@@ -140,7 +140,8 @@ class IGlobal(IGlobalTransform):
 
         self.store = None
         self.store = Store(self.glb.logicalType, connConfig, bag)
-        self.mode = _parse_mode_elasticsearch(connConfig.get('mode', MODE_VSTORE))
+        mode_val = connConfig.get('store_mode') if 'store_mode' in connConfig else connConfig.get('mode', MODE_VSTORE)
+        self.mode = _parse_mode_elasticsearch(mode_val)
         debug(f'Elasticsearch mode: {self.mode}')
 
         self.search_enabled = bool(connConfig.get('search', False))

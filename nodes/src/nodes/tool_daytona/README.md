@@ -1,119 +1,75 @@
 # tool_daytona
 
-A RocketRide tool node that gives an AI agent an isolated cloud sandbox for running code.
+A RocketRide tool node that gives an agent a shared, ephemeral Daytona sandbox for remote code, shell commands, and text-file operations.
+
+## About Daytona
+
+Daytona is the external sandbox service this node accesses through its Python SDK. This node creates an ephemeral sandbox and uses it for code execution, shell commands, and file transfer during a pipeline run.
 
 ## What it does
 
-Gives an agent a remote [Daytona](https://www.daytona.io) sandbox to execute generated code
-and shell commands in, the code runs on Daytona's infrastructure, never on the engine host.
-The agent can run code in the configured language, run arbitrary shell commands (install
-packages, build, then run), and move text files in and out of the sandbox.
+Use this node when an agent must execute generated code or commands outside the engine host and retain files or installed packages across related tool calls. It exposes tools only, with no pipeline lanes, and creates its sandbox only when a tool first needs it. Pick it over a local execution tool when remote sandbox isolation and an automatically cleaned-up session are required.
 
-One ephemeral sandbox is shared across every tool call in the pipeline: files written and
-packages installed by one call are visible to the next. The sandbox is created **lazily** on
-the first tool call, a pipeline that never invokes the tool never provisions (or pays for)
-one, and is deleted when the pipeline shuts down.
+## As a tool
 
-A running sandbox bills by the minute, so the node is built to fail safe on cost: the sandbox
-is `ephemeral` with a 1–120 minute inactivity **auto-stop** that deletes it even if the engine
-crashes before cleanup. If an idle gap recycles the sandbox mid-pipeline, the next `run_code`,
-`run_command`, or `upload_file` call transparently creates a fresh one (state resets: re-upload
-and reinstall as needed).
+The registered prefix is `daytona`, so the agent sees four functions.
 
----
+| Function | Description |
+|---|---|
+| `daytona.run_code` | Runs source code in the configured sandbox language. |
+| `daytona.run_command` | Runs a shell command, optionally in a sandbox working directory. |
+| `daytona.upload_file` | Creates or overwrites a UTF-8 text file in the sandbox. |
+| `daytona.download_file` | Reads a text file from the sandbox. |
+
+### `daytona.run_code`
+
+`code` is required and must be a non-empty string. The function returns `exit_code`, captured `output`, and `truncated`. A Daytona SDK failure instead returns `error`, `exit_code: -1`, empty output, and `truncated: false`.
+
+### `daytona.run_command`
+
+`command` is required and non-empty; optional `cwd` must be a string and is passed as the sandbox working directory when non-blank. The result and failure shape match `run_code`. Use it to install dependencies, build, or invoke shell programs in the same sandbox session.
+
+### `daytona.upload_file`
+
+`path` and string `content` are required. The function encodes content as UTF-8, creates or overwrites the file, and returns `success` with `path`. A Daytona failure returns `success: false`, the requested path, and `error`.
+
+### `daytona.download_file`
+
+`path` is required and non-empty. Successful output has `content` and `truncated`; missing files and SDK failures return empty content, `truncated: false`, and `error`. Unlike the other stateful calls, this function does not create a replacement sandbox after an expiration because an empty replacement cannot recover the file.
 
 ## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | **Required.** Daytona API key (app.daytona.io → Keys). |
-| `api_url` | string | Default empty. Daytona API endpoint. Leave empty for the default cloud (`https://app.daytona.io/api`); set it to point at a self-hosted Daytona. |
-| `target` | string | Default empty. Sandbox region, e.g. `us` or `eu`. Leave empty for the organization default. |
-| `snapshot` | string | Default empty. Daytona snapshot to create the sandbox from. Leave empty for the default snapshot. |
-| `language` | string | Default `python`. Language runtime used by `run_code`: `python`, `javascript`, or `typescript`. |
-| `auto_stop_minutes` | integer | Default 5 (1–120). Inactivity stop interval. The sandbox is ephemeral, so stopping also deletes it: this is the cost safety net if cleanup is missed. |
-| `exec_timeout_secs` | integer | Default 120 (1–1200). Maximum seconds a single `run_code` / `run_command` call may take. |
-| `max_output_chars` | integer | Default 50000 (1000–1000000). Output longer than this is truncated before being returned to the agent, protecting its context window. |
+Provide the API key, then keep the defaults unless a particular sandbox workload needs a different image, language, lifetime, or output budget.
 
----
+### API URL, Target Region, and Snapshot
 
-## Available tools
+Leave **API URL** blank to let the SDK use its default endpoint; set it only for a different Daytona endpoint. Leave **Target Region** blank to use the organization's default target, or select a target for a specific region. **Snapshot** is also optional and is passed when creating the sandbox; use it when a known snapshot supplies the runtime state your workload requires.
 
-| Tool | Description |
-|---|---|
-| `run_code` | Execute source code in the sandbox (language from config) and return its output. |
-| `run_command` | Run a shell command in the sandbox: install dependencies, build, then run. |
-| `upload_file` | Write a text file into the sandbox (creates or overwrites). |
-| `download_file` | Read a text file back from the sandbox. |
+### Language
 
-### run_code
+This sets the sandbox language used by `run_code` and defaults to `python`. The supported configured values are `python`, `javascript`, and `typescript`. `run_command` remains the tool for shell commands regardless of this setting.
 
-| Parameter | Required | Description |
-|---|---|---|
-| `code` | yes | Source code to execute. Use `print()` (or the language equivalent) to produce output. |
+### Auto-stop (minutes)
 
-Returns `exit_code`, `output` (combined stdout/stderr, truncated at `max_output_chars`), and
-`truncated`. On a sandbox failure it returns `error` instead, with `exit_code: -1`.
+The shared sandbox is created as ephemeral, and this interval defaults to 5 minutes. After inactivity, server-side auto-stop deletes it; use a longer value only when calls need a longer idle gap without losing their files and installed packages. The node clamps configuration from 1 through 120 minutes, never allowing zero to disable this cost-safety cleanup.
 
-### run_command
+### Execution Timeout (seconds) and Max Output (characters)
 
-| Parameter | Required | Description |
-|---|---|---|
-| `command` | yes | Shell command, e.g. `pip install requests && python app.py`. |
-| `cwd` | no | Working directory inside the sandbox. |
+Both `run_code` and `run_command` use **Execution Timeout**, which defaults to 120 seconds and is clamped from 1 through 1,200. **Max Output** defaults to 50,000 characters and is clamped from 1,000 through 1,000,000; longer command output and downloaded file content are returned only up to that cap with `truncated: true`. Increase either only when the agent needs it, because timeout limits wait time and output limits protect its context window.
 
-Returns `exit_code`, `output`, and `truncated` (or `error` on a sandbox failure).
+## Authentication
 
-### upload_file
+Provide a Daytona API key in **API Key**. The node fails pipeline startup when the key is empty.
 
-| Parameter | Required | Description |
-|---|---|---|
-| `path` | yes | Destination path inside the sandbox, e.g. `app/main.py`. |
-| `content` | yes | Text content to write (UTF-8). |
+## Notes
 
-Returns `success` and `path`, or `error` on failure.
+### Session lifecycle
 
-### download_file
+All calls in a pipeline share one lazily created sandbox. A lock prevents simultaneous tool calls from creating multiple sandboxes. `run_code`, `run_command`, and `upload_file` retry once on a fresh sandbox when the prior handle has expired; any state from the old sandbox is gone and must be restored. Pipeline shutdown attempts to delete the sandbox, while ephemeral auto-stop remains the cleanup fallback if deletion fails.
 
-| Parameter | Required | Description |
-|---|---|---|
-| `path` | yes | Path of the file to read from the sandbox. |
+## Upstream docs
 
-Returns `content` (UTF-8, truncated at `max_output_chars`) and `truncated`, or `error` when the
-file is missing or the sandbox call fails.
-
----
-
-## Cost safety
-
-A sandbox bills while it runs, so the node bounds the exposure three ways:
-
-- **Lazy creation**: the sandbox is provisioned only when a tool is actually called, never at
-  pipeline start.
-- **Ephemeral + auto-stop**: it stops (and, being ephemeral, deletes itself) after
-  `auto_stop_minutes` of inactivity, even if the engine dies before cleanup. The interval is
-  floored at 1 minute so an abandoned sandbox always shuts itself down.
-- **Explicit teardown**: it is deleted on pipeline shutdown (`endGlobal`).
-
-## Sandbox lifecycle
-
-The sandbox is shared, so installed packages and uploaded files persist between tool calls
-within a pipeline run. After it sits idle past the auto-stop interval it is recycled
-server-side; the next `run_code`, `run_command`, or `upload_file` call detects the stale handle
-and creates a fresh, empty sandbox automatically. `download_file` does **not** auto-recreate: a
-404 there is ambiguous between a missing file and an expired sandbox, and a fresh empty sandbox
-could not produce the file either way, so it simply reports the miss.
-
----
-
-## Running the tests
-
-```bash
-# Unit tests (mocked Daytona client — no API key or network needed)
-pytest nodes/test/test_tool_daytona.py -v
-```
-
----
+- [Daytona documentation](https://www.daytona.io/docs)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

@@ -29,10 +29,10 @@
 //   Footer (SidebarFooter — shared component with popup menu)
 // =============================================================================
 
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import {
-	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome,
+	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome, BxX,
 } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import { getHomeAppId } from '../../constants';
@@ -46,6 +46,8 @@ import { RocketRideMark } from '../RocketRideMark';
 import { SidebarCollapsedProvider } from '../sidebar-menu/SidebarCollapsedContext';
 import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
 import { useHostChromeState } from './HostChromeContext';
+import { useCompactNav } from './CompactNavContext';
+import { FOCUSABLE_SELECTOR, trapFocus } from '../modal/Modal';
 
 // =============================================================================
 // CONSTANTS
@@ -53,10 +55,74 @@ import { useHostChromeState } from './HostChromeContext';
 
 const EXPANDED_WIDTH = 260;
 const COLLAPSED_WIDTH = 56;
+
+/** Where an app's answered sidebar preference is kept, by app id. */
+const MEMORY_KEY = 'rr.shell.sidebar';
+
+/**
+ * Whether this app asked for the rail closed, last time it was here.
+ *
+ * Read during the first render, so the answer costs nothing and arrives before
+ * the first paint. Storage can throw — a locked-down profile, private mode in
+ * some browsers — and a sidebar is not worth failing a boot over, so anything
+ * unreadable means "no answer" and the rail opens as it always did.
+ *
+ * @param appId - The app about to be shown.
+ * @returns True when it asked to be collapsed.
+ */
+function remembered(appId: string): boolean {
+	if (!appId) return false;
+	try {
+		return window.localStorage.getItem(`${MEMORY_KEY}:${appId}`) === 'collapsed';
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Remember what an app asked for.
+ *
+ * The APP's preference, not the person's: expanding the rail by hand is a
+ * decision about this visit, and writing it here would quietly turn "opens
+ * closed" into "opens however you left it".
+ *
+ * @param appId - The app that asked.
+ * @param collapsed - What it asked for.
+ */
+function remember(appId: string, collapsed: boolean): void {
+	if (!appId) return;
+	try {
+		window.localStorage.setItem(`${MEMORY_KEY}:${appId}`, collapsed ? 'collapsed' : 'expanded');
+	} catch {
+		// Nothing to do and nothing worth saying: the rail still works, it just
+		// collapses on the way in each time rather than arriving collapsed.
+	}
+}
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 480;
 const SNAP_THRESHOLD = 100;
 const TRANSITION_MS = 150;
+
+/**
+ * The drawer, below `COMPACT_BREAKPOINT_PX`.
+ *
+ * 320 is the widest a nav should be on a phone that is 360-430 wide: enough for
+ * a chat title, little enough that the scrim behind it still reads as "the page
+ * is still there". `86vw` keeps a strip of that page visible on the narrowest
+ * device rather than covering it completely.
+ */
+const DRAWER_WIDTH = 'min(320px, 86vw)';
+const DRAWER_TRANSITION_MS = 220;
+
+/**
+ * Above every app, below every shell dialog.
+ *
+ * The overlay manager's backdrop is 200, the load-failure modal 1200, and a
+ * `DetailPanel` 1500. Sitting at 100/101 means opening Settings covers the nav
+ * — which is right, it is a modal — and the nav can never trap one.
+ */
+const SCRIM_Z = 100;
+const DRAWER_Z = 101;
 const ICON_SIZE = 20;
 const COLLAPSED_BTN = 40;
 
@@ -84,6 +150,29 @@ export interface SidebarProps {
 	 * regardless of the server edition).
 	 */
 	isSaas?: boolean;
+}
+
+/**
+ * Whether the sidebar frame has anything to hold.
+ *
+ * The shell renders NO sidebar for an app that registers neither a legacy
+ * `components.Sidebar` nor content through `useSidebarContent` — home-ui, for
+ * one. Exported because the compact chrome bar has to reach the same verdict:
+ * a hamburger that opens an empty drawer is worse than no hamburger, and two
+ * copies of this expression would eventually disagree.
+ *
+ * Signed out counts as nothing to hold: `Sidebar` renders no frame without an
+ * identity, so a public app's sidebar content must not earn a hamburger that
+ * opens a drawer that is not there.
+ *
+ * @returns Whether to show a sidebar, or a way to open one.
+ */
+export function useHasSidebarContent(): boolean {
+	const identity = useContext(ShellIdentityContext);
+	const { activeAppId, loadedApps } = useWorkspace();
+	const { sidebarContent } = useHostChromeState();
+	if (!identity) return false;
+	return !!loadedApps[activeAppId]?.components?.Sidebar || sidebarContent != null;
 }
 
 // =============================================================================
@@ -212,6 +301,21 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 	// App name for display
 	const appLabel = isHome ? 'ROCKETRIDE CLOUD' : (activeManifest?.name.toUpperCase() ?? '');
 
+	// An app may bring its own header lockup.
+	//
+	// `branding.logo` has been in the contract since it was written and was
+	// never read — this is that seam finally being used. An app that supplies
+	// one owns the whole header and says its own name; an app that does not is
+	// untouched and still gets the RocketRide wordmark over its label, which is
+	// every app but the one that asked.
+	if (branding?.logo) {
+		return (
+			<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '4px 4px 2px', minWidth: 0 }}>
+				{branding.logo}
+			</div>
+		);
+	}
+
 	return (
 		<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1, padding: '4px 4px 2px' }}>
 			<RocketRideWordmark height={22} color={paletteMode === 'dark' ? '#FAFBF8' : '#1E1A34'} />
@@ -284,13 +388,25 @@ const AppIcon: React.FC<{ name: string; iconUrl?: string; size?: number }> = ({ 
  * @param props - Sidebar configuration and callbacks.
  */
 const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, hideAppSwitcher, onOverlay, isSaas }) => {
+	// Not props: `SidebarProps` is part of the frozen app-facing contract, and
+	// the drawer is a shell-internal concern no app can see. See
+	// `CompactNavContext`.
+	const { isCompact, drawerOpen, requestClose } = useCompactNav();
 	const identity = useContext(ShellIdentityContext);
-	const { prefs, updatePrefs: _updatePrefs, setTheme, themeOptions, activeAppId, appManifest } = useWorkspace();
+	const { prefs, updatePrefs: _updatePrefs, setTheme, themeOptions, activeAppId, appManifest, loadedApps } = useWorkspace();
 	const { isOnDesktop } = useSubscriptions();
 
 	// --- Collapse / resize state ---------------------------------------------
 
-	const [collapsed, setCollapsed] = useState(false);
+	// Closed on the FIRST FRAME for an app already known to want it closed.
+	//
+	// The preference itself arrives with the app's descriptor, which is loaded
+	// after the shell has painted — so honouring it only from there means the
+	// rail opens and then shuts on every visit, and means nothing at all if the
+	// descriptor is slow or never lands. Remembering the answer turns that into
+	// a one-time event: the first ever visit to an app collapses on the way in,
+	// every visit after renders closed.
+	const [collapsed, setCollapsed] = useState(() => remembered(activeAppId));
 	const [width, setWidth] = useState(EXPANDED_WIDTH);
 	const [isResizing, setIsResizing] = useState(false);
 	const [handleHover, setHandleHover] = useState(false);
@@ -308,7 +424,83 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// Whether the scrolling slot has anything to show. Drives self-hiding so the
 	// shell renders NO sidebar (and the client area spans full width) when an
 	// app declares no sidebar (a one-column AppLayout).
-	const hasSlotContent = sidebarContent != null;
+	// The exported hook, not a second copy of the expression: the compact chrome
+	// bar asks the same question, and two copies would eventually answer
+	// differently — a hamburger opening an empty drawer, or none where there is
+	// content.
+	const hasSlotContent = useHasSidebarContent();
+
+	// A drawer is never "collapsed". The rail is a desktop affordance for
+	// trading width against legibility; a drawer has the width it has, and an
+	// app that draws nothing while collapsed (several return null) would render
+	// an empty drawer. `collapsed` and `width` below are left untouched by the
+	// responsive path, so crossing back to desktop restores exactly the rail the
+	// user had.
+	const effectiveCollapsed = isCompact ? false : collapsed;
+
+	// --- The active app's own preference -------------------------------------
+
+	/**
+	 * Open the way the app being opened asks to be opened.
+	 *
+	 * Keyed on the app id, so it fires when an app becomes active and not on
+	 * every render: inside an app the person's own toggle wins, and it keeps
+	 * winning until they leave and come back.
+	 *
+	 * An app that declares NOTHING is not an app that declares 'expanded' — it
+	 * leaves the sidebar alone. Treating silence as a preference would mean
+	 * every app switch overrode a rail the person had deliberately collapsed.
+	 */
+	const wanted = loadedApps[activeAppId]?.sidebar;
+
+	/**
+	 * Take a preference, and remember it for next time.
+	 *
+	 * Below the breakpoint the sidebar is a drawer, and a drawer is never
+	 * collapsed — see `effectiveCollapsed` above. The answer is still REMEMBERED
+	 * there, so a phone that later becomes a wide window opens the way the app
+	 * asked; only the flag is left alone.
+	 */
+	const prefer = useCallback((next: boolean) => {
+		remember(activeAppId, next);
+		if (isCompact) return;
+		setCollapsed(next);
+	}, [activeAppId, isCompact]);
+
+	// Read through a ref, and keyed on the APP rather than on `prefer`.
+	//
+	// `prefer` changes identity with `isCompact`, so depending on it re-ran this
+	// on every breakpoint crossing and re-applied the app's preference over a
+	// rail the person had opened by hand: declare `sidebar: 'collapsed'`, expand
+	// it, narrow the window under 1024 and widen it again, and the rail shut
+	// itself. That contradicts both invariants above — the person's own toggle
+	// wins inside an app, and crossing back restores the rail they had.
+	const preferRef = useRef(prefer);
+	preferRef.current = prefer;
+	useEffect(() => {
+		if (!wanted) return;
+		preferRef.current(wanted === 'collapsed');
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- see above: keyed on the app, not on `prefer`
+	}, [wanted, activeAppId]);
+
+	// The same preference, asked for directly.
+	//
+	// An app can reach this on its own first render, which is earlier and more
+	// certain than its descriptor reaching the shell's `loadedApps` map — and it
+	// is the path that works when that map does not have what it wants.
+	//
+	// A LAYOUT effect, because the event is not replayed. An app emitting from
+	// its own layout effect runs before every passive effect in the commit, so a
+	// passive subscription here would miss it on first mount — and on an app
+	// switch the stale listener, still bound to the previous app's id, would
+	// catch it and file the answer under the wrong app. The sidebar precedes the
+	// client area in the tree, so its layout effects run first.
+	useLayoutEffect(() => (
+		ConnectionManager.getInstance().on(
+			'shell:setSidebarCollapsed',
+			({ collapsed: next }: { collapsed: boolean }) => prefer(next),
+		)
+	), [prefer]);
 
 	// --- Collapse toggle -----------------------------------------------------
 
@@ -325,6 +517,68 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			setCollapsed(true);
 		}
 	}, [collapsed, width]);
+
+	/**
+	 * Close the drawer when something inside it takes you somewhere.
+	 *
+	 * CAPTURE PHASE, so it still fires for an app that stops propagation on its
+	 * own handlers — several do. It is a heuristic and it is deliberately a
+	 * conservative one: a control that opens more UI inside the drawer (a
+	 * submenu, a theme picker — anything carrying `aria-haspopup` or
+	 * `aria-expanded`) is not a destination, and neither is anything an app has
+	 * marked `data-rr-drawer="keep"`, which is how a row's rename and delete
+	 * buttons say "this leaves you where you are".
+	 *
+	 * A DOM convention rather than an API on purpose: nothing here reaches the
+	 * frozen shell contract, and an app that adopts it needs no new import.
+	 *
+	 * @param event - The click, caught on its way down.
+	 */
+	const onSlotClickCapture = useCallback((event: React.MouseEvent) => {
+		if (!isCompact || !drawerOpen) return;
+		const target = event.target as Element | null;
+		const control = target?.closest?.('a[href], button, [role="menuitem"], [role="tab"], [role="option"]');
+		if (!control) return;
+		if (control.closest('[data-rr-drawer="keep"]')) return;
+		if (control.hasAttribute('aria-haspopup') || control.hasAttribute('aria-expanded')) return;
+		requestClose();
+	}, [isCompact, drawerOpen, requestClose]);
+
+	// --- The drawer is a dialog: focus goes in, stays in, and comes back ------
+	//
+	// `aria-modal` tells assistive tech nothing behind the scrim is reachable.
+	// Without this Tab walks straight out of the drawer into the dimmed page,
+	// and closing it strands focus on a button that is no longer visible.
+	//
+	// The trap listens on the drawer, not the document: it acts only while focus
+	// is inside, so a dialog or DetailPanel opened from the drawer keeps its own
+	// Tab and Escape, and the shared overlay stack is left exactly as it was.
+	const frameRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (!isCompact || !drawerOpen) return undefined;
+		const drawer = frameRef.current;
+		if (!drawer) return undefined;
+		const opener = document.activeElement;
+		(drawer.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? drawer).focus();
+		const onKeyDown = (event: KeyboardEvent): void => {
+			if (event.key === 'Tab') trapFocus(event, drawer);
+		};
+		drawer.addEventListener('keydown', onKeyDown);
+		return () => {
+			drawer.removeEventListener('keydown', onKeyDown);
+			// Back to the hamburger — unless something the drawer opened (an
+			// overlay, a panel) has already taken focus somewhere else. Safari
+			// does not focus a tapped button, so the opener may be the body; the
+			// trigger is found by the drawer it controls.
+			const active = document.activeElement;
+			if (active && active !== document.body && !drawer.contains(active)) return;
+			const trigger =
+				opener instanceof HTMLElement && opener !== document.body && opener.isConnected
+					? opener
+					: document.querySelector<HTMLElement>('[aria-controls="rr-shell-sidebar"]');
+			trigger?.focus();
+		};
+	}, [isCompact, drawerOpen]);
 
 	// --- Resize handler ------------------------------------------------------
 
@@ -452,23 +706,73 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 
 	// --- Render --------------------------------------------------------------
 
-	return (
-		<div style={{
+	// In flow on a desktop; out of flow, over a scrim, on anything narrower. The
+	// node itself stays exactly where it is in the tree either way: moving it
+	// across the breakpoint would remount the app's registered content and throw
+	// away whatever state it was holding — a rename in progress, a scroll
+	// position — every time a window crossed 1024.
+	const frame: CSSProperties = isCompact
+		? {
+			position: 'fixed', top: 0, left: 0, height: '100%',
+			width: DRAWER_WIDTH, minWidth: 0, zIndex: DRAWER_Z,
+			display: 'flex', flexDirection: 'column',
+			background: 'var(--rr-bg-paper)', borderRight: '1px solid var(--rr-border)',
+			boxShadow: drawerOpen ? '0 0 40px rgba(0, 0, 0, 0.35)' : 'none',
+			overflow: 'hidden',
+			transform: drawerOpen ? 'translateX(0)' : 'translateX(-100%)',
+			// Visible AT ONCE on the way in, so the focus move below lands on
+			// something focusable; held visible to the end on the way out, so
+			// the slide stays on screen.
+			transition: drawerOpen
+				? `transform ${DRAWER_TRANSITION_MS}ms ease`
+				: `transform ${DRAWER_TRANSITION_MS}ms ease, visibility ${DRAWER_TRANSITION_MS}ms`,
+			// Not just off-screen: a closed drawer must not be reachable by Tab,
+			// and `transform` alone leaves every button in it focusable.
+			visibility: drawerOpen ? 'visible' : 'hidden',
+		}
+		: {
 			width: sidebarWidth, minWidth: sidebarWidth, height: '100%',
 			display: 'flex', flexDirection: 'column',
 			background: 'var(--rr-bg-paper)', borderRight: '1px solid var(--rr-border)',
 			position: 'relative', overflow: 'hidden',
 			transition: isResizing ? 'none' : `width ${TRANSITION_MS}ms ease, min-width ${TRANSITION_MS}ms ease`,
-		}}>
+		};
+
+	return (
+		<>
+		{/* The page behind the drawer, dimmed and tappable. Rendered even when
+		    closed so it can fade rather than blink, and inert while it is. */}
+		{isCompact && (
+			<div
+				aria-hidden="true"
+				onPointerDown={requestClose}
+				style={{
+					position: 'fixed', inset: 0, zIndex: SCRIM_Z,
+					background: 'rgba(0, 0, 0, 0.45)',
+					opacity: drawerOpen ? 1 : 0,
+					pointerEvents: drawerOpen ? 'auto' : 'none',
+					transition: `opacity ${DRAWER_TRANSITION_MS}ms ease`,
+				}}
+			/>
+		)}
+		<div
+			id="rr-shell-sidebar"
+			ref={frameRef}
+			tabIndex={isCompact ? -1 : undefined}
+			role={isCompact ? 'dialog' : undefined}
+			aria-modal={isCompact ? true : undefined}
+			aria-label={isCompact ? 'Navigation' : undefined}
+			style={frame}
+		>
 			{/* ================================================================
 			    HEADER — AppSwitcherButton + collapse toggle
 			    ================================================================ */}
 			<div
-				style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0, marginBottom: 10 }}
+				style={{ display: 'flex', alignItems: 'center', justifyContent: effectiveCollapsed ? 'center' : undefined, height: 52, padding: effectiveCollapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0, marginBottom: 10 }}
 				onMouseEnter={() => setHeaderHover(true)}
 				onMouseLeave={() => setHeaderHover(false)}
 			>
-				{collapsed ? (
+				{effectiveCollapsed ? (
 					// Collapsed: a single always-rendered, focusable button toggles
 					// expansion. It shows the brand mark by default and swaps to the
 					// collapse-sidebar icon on hover/focus (same 40×40 box, so no layout
@@ -482,7 +786,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 						onBlur={() => setHeaderHover(false)}
 						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, padding: 0 }}
 					>
-						{headerHover ? <BxDockLeft size={20} /> : <AppSwitcherButton collapsed={collapsed} />}
+						{headerHover ? <BxDockLeft size={20} /> : <AppSwitcherButton collapsed={effectiveCollapsed} />}
 					</button>
 				) : (
 					<>
@@ -494,17 +798,20 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
 							style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
 						>
-							<AppSwitcherButton collapsed={collapsed} />
+							<AppSwitcherButton collapsed={effectiveCollapsed} />
 						</button>
 						<button
-							title="Collapse sidebar"
-							aria-label="Collapse sidebar"
-							onClick={toggleCollapse}
+							title={isCompact ? 'Close navigation' : 'Collapse sidebar'}
+							aria-label={isCompact ? 'Close navigation' : 'Collapse sidebar'}
+							onClick={isCompact ? requestClose : toggleCollapse}
 							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
 							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
+							/* 28px suits a mouse in the desktop header; the same button in the
+							   drawer is the one a thumb reaches for, and 28 is well under
+							   the 44 the rest of the compact chrome keeps to. */
+							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: isCompact ? 44 : 28, height: isCompact ? 44 : 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
 						>
-							<BxDockLeft size={18} />
+							{isCompact ? <BxX size={20} /> : <BxDockLeft size={18} />}
 						</button>
 					</>
 				)}
@@ -513,13 +820,16 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			{/* ================================================================
 			    APP SIDEBAR CONTENT SLOT — scrolls between fixed header/footer
 			    ================================================================ */}
-			<div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
+			<div
+				onClickCapture={onSlotClickCapture}
+				style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}
+			>
 				{/* App-declared sidebar content — rendered ALWAYS, including
 				    while collapsed to the icon rail. The provider exposes the
 				    collapsed flag; each component inside decides its collapsed form
 				    (SidebarMenu iconifies, free-form content returns null; the
 				    legacy bridge reads it back into the `collapsed` prop). */}
-				<SidebarCollapsedProvider value={collapsed}>
+				<SidebarCollapsedProvider value={effectiveCollapsed}>
 					{sidebarContent}
 				</SidebarCollapsedProvider>
 			</div>
@@ -529,7 +839,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			    ================================================================ */}
 			{identity && (
 				<SidebarFooter
-					collapsed={collapsed}
+					collapsed={effectiveCollapsed}
 					userName={account.userName}
 					userEmail={account.userEmail}
 					menuItems={footerMenuItems}
@@ -537,8 +847,10 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			)}
 
 			{/* ================================================================
-			    RESIZE HANDLE
+			    RESIZE HANDLE — desktop only. A drawer has one width, and dragging
+			    it would write the DESKTOP width the user set before they got here.
 			    ================================================================ */}
+			{!isCompact && (
 			<div
 				style={{ position: 'absolute', right: 0, top: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 10 }}
 				onMouseDown={handleMouseDown}
@@ -549,7 +861,9 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 					<div style={{ position: 'absolute', right: 0, top: 0, width: 2, height: '100%', background: 'var(--rr-brand)' }} />
 				)}
 			</div>
+			)}
 		</div>
+		</>
 	);
 };
 

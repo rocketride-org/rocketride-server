@@ -41,6 +41,9 @@
  *   ui:clean        — clean all UI app build artifacts
  *   ui:register     — register all UI apps into apps.json (no bundling)
  *   ui:build        — build all UI app remotes (the shell rides server:build)
+ *   ui:audit        — consistency gate for the app family (canonical rsbuild
+ *                     template, dev-port uniqueness, manifest hygiene,
+ *                     dependency-range drift); overlay runs audit both repos
  *   client:update   — [standalone repos only] refresh .rocketride/shell
  *                     from a server (--shell=<url>, default ROCKETRIDE_URI)
  *                     and relink the workspace
@@ -124,6 +127,21 @@ const uiModule = {
 						'Build remote apps',
 					),
 				],
+			}),
+		},
+		{
+			// Consistency gate for the app family: every config must render
+			// from the canonical template (scripts/assets), dev ports must be
+			// unique, manifests must carry license/scripts/browserslist, and
+			// dependency ranges may not drift. Throws with one line per
+			// finding; overlay runs cover both repos' apps.
+			name: 'ui:audit',
+			action: (options) => ({
+				description: 'Audit UI apps for baseline drift',
+				run: async (ctx, task) => {
+					const { runUiAudit } = require('./lib/uiAudit');
+					runUiAudit({ overlayRoot: options.overlayRoot, task });
+				},
 			}),
 		},
 	],

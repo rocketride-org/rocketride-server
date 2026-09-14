@@ -12,11 +12,40 @@ Table extraction uses **img2table** for OpenCV-based table structure detection, 
 
 Animated GIFs are handled frame by frame: each frame is OCR'd individually and the per-frame texts are joined with newlines before being written to the `text` lane. OCR reads are serialised with an internal threading lock so concurrent instances share one engine safely.
 
----
+## Example pipelines
 
-## Configuration
+**Extract and redact document text**
 
-### Lanes
+`webhook → parse → ocr → ner → anonymize_text → response_text`
+
+<div align="center">
+
+![The OCR node on the canvas extracting text from parsed documents in a redaction pipeline](example.png)
+
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
+
+</div>
+
+`parse` feeds document images to OCR and also sends text directly to NER.
+Recognized and parsed text is tagged, anonymized, and returned as redacted
+text.
+
+**Invoice tables into a database**
+
+`webhook → ocr → extract_data → db_postgres`
+
+Invoice images come in and the `table` lane extracts their line items as
+Markdown tables; `extract_data` structures the fields and PostgreSQL stores
+the rows — paper documents to queryable data with no manual entry.
+
+**Searchable archive of scanned records**
+
+`webhook → ocr → embedding_transformer → store_qdrant`
+
+OCR converts a scanned archive to text, the embedding node vectorizes it, and
+the vector store makes it searchable by meaning rather than filename.
+
+## Lanes
 
 | Lane in     | Lane out | Description                       |
 | ----------- | -------- | --------------------------------- |
@@ -26,36 +55,14 @@ Animated GIFs are handled frame by frame: each frame is OCR'd individually and t
 
 On the `documents` lane, every incoming document must be of type `Image` (the node raises a `ValueError` otherwise). Each image document is OCR'd and re-emitted as a `Document`-type copy whose `page_content` is the extracted text. The original image documents are not forwarded: if a downstream node needs the images themselves, connect it to the source node directly.
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `engine` | string | Default "easyocr". Select the OCR engine for text extraction. EasyOCR supports many languages with script families. DocTR is language-agnostic and good for documents. Surya supports multi-language. TrOCR uses transformer models. |
-| `script_family` | string | Default "latin". Select the script family for OCR. This determines which languages are loaded for text recognition. Only applies to EasyOCR engine. |
-| `det_arch` | string | Default "db_resnet50". Choose the architecture used for table text detection.
- Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html |
-| `reco_arch` | string | Default "crnn_vgg16_bn". Choose the architecture used for table text recognition.
- Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html |
-| `table_engine` | string | Default "doctr". Select the OCR engine used for table text extraction. DocTR is optimized for document tables. EasyOCR and Surya are general-purpose alternatives. |
-| `profile` | string | Default "latin". Select a preconfigured OCR profile optimized for different languages and use cases. |
-
-The main settings panel exposes `ocr.profile`, `ocr.engine`, `ocr.script_family`, and `ocr.table_engine`. The DocTR architecture fields (`ocr.det_arch`, `ocr.reco_arch`) accept the architectures listed in the [DocTR model docs](https://mindee.github.io/doctr/latest/using_doctr/using_models.html).
-
-Detection architectures: `linknet_resnet18`, `linknet_resnet34`, `linknet_resnet50`, `db_resnet50`, `db_mobilenet_v3_large`, `fast_tiny`, `fast_small`, `fast_base`.
-
-Recognition architectures: `crnn_vgg16_bn`, `crnn_mobilenet_v3_small`, `crnn_mobilenet_v3_large`, `sar_resnet31`, `master`, `vitstr_small`, `vitstr_base`, `parseq`.
-
-The TrOCR engine additionally reads an optional `trocr_model` config value selecting the Hugging Face model variant (default: `microsoft/trocr-base-printed`).
-
----
-
 ## Profiles
 
-Profiles are preconfigured combinations of engine, script family, and table engine. Selecting a profile sets all three at once. The default profile is `latin`.
+Profiles are preconfigured combinations of engine, script family, and table engine. Selecting a profile sets all three at once. Default: **Latin (English)**
+(`latin`).
 
 | Profile key            | Title                         | Engine  | Script family         | Table engine |
 | ---------------------- | ----------------------------- | ------- | --------------------- | ------------ |
-| `latin`                | Latin (English)               | EasyOCR | `latin`               | DocTR        |
+| `latin` **(default)**  | Latin (English)               | EasyOCR | `latin`               | DocTR        |
 | `latin-extended`       | Latin Extended (European)     | EasyOCR | `latin-extended`      | DocTR        |
 | `cyrillic`             | Cyrillic (Russian, etc.)      | EasyOCR | `cyrillic`            | DocTR        |
 | `arabic`               | Arabic/Persian/Urdu           | EasyOCR | `arabic`              | DocTR        |
@@ -68,11 +75,34 @@ Profiles are preconfigured combinations of engine, script family, and table engi
 | `surya`                | Surya (Multi-language)        | Surya   | `latin` (unused)      | Surya        |
 | `trocr`                | TrOCR (Transformer)           | TrOCR   | `latin` (unused)      | DocTR        |
 
----
+## Configuration
 
-## Script families
+Pick a profile and you can usually ignore everything else — the remaining
+fields exist to override what the profile chose. The main settings panel
+exposes `ocr.profile`, `ocr.engine`, `ocr.script_family`, and
+`ocr.table_engine`; the DocTR architecture fields are for table extraction
+tuning.
 
-Script families map to EasyOCR language code lists. Every family except plain `latin` also loads English as a fallback. The `script_family` setting has no effect when the selected engine is DocTR, Surya, or TrOCR.
+### OCR Engine
+
+Overrides the engine the profile selected. The trade-offs: **EasyOCR** covers
+the most languages via script families and is the safe default. **DocTR** is
+language-agnostic and strongest on structured documents (forms, dense
+layouts). **Surya** handles 90+ languages without a script-family choice.
+**TrOCR** is transformer-based and best on difficult, handwriting-like text.
+An unknown engine name silently falls back to EasyOCR. The TrOCR engine
+additionally reads an optional `trocr_model` config value selecting the
+Hugging Face model variant (default: `microsoft/trocr-base-printed`).
+
+### Script Family
+
+Script families map to EasyOCR language code lists — this field picks which
+set of language models EasyOCR loads. It applies **only when the engine is
+EasyOCR**; DocTR, Surya, and TrOCR ignore it. A wrong script family is the
+most common cause of garbage output on non-English documents: if Russian
+scans come out as Latin gibberish, check this field first.
+
+Every family except plain `latin` also loads English as a fallback:
 
 | Family                | Languages loaded                                                                                                                       |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -92,9 +122,35 @@ Script families map to EasyOCR language code lists. Every family except plain `l
 
 The `bengali`, `thai`, `tamil`, and `telugu` families are selectable via `ocr.script_family` but have no preconfigured profile. The Japanese EasyOCR models may misread English text; the full test suite uses a relaxed assertion (`contains: "quick"` instead of `"quick brown fox"`) for that profile.
 
----
+### Detection / Recognition Architecture (DocTR)
 
-## OpenCV compatibility
+Model choices for DocTR's two-stage table pipeline: detection finds where text
+is, recognition reads it. The defaults (`db_resnet50` + `crnn_vgg16_bn`) are
+right for nearly everyone; alternatives trade accuracy against speed and
+memory — see the [DocTR model docs](https://mindee.github.io/doctr/latest/using_doctr/using_models.html)
+before changing them.
+
+Detection architectures: `linknet_resnet18`, `linknet_resnet34`, `linknet_resnet50`, `db_resnet50`, `db_mobilenet_v3_large`, `fast_tiny`, `fast_small`, `fast_base`.
+
+Recognition architectures: `crnn_vgg16_bn`, `crnn_mobilenet_v3_small`, `crnn_mobilenet_v3_large`, `sar_resnet31`, `master`, `vitstr_small`, `vitstr_base`, `parseq`.
+
+### Table OCR Engine
+
+Engine used for table text extraction (default DocTR, which is optimized for
+document tables; EasyOCR and Surya are general-purpose alternatives). This is
+independent of the main `engine` field — text and tables can use different
+engines.
+
+## Requirements
+
+GPU-capable: engines run on CUDA when available and fall back to CPU (slower,
+same results). Engine models are fetched through the `ai.common.models`
+model-server wrappers, which auto-detect whether to call a remote model
+server or run local inference; models download on first use.
+
+## Notes
+
+### OpenCV compatibility
 
 All four engines share the `cv2` namespace but require different OpenCV builds. The node installs a single unified build, `opencv-contrib-python==4.13.0.92`, via `ai.common.opencv`, which also uninstalls competing variants (`opencv-python`, `opencv-python-headless`, `opencv-contrib-python-headless`) so only one `cv2` is active at runtime.
 
@@ -111,9 +167,7 @@ Surya and TrOCR's detector pin OpenCV to versions the project deliberately overr
 
 For the same reason, `IGlobal.py` imports `ai.common.opencv` before img2table: img2table internally imports `cv2` at load time, so the correct OpenCV package must already be active.
 
----
-
-## img2table version compatibility
+### img2table version compatibility
 
 img2table 2.0 (released 2026-05-10) reorganised the OCR plug-in API. The node supports both v1 and v2:
 
@@ -124,8 +178,6 @@ img2table 2.0 (released 2026-05-10) reorganised the OCR plug-in API. The node su
 | Plug-in contract                   | `content()` + `to_ocr_dataframe()` | single `of()` override |
 
 The `_IMG2TABLE_V2` flag is set at import time and gates each code path. `external_contracts.py` declares version-tagged import requirements so the `check-externals` CI framework can validate the correct symbols on whichever version is installed.
-
----
 
 ## Upstream docs
 

@@ -34,18 +34,12 @@ export interface ConnectionConfigProps {
 	/** Which connection group this config manages */
 	group: 'development' | 'deployment';
 
-	/** When true, only auth-relevant fields are shown (sign-in, API key). Used by Auth page for re-authentication. */
-	authOnly?: boolean;
-
 	/**
 	 * The other group's connection mode (dev's mode when rendering deploy,
 	 * deploy's mode when rendering dev). Used to filter out incompatible
 	 * mode combinations (service + docker port conflict).
 	 */
 	otherGroupMode?: ConnectionMode | null;
-
-	// Server capabilities (from probe) — controls which modes are shown
-	serverCapabilities: string[];
 
 	// Mode change handler
 	onConnectionModeChange: (mode: ConnectionMode) => void;
@@ -56,11 +50,22 @@ export interface ConnectionConfigProps {
 
 	// Cloud
 	cloudSignedIn: boolean;
+	/** The server the session's token was minted against (subscribe gate). */
+	cloudSignedInUrl?: string;
+	/** Last sign-in attempt was waitlisted — CloudPanel shows the queue banner. */
+	cloudWaitlisted?: boolean;
+	cloudWaitlistedName?: string;
 	cloudUserName: string;
 	onCloudSignIn: () => void;
 	onCloudSignOut: () => void;
+	/** Staged (uncommitted) auth change — rendered by CloudPanel as a pending row. */
+	cloudPending?: { signIn: boolean; signOut: boolean; userName: string; url: string };
+	/** Discard the staged auth change (the pending row's Undo). */
+	onCloudUndoPending?: () => void;
 	onProbeCloudServer?: (cloudUrl: string) => void;
 	isSaas?: boolean;
+	/** The probe could not reach the server (transport failure). */
+	probeUnreachable?: boolean;
 	/** Whether the user has an active subscription. */
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
@@ -120,7 +125,7 @@ export interface ConnectionConfigProps {
 // =============================================================================
 
 export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
-	const { simplified, idPrefix, group, authOnly, serverCapabilities, onConnectionModeChange, settings, onSettingsChange, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, onClearCredentials, onTestConnection, testMessage, engineVersions, engineVersionsLoading } = props;
+	const { simplified, idPrefix, group, onConnectionModeChange, settings, onSettingsChange, cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, onClearCredentials, onTestConnection, testMessage, engineVersions, engineVersionsLoading } = props;
 
 	const groupSettings = settings[group];
 	const connectionMode = groupSettings.connectionMode;
@@ -182,17 +187,6 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 		? !modeOptions.some((opt) => opt.value === connectionMode)
 		: false;
 
-	// authOnly: only show auth-relevant fields for re-authentication
-	if (authOnly) {
-		return (
-			<div style={S.modeConfigBox}>
-				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} simplified={true} />}
-
-				{(connectionMode === 'onprem' || connectionMode === 'docker' || connectionMode === 'service') && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} simplified={true} />}
-			</div>
-		);
-	}
-
 	return (
 		<>
 			{/* Connection mode dropdown */}
@@ -217,7 +211,7 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 
 			{/* Mode-specific panel — hidden when no mode selected or mode has a conflict */}
 			{connectionMode && !modeConflict && <div style={{ ...S.modeConfigBox, marginTop: 8 }}>
-				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} simplified={simplified} isSaas={props.isSaas} onProbeServer={props.onProbeCloudServer} isSubscribed={props.isSubscribed} onFetchPlans={props.onFetchPlans} onCreateCheckout={props.onCreateCheckout} onConfirmPending={props.onConfirmPending} onCheckoutSuccess={props.onCheckoutSuccess} />}
+				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} cloudSignedInUrl={props.cloudSignedInUrl} waitlisted={props.cloudWaitlisted} waitlistedName={props.cloudWaitlistedName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} pending={props.cloudPending} onUndoPending={props.onCloudUndoPending} simplified={simplified} useCustomServer={groupSettings.useCustomServer} customUrl={groupSettings.cloudUrl} defaultCloudUrl={groupSettings.defaultCloudUrl} onUseCustomServerChange={(v) => changeGroup({ useCustomServer: v })} onCustomUrlChange={(url) => changeGroup({ cloudUrl: url })} isSaas={props.isSaas} probeUnreachable={props.probeUnreachable} onProbeServer={props.onProbeCloudServer} isSubscribed={props.isSubscribed} onFetchPlans={props.onFetchPlans} onCreateCheckout={props.onCreateCheckout} onConfirmPending={props.onConfirmPending} onCheckoutSuccess={props.onCheckoutSuccess} />}
 
 				{connectionMode === 'onprem' && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} onTestConnection={(hostUrl, apiKey) => onTestConnection('onprem', { hostUrl, apiKey })} testMessage={testMessage} />}
 

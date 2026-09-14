@@ -13,6 +13,7 @@ from . import execution
 from . import integrations
 from . import introspection
 from . import logs
+from . import scaffold
 from . import visibility
 
 
@@ -27,7 +28,8 @@ def register_all(registry: ToolRegistry) -> None:
     `save_template`, `load_template`, `deploy_add`, `deploy_list`,
     `deploy_status`, `deploy_remove`, `deploy_update`), the visibility tools
     (`monitor`, `list_running_pipelines`), the DVR run-log tools
-    (`log_chapters`, `log_read`, `log_traces`, `log_trace`), and the
+    (`log_chapters`, `log_read`, `log_traces`, `log_trace`), the node
+    scaffolding tool (`scaffold_node`), and the
     integration-discovery tool (`list_integrations`) -- registered last so
     it always trails the surface it discovers.
     """
@@ -36,4 +38,5 @@ def register_all(registry: ToolRegistry) -> None:
     capability.register(registry)
     visibility.register(registry)
     logs.register(registry)
+    scaffold.register(registry)
     integrations.register(registry)

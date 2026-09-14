@@ -26,7 +26,7 @@
 // service docs) is picked up by `docs:gather` instead of failing the build
 // as an unmounted docs/ tree (packages/docs/scripts/lib/gather.js). Mounted
 // under the public-docs `canvas-agent` spine slot (packages/docs/scripts/lib/spine.js),
-// alongside the product page at packages/docs/content-static/canvas-agent.md —
+// alongside the product page at docs/public/product/guides/canvas-agent.md —
 // this service currently has no other build actions registered here.
 module.exports = {
 	name: 'rocket-agent',

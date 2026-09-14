@@ -49,8 +49,9 @@ gated by `allowDelete`.
   `acl_insert` (share; scopeType `default`/`domain` additionally requires
   `allowPublicSharing`), `acl_delete` (unshare).
 - **Delete (write + `allowDelete`):** `event_delete`, `calendar_delete`.
-- **Diagnostics:** `check_connection` verifies that granted OAuth scopes cover
-  the configured access tier and probes the Calendar API.
+- **Diagnostics:** `check_connection` probes the Calendar API with a live call;
+  for user OAuth it also verifies that granted scopes cover the configured
+  access tier (service-account auth has no per-user scope grant to check).
 
 ### Incremental sync (`syncToken`)
 

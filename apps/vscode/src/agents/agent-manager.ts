@@ -26,10 +26,13 @@
  *
  * Coordinates installing RocketRide documentation and agent stubs into
  * user workspaces. Handles:
- *   1. Copying docs from extension bundle → .rocketride/docs/
+ *   1. Downloading the agent docs bundle from the connected server
+ *      (GET /client/docs) → .rocketride/docs/ (docs at the root, stubs
+ *      under stubs/), hash-stamped so unchanged bundles are a no-op
  *   2. Ensuring .rocketride/ and .env are in .gitignore
  *   3. Detecting which coding agents are present
- *   4. Delegating to per-agent installers
+ *   4. Delegating to per-agent installers (stubs come from the
+ *      downloaded bundle, so they always match the connected server)
  */
 
 import * as vscode from 'vscode';
@@ -37,6 +40,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
+import { ConnectionManager } from '../connection/connection';
+import { installDocsBundle, toHttpBase } from '../../../../packages/client-common/typescript/src/provision';
 import { BaseAgentInstaller } from './base-installer';
 import { CursorInstaller } from './cursor-installer';
 import { ClaudeCodeInstaller } from './claude-code-installer';
@@ -57,9 +62,6 @@ const DOCS_DIR = '.rocketride/docs';
  */
 const GITIGNORE_ENTRIES = ['.rocketride/', '.env'] as const;
 
-/** Doc files shipped in the extension's docs/ directory. */
-const DOC_FILES = ['ROCKETRIDE_README.md', 'ROCKETRIDE_QUICKSTART.md', 'ROCKETRIDE_PIPELINE_RULES.md', 'ROCKETRIDE_COMPONENT_REFERENCE.md', 'ROCKETRIDE_COMMON_MISTAKES.md', 'ROCKETRIDE_python_API.md', 'ROCKETRIDE_typescript_API.md', 'ROCKETRIDE_OBSERVABILITY.md'];
-
 /** Map from installer name to the VS Code config key under rocketride.integrations.* */
 const INTEGRATION_CONFIG_KEYS: Record<string, string> = {
 	Cursor: 'integrations.cursor',
@@ -73,6 +75,9 @@ const INTEGRATION_CONFIG_KEYS: Record<string, string> = {
 export class AgentManager {
 	private readonly installers: BaseAgentInstaller[] = [new CursorInstaller(), new ClaudeCodeInstaller(), new WindsurfInstaller(), new CopilotInstaller(), new ClaudeMdInstaller(), new AgentsMdInstaller()];
 
+	/** The install pass currently running, shared by concurrent callers. */
+	private autoInstallInFlight: Promise<void> | null = null;
+
 	/**
 	 * Run on startup. Two passes:
 	 *
@@ -82,7 +87,28 @@ export class AgentManager {
 	 * Pass 2 (manual settings): For each individual integration checkbox that
 	 *   is checked, install that stub if it wasn't already covered by Pass 1.
 	 */
-	async autoInstall(extensionPath: string, workspaceRoot: vscode.Uri): Promise<void> {
+	async autoInstall(workspaceRoot: vscode.Uri): Promise<void> {
+		// Single-flight: activation starts a pass without awaiting it, and a
+		// shell:connected event starts another. The dedupe state below is
+		// per-call, so overlapping passes would re-run installers and write
+		// the same workspace files at once. Concurrent callers share the
+		// running pass instead; the memo clears when it settles so a LATER
+		// call still installs (settings can change mid-session).
+		if (!this.autoInstallInFlight) {
+			this.autoInstallInFlight = this.runAutoInstall(workspaceRoot).finally(() => {
+				this.autoInstallInFlight = null;
+			});
+		}
+		return this.autoInstallInFlight;
+	}
+
+	/**
+	 * The actual install pass — always entered through {@link autoInstall},
+	 * which serializes it.
+	 *
+	 * @param workspaceRoot - Workspace folder receiving the stubs.
+	 */
+	private async runAutoInstall(workspaceRoot: vscode.Uri): Promise<void> {
 		const logger = getLogger();
 		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
 		const autoDetect = workspaceConfig.get<boolean>('integrations.autoAgentIntegration', true);
@@ -94,7 +120,7 @@ export class AgentManager {
 		// Helper: ensure docs + gitignore are set up before first install
 		const prepareWorkspace = async () => {
 			if (workspacePrepared) return;
-			await this.installDocs(extensionPath, workspaceRoot);
+			await this.installDocs(workspaceRoot);
 			await this.ensureGitignore(workspaceRoot);
 			workspacePrepared = true;
 		};
@@ -105,7 +131,7 @@ export class AgentManager {
 			if (detected.length > 0) {
 				await prepareWorkspace();
 				for (const installer of detected) {
-					const ok = await this.runInstaller(installer, extensionPath, workspaceRoot);
+					const ok = await this.runInstaller(installer, workspaceRoot);
 					if (ok) installed.add(installer.name);
 				}
 			}
@@ -118,7 +144,7 @@ export class AgentManager {
 			const configKey = INTEGRATION_CONFIG_KEYS[installer.name];
 			if (configKey && workspaceConfig.get<boolean>(configKey, false)) {
 				await prepareWorkspace();
-				const ok = await this.runInstaller(installer, extensionPath, workspaceRoot);
+				const ok = await this.runInstaller(installer, workspaceRoot);
 				if (ok) installed.add(installer.name);
 			}
 		}
@@ -182,12 +208,12 @@ export class AgentManager {
 	/**
 	 * Install docs + stubs for all detected agents in the workspace.
 	 */
-	async installAll(extensionPath: string, workspaceRoot: vscode.Uri): Promise<void> {
-		await this.installDocs(extensionPath, workspaceRoot);
+	async installAll(workspaceRoot: vscode.Uri): Promise<void> {
+		await this.installDocs(workspaceRoot);
 		await this.ensureGitignore(workspaceRoot);
 
 		for (const installer of this.installers) {
-			await this.runInstaller(installer, extensionPath, workspaceRoot);
+			await this.runInstaller(installer, workspaceRoot);
 		}
 	}
 
@@ -195,7 +221,7 @@ export class AgentManager {
 	 * Called when integration settings are saved. Installs stubs for any
 	 * integration that is currently checked in settings.
 	 */
-	async installFromSettings(extensionPath: string, workspaceRoot: vscode.Uri): Promise<void> {
+	async installFromSettings(workspaceRoot: vscode.Uri): Promise<void> {
 		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
 		let anyInstalled = false;
 
@@ -204,11 +230,11 @@ export class AgentManager {
 			if (configKey && workspaceConfig.get<boolean>(configKey, false)) {
 				if (!anyInstalled) {
 					// Only sync docs + gitignore if we actually have something to install
-					await this.installDocs(extensionPath, workspaceRoot);
+					await this.installDocs(workspaceRoot);
 					await this.ensureGitignore(workspaceRoot);
 					anyInstalled = true;
 				}
-				await this.runInstaller(installer, extensionPath, workspaceRoot);
+				await this.runInstaller(installer, workspaceRoot);
 			}
 		}
 	}
@@ -255,63 +281,38 @@ export class AgentManager {
 	}
 
 	/**
-	 * Sync documentation files from the extension bundle into .rocketride/docs/.
-	 * - Adds missing files
-	 * - Updates files whose content has changed
-	 * - Removes files in the target that are not in the source (obsolete)
+	 * Sync the agent docs bundle from the connected server into
+	 * .rocketride/docs/.
+	 *
+	 * Downloads GET /client/docs (docs.zip), compares its manifest hash
+	 * to the workspace stamp, and on change deletes every ROCKETRIDE_*
+	 * doc before unpacking the new set — renamed/retired docs cannot
+	 * linger, while non-matching files a user added survive. Stubs land
+	 * under .rocketride/docs/stubs/, where the per-agent installers read
+	 * them.
+	 *
+	 * Non-fatal by design: with no reachable server the existing
+	 * workspace docs are kept untouched and the sync re-runs on the next
+	 * connect.
 	 */
-	async installDocs(extensionPath: string, workspaceRoot: vscode.Uri): Promise<void> {
+	async installDocs(workspaceRoot: vscode.Uri): Promise<void> {
 		const logger = getLogger();
-		const targetDir = vscode.Uri.joinPath(workspaceRoot, DOCS_DIR);
-		await vscode.workspace.fs.createDirectory(targetDir);
 
-		const sourceDir = `${extensionPath}/docs`;
-		const expectedFiles = new Set(DOC_FILES);
-
-		// Add or update files from the source
-		for (const file of DOC_FILES) {
-			const sourceUri = vscode.Uri.file(`${sourceDir}/${file}`);
-			const targetUri = vscode.Uri.joinPath(targetDir, file);
-
-			try {
-				const sourceContent = await vscode.workspace.fs.readFile(sourceUri);
-
-				// Only write if content differs or file is missing
-				let needsWrite = true;
-				try {
-					const targetContent = await vscode.workspace.fs.readFile(targetUri);
-					// Normalize line endings so \r\n vs \n doesn't trigger a false write
-					const sourceStr = Buffer.from(sourceContent).toString('utf8').replace(/\r\n/g, '\n');
-					const targetStr = Buffer.from(targetContent).toString('utf8').replace(/\r\n/g, '\n');
-					needsWrite = sourceStr !== targetStr;
-				} catch {
-					// Target doesn't exist — needs write
-				}
-
-				if (needsWrite) {
-					await vscode.workspace.fs.writeFile(targetUri, sourceContent);
-					logger.output(`${icons.info} Synced ${file}`);
-				}
-			} catch (err) {
-				logger.output(`${icons.warning} Could not sync ${file}: ${err}`);
-			}
+		// step: the connected server is the only docs source — no bundle copy
+		const baseUrl = ConnectionManager.getInstance().getHttpUrl?.() || '';
+		if (!baseUrl) {
+			logger.output(`${icons.info} Not connected — agent docs sync deferred to the next connect`);
+			return;
 		}
 
-		// Remove obsolete files in the target that are not in the source
+		// step: shared install (sweep + stamp + unpack) from client-common —
+		// the exact code the CLI's `rocketride init` runs. Non-fatal: with
+		// an unreachable bundle the existing workspace docs are kept.
 		try {
-			const entries = await vscode.workspace.fs.readDirectory(targetDir);
-			for (const [name, type] of entries) {
-				if (type === vscode.FileType.File && !expectedFiles.has(name)) {
-					const obsoleteUri = vscode.Uri.joinPath(targetDir, name);
-					await vscode.workspace.fs.delete(obsoleteUri);
-					logger.output(`${icons.info} Removed obsolete doc: ${name}`);
-				}
-			}
-		} catch {
-			// Directory listing failed — likely first install, nothing to clean
+			await installDocsBundle(workspaceRoot.fsPath, toHttpBase(baseUrl), (line) => logger.output(`${icons.info} ${line}`));
+		} catch (err) {
+			logger.output(`${icons.warning} Agent docs sync failed: ${err} — keeping existing docs`);
 		}
-
-		logger.output(`${icons.info} Documentation synced to ${DOCS_DIR}`);
 	}
 
 	/**
@@ -349,10 +350,10 @@ export class AgentManager {
 		return this.installers.map((i) => i.name);
 	}
 
-	private async runInstaller(installer: BaseAgentInstaller, extensionPath: string, workspaceRoot: vscode.Uri): Promise<boolean> {
+	private async runInstaller(installer: BaseAgentInstaller, workspaceRoot: vscode.Uri): Promise<boolean> {
 		const logger = getLogger();
 		try {
-			await installer.install(extensionPath, workspaceRoot);
+			await installer.install(workspaceRoot);
 			logger.output(`${icons.info} Installed ${installer.name} agent stub → ${installer.stubTarget}`);
 			return true;
 		} catch (err) {

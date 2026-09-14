@@ -3,8 +3,15 @@
 	"version": "2.2.0",
 	"description": "RocketRide AI Dropper Interface",
 	"private": true,
+	"license": "MIT",
 	"copylist": {
 		"dist/*": "dist"
+	},
+	"scripts": {
+		"build": "rsbuild build",
+		"build:prod": "rsbuild build --env-mode production",
+		"dev": "rsbuild dev",
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@textea/json-viewer": "^4.0.1",
@@ -38,6 +45,6 @@
 		"postcss": "^8.5.23",
 		"rimraf": "^5.0.5",
 		"tailwindcss": "^3.3.6",
-		"typescript": "^5.2.2"
+		"typescript": "^5.3.0"
 	}
 }

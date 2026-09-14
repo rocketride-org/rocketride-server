@@ -1,0 +1,269 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Text To Speech (Rime)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tts_rime://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["audio"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "experimental" marks this node as not yet production-ready.
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code. Shared with the OpenAI and
+	//		ElevenLabs registrations: all cloud TTS vendors run the same engine
+	//		code in nodes/cloud_tts and are dispatched by logicalType at runtime.
+	//
+	"path": "nodes.cloud_tts",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "tts_rime",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Converts incoming text into speech using the Rime text-to-speech API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "Rime speakers are model-specific, so each model exposes its own curated speaker list; the API key falls back to the RIME_API_KEY environment variable when blank."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node
+	//
+	"icon": "rime.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["audio"],
+		"documents": ["audio"],
+		"questions": ["audio"],
+		"answers": ["audio"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself. One profile per model (maintained manually).
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "coda",
+		// Defines profiles used with the "profile": key. model + voice live here so
+		// Config.getNodeConfig merges them under the selected profile. `voice` is the
+		// Rime speaker; the shared cloud_tts engine reads it as cfg['voice']. astra is
+		// valid across all four shipped models and is the default.
+		"profiles": {
+			"coda": {
+				"title": "Coda    - Flagship, best quality",
+				"model": "coda",
+				"voice": "astra",
+				"apikey": ""
+			},
+			"arcana": {
+				"title": "Arcana  - Expressive, multilingual",
+				"model": "arcana",
+				"voice": "astra",
+				"apikey": ""
+			},
+			"mistv3": {
+				"title": "Mist v3 - Lowest latency",
+				"model": "mistv3",
+				"voice": "astra",
+				"apikey": ""
+			},
+			"mistv2": {
+				"title": "Mist v2 - Pronunciation control",
+				"model": "mistv2",
+				"voice": "astra",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		// ── Form objects (one per model profile; api key + model-specific voice) ──
+		// The voice field MUST live inside the form-object so it is merged under the
+		// selected profile; in the top-level shape it would be silently dropped by
+		// getNodeConfig. Each profile references its OWN voice field
+		// (tts_rime.<model>.voice) whose leaf key is `voice`, so the shared engine
+		// reads cfg['voice'] regardless of the model — matching how vendor voices
+		// merge for OpenAI/ElevenLabs, but with a model-scoped speaker enum.
+		"tts_rime.coda": {
+			"object": "coda",
+			"properties": ["llm.cloud.apikey", "tts_rime.coda.voice"]
+		},
+		"tts_rime.arcana": {
+			"object": "arcana",
+			"properties": ["llm.cloud.apikey", "tts_rime.arcana.voice"]
+		},
+		"tts_rime.mistv3": {
+			"object": "mistv3",
+			"properties": ["llm.cloud.apikey", "tts_rime.mistv3.voice"]
+		},
+		"tts_rime.mistv2": {
+			"object": "mistv2",
+			"properties": ["llm.cloud.apikey", "tts_rime.mistv2.voice"]
+		},
+		// ── Speaker (model-specific; one curated enum per model). Rime rejects an
+		//    out-of-model speaker at request time, so the list is scoped per model.
+		//    Each field's leaf key is `voice`, delivered to the shared engine as
+		//    cfg['voice']. Sourced from the live catalog; maintained manually. ──────
+		"tts_rime.coda.voice": {
+			"type": "string",
+			"title": "Speaker",
+			"description": "Rime voice for the Coda model.",
+			"default": "astra",
+			"enum": [
+				["astra", "Astra"],
+				["andromeda", "Andromeda"],
+				["arcade", "Arcade"],
+				["aurelio", "Aurelio"],
+				["bancroft", "Bancroft"],
+				["adeline", "Adeline"],
+				["alma", "Alma"],
+				["azura", "Azura"]
+			]
+		},
+		"tts_rime.arcana.voice": {
+			"type": "string",
+			"title": "Speaker",
+			"description": "Rime voice for the Arcana model.",
+			"default": "astra",
+			"enum": [
+				["astra", "Astra"],
+				["andromeda", "Andromeda"],
+				["arcade", "Arcade"],
+				["albion", "Albion"],
+				["andersen_johan", "Andersen Johan"],
+				["anderson_emily", "Anderson Emily"]
+			]
+		},
+		"tts_rime.mistv3.voice": {
+			"type": "string",
+			"title": "Speaker",
+			"description": "Rime voice for the Mist v3 model.",
+			"default": "astra",
+			"enum": [
+				["astra", "Astra"],
+				["alpine", "Alpine"],
+				["cove", "Cove"],
+				["cedar", "Cedar"],
+				["breeze", "Breeze"],
+				["blossom", "Blossom"],
+				["boulder", "Boulder"],
+				["brook", "Brook"]
+			]
+		},
+		"tts_rime.mistv2.voice": {
+			"type": "string",
+			"title": "Speaker",
+			"description": "Rime voice for the Mist v2 model.",
+			"default": "astra",
+			"enum": [
+				["astra", "Astra"],
+				["alpine", "Alpine"],
+				["abbie", "Abbie"],
+				["allison", "Allison"],
+				["amber", "Amber"],
+				["antoine", "Antoine"],
+				["bayou", "Bayou"],
+				["blaze", "Blaze"]
+			]
+		},
+		// ── Profile selector (drives conditional form rendering) ───────────────
+		"tts_rime.profile": {
+			"title": "Model",
+			"description": "Rime TTS model",
+			"type": "string",
+			"default": "coda",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "coda",
+					"properties": ["tts_rime.coda"]
+				},
+				{
+					"value": "arcana",
+					"properties": ["tts_rime.arcana"]
+				},
+				{
+					"value": "mistv3",
+					"properties": ["tts_rime.mistv3"]
+				},
+				{
+					"value": "mistv2",
+					"properties": ["tts_rime.mistv2"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Rime Text To Speech",
+			"properties": ["tts_rime.profile"]
+		}
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing
+	//
+	"test": [
+		{
+			// No audio mock exists, so this runs only when a real key is present
+			// (ROCKETRIDE_TTS_RIME_KEY) and is skipped in CI otherwise.
+			"requires": ["ROCKETRIDE_TTS_RIME_KEY"],
+			"avoidMocks": true,
+			"profiles": ["coda"],
+			"outputs": ["audio"],
+			"cases": [
+				{
+					"name": "Rime TTS returns audio",
+					"text": "Hello from RocketRide",
+					"expect": {
+						"audio": {
+							"notEmpty": true
+						}
+					}
+				}
+			]
+		}
+	]
+}

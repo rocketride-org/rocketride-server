@@ -84,6 +84,10 @@ export interface IDeployPanelProps {
 	onOpenDeployment?: (teamId: string, sourceId?: string) => void;
 	/** Toggle the whole-deployment kill switch from the where-live header. */
 	onSetDisabled?: (teamId: string, disabled: boolean) => Promise<void>;
+	/** Soft-remove one team's deployment from the where-live header —
+	    listings hide it; history and artifacts survive; re-deploying any
+	    version revives it. */
+	onRemove?: (teamId: string) => Promise<void>;
 	/** Set/clear one source's schedule (the where-live pill opens the stock
 	    SchedulePanel editor; cron null clears). */
 	onSetSchedule?: (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => Promise<void>;
@@ -258,6 +262,18 @@ const S = {
 		fontSize: 11.5,
 		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
+	// Per-team soft-remove on the where-live group header.
+	liveRemoveBtn: {
+		padding: '2px 9px',
+		fontSize: 11,
+		fontWeight: 600,
+		background: 'transparent',
+		color: 'var(--rr-text-secondary)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 4,
+		cursor: 'pointer',
+		whiteSpace: 'nowrap',
+	} as CSSProperties,
 	// Running badge — the live-run indicator on group headers + source rows
 	// (the schedule-pill grammar, always in its armed/green form).
 	liveRunning: {
@@ -323,7 +339,7 @@ function shortSha(sha: string): string {
  * The DEPLOY-page lifecycle surface: version strip, where-live grid,
  * merged history grid. See the module docstring for the collapsing rules.
  */
-export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onSetDisabled, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
+export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onSetDisabled, onRemove, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
 	// --- Panel-owned registry data (fetched, never passed in) -----------------
 
 	const [versions, setVersions] = useState<DeployVersionCard[]>([]);
@@ -376,6 +392,8 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 
 	// The version awaiting a team choice (Deploy to… picker).
 	const [pickerVersion, setPickerVersion] = useState<number | null>(null);
+	// The team deployment awaiting soft-remove confirmation (null = none).
+	const [removeTeam, setRemoveTeam] = useState<{ teamId: string; teamName: string } | null>(null);
 	// A chosen (version, team) pointer move awaiting CONFIRMATION.
 	const [pendingDeploy, setPendingDeploy] = useState<{ version: number; team: DeployTeamRef; fromVersion?: number } | null>(null);
 	const [publishOpen, setPublishOpen] = useState(false);
@@ -398,7 +416,6 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			.catch((err: unknown) => setVersionError(err instanceof Error ? err.message : String(err)));
 	};
 	const [publishComment, setPublishComment] = useState('');
-	const [publishAndDeploy, setPublishAndDeploy] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
 
@@ -413,7 +430,6 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			setPendingDeploy(null);
 			setPublishOpen(false);
 			setPublishComment('');
-			setPublishAndDeploy(false);
 			await refresh();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -557,6 +573,24 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 										{/* Live-run roll-up: any source running lights the group. */}
 										{dep.sources.some((src) => src.running) && <span style={S.liveRunning}>&#9679; running</span>}
 										<span style={S.liveDeployedAt}>{dep.deployedAt ? `deployed ${formatDayTime(dep.deployedAt)}` : ''}</span>
+										{onRemove && (
+											<button
+												style={S.liveRemoveBtn}
+												disabled={busy}
+												onClick={(e) => {
+													// The header row opens the record; Remove must not.
+													e.stopPropagation();
+													setRemoveTeam({ teamId: dep.teamId, teamName: dep.teamName });
+												}}
+												// Enter/Space on the button also bubble a keydown to
+												// the buttonized header (which activates on those
+												// keys); stop it so removing never also opens the
+												// deployment record.
+												onKeyDown={(e) => e.stopPropagation()}
+											>
+												Remove
+											</button>
+										)}
 									</div>
 									{/* Source rows — schedule pill + last run, drawer-pill grammar. */}
 									{dep.sources.map((src) => (
@@ -581,6 +615,22 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 						</div>
 					</Card>
 				</div>
+			)}
+
+			{/* ── Soft-remove confirmation (where-live header verb) ─────── */}
+			{removeTeam && onRemove && (
+				<ConfirmDialog
+					title={`Remove ${pipelineName || 'this deployment'} from ${removeTeam.teamName}?`}
+					message={`Takes ${pipelineName || 'the deployment'} off ${removeTeam.teamName}: schedules stop firing and the deployment leaves all listings. This is a SOFT remove — the audit history and every published version survive, and deploying any version to ${removeTeam.teamName} revives it.`}
+					confirmLabel="Remove"
+					cancelLabel="Cancel"
+					onConfirm={() => {
+						const team = removeTeam;
+						setRemoveTeam(null);
+						void run(() => onRemove(team.teamId));
+					}}
+					onCancel={() => setRemoveTeam(null)}
+				/>
 			)}
 
 			{/* ── Where-live schedule editor (stock SchedulePanel drawer) ── */}
@@ -631,11 +681,11 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 										// Save-first: the registry snapshots what is on
 										// disk, so a dirty doc saves before publishing.
 										if (requiresSave && onSaveDocument) await onSaveDocument();
-										await onPublish(publishComment.trim(), publishAndDeploy && singleTarget ? singleTarget.id : undefined);
+										await onPublish(publishComment.trim());
 									})
 								}
 							>
-								{busy ? 'Publishing…' : requiresSave ? (publishAndDeploy && singleTarget ? 'Save, publish & deploy' : 'Save & publish') : publishAndDeploy && singleTarget ? 'Publish & deploy' : 'Publish'}
+								{busy ? 'Publishing…' : requiresSave ? 'Save & publish' : 'Publish'}
 							</Button>
 						</>
 					}
@@ -645,14 +695,6 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 						{requiresSave ? ' Your unsaved changes are saved first.' : ''}
 					</div>
 					<input style={S.commentInput} placeholder="What changed? (optional comment)" value={publishComment} onChange={(e) => setPublishComment(e.target.value)} disabled={busy} />
-					{/* One-step publish+deploy — offered only when there is exactly
-					    one deploy target (the small-team path, mockup screen C). */}
-					{singleTarget && (
-						<label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12.5 }}>
-							<input type="checkbox" checked={publishAndDeploy} onChange={(e) => setPublishAndDeploy(e.target.checked)} disabled={busy} />
-							and deploy to <b>{singleTarget.name}</b>
-						</label>
-					)}
 					{error && <div style={S.errorText}>{error}</div>}
 				</Modal>
 			)}

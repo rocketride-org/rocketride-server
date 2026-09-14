@@ -16,10 +16,35 @@ from unittest.mock import MagicMock
 import pytest
 
 # tools/sync_models/src is added to sys.path by conftest.py
-from core.merger import merge, _make_profile_key, _derive_title
+from core.merger import (
+    merge,
+    _make_profile_key,
+    _derive_title,
+    find_swapped_output_profiles,
+    _source_is_authoritative,
+    _migration_from_provider,
+    CALL_VERIFIED,
+)
+from core.smoke import classify_failure
+from providers.base import is_retirement_anomaly
+
+
+class _NotFound(Exception):
+    """Stands in for openai/anthropic NotFoundError and google-genai ClientError."""
+
+    def __init__(self, message):
+        super().__init__(message)
+        self.status_code = 404
+
+
+def _not_found(message):
+    return _NotFound(message)
+
+
 from core.smoke import run
 from core.patcher import load as patcher_load, patch as patcher_patch, get_profiles
 from core.reporter import SyncReport, ProviderReport, format_console, format_pr_body
+import sync_models
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +193,9 @@ class TestMerge:
                 'model': 'test-model-a',
                 'modelTotalTokens': 16384,
                 'deprecated': True,
+                # Marked by the sync, so the sync may lift it again. Without this the
+                # mark is a human's and stays — see TestDeprecationIsNotUndoneByTheSync.
+                'deprecatedBy': 'provider',
                 'apikey': '',
             }
         }
@@ -527,3 +555,577 @@ class TestCliValidation:
         )
         assert rc != 0
         assert 'must not be repeated' in stderr.lower() or 'duplicate' in stderr.lower() or '--model-source' in stderr
+
+
+# ---------------------------------------------------------------------------
+# Swapped output tokens (context window reported as the completion limit)
+# ---------------------------------------------------------------------------
+
+
+class TestSwappedOutputTokens:
+    def test_swapped_candidate_is_not_used_for_new_profile(self, current_profiles, title_mappings):
+        # Source reports the same number for both fields — the swap signature.
+        api_models = [
+            {'id': 'test-model-a'},
+            {'id': 'test-model-b'},
+            {'id': 'test-model-c', 'context_window': 128000, 'max_output_tokens': 128000},
+        ]
+        updated, result = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            output_limit_below_context=True,
+        )
+        profile = updated['test-model-c']
+        assert profile['modelTotalTokens'] == 128000
+        assert profile['modelOutputTokens'] == 4096
+
+    def test_equal_values_kept_when_provider_has_no_separate_limit(self, current_profiles, title_mappings):
+        # Mistral and xAI accept max_tokens up to the window, so equality is real data.
+        api_models = [
+            {'id': 'test-model-a'},
+            {'id': 'test-model-b'},
+            {'id': 'test-model-c', 'context_window': 128000, 'max_output_tokens': 128000},
+        ]
+        updated, _ = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-c']['modelOutputTokens'] == 128000
+
+    def test_genuine_output_limit_is_kept(self, current_profiles, title_mappings):
+        api_models = [
+            {'id': 'test-model-a'},
+            {'id': 'test-model-b'},
+            {'id': 'test-model-c', 'context_window': 128000, 'max_output_tokens': 32768},
+        ]
+        updated, _ = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-c']['modelOutputTokens'] == 32768
+
+    def test_override_still_wins_over_source(self, current_profiles, title_mappings):
+        api_models = [
+            {'id': 'test-model-a'},
+            {'id': 'test-model-b'},
+            {'id': 'test-model-c', 'context_window': 128000, 'max_output_tokens': 128000},
+        ]
+        updated, _ = merge(
+            current_profiles=current_profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={'test-model-c': 16384},
+            default_output_tokens=4096,
+            output_limit_below_context=True,
+        )
+        assert updated['test-model-c']['modelOutputTokens'] == 16384
+
+    def test_fallback_default_does_not_overwrite_existing_value(self, title_mappings):
+        # A profile that already carries a real limit must survive a source that
+        # only offers a swapped value — the 4096 default is for new profiles.
+        profiles = {
+            'test-model-a': {
+                'title': 'Test Model A',
+                'model': 'test-model-a',
+                'modelSource': 'provider',
+                'modelTotalTokens': 128000,
+                'modelOutputTokens': 32768,
+                'apikey': '',
+            },
+        }
+        api_models = [{'id': 'test-model-a', 'context_window': 128000, 'max_output_tokens': 128000}]
+        updated, _ = merge(
+            current_profiles=profiles,
+            api_models=api_models,
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            output_limit_below_context=True,
+        )
+        assert updated['test-model-a']['modelOutputTokens'] == 32768
+
+    def test_find_swapped_output_profiles(self):
+        profiles = {
+            'bad': {'model': 'm1', 'modelSource': 'provider', 'modelTotalTokens': 131072, 'modelOutputTokens': 131072},
+            'good': {'model': 'm2', 'modelSource': 'provider', 'modelTotalTokens': 131072, 'modelOutputTokens': 32768},
+            'no-output-key': {'model': 'm3', 'modelTotalTokens': 131072},
+            'custom': {'model': ''},
+        }
+        assert find_swapped_output_profiles(profiles) == [('bad', 131072)]
+
+    def test_deprecated_and_confirmed_profiles_are_not_reported(self):
+        profiles = {
+            'dead': {
+                'model': 'm1',
+                'deprecated': True,
+                'modelTotalTokens': 131072,
+                'modelOutputTokens': 131072,
+            },
+            'confirmed': {'model': 'm2', 'modelTotalTokens': 16384, 'modelOutputTokens': 16384},
+            'suspect': {'model': 'm3', 'modelTotalTokens': 131072, 'modelOutputTokens': 131072},
+        }
+        assert find_swapped_output_profiles(profiles, confirmed_models={'m2'}) == [('suspect', 131072)]
+
+    def test_native_only_skips_routed_aliases(self):
+        profiles = {
+            'native': {
+                'model': 'm1',
+                'modelSource': 'provider',
+                'modelTotalTokens': 131072,
+                'modelOutputTokens': 131072,
+            },
+            'routed': {
+                'model': 'm2',
+                'modelSource': 'openrouter',
+                'modelTotalTokens': 131072,
+                'modelOutputTokens': 131072,
+            },
+        }
+        assert find_swapped_output_profiles(profiles, native_only=True) == [('native', 131072)]
+        assert len(find_swapped_output_profiles(profiles)) == 2
+
+    def test_catalogue_gate_is_clean(self):
+        # The real gate: fails only where the provider caps completions below its
+        # window and the profile came from that provider's own API.
+        repo_root = Path(__file__).resolve().parents[3]
+        config = sync_models._load_config()
+        providers = sorted(sync_models._PROVIDER_REGISTRY)
+        errors, _ = sync_models.check_swapped_outputs(repo_root, providers, config)
+        assert not errors, 'Profiles sending the context window as max_tokens:\n' + '\n'.join(
+            f'{p}: {k} ({v:,})' for p, k, v in errors
+        )
+
+
+# ---------------------------------------------------------------------------
+# Deprecation authority
+# ---------------------------------------------------------------------------
+
+
+class TestSourceAuthority:
+    def test_a_source_owns_the_profiles_it_discovered(self):
+        assert _source_is_authoritative('provider', 'provider') is True
+        assert _source_is_authoritative('provider', 'manual') is True
+        assert _source_is_authoritative('openrouter', 'openrouter') is True
+        assert _source_is_authoritative('litellm', 'litellm') is True
+
+    def test_a_source_has_no_authority_over_another_source_profile(self):
+        assert _source_is_authoritative('provider', 'openrouter') is False
+        assert _source_is_authoritative('openrouter', 'provider') is False
+        assert _source_is_authoritative('openrouter', 'manual') is False
+        assert _source_is_authoritative('litellm', 'openrouter') is False
+
+    def test_display_labels_are_not_accepted_as_keys(self):
+        # Authority is decided on canonical keys only; a label must never reach here.
+        assert _source_is_authoritative('Anthropic API', 'provider') is False
+        assert _source_is_authoritative('OpenRouter', 'openrouter') is False
+        assert _source_is_authoritative('something else', 'provider') is False
+
+
+class TestDeprecationIsNotUndoneByTheSync:
+    def _profile(self, **extra):
+        base = {
+            'title': 'Test Model A',
+            'model': 'test-model-a',
+            'modelSource': 'provider',
+            'modelTotalTokens': 16384,
+            'modelOutputTokens': 4096,
+            'deprecated': True,
+            'migration': "Please use 'test-model-b' instead",
+            'apikey': '',
+        }
+        base.update(extra)
+        return {'test-model-a': base}
+
+    def test_hand_marked_profile_survives_the_model_reappearing(self, title_mappings):
+        # No deprecatedBy — a human marked this. The provider listing still returning
+        # the model is exactly the case that made someone mark it by hand.
+        updated, _ = merge(
+            current_profiles=self._profile(),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is True
+        assert updated['test-model-a'].get('migration') == "Please use 'test-model-b' instead"
+
+    def test_sync_marked_profile_is_lifted_when_the_model_returns(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._profile(deprecatedBy='provider'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        profile = updated['test-model-a']
+        assert profile.get('deprecated') is None
+        assert profile.get('deprecatedBy') is None
+        assert profile.get('migration') is None
+        assert any(r[0] == 'test-model-a' and r[1] == 'deprecated' for r in result.updated)
+
+    def test_an_authoritative_source_lifts_a_mark_another_source_applied(self, title_mappings):
+        # A keyless run can stamp deprecatedBy='openrouter' on a 'provider' profile via
+        # the expiration branch. Requiring the stamp to match would strand it deprecated
+        # with no source able to clear it, so authority over the profile is what counts.
+        updated, _ = merge(
+            current_profiles=self._profile(deprecatedBy='openrouter'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+
+    def test_a_source_without_authority_cannot_lift(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._profile(modelSource='openrouter', deprecatedBy='openrouter'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            deprecation_source_key='provider',
+        )
+        assert updated['test-model-a'].get('deprecated') is True
+
+    def test_a_standing_mark_is_reported_not_silent(self, title_mappings):
+        _, result = merge(
+            current_profiles=self._profile(),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert result.reappeared_deprecated == ['test-model-a']
+
+    def test_deprecating_records_the_source(self, current_profiles, title_mappings):
+        # test-model-b absent from the API, discovered by the native provider.
+        updated, result = merge(
+            current_profiles=current_profiles,
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            deprecation_source='Anthropic API',
+            deprecation_source_key='provider',
+        )
+        assert 'test-model-b' in result.deprecated
+        assert updated['test-model-b']['deprecatedBy'] == 'provider'
+
+
+class TestReappearedDeprecatedIsReported:
+    def test_a_provider_whose_only_finding_is_a_standing_mark_is_not_a_pure_skip(self):
+        pr = ProviderReport(provider='llm_gemini')
+        pr.reappeared_deprecated = ['gemini-3-pro-image']
+        assert pr.has_changes() is True
+
+    def test_it_survives_the_skip_path_in_the_console_output(self):
+        pr = ProviderReport(provider='llm_gemini')
+        pr.warning = 'ran without a key'
+        pr.reappeared_deprecated = ['gemini-3-pro-image']
+        report = SyncReport(providers=[pr])
+        assert 'gemini-3-pro-image' in format_console(report)
+
+    def test_it_survives_into_the_pr_body(self):
+        pr = ProviderReport(provider='llm_gemini')
+        pr.reappeared_deprecated = ['gemini-3-pro-image']
+        assert 'gemini-3-pro-image' in format_pr_body(SyncReport(providers=[pr]))
+
+
+# ---------------------------------------------------------------------------
+# Re-verifying models already in the catalogue
+# ---------------------------------------------------------------------------
+
+
+class TestRetiredModelsDeprecation:
+    def _profiles(self, model_source='openrouter'):
+        return {
+            'test-model-a': {
+                'title': 'Test Model A',
+                'model': 'test-model-a',
+                'modelSource': model_source,
+                'modelTotalTokens': 16384,
+                'modelOutputTokens': 4096,
+                'apikey': '',
+            }
+        }
+
+    def test_a_direct_refusal_deprecates_regardless_of_who_discovered_it(self, title_mappings):
+        # The provider API has no authority over an 'openrouter' profile when the
+        # signal is absence from a listing. A refusal to run it is different.
+        updated, result = merge(
+            current_profiles=self._profiles(model_source='openrouter'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            retired_models={'test-model-a': '404 NOT_FOUND: no longer available'},
+        )
+        assert updated['test-model-a']['deprecated'] is True
+        # Marked as call-verified, not as the source: the listing path must not lift it.
+        assert updated['test-model-a']['deprecatedBy'] == CALL_VERIFIED
+        assert 'test-model-a' in result.deprecated
+
+    def test_the_providers_suggested_replacement_becomes_the_migration_note(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._profiles(),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            retired_models={
+                'test-model-a': (
+                    'This model models/gemini-2.5-flash is no longer available to new users. '
+                    'Please update your code to use models/gemini-3.6-flash instead.'
+                )
+            },
+        )
+        assert 'models/gemini-3.6-flash' in updated['test-model-a']['migration']
+
+    def test_a_hand_written_migration_note_is_kept(self, title_mappings):
+        profiles = self._profiles()
+        profiles['test-model-a']['migration'] = "Please use 'test-model-b' instead"
+        updated, _ = merge(
+            current_profiles=profiles,
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            retired_models={'test-model-a': '404 not found'},
+        )
+        assert updated['test-model-a']['migration'] == "Please use 'test-model-b' instead"
+
+    def test_nothing_changes_without_verification(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._profiles(),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+        assert result.deprecated == []
+
+
+class TestMigrationFromProvider:
+    def test_extracts_the_named_replacement(self):
+        note = _migration_from_provider('Please update your code to use models/gemini-3.6-flash.', 'Gemini API')
+        assert "'models/gemini-3.6-flash'" in note
+
+    def test_falls_back_when_no_replacement_is_named(self):
+        note = _migration_from_provider('404 not found', 'Gemini API')
+        assert 'Gemini API' in note
+
+    def test_ignores_prose_that_is_not_a_model_id(self):
+        note = _migration_from_provider('You must use a valid key to continue', 'Gemini API')
+        assert 'Please select a current model' in note
+
+
+class TestCallVerifiedMarksSurviveTheListing:
+    """
+    The premise of a call-verified retirement is that the provider still lists
+    the model. So the listing path must not be able to lift one, or the next
+    scheduled run — which never passes --verify-existing — resurrects it and
+    deletes the provider's replacement note.
+    """
+
+    def _marked(self, deprecated_by):
+        return {
+            'test-model-a': {
+                'title': 'Test Model A',
+                'model': 'test-model-a',
+                'modelSource': 'provider',
+                'modelTotalTokens': 16384,
+                'modelOutputTokens': 4096,
+                'deprecated': True,
+                'deprecatedBy': deprecated_by,
+                'migration': "Model retired by the provider. Please use 'test-model-b' instead.",
+                'apikey': '',
+            }
+        }
+
+    def test_a_listing_run_does_not_resurrect_a_call_made_mark(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._marked(CALL_VERIFIED),
+            api_models=[{'id': 'test-model-a'}],  # still listed, as expected
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a']['deprecated'] is True
+        assert 'test-model-b' in updated['test-model-a']['migration']
+
+    def test_a_listing_run_still_lifts_a_listing_made_mark(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._marked('provider'),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+
+    def test_a_passing_call_lifts_a_call_made_mark(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._marked(CALL_VERIFIED),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            revived_models={'test-model-a'},
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+        assert updated['test-model-a'].get('deprecatedBy') is None
+        assert any(r[0] == 'test-model-a' and r[1] == 'deprecated' for r in result.updated)
+
+    def test_a_call_that_did_not_pass_leaves_it_marked(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._marked(CALL_VERIFIED),
+            api_models=[{'id': 'test-model-a'}],
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+            revived_models=set(),
+        )
+        assert updated['test-model-a']['deprecated'] is True
+
+
+class TestFailureClassification:
+    def test_an_explicit_retirement_is_the_only_thing_that_deprecates(self):
+        error = _not_found('This model is no longer available to new users. Please use model-y')
+        assert classify_failure(error).outcome == 'retired'
+
+    def test_a_bare_404_is_reported_not_acted_on(self):
+        # OpenAI answers this for a retired model and for one the key cannot reach.
+        error = _not_found('The model `gpt-x` does not exist or you do not have access to it.')
+        assert classify_failure(error).outcome == 'missing'
+
+    def test_a_method_mismatch_is_not_a_retirement(self):
+        error = _not_found('models/x is not found for API version v1beta, or is not supported for generateContent')
+        assert classify_failure(error).outcome == 'missing'
+
+    def test_a_transient_failure_never_looks_like_a_retirement(self):
+        for message in ('429 rate limit exceeded', '503 service unavailable', 'connection timeout', 'overloaded'):
+            assert classify_failure(Exception(message)).outcome == 'error', message
+
+    def test_a_404_in_the_text_of_an_untyped_error_is_not_a_404(self):
+        # The old string match turned any message mentioning 404 into a retirement.
+        assert classify_failure(Exception('failed to fetch the 404 page')).outcome != 'retired'
+
+    def test_an_auth_failure_is_not_a_retirement(self):
+        assert classify_failure(Exception('401 unauthorized')).outcome == 'skip'
+        assert classify_failure(Exception('permission denied for this model')).outcome == 'skip'
+
+
+class TestOpenRouterExpirationRespectsOwnership:
+    """
+    An expiry OpenRouter publishes is evidence about the models it serves, not
+    about one the native provider still supports. Acting on it regardless of
+    ownership lets a keyless run hide a working model.
+    """
+
+    def _profile(self, model_source):
+        return {
+            'test-model-a': {
+                'title': 'Test Model A',
+                'model': 'test-model-a',
+                'modelSource': model_source,
+                'modelTotalTokens': 16384,
+                'modelOutputTokens': 4096,
+                'apikey': '',
+            }
+        }
+
+    def _expired_entry(self):
+        return [{'id': 'test-model-a', '_source': 'openrouter', 'expiration_date': '2026-01-01'}]
+
+    def test_it_deprecates_a_profile_openrouter_owns(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._profile('openrouter'),
+            api_models=self._expired_entry(),
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a']['deprecated'] is True
+        assert updated['test-model-a']['deprecatedBy'] == 'openrouter'
+        assert 'test-model-a' in result.deprecated
+
+    def test_it_leaves_a_native_profile_alone(self, title_mappings):
+        updated, result = merge(
+            current_profiles=self._profile('provider'),
+            api_models=self._expired_entry(),
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+        assert 'test-model-a' not in result.deprecated
+
+    def test_it_leaves_a_hand_added_profile_alone(self, title_mappings):
+        updated, _ = merge(
+            current_profiles=self._profile('manual'),
+            api_models=self._expired_entry(),
+            title_mappings=title_mappings,
+            token_overrides={},
+            output_token_overrides={},
+            default_output_tokens=4096,
+        )
+        assert updated['test-model-a'].get('deprecated') is None
+
+
+class TestRetirementAnomaly:
+    """
+    A per-model verdict that arrives for the whole provider at once is not N
+    retirements; it is one failure a level up. Retire an API version and every
+    call answers with the same 404 and the same wording, which is exactly what
+    the retirement phrases match.
+    """
+
+    def test_a_majority_verdict_is_treated_as_an_api_failure(self):
+        assert is_retirement_anomaly(6, 10) is True
+        assert is_retirement_anomaly(26, 26) is True
+
+    def test_a_normal_handful_is_believed(self):
+        # The real gemini case: five of twenty-six.
+        assert is_retirement_anomaly(5, 26) is False
+        assert is_retirement_anomaly(1, 3) is False
+
+    def test_exactly_half_is_not_a_majority(self):
+        assert is_retirement_anomaly(5, 10) is False
+
+    def test_nothing_retired_is_never_an_anomaly(self):
+        assert is_retirement_anomaly(0, 26) is False
+
+    def test_nothing_verified_cannot_be_judged(self):
+        # No calls were made, so there is no ratio to reason about.
+        assert is_retirement_anomaly(3, 0) is False

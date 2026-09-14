@@ -9,7 +9,7 @@
 	"prefix": "Elasticsearch Vector Store",
 	"description": ["A vector database component for Elasticsearch, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance. Supports Elastic Cloud ", "Serverless, Elastic Cloud Hosted, and self-managed Elasticsearch deployments."],
 	"icon": "elasticsearch.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/store_elasticsearch/elasticsearch",
 	"tile": ["Host/Port: ${parameters.elasticsearch.${profile}.host}:${parameters.elasticsearch.${profile}.port}", "Index: ${parameters.elasticsearch.${profile}.index}"],
 	"lanes": {
 		"text": [],
@@ -146,7 +146,7 @@
 			"description": "Enable document storage",
 			"default": true
 		},
-		"elasticsearch.mode": {
+		"elasticsearch.store_mode": {
 			"title": "Store Mode",
 			"type": "boolean",
 			"default": true,
@@ -221,15 +221,15 @@
 		},
 		"elasticsearch.self-managed": {
 			"object": "self-managed",
-			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.index", "elasticsearch.mode"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.index", "elasticsearch.store_mode"]
 		},
 		"elasticsearch.cloud-hosted": {
 			"object": "cloud-hosted",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.mode"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.store_mode"]
 		},
 		"elasticsearch.cloud-serverless": {
 			"object": "cloud-serverless",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.mode"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.store_mode"]
 		},
 		"elasticsearch.profile": {
 			"title": "Deployment Type",

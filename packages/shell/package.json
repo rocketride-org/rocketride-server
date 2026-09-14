@@ -16,6 +16,12 @@
 		"build": "pnpm rsbuild build --env-mode development",
 		"build:prod": "pnpm rsbuild build --env-mode production"
 	},
+	"browserslist": [
+		"chrome >= 81",
+		"edge >= 83",
+		"firefox >= 76",
+		"safari >= 13"
+	],
 	"dependencies": {
 		"@fontsource-variable/figtree": "^5.2.10",
 		"@module-federation/runtime": "^2.5.1",
@@ -26,7 +32,7 @@
 		"@types/tabulator-tables": "~6.2.0",
 		"allotment": "^1.20.5",
 		"chart.js": "^4.4.0",
-		"lucide-react": "~0.460.0",
+		"lucide-react": "^0.577.0",
 		"react": "^18.2.0",
 		"react-chartjs-2": "^5.2.0",
 		"react-dom": "^18.2.0",

@@ -9,7 +9,7 @@
 	"prefix": "agent",
 	"description": ["Single-agent execution using LangChain.", "Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."],
 	"icon": "langchain.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/agent_langchain",
 	"invoke": {
 		"llm": {
 			"description": "LLM used by the agent",

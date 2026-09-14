@@ -37,13 +37,23 @@ interface DeploySettingsProps {
 	testMessage: MessageData | null;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
-	serverCapabilities: string[];
 	cloudSignedIn?: boolean;
 	cloudUserName?: string;
+	/** The server the session's token was minted against (subscribe gate). */
+	cloudSignedInUrl?: string;
+	/** Last sign-in attempt was waitlisted — CloudPanel shows the queue banner. */
+	cloudWaitlisted?: boolean;
+	cloudWaitlistedName?: string;
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
+	/** Staged (uncommitted) cloud auth change — CloudPanel renders it as pending. */
+	cloudPending?: { signIn: boolean; signOut: boolean; userName: string; url: string };
+	/** Discard the staged cloud auth change. */
+	onCloudUndoPending?: () => void;
 	onProbeCloudServer?: (cloudUrl: string) => void;
 	isSaas?: boolean;
+	/** The probe could not reach the server (transport failure). */
+	probeUnreachable?: boolean;
 	/** Whether the user has an active subscription. */
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel. */
@@ -111,9 +121,10 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 	 */
 	const handleToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (e.target.checked) {
-			const isSaas = (props.serverCapabilities ?? []).includes('saas');
+			// Single source for SaaS-ness: the probe result prop (the same
+			// fact CloudPanel renders), never a separate capabilities list.
 			const devMode = settings.development.connectionMode;
-			const canUseCloud = cloudSignedIn && isSaas && devMode !== 'cloud';
+			const canUseCloud = cloudSignedIn && props.isSaas === true && devMode !== 'cloud';
 			const defaultMode: ConnectionMode = canUseCloud ? 'cloud' : 'local';
 			onSettingsChange({ deployment: { connectionMode: defaultMode } } as Partial<SettingsData>);
 		} else {
@@ -121,9 +132,19 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 		}
 	};
 
-	/** Change the deploy group's connection mode. */
+	/** Change the deploy group's connection mode. When switching to onprem,
+	 *  clear a stale cloud/localhost hostUrl (parity with ConnectionSettings). */
 	const handleModeChange = (mode: ConnectionMode) => {
-		onSettingsChange({ deployment: { connectionMode: mode } } as Partial<SettingsData>);
+		const groupUpdates: Partial<SettingsData['deployment']> = { connectionMode: mode };
+
+		if (mode === 'onprem') {
+			const hostUrl = settings.deployment.hostUrl;
+			if (!hostUrl || hostUrl.includes('cloud.rocketride') || hostUrl.startsWith('http://localhost')) {
+				groupUpdates.hostUrl = '';
+			}
+		}
+
+		onSettingsChange({ deployment: groupUpdates } as Partial<SettingsData>);
 	};
 
 	return (
@@ -150,16 +171,21 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 						idPrefix="deploy"
 						group="deployment"
 						otherGroupMode={settings.development.connectionMode}
-						serverCapabilities={props.serverCapabilities}
 						onConnectionModeChange={handleModeChange}
 						settings={settings}
 						onSettingsChange={onSettingsChange}
 						cloudSignedIn={props.cloudSignedIn ?? false}
 						cloudUserName={props.cloudUserName ?? ''}
+						cloudSignedInUrl={props.cloudSignedInUrl}
+						cloudWaitlisted={props.cloudWaitlisted}
+						cloudWaitlistedName={props.cloudWaitlistedName}
 						onCloudSignIn={props.onCloudSignIn ?? (() => {})}
 						onCloudSignOut={props.onCloudSignOut ?? (() => {})}
+						cloudPending={props.cloudPending}
+						onCloudUndoPending={props.onCloudUndoPending}
 						onProbeCloudServer={props.onProbeCloudServer}
 						isSaas={props.isSaas}
+						probeUnreachable={props.probeUnreachable}
 						onClearCredentials={props.onClearCredentials}
 						onTestConnection={props.onTestConnection}
 						testMessage={props.testMessage}

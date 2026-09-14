@@ -172,3 +172,45 @@ TEST_CASE("Location::sanitizeFunctionName") {
         REQUIRE(ap::Location::sanitizeFunctionName("").empty());
     }
 }
+
+TEST_CASE("Location::toString") {
+    const ap::Location loc{"/usr/src/apLib/Location.hpp", 91, "renderLine"};
+
+    SECTION("file and function together") {
+        Text buff;
+        loc.toString(buff, true, true);
+        REQUIRE(buff == "Location.hpp:91-renderLine");
+    }
+
+    SECTION("file only") {
+        Text buff;
+        loc.toString(buff, false, true);
+        REQUIRE(buff == "Location.hpp:91");
+    }
+
+    SECTION("function only") {
+        Text buff;
+        loc.toString(buff, true, false);
+        REQUIRE(buff == "renderLine");
+    }
+
+    SECTION("neither file nor function renders nothing") {
+        Text buff;
+        loc.toString(buff, false, false);
+        REQUIRE(buff.empty());
+    }
+
+    SECTION("full path mode keeps the directory") {
+        const ap::Location loc{"/usr/src/apLib/Location.hpp", 91, "renderLine", true};
+        Text buff;
+        loc.toString(buff, true, true);
+        REQUIRE(buff == "/usr/src/apLib/Location.hpp:91-renderLine");
+    }
+
+    SECTION("a lambda function name is sanitized in the rendered output") {
+        const ap::Location loc{"a.cpp", 1, "pybind11_init::<lambda_96>::operator()"};
+        Text buff;
+        loc.toString(buff, true, false);
+        REQUIRE(buff == "pybind11_init::[lambda]");
+    }
+}

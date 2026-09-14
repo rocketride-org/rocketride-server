@@ -334,8 +334,21 @@ class MessagesMixin(GoHighLevelToolsBase):
                 'entries, and excludes email, so pass "Email" explicitly to export email.',
                 ('Call', 'SMS', 'Email', 'WhatsApp', 'Instagram', 'Facebook'),
             ),
-            startDate=STR('Earliest message to include, as an ISO 8601 timestamp.'),
-            endDate=STR('Latest message to include, as an ISO 8601 timestamp.'),
+            # A bare local timestamp is the same trap `_APPOINTMENT_TIMEZONE_DESC` names on
+            # the write side: with no zone in the string, the zone is whatever the far end
+            # assumes, and the only symptom is a range that quietly ends in the wrong place.
+            startDate=STR(
+                'Earliest message to include, as an ISO 8601 timestamp carrying its zone - a trailing Z '
+                'for UTC, or a numeric offset. Without one the timestamp is read in whichever timezone '
+                'GoHighLevel assumes, so the range silently starts somewhere else.'
+            ),
+            # The format is repeated, not referenced: "the same form as startDate"
+            # names no format, so zone_audit would skip the field instead of
+            # checking it, and a later edit here could drop the zone unnoticed.
+            endDate=STR(
+                'Latest message to include, in the same form as startDate: an ISO 8601 timestamp '
+                'carrying its zone, either a trailing Z for UTC or a numeric offset.'
+            ),
             sortBy=ENUM('Field to sort on. Defaults to createdAt.', ('createdAt', 'updatedAt')),
             sortOrder=ENUM('Sort direction. Defaults to desc.', ('asc', 'desc')),
         ),

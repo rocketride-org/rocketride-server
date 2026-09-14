@@ -29,7 +29,6 @@ depends(requirements)
 
 from typing import List, Dict, Any, Callable, cast
 import chromadb
-from chromadb.config import Settings
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
@@ -78,6 +77,18 @@ class Store(DocumentStoreBase):
     client: chromadb.HttpClient
     collectionObj: chromadb.Collection | None = None
 
+    @staticmethod
+    def _coerceBool(value: Any) -> bool:
+        """Read a boolean that may arrive as a string from an env-var placeholder."""
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ('false', '0', 'no', 'off'):
+            return False
+        # An unresolved '${...}' placeholder is not a deliberate 'off', so it
+        # keeps the safe default rather than silently dropping TLS.
+        return True
+
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
         Initialize the chroma vector store.
@@ -101,10 +112,24 @@ class Store(DocumentStoreBase):
         if self.apikey is not None:
             self.apikey = self.apikey.strip()
 
+        # Chroma Cloud multi-tenancy - both are required by Chroma Cloud
+        # accounts and optional for self-hosted servers
+        self.tenant = (config.get('tenant') or '').strip() or None
+        self.database = (config.get('database') or '').strip() or None
+
+        # TLS for the cloud/remote profile. Defaults on, since Chroma Cloud is
+        # HTTPS-only; a self-hosted server behind plain HTTP turns it off.
+        self.ssl = self._coerceBool(config.get('ssl', True))
+
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
 
-        profile = config.get('profile', 'local')
+        # The merged node config carries the profile selection in 'mode':
+        # getNodeConfig consumes the 'profile' key while merging the selected
+        # profile's contents, so 'profile' is absent when configured through
+        # a service/autopipe config and the cloud branch was never taken.
+        # Keep 'profile' as a fallback for direct configurations.
+        profile = config.get('mode') or config.get('profile') or 'local'
 
         # check if the similarity matches qdrant configuration options
         similarity = config.get('similarity', 'cosine')
@@ -121,13 +146,26 @@ class Store(DocumentStoreBase):
             if profile == 'local':
                 self.client = chromadb.HttpClient(host=self.host, port=self.port)
             else:
+                # Cloud / remote server. Chroma Cloud only serves HTTPS, and a
+                # plain HTTP request against the TLS port hangs or is rejected
+                # with "illegal request line" -- so TLS is the default. It stays
+                # configurable because this profile also covers a self-hosted
+                # server reached over plain HTTP with token auth, which the
+                # removed Settings path supported and which would otherwise lose
+                # its only working configuration.
+                # The API key travels in the x-chroma-token header, and Chroma
+                # Cloud additionally requires the tenant and database.
+                kwargs: Dict[str, Any] = {}
+                if self.tenant:
+                    kwargs['tenant'] = self.tenant
+                if self.database:
+                    kwargs['database'] = self.database
                 self.client = chromadb.HttpClient(
                     host=self.host,
                     port=self.port,
-                    settings=Settings(
-                        chroma_client_auth_provider='chromadb.auth.token_authn.TokenAuthClientProvider',
-                        chroma_client_auth_credentials=self.apikey,
-                    ),
+                    ssl=self.ssl,
+                    headers={'x-chroma-token': self.apikey} if self.apikey else None,
+                    **kwargs,
                 )
         except Exception as e:
             self.client = None

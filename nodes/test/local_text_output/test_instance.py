@@ -94,6 +94,37 @@ def test_close_writes_normal_file(tmp_path):
     assert _read(expected) == 'hello world'
 
 
+def test_close_with_unset_exclude_preserves_source_path(tmp_path):
+    """An omitted exclude value behaves like no exclusion instead of skipping output."""
+    inst = _make_instance(str(tmp_path))
+    inst.IGlobal.exclude = None
+    _drive(inst, '/data/folder/report.md', 'content')
+
+    expected = os.path.join(str(tmp_path), 'data', 'folder', 'report.txt')
+    assert _read(expected) == 'content'
+
+
+def test_close_removes_only_leading_exclude_prefix(tmp_path):
+    """A repeated path segment after the accepted prefix remains in the destination."""
+    inst = _make_instance(str(tmp_path))
+    inst.IGlobal.exclude = '/data'
+    _drive(inst, '/data/archive/data/report.md', 'content')
+
+    expected = os.path.join(str(tmp_path), 'archive', 'data', 'report.txt')
+    incorrectly_replaced = os.path.join(str(tmp_path), 'archive', 'report.txt')
+    assert _read(expected) == 'content'
+    assert not os.path.exists(incorrectly_replaced)
+
+
+def test_close_rejects_partial_exclude_component(tmp_path):
+    """An exclude value must end at a path boundary, not inside a component."""
+    inst = _make_instance(str(tmp_path))
+    inst.IGlobal.exclude = '/data/job'
+    _drive(inst, '/data/jobs/report.md', 'content')
+
+    assert not any(tmp_path.iterdir())
+
+
 def test_close_writes_path_exceeding_windows_max_path(tmp_path):
     r"""A derived path well past 260 chars must still be written (\\?\ prefix)."""
     deep = '/'.join('dir_%02d_padded_segment' % i for i in range(25))

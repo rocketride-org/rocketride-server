@@ -1,100 +1,100 @@
 # anomaly_detector
 
-A RocketRide filter node that monitors numeric values flowing through a pipeline and flags statistical anomalies by severity.
+A RocketRide filter node that monitors numeric text or document metadata and
+marks statistically unusual values. Pick it when a pipeline needs a rolling,
+per-run check for outliers rather than a fixed rule for every value.
 
 ## What it does
 
-Watches numeric values passing through a pipeline and classifies each one as `normal`, `warning`, or `critical` using one of three statistical methods: Z-Score, IQR (interquartile range), or Rolling Average percentage deviation. Use it to catch outliers, unexpected spikes, or shifts in data distribution that may need attention.
+The node accepts `text` and `documents` lanes and returns data on the matching
+lane. Text is inspected for one numeric value; documents are copied and
+enriched with anomaly metadata based on the configured metadata field. Use it
+for changing measurements whose usual range must be learned from recent data,
+instead of a rule-based validation node that compares each item against a
+known limit.
 
-Implemented entirely with the Python standard library (`math`, `threading`, `collections`); no external dependencies are required.
+The detector is created once per pipeline execution and shares one
+thread-safe, fixed-size history across its instances. Each value is evaluated
+against the existing history and only then added to it, so the history is
+discarded when the run ends. This node is experimental.
 
-One detector is created per pipeline execution and shared across all instances. It maintains a thread-safe sliding window of the most recent `windowSize` values. Each incoming value is scored against the current window contents and then appended to the window. Window state is discarded when the pipeline ends.
+## Lanes
 
-Non-finite inputs (NaN, positive/negative infinity) are treated as `normal` and skipped. Until the window holds enough data (2 values for Z-Score and Rolling Average, 4 for IQR), every value is reported as `normal` with `details: "insufficient data"`, so expect a brief warm-up period at the start of every run.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `text` | Inspect a numeric value in text; anomalous values receive a suffix. |
+| `documents` | `documents` | Inspect the configured metadata metric and add detection metadata. |
 
-This node is marked **experimental**.
+## Profiles
 
----
+Default: **Z-Score - Standard deviation based detection** (`z_score`).
+
+| Profile | Method | Default window | Warning / critical threshold |
+| --- | --- | --- | --- |
+| `z_score` **(default)** | Z-Score | 100 | 2.0 / 3.0 |
+| `iqr` | Interquartile range | 100 | 1.5 / 3.0 |
+| `rolling_avg` | Rolling Average - Moving average deviation detection | 50 | 2.0 / 3.0 |
 
 ## Configuration
 
-### Lanes
+Start with the profile whose kind of change you need to detect, then point
+**Metric field** at the numeric document-metadata key to monitor. The defaults
+are conservative starting points; every method needs a warm-up period before
+it can identify an outlier.
 
-| Lane        | In → Out                  | Behaviour                                                                                                                      |
-|-------------|---------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `text`      | `text` → `text`           | Parses a numeric value from the incoming text, scores it, and annotates anomalous text. Non-numeric text passes through unchanged. |
-| `documents` | `documents` → `documents` | Reads the configured `metric` field from each document's metadata, scores it, and writes the detection result back into the metadata. |
+### Detection method and sensitivity
 
-### Text lane
+Choose `z_score` when distance in standard deviations is meaningful, `iqr`
+when you want quartile-based outlier bounds, or `rolling_avg` when percentage
+change from recent values is more useful. `sensitivity` controls the IQR bounds
+and normalizes the rolling-average score; lowering it makes both methods flag
+smaller deviations. It has no effect on Z-Score, whose score is calculated
+from the window standard deviation.
 
-The node first tries to parse the entire (stripped) text as a float. If that fails, it extracts the first numeric token via regex (integers, decimals, scientific notation, optional leading minus). If no number can be found, the text is forwarded unchanged and a debug message is logged.
+### Window size
 
-When a value is anomalous (`warning` or `critical`), a tag is appended to the original text:
+**Window size** retains 10 to 10,000 recent values, with 100 by default. Use a
+larger window for a stable long-term baseline and a smaller one when the normal
+level changes quickly. Z-Score and Rolling Average need at least two existing
+values; IQR needs four. Before that, a value is returned as `normal` with
+`insufficient data`, so a very large window does not delay the minimum
+warm-up but does make the baseline slower to adapt.
 
-```
-42.7 [ANOMALY: critical score=3.4119]
-```
+### Metric field
 
-Normal values pass through unchanged.
+For documents, set **Metric field** to the metadata key containing the number;
+the default is `value`. A missing or non-numeric key does not stop the
+pipeline: the copied document is marked normal and receives an explanatory
+`anomaly_details` value. Text input first attempts to parse all of the text,
+then uses its first integer, decimal, or scientific-notation token; text with
+no number passes through unchanged.
 
-### Documents lane
+### Warning and critical thresholds
 
-Each document is deep-copied before enrichment; documents whose `metadata` is `None` pass through untouched. Four fields are added to the metadata of each processed document:
+The detector labels a score at or above **Critical threshold** as `critical`,
+then a score at or above **Warning threshold** as `warning`; lower scores are
+`normal`. Raise these values to reduce alerts and lower them to surface more
+borderline changes. With the default rolling-average settings, warning begins
+at a 40% deviation and critical at 60%; changing sensitivity changes those
+effective percentages as well.
 
-| Metadata field         | Content                                                                                |
-|------------------------|----------------------------------------------------------------------------------------|
-| `anomaly_score`        | Numeric anomaly score, rounded to 4 decimal places.                                   |
-| `anomaly_severity`     | `normal`, `warning`, or `critical`.                                                    |
-| `anomaly_is_anomalous` | Boolean, `true` when severity is `warning` or `critical`.                              |
-| `anomaly_details`      | Human-readable diagnostics: method internals, or an explanation of why detection was skipped. |
+## Notes
 
-If the `metric` field is absent from a document's metadata or contains a non-numeric value, the document is marked `normal` with an explanatory `details` string and is never dropped.
+### Output details
 
-### Fields
+For anomalous text, the node appends a suffix such as
+`[ANOMALY: critical score=3.4119]`; normal text remains unchanged. Documents
+receive `anomaly_score`, `anomaly_severity`, `anomaly_is_anomalous`, and
+`anomaly_details` metadata. Non-finite numeric input is treated as normal and
+is not added to the history.
 
-The node is configured through a single profile selector plus per-method fields. The selected profile determines the detection method and supplies the defaults shown in the Profiles table below.
+### Method edge cases
 
-| Field | Type | Description |
-|---|---|---|
-| `method` | string | Default "z_score". Statistical method used for anomaly detection |
-| `sensitivity` | number | Default 2.0. Detection sensitivity threshold (lower = more sensitive) |
-| `windowSize` | integer | Default 100. Number of recent values to consider for statistical calculations |
-| `metric` | string | Default "value". The metadata field name containing the numeric value to monitor |
-| `warningThreshold` | number | Default 2.0. Threshold multiplier for warning-level anomalies |
-| `criticalThreshold` | number | Default 3.0. Threshold multiplier for critical-level anomalies |
-| `profile` | string | Default "z_score". Anomaly detection configuration |
-
-### Profiles
-
-The `profile` field (UI: "Detection Method") selects a preset that pre-fills `method` and the threshold defaults. The default profile is `z_score`.
-
-| Profile       | Method          | `sensitivity` | `windowSize` | `warningThreshold` | `criticalThreshold` |
-|---------------|-----------------|---------------|--------------|--------------------|---------------------|
-| `z_score`     | Z-Score         | 2.0           | 100          | 2.0                | 3.0                 |
-| `iqr`         | IQR             | 1.5           | 100          | 1.5                | 3.0                 |
-| `rolling_avg` | Rolling Average | 2.0           | 50           | 2.0                | 3.0                 |
-
----
-
-## Detection methods
-
-All three methods produce a numeric score that is classified by the same rule: `score >= criticalThreshold` is `critical`, else `score >= warningThreshold` is `warning`, else `normal`.
-
-### Z-Score
-
-Measures how many standard deviations the value is from the window mean: `score = |value - mean| / std`. Requires at least 2 values in the window. A window with zero variance (all identical values) yields `normal` with `details: "zero variance"`. The `sensitivity` field has no effect on this method.
-
-### IQR
-
-Computes Q1 and Q3 by linear interpolation over the sorted window and defines outlier bounds at `Q1 - sensitivity * IQR` and `Q3 + sensitivity * IQR`. The score is the distance from the nearer bound expressed in IQR units; any value outside the bounds (score > 0) is flagged as anomalous regardless of `warningThreshold`. Requires at least 4 values. A zero-IQR window yields `normal` with `details: "zero IQR"`.
-
-### Rolling Average
-
-Computes a moving average over the most recent half of the window (minimum 2 values) and measures the value's percentage deviation from that local mean. No standard-deviation normalization is applied, making it intuitive for business metrics where "a 10% deviation" has a clear meaning.
-
-The score is `pct_deviation / (sensitivity * 10)`, so the effective trigger points are `sensitivity * 10 * threshold` percent deviation. With default values (sensitivity 2.0, warningThreshold 2.0, criticalThreshold 3.0), warning fires at 40% deviation and critical at 60%. A zero local mean yields `normal` with `details: "zero mean"`.
-
----
+Z-Score produces a normal result when the history has zero variance, IQR does
+the same when the interquartile range is zero, and Rolling Average does so when
+its local mean is zero. IQR marks any value outside its sensitivity-based
+bounds as anomalous even if its resulting score remains below the configured
+warning threshold; its severity still uses the warning and critical thresholds.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

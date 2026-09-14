@@ -284,6 +284,12 @@ import type { DatabaseDialect as Frozen_DatabaseDialect } from '../contract/vers
 import type { DatabaseDialect as Current_DatabaseDialect } from './client/index.js';
 import type { DatabaseApi as Frozen_DatabaseApi } from '../contract/versions/v1.3';
 import type { DatabaseApi as Current_DatabaseApi } from './client/index.js';
+import type { AppVerifyCheck as Frozen_AppVerifyCheck } from '../contract/versions/v1.3';
+import type { AppVerifyCheck as Current_AppVerifyCheck } from './client/index.js';
+import type { AppVerifyReport as Frozen_AppVerifyReport } from '../contract/versions/v1.3';
+import type { AppVerifyReport as Current_AppVerifyReport } from './client/index.js';
+import type { CreatedApp as Frozen_CreatedApp } from '../contract/versions/v1.3';
+import type { CreatedApp as Current_CreatedApp } from './client/index.js';
 import type { LogEventStream as Frozen_LogEventStream } from '../contract/versions/v1.3';
 import type { LogEventStream as Current_LogEventStream } from './client/index.js';
 import type { DataPipe as Frozen_DataPipe } from '../contract/versions/v1.3';
@@ -568,6 +574,12 @@ const _t_DatabaseDialect: Frozen_DatabaseDialect = {} as Current_DatabaseDialect
 void _t_DatabaseDialect;
 const _t_DatabaseApi: Frozen_DatabaseApi = {} as Current_DatabaseApi;
 void _t_DatabaseApi;
+const _t_AppVerifyCheck: Frozen_AppVerifyCheck = {} as Current_AppVerifyCheck;
+void _t_AppVerifyCheck;
+const _t_AppVerifyReport: Frozen_AppVerifyReport = {} as Current_AppVerifyReport;
+void _t_AppVerifyReport;
+const _t_CreatedApp: Frozen_CreatedApp = {} as Current_CreatedApp;
+void _t_CreatedApp;
 const _t_LogEventStream: Frozen_LogEventStream = {} as Current_LogEventStream;
 void _t_LogEventStream;
 const _t_DataPipe: Frozen_DataPipe = {} as Current_DataPipe;

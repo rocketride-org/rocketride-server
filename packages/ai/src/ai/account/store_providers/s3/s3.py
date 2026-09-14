@@ -7,6 +7,49 @@ from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from ...store import IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
 
+# botocore raises its OWN exception types for transport failures, and none of
+# them inherit from the builtin `ConnectionError` or `TimeoutError`:
+#
+#     EndpointConnectionError  builtin ConnectionError = False
+#     ConnectTimeoutError      builtin ConnectionError = False
+#     ReadTimeoutError         builtin ConnectionError = False
+#
+# So a retry tuple of `(ConnectionError, TimeoutError)` matches nothing boto
+# actually raises. Every real S3 transport failure fell through to the bare
+# `except Exception`, got wrapped in StorageError, and Tenacity never saw it —
+# the retry logic in this module had never once retried the failure it exists
+# for.
+#
+# Two base classes cover the family: botocore's own `ConnectionError` (parent of
+# EndpointConnectionError, ConnectTimeoutError, ProxyConnectionError, SSLError)
+# and `HTTPClientError` (parent of ReadTimeoutError, ConnectionClosedError,
+# ResponseStreamingError). `IncompleteReadError` sits under neither and is added
+# by name — a truncated body is exactly the transient case worth another try.
+#
+# `EndpointResolutionError` is deliberately NOT retried. It is nearly always a
+# misconfigured region or endpoint, and retrying a config error only delays the
+# message that would have explained it.
+#
+# The import is GUARDED because boto3 is optional here: store_providers/__init__
+# imports S3Store unconditionally, so this module is loaded on filesystem-store
+# deployments that have never installed boto3. `_get_client()` handles that with
+# a readable error at call time; a hard import here would replace it with an
+# ImportError at import time, on installs that never touch S3.
+try:
+    from botocore.exceptions import (
+        ConnectionError as _BotoConnectionError,
+        HTTPClientError as _BotoHTTPClientError,
+        IncompleteReadError as _BotoIncompleteReadError,
+    )
+
+    _BOTO_TRANSIENT: tuple = (_BotoConnectionError, _BotoHTTPClientError, _BotoIncompleteReadError)
+except ImportError:  # pragma: no cover - boto3 not installed; S3 is unusable anyway
+    _BOTO_TRANSIENT = ()
+
+# One tuple, used by every retry decorator and every pass-through `except` in
+# this file, so the two can never disagree about what counts as transient.
+TRANSIENT_ERRORS: tuple = (ConnectionError, TimeoutError) + _BOTO_TRANSIENT
+
 
 class S3Store(IStore):
     """
@@ -65,7 +108,7 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
         reraise=True,
     )
     async def write_file(self, filename: str, data: str) -> None:
@@ -80,7 +123,7 @@ class S3Store(IStore):
 
             await asyncio.to_thread(client.put_object, Bucket=self._bucket, Key=key, Body=data.encode('utf-8'))
 
-        except (ConnectionError, TimeoutError):
+        except TRANSIENT_ERRORS:
             # Let these bubble up for retry
             raise
         except Exception as e:
@@ -89,7 +132,7 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
         reraise=True,
     )
     async def read_file(self, filename: str) -> str:
@@ -109,7 +152,7 @@ class S3Store(IStore):
             data = await asyncio.to_thread(_read)
             return data.decode('utf-8')
 
-        except (ConnectionError, TimeoutError):
+        except TRANSIENT_ERRORS:
             # Let these bubble up for retry
             raise
         except Exception as e:
@@ -121,7 +164,66 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
+        reraise=True,
+    )
+    async def write_bytes(self, filename: str, data: bytes) -> None:
+        """
+        Write binary data to S3 with retry logic.
+
+        Overrides the base implementation, which routes bytes through
+        ``str`` via latin-1 and would re-encode them as UTF-8 on the way
+        out -- doubling every byte above 0x7F in the stored object.
+        """
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+
+            await asyncio.to_thread(client.put_object, Bucket=self._bucket, Key=key, Body=data)
+
+        except TRANSIENT_ERRORS:
+            # Let these bubble up for retry
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to write file {filename} to S3: {e}') from e
+
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
+        reraise=True,
+    )
+    async def read_bytes(self, filename: str) -> bytes:
+        """
+        Read binary data from S3 with retry logic.
+
+        Overrides the base implementation, which calls :meth:`read_file`
+        and therefore UTF-8 decodes the object body. Any object that is
+        not valid UTF-8 -- a zip, an image, a font -- raises
+        ``UnicodeDecodeError`` there before the caller sees a byte.
+        """
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+
+            def _read():
+                response = client.get_object(Bucket=self._bucket, Key=key)
+                return response['Body'].read()
+
+            return await asyncio.to_thread(_read)
+
+        except TRANSIENT_ERRORS:
+            # Let these bubble up for retry
+            raise
+        except Exception as e:
+            if self._is_no_such_key_error(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to read file {filename} from S3: {e}') from e
+
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
         reraise=True,
     )
     async def read_file_with_metadata(self, filename: str) -> tuple:
@@ -142,7 +244,7 @@ class S3Store(IStore):
             data, etag = await asyncio.to_thread(_read)
             return (data.decode('utf-8'), etag)
 
-        except (ConnectionError, TimeoutError):
+        except TRANSIENT_ERRORS:
             raise
         except Exception as e:
             # Check for NoSuchKey exception (can be ClientError with 'NoSuchKey' in message or class name)
@@ -153,7 +255,7 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError, _RaceConditionError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS + (_RaceConditionError,)),
         reraise=True,
     )
     async def write_file_atomic(self, filename: str, data: str, expected_version: Optional[str] = None) -> str:
@@ -211,7 +313,7 @@ class S3Store(IStore):
             new_etag = response.get('ETag', '').strip('"')
             return new_etag
 
-        except (ConnectionError, TimeoutError, self._RaceConditionError):
+        except TRANSIENT_ERRORS + (self._RaceConditionError,):
             # Let tenacity handle retries
             raise
         except Exception as e:
@@ -227,7 +329,7 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
         reraise=True,
     )
     async def delete_file(self, filename: str, expected_version: Optional[str] = None) -> None:
@@ -266,7 +368,7 @@ class S3Store(IStore):
             # Delete the file
             await asyncio.to_thread(client.delete_object, Bucket=self._bucket, Key=key)
 
-        except (ConnectionError, TimeoutError):
+        except TRANSIENT_ERRORS:
             raise
         except StorageError:
             raise
@@ -276,7 +378,7 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
         reraise=True,
     )
     async def move_file(self, src: str, dst: str) -> None:
@@ -308,7 +410,7 @@ class S3Store(IStore):
                     raise StorageError(f'File not found: {src}')
                 raise
             await asyncio.to_thread(client.delete_object, Bucket=self._bucket, Key=src_key)
-        except (ConnectionError, TimeoutError):
+        except TRANSIENT_ERRORS:
             raise
         except StorageError:
             raise
@@ -318,7 +420,7 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
         reraise=True,
     )
     async def list_files(self, prefix: str = '') -> list:
@@ -350,7 +452,7 @@ class S3Store(IStore):
 
             return await asyncio.to_thread(_list)
 
-        except (ConnectionError, TimeoutError):
+        except TRANSIENT_ERRORS:
             raise
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix} from S3: {e}') from e
@@ -358,7 +460,7 @@ class S3Store(IStore):
     @retry(
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        retry=retry_if_exception_type(TRANSIENT_ERRORS),
         reraise=True,
     )
     async def list_entries(
@@ -432,7 +534,7 @@ class S3Store(IStore):
 
             return await asyncio.to_thread(_list_entries)
 
-        except (ConnectionError, TimeoutError):
+        except TRANSIENT_ERRORS:
             raise
         except Exception as e:
             raise StorageError(f'Failed to list entries with prefix {prefix} from S3: {e}') from e

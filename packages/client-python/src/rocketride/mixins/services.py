@@ -105,6 +105,33 @@ class ServicesMixin(DAPClient):
 
         return await self.call('rrext_services', service=service)
 
+    async def resolve_config(self, provider: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Resolve a component config the way the node will receive it.
+
+        Applies the engine's own profile and default merging, so an author can
+        see the effective config instead of inferring it. Resolution is
+        engine-side because the service catalog does not carry ``preconfig``.
+
+        Args:
+            provider: Component provider, e.g. 'llm_openai'.
+            config: The component's config block. Defaults to empty.
+
+        Returns:
+            ``{'provider', 'profile', 'resolved', 'dropped'}``, where ``dropped``
+            lists top-level keys the resolver discarded.
+
+        Raises:
+            ValueError: If provider is empty.
+            RuntimeError: If the service is unknown or has no preconfig section.
+        """
+        if not provider:
+            raise ValueError('Provider name is required')
+
+        # Default only an absent config: `or {}` would coerce a falsy non-object
+        # such as [] and hide it from the engine's type check.
+        return await self.call('rrext_resolve_config', provider=provider, config={} if config is None else config)
+
     async def validate(
         self,
         pipeline: PipelineConfig,
@@ -127,7 +154,9 @@ class ServicesMixin(DAPClient):
             source: Optional override for the source component ID.
 
         Returns:
-            Validation result containing errors and warnings.
+            Validation result containing errors and warnings. Both keys
+            are ALWAYS lists — a clean pipeline returns them empty, never
+            absent.
 
         Raises:
             RuntimeError: If the server returns a validation error.
@@ -143,6 +172,12 @@ class ServicesMixin(DAPClient):
             if source is not None:
                 kwargs['source'] = source
 
-            return await self.call('rrext_validate', **kwargs)
+            result = await self.call('rrext_validate', **kwargs)
+            # The server omits the keys entirely when a pipeline is clean —
+            # normalize so 'errors'/'warnings' are ALWAYS lists and callers
+            # never need absence guards on a passing validation
+            result.setdefault('errors', [])
+            result.setdefault('warnings', [])
+            return result
         except Exception as err:
             raise RuntimeError(f'Pipeline validation failed: {err}') from err

@@ -8,8 +8,8 @@
 Path-param values are percent-encoded and inserted via a re.sub callback. This
 keeps each value as a single, literal path segment: a value used as a plain
 re.sub replacement string would be interpreted as a template (``\\1`` ->
-``re.error``, ``\\t`` -> a tab character), and an unencoded value could contain
-``/`` or ``..`` and alter the URL structure past the allowlist.
+``re.error``, ``\\t`` -> a tab character). Final URL validation separately
+rejects raw or encoded dot-segment traversal before the allowlist and network.
 """
 
 from __future__ import annotations
@@ -53,6 +53,22 @@ def test_reserved_chars_are_encoded_to_stay_one_segment():
     out = _resolve_path_params('https://api/public/:id', {'id': '../admin?x=1'})
     assert out == 'https://api/public/..%2Fadmin%3Fx%3D1'
     assert '/admin' not in out
+
+
+@pytest.mark.parametrize('value', ['.', '..'])
+def test_dot_segment_value_is_rejected(value):
+    """A path parameter cannot traverse outside an allowlisted path prefix."""
+    with pytest.raises(ValueError, match='dot segments'):
+        _resolve_path_params('https://api/public/:id/profile', {'id': value})
+
+
+def test_placeholders_outside_path_are_not_replaced():
+    """Path parameters cannot rewrite the authority, query, or fragment."""
+    out = _resolve_path_params(
+        'https://:host/public/:id?query=:id#fragment-:id',
+        {'host': 'attacker.example', 'id': '42'},
+    )
+    assert out == 'https://:host/public/42?query=:id#fragment-:id'
 
 
 def test_plain_value_substitution():

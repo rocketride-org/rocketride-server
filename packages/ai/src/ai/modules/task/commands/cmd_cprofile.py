@@ -121,7 +121,7 @@ class CProfileCommands(DAPConn):
             DAP response with the subprocess result body.
         """
         # Look up the task control entry by token, requiring task.control on
-        # the TASK'S team. Without this, any defaultTeam task.control holder
+        # the TASK'S team. Without this, any dev-team task.control holder
         # could drive the profiler inside another team's engine subprocess.
         control = self._server.get_task_control(target, self._account_info, require='task.control')
         task = control.task

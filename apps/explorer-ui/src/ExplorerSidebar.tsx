@@ -30,7 +30,7 @@ import { useShellConnection } from 'shell';
 import { Explorer } from 'shell';
 import { BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shell';
 import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction } from 'shell';
-import type { IVirtualFileSystem } from 'shell';
+import type { IVirtualFileSystem, RocketRideClient } from 'shell';
 import { getDocs } from './docs';
 import { getMediaInfo } from './mediaTypes';
 import { getCompatibleViewers, VIEWER_LABELS } from './viewerRegistry';
@@ -355,7 +355,7 @@ const ExplorerSidebar: React.FC = () => {
  * can derive its tree hierarchy from.
  */
 async function listRecursive(
-	client: any,
+	client: RocketRideClient,
 	dir: string,
 ): Promise<ExplorerEntry[]> {
 	const result = await client.fsListDir(dir);

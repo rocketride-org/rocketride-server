@@ -22,7 +22,10 @@
 		"strictPropertyInitialization": true
 	},
 	"include": [
-		"./src/client/**/*"
+		"./src/client/**/*",
+		"./src/app-pack/**/*",
+		"./src/app-scaffold/**/*",
+		"./src/app-sdk/**/*"
 	],
 	"exclude": [
 		"node_modules",

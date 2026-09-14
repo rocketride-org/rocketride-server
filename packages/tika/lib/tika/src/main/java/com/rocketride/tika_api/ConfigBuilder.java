@@ -513,6 +513,19 @@ public class ConfigBuilder {
 		excludeExternalParserIfUnavailable(doc, "org.apache.tika.parser.external.CompositeExternalParser");
 		excludeExternalParserIfUnavailable(doc, "org.apache.tika.parser.external.ExternalParser");
 
+		// Replace Tika's junrar-backed RarParser (RAR4-only; throws on RAR5) with our
+		// 7-Zip-JBinding-backed parser, which handles both RAR4 and RAR5.
+		//
+		// Only when the native library actually loaded. TikaApi.init() logs and carries
+		// on when it does not, and installing a parser that cannot run would leave RAR
+		// with no working parser at all. Keeping junrar preserves RAR4 in that case.
+		if (TikaApi.isSevenZipReady()) {
+			removeParser(doc, "org.apache.tika.parser.pkg.RarParser");
+			findOrAddParser(doc, "com.rocketride.tika_api.parsers.rar.RarSevenZipParser");
+		} else {
+			logger.warn("7-Zip-JBinding unavailable; keeping Tika's RarParser (RAR4 only, RAR5 unsupported)");
+		}
+
 		// Output the xml
 		logger.debug(xmlToString(doc, 4));
 
