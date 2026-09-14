@@ -23,14 +23,17 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Unit tests for tool_tenki's session lifecycle and recovery (no network, no real keys)."""
+"""Unit tests for tool_tenki: session lifecycle, tool groups and tools (no network, no real keys)."""
 
 from __future__ import annotations
 
 import importlib
+import importlib.util
+import json
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -46,6 +49,9 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _NODES_SRC = Path(__file__).resolve().parents[1] / 'src'
+_TOOL_ARGS = (
+    Path(__file__).resolve().parents[2] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'tool_args.py'
+)
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
@@ -73,6 +79,10 @@ class _StubInvalidStateError(_StubSandboxError):
     pass
 
 
+class _StubCommandTimeoutError(_StubSandboxError):
+    pass
+
+
 class _StubWaitReadyFailedError(_StubSandboxError):
     def __init__(self, message, sandbox=None):
         super().__init__(message)
@@ -86,12 +96,34 @@ class _StubTemplateRuntimeFailedError(_StubSandboxError):
         self.reason = message
 
 
+def _tool_function(*, input_schema=None, description=None, output_schema=None):
+    """Mirror of rocketlib.tool_function: stamps the metadata that tool.query reads."""
+
+    def decorator(fn):
+        fn.__tool_meta__ = {'input_schema': input_schema, 'description': description, 'output_schema': output_schema}
+        return fn
+
+    return decorator
+
+
+class _StubInstanceBase:
+    """Mirror of rocketlib.IInstanceBase._collect_tool_methods, the hook the node filters."""
+
+    def _collect_tool_methods(self):
+        methods = {}
+        for name in dir(type(self)):
+            attr = getattr(type(self), name, None)
+            if attr is not None and hasattr(attr, '__tool_meta__'):
+                methods[name] = getattr(self, name)
+        return methods
+
+
 def _build_import_stubs():
     """Return {module_name: stub} for the deps needed only to import the module."""
     rocketlib = MagicMock()
-    rocketlib.IInstanceBase = object
+    rocketlib.IInstanceBase = _StubInstanceBase
     rocketlib.IGlobalBase = object
-    rocketlib.tool_function = lambda **kwargs: lambda f: f
+    rocketlib.tool_function = _tool_function
     rocketlib.debug = lambda *a, **kw: None
     rocketlib.error = lambda *a, **kw: None
     rocketlib.warning = lambda *a, **kw: None
@@ -107,6 +139,7 @@ def _build_import_stubs():
     tenki.SessionNotFoundError = _StubSessionNotFoundError
     tenki.SessionTerminatedError = _StubSessionTerminatedError
     tenki.InvalidStateError = _StubInvalidStateError
+    tenki.CommandTimeoutError = _StubCommandTimeoutError
     tenki.WaitReadyFailedError = _StubWaitReadyFailedError
     tenki.TemplateRuntimeFailedError = _StubTemplateRuntimeFailedError
 
@@ -126,7 +159,18 @@ for _name, _stub in _build_import_stubs().items():
         sys.modules[_name] = _stub
         _added_stubs.append(_name)
 
+# The real tool-argument helpers, loaded from source as tool_gohighlevel's tests do: a
+# hand-written stand-in would stop tracking normalize_tool_input the moment it changes.
+# rocketlib is already in sys.modules here, and tool_args imports warning from it.
+if 'ai.common.utils' not in sys.modules:
+    _spec = importlib.util.spec_from_file_location('ai.common.utils', _TOOL_ARGS)
+    sys.modules['ai.common.utils'] = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(sys.modules['ai.common.utils'])
+    _added_stubs.append('ai.common.utils')
+
 mod = importlib.import_module('nodes.tool_tenki.IGlobal')
+inst_mod = importlib.import_module('nodes.tool_tenki.IInstance')
+groups = importlib.import_module('nodes.tool_tenki.tool_groups')
 
 for _name in _added_stubs:
     sys.modules.pop(_name, None)
@@ -144,13 +188,36 @@ class _FakeSession:
     session that is already terminating or terminated, as the real handle does.
     """
 
-    def __init__(self, session_id, *, state='RUNNING', refresh_error=None, resume_delay=0.0, close_error=None):
+    def __init__(
+        self,
+        session_id,
+        *,
+        state='RUNNING',
+        refresh_error=None,
+        resume_delay=0.0,
+        close_error=None,
+        exec_result=None,
+        exec_error=None,
+        remove_error=None,
+    ):
         self.id = session_id
         self.state = state
         self._refresh_error = refresh_error
         self._resume_delay = resume_delay
         self._close_error = close_error
+        self._exec_result = exec_result
+        self._exec_error = exec_error
         self.calls = []
+        self.fs = _FakeFS(self, remove_error=remove_error)
+
+    def exec(self, *argv, cwd=None, env=None, timeout=None, input=None, check=False, privileged=False):
+        kwargs = {'cwd': cwd, 'env': env, 'timeout': timeout, 'input': input, 'check': check, 'privileged': privileged}
+        self.calls.append(('exec', argv, kwargs))
+        if self.state == 'PAUSED':
+            raise mod.InvalidStateError('session is paused')
+        if self._exec_error is not None:
+            raise self._exec_error
+        return self._exec_result if self._exec_result is not None else _CommandResult(argv=list(argv), exit_code=0)
 
     def refresh(self):
         self.calls.append('refresh')
@@ -175,6 +242,51 @@ class _FakeSession:
     def close_if_open(self):
         if self.state not in ('TERMINATING', 'TERMINATED'):
             self.close()
+
+
+class _FakeFS:
+    """Stand-in for tenki's SandboxFS, with the real signatures, logging into the session's calls."""
+
+    def __init__(self, session, *, remove_error=None):
+        self._session = session
+        self._remove_error = remove_error
+        self.written = {}
+
+    def write_text(self, path, text, *, encoding='utf-8'):
+        self._session.calls.append(('write_text', path))
+        self.written[path] = text
+
+    def remove(self, path, *, recursive=True):
+        self._session.calls.append(('remove', path))
+        if self._remove_error is not None:
+            raise self._remove_error
+
+
+@dataclass(frozen=True)
+class _CommandResult:
+    """Mirror of tenki.CommandResult: the SDK's fields and its text helpers."""
+
+    argv: list
+    exit_code: int
+    stdout: bytes = b''
+    stderr: bytes = b''
+    signal: str | None = None
+    duration_ms: int | None = None
+    reason: str | None = None
+    errno: int | None = None
+    timed_out: bool = False
+
+    @property
+    def ok(self):
+        return self.exit_code == 0 and not self.signal and not self.timed_out
+
+    @property
+    def stdout_text(self):
+        return self.stdout.decode(errors='replace')
+
+    @property
+    def stderr_text(self):
+        return self.stderr.decode(errors='replace')
 
 
 class _FakeClient:
@@ -238,6 +350,19 @@ def _started(monkeypatch, *sessions, cfg=None, **client_kwargs):
     glb, _ = _make_global(monkeypatch, {'apikey': _KEY, **(cfg or {})}, client)
     glb.beginGlobal()
     return glb, client
+
+
+def _instance(monkeypatch, *sessions, cfg=None):
+    """Return an IInstance on a real, started IGlobal whose client hands out ``sessions``."""
+    glb, client = _started(monkeypatch, *sessions, cfg=cfg)
+    inst = inst_mod.IInstance()
+    inst.IGlobal = glb
+    return inst, client
+
+
+def _execs(session):
+    """The (argv, kwargs) of every exec call made on a fake session."""
+    return [(call[1], call[2]) for call in session.calls if isinstance(call, tuple) and call[0] == 'exec']
 
 
 def _raise(error):
@@ -618,3 +743,278 @@ def test_end_global_waits_for_an_in_flight_create_and_closes_that_session(monkey
     glb.endGlobal()
     creator.join()
     assert session.calls == ['close']
+
+
+# ---------------------------------------------------------------------------
+# tool_groups: which tools an agent is offered
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('raw', [None, [], '', ' , ', ()])
+def test_unset_tool_groups_mean_execution_filesystem_and_git(raw):
+    assert groups.normalize_groups(raw) == frozenset({'execution', 'filesystem', 'git'})
+
+
+@pytest.mark.parametrize('raw', ['all', ['ALL'], ['*'], 'git, all'])
+def test_all_publishes_every_group(raw):
+    assert groups.normalize_groups(raw) == frozenset(
+        {'execution', 'filesystem', 'git', 'ports', 'volumes', 'snapshots', 'remote_access'}
+    )
+
+
+@pytest.mark.parametrize(('raw', 'expected'), [(['Ports'], {'ports'}), ('git, volumes', {'git', 'volumes'})])
+def test_named_groups_replace_the_defaults(raw, expected):
+    assert groups.normalize_groups(raw) == frozenset(expected)
+
+
+def test_partly_unknown_groups_narrow_to_the_names_that_matched():
+    assert groups.normalize_groups(['git', 'gti']) == frozenset({'git'})
+    assert groups.unknown_groups(['git', 'gti']) == ['gti']
+
+
+@pytest.mark.parametrize('raw', [['gti'], 'shell, sockets'])
+def test_groups_that_match_nothing_raise_instead_of_widening_to_the_defaults(raw):
+    with pytest.raises(ValueError):
+        groups.normalize_groups(raw)
+
+
+def test_tool_decorator_rejects_an_unknown_group():
+    with pytest.raises(ValueError):
+        groups.tenki_tool(group='shell')
+
+
+def test_editor_offers_exactly_the_implemented_groups():
+    # services.json lists the groups for the editor; a group added on only one side is
+    # either impossible to select or rejected at startup.
+    services = json.loads((_NODES_SRC / 'nodes' / 'tool_tenki' / 'services.json').read_text())
+    offered = {value for value, _label in services['fields']['tenki.toolGroups']['items']['enum']}
+    assert offered == groups.ALL_GROUPS | {'all'}
+
+
+def test_tool_groups_that_match_nothing_stop_startup_before_a_client_exists(monkeypatch, logs):
+    glb, constructed = _make_global(monkeypatch, {'apikey': _KEY, 'toolGroups': ['gti']})
+    with pytest.raises(ValueError):
+        glb.beginGlobal()
+    assert constructed == []
+
+
+def test_partly_unknown_tool_groups_are_logged_and_narrowed(monkeypatch, logs):
+    glb, _ = _make_global(monkeypatch, {'apikey': _KEY, 'toolGroups': ['git', 'gti']})
+    glb.beginGlobal()
+    assert glb.tool_groups == frozenset({'git'})
+    assert any('gti' in message for message in logs)
+
+
+def test_validate_config_warns_about_unknown_tool_groups(monkeypatch, logs):
+    glb, _ = _make_global(monkeypatch, {'apikey': _KEY, 'toolGroups': ['gti']})
+    glb.validateConfig()
+    assert any('gti' in message for message in logs)
+
+
+def test_default_groups_publish_the_execution_tools(monkeypatch, logs):
+    inst, _ = _instance(monkeypatch)
+    assert set(inst._collect_tool_methods()) == {'run_command', 'run_code'}
+
+
+def test_tools_outside_the_configured_groups_are_not_published(monkeypatch, logs):
+    # tool.invoke looks tool names up in the same collection, so this also refuses the call.
+    inst, _ = _instance(monkeypatch, cfg={'toolGroups': ['git']})
+    assert inst._collect_tool_methods() == {}
+
+
+def test_every_tool_is_tagged_with_a_known_group():
+    # An untagged tool is never published, so a missing tag would hide the tool silently.
+    tagged = {}
+    for name in dir(inst_mod.IInstance):
+        attr = getattr(inst_mod.IInstance, name)
+        if hasattr(attr, '__tool_meta__'):
+            tagged[name] = getattr(attr, '__tenki_group__', None)
+    assert tagged
+    assert all(group in groups.ALL_GROUPS for group in tagged.values()), tagged
+
+
+def test_tool_descriptions_resolve_and_state_the_configured_timeout(monkeypatch, logs):
+    # Descriptions are evaluated at tool.query time; one that raises breaks the whole catalog.
+    inst, _ = _instance(monkeypatch, cfg={'exec_timeout_secs': 45})
+    published = inst._collect_tool_methods()
+    assert published
+    for name, method in published.items():
+        description = method.__tool_meta__['description']
+        text = description(inst) if callable(description) else description
+        assert '45s' in text, name
+
+
+# ---------------------------------------------------------------------------
+# run_command
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'args', [{}, {'command': ''}, {'command': '   '}, {'command': 42}, {'command': 'ls', 'cwd': 42}]
+)
+def test_run_command_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.run_command(args)
+    assert client.create_calls == []
+
+
+def test_run_command_runs_bash_as_a_login_shell_with_the_configured_timeout(monkeypatch, logs):
+    # The timeout is always passed: left out, Tenki applies its own 30-second default.
+    session = _FakeSession('sb-1', exec_result=_CommandResult(argv=['bash'], exit_code=0, stdout=b'total 0\n'))
+    inst, _ = _instance(monkeypatch, session, cfg={'exec_timeout_secs': 45})
+    assert inst.run_command({'command': 'ls -la'}) == {
+        'exit_code': 0,
+        'stdout': 'total 0\n',
+        'stderr': '',
+        'timed_out': False,
+        'truncated': False,
+    }
+    assert _execs(session) == [
+        (
+            ('bash', '-lc', 'ls -la'),
+            {'cwd': None, 'env': None, 'timeout': 45, 'input': None, 'check': False, 'privileged': False},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ('cwd', 'script'),
+    [
+        ('app', 'cd /home/tenki/app && make test'),
+        ('/opt/my project', "cd '/opt/my project' && make test"),
+        ('   ', 'make test'),
+    ],
+)
+def test_run_command_changes_directory_inside_the_shell(monkeypatch, logs, cwd, script):
+    # A login shell runs the guest's startup files before the command, and a cd in them would
+    # win over exec's cwd, so the directory change is part of the script itself.
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    inst.run_command({'command': 'make test', 'cwd': cwd})
+    [(argv, kwargs)] = _execs(session)
+    assert argv == ('bash', '-lc', script)
+    assert kwargs['cwd'] is None
+
+
+def test_run_command_reports_a_command_stopped_at_the_timeout(monkeypatch, logs):
+    # Tenki stops the command and reports it on the result, possibly with exit code 0.
+    session = _FakeSession('sb-1', exec_result=_CommandResult(argv=['bash'], exit_code=0, timed_out=True))
+    inst, _ = _instance(monkeypatch, session)
+    result = inst.run_command({'command': 'sleep 999'})
+    assert result['timed_out'] is True
+    assert 'error' not in result
+
+
+def test_run_command_reports_a_deadline_error_as_timed_out(monkeypatch, logs):
+    session = _FakeSession('sb-1', exec_error=inst_mod.CommandTimeoutError('deadline exceeded'))
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.run_command({'command': 'sleep 999'}) == {
+        'error': 'deadline exceeded',
+        'exit_code': -1,
+        'stdout': '',
+        'stderr': '',
+        'timed_out': True,
+        'truncated': False,
+    }
+
+
+def test_run_command_returns_sandbox_errors_to_the_agent(monkeypatch, logs):
+    session = _FakeSession('sb-1', exec_error=inst_mod.SandboxError('workspace quota exceeded'))
+    inst, _ = _instance(monkeypatch, session)
+    result = inst.run_command({'command': 'ls'})
+    assert result['error'] == 'workspace quota exceeded'
+    assert result['exit_code'] == -1
+    assert result['timed_out'] is False
+
+
+@pytest.mark.parametrize(
+    ('stdout_len', 'stderr_len', 'kept'),
+    [
+        (600, 400, (600, 400)),  # within the cap: untouched
+        (1500, 0, (1000, 0)),  # one stream over: cut to the cap
+        (5000, 10, (990, 10)),  # stdout floods: stderr, where errors land, keeps its text
+        (4, 5000, (4, 996)),  # stderr floods: stdout keeps its text
+        (5000, 5000, (500, 500)),  # both flood: an even split
+    ],
+)
+def test_output_shares_the_cap_across_both_streams(stdout_len, stderr_len, kept):
+    result = _CommandResult(argv=['bash'], exit_code=0, stdout=b'o' * stdout_len, stderr=b'e' * stderr_len)
+    shaped = inst_mod._exec_result(result, 1000)
+    assert (len(shaped['stdout']), len(shaped['stderr'])) == kept
+    assert shaped['truncated'] is (kept != (stdout_len, stderr_len))
+
+
+# ---------------------------------------------------------------------------
+# run_code
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'args', [{}, {'code': ''}, {'code': '  \n '}, {'code': 7}, {'code': 'print(1)', 'language': 'ruby'}]
+)
+def test_run_code_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.run_code(args)
+    assert client.create_calls == []
+
+
+@pytest.mark.parametrize(
+    ('language', 'interpreter', 'extension'),
+    [
+        (None, 'python3', '.py'),
+        ('python', 'python3', '.py'),
+        ('javascript', 'node', '.js'),
+        ('typescript', 'ts-node', '.ts'),
+    ],
+)
+def test_run_code_writes_the_code_to_a_file_then_runs_the_interpreter_on_it(
+    monkeypatch, logs, language, interpreter, extension
+):
+    # Multi-line code with quotes and a heredoc marker reaches the file unchanged, because it
+    # goes through the file API rather than through shell escaping.
+    code = 'print("it\'s")\nprint("""EOF""")\n'
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session, cfg={'exec_timeout_secs': 45})
+    args = {'code': code} if language is None else {'code': code, 'language': language}
+    assert inst.run_code(args)['exit_code'] == 0
+    written, executed, removed = session.calls
+    path = written[1]
+    assert written == ('write_text', path)
+    assert path.startswith('/home/tenki/') and path.endswith(extension)
+    assert session.fs.written[path] == code
+    assert executed[0] == 'exec'
+    assert executed[1][-2:] == (interpreter, path)
+    assert executed[2]['timeout'] == 45
+    assert removed == ('remove', path)
+
+
+def test_run_code_uses_a_new_file_for_every_call(monkeypatch, logs):
+    # Parallel calls share one session, so a fixed name would let one call run another's code.
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    inst.run_code({'code': 'print(1)'})
+    inst.run_code({'code': 'print(2)'})
+    paths = [call[1] for call in session.calls if call[0] == 'write_text']
+    assert len(set(paths)) == 2
+
+
+def test_run_code_returns_the_result_even_if_cleanup_fails(monkeypatch, logs):
+    session = _FakeSession(
+        'sb-1',
+        exec_result=_CommandResult(argv=['bash'], exit_code=0, stdout=b'42\n'),
+        remove_error=inst_mod.SandboxError('remove failed'),
+    )
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.run_code({'code': 'print(42)'})['stdout'] == '42\n'
+
+
+def test_run_code_on_a_paused_session_resumes_it_and_runs_the_code(monkeypatch, logs):
+    session = _FakeSession(
+        'sb-1', state='PAUSED', exec_result=_CommandResult(argv=['bash'], exit_code=0, stdout=b'ok\n')
+    )
+    inst, client = _instance(monkeypatch, session)
+    assert inst.run_code({'code': 'print("ok")'})['stdout'] == 'ok\n'
+    assert session.calls.count('resume') == 1
+    assert len(client.create_calls) == 1

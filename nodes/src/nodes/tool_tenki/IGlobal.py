@@ -26,12 +26,12 @@
 """
 Tenki Sandbox tool node - global (shared) state.
 
-Reads the Tenki workspace API key and the sandbox sizing from config and
-creates a Tenki client. The session itself is created lazily on the first tool
-call (creating one costs money and time, and a pipeline may never invoke the
-tool) and is closed in ``endGlobal``. Tool logic lives on IInstance via
-@tool_function, and every tool reaches the session through
-``call_with_session``, which owns recovery.
+Reads the Tenki workspace API key, the sandbox sizing and the published tool
+groups from config and creates a Tenki client. The session itself is created
+lazily on the first tool call (creating one costs money and time, and a
+pipeline may never invoke the tool) and is closed in ``endGlobal``. Tool logic
+lives on IInstance via @tool_function, and every tool reaches the session
+through ``call_with_session``, which owns recovery.
 
 Three things differ from tool_daytona and shape this file:
 
@@ -62,6 +62,8 @@ from tenki import (
     TemplateRuntimeFailedError,
     WaitReadyFailedError,
 )
+
+from .tool_groups import DEFAULT_GROUPS, normalize_groups, unknown_groups
 
 # Given an empty endpoint the SDK resolves one from TENKI_API_ENDPOINT / TENKI_API_URL,
 # so the public default is passed explicitly rather than left to the host's environment.
@@ -109,6 +111,7 @@ class IGlobal(IGlobalBase):
     max_duration_minutes: int = 60
     exec_timeout_secs: int = 120
     max_output_chars: int = 50000
+    tool_groups: frozenset = DEFAULT_GROUPS
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -124,6 +127,18 @@ class IGlobal(IGlobalBase):
         # environment silently decide which workspace gets billed.
         if not apikey:
             raise Exception('tool_tenki: apikey is required')
+
+        # A value naming only unknown groups raises in normalize_groups rather than falling back
+        # to the defaults. A partially unknown one narrows to the names that matched, which is
+        # what the operator asked for minus the typo, so it runs; the dropped names go to the
+        # job log, because the editor warning in validateConfig never reaches a deployed pipeline.
+        self.tool_groups = normalize_groups(cfg.get('toolGroups'))
+        dropped = unknown_groups(cfg.get('toolGroups'))
+        if dropped:
+            warning(
+                f'tool_tenki: ignoring unknown tool group(s): {", ".join(dropped)}. '
+                f'Publishing: {", ".join(sorted(self.tool_groups))}'
+            )
 
         base_url = str((cfg.get('base_url') or '')).strip() or _DEFAULT_BASE_URL
         self.image = str((cfg.get('image') or '')).strip()
@@ -260,6 +275,13 @@ class IGlobal(IGlobalBase):
                 warning('apikey is required')
             elif not apikey.startswith('tk_'):
                 warning('apikey must be a Tenki workspace API key, which starts with tk_')
+            unknown = unknown_groups(cfg.get('toolGroups'))
+            if unknown:
+                warning(f'unknown tool group(s): {", ".join(unknown)}')
+            try:
+                normalize_groups(cfg.get('toolGroups'))
+            except ValueError:
+                warning('toolGroups matches no known group, so the pipeline will fail to start')
         except Exception as e:
             warning(str(e))
 
