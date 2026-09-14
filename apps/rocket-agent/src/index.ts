@@ -41,6 +41,7 @@ import {
 import { reconcileOnBoot, startReaper } from './reaper';
 import { MemorySessionIndex, RedisSessionIndex } from './sessionIndex';
 import { SessionManager } from './session';
+import { startHeartbeat } from './sse';
 import { appendSyntheticToolsToListSse, handleSyntheticToolCall, isSyntheticToolCall, SyntheticCtx } from './synthetics';
 import { HttpError, Identity, IdentityResolver, InferenceSettings, KeyResolver, ProviderKeyMap, SessionIndex, SessionRecord, StoreFs } from './types';
 import { buildTurnSystemAndConsume, injectSystemIntoPromptBody } from './turnContext';
@@ -488,6 +489,9 @@ export function createApp(deps: AppDeps): express.Express {
 		// reaper skip this session forever — the inverse of the bug it fixes).
 		let decremented = true;
 		const decrementOnce = () => { if (!decremented) { decremented = true; live!.openStreams--; } };
+		// Assigned only once the stream is actually open; the catch can fire before
+		// that (e.g. auth failure), so guard the call there.
+		let stopHeartbeat: (() => void) | undefined;
 		try {
 			const credential = bearer(req);
 			if (!credential) { res.status(401).json({ error: 'Bearer token required' }); return; }
@@ -501,11 +505,13 @@ export function createApp(deps: AppDeps): express.Express {
 			decremented = false;
 			res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
 			res.write(': connected\n\n');
+			stopHeartbeat = startHeartbeat(res);
 			const onEvent = (e: unknown) => res.write(`data: ${JSON.stringify(e)}\n\n`);
 			live.events.on('event', onEvent);
-			req.on('close', () => { live!.events.off('event', onEvent); decrementOnce(); });
+			req.on('close', () => { stopHeartbeat!(); live!.events.off('event', onEvent); decrementOnce(); });
 		} catch (err) {
 			log.error(`[events ${req.params.id}]`, err);
+			if (typeof stopHeartbeat === 'function') stopHeartbeat();
 			decrementOnce();
 			safeSend(res, 500, { error: 'events stream failed' });
 		}
