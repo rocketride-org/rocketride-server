@@ -216,7 +216,7 @@
 		"require_grounding": {
 			"type": "boolean",
 			"title": "Require grounding",
-			"description": "Treat an answer produced with no source documents as a violation. Without this the hallucination check passes when retrieval returned nothing, which is when a model is most likely to answer from memory.",
+			"description": "After a retrieval returns nothing, treat an answer as a violation when it states a figure, unless the answer declines to give one. Greetings, acknowledgements and refusals are unaffected, and a non-numeric claim is not checked. Needs the documents lane wired to have any effect.",
 			"default": false
 		},
 		"max_input_length": {
