@@ -25,7 +25,7 @@ import type { LogSessionHostToWebview, LogSessionWebviewToHost } from './logType
 /** All messages the extension host can send to the ProjectWebview. */
 export type ProjectHostToWebview =
 	| ShellHostToWebview
-	| { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; icons?: Record<string, string>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; oauthReturnUrl?: string; isReadonly?: boolean; envKeys?: string[] }
+	| { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; icons?: Record<string, string>; isConnected: boolean; cloudConnectionConfigured?: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; oauthReturnUrl?: string; isReadonly?: boolean; envKeys?: string[] }
 	| { type: 'project:oauthTokens'; tokens: string; state: string }
 	| { type: 'project:update'; project: any }
 	| { type: 'project:services'; services: Record<string, any>; icons?: Record<string, string> }
@@ -34,6 +34,7 @@ export type ProjectHostToWebview =
 	| { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean }
 	| { type: 'project:initialState'; state: ViewState }
 	| { type: 'project:initialPrefs'; prefs: Record<string, unknown> }
+	| { type: 'project:cloudConnectionConfigured'; cloudConnectionConfigured: boolean }
 	| { type: 'project:envKeysUpdate'; envKeys: string[] }
 	// Subscription gate + embedded checkout flow (the Subscribe overlay).
 	| { type: 'checkout:required' }
@@ -57,6 +58,7 @@ export type ProjectWebviewToHost =
 	| { type: 'project:prefsChange'; prefs: Record<string, unknown> }
 	| { type: 'project:openLink'; url: string; displayName?: string; browser?: boolean }
 	| { type: 'project:openExternal'; url: string }
+	| { type: 'project:openCloudSetup' }
 	| { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string }
 	| { type: 'status:missingEnvVars'; keys: string[] }
 	| { type: 'trace:clear' }

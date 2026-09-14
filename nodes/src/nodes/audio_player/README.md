@@ -1,52 +1,52 @@
 # audio_player
 
-A RocketRide audio node that plays incoming audio through the system's default output device in real time.
+A RocketRide audio sink that plays incoming audio or a video's audio track
+through the system output device.
 
 ## What it does
 
-Accepts container-format audio bytes (for example WAV or MP3, identified by MIME type) on its `audio` lane and plays them through the machine's default speakers. Video input is also accepted on the `video` lane: the audio track is extracted and played while video frames are discarded. This is a terminal node with no output lanes.
+The node passes incoming `audio` and `video` streams to a PCM player and has no
+downstream lane. Choose it when a local pipeline needs to play a stream rather
+than transform it, transcribe it, or generate speech. It serializes playback
+across node instances with one shared lock.
 
-Incoming bytes are piped through **ffmpeg** (the binary bundled with `imageio_ffmpeg`, so no host ffmpeg install is required), which decodes any common container/codec to raw PCM. Playback is handled by **sounddevice** (PortAudio) via a low-latency output stream at 44,100 Hz stereo int16.
+## Lanes
 
-Playback is serialized engine-wide: a shared `threading.Lock` created at node startup ensures only one stream plays at a time. Because the node drives a physical audio device, it carries the `nosaas` capability and is not available in SaaS deployments (local only).
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `audio` | — | Pass the audio stream to the player. |
+| `video` | — | Extract and play the video's audio track. |
 
 ## Configuration
 
-### Lanes
+This node exposes no configuration fields. It has one empty `default` profile;
+playback behavior is fixed by the implementation.
 
-| Lane    | Direction | Behavior                                                             |
-|---------|-----------|----------------------------------------------------------------------|
-| `audio` | input     | Decoded and played through the default output device                 |
-| `video` | input     | Audio track extracted and played; video frames are discarded         |
+## Limitations
 
-Neither lane produces downstream output. The node is a sink.
+The `nosaas` capability means this node is excluded from SaaS deployments. It
+opens an output stream through `sounddevice`, so it is intended for a runtime
+that can access an audio output device.
 
-### Fields
+## Notes
 
-No configuration options: the node exposes no fields and uses a single empty `default` profile. Playback settings are fixed in the implementation:
+### Fixed playback format and buffering
 
-| Parameter   | Value                                              |
-|-------------|----------------------------------------------------|
-| Sample rate | 44,100 Hz                                          |
-| Channels    | Stereo (2)                                         |
-| Format      | PCM int16 (internal playback format after decode)  |
-| Latency     | Low (`latency='low'`, blocksize 1024 frames)       |
-| Chunk size  | 16 KB per queued buffer                            |
-| Queue depth | 32 chunks maximum (~512 KB, roughly 3 s of audio)  |
+The player is configured for 44,100 Hz, two-channel, signed 16-bit PCM output
+with a low-latency stream and 1,024-frame callback blocks. It accumulates input
+into 16 KiB chunks and enqueues at most 32 chunks; a full queue blocks incoming
+writes, providing natural backpressure that prevents unbounded memory growth.
 
----
+At end of stream, whatever is left in the accumulator — a partial chunk, or the
+whole stream when it is shorter than 16 KiB — is queued ahead of the
+end-of-stream marker, so short streams and stream tails are never discarded.
 
-## Playback behavior
-
-Decoded PCM is accumulated into 16 KB chunks and placed into a bounded queue. When the queue holds 32 chunks, upstream writes block, providing natural backpressure that prevents unbounded memory growth.
-
-At end of stream, whatever is left in the accumulator — a partial chunk, or the whole stream when it is shorter than 16 KB — is queued ahead of the end-of-stream marker, so short streams and stream tails are never discarded.
-
-On stop, the node polls until the queue and the internal playback buffer are both fully drained before closing the stream, so buffered audio plays to completion. The final callback always fills its output buffer as required by `sounddevice`: a partial block is played in full and padded with silence, while an exact-boundary end writes silence before stopping. The callback stops immediately after committing that terminal block.
-
----
+On stop, the node polls until the queue and the internal playback buffer are
+both fully drained before closing the stream, so buffered audio plays to
+completion. The final callback always fills its output buffer as required by
+`sounddevice`: a partial block is played in full and padded with silence, while
+an exact-boundary end writes silence before stopping. The callback stops
+immediately after committing that terminal block.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

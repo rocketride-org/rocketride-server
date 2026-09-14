@@ -8,7 +8,7 @@
 	"path": "nodes.tool_microsoft_365.word",
 	"prefix": "word",
 	"icon": "word.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_microsoft_365/word",
 	"description": ["Exposes Microsoft Word document operations as agent tools.", "Read text, create documents from paragraph lists, append text, find/replace text, and export to PDF. Operates on docx files in the acting user's OneDrive via the Microsoft Graph drive content API, round-tripping through python-docx.", "Authenticates via an Entra app (client credentials) or user OAuth."],
 	"tile": ["Word (${parameters.word.access})"],
 	"lanes": {},

@@ -37,8 +37,8 @@
     "@module-federation/rsbuild-plugin": "^2.5.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "rocketride": "file:../../../.rocketride/client/rocketride.tgz",
-    "shell": "file:../../../.rocketride/shell/shell.tgz"
+    "rocketride": "file:../../.rocketride/client/rocketride.tgz",
+    "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
     "@rsbuild/core": "~2.0.11",

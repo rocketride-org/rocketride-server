@@ -12,7 +12,7 @@ The node registers as a `filter` with class type `other` and capability `interna
 
 ---
 
-## What gets inserted
+### Filter assembly
 
 | Mode | Filters inserted |
 | ---- | ---------------- |
@@ -44,7 +44,9 @@ Defaults come from the `default` preconfig profile in `services.json`. The prepr
 
 ---
 
-## Remote processing
+## Notes
+
+### Remote processing
 
 The implementation distinguishes local and remote filter placement, and the default profile carries a `remote` sub-configuration (host, port, apikey, `mode: local`). However, the remote-pipeline assembly path is currently commented out in `IGlobal.endGlobal` and the remote queue is never dispatched: all inserted filters run locally regardless of the `remote` setting.
 

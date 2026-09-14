@@ -61,7 +61,7 @@
 	//              profile (model name)
 	//
 	"icon": "deepseek.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/llm_deepseek",
 	//
 	//
 	//  Optional:

@@ -1,45 +1,116 @@
 # rocketride_graph
 
-A RocketRide-managed graph database node backed by PostgreSQL + Apache AGE in your own provisioned RocketRide cloud database — with **zero database setup**.
+A RocketRide graph database node for natural-language Cypher queries against
+the Apache AGE graph in the signed-in tenant's managed database. Pick it over
+rocketride_sql when relationships and traversals are the data model.
 
 ## What it does
 
-Mirrors the `graph_neo4j` node: as a pipeline node it takes natural-language questions on the `questions` lane, asks a connected LLM to translate them to Cypher, executes, and emits results; as a tool node agents call `get_data`, `get_schema`, `get_query`, `execute`, and `dialect` (dialect: `age`).
+The node accepts questions, asks its required LLM to generate read-only Cypher,
+translates it to Apache AGE SQL, and returns rows as a table, text, or answer.
+It also exposes graph discovery and query functions to an agent. Use it for
+graph labels, relationships, and multi-hop traversal; use rocketride_sql for
+relational SQL or rocketride_vector for embedding-backed document retrieval.
 
-Two differences from the generic graph nodes:
+## Connections
 
-1. **No connection fields.** The per-tenant DSN is resolved from the account layer (`Account.resolve_db_dsn(client_id)`), keyed by the authenticated connection identity — the same seam as `rocketride_sql` and `rocketride_vector` (one database per tenant backs all three). Requires signing into RocketRide cloud; the open-source build without a cloud identity fails with `RocketRide cloud DB nodes require signing into RocketRide cloud`.
-2. **Cypher → AGE translation.** Apache AGE cannot run bare Cypher, so every query path routes through the translation layer at `ai.common.graph.age` (openCypher ANTLR parse → firewall → dialect capability gate → `cypher()` envelope with synthesized column list → prepared-statement parameter binding → agtype decode). Even the raw EXECUTE path translates — only the *semantic* firewall is skipped there, never the resource caps.
+| Connection | Required | Description |
+| --- | --- | --- |
+| llm | yes | Produces Cypher from a natural-language question. |
 
-## Safety model
+## Lanes
 
-- **Safe path** (LLM/tool reads): runs in a server-side **READ ONLY transaction** (writes are refused by Postgres itself), plus the layer's semantic firewall (no write clauses, no CALL) and the base's `is_cypher_safe` regex as defence-in-depth.
-- **Resource caps** (both paths): query length limit, variable-length traversal depth cap (unbounded `*` patterns are rejected), and a per-transaction `statement_timeout`.
-- **EXECUTE** is gated by `allow_execute` (default off); isolation for raw writes is the database-per-tenant boundary.
-- All per-query settings are `SET LOCAL` — the cloud endpoint is a transaction-mode pooler, so session-level `SET` would bleed across tenants. AGE is preloaded server-side (no `LOAD`).
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| questions | table | Returns an executed graph-query result as a Markdown table. |
+| questions | text | Returns the graph-query result as text. |
+| questions | answers | Returns the graph-query result on the answers lane. |
 
-## Graph provisioning (open)
+## As a tool
 
-Ownership of per-tenant `create_graph` is **pending** (cloud provisioner vs node). Until decided, the node fails fast at pipeline start when the configured graph does not exist rather than creating one silently.
+The inherited graph functions are registered under the bare names below; this
+node defines no configurable server-name prefix. Inputs are JSON objects.
+
+| Function | Description |
+| --- | --- |
+| get_data | Converts required natural-language question to a safe read-only Cypher query and returns rows; limit is optional. |
+| get_schema | Returns the discovered labels, sampled node properties, and relationships. |
+| get_query | Converts required natural-language question to read-only Cypher without executing it; limit is optional. |
+| execute | Runs required raw Cypher query when direct execution is enabled. |
+| dialect | Returns {"dialect": "age"}. |
+
+get_data defaults to the shared read limit, then clamps the requested limit to
+the configured Max read rows ceiling. A successful result contains
+{valid, rows, query, row_limit, truncated}. Generation, validation, or
+execution failure returns {valid: false, error, query, rows: []}; a non-graph
+question may instead carry an LLM answer with valid: false.
+
+get_query returns {query, valid: true} only after its safe-query checks.
+execute bypasses the read-only gate but still passes Cypher through the AGE
+translation and resource limits; it raises if direct execution is disabled or
+the input is invalid, and otherwise returns {rows, affected_rows}.
 
 ## Configuration
 
-### Fields
+The single built-in profile supplies the default graph name. RocketRide
+provisions a per-tenant database for its managed database nodes, and this node
+resolves it from the signed-in RocketRide identity instead of a host, user,
+password, or database name you enter. Start with the defaults, then tune the
+graph context and read limits around the size and shape of the graph your LLM
+must query.
 
-| Field | Type | Description |
-|---|---|---|
-| `graph` | string | Default "rocketride". Name of the AGE graph to query |
-| `db_description` | string | Default empty. What the graph contains; improves LLM query quality |
-| `max_attempts` | integer | Default 5. LLM re-ask ceiling when validation rejects generated Cypher |
-| `max_rows` | integer | Default 1000. Row ceiling for the read path |
-| `query_timeout_ms` | integer | Default 30000. Per-transaction statement timeout |
-| `allow_execute` | boolean | Default false. Enables the raw EXECUTE path |
+### Graph name and graph description
 
-There are intentionally no `host` / `user` / `password` / `database` fields.
+Graph name defaults to rocketride and must name an existing AGE graph; startup
+fails instead of creating a missing graph. Graph description is empty by
+default and becomes LLM context, so describe labels, relationship meaning, and
+domain vocabulary when those are not obvious from reflected schema. Change the
+graph name when the tenant database contains multiple AGE graphs; update the
+description with it so generated Cypher targets the right model.
 
-### Dialect notes (AGE 1.5.0)
+### Validation attempts and read rows
 
-The capability table (see `ai.common.graph.age.capabilities`) rejects constructs the cloud's AGE 1.5.0 cannot run with actionable messages: `datetime()` (store ISO-8601 strings or epoch numbers), `RETURN *` (list columns explicitly), `ORDER BY` on a projection alias (order by the expression), `MERGE ... ON CREATE/MATCH SET` (plain `MERGE` then a separate `SET`), label predicates in `WHERE` (put the label in the `MATCH` pattern), multi-labels like `(n:A:B)` (model the second label as a property or category-node edge), and `shortestPath()` (use a bounded variable-length match). All cells are empirically verified against the exact cloud pin — none pass through unverified.
+The node retries failed Cypher validation up to five times by default. Raise
+Max validation attempts for a complex schema where the returned validation error
+is likely to let the LLM repair its query, or lower it to fail faster. Max read
+rows defaults to 1,000 and is an owner-controlled cap for both the questions
+lane and get_data; increase it only when agents truly need larger result sets,
+since results beyond the cap are intentionally truncated.
+
+### Query timeout
+
+Query timeout (ms) defaults to 30,000 and is applied inside each query's
+transaction. Reduce it to protect an interactive pipeline from expensive
+traversals; increase it only for known queries that legitimately need more
+time. It works with the row cap: one limits execution time and the other limits
+returned data.
+
+### Allow direct query execution
+
+This setting is off by default. Turning it on permits raw Cypher through the
+execute tool and QuestionType.EXECUTE; those calls skip LLM translation and the
+safe read-only gate. They still use the AGE translator and its resource
+controls. Enable it only for trusted callers that require writes or raw Cypher.
+
+## Limitations
+
+This node runs on the RocketRide engine host and does not support remote
+execution. The engine host must have access to the signed-in RocketRide
+identity used to resolve the tenant DSN. The tenant database must already have
+Apache AGE installed and contain the configured graph. Read paths are
+intentionally read-only; raw execution remains disabled until explicitly
+enabled.
+
+## Notes
+
+### Translation and schema discovery
+
+Apache AGE cannot execute bare Cypher. Every query path is translated, and the
+safe path runs in a server-side read-only transaction with a semantic firewall,
+the base Cypher safety check, and a transaction-local statement timeout.
+Schema reflection is best effort: it lists AGE labels, samples node properties,
+and samples relationship endpoints; an individual reflection failure warns and
+returns partial rather than blocking all schema output.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -130,6 +130,7 @@ export interface IFlowContainerProps {
 
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
+	cloudConnectionConfigured?: boolean;
 
 	/** Whether the user has an active subscription. When false, run buttons show a lock icon. */
 	isSubscribed?: boolean;
@@ -143,6 +144,7 @@ export interface IFlowContainerProps {
 	isNew?: boolean;
 	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
+	onOpenCloudSetup?: () => void;
 	onExport?: () => void;
 
 
@@ -163,7 +165,7 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
@@ -198,11 +200,13 @@ export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, 
 					onOpenStatus={onOpenStatus}
 					serverHost={serverHost}
 					isConnected={isConnected}
+					cloudConnectionConfigured={cloudConnectionConfigured}
 					isSubscribed={isSubscribed}
 					initialViewport={initialViewport}
 					isDirty={isDirty}
 					isNew={isNew}
 					onSave={onSave}
+					onOpenCloudSetup={onOpenCloudSetup}
 					onExport={onExport}
 					envKeys={envKeys}
 				>

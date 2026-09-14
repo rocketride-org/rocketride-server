@@ -127,7 +127,7 @@ const SidebarViewWebview: React.FC = () => {
 
 	// ── App Builder (MY APPS) ───────────────────────────────────────────────
 	const [apps, setApps] = useState<AppListItem[]>([]);
-	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('pipelines');
+	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('apps');
 	// The host-persisted mode seeds the strip ONCE: an `update` composed
 	// before the persist round trip completed carries the previous value and
 	// must not revert a selection the user just made.

@@ -39,10 +39,38 @@ from __future__ import annotations
 
 import re
 
+# The leading ``(?<![\w.])`` refuses a match when the keyword is preceded by a
+# word character or a dot, so a property or map read like ``n.delete`` or
+# ``n.create`` is not mistaken for the DELETE / CREATE clause. Bare reserved
+# words still match, which is correct: Cypher requires such identifiers to be
+# back-quoted, and back-quoted spans are stripped before this runs.
 _UNSAFE_CYPHER = re.compile(
-    r'\b(?:CREATE|MERGE|DELETE|DETACH\s+DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|'
+    r'(?<![\w.])(?:CREATE|MERGE|DELETE|DETACH\s+DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|'
     r'CALL\s+apoc\.(?:create|merge|delete|periodic\.commit|refactor|load))\b',
     re.IGNORECASE,
+)
+
+# Comments and string / back-quoted-identifier literals, matched in one pass.
+# Whichever span opens first at a given position wins, so a ``//`` inside a
+# string is consumed as string content and a quote inside a comment is consumed
+# as comment content. That single left-to-right scan is what closes the
+# cross-boundary bypass a chain of independent strippers allows (e.g. an
+# unbalanced quote in a comment swallowing a trailing write keyword). An
+# unterminated string or block comment does not match, so its keywords survive
+# and the statement is rejected, which is the safe direction.
+#
+# A line comment ends at a carriage return as well as a line feed. Stopping only
+# at ``\n`` would let ``// ...\rDELETE`` be read as one long comment here while
+# Cypher ends the comment at the ``\r`` and runs the DELETE.
+_STRIP_LITERALS = re.compile(
+    r"""
+      //[^\r\n]*           # line comment
+    | /\*.*?\*/            # block comment
+    | '(?:\\.|[^'\\])*'    # single-quoted string
+    | "(?:\\.|[^"\\])*"    # double-quoted string
+    | `[^`]*`              # back-quoted identifier
+    """,
+    re.DOTALL | re.VERBOSE,
 )
 
 
@@ -55,7 +83,8 @@ def is_cypher_safe(cypher: str) -> bool:
     Returns:
         bool: ``True`` if the statement contains no write or admin clauses.
     """
-    # Strip line and block comments so a commented-out DELETE can't hide a live one.
-    stripped = re.sub(r'//[^\n]*', '', cypher)
-    stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)
+    # Remove comments and literals first so a keyword that is only data (a
+    # commented-out DELETE, or ``n.op = "CREATE"``) can neither trip the gate
+    # nor smuggle a live write past it.
+    stripped = _STRIP_LITERALS.sub('', cypher)
     return not bool(_UNSAFE_CYPHER.search(stripped))

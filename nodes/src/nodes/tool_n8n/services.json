@@ -8,7 +8,7 @@
 	"path": "nodes.tool_n8n",
 	"prefix": "n8n",
 	"icon": "n8n.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_n8n",
 	"description": ["Trigger n8n workflows from a RocketRide pipeline or an agent.", "As a pipeline step, lane input is POSTed to a workflow's webhook and the response flows downstream; as a tool, an agent can trigger workflows and inspect workflows/executions.", "Self-hosted: configure the n8n base URL and (for listing/polling) a public API key."],
 	"tile": ["n8n${parameters.tool_n8n.workflow ? ': ' + parameters.tool_n8n.workflow : ''}"],
 	"lanes": {

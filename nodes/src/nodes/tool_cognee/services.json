@@ -8,7 +8,7 @@
 	"path": "nodes.tool_cognee",
 	"prefix": "cognee",
 	"icon": "cognee.svg",
-	"documentation": "https://docs.cognee.ai",
+	"documentation": "https://docs.rocketride.org/nodes/tool_cognee",
 	"description": [
 		"Persistent semantic memory backed by a Cognee server, exposed as three agent tools. ",
 		"Remember plain text, recall memory results while requesting references, and check background processing. The knowledge graph captures semantic relationships; it is not an AST, import graph, or call graph."

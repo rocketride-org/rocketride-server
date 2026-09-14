@@ -45,8 +45,17 @@ def _simulate_engine_dispatch(write_override, default_forward):
 class FakeMetadata:
     """Stand-in for DocMetadata: attribute assignment plus model_dump()."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, pInstance=None, **kwargs):
         self.chunkId = 0
+        if pInstance is not None:
+            # Mirror DocMetadata's instance-aware constructor: identity comes from the
+            # object being processed, not from the document.
+            current = pInstance.instance.currentObject
+            self.objectId = current.objectId
+            self.nodeId = pInstance.IEndpoint.endpoint.jobConfig['nodeId']
+            self.parent = current.path
+            self.permissionId = current.permissionId
+            self.signature = current.componentId
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -98,6 +107,11 @@ class FakeInstance:
     def __init__(self, listeners=None):
         self.listeners = set(listeners) if listeners is not None else None
         self.delivered = {}
+        # The engine exposes the object currently being processed; DocMetadata(pInstance)
+        # reads its identity fields when a node builds metadata from scratch.
+        self.currentObject = types.SimpleNamespace(
+            objectId='obj-1', path='/src/doc.txt', permissionId=7, componentId='sig-1'
+        )
 
     def hasListener(self, lane):
         """Report whether the given lane has a downstream listener."""
@@ -172,6 +186,7 @@ def _make_stubs():
     stubs['rocketlib'].debug = lambda *a, **kw: None
     stubs['rocketlib'].warning = lambda *a, **kw: None
     stubs['ai.common.schema'].Doc = FakeDoc
+    stubs['ai.common.schema'].DocMetadata = FakeMetadata
     stubs['ai.common.schema'].Question = FakeQuestion
     stubs['ai.common.llm_base'].LLMBase = _FakeIInstanceBase
     stubs['ai.common.avi.descriptor'].rename_ext = lambda metadata, ext: metadata
@@ -258,6 +273,7 @@ def _build(pkg, iglobal, listeners=None):
     inst = _load_iinstance(pkg)()
     inst.IGlobal = iglobal
     inst.instance = FakeInstance(listeners)
+    inst.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(jobConfig={'nodeId': 'node-1'}))
     return inst, inst.instance
 
 
@@ -369,8 +385,9 @@ def test_ner_documents_delivered_once():
     """
     Only the enriched copy arrives.
 
-    Docs carry no metadata here: that is the path that works today. Assigning into
-    DocMetadata by subscript raises TypeError, tracked separately.
+    Docs carry no metadata here, so the node builds a DocMetadata from the instance and
+    writes entity fields onto it as attributes. Both metadata paths now produce a
+    DocMetadata, so entity fields are read by attribute rather than by subscript.
     """
     inst, fake = _ner()
     docs = [FakeDoc(page_content='Obama')]
@@ -384,7 +401,9 @@ def test_ner_documents_delivered_once():
         f'enriched copies downstream, but the engine default forward also delivers the originals'
     )
     assert delivered[0] is not docs[0]
-    assert delivered[0].metadata['entities_per'] == ['Obama']
+    assert delivered[0].metadata.entities_per == ['Obama']
+    # Identity is inherited from the object being processed, not a placeholder.
+    assert delivered[0].metadata.objectId == 'obj-1'
 
 
 # ============================================================================

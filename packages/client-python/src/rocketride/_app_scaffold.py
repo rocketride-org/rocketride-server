@@ -694,8 +694,9 @@ def _placeholder_icon() -> str:
 def _readme_md(v: TemplateVars) -> str:
     """The scaffolded starter README — what the app does and how to work on it.
     Ships with every template so the PACKAGE tab's readme readiness starts
-    green and the store listing has a document to grow into. The canonical
-    authored copy is docs/README-template.md — keep the two in sync.
+    green and the store listing has a document to grow into. This function is
+    the single source of the template; the TypeScript scaffold
+    (packages/client-typescript/src/app-scaffold/index.ts) mirrors it.
 
     Args:
         v: Substitution variables.

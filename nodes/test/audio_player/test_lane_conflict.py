@@ -36,6 +36,9 @@ def _install_stubs():
             def stop(self):
                 pass
 
+            def abort(self):
+                pass
+
             def close(self):
                 pass
 
@@ -44,6 +47,8 @@ def _install_stubs():
 
         sd.OutputStream = _FakeOutputStream
         sd.CallbackStop = _CallbackStop
+        # start() now probes for an output device before opening a stream.
+        sd.query_devices = lambda *a, **k: [{'max_output_channels': 2}]
         sys.modules['sounddevice'] = sd
 
     ai_src = str(_AI_SRC)

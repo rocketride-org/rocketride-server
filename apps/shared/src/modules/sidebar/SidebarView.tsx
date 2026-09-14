@@ -142,7 +142,7 @@ const HOVER_BG = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
 
 /** Default configuration for the pipeline Explorer panel. */
 const PIPELINE_CONFIG: ExplorerConfig = {
-	title: 'Pipelines',
+	title: 'My Pipelines',
 	extensions: ['.pipe', '.pipe.json'],
 	displayName: (name: string) => name.replace(/\.pipe(?:\.json)?$/, '') || name,
 	createPlaceholder: 'pipeline name',
@@ -191,9 +191,9 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 	// node-builder placeholder) rides along whenever the tabs render.
 	const modeMenu: ViewMenu = {
 		entries: [
-			{ id: 'pipelines', label: 'Pipelines' },
 			...(hasAppBuilder ? [{ id: 'apps', label: 'Apps' }] : []),
 			{ id: 'nodes', label: 'Nodes' },
+			{ id: 'pipelines', label: 'Pipelines' },
 		],
 	};
 

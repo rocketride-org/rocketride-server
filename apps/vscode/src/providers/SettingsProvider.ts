@@ -53,6 +53,7 @@ export class SettingsProvider {
 	private connHandler: ConnectionMessageHandler;
 	private _isSaving = false;
 	private panel: vscode.WebviewPanel | undefined;
+	private viewReady = false;
 
 	/**
 	 * Creates a new SettingsProvider
@@ -114,7 +115,7 @@ export class SettingsProvider {
 
 	/**
 	 * Opens the settings page, optionally focused on a single section.
-	 * @param focus - If set ('development' or 'deployment'), shows only that section.
+	 * @param focus - If set, activates the matching settings tab.
 	 * @param authError - If set, displays an auth-failure banner that clears on successful test.
 	 */
 	public async openSettings(focus?: string, authError?: string): Promise<void> {
@@ -129,6 +130,13 @@ export class SettingsProvider {
 			if (authError) {
 				this.panel.webview.postMessage({ type: 'authError', message: authError });
 			}
+			// Only drop the pending replay once the webview is listening; otherwise a second
+			// openSettings landing before `view:ready` would lose both the direct message
+			// and the replay.
+			if (this.viewReady) {
+				this.pendingFocus = undefined;
+				this.pendingAuthError = undefined;
+			}
 			return;
 		}
 
@@ -139,6 +147,7 @@ export class SettingsProvider {
 		});
 
 		this.panel = panel;
+		this.viewReady = false;
 		panel.webview.html = this.getHtmlForWebview(panel.webview);
 
 		// Track this webview for updates
@@ -149,6 +158,7 @@ export class SettingsProvider {
 			try {
 				switch (message.type) {
 					case 'view:ready':
+						this.viewReady = true;
 						await this.loadAllSettings(panel.webview);
 						// Server probe is triggered by CloudPanel when cloud mode is selected
 						if (this.pendingFocus) {
@@ -269,6 +279,7 @@ export class SettingsProvider {
 				CloudAuthProvider.getInstance().clearPendingChanges();
 			}
 			this.panel = undefined;
+			this.viewReady = false;
 			this.activeWebviews.delete(panelWebview);
 			this.connHandler.stopStatusPolling();
 

@@ -8,7 +8,7 @@
 	"path": "nodes.tool_daytona",
 	"prefix": "daytona",
 	"icon": "daytona.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_daytona",
 	"description": ["Gives agents an isolated Daytona cloud sandbox for running code and shell commands.", "Provides run_code, run_command, upload_file and download_file on one shared ephemeral sandbox."],
 	"tile": [],
 	"lanes": {},

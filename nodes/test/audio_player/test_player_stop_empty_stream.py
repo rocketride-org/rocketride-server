@@ -82,6 +82,9 @@ def _install_stubs():
         def stop(self):
             sd.stream_calls.append('stop')
 
+        def abort(self):
+            sd.stream_calls.append('abort')
+
         def close(self):
             sd.stream_calls.append('close')
 
@@ -90,6 +93,9 @@ def _install_stubs():
 
     sd.OutputStream = _FakeOutputStream
     sd.CallbackStop = _CallbackStop
+    # start() now refuses to open a stream unless some device reports output
+    # channels, so the fake has to answer the probe or every BEGIN raises.
+    sd.query_devices = lambda *a, **k: [{'max_output_channels': 2}]
     sys.modules['sounddevice'] = sd
 
     for name in [n for n in sys.modules if n == 'audio_player' or n.startswith('audio_player.')]:

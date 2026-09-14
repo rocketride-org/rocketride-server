@@ -96,7 +96,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * a slower earlier run must not overwrite fresher state.
 	 */
 	private rescanSeq = 0;
-	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'pipelines';
+	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'apps';
 
 	private logger = getLogger();
 
@@ -287,6 +287,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		for (const app of this.scannedApps) {
 			rows.push({ id: app.id, name: app.name, folder: app.folder, iconUrl: await appIconDataUri(app.icon) });
 		}
+		// Scan order is marker-path order (a binding-priority detail); the
+		// list the user sees sorts by display name.
+		rows.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 		return rows;
 	}
 

@@ -1,0 +1,61 @@
+---
+title: Build a pipeline in your IDE
+sidebar_label: Build in your IDE
+---
+
+import ThemedImage from '@theme/ThemedImage';
+import { LuPlay } from 'react-icons/lu';
+
+# Build a pipeline in your IDE
+
+The visual canvas in the VS Code extension is the fastest way to author a `.pipe` file.
+This walkthrough starts from zero and finishes with a running `Chat → LLM` pipeline you
+can talk to.
+
+## 1. Install the extension
+
+Search for **RocketRide** in the VS Code Extension Marketplace and install it. The
+extension also works in VS Code forks (Cursor, Windsurf, VSCodium) via the
+[Open VSX Registry](https://open-vsx.org/extension/RocketRide/rocketride).
+
+## 2. Deploy a server
+
+Click the RocketRide
+(<ThemedImage alt="RocketRide" className="rr-inline-icon" sources={{ light: '/img/rocketride-icon-colored.svg', dark: '/img/rocketride-icon-white.svg' }} />)
+icon in your IDE sidebar, then choose how to run the runtime. **Local** is the
+right choice here — it pulls the server straight into your IDE with no extra
+setup. (The other options are covered in
+[Choose How to Run RocketRide](/operate).)
+
+## 3. Create a pipeline file
+
+Create a file ending in `.pipe` (e.g. `my-first-pipeline.pipe`). The extension opens it in
+the visual builder canvas. `.pipe` files are JSON under the hood, but you author them
+visually.
+
+## 4. Build a simple chat pipeline
+
+Every pipeline starts with a **source node**:
+
+1. Add a **Chat** source node: an interactive conversational interface.
+2. Add an **LLM** node: pick a provider (OpenAI, Anthropic, Google, …) and set your API key.
+3. Connect the Chat source's output lane to the LLM's input lane.
+
+The result is a `Chat → LLM` pipeline; the LLM's response routes back to the chat interface
+automatically.
+
+## 5. Run it
+
+Press the **<LuPlay className="rr-inline-icon" /> Run button** on the source node, or launch
+from the **RocketRide sidebar**. Open the chat interface, send a message, and watch
+the LLM respond in real time. Use the **Server Monitor** page to trace call trees, token usage,
+and memory consumption.
+
+Save the `.pipe` file, you'll run it from code in the next walkthrough.
+
+## Next
+
+- [Integrate a pipeline with an SDK](/quickstart/sdk-integration): run the `.pipe` file you
+  just built from your own Python or TypeScript application.
+- [VS Code extension](/clients/vscode): the full extension guide (canvas, runtime
+  management, tracing).

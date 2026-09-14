@@ -9,7 +9,7 @@
 	"prefix": "vertex",
 	"description": ["A processing component that interacts with Google Vertex AI Vector Search."],
 	"icon": "vertex.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_vertex_search",
 	"invoke": {},
 	"lanes": {},
 	"preconfig": {

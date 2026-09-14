@@ -279,6 +279,23 @@ export interface AppDescriptor {
 	 */
 	app: React.ComponentType<ShellAppProps>;
 	/**
+	 * How this app would like the shell's sidebar to open.
+	 *
+	 * `'collapsed'` opens the rail collapsed each time the app becomes active;
+	 * the person can still expand it, and expanding it lasts until they leave
+	 * and come back. Absent means the app has no opinion and the sidebar is
+	 * left exactly as it is — an app that says nothing can never disturb the
+	 * state another app or the person chose.
+	 *
+	 * For an app whose own content is the reason to open the sidebar rather
+	 * than the shell's navigation: a chat list is worth a column when you want
+	 * it and a stolen quarter of the window when you do not.
+	 *
+	 * Ignored below the compact breakpoint, where the sidebar is a drawer and
+	 * "collapsed" has no meaning.
+	 */
+	sidebar?: 'expanded' | 'collapsed';
+	/**
 	 * Optional cross-app component catalog. Never mounted by the shell —
 	 * entries are loadable by other apps via `useAppComponent()`.
 	 */
@@ -301,10 +318,26 @@ export interface AppDescriptor {
 export interface ShellBrandingConfig {
 	/** App display name used in the sidebar header and tab bar. */
 	appName: string;
-	/** Logo rendered in the expanded sidebar header. */
+	/**
+	 * Logo rendered in the expanded sidebar header.
+	 *
+	 * An app that supplies one owns the whole header — the shell draws this
+	 * INSTEAD of its own wordmark and the app-name label beneath it, not above
+	 * them. For an app carrying its own brand rather than sitting under the
+	 * platform's.
+	 */
 	logo?: React.ReactNode;
 	/** Compact logo rendered in the collapsed sidebar header. */
 	logoCollapsed?: React.ReactNode;
+	/**
+	 * Whether to keep the announcements ticker out of this app's sidebar.
+	 *
+	 * The ticker is the platform's channel, not the app's, and it reads as the
+	 * host talking over a product that carries its own brand. Opt-in to hiding
+	 * rather than opt-out of showing: an app that says nothing keeps it, so
+	 * this cannot quietly turn the channel off for everyone.
+	 */
+	hideAnnouncements?: boolean;
 	/**
 	 * Theme-aware icon for the sidebar header.
 	 * The shell picks iconDark on dark palettes, iconLight on light palettes.

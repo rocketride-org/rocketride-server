@@ -240,6 +240,9 @@ class CrewManager(CrewBase):
         # 2. Build the manager's LLM (uses this node's own llm channel).
         manager_llm = self._build_crew_llm(context, _MGR_ROLE)
 
+        # `context`, not a delegate's `sub_context` -- the manager's own channel.
+        manager_tools = self._build_crew_tools(context, context.tools.list)
+
         # 3. Build per-sub-agent Agent + Task.
         # d.invoke is the sub-agent's full pSelf IInstance.
         # Each sub-agent gets its own AgentContext built from a fresh
@@ -299,26 +302,21 @@ class CrewManager(CrewBase):
                 context=[],
             )
 
-            # Keep the delegate's tools off the manager.
+            # Overwrite, don't clear: this both keeps the delegate's tools off the
+            # manager and is the only route for the manager's own channel.
             #
-            # CrewAI back-fills Task.tools from the task's agent (crewai/task.py
-            # check_tools), and crewai/crews/utils.py then resolves the executing
-            # agent's toolset as `task.tools or agent_to_use.tools` -- while
-            # Crew._get_agent_to_use (crewai/crew.py) returns the MANAGER for a
-            # hierarchical process. The manager therefore inherits whichever delegate's tools
-            # belong to the task it is running and can work the tools itself
-            # instead of delegating, which is exactly what a tool-split prompt
-            # forbids.
+            # crewai/task.py check_tools back-fills Task.tools from task.agent, and
+            # crewai/crews/utils.py resolves `task.tools or agent_to_use.tools` --
+            # where Crew._get_agent_to_use returns the MANAGER when hierarchical, so
+            # an untouched task hands the manager whichever delegate it is running.
+            # Putting them on the Agent instead is rejected: crewai/crew.py
+            # _create_manager_agent raises "Manager agent should not have tools".
             #
-            # This must happen after construction: passing `tools=[]` to Task()
-            # does not survive, because check_tools runs as an after-validator and
-            # reads the empty list as "unset". Task sets no validate_assignment, so
-            # assigning here is not re-validated and sticks.
-            #
-            # Delegation is unaffected: crewai/tools/agent_tools builds a fresh
-            # Task bound to the coworker, which back-fills from that agent's own
-            # tools.
-            task_obj.tools = []
+            # Post-construction because check_tools is an after-validator that reads
+            # an empty list as "unset". Delegation is unaffected: _prepare_tools
+            # merges the delegation tools on top, and agent_tools builds a fresh Task
+            # per handoff.
+            task_obj.tools = list(manager_tools)
 
             sub_agents.append(agent_obj)
             sub_tasks.append(task_obj)
@@ -336,6 +334,8 @@ class CrewManager(CrewBase):
         else:
             manager_backstory = base_backstory
 
+        # No `tools=`: _create_manager_agent rejects a manager that carries any.
+        # The channel rides on task_obj.tools in step 3 instead.
         manager_agent = Agent(
             role=_MGR_ROLE,
             goal=ig.goal or _MGR_GOAL,

@@ -8,7 +8,7 @@
 	"path": "nodes.tool_filesystem",
 	"prefix": "fs",
 	"icon": "file-system.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_filesystem",
 	"description": ["File Store source. Streams files from the account-scoped RocketRide file store into the pipeline as raw objects for downstream processing.", "Point it at a file to process just that file, or at a folder to process every file in it; enable 'Recursive' to also descend into subfolders.", "Paths are relative to the task's storage anchor, resolved automatically from the running task."],
 	"tile": ["Path: ${parameters.filesystem.path}"],
 	"lanes": {

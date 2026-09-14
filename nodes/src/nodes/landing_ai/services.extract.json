@@ -59,7 +59,7 @@
 	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "landing_ai.svg",
-	"documentation": "https://docs.landing.ai/ade/ade-python",
+	"documentation": "https://docs.rocketride.org/nodes/landing_ai/extract",
 
 	//
 	// Required:

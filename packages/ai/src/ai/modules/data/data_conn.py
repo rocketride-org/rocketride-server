@@ -40,6 +40,7 @@ from rocketlib import (
     monitorCompleted,
     monitorFailed,
     monitorOther,
+    warning,
 )
 
 # Only import for type checking to avoid circular import errors
@@ -55,6 +56,22 @@ if TYPE_CHECKING:
 # trace events ride the run-log continuum, so unbounded tool payloads would
 # bloat segments without adding replay value.
 TOOL_TRACE_DATA_CAP = 2048
+
+
+# =============================================================================
+# LANE CONSTANTS
+# =============================================================================
+
+# Lane names as `_determine_lane` returns them, mapped to the binder method a
+# write on that lane dispatches to. Only names that differ need an entry: the
+# `tag` and `raw` lanes both ride the `tags` method (writeTag / writeTagData),
+# so asking the pipe about `raw` would always answer "no listener".
+LANE_BINDER_METHODS = {'tag': 'tags', 'raw': 'tags'}
+
+# Binder methods that are lifecycle hooks, not data lanes. Every bound component
+# listens on them, so they always come back from getListeners() and must be kept
+# out of any "lanes you could send to" list.
+LANE_LIFECYCLE_METHODS = frozenset({'open', 'closing', 'close'})
 
 
 def _trim_tool_data(value: Any) -> Any:
@@ -303,6 +320,36 @@ class DataConn(DAPConn):
         # and output it to the data lane
         else:
             return 'raw'
+
+    def _warn_on_unconsumed_lane(self, mime_type: str, lane: str, pipe_instance: IServiceFilterPipe):
+        """
+        Warn when the chosen lane has no consumer, so the data reaches nothing.
+
+        A lane that no component reads is not an error — a source may legitimately
+        offer several lanes while the pipeline wires up one. What is never intended
+        is *this* object landing on one of the unread ones: it is accepted, counted
+        as completed and answered with status OK, yet no component ever sees it.
+        The warning is the only signal that separates that outcome from a real one.
+
+        Args:
+            mime_type (str): MIME type the sender supplied, as received.
+            lane (str): Lane chosen for it by :pyfunc:`_determine_lane`.
+            pipe_instance (IServiceFilterPipe): Pipe the data would be written to.
+
+        Returns:
+            None
+        """
+        method = LANE_BINDER_METHODS.get(lane, lane)
+        if pipe_instance.hasListener(method):
+            return
+
+        data_lanes = set(pipe_instance.getListeners()) - LANE_LIFECYCLE_METHODS
+        consumed = ', '.join(sorted(data_lanes)) or 'none'
+        warning(
+            f'Data sent as "{mime_type}" went to the "{lane}" lane, which no component in this '
+            f'pipeline reads, so nothing received it. Lanes this pipeline reads: {consumed}. '
+            'Send a Content-Type that maps to one of those instead.'
+        )
 
     def _begin(self, pipe_conn: DataConnPipe):
         """
@@ -575,6 +622,7 @@ class DataConn(DAPConn):
                     # Get the id and determine the lane
                     pipe_id = pipe_instance.pipeId
                     lane = self._determine_lane(mime_type, pipe_instance)
+                    self._warn_on_unconsumed_lane(mime_type, lane, pipe_instance)
 
                     # Open the object for processing
                     pipe_instance.open(entry)

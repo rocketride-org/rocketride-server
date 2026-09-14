@@ -162,9 +162,16 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
         run: |
           set -euo pipefail
+          # quay.io, not Docker Hub: minio/minio on Hub returns zero tags and
+          # empty repository metadata — the whole repo is gone from there, not just
+          # this tag, and Hub reports a missing tag as "pull access denied", which
+          # makes it read like a permissions problem. Same release, same entrypoint,
+          # pulls anonymously. The comment lives ABOVE the command deliberately: a
+          # `#` line inside a `\` continuation ends the command early and docker
+          # never sees the image argument.
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:9000/minio/health/live >/dev/null 2>&1; then ready=1; break; fi
             sleep 2

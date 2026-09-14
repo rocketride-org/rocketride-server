@@ -1,84 +1,85 @@
 # preprocessor_code
 
-A RocketRide preprocessor node that splits source code into syntax-aware chunks for embedding, search, or LLM processing.
+A RocketRide preprocessor node that splits supported source code into
+syntax-aware documents. Choose it over a general-text or LLM preprocessor when
+you want code structures, rather than prose boundaries, to drive chunking.
+
+## About Tree-sitter
+
+Tree-sitter is the parsing library this node uses to build source-code syntax
+trees. The node installs its language-specific grammar packages and creates a
+parser for the selected language.
 
 ## What it does
 
-Accepts source code text and emits each syntactic construct (function, class, statement, block) as a separate document, so downstream nodes receive chunks that respect code boundaries rather than cutting mid-construct.
+Receives `text` and emits `documents` made from syntax-tree nodes. It supports
+the C, C++, Python, JavaScript, and TypeScript profiles; in automatic mode it
+detects one of those languages from the text itself. A matched class or
+function can coexist with chunks for nested constructs, so output may overlap.
 
-Uses **tree-sitter** with per-language grammar packages (`tree-sitter-python`, `tree-sitter-javascript`, `tree-sitter-typescript`, `tree-sitter-c`, `tree-sitter-cpp`). If the optional `tree_sitter_languages` package is installed it is used as a fast path for grammar loading; otherwise the individual per-language modules are loaded directly. Parsers are cached per language for the lifetime of the pipeline run.
+## Lanes
 
-By default (`language: auto`) the language is detected from the **content** of each file using weighted regex heuristics, not the filename extension. If detection cannot identify a supported language with sufficient confidence, the file is skipped and a warning is emitted; no documents are produced for that file.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `documents` | Split source-code text into syntax-aware documents. |
 
----
+## Profiles
+
+Default: `auto`, which detects the language from the source text.
+
+| Profile | Language |
+| --- | --- |
+| `auto` *(default)* | Detect from source text |
+| `c` | C |
+| `cpp` | C++ |
+| `python` | Python |
+| `javascript` | JavaScript |
+| `typescript` | TypeScript |
 
 ## Configuration
 
-### Lanes
+Select the language profile that matches the input when its language is known;
+otherwise leave the default automatic profile. The maximum string length is
+present in the configuration, but the current implementation determines output
+boundaries from syntax nodes.
 
-| Lane in | Lane out    | Description                                         |
-|---------|-------------|-----------------------------------------------------|
-| `text`  | `documents` | Split source code into syntax-aware document chunks |
+### Code splitter profile
 
-Both `writeText` and `writeTable` inputs are processed. Table input marks the resulting documents with `isTable: true` and an incrementing `tableId`. Each emitted document carries an incrementing `chunkId` starting at 0 per object.
+The automatic profile samples up to the first 5,000,000 characters and scores regex signals
+for the five supported languages. It needs a score of at least 3 and a lead of
+at least 2 over the runner-up; otherwise the input produces no documents and a
+warning is emitted. Use an explicit profile for short snippets, unusual code,
+or content that automatic detection cannot classify reliably.
 
-### Fields
+For C and C++, automatic detection favors C for header-like ties and for
+`extern "C"` without C++-only markers. Pick `cpp` explicitly when that
+conservative choice is wrong for your input.
 
-Configuration is profile-based. Select a profile to fix the parsing language, or leave the default `auto` profile to detect the language per file.
+### Maximum string length
 
-| Field | Type | Description |
-|---|---|---|
-| `strlen` | number | Default 512.  |
-| `language` | string | Default "auto".  |
-| `profile` | string | Default "auto".  |
+This value defaults to 512, but the splitter does not use it to divide a
+syntax node. A large class or function is therefore emitted as one chunk even
+when it exceeds that value. Change it only if a downstream component reads the
+same configuration; it does not constrain this node's output today.
 
-Note: `strlen` is stored in the configuration and profile but the current splitter determines chunk boundaries purely from syntax nodes. A single large function or class becomes a single chunk regardless of `strlen`.
+## Notes
 
-### Profiles
+### Output details
 
-| Profile          | Language setting | Notes                                      |
-|------------------|------------------|--------------------------------------------|
-| `auto` (default) | `auto`           | Detects language from file content         |
-| `c`              | `c`              | C source and headers                       |
-| `cpp`            | `cpp`            | C++ source                                 |
-| `python`         | `python`         | Python source                              |
-| `javascript`     | `javascript`     | JavaScript source                          |
-| `typescript`     | `typescript`     | TypeScript source                          |
+Both text and table callbacks are parsed. Table-derived documents are marked
+as tables; each object starts its `chunkId` at 0. C and C++ header declarations
+and whole `extern "C"` linkage blocks are included, while preprocessor lines
+such as `#include` and `#define` are skipped.
 
-The UI profile picker exposes `auto`, `c` (labelled "C/C++ source"), `python`, `javascript`, and `typescript`. The `cpp` profile is also present in `preconfig` for direct configuration use.
+The parser cache is a class attribute on `PreProcessor`, so a grammar loaded
+once is reused by every instance in the process and outlives any single global
+node instance. If the optional `tree_sitter_languages` package is available it
+is used to load a grammar; otherwise the node loads the installed per-language
+grammar module.
 
----
+## Upstream docs
 
-## Language auto-detection
-
-With `language: auto`, the node scores the text against weighted regex patterns for Python, TypeScript, JavaScript, C++, and C (only the first 5 MB of the text is sampled).
-
-Example signals used per language:
-
-- **Python**: `def ...():`, `class ...:`, decorator patterns, `from X import`, `async def`
-- **TypeScript**: `interface`, `type X =`, `import type`, `enum`, type annotations, `export ... type`
-- **JavaScript**: `export default/const/function/class`, `require(`, `module.exports`, arrow functions
-- **C++**: `std::`, `template <`, `using namespace std`, `::` resolution
-- **C**: include guards (`#ifndef`/`#define`/`#endif`), `typedef struct`, prototypes ending with `;`
-
-The winner must score at least 3 and lead the runner-up by at least 2, otherwise detection fails and the file is skipped with a warning. Tie-break rules for C vs C++:
-
-- `extern "C"` present with no C++-only markers (`std::`, templates, namespaces, `::`) resolves to **C**.
-- A near-tie where the top two candidates are C and C++ resolves to **C** (conservative, matches typical header-like code).
-
-If detection regularly fails on valid source (very short snippets, unusual dialects), pin the language with an explicit profile instead of `auto`.
-
----
-
-## How chunks are extracted
-
-The tree-sitter syntax tree is walked recursively. The following node types become chunks:
-
-- **Python**: `function_definition`, `class_definition`, `decorated_definition`, plus module-level `import_statement`, `import_from_statement`, `assignment`, and `expression_statement`.
-- **JavaScript / TypeScript**: `function_declaration`, `function_expression`, `arrow_function`, `class_declaration`, `method_definition`, and function values in minified patterns (`const f = () => {...}`, object pair values that are functions).
-- **C / C++**: `function_definition`, `class_specifier`, `struct_specifier`, entire `extern "C" { ... }` linkage blocks, and top-level declarations in headers (prototypes, typedefs, field declarations). Preprocessor directives (`#include`, `#define`, etc.) are skipped.
-
-Because the walk recurses into matched nodes, nested constructs produce overlapping chunks: a class is emitted as one chunk and each of its methods is also emitted as its own chunk. This gives both whole-construct and per-member granularity for downstream retrieval.
+- [Tree-sitter documentation](https://tree-sitter.github.io/tree-sitter/)
 
 ---
 
