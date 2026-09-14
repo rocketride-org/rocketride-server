@@ -16,7 +16,7 @@ export const SCENARIOS: ChaosScenario[] = [
 	{
 		id: 'whack-a-mole',
 		name: 'Whack-a-Mole',
-		description: 'Start 16 pipelines, randomly kill 50% every 5s, immediately restart them. Tests cleanup, resource leaks, and ghost tasks.',
+		description: 'Start 16 pipelines, randomly kill 15% every 5s, immediately restart them. Tests cleanup, resource leaks, and ghost tasks.',
 		tags: [{ label: 'chaos', color: 'chaos' }, { label: 'stress', color: 'stress' }],
 		config: { pipelines: 16, sendsPerPipeline: 100, rampUp: 'linear', randomDelay: 200, killProbability: 15, payloadSize: 'medium' },
 		run: async (engine) => engine.start({ pipelines: 16, sendsPerPipeline: 100, rampUp: 'linear', randomDelay: 200, killProbability: 15, corruptionLevel: 'off', payloadSize: 'medium', payloadType: 'text' }),

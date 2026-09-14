@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// rocketride/app-sdk — subpath export for shell-ui app development
+// rocketride/app-sdk — subpath export for shell app development
 // =============================================================================
 //
 // External developers install `rocketride` and import from this subpath:
@@ -34,7 +34,7 @@
 //
 // At runtime:      Module Federation's shared singleton mechanism replaces
 //                  these stubs with the real implementations from the shell
-//                  host (shell-ui).  Third-party apps never bundle the
+//                  host (the shell).  Third-party apps never bundle the
 //                  implementations.
 // =============================================================================
 
@@ -45,7 +45,6 @@
 export type {
 	// Shell component prop contracts
 	ShellAppProps,
-	ShellSidebarProps,
 	ConnectResult,
 
 	// App configuration

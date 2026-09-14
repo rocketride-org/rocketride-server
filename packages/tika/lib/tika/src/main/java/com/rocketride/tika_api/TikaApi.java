@@ -39,6 +39,8 @@ import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.extractor.EmbeddedDocumentExtractor;
 
+import net.sf.sevenzipjbinding.SevenZip;
+
 import com.rocketride.tika_api.parsers.email.CustomRFC822Parser;
 import com.rocketride.tika_api.EmbeddedContentExtractor.EmbeddedContentProcessor;
 
@@ -110,7 +112,17 @@ public final class TikaApi {
 	/**
 	 * Global privates used to control the process
 	 */
-	private static boolean initialized = false;
+	// volatile so a reader outside init()'s monitor cannot observe a stale value.
+	private static volatile boolean initialized = false;
+
+	/**
+	 * Whether 7-Zip-JBinding's native library actually loaded.
+	 *
+	 * ConfigBuilder only swaps Tika's RarParser for RarSevenZipParser when this is
+	 * true, so a failed native load leaves RAR4 handling in place instead of
+	 * removing RAR support altogether.
+	 */
+	private static volatile boolean sevenZipReady = false;
 
 	// private static CompositeEncodingDetector encodingDetector;
 	private static ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
@@ -305,7 +317,10 @@ public final class TikaApi {
 	/**
 	 * Global init/deinit of our tika parsing subsystem
 	 */
-	public static void init() throws Exception {
+	// synchronized so the initialized check and assignment below are one atomic
+	// step. Two threads could otherwise both pass the guard and race into
+	// SevenZip.initSevenZipFromPlatformJAR().
+	public static synchronized void init() throws Exception {
 		// Get the root path
 		logger.log(Level.INFO, "Tika.rootPath (Before set): " + TikaApi.rootPath);
 		rootPath = System.getProperty("java.home") + "/..";
@@ -318,6 +333,25 @@ public final class TikaApi {
 		logger.log(Level.INFO, "Initializing TikaAPI ...");
 		logger.log(Level.INFO, "Aspose parsers available: " + asposeAvailable);
 
+		// Initialize 7-Zip-JBinding once for the JVM. Required by RarSevenZipParser;
+		// the call extracts the platform-specific native lib from the bundled jar
+		// and loads it. Failures are logged but not fatal: non-RAR parsing still
+		// works, and ConfigBuilder keeps Tika's RAR4 parser when this did not load.
+		try {
+			if (!SevenZip.isInitializedSuccessfully()) {
+				SevenZip.initSevenZipFromPlatformJAR();
+				logger.log(Level.INFO, "7-Zip-JBinding initialized: " + SevenZip.getSevenZipVersion().version);
+			}
+			sevenZipReady = true;
+		} catch (Exception | LinkageError t) {
+			// A missing or incompatible native library arrives as UnsatisfiedLinkError,
+			// hence LinkageError. JVM-fatal Errors (OutOfMemoryError, StackOverflowError)
+			// are deliberately not caught: continuing after one of those would leave the
+			// process in a state this method cannot reason about.
+			logger.log(Level.WARNING, "Failed to initialize 7-Zip-JBinding; RAR5 support disabled", t);
+			sevenZipReady = false;
+		}
+
 		// Get a new encoding detector
 		// encodingDetector = initEncodingDetector();
 
@@ -329,6 +363,16 @@ public final class TikaApi {
 		// TemporaryResources [APPLAT-265]. This task will run every 5 minutes.
 		executor.scheduleWithFixedDelay(new DeleteTemporaryFilesTask(), 5, 5, TimeUnit.MINUTES);
 		initialized = true;
+	}
+
+	/**
+	 * Whether the 7-Zip-JBinding native library is loaded and RarSevenZipParser can
+	 * run. Consulted by ConfigBuilder before it replaces Tika's RarParser.
+	 *
+	 * @return true when 7-Zip-JBinding initialized successfully
+	 */
+	public static boolean isSevenZipReady() {
+		return sevenZipReady;
 	}
 
 	/**

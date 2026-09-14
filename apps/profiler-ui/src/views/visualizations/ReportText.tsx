@@ -26,7 +26,7 @@
 
 import React, { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles } from 'shared/themes/styles';
+import { commonStyles } from 'shell';
 
 // =============================================================================
 // STYLES

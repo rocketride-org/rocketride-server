@@ -29,8 +29,8 @@
 // workspace file API.
 // =============================================================================
 
-import { Documents } from 'shell-ui';
-import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+import { Documents } from 'shell';
+import type { IVirtualFileSystem } from 'shell';
 
 /** The app's Documents instance. Set by AparaviApp on mount. */
 let _docs: Documents | null = null;
@@ -51,7 +51,7 @@ export function getDocs(): Documents | null {
  */
 export function createDocs(
 	vfs: IVirtualFileSystem,
-	workspace?: import('shell-ui').WorkspaceBinding,
+	workspace?: import('shell').WorkspaceBinding,
 ): Documents {
 	_docs = new Documents(vfs, workspace);
 	return _docs;

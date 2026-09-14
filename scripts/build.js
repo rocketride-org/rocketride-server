@@ -109,6 +109,18 @@ function parseArgs(args) {
 		} else if (arg.startsWith('--log=')) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
+		} else if (arg.startsWith('--path=')) {
+			// builder:inject / builder:update: root of the target repository
+			// (inject requires it; update defaults to this repository).
+			options.path = arg.substring('--path='.length);
+		} else if (arg.startsWith('--branch=')) {
+			// builder:update: upstream branch to fetch the scripts/ tree
+			// from (default: develop).
+			options.branch = arg.substring('--branch='.length);
+		} else if (arg.startsWith('--shell=')) {
+			// Server to vendor the platform package from (auto-injection and
+			// client:update); beats ROCKETRIDE_URI from .config/.env.
+			options.shell = arg.substring('--shell='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
 			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
 			const paths = require('./lib/paths');
@@ -134,6 +146,12 @@ function parseArgs(args) {
 			// shell:freeze --check: CI mode — verify the frozen shell-api
 			// contract is current without writing a new version.
 			options.check = true;
+		} else if (arg === '--reseed') {
+			// saas:seed --reseed: fleet bump — roll a NEW version of every
+			// platform app. Deliberately NOT the global --force flag: that
+			// one forces full rebuilds (C++ recompile included) of every
+			// step in the dependency chain.
+			options.reseed = true;
 		} else if (arg === '--rebuild-cache') {
 			// test-integrity: nuke <engine-cache>/{constraints.txt,requirements.hash}
 			// so depends.ensure_constraints() does a full uv pip compile.
@@ -236,6 +254,7 @@ Options:
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message
+  --shell=URL         Server to vendor the platform from (auto-injection, client:update)
   --jest="args"       Pass arguments to Jest (can be repeated)
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
@@ -251,7 +270,7 @@ Options:
   --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
   --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated)
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
-  --rebuild-cache     check-externals:run: force ensure_constraints() to recompile (deletes constraints.txt + requirements.hash)
+  --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt, requirements.hash and the satisfied/ verdicts)
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
@@ -276,6 +295,40 @@ async function main() {
 
 	// Parse arguments early to check for --help
 	const { requests: explicitRequests, options, globalCommands } = parseArgs(args);
+
+	// =========================================================================
+	// Pre-bootstrap injection — handled before any other machinery, on Node
+	// built-ins alone: the workspace may not even be installable yet
+	// =========================================================================
+	const fs = require('fs');
+	// Standalone app repo = no in-tree shell source.
+	const isStandalone = !fs.existsSync(path.join(ROOT, 'packages', 'shell'));
+
+	// Vendored-shell bootstrap — before the dependency check: apps install
+	// the platform package (file:../../.rocketride/shell/shell.tgz), and
+	// pnpm hard-fails when a file: target is missing, so the tarball must
+	// exist before install can succeed.
+	// Standalone repo: fetch the real package from a server (--shell=<url>
+	// beats ROCKETRIDE_URI beats localhost); refreshing an EXISTING install
+	// stays explicit (builder client:update).
+	// Platform repo: pack the placeholder tarball — the real one is emitted
+	// by the first shell:build (pack-shell), whose chained install relinks
+	// every consumer.
+	if (isStandalone) {
+		const { ensureVendoredShell } = require('./lib/vendor-shell');
+		try {
+			await ensureVendoredShell(ROOT, options);
+		} catch (err) {
+			console.error(`✖ Vendored shell injection failed: ${err.message}`);
+			console.error('Set ROCKETRIDE_URI in .env or pass --shell=<server url>.');
+			process.exit(1);
+		}
+	}
+	// Platform and overlay repos need no bootstrap: their workspace override
+	// resolves shell to the in-tree package (workspace:*), which carries no
+	// tarball to exist or verify — install works on a fresh clone as-is.
+	// pack-shell still emits the tgz on every shell:build for /client/shell
+	// serving and standalone vendoring.
 
 	// Make sure the system is setup
 	const { setupSystem } = require('./setup');

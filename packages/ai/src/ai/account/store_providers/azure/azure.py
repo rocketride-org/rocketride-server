@@ -276,6 +276,50 @@ class AzureBlobStore(IStore):
         retry=retry_if_exception_type((ConnectionError, TimeoutError)),
         reraise=True,
     )
+    async def move_file(self, src: str, dst: str) -> None:
+        """Move a blob onto ``dst``, replacing it if it exists.
+
+        The copy is server-side and the destination is replaced only once it completes, so a
+        failure leaves the old blob as it was. The status is checked rather than assumed.
+
+        Args:
+            src: Source path, relative to the container prefix.
+            dst: Destination path, relative to the container prefix.
+
+        Raises:
+            StorageError: If the source is missing or the move fails.
+        """
+        try:
+            client = self._get_client()
+            src_client = client.get_blob_client(container=self._container, blob=self._get_blob_name(src))
+            dst_client = client.get_blob_client(container=self._container, blob=self._get_blob_name(dst))
+
+            try:
+                await asyncio.to_thread(src_client.get_blob_properties)
+            except Exception as e:
+                raise StorageError(f'File not found: {src}') from e
+
+            # Without requires_sync the copy can return 'pending' having already started
+            # overwriting the destination, which this process cannot undo.
+            result = await asyncio.to_thread(dst_client.start_copy_from_url, src_client.url, requires_sync=True)
+            if str(result.get('copy_status', '')).lower() != 'success':
+                raise StorageError(f'Copy of {src} to {dst} did not complete: {result.get("copy_status")}')
+
+            await asyncio.to_thread(src_client.delete_blob)
+
+        except (ConnectionError, TimeoutError):
+            raise
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to move {src} to {dst} in Azure: {e}') from e
+
+    @retry(
+        stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
+        wait=wait_exponential(multiplier=1, min=1),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
     async def list_files(self, prefix: str = '') -> list:
         """
         List all blobs in Azure container with given prefix.

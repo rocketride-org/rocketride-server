@@ -30,18 +30,19 @@ task execution, debugging sessions, and resource management.
 
 Primary Responsibilities:
 --------------------------
-1. Handles DAP protocol commands for task lifecycle management (launch, execute, attach, terminate)
-2. Manages debugging session initialization and capabilities negotiation
-3. Provides task execution control (pause, continue, disconnect)
-4. Coordinates with a TaskServer to orchestrate backend task engines
-5. Maintains DAP-compliant communication with debugging clients
+1. Handles DAP protocol commands for task lifecycle management (launch, execute,
+   terminate, restart)
+2. Coordinates with a TaskServer to orchestrate backend task engines
+3. Resolves the run team and its owning org before any task is started
+4. Maintains DAP-compliant communication with clients
 
 Architecture:
 -------------
 - Inherits from DAPConn to leverage DAP protocol handling
 - Works in conjunction with TaskServer for actual task management
-- Supports both debugging-enabled ('launch') and debug-free ('execute') task execution
-- Handles attachment to existing task sessions for collaborative debugging
+- Two entry points start a task: 'launch' (the cloud REST path, via the SaaS
+  ALB) and 'execute' (the SDK path). They are deliberately separate — see
+  on_launch's docstring for the three ways they differ
 
 Usage Context:
 --------------
@@ -54,7 +55,7 @@ import os
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
-from ai.account.models import resolve_task_permissions
+from ai.account.models import resolve_run_permissions
 from rocketride import TASK_STATE
 
 # Only import for type checking to avoid circular import errors
@@ -125,18 +126,20 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # The run team is ALWAYS the session's team context: the user's
-            # profile-assigned development team for client connections, or the
-            # deployment's team for the trusted in-process dispatch (which
-            # synthesizes an AccountInfo with defaultTeam = the run's team).
-            # Clients do not choose a team at launch; a stray teamId is
-            # rejected rather than silently ignored so the caller is never
-            # surprised by which team a run was billed/authorized under.
+            # The run team is ALWAYS the session's DEV TEAM: the team a
+            # development-mode run is billed to and whose environment layer
+            # applies — the user's profile-assigned team for client
+            # connections, or the deployment's team for the trusted
+            # in-process dispatch (which synthesizes an AccountInfo with
+            # devTeam = the run's team). A client-supplied teamId is
+            # IGNORED, never honored — the caller must not be able to pick
+            # the team a run is billed/authorized/secret-resolved under
+            # (same doctrine as the org IDOR fixes).
             args = request.get('arguments') or {}
-            team_id = self._account_info.defaultTeam
-            requested_team = args.get('teamId')
-            if requested_team and requested_team != team_id:
-                raise PermissionError('Tasks run in your assigned development team; change it in your profile')
+            team_id = self._account_info.devTeam
+            # Billing must never guess: no dev team = no dev run.
+            if not team_id:
+                raise PermissionError('No development team is set — pick one in your profile before running pipelines')
 
             # Verify task.control on the run team BEFORE any secret handling,
             # since the env merge below pulls that team's secrets.
@@ -175,13 +178,20 @@ class TaskCommands(DAPConn):
             # cannot spoof a deploy run into the team continuum.
             run_kind = getattr(self, '_trusted_run_kind', 'dev')
             trigger = getattr(self, '_trusted_trigger', '') or ''
+            # Owner scope rides the same trusted channel: a TEAM-owned deploy
+            # (@team) or a USER-owned run (an interactive .use, or a personal
+            # @me deploy). Defaults from run_kind when the dispatch didn't set
+            # it (an ordinary .use is user-owned).
+            owner_kind = getattr(self, '_trusted_owner_kind', '') or ('team' if run_kind == 'deploy' else 'user')
 
-            # Layer org → team → user secrets on top. Deploy runs skip the
-            # USER layer deliberately: a deployment's configuration must not
-            # depend on which human deployed it (org+team only).
+            # Layer org → team → user secrets on top. A TEAM-owned run skips the
+            # USER layer deliberately (a @team deployment's config must not
+            # depend on which human deployed it); a USER-owned run — an
+            # interactive .use OR a personal @me deploy — applies its owner's
+            # user layer.
             merged_env.update(
                 await account.get_merged_env(
-                    user_id='' if run_kind == 'deploy' else self._account_info.userId,
+                    user_id='' if owner_kind == 'team' else self._account_info.userId,
                     org_id=org_id,
                     team_id=team_id,
                 )
@@ -200,6 +210,7 @@ class TaskCommands(DAPConn):
                 org_id=org_id,
                 env=merged_env,
                 run_kind=run_kind,
+                owner_kind=owner_kind,
                 trigger=trigger,
             )
 
@@ -209,6 +220,116 @@ class TaskCommands(DAPConn):
         except Exception as e:
             # Log execution failure and re-raise
             self.debug_message(f'Failed to execute task: {str(e)}')
+            raise
+
+    async def on_launch(self, request: Dict[str, Any]) -> None:
+        """
+        Handle DAP 'launch' command to start a new task.
+
+        This is the cloud pipeline-launch path: the SaaS ALB forwards a
+        'launch' request here (REST ``PUT /task``), which resolves the run
+        team and its owning org, then delegates to TaskServer.start_task.
+
+        Deliberately NOT a wrapper over on_execute — the two differ in three
+        ways that must not converge silently: on_launch resolves no
+        org/team/user secrets, does not wait for the task to reach RUNNING,
+        and does not classify the run. See the module history before merging
+        them.
+
+        Args:
+            request (Dict[str, Any]): Launch request containing:
+                - arguments: Task configuration and launch parameters
+
+        Returns:
+            None: the reply is sent directly via send_response.
+
+        Raises:
+            Exception: If task creation fails
+        """
+        try:
+            # Launch runs are development runs: they ALWAYS execute under the
+            # user's profile-assigned development team. Clients do not choose
+            # a team at launch; a stray teamId is rejected rather than
+            # silently ignored so the caller is never surprised by which team
+            # the run was billed/authorized under.
+            args = request.get('arguments') or {}
+            team_id = self._account_info.devTeam
+            # Billing must never guess: no dev team = no dev run.
+            if not team_id:
+                raise PermissionError('No development team is set — pick one in your profile before running pipelines')
+            requested_team = args.get('teamId')
+            if requested_team and requested_team != team_id:
+                raise PermissionError('Tasks run in your assigned development team; change it in your profile')
+
+            # Verify task.debug on the development team.
+            self.verify_team_permission(team_id, 'task.debug')
+
+            # Resolve the org that owns the TARGET team. Members resolve via
+            # their own org; callers passing the permission check without
+            # membership (sys.admin, internal) resolve via the account backend
+            # so the task file never carries an empty orgId as trusted
+            # identity (rejected if the team's org cannot be determined).
+            org_id = await self.resolve_org_for_team(team_id)
+
+            # Create and start the new task, obtaining a unique token
+            response = await self._server.start_task(
+                request,
+                self,
+                client_id=self._account_info.userId,
+                user_id=self._account_info.userId,
+                team_id=team_id,
+                org_id=org_id,
+            )
+
+            # Send successful launch response with task token
+            await self.send_response(request, body=response)
+
+        except Exception as e:
+            # Log the error for diagnostics and re-raise
+            self.debug_message(f'Failed to launch task: {str(e)}')
+            raise
+
+    async def on_terminate(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'terminate' command to stop task execution and cleanup.
+
+        Forcibly terminates the target task and cleans up associated resources.
+        This is a graceful shutdown that may not always be called if clients
+        disconnect abruptly, so cleanup logic should also be handled in
+        disconnect.
+
+        Args:
+            request (Dict[str, Any]): Terminate request carrying the task token
+
+        Returns:
+            Dict[str, Any]: Acknowledgment of successful termination
+
+        Raises:
+            Exception: If task termination or cleanup fails
+        """
+        # Bound before the try so the failure log below can reference it even
+        # when get_task_token itself raises — otherwise the UnboundLocalError
+        # would replace the real error.
+        token = '<unresolved>'
+
+        try:
+            token = self.get_task_token(request)
+
+            # Validate ownership and permissions via get_task
+            self.get_task(request, 'task.control')
+
+            # Log the termination request
+            self.debug_message('Terminating task and cleaning up resources')
+
+            # Stop the task and perform resource cleanup
+            await self._server.stop_task(token)
+
+            # Acknowledge successful termination
+            return self.build_response(request)
+
+        except Exception as e:
+            # Log termination failure with task context
+            self.debug_message(f'Failed to terminate task "{token}": {str(e)}')
             raise
 
     async def on_restart(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -229,9 +350,9 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Authorize against the TASK'S team, not defaultTeam: get_task
+            # Authorize against the TASK'S team, not the dev team: get_task
             # resolves the token to its control entry and requires
-            # task.control on that team (sys.admin bypasses). A defaultTeam
+            # task.control on that team (sys.admin bypasses). A dev-team
             # check alone let any task.control holder restart other teams'
             # token-addressed tasks.
             self.get_task(request, 'task.control')
@@ -345,8 +466,10 @@ class TaskCommands(DAPConn):
                     - projectId (str)): The project id
                     - source (str): The source id
                     - teamId (str, optional): Address the team's DEPLOY run;
-                      absent addresses the caller's own DEV run (the scope
-                      IS the kind — there is no run-kind argument)
+                      absent addresses the caller's own run
+                    - runKind (str, optional): Teamless continuum selector —
+                      absent/'dev' = the caller's dev run, 'deploy' = the
+                      caller's personal @me deploy run
 
         Returns:
             Dict[str, Any]: DAP response with token
@@ -360,6 +483,7 @@ class TaskCommands(DAPConn):
             project_id = args.get('projectId', None)
             source = args.get('source', None)
             team_id = args.get('teamId') or ''
+            run_kind = args.get('runKind') or ''
 
             # Verify permission against the requested scope: the named team
             # for a deploy lookup, the caller's default context otherwise
@@ -371,7 +495,7 @@ class TaskCommands(DAPConn):
 
             # Get the task control (owner scoping + permission check inside)
             control = self._server.get_task_control_by_project(
-                project_id, source, self._account_info, require='task.monitor', team_id=team_id
+                project_id, source, self._account_info, require='task.monitor', team_id=team_id, run_kind=run_kind
             )
 
             # Return successful response with status data
@@ -405,14 +529,18 @@ class TaskCommands(DAPConn):
                     - pipeline: Full pipeline configuration dict
         """
         try:
-            # Require monitor permission to list tasks
-            self.verify_permission('task.monitor')
-
             tasks = []
 
-            # Iterate all tasks the caller has access to (own, teammate, or org admin).
+            # Iterate all tasks the caller may see: user-owned runs (dev and
+            # @me deploys) are OWNER-ONLY — the caller's own runs stay
+            # visible across an org switch (identity, not team, is the key)
+            # and a teammate's personal runs never appear; team-owned deploy
+            # runs list for anyone with permissions on the run's team.
+            # Authorization is PER RUN — a global verify_permission here
+            # would evaluate the caller's current dev-team context and hide
+            # their own private runs after an org or dev-team switch.
             for control in self._server._task_control.values():
-                if not resolve_task_permissions(self._account_info, control.teamId):
+                if 'task.monitor' not in resolve_run_permissions(self._account_info, control):
                     continue
 
                 # Get current status for name and status string
@@ -448,6 +576,12 @@ class TaskCommands(DAPConn):
                             # clients must not infer deploy-ness from teamId
                             # (dev runs carry an attribution team too).
                             'runKind': control.run_kind,
+                            # Trusted owner scope: a personal (@me) deploy's
+                            # teamId is only billing attribution — clients
+                            # match personal deployments by ownerKind='user'
+                            # + ownerId, never by the billing team.
+                            'ownerKind': control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user'),
+                            'ownerId': control.owner_id,
                             'pipeline': control.pipeline,
                         }
                     )

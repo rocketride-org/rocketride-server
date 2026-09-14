@@ -55,7 +55,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "falkordb.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/graph_falkordb",
 	"tile": [],
 	//
 	// Optional:

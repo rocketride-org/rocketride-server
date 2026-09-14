@@ -69,7 +69,7 @@ inline const auto &user() noexcept {
             return res;
 
         // Now, look two levels up so to see if it is there. This will be for
-        // running in the build/engine or the apps engine/windows directory
+        // running in the build/engine or the build/packages/engine directory
         auto path = application::execDir() / ".." / ".." / "user.json";
 
         // Resolve it

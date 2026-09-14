@@ -35,8 +35,8 @@
 // =============================================================================
 
 import React from 'react';
-import { ConnectionManagerView } from 'shared';
-import type { IConnectionFormField } from 'shared';
+import { ConnectionManagerView } from 'shell';
+import type { IConnectionFormField } from 'shell';
 import { useSavedConnections, addConnection, updateConnection, deleteConnection } from '../connections';
 import type { SavedConnection } from '../connections';
 import { getDocs } from '../docs';

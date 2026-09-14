@@ -50,7 +50,7 @@
 	//		The icon to display in the UI for this node
 	//
 	"icon": "nebius.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/llm_openai_api",
 	//
 	// Optional:
 	//		Rendering hints to the UI which indicate which config fields to surface

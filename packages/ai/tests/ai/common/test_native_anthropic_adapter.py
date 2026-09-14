@@ -5,12 +5,15 @@
 
 """Pins NativeAnthropicAdapter: native Messages stream → Events, same payload path."""
 
+import pytest
+
 from ai.common.llm_adapter import Event
 from ai.common.llm_native_stream import (
     NativeAnthropicAdapter,
     build_anthropic_thinking_kwargs,
     try_anthropic_native_chat_stream,
 )
+from ai.web.metrics.metrics import metrics
 
 
 class _Delta:
@@ -120,3 +123,39 @@ def test_haiku_latest_gets_extended_thinking():
 
 def test_legacy_claude3_haiku_has_no_thinking():
     assert build_anthropic_thinking_kwargs('claude-3-haiku', 8192) == {}
+
+
+def test_reports_usage_even_when_stream_raises_midway():
+    """A mid-stream failure must still record the usage already reported by the provider."""
+    metrics.reset()
+
+    class _Usage:
+        input_tokens = 50
+        cache_creation_input_tokens = 5
+        cache_read_input_tokens = 8
+
+    class _Msg:
+        usage = _Usage()
+
+    class _MsgStart:
+        type = 'message_start'
+        message = _Msg()
+
+    def _raising_create(**_kwargs):
+        def gen():
+            yield _MsgStart()
+            raise RuntimeError('stream broke mid-way')
+
+        return gen()
+
+    client = _Client([])
+    client.messages.create = _raising_create
+    adapter = NativeAnthropicAdapter(_Chat(_LLM({'model': 'm', 'max_tokens': 10}, client)))
+
+    with pytest.raises(RuntimeError):
+        list(adapter.stream('q'))
+
+    counters = metrics.report()['counters']
+    assert counters.get('llm_input_tokens') == 50
+    assert counters.get('llm_cache_creation_tokens') == 5
+    assert counters.get('llm_cache_read_tokens') == 8

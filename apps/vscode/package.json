@@ -45,11 +45,22 @@
 					}
 				],
 				"priority": "default"
+			},
+			{
+				"viewType": "rocketride.appBuilder",
+				"displayName": "RocketRide App Builder",
+				"selector": [
+					{
+						"filenamePattern": "*.rrapp"
+					}
+				],
+				"priority": "default"
 			}
 		],
 		"configurationDefaults": {
 			"files.associations": {
-				"*.pipe": "json"
+				"*.pipe": "json",
+				"*.rrapp": "json"
 			}
 		},
 		"configuration": {
@@ -80,6 +91,17 @@
 					"description": "Host URL for development connection",
 					"format": "uri"
 				},
+				"rocketride.development.useCustomServer": {
+					"type": "boolean",
+					"default": false,
+					"description": "Cloud mode: connect to the server named in 'Cloud Url' instead of RocketRide Cloud"
+				},
+				"rocketride.development.cloudUrl": {
+					"type": "string",
+					"default": "https://api.rocketride.ai",
+					"description": "Cloud mode: the server this connection targets when 'Use Custom Server' is enabled (e.g. https://cloud.rocketride.ai, http://localhost:5565). Custom servers must use https; http is allowed only for localhost development targets.",
+					"format": "uri"
+				},
 				"rocketride.development.local.engineVersion": {
 					"type": "string",
 					"default": "latest",
@@ -105,6 +127,17 @@
 					"type": "string",
 					"default": "",
 					"description": "Host URL for deployment connection",
+					"format": "uri"
+				},
+				"rocketride.deployment.useCustomServer": {
+					"type": "boolean",
+					"default": false,
+					"description": "Cloud mode: deploy to the server named in 'Cloud Url' instead of RocketRide Cloud"
+				},
+				"rocketride.deployment.cloudUrl": {
+					"type": "string",
+					"default": "https://api.rocketride.ai",
+					"description": "Cloud mode: the server this connection targets when 'Use Custom Server' is enabled (e.g. https://staging.rocketride.ai, http://localhost:5565). Custom servers must use https; http is allowed only for localhost development targets.",
 					"format": "uri"
 				},
 				"rocketride.deployment.local.engineVersion": {
@@ -272,6 +305,17 @@
 					"type": "string",
 					"default": "",
 					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+				},
+				"rocketride.appdev.shellUrl": {
+					"type": "string",
+					"default": "",
+					"description": "App Builder: override the preview shell base URL (empty = the Development Mode engine). For monorepo developers running the shell dev server.",
+					"format": "uri"
+				},
+				"rocketride.appdev.autoWatch": {
+					"type": "boolean",
+					"default": true,
+					"description": "App Builder: start the app watch/rebuild session automatically when an App Builder screen opens."
 				}
 			}
 		},
@@ -385,6 +429,16 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
+				"command": "rocketride.pipeline.new",
+				"title": "RocketRide Pipeline",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.pipeline.save",
+				"title": "Save Pipeline",
+				"category": "RocketRide Pipeline"
+			},
+			{
 				"command": "rocketride.sidebar.files.runPipeline",
 				"title": "Run",
 				"icon": "$(play)",
@@ -419,9 +473,38 @@
 				"command": "rocketride.agents.uninstall",
 				"title": "Remove Agent Documentation",
 				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.create",
+				"title": "New App",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.open",
+				"title": "Open App Builder",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.debug",
+				"title": "Debug App (external browser)",
+				"category": "RocketRide"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "rocketride.pipeline.save",
+				"key": "ctrl+s",
+				"mac": "cmd+s",
+				"when": "activeCustomEditorId == 'rocketride.PageProject'"
 			}
 		],
 		"menus": {
+			"file/newFile": [
+				{
+					"command": "rocketride.pipeline.new",
+					"group": "file"
+				}
+			],
 			"commandPalette": [
 				{
 					"command": "rocketride.sidebar.files.openStatus",
@@ -480,6 +563,14 @@
 					"when": "false"
 				},
 				{
+					"command": "rocketride.pipeline.new",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.pipeline.save",
+					"when": "false"
+				},
+				{
 					"command": "rocketride.page.deploy.open",
 					"when": "false"
 				},
@@ -489,6 +580,14 @@
 				},
 				{
 					"command": "rocketride.agents.uninstall",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.app.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.app.debug",
 					"when": "false"
 				}
 			],
@@ -542,30 +641,32 @@
 		"@types/chart.js": "^2.9.41",
 		"@types/dockerode": "^4.0.1",
 		"@types/mocha": "^10.0.10",
-		"@types/node": "20.x",
+		"@types/node": "^20.19.41",
 		"@types/proper-lockfile": "^4.1.4",
-		"@types/react": "^18.3.31",
-		"@types/react-dom": "^18.3.7",
+		"@types/react": "~18.3.31",
+		"@types/react-dom": "~18.3.7",
 		"@types/vscode": "~1.99.0",
 		"@types/vscode-webview": "^1.57.5",
 		"@vscode/debugprotocol": "^1.68.0",
 		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",
 		"@vscode/vsce": "^3.9.1",
-		"esbuild": "^0.28.0",
+		"esbuild": "^0.28.1",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
 		"typescript": "^5.8.3"
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"adm-zip": "^0.5.17",
+		"adm-zip": "^0.6.0",
 		"chart.js": "^4.4.0",
 		"dockerode": "^4.0.12",
+		"ignore": "^7.0.5",
 		"proper-lockfile": "^4.1.2",
+		"shared": "file:../shared",
+		"tar": "^7.5.21",
 		"rocketride": "workspace:*",
-		"shared": "workspace:*",
-		"tar": "^7.5.15"
+		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"files": [
 		"README.md",

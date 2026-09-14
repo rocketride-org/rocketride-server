@@ -115,4 +115,4 @@ async def test_deploy_dispatch_carries_no_human_identity():
     assert account_info.userId == ''
     assert account_info.displayName == ''
     assert account_info.email == ''
-    assert account_info.defaultTeam == 'team-1'
+    assert account_info.devTeam == 'team-1'

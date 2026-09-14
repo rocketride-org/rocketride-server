@@ -59,6 +59,73 @@ FETCH_CLAIM_VERSION = 2
 _INVALID_SEGMENT_CHARS = frozenset('*?<>|":\x00')
 
 
+def mint_directory_url(dir_path: str, entry_file: str, expires_in: int = 86400, sub: str = 'system') -> str:
+    """
+    Mint a signed DIRECTORY-capability fetch URL for a multi-file bundle.
+
+    Module Federation remotes are multi-file: ``remoteEntry.js`` fetches its
+    async chunks RELATIVE to its own URL, so a single-file query-token URL
+    (``/task/fetch?token=...``) cannot serve one — the chunk requests would
+    resolve tokenless against ``/task/fetch/``. This mints the path-embedded
+    form instead: ``{base}/task/fetch/{token}/{entry_file}``, whose token
+    authorizes the whole ``dir_path`` directory. Every relative chunk request
+    then inherits the token naturally
+    (``/task/fetch/{token}/static/js/async/...``).
+
+    The caller is responsible for AUTHORIZING ``dir_path`` before minting —
+    like ``FileStore.get_url``, the signed JWT is the capability and the
+    fetch handler serves it verbatim. Bundle directories are immutable, so
+    the default expiry is generous (24h); manifest deliveries re-mint on
+    every login/account push.
+
+    Args:
+        dir_path:   RESOLVED physical store path of the bundle directory
+                    (e.g. ``marketplace/apps/<id>/<ver>``, no trailing slash).
+        entry_file: File within the directory the URL should address
+                    (e.g. ``remoteEntry.js``).
+        expires_in: Token validity in seconds (default 24 hours).
+        sub:        Audit-trail subject baked into the claim.
+
+    Returns:
+        Absolute URL to ``entry_file`` inside the signed directory.
+
+    Raises:
+        ValueError:   If ``expires_in`` is not positive.
+        RuntimeError: If ``RR_BASE_URL`` is not configured.
+    """
+    import os
+    import time
+
+    import jwt
+
+    from ai.constants import CONST_DEFAULT_SIGNING_KEY
+
+    if expires_in <= 0:
+        raise ValueError('expires_in must be positive')
+
+    # Unset falls back to the self-describing development default so a fresh
+    # install works out of the box; production replaces it via .env/.config.
+    signing_key = os.environ.get('RR_SIGNING_KEY', '') or CONST_DEFAULT_SIGNING_KEY
+
+    # Directory claim: `dir` (not `path`) so the fetch handler knows the
+    # capability covers a subtree, gated by the same claim generation.
+    payload = {
+        'sub': sub,
+        'dir': dir_path.rstrip('/'),
+        'v': FETCH_CLAIM_VERSION,
+        'exp': int(time.time()) + expires_in,
+    }
+    token = jwt.encode(payload, signing_key, algorithm='HS256')
+
+    base_url = os.environ.get('RR_BASE_URL')
+    if not base_url:
+        raise RuntimeError(
+            'RR_BASE_URL is not set — configure it in .env or ensure'
+            ' the web server has started before generating fetch URLs'
+        )
+    return f'{base_url}/task/fetch/{token}/{entry_file}'
+
+
 # =============================================================================
 # SCOPE GRAMMAR + PERMISSION POLICY
 #
@@ -316,12 +383,13 @@ def resolve_scope(
       - sys.admin sessions: full access everywhere, system trees included;
         team names still resolve in their OWN org only, ``=id`` references
         cross boundaries mechanically (the platform support capability).
-      - ordinary sessions: ``@/User/<rest>`` is an alias of the own tree;
-        team references (name or ``=id``) resolve strictly within their own
-        membership; ``@/Org`` (implicitly their one org) needs ``org.admin``;
-        ``task.store`` required elsewhere; SYSTEM TREES ARE FULLY DENIED —
-        logs/deployments are reachable only through their domain APIs
-        (rrext_log / rrext_deploy), never the file API.
+      - ordinary sessions: the OWN tree (plain paths and the ``@/User/<rest>``
+        alias) is unconditional — ownership is the authorization, no team or
+        org grant consulted; team references (name or ``=id``) resolve
+        strictly within their own membership and require ``task.store``;
+        ``@/Org`` (implicitly their one org) needs ``org.admin``; SYSTEM
+        TREES ARE FULLY DENIED — logs/deployments are reachable only through
+        their domain APIs (rrext_log / rrext_deploy), never the file API.
 
     Raises:
         PermissionError: Identity may not touch the addressed location (or
@@ -372,20 +440,13 @@ def resolve_scope(
         raise PermissionError(f'{_system_tree(rest)}/ is system-owned (use its API)')
 
     # -- Own namespace: plain paths and their joined-mode alias @/User/<rest> -
+    # Ownership IS the authorization: this branch resolves to the caller's
+    # own users/<id>/files tree by construction, so an authenticated
+    # identity needs no team- or org-carried permission. Personal storage
+    # must survive every org/team context switch — routing it through the
+    # active org's team grants denied users their own files whenever an
+    # org switch landed them somewhere they hold no team membership.
     if kind == 'own' or (kind == 'user' and ref is None):
-        if is_sys_admin:
-            return (kind, f'users/{client_id}/files', rest)
-        # The caller's OWN tree must not hinge on the defaultTeam pointer —
-        # an unset or stale defaultTeam would deny a user their own storage.
-        # The file-storage permission is granted when ANY membership carries
-        # it (org.admin implies it via full team permissions).
-        org = account_info.organization if isinstance(account_info.organization, dict) else {}
-        if not any(
-            _DEFAULT_PERMISSION in resolve_task_permissions(account_info, team['id'])
-            for team in org.get('teams', [])
-            if team.get('id')
-        ):
-            raise PermissionError(f'Permission {_DEFAULT_PERMISSION!r} denied')
         return (kind, f'users/{client_id}/files', rest)
 
     # -- @/Org: implicitly MY org — org.admin only; =id crosses for sys.admin -
@@ -903,9 +964,15 @@ class FileStore:
         """
         Rename a file or directory.
 
-        On object stores there is no native rename, so this is implemented as
-        copy + delete.  For directories every file under the old prefix is
-        copied to the new prefix and then deleted.
+        Files and directories alike ride the backend's native move primitive
+        (server-side on object stores — no bytes pass through this process);
+        a directory moves as one native move per file under its prefix.
+
+        A directory rename is therefore NOT atomic: with no atomic backend
+        primitive to ride, a mid-loop backend failure leaves the tree split
+        between both paths. That case is reported, never swallowed — every
+        file is attempted and the survivors are named in the raised error
+        (the same partial-failure contract ``rmdir`` carries).
 
         Args:
             old_path: Current relative path within the account store.
@@ -916,7 +983,8 @@ class FileStore:
         Raises:
             StorageError: If old_path does not exist, is open for reading or
                 writing, the destination already exists without ``overwrite``,
-                or the operation fails.
+                or the operation fails — including a partial directory rename,
+                whose message lists the files left under ``old_path``.
         """
         old_full, old_kind, old_rest = self._resolve(old_path)
         new_full, new_kind, new_rest = self._resolve(new_path)
@@ -927,9 +995,16 @@ class FileStore:
         if not old_rest or not new_rest:
             raise StorageError('rename cannot target a scope root')
 
-        # Check for directory (has children under old_path/)
+        # Listing a prefix also returns the file at that path; counting it would send every
+        # plain file down the directory branch. Same test stat() uses.
         dir_prefix = old_full.rstrip('/') + '/'
-        all_files = await self._store.list_files(dir_prefix)
+        listed = await self._store.list_files(dir_prefix)
+        all_files = [f for f in listed if f != old_full and f.startswith(dir_prefix)]
+
+        # stat()'s 'both': neither branch covers it, and the directory one would move the
+        # children and leave the file, reporting success.
+        if all_files and old_full in listed:
+            raise StorageError(f'Cannot rename {old_path!r}: it is both a file and a directory')
 
         if all_files:
             # Directory rename: refuse if any source file is open, then check
@@ -941,12 +1016,28 @@ class FileStore:
                 existing = await self._store.list_files(new_dir_prefix)
                 if existing:
                     raise StorageError(f'Destination already exists: {new_path}')
+            # No backend offers an atomic directory move, and rolling completed
+            # moves back is itself fallible — a failed reverse move would only
+            # scatter the tree further. Take rmdir's contract instead: attempt
+            # EVERY file, then name the ones that stayed behind, so a directory
+            # split across both paths is visible to the caller rather than
+            # hidden behind whichever file failed first.
+            errors: list[str] = []
             for file_path in all_files:
                 relative_to_old = file_path[len(dir_prefix) :]
                 new_file_path = new_dir_prefix + relative_to_old
-                data = await self._store.read_bytes(file_path)
-                await self._store.write_bytes(new_file_path, data)
-                await self._store.delete_file(file_path)
+                # Native move per file — no whole-file buffering in this
+                # process, and each destination is untouched until its new
+                # content is in place (same guarantee as the file branch).
+                try:
+                    await self._store.move_file(file_path, new_file_path)
+                except StorageError as e:
+                    errors.append(f'{file_path}: {e}')
+            if errors:
+                raise StorageError(
+                    f'rename partial failure ({len(errors)} of {len(all_files)} file(s) still under {old_path}): '
+                    f'{"; ".join(errors)}'
+                )
         else:
             # File rename: check both source and destination locks, then
             # check destination existence unless overwrite was requested.
@@ -965,9 +1056,8 @@ class FileStore:
                     pass
                 if dest_exists:
                     raise StorageError(f'Destination already exists: {new_path}')
-            data = await self._store.read_bytes(old_full)
-            await self._store.write_bytes(new_full, data)
-            await self._store.delete_file(old_full)
+            # Native move — the destination is untouched until the new content is in place.
+            await self._store.move_file(old_full, new_full)
 
     async def stat(self, path: str) -> dict:
         """
@@ -1090,9 +1180,7 @@ class FileStore:
             A direct HTTP(S) URL to the file.
 
         Raises:
-            ValueError: If ``expires_in`` is not positive, or if
-                ``RR_SIGNING_KEY`` is not set and the backend requires a
-                locally-signed URL.
+            ValueError: If ``expires_in`` is not positive.
             RuntimeError: If ``RR_BASE_URL`` is not configured and the
                 backend requires a locally-signed URL.
         """
@@ -1118,9 +1206,12 @@ class FileStore:
         import time
         import jwt
 
-        signing_key = os.environ.get('RR_SIGNING_KEY', '')
-        if not signing_key:
-            raise ValueError('RR_SIGNING_KEY not configured — cannot generate fetch URL')
+        from ai.constants import CONST_DEFAULT_SIGNING_KEY
+
+        # Unset falls back to the self-describing development default so a
+        # fresh install works out of the box; production replaces it via
+        # .env/.config.
+        signing_key = os.environ.get('RR_SIGNING_KEY', '') or CONST_DEFAULT_SIGNING_KEY
 
         # The claim carries the RESOLVED physical store path, not the wire
         # spelling: authorization already ran above (_full_path under THIS

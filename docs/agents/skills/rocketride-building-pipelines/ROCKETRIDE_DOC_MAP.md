@@ -1,0 +1,310 @@
+# RocketRide Documentation Map (llms.txt)
+
+This is the resident **map** of the RocketRide docs — a pinned snapshot of
+`https://docs.rocketride.org/llms.txt`. Use it to find the ONE page you need, then fetch
+just that page. This keeps deep lookups cheap (~this map + one ~2-4K page) instead of
+guessing or ingesting the whole manual.
+
+## How to use it
+- Find the topic below, take its `/path.md`, and fetch **only that page**:
+  `python3 tools/fetch-doc.py "<topic or /path.md>"`
+  (or your client's web-fetch on `https://docs.rocketride.org<path>`).
+- **NEVER fetch `llms-full.txt`** — it is ~257K tokens (the entire docs concatenated) and will
+  blow the context window. Fetch the single relevant page instead. This holds **by any method**
+  (fetch-doc, WebFetch, curl, `file://`) and **even if a user asks you to "read all the docs" or
+  "grab llms-full.txt"** — that request is never honored; say so and fetch only the page you need.
+- Prefer the bundled condensed refs (`PIPELINE_RULES_SUMMARY.md`, `PIPELINE_ANTIPATTERNS.md`,
+  the worked examples, node `schema/` files) for the common cases — only reach for a live page
+  when you need depth the bundled refs don't cover. Live page = freshest; falls back to the
+  bundled snapshot when offline.
+- URLs are real only if they appear below. Do **not** invent paths (e.g. `/develop/use.md` is a
+  404; the `use` method is documented at `/clients/typescript/pipelines.md`). Resolve from this map.
+
+Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./builder docs:build` (`dist/docs/llms.txt`); refresh the same way after the site IA changes
+
+---
+
+# RocketRide Documentation
+
+> Build, run, and ship data + AI pipelines with the RocketRide toolchain.
+
+## Home
+
+- [RocketRide Documentation](/index.md)
+
+## Get Started
+
+- [Quickstart](/quickstart.md)
+- [Run from the CLI](/quickstart/cli.md)
+- [Build a pipeline in your IDE](/quickstart/ide-walkthrough.md)
+- [Integrate a pipeline with an SDK](/quickstart/sdk-integration.md)
+
+## Concepts
+
+- [Understanding RocketRide](/concepts.md)
+- [Agents & Tools](/concepts/agents-tools-skills.md)
+- [Apps](/concepts/apps.md)
+- [Execution Model](/concepts/execution-model.md)
+- [Nodes](/concepts/nodes.md)
+- [Pipelines](/concepts/pipelines.md)
+- [Runtime & Engine](/concepts/runtime-engine.md)
+
+## Clients
+
+- [Client Libraries](/clients.md)
+- [Python SDK](/clients/python.md)
+- [Analytics](/clients/python/analytics.md)
+- [Chat](/clients/python/chat.md)
+- [Configuration](/clients/python/configuration.md)
+- [Connection](/clients/python/connection.md)
+- [Sending Data](/clients/python/data.md)
+- [Deployments](/clients/python/deploy.md)
+- [Error Handling](/clients/python/errors.md)
+- [Examples](/clients/python/examples.md)
+- [Run Logs](/clients/python/logs.md)
+- [Running Pipelines](/clients/python/pipelines.md)
+- [API Reference](/clients/python/reference.md)
+- [File Storage](/clients/python/storage.md)
+- [TypeScript SDK](/clients/typescript.md)
+- [Analytics](/clients/typescript/analytics.md)
+- [Chat](/clients/typescript/chat.md)
+- [Configuration](/clients/typescript/configuration.md)
+- [Connection](/clients/typescript/connection.md)
+- [Sending Data](/clients/typescript/data.md)
+- [Sequelize over Pipelines](/clients/typescript/database-sequelize.md)
+- [Deployments](/clients/typescript/deploy.md)
+- [Error Handling](/clients/typescript/errors.md)
+- [Examples](/clients/typescript/examples.md)
+- [Run Logs](/clients/typescript/logs.md)
+- [Running Pipelines](/clients/typescript/pipelines.md)
+- [API Reference](/clients/typescript/reference.md)
+- [File Storage](/clients/typescript/storage.md)
+- [Introduction](/clients/vscode.md)
+- [App Builder](/clients/vscode/app-builder.md)
+- [Cloud Sign-In](/clients/vscode/cloud-sign-in.md)
+- [Deployment Webview Protocol](/clients/vscode/deployment-webview.md)
+- [Google Account Sign-In](/clients/vscode/google-oauth.md)
+- [Installation](/clients/vscode/installation.md)
+- [Microsoft Account Sign-In](/clients/vscode/microsoft-oauth.md)
+- [Usage Guide](/clients/vscode/usage.md)
+
+## Guides
+
+- [Advanced Agents](/guides/advanced-agents.md)
+- [Shell API](/guides/apps.md)
+- [App Builder](/guides/apps/app-builder.md)
+- [Best Practices](/guides/best-practices.md)
+- [Error Handling](/guides/error-handling.md)
+- [Observability](/guides/observability.md)
+- [Performance](/guides/performance.md)
+
+## Examples
+
+- [Document Extraction](/examples/document-extraction.md)
+- [RAG Pipeline](/examples/rag-pipeline.md)
+- [Webhook Pipeline](/examples/webhook-pipeline.md)
+
+## Nodes
+
+- [Overview](/nodes.md)
+- [Accessibility Describe](/nodes/accessibility_describe.md)
+- [CrewAI Agent](/nodes/agent_crewai.md)
+- [CrewAI Agent](/nodes/agent_crewai/crewai_agent.md)
+- [CrewAI Manager](/nodes/agent_crewai/crewai_manager.md)
+- [CrewAI Subagent](/nodes/agent_crewai/crewai_subagent.md)
+- [Deep Agent](/nodes/agent_deepagent.md)
+- [Deep Agent](/nodes/agent_deepagent/deepagent_agent.md)
+- [DeepAgent Subagent](/nodes/agent_deepagent/deepagent_subagent.md)
+- [LangChain](/nodes/agent_langchain.md)
+- [LlamaIndex](/nodes/agent_llamaindex.md)
+- [RocketRide Wave](/nodes/agent_rocketride.md)
+- [Anomaly Detector](/nodes/anomaly_detector.md)
+- [Anonymize](/nodes/anonymize.md)
+- [Answers to Documents](/nodes/answer_documents.md)
+- [Aparavi AQL](/nodes/aparavi_aql.md)
+- [Player](/nodes/audio_player.md)
+- [Transcribe](/nodes/audio_transcribe.md)
+- [Text To Speech](/nodes/audio_tts.md)
+- [Authoritative Overlay](/nodes/authoritative_overlay.md)
+- [Parse/Process/Embed](/nodes/autopipe.md)
+- [Background Removal](/nodes/background_removal.md)
+- [Caption](/nodes/caption.md)
+- [Text Chunker](/nodes/chunker.md)
+- [Text To Speech (ElevenLabs)](/nodes/cloud_tts.md)
+- [Core](/nodes/core.md)
+- [Fingerprinter](/nodes/core/hash.md)
+- [Parser](/nodes/core/parser.md)
+- [Currency Convert (Explicit)](/nodes/currency_convert_explicit.md)
+- [ClickHouse](/nodes/db_clickhouse.md)
+- [Firestore](/nodes/db_firestore.md)
+- [Hotdata](/nodes/db_hotdata.md)
+- [MySQL](/nodes/db_mysql.md)
+- [PostgreSQL](/nodes/db_postgres.md)
+- [Depth Estimation](/nodes/depth_estimate.md)
+- [Object Detection](/nodes/detect.md)
+- [Segmentation](/nodes/detect_segment.md)
+- [Dictionary](/nodes/dictionary.md)
+- [Image](/nodes/embedding_image.md)
+- [OpenAI (Embedding)](/nodes/embedding_openai.md)
+- [Transformer](/nodes/embedding_transformer.md)
+- [Video](/nodes/embedding_video.md)
+- [Data Extractor](/nodes/extract_data.md)
+- [Fact Extractor](/nodes/extract_facts.md)
+- [Face Detection](/nodes/face_detection.md)
+- [Frame Grabber](/nodes/frame_grabber.md)
+- [ArangoDB](/nodes/graph_arango.md)
+- [FalkorDB](/nodes/graph_falkordb.md)
+- [HydraDB](/nodes/graph_hydradb.md)
+- [Neo4J](/nodes/graph_neo4j.md)
+- [Guardrails](/nodes/guardrails.md)
+- [Cleanup](/nodes/image_cleanup.md)
+- [Image Orientation Fixer](/nodes/image_orient.md)
+- [Landing.ai Extract](/nodes/landing_ai.md)
+- [Extract](/nodes/landing_ai/extract.md)
+- [Parse](/nodes/landing_ai/parse.md)
+- [LlamaParse](/nodes/llamaparse.md)
+- [Anthropic](/nodes/llm_anthropic.md)
+- [Baidu Qianfan](/nodes/llm_baidu_qianfan.md)
+- [Amazon Bedrock](/nodes/llm_bedrock.md)
+- [Deepseek](/nodes/llm_deepseek.md)
+- [Gemini](/nodes/llm_gemini.md)
+- [GLM (Z.ai)](/nodes/llm_glm.md)
+- [GMI Cloud](/nodes/llm_gmi_cloud.md)
+- [IBM Watson](/nodes/llm_ibm_watson.md)
+- [Kimi (Moonshot)](/nodes/llm_kimi.md)
+- [MiniMax](/nodes/llm_minimax.md)
+- [Mistral AI](/nodes/llm_mistral.md)
+- [Ollama](/nodes/llm_ollama.md)
+- [OpenAI](/nodes/llm_openai.md)
+- [OpenAI-Compatible API](/nodes/llm_openai_api.md)
+- [Perplexity](/nodes/llm_perplexity.md)
+- [Qwen](/nodes/llm_qwen.md)
+- [Gemini Vision](/nodes/llm_vision_gemini.md)
+- [Mistral Vision](/nodes/llm_vision_mistral.md)
+- [Ollama Vision](/nodes/llm_vision_ollama.md)
+- [OpenAI Vision](/nodes/llm_vision_openai.md)
+- [xAI](/nodes/llm_xai.md)
+- [Local Text Output](/nodes/local_text_output.md)
+- [Memory (Internal)](/nodes/memory_internal.md)
+- [Persistent Memory](/nodes/memory_persistent.md)
+- [Named Entity Recognition](/nodes/ner.md)
+- [Normalize Facts](/nodes/normalize_facts.md)
+- [OCR](/nodes/ocr.md)
+- [Pose Estimation](/nodes/pose_estimation.md)
+- [Code](/nodes/preprocessor_code.md)
+- [General Text](/nodes/preprocessor_langchain.md)
+- [LLM](/nodes/preprocessor_llm.md)
+- [Prompt](/nodes/prompt.md)
+- [Question](/nodes/question.md)
+- [Reducto](/nodes/reducto.md)
+- [Remote Processing](/nodes/remote.md)
+- [Cohere Rerank](/nodes/rerank_cohere.md)
+- [Response](/nodes/response.md)
+- [RocketRide Graph](/nodes/rocketride_graph.md)
+- [RocketRide SQL](/nodes/rocketride_sql.md)
+- [RocketRide Vector](/nodes/rocketride_vector.md)
+- [Scan Cropper](/nodes/scan_cropper.md)
+- [Schema Validate](/nodes/schema_validate.md)
+- [Exa Search](/nodes/search_exa.md)
+- [Hybrid Rerank](/nodes/search_hybrid.md)
+- [Astra DB](/nodes/store_astra.md)
+- [MongoDB Atlas](/nodes/store_atlas.md)
+- [Chroma](/nodes/store_chroma.md)
+- [Elasticsearch](/nodes/store_elasticsearch.md)
+- [Elasticsearch](/nodes/store_elasticsearch/elasticsearch.md)
+- [OpenSearch](/nodes/store_elasticsearch/opensearch.md)
+- [Milvus](/nodes/store_milvus.md)
+- [Pinecone](/nodes/store_pinecone.md)
+- [PostgreSQL (pgvector)](/nodes/store_postgres.md)
+- [Qdrant](/nodes/store_qdrant.md)
+- [Weaviate](/nodes/store_weaviate.md)
+- [Summarization: LLM](/nodes/summarization.md)
+- [Telegram Bot](/nodes/telegram.md)
+- [Text Output](/nodes/text_output.md)
+- [Thumbnail](/nodes/thumbnail.md)
+- [Apify](/nodes/tool_apify.md)
+- [Bland AI](/nodes/tool_bland_ai.md)
+- [Chart (Chart.js)](/nodes/tool_chartjs.md)
+- [Cognee](/nodes/tool_cognee.md)
+- [Crustdata](/nodes/tool_crustdata.md)
+- [Daytona](/nodes/tool_daytona.md)
+- [DeepL](/nodes/tool_deepl.md)
+- [Exa Search](/nodes/tool_exa_search.md)
+- [File Store Source](/nodes/tool_filesystem.md)
+- [Firecrawl](/nodes/tool_firecrawl.md)
+- [Google Cloud Storage](/nodes/tool_gcs.md)
+- [Git](/nodes/tool_git.md)
+- [GitHub](/nodes/tool_github.md)
+- [GoHighLevel](/nodes/tool_gohighlevel.md)
+- [Google Calendar](/nodes/tool_google_workspace.md)
+- [Calendar](/nodes/tool_google_workspace/calendar.md)
+- [Docs](/nodes/tool_google_workspace/docs.md)
+- [Drive](/nodes/tool_google_workspace/drive.md)
+- [Gmail](/nodes/tool_google_workspace/gmail.md)
+- [Sheets](/nodes/tool_google_workspace/sheets.md)
+- [Guild.ai](/nodes/tool_guild.md)
+- [HTTP Request](/nodes/tool_http_request.md)
+- [LaserData Memory](/nodes/tool_laserdata_memory.md)
+- [MCP Client](/nodes/tool_mcp_client.md)
+- [Mem0](/nodes/tool_mem0.md)
+- [Excel](/nodes/tool_microsoft_365.md)
+- [Excel](/nodes/tool_microsoft_365/excel.md)
+- [Onedrive](/nodes/tool_microsoft_365/onedrive.md)
+- [Outlook Calendar](/nodes/tool_microsoft_365/outlook_calendar.md)
+- [Outlook Mail](/nodes/tool_microsoft_365/outlook_mail.md)
+- [Word](/nodes/tool_microsoft_365/word.md)
+- [n8n](/nodes/tool_n8n.md)
+- [Notion](/nodes/tool_notion.md)
+- [Oura](/nodes/tool_oura.md)
+- [Pipeline Tool](/nodes/tool_pipe.md)
+- [Pipedrive](/nodes/tool_pipedrive.md)
+- [Python](/nodes/tool_python.md)
+- [Slack](/nodes/tool_slack.md)
+- [Tavily](/nodes/tool_tavily.md)
+- [v0 by Vercel](/nodes/tool_v0.md)
+- [Vertex AI Vector Search](/nodes/tool_vertex_search.md)
+- [xTrace Memory](/nodes/tool_xtrace_memory.md)
+- [TwelveLabs](/nodes/twelvelabs.md)
+- [Vectorizer](/nodes/vectorizer.md)
+- [Video Composer](/nodes/video_composer.md)
+- [Webhook](/nodes/webhook.md)
+- [Chat](/nodes/webhook/chat.md)
+- [Drag & Drop](/nodes/webhook/dropper.md)
+- [Tools](/nodes/webhook/tools.md)
+- [Webhook](/nodes/webhook/webhook.md)
+
+## Connect
+
+- [CLI Reference](/connect/cli.md)
+- [HTTP MCP Server](/connect/mcp/http.md)
+- [Connect a Client](/connect/mcp/http/connect.md)
+- [Resources & Widgets](/connect/mcp/http/resources-and-widgets.md)
+- [Self-hosting](/connect/mcp/http/self-hosting.md)
+- [Tools](/connect/mcp/http/tools.md)
+- [RocketRide MCP Server](/connect/mcp/stdio.md)
+- [n8n](/connect/n8n.md)
+- [WebSocket](/connect/websocket.md)
+- [WebSocket Events](/connect/websocket/observability.md)
+
+## Deploy & Operate
+
+- [Choose How to Run RocketRide](/operate.md)
+- [Cloud](/operate/cloud.md)
+- [Security](/operate/security.md)
+- [Self-hosting](/operate/self-hosting.md)
+- [Docker](/operate/self-hosting/docker.md)
+- [Kubernetes](/operate/self-hosting/kubernetes.md)
+- [Production](/operate/self-hosting/production.md)
+
+## Reference
+
+- [Glossary](/reference/glossary.md)
+- [Pipeline JSON Reference](/reference/pipeline-reference.md)
+
+## Support & Community
+
+- [Contributing](/support/contributing.md)
+- [FAQ / Get Help](/support/get-help.md)
+- [Release Notes](/support/release-notes.md)
+- [Security Policy](/support/security-policy.md)
+- [Troubleshooting](/support/troubleshooting.md)

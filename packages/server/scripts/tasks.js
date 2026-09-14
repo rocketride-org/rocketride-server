@@ -26,10 +26,11 @@
  *
  * Handles downloading pre-built server binaries or compiling from source.
  */
+
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
-const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
+const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, sequence, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
 
 // Paths
@@ -777,6 +778,10 @@ function makeSetupJreAction() {
 			const result = await copyJavaJre();
 			if (!result.copied) {
 				task.output = result.reason;
+				// A silent no-op here means the engine starts without jvm.dll
+				// and every pipeline task fails; warn loudly so the missing
+				// JRE is diagnosable from the build log.
+				console.warn(`WARNING: JRE not staged into dist — ${result.reason}`);
 			} else {
 				task.output = result.stats ? formatSyncStats(result.stats) : 'Synced JRE';
 			}
@@ -869,10 +874,10 @@ function makeCompileEngineAction(options = {}) {
 			// Copy engine to dist
 			await mkdir(DIST_DIR);
 			const exeExt = isWindows() ? '.exe' : '';
-			await syncFile(path.join(BUILD_ROOT, 'apps', 'engine', 'engine' + exeExt), path.join(DIST_DIR, 'engine' + exeExt), { package: true });
+			await syncFile(path.join(BUILD_ROOT, 'packages', 'engine', 'engine' + exeExt), path.join(DIST_DIR, 'engine' + exeExt), { package: true });
 
 			if (isWindows()) {
-				await syncFile(path.join(BUILD_ROOT, 'apps', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
+				await syncFile(path.join(BUILD_ROOT, 'packages', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
 			} else {
 				// crashpad_handler must ship next to the engine (runtime finds it via
 				// execDir()). Windows keeps its native MiniDumpWriteDump path.
@@ -885,7 +890,7 @@ function makeCompileEngineAction(options = {}) {
 				}
 
 				// Retain generated symbols (if dump_syms ran) for later symbolication.
-				const symbolsSrc = path.join(BUILD_ROOT, 'apps', 'engine', 'symbols');
+				const symbolsSrc = path.join(BUILD_ROOT, 'packages', 'engine', 'symbols');
 				if (await exists(symbolsSrc)) {
 					await syncDir(symbolsSrc, path.join(DIST_DIR, 'symbols'), { mirror: false, package: true });
 				}
@@ -1098,7 +1103,7 @@ function makeBuildCoreAction() {
 			whenNot({
 				name: 'ready',
 				condition: (ctx) => ctx.serverReady,
-				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'tika:submodule-build'],
+				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk', 'java:setup-jre'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'tika:submodule-build'],
 			}),
 		],
 	};
@@ -1117,13 +1122,36 @@ function makeBuildAction() {
 			// After sync, the node/ai requirement files are in the dist, so depends()
 			// has the full constraint set — install the test/runtime deps through it.
 			'server:setup-test-deps',
+			// The shell platform ships WITH the server (static/shell bundle,
+			// /client/shell tgz, the materialized .rocketride/shell package),
+			// so the server build carries it. The TS SDK builds first —
+			// pack-shell vendors its dist inside the shell package (and its
+			// build chains client-docs:agent, which stages the /client/docs bundle).
+			'client-typescript:build',
+			'shell:build',
+			// The workspace bootstrap shim also ships with the server
+			// (/client/typescript-init).
+			'client-init:build',
+			// The Python wheel ships with the server too — /client/python is
+			// an OSS route, so a server build that stages the TS package but
+			// not the wheel leaves that route serving nothing.
+			//
+			// Its own client-python:build is NOT usable here: that action
+			// starts with server:build (the wheel is built with the engine's
+			// pip), so calling it would close a cycle. The staging steps run
+			// directly instead — by this point server:setup-pip has run, so
+			// the interpreter the wheel build needs already exists.
+			// sync-source ran above, in the parallel Sync modules group.
+			'client-python:wheel-source',
+			'client-python:copy-readme',
+			'client-python:wheel-build',
+			'client-python:sync',
 		],
 	};
 }
 
 function makeCleanServerAction() {
 	return {
-		description: 'Cleaning server',
 		run: async (ctx, task) => {
 			await setState('server', {});
 			await setState('package', null);
@@ -1151,8 +1179,10 @@ function makeBuildAllAction() {
 		description: 'Build server (all modules)',
 		steps: [
 			'server:build',
-			// Build external modules
-			parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
+			// Build external modules. mcp-widgets:build must complete before ai:build —
+			// it writes the widget bundle into packages/ai/src/ai/modules/mcp/apps/dist,
+			// and ai:build's sync step is what carries it into dist/server.
+			parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 		],
 	};
 }
@@ -1188,8 +1218,9 @@ function makeTestAction() {
 				// still skips the test-compile block across step boundaries.
 				condition: async (ctx) => ctx.serverDownloaded || Boolean(await getState('server.downloadHash')),
 				then: [
-					// Build modules needed for tests
-					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build modules'),
+					// Build modules needed for tests. mcp-widgets:build must complete before
+					// ai:build — see makeBuildAllAction for the full rationale.
+					parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
 					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
@@ -1305,9 +1336,6 @@ module.exports = {
 	name: 'server',
 	description: 'C++ Engine Server',
 
-	// Co-located docs gathered by docs:gather.
-	docs: [{ source: 'docs', mount: 'protocols/websocket' }],
-
 	actions: [
 		// Internal actions (no description in help)
 		{ name: 'server:download', action: makeDownloadAction },
@@ -1326,7 +1354,17 @@ module.exports = {
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },
 		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
-		{ name: 'server:clean', action: makeCleanServerAction },
+		{ name: 'server:clean-run', action: makeCleanServerAction },
+		{
+			// The shell rides the server build (see server:build), so its
+			// artifacts go with the server clean. steps SHADOW run in the
+			// runner, hence the internal clean-run + compound split.
+			name: 'server:clean',
+			action: () => ({
+				description: 'Cleaning server',
+				steps: ['server:clean-run', 'shell:clean'],
+			}),
+		},
 
 		// Public actions (have descriptions, shown in help)
 		{
@@ -1335,7 +1373,7 @@ module.exports = {
 				description: 'Starting server (dev)',
 				steps: [
 					'server:build',
-					parallel(['server:run-eaas', 'shell-ui:dev'], 'Start dev servers'),
+					parallel(['server:run-eaas', 'shell:dev'], 'Start dev servers'),
 				],
 			}),
 		},
@@ -1360,7 +1398,7 @@ module.exports = {
 		},
 		{
 			// Internal action — starts the EaaS Python server process.
-			// Separated so it can be run in parallel with shell-ui:dev or model_server.
+			// Separated so it can be run in parallel with shell:dev or model_server.
 			name: 'server:run-eaas',
 			action: (options = {}) => ({
 				run: async (_ctx, task) => {

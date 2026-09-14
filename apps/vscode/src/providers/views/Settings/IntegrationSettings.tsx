@@ -34,8 +34,10 @@ interface IntegrationSettingsProps {
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 }
 
-/** Keys of SettingsData whose values are booleans — the checkbox-backed rows. */
-type BooleanKeys<T> = { [K in keyof T]: T[K] extends boolean ? K : never }[keyof T];
+/** Keys of SettingsData whose values are booleans — the checkbox-backed rows.
+    `-?` strips optionality so optional boolean keys qualify and the indexed
+    access never unions in `undefined`. */
+type BooleanKeys<T> = { [K in keyof T]-?: NonNullable<T[K]> extends boolean ? K : never }[keyof T];
 
 // ============================================================================
 // CONSTANTS

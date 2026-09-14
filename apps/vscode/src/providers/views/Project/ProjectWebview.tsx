@@ -16,21 +16,26 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { applyTheme } from 'shared/themes';
-import type { ThemeTokens } from 'shared/themes/tokens';
+import { applyTheme } from 'shell';
+import type { IProject, ThemeTokens } from 'shell';
 // Project module is imported via subpath (not the 'shared' barrel): the
 // barrel is the shell's MF share and must stay canvas-free; this webview
 // bundles the project module directly.
 import { ProjectView, parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from 'shared/modules/project';
-import { foldProjectDeployRuns } from 'shared';
-import type { TaskLifecycleEvent } from 'shared';
+import { mergeProjectPreferences } from 'shared/modules/project/projectPreferences';
+import { registerServiceIcons } from 'shared/components/canvas/util/Icon';
+import { foldProjectDeployRuns } from 'shared/modules/sidebar/taskFold';
+import type { TaskLifecycleEvent } from 'shared/modules/sidebar/taskFold';
 import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, ViewState } from 'shared/modules/project';
-import { CheckoutModal } from 'shared';
-import type { CheckoutPlan, PlanAction } from 'shared';
+import { CheckoutModal } from 'shell';
+import type { CheckoutPlan, PlanAction } from 'shell';
 import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from 'shared/components/deploy-panel';
 import type { DeploySnapshot } from 'shared/components/deploy-panel';
 import { useMessaging } from '../hooks/useMessaging';
-import type { ProjectHostToWebview, ProjectWebviewToHost, DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from '../types';
+import { useStripeKey } from '../hooks/useStripeKey';
+import { CheckoutUnavailableNotice } from '../components';
+import type { ProjectHostToWebview, ProjectWebviewToHost } from '../../types/projectTypes';
+import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from '../../types/deployTypes';
 
 // =============================================================================
 // CONSTANTS
@@ -78,7 +83,11 @@ const ProjectWebview: React.FC = () => {
 	const [subscribed, setSubscribed] = useState(true);
 	const [isReadonly, setIsReadonly] = useState(false);
 	const [showCheckout, setShowCheckout] = useState(false);
+	// Server-supplied Stripe publishable key — matches the connected server's
+	// Stripe account instead of a build-time value.
+	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey();
 	const [envKeys, setEnvKeys] = useState<string[]>([]);
+	const [cloudConnectionConfigured, setCloudConnectionConfigured] = useState(false);
 
 	// Deploy lifecycle: LIVE rows pushed by deploy:data (badges/where-live);
 	// the panel's registry snapshot resolves through pendingLifecycleFetches.
@@ -141,6 +150,10 @@ const ProjectWebview: React.FC = () => {
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
 	const validateCounter = useRef(0);
 
+	// Pending node-schema requests (request-ID → Promise resolver)
+	const pendingNodeSchemas = useRef<Map<number, { resolve: (v: Record<string, any> | undefined) => void; reject: (e: Error) => void }>>(new Map());
+	const nodeSchemaCounter = useRef(0);
+
 	// --- Messaging ------------------------------------------------------------
 
 	const sendMessageRef = useRef<(msg: ProjectWebviewToHost) => void>(() => {});
@@ -155,11 +168,13 @@ const ProjectWebview: React.FC = () => {
 
 				setProject(msg.project);
 				setProjectId(msg.project?.project_id ?? '');
+				registerServiceIcons({ services: msg.services, icons: msg.icons });
 				setServicesJson(msg.services);
 				setIsConnected(msg.isConnected);
 				if (msg.isSubscribed !== undefined) setSubscribed(msg.isSubscribed);
 				setIsReadonly(msg.isReadonly ?? false);
 				setStatusMap(msg.statuses ?? {});
+				setCloudConnectionConfigured(msg.cloudConnectionConfigured ?? false);
 				setViewState({
 					mode: vs?.mode ?? 'design',
 					flowViewMode: vs?.flowViewMode ?? 'pipeline',
@@ -190,6 +205,7 @@ const ProjectWebview: React.FC = () => {
 				setProject(msg.project);
 				break;
 			case 'project:services':
+				registerServiceIcons({ services: msg.services, icons: msg.icons });
 				setServicesJson(msg.services);
 				break;
 			case 'project:validateResponse': {
@@ -198,6 +214,15 @@ const ProjectWebview: React.FC = () => {
 					pendingValidates.current.delete(msg.requestId);
 					if (msg.error) pending.reject(new Error(msg.error));
 					else pending.resolve(msg.result);
+				}
+				break;
+			}
+			case 'project:nodeSchemaResponse': {
+				const pending = pendingNodeSchemas.current.get(msg.requestId);
+				if (pending) {
+					pendingNodeSchemas.current.delete(msg.requestId);
+					if (msg.error) pending.reject(new Error(msg.error));
+					else pending.resolve(msg.service);
 				}
 				break;
 			}
@@ -262,6 +287,9 @@ const ProjectWebview: React.FC = () => {
 			case 'project:envKeysUpdate':
 				setEnvKeys(msg.envKeys);
 				break;
+			case 'project:cloudConnectionConfigured':
+				setCloudConnectionConfigured(msg.cloudConnectionConfigured);
+				break;
 			case 'shell:connectionChange':
 				if (msg.isConnected) {
 					setStatusMap({});
@@ -273,7 +301,7 @@ const ProjectWebview: React.FC = () => {
 				break;
 			case 'checkout:required':
 				// Host says subscription is required — show inline prompt (handled by ProjectView's Subscribe button)
-				console.log(`[ProjectWebview] checkout:required received, stripeKey=${!!(typeof process !== 'undefined' && (process.env as any).RR_STRIPE_PUBLISHABLE_KEY)}`);
+				console.log('[ProjectWebview] checkout:required received');
 				setShowCheckout(true);
 				break;
 			case 'checkout:subscriptionUpdate':
@@ -411,7 +439,8 @@ const ProjectWebview: React.FC = () => {
 				});
 				break;
 			case 'project:initialPrefs':
-				setPrefs(msg.prefs ?? {});
+				// Merge: the host broadcasts only the keys that changed, not the whole bag.
+				setPrefs((prev) => mergeProjectPreferences(prev, msg.prefs ?? {}));
 				break;
 			case 'project:dirtyState':
 				setIsDirty(msg.isDirty);
@@ -458,6 +487,30 @@ const ProjectWebview: React.FC = () => {
 		[sendMessage]
 	);
 
+	/**
+	 * Fetches the FULL definition (config schema) for one service provider
+	 * from the extension host. The bulk services payload is summary-only, so
+	 * the canvas requests definitions on demand and caches them. Rejects on
+	 * host error or timeout so the canvas treats the request as retryable.
+	 */
+	const handleGetNodeSchema = useCallback(
+		async (provider: string): Promise<Record<string, any> | undefined> => {
+			return new Promise((resolve, reject) => {
+				const requestId = ++nodeSchemaCounter.current;
+				pendingNodeSchemas.current.set(requestId, { resolve, reject });
+				sendMessage({ type: 'project:getNodeSchema', requestId, provider });
+				// Timeout: reject after 15s so a lost reply never hangs the canvas
+				setTimeout(() => {
+					if (pendingNodeSchemas.current.has(requestId)) {
+						pendingNodeSchemas.current.delete(requestId);
+						reject(new Error(`Node schema request timed out for '${provider}'`));
+					}
+				}, 15000);
+			});
+		},
+		[sendMessage]
+	);
+
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
 			sendMessage({ type: 'status:pipelineAction', action, source });
@@ -486,6 +539,7 @@ const ProjectWebview: React.FC = () => {
 
 	const handlePrefsChange = useCallback(
 		(updatedPrefs: Record<string, unknown>) => {
+			setPrefs((prev) => mergeProjectPreferences(prev, updatedPrefs));
 			sendMessage({ type: 'project:prefsChange', prefs: updatedPrefs });
 		},
 		[sendMessage]
@@ -508,6 +562,10 @@ const ProjectWebview: React.FC = () => {
 	const clearPendingOAuthTokens = useCallback(() => {
 		setPendingOAuthTokens(undefined);
 	}, []);
+
+	const handleOpenCloudSetup = useCallback(() => {
+		sendMessage({ type: 'project:openCloudSetup' });
+	}, [sendMessage]);
 
 	const handleSave = useCallback(() => {
 		sendMessage({ type: 'project:requestSave' });
@@ -589,7 +647,7 @@ const ProjectWebview: React.FC = () => {
 	}, []);
 
 	/** Fetch one immutable artifact (the version cards' record drawer). */
-	const fetchDeployArtifact = useCallback((version: number): Promise<Record<string, unknown>> => {
+	const fetchDeployArtifact = useCallback((version: number): Promise<IProject | undefined> => {
 		return new Promise<Record<string, unknown>>((resolve, reject) => {
 			// Step 1: allocate the correlation id and arm the timeout guard.
 			const requestId = ++deployRequestCounter.current;
@@ -602,7 +660,9 @@ const ProjectWebview: React.FC = () => {
 			// Step 2: register the resolver and post the message.
 			pendingArtifactFetches.current.set(requestId, { resolve, reject, timer });
 			sendMessageRef.current({ type: 'deploy:artifact', requestId, projectId: projectIdRef.current, version });
-		});
+			// The registry stores the saved pipeline document verbatim, so the
+			// raw artifact record IS the IProject the record drawer renders.
+		}).then((artifact) => artifact as unknown as IProject);
 	}, []);
 
 	/** Publish the SAVED document (the host snapshots it; only metadata travels). */
@@ -744,14 +804,13 @@ const ProjectWebview: React.FC = () => {
 
 	// --- Render --------------------------------------------------------------
 
-	const stripeKey = process.env.RR_STRIPE_PUBLISHABLE_KEY || '';
-
 	return (
 		<>
 			<ProjectView
 				project={project}
 				servicesJson={servicesJson}
 				isConnected={isConnected}
+				cloudConnectionConfigured={cloudConnectionConfigured}
 				isSubscribed={subscribed}
 				statusMap={statusMap}
 				serverHost={serverHost}
@@ -762,10 +821,12 @@ const ProjectWebview: React.FC = () => {
 				liveLogEvents={liveLogEvents}
 				onContentChanged={handleContentChanged}
 				onValidate={handleValidate}
+				getNodeSchema={handleGetNodeSchema}
 				onPipelineAction={handlePipelineAction}
 				onViewStateChange={handleViewStateChange}
 				onPrefsChange={handlePrefsChange}
 				onOpenLink={handleOpenLink}
+				onOpenCloudSetup={handleOpenCloudSetup}
 				oauthReturnUrl={oauthReturnUrl}
 				onOpenExternal={handleOpenExternal}
 				pendingOAuthTokens={pendingOAuthTokens}
@@ -791,6 +852,10 @@ const ProjectWebview: React.FC = () => {
 							// refresh via deploy:fetch once the mutation resolves.
 							onDeploySetDisabled: async (teamId: string, disabled: boolean) => {
 								await deploymentRequest((requestId) => ({ type: 'deployment:setDisabled', teamId, requestId, disabled }));
+								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+							},
+							onDeployRemove: async (teamId: string) => {
+								await deploymentRequest((requestId) => ({ type: 'deployment:remove', teamId, requestId }));
 								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
 							},
 							onDeploySetSchedule: async (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => {
@@ -898,7 +963,7 @@ const ProjectWebview: React.FC = () => {
 										sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId, sourceId: openDeployment.sourceId });
 									},
 									onSetSchedulePaused: async (paused: boolean) => {
-										await deploymentRequest((requestId) => ({ type: 'deployment:setSchedulePaused', teamId: openDeployment.teamId, requestId, sourceId: openDeployment.sourceId, paused }));
+										await deploymentRequest((requestId) => ({ type: 'deployment:setSchedulePaused', teamId: openDeployment.teamId, requestId, sourceId: openDeployment.sourceId as string, paused }));
 										sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId, sourceId: openDeployment.sourceId });
 									},
 									onRunSource: async (sourceId) => {
@@ -915,6 +980,7 @@ const ProjectWebview: React.FC = () => {
 				/>
 			)}
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setShowCheckout(false)} />}
 		</>
 	);
 };

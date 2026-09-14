@@ -124,6 +124,12 @@ class IInstance(IInstanceBase):
                 # Emit the document(s) for further processing in the pipeline
                 self.instance.writeDocuments([doc])
 
+                # One object can deliver several image streams — a cropper's crops, a
+                # frame grabber's frames — and each thumbnail is its own chunk of that
+                # object. Without this every one of them claims chunk 0, so a consumer
+                # keyed on (objectId, chunkId) keeps overwriting a single row.
+                self.chunkId += 1
+
                 # Reset image data after processing is complete
                 self.image_data = b''
 

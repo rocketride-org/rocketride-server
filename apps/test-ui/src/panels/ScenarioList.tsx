@@ -13,7 +13,10 @@ interface Props {
 }
 
 const ScenarioList: React.FC<Props> = ({ engine, engineState }) => {
-	const isRunning = engineState === 'running' || engineState === 'paused';
+	// Any non-idle state blocks activation: engine.start is idle-only, so a
+	// card clicked while aborting would log a phantom "Running scenario"
+	// event and then silently do nothing.
+	const isRunning = engineState !== 'idle';
 
 	return (
 		<div style={styles.scenarioList}>
@@ -27,6 +30,17 @@ const ScenarioList: React.FC<Props> = ({ engine, engineState }) => {
 					}}
 					onClick={() => {
 						if (!isRunning) engine.runScenario(scenario);
+					}}
+					// Keyboard access: cards act as buttons (Enter/Space = click),
+					// dropped from the tab order while a run is active.
+					role="button"
+					tabIndex={isRunning ? -1 : 0}
+					aria-disabled={isRunning}
+					onKeyDown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							if (!isRunning) engine.runScenario(scenario);
+						}
 					}}
 				>
 					<div style={styles.scenarioTitle}>{scenario.name}</div>

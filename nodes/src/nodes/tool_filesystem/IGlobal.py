@@ -42,9 +42,22 @@ Surfaces ``read_file``, ``write_file``, ``delete_file``, ``list_directory``,
 from __future__ import annotations
 
 import re
+from enum import IntEnum
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
+
+
+class OnConflict(IntEnum):
+    """What to do when the sink's target path is already taken.
+
+    Member names are the services.store.json enum values uppercased, so
+    :meth:`IGlobal._sink_config` resolves one to the other by name.
+    """
+
+    UNIQUE = 0
+    OVERWRITE = 1
+    SKIP = 2
 
 
 class IGlobal(IGlobalBase):
@@ -62,6 +75,7 @@ class IGlobal(IGlobalBase):
     target_dir: str = 'output/'
     emit_url: bool = False
     url_expires_in: int = 3600
+    on_conflict: OnConflict = OnConflict.UNIQUE
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -76,7 +90,12 @@ class IGlobal(IGlobalBase):
         self.allow_stat = bool(cfg.get('allowStat', True))
         self.allow_delete = bool(cfg.get('allowDelete', False))
         self.path_patterns = self._build_path_patterns(cfg)
-        self.target_dir, self.emit_url, self.url_expires_in = self._sink_config(cfg)
+        (
+            self.target_dir,
+            self.emit_url,
+            self.url_expires_in,
+            self.on_conflict,
+        ) = self._sink_config(cfg)
 
         try:
             # Engine identity: this node runs INSIDE the engine subprocess
@@ -132,11 +151,13 @@ class IGlobal(IGlobalBase):
         return patterns
 
     @staticmethod
-    def _sink_config(cfg: dict) -> tuple[str, bool, int]:
-        """Parse the sink lane config into ``(target_dir, emit_url, url_expires_in)``.
+    def _sink_config(cfg: dict) -> tuple[str, bool, int, OnConflict]:
+        """Parse the sink lane config into ``(target_dir, emit_url, url_expires_in, on_conflict)``.
 
         ``url_expires_in`` is clamped to the FileStore range of 1..3600 seconds;
         non-positive or missing values fall back to the 3600-second default.
+        ``on_conflict`` falls back to :attr:`OnConflict.UNIQUE` on anything that does not
+        name a member, so a mistyped config degrades to the non-destructive outcome.
         """
         target_dir = str(cfg.get('targetDir', 'output/'))
         emit_url = bool(cfg.get('emitUrl', False))
@@ -145,7 +166,11 @@ class IGlobal(IGlobalBase):
         except (TypeError, ValueError):
             raw_expires = 3600
         url_expires_in = min(raw_expires, 3600) if raw_expires > 0 else 3600
-        return target_dir, emit_url, url_expires_in
+        try:
+            on_conflict = OnConflict[str(cfg.get('onConflict', '')).strip().upper()]
+        except KeyError:
+            on_conflict = OnConflict.UNIQUE
+        return target_dir, emit_url, url_expires_in, on_conflict
 
     def validateConfig(self) -> None:
         try:
@@ -161,3 +186,4 @@ class IGlobal(IGlobalBase):
         self.target_dir = 'output/'
         self.emit_url = False
         self.url_expires_in = 3600
+        self.on_conflict = OnConflict.UNIQUE

@@ -26,11 +26,13 @@
 """Tool filesystem package.
 
 This module exports the public interfaces for filesystem operations:
+- IEndpoint: File Store source endpoint
 - IGlobal: Global filesystem interface
 - IInstance: Instance-level filesystem interface
 """
 
+from .IEndpoint import IEndpoint
 from .IGlobal import IGlobal
 from .IInstance import IInstance
 
-__all__ = ['IGlobal', 'IInstance']
+__all__ = ['IEndpoint', 'IGlobal', 'IInstance']

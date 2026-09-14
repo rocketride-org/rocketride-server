@@ -37,12 +37,18 @@ engine:
   env:
     LOG_LEVEL: 'debug'
     WORKER_THREADS: '2'
+    # autoscaling below can take this release past one replica, which requires
+    # a shared file store — without it the chart fails the render on purpose
+    # (see the HA Tuning section of the chart README). Keeping a real value
+    # here means CI exercises a configuration that would actually work.
+    RR_STORE_URL: 's3://rocketride-test-bucket/store'
 
   existingSecret: ''
 
   secrets:
     OPENAI_API_KEY: 'openai-test-placeholder'
     ANTHROPIC_API_KEY: 'anthropic-test-placeholder'
+    RR_STORE_SECRET_KEY: '{"access_key_id": "test-key-id", "secret_access_key": "test-secret"}'
 
   podAnnotations:
     prometheus.io/scrape: 'true'

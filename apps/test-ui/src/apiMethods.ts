@@ -117,7 +117,7 @@ export const API_METHODS: ApiMethodDef[] = [
 	// =========================================================================
 	{ method: 'account.getProfile', category: 'Account', mode: 'happy', saasOnly: true },
 	{ method: 'account.updateProfile', category: 'Account', mode: 'skip', skipReason: 'Destructive: would modify user profile', saasOnly: true },
-	{ method: 'account.setDefaultTeam', category: 'Account', mode: 'skip', skipReason: 'Destructive: would change default team', saasOnly: true },
+	{ method: 'account.setDevTeam', category: 'Account', mode: 'skip', skipReason: 'Destructive: would change dev team', saasOnly: true },
 	{ method: 'account.setDefaultOrg', category: 'Account', mode: 'skip', skipReason: 'Destructive: would change default org', saasOnly: true },
 	{ method: 'account.getOrg', category: 'Account', mode: 'happy', saasOnly: true },
 	{ method: 'account.updateOrgName', category: 'Account', mode: 'skip', skipReason: 'Destructive: would rename organization', saasOnly: true },

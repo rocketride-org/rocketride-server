@@ -16,7 +16,14 @@ from abc import ABC, abstractmethod
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
-from core.merger import _derive_title, _LITELLM_AVAILABLE, get_openrouter_cache, is_openrouter_available, merge
+from core.merger import (
+    CALL_VERIFIED,
+    _derive_title,
+    _LITELLM_AVAILABLE,
+    get_openrouter_cache,
+    is_openrouter_available,
+    merge,
+)
 from core.patcher import patch, _find_fields_block, _repair_field_objects
 from core.reporter import ProviderReport
 from core.smoke import run as smoke_run, SmokeResult
@@ -30,6 +37,31 @@ except ImportError:
 #   -2024-05-13  (YYYY-MM-DD, e.g. gpt-4-turbo-2024-04-09)
 #   -0613        (MMDD, e.g. gpt-4-0613, gpt-3.5-turbo-1106)
 _DATED_SNAPSHOT_RE = re.compile(r'(-20\d{2}-\d{2}-\d{2}|-\d{4})$')
+
+# Above this share of a provider's verified models coming back "retired", the
+# result is treated as an API-level failure rather than N retirements.
+_RETIREMENT_ANOMALY_RATIO = 0.5
+
+
+def is_retirement_anomaly(retired_count: int, verified_count: int) -> bool:
+    """True when "retired" came back for too much of a provider to be believable.
+
+    A retirement message is per-model evidence, but a break one level up produces
+    the same message for every model at once: retire an API version and every call
+    answers with the same 404 and the same wording. Providers do not retire most of
+    a catalogue in one go, so a majority verdict says more about the API than about
+    the models.
+
+    Args:
+        retired_count: Models whose call reported them retired.
+        verified_count: Models actually called this run.
+
+    Returns:
+        True if the run should be treated as an API-level failure instead.
+    """
+    if not retired_count or not verified_count:
+        return False
+    return retired_count > verified_count * _RETIREMENT_ANOMALY_RATIO
 
 
 def _active_protected_profiles(entries: List, today=None) -> set:
@@ -272,6 +304,7 @@ class CloudProvider(ABC):
         allow_fallback_discovery: bool = False,
         use_config_overrides: bool = True,
         global_protected_profiles: List[str] | None = None,
+        verify_existing: bool = False,
     ) -> ProviderReport:
         """
         Full sync pipeline: pick source → fetch → discovery gate → smoke (if applicable) → merge.
@@ -387,7 +420,9 @@ class CloudProvider(ABC):
             report.error = f'Failed to fetch models from {primary_source}: {e}'
             return report
 
-        # Set deprecation_source label based on the actual primary source.
+        # Set deprecation_source label based on the actual primary source. The label
+        # is prose for the migration message; primary_source is the canonical key that
+        # decides authority, and is passed through unchanged.
         if primary_source == 'provider':
             provider_label = self.display_name or self.provider_name
             deprecation_source = f'{provider_label} API'
@@ -395,6 +430,7 @@ class CloudProvider(ABC):
             deprecation_source = 'OpenRouter'
         else:
             deprecation_source = 'LiteLLM'
+        deprecation_source_key = primary_source
 
         # --- Discovery gate ---
         # If discovery is off, OR no source qualifies for discovery, drop new models
@@ -425,6 +461,62 @@ class CloudProvider(ABC):
                         report.skipped.append((model_id, result.reason))
             api_models = verified_models
 
+        # --- Re-verify what is already in the catalogue ---
+        # The smoke gate above validates additions only, so a model that entered
+        # correctly and was retired six months later is never called again. A listing
+        # endpoint is no help: providers keep returning models they have retired, and
+        # the call is the only thing that answers the question. Only a message naming
+        # provider states the model is retired counts; a bare 404 is reported instead,
+        # since OpenAI and Anthropic answer one for a gated model too, and a busy
+        # service or a permission problem never reaches this at all.
+        retired_models: Dict[str, str] = {}
+        revived_models: set = set()
+        verified_count = 0
+        if verify_existing and primary_source == 'provider' and client is not None:
+            protected_keys = _active_protected_profiles(self._config.get('protected_profiles', []))
+            if global_protected_profiles:
+                protected_keys.update(_active_protected_profiles(global_protected_profiles))
+            for profile_key, profile in current_profiles.items():
+                if not isinstance(profile, dict) or profile_key in protected_keys:
+                    continue
+                model_id = profile.get('model')
+                if not model_id:
+                    continue
+                # Profiles this pass marked before are called again: a mark made by a
+                # call can only be lifted by a call that passes, never by the model
+                # turning up in a listing (it never left one).
+                already_marked = profile.get('deprecated')
+                if already_marked and profile.get('deprecatedBy') != CALL_VERIFIED:
+                    continue
+                result = smoke_run(self.smoke_type, client, model_id)
+                verified_count += 1
+                if result.retired():
+                    if not already_marked:
+                        retired_models[model_id] = result.reason
+                        report.retired.append((profile_key, result.reason))
+                elif result.passed() and already_marked:
+                    revived_models.add(model_id)
+                elif result.outcome == 'missing' and not already_marked:
+                    # A bare 404: retired, or a model this key cannot reach. Not
+                    # evidence enough to deprecate, so hand it to a human instead.
+                    report.unverified.append((profile_key, result.reason))
+
+            # A retirement message is per-model evidence, but a break one level up
+            # produces the same message for every model at once: retire an API
+            # version and each call comes back with the same 404 and the same
+            # wording. Providers do not retire most of a catalogue in one go, so a
+            # majority verdict says more about the API than about the models.
+            # Deprecating nothing and asking for a human is the safe reading; a real
+            # mass retirement is then applied deliberately rather than swept in.
+            if is_retirement_anomaly(len(retired_models), verified_count):
+                report.warning = (
+                    f'{len(retired_models)} of {verified_count} models reported as retired — that is an API-level '
+                    'failure more often than a real mass retirement. Nothing was deprecated; verify by hand.'
+                )
+                report.unverified.extend(report.retired)
+                report.retired = []
+                retired_models = {}
+
         # --- Warning messages for partial-result modes ---
         if primary_source != 'provider' and api_key is None:
             report.warning = (
@@ -447,6 +539,9 @@ class CloudProvider(ABC):
             use_config_overrides=use_config_overrides,
             global_protected_profiles=global_protected_profiles,
             deprecation_source=deprecation_source,
+            deprecation_source_key=deprecation_source_key,
+            retired_models=retired_models,
+            revived_models=revived_models,
         )
 
     def _fetch_litellm_models(self) -> List[Dict[str, Any]]:
@@ -556,6 +651,9 @@ class CloudProvider(ABC):
         use_config_overrides: bool = True,
         global_protected_profiles: List[str] | None = None,
         deprecation_source: str = 'provider API',
+        deprecation_source_key: str = 'provider',
+        retired_models: Dict[str, str] | None = None,
+        revived_models: set | None = None,
     ) -> ProviderReport:
         """
         Run the smart merge and optionally write results to disk.
@@ -600,7 +698,11 @@ class CloudProvider(ABC):
             model_sources=model_sources,
             normalize_profile_model_id=self.normalize_profile_model_id,
             deprecation_source=deprecation_source,
+            deprecation_source_key=deprecation_source_key,
             derive_title_fn=self.derive_title,
+            output_limit_below_context=bool(self._config.get('output_limit_below_context', False)),
+            retired_models=retired_models or {},
+            revived_models=revived_models or set(),
         )
 
         report.added = merge_result.added
@@ -608,6 +710,7 @@ class CloudProvider(ABC):
         report.deprecated = merge_result.deprecated
         report.unchanged_count = len(merge_result.unchanged)
         report.estimated_tokens = merge_result.estimated_tokens
+        report.reappeared_deprecated = merge_result.reappeared_deprecated
 
         if apply:
             # Check if field repairs are needed even when no profiles changed

@@ -24,10 +24,10 @@
 // APP SDK TYPES
 // =============================================================================
 //
-// Type definitions for the RocketRide shell-ui app plugin system.
+// Type definitions for the RocketRide shell app plugin system.
 //
-// These mirror shell-ui/src/workspace/types.ts so that third-party apps can
-// import them from `rocketride/app-sdk` without depending on the shell-ui
+// These mirror shell/src/workspace/types.ts so that third-party apps can
+// import them from `rocketride/app-sdk` without depending on the shell
 // monorepo package.  At runtime, Module Federation replaces stub implementations
 // with the real singletons from the shell host.
 // =============================================================================
@@ -52,17 +52,6 @@ export interface ShellAppProps {
 }
 
 /**
- * Props injected by the shell into the app's `<Sidebar />` component.
- *
- * The sidebar zone is collapsible; apps should hide or simplify their
- * sidebar content when `collapsed` is true.
- */
-export interface ShellSidebarProps {
-	/** True when the sidebar is in collapsed (icon-only) mode. */
-	collapsed: boolean;
-}
-
-/**
  * Authenticated user identity returned by the RocketRide server after
  * a successful connection.  Includes profile, org, and subscription info.
  */
@@ -78,7 +67,7 @@ export interface ConnectResult {
 	/** Organizations the user belongs to. */
 	organizations?: { id: string; name: string }[];
 	/** Apps on the user's desktop — full manifest entries with appStatus + onDesktop. */
-	apps?: { id: string; moduleId: string; name: string; entry: string; appStatus?: string; onDesktop?: boolean; [key: string]: unknown }[];
+	apps?: { id: string; moduleId: string; name: string; entry?: string; registryVersion?: number; appStatus?: string; onDesktop?: boolean; [key: string]: unknown }[];
 	/** Open-ended additional fields. */
 	[key: string]: unknown;
 }
@@ -194,6 +183,24 @@ export interface AppManifestEntry {
 	categories?: string[];
 	/** The app's settings contribution (VSCode contributes.configuration shape). */
 	configuration?: AppConfiguration;
+	/**
+	 * Resolved app version (semver) for the desktop tile version chip —
+	 * a built-in's package version, a marketplace app's active version, or
+	 * a deployed pin's appVersion. Absent when the server sent none.
+	 */
+	version?: string;
+	/** Registry version number the entry resolves to (the scope-walk winner). */
+	registryVersion?: number;
+	/** True when the entry is a dev-overlay override (live watch build). */
+	dev?: boolean;
+	/**
+	 * Every live dev-server registration for this app — one per editor
+	 * session, newest first; `entry` already carries the newest. Pages
+	 * launched from a specific editor carry that editor's session nonce
+	 * and prefer its registration, so several editors can dev-serve the
+	 * same app concurrently.
+	 */
+	devEntries?: Array<{ url: string; session?: string; registeredAt?: number }>;
 	/** When false, the app runs without authentication. Default: true. */
 	authenticated?: boolean;
 	/** When false, the status bar is hidden for this app. Default: true. */
@@ -229,10 +236,6 @@ export interface ShellBrandingConfig {
  *
  * The shell stores one of these per app once the dynamic import triggered
  * by `AppManifestEntry.load()` resolves.
- *
- * The `components` object provides React components the shell mounts in
- * its screen zones.  `App` and `Sidebar` are well-known; any additional
- * keys are available for cross-app loading via `useAppComponent()`.
  */
 export interface AppDescriptor {
 	/** Unique stable identifier — must match the manifest id. */
@@ -244,16 +247,16 @@ export interface AppDescriptor {
 	/** Branding tokens (logo, welcome text) for the app. */
 	branding: ShellBrandingConfig;
 	/**
-	 * Component catalog.
-	 *
-	 * - `App`     — required, mounted in the client area.
-	 * - `Sidebar` — optional, mounted in the sidebar zone.
-	 *               If absent the sidebar zone is hidden.
-	 * - Any other keys — available for cross-app loading.
+	 * The app's ONE mount point, rendered raw in the client area. The app
+	 * composes its own layout inside with `<AppLayout>` (one column, sidebar,
+	 * status bar — declared as props from the app's single tree).
 	 */
-	components: {
-		App: React.ComponentType<ShellAppProps>;
-		Sidebar?: React.ComponentType<ShellSidebarProps>;
+	app: React.ComponentType<ShellAppProps>;
+	/**
+	 * Optional cross-app component catalog. Never mounted by the shell —
+	 * entries are loadable by other apps via `useAppComponent()`.
+	 */
+	components?: {
 		[key: string]: React.ComponentType<any> | undefined;
 	};
 }

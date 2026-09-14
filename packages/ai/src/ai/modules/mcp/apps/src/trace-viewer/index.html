@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Pipeline trace</title>
+		<!-- Minimal pre-JS styling only; the shared widget design-system
+		     (../shared/theme.css) is imported by main.tsx and inlined at build.
+		     No height or min-height anywhere: the list sizes to its rows and the
+		     host's auto-resize follows the content (a viewport-relative cap here
+		     would feed back into that measurement and collapse the widget). -->
+		<style>
+			:root {
+				color-scheme: light dark;
+			}
+			body {
+				font:
+					13px/1.5 system-ui,
+					sans-serif;
+				margin: 12px;
+			}
+			.rr-waiting {
+				opacity: 0.6;
+				padding: 8px 0;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="root"><div class="rr-waiting">Waiting for trace data…</div></div>
+		<script type="module" src="./main.tsx"></script>
+	</body>
+</html>

@@ -32,6 +32,9 @@ _inject('rocketride', _mock_rocketride)
 # depends (used transitively by ai.web.__init__)
 _inject('depends', MagicMock())
 
+# rocketlib (server.py imports debug; real module needs the engine's engLib)
+_inject('rocketlib', MagicMock())
+
 # ai.account and its sub-modules (ai.web.__init__ imports ai.account.account)
 _mock_ai_account = MagicMock()
 _inject('ai.account', _mock_ai_account)
@@ -98,6 +101,7 @@ class TestAllowedModules:
             'clients',
             'data',
             'dropper',
+            'mcp',
             'pipe',
             'remote',
             'services',

@@ -53,9 +53,11 @@ struct Location {
     int line() const noexcept;
     static std::string sanitizeFunctionName(std::string_view name) noexcept;
 
-    // We use string_view's here so that *no* allocations occur
-    // this requires that all strings passed here must be constant
-    // literals
+    // We use string_view's here so that *no* allocations occur. That puts one
+    // requirement on the caller: the characters must outlive every Error this
+    // location is copied into. A string literal always does; anything else has
+    // to be interned or otherwise live for the process. The views need not be
+    // NUL-terminated - fileName() copies the path before parsing it.
     std::string_view m_path;
     int m_line = 0;
     std::string_view m_function;

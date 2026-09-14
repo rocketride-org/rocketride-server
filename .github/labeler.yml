@@ -6,7 +6,7 @@ module:server:
               - "packages/server/**"
               - "packages/vcpkg/**"
               - "packages/tika/**"
-              - "apps/engine/**"
+              - "packages/engine/**"
           - all-globs-to-all-files: "!**/scripts/**"
 
 module:nodes:

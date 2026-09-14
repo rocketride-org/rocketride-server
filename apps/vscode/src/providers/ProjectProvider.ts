@@ -8,7 +8,7 @@
  *
  * Combines the former PageEditorProvider (canvas editing, file I/O, undo/redo)
  * and StatusProvider (status, trace, flow monitoring) into a single provider
- * that renders the shared-ui ProjectView component.
+ * that renders the shared ProjectView component.
  *
  * Uses the ProjectViewIncoming / ProjectViewOutgoing message protocol to
  * communicate with the Project webview.
@@ -27,9 +27,13 @@ import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
-import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo } from '../shared/util/deployMapping';
-import type { DeploymentWebviewToHost, DeploymentLoadPayload } from './views/deployTypes';
-import type { LogSessionWebviewToHost } from './views/logTypes';
+import { isCloudConnectionConfigured as hasCloudConnectionConfigured } from '../shared/util/connectionModeAuth';
+import { savePipelineDocument } from '../shared/util/pipelineSave';
+import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo, wireTeamIdOf } from '../shared/util/deployMapping';
+import type { DeploymentWebviewToHost, DeploymentLoadPayload } from './types/deployTypes';
+import type { LogSessionWebviewToHost } from './types/logTypes';
+import { getStripePublishableKey } from './shared/stripe-key';
+import type { StripeKeyUnavailableReason } from './types/checkoutTypes';
 
 // =============================================================================
 // CONSTANTS
@@ -37,6 +41,12 @@ import type { LogSessionWebviewToHost } from './views/logTypes';
 
 const PREFS_KEY = 'rocketride.prefs';
 const LAYOUTS_KEY = 'rocketride.layouts';
+const GLOBAL_PREF_KEYS = new Set(['cloudCanvasPromptDismissed']);
+// workspaceState key prefix for the auto-backup of an untitled pipeline's
+// content. VS Code does not hot-exit-back-up a custom-editor untitled document,
+// so we persist it ourselves (keyed by the untitled URI) and restore it when
+// the editor re-resolves empty after a restart. Cleared when the editor closes.
+const UNTITLED_BACKUP_PREFIX = 'rocketride.untitledBackup:';
 
 // How long undelivered OAuth tokens are kept for redelivery after a webview
 // reload. Long enough to cover a slow consent flow, short enough that stale
@@ -73,6 +83,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	private connectionManager = ConnectionManager.getInstance();
 	private logger = getLogger();
 	private savesForRun: Set<string> = new Set();
+	private preferenceUpdateQueue: Promise<void> = Promise.resolve();
 	// OAuth tokens that arrived while no live webview existed for their
 	// document (e.g. the editor was recycled during the browser round-trip),
 	// keyed by document URI. Redelivered after the next view:ready.
@@ -81,6 +92,17 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.registerCommands();
 		this.setupEventListeners();
+		// Drop an untitled pipeline's auto-backup once its editor closes: an
+		// explicit save reverts-and-closes it, and a discard just closes it, so
+		// only a full VS Code exit leaves the backup behind — which is exactly
+		// the case we want to restore on the next launch.
+		this.context.subscriptions.push(
+			vscode.workspace.onDidCloseTextDocument((closed) => {
+				if (closed.isUntitled) {
+					void this.context.workspaceState.update(`${UNTITLED_BACKUP_PREFIX}${closed.uri.toString()}`, undefined);
+				}
+			})
+		);
 	}
 
 	// =========================================================================
@@ -140,11 +162,17 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 		});
 
-		const servicesUpdatedListener = this.connectionManager.on('shell:servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
+		const servicesUpdatedListener = this.connectionManager.on('shell:servicesUpdated', (payload: { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string }) => {
 			this.broadcastServicesToAllEditors(payload);
 		});
 
-		this.disposables.push(eventListener, accountUpdateListener, envKeysChangedListener, connectionStateListener, servicesUpdatedListener);
+		const configChangeListener = vscode.workspace.onDidChangeConfiguration((event) => {
+			if (event.affectsConfiguration('rocketride.development.connectionMode') || event.affectsConfiguration('rocketride.deployment.connectionMode')) {
+				this.broadcastCloudConnectionConfigured();
+			}
+		});
+
+		this.disposables.push(eventListener, accountUpdateListener, envKeysChangedListener, connectionStateListener, servicesUpdatedListener, configChangeListener);
 	}
 
 	// =========================================================================
@@ -199,13 +227,14 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// BROADCASTING
 	// =========================================================================
 
-	private broadcastServicesToAllEditors(payload: { services: Record<string, unknown>; servicesError?: string }): void {
+	private broadcastServicesToAllEditors(payload: { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string }): void {
 		for (const editorState of this.editorStates.values()) {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
 				editorState.webviewPanel.webview
 					.postMessage({
 						type: 'project:services',
 						services: payload.services,
+						icons: payload.icons ?? {},
 					})
 					.then(undefined, (err: unknown) => {
 						this.logger.error(`Failed to post services to webview: ${err}`);
@@ -224,6 +253,87 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				});
 			}
 		}
+	}
+
+	private isCloudConnectionConfigured(): boolean {
+		return hasCloudConnectionConfigured({
+			development: { connectionMode: vscode.workspace.getConfiguration('rocketride.development').get('connectionMode', 'local') },
+			deployment: { connectionMode: vscode.workspace.getConfiguration('rocketride.deployment').get('connectionMode', null) },
+		});
+	}
+
+	private broadcastCloudConnectionConfigured(): void {
+		const cloudConnectionConfigured = this.isCloudConnectionConfigured();
+		for (const editorState of this.editorStates.values()) {
+			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
+				editorState.webviewPanel.webview.postMessage({ type: 'project:cloudConnectionConfigured', cloudConnectionConfigured }).then(undefined, (err: unknown) => {
+					this.logger.error(`Failed to post cloudConnectionConfigured to webview: ${err}`);
+				});
+			}
+		}
+	}
+
+	private getPreferences(): Record<string, unknown> {
+		const workspacePrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
+		const globalPrefs = this.context.globalState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
+		const prefs = { ...workspacePrefs };
+		for (const key of GLOBAL_PREF_KEYS) {
+			// globalState is authoritative, but a value left in workspaceState by an earlier
+			// build is honoured as a fallback so a prior "Don't show again" keeps applying.
+			if (Object.prototype.hasOwnProperty.call(globalPrefs, key)) {
+				prefs[key] = globalPrefs[key];
+			}
+		}
+		return prefs;
+	}
+
+	private broadcastPreferences(prefs: Record<string, unknown>, originatingWebview: vscode.Webview): void {
+		for (const editorState of this.editorStates.values()) {
+			const webview = editorState.webviewPanel.webview;
+			if (editorState.isReady && !editorState.isDisposed && webview && webview !== originatingWebview) {
+				webview.postMessage({ type: 'project:initialPrefs', prefs }).then(undefined, (err: unknown) => {
+					this.logger.error(`Failed to post initialPrefs to webview: ${err}`);
+				});
+			}
+		}
+	}
+
+	/** Merges preference updates; keys cannot currently be deleted through this path. */
+	private updatePreferences(updatedPrefs: Record<string, unknown>, originatingWebview: vscode.Webview): Promise<void> {
+		this.preferenceUpdateQueue = this.preferenceUpdateQueue
+			.then(async () => {
+				const workspacePrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
+				const globalPrefs = this.context.globalState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
+				// Webviews send one-key patches; ignore a patch that is already stored so
+				// every layout drag does not rewrite global storage.
+				const workspaceUpdates: Record<string, unknown> = {};
+				const globalUpdates: Record<string, unknown> = {};
+				for (const [key, value] of Object.entries(updatedPrefs)) {
+					const isGlobal = GLOBAL_PREF_KEYS.has(key);
+					const current = isGlobal ? globalPrefs[key] : workspacePrefs[key];
+					if (current === value) continue;
+					if (isGlobal) globalUpdates[key] = value;
+					else workspaceUpdates[key] = value;
+				}
+
+				// Only touch a scope that actually has updates — most pref writes (layout,
+				// navigation mode) are workspace-only and should not rewrite global storage.
+				await Promise.all([
+					Object.keys(workspaceUpdates).length > 0 ? this.context.workspaceState.update(PREFS_KEY, { ...workspacePrefs, ...workspaceUpdates }) : Promise.resolve(),
+					Object.keys(globalUpdates).length > 0 ? this.context.globalState.update(PREFS_KEY, { ...globalPrefs, ...globalUpdates }) : Promise.resolve(),
+				]);
+
+				// Broadcast only the global-scoped changes. Workspace prefs (layout,
+				// navigation mode) are per-editor view state: propagating them would let one
+				// editor's stale full-bag write revert another editor's live UI.
+				if (Object.keys(globalUpdates).length > 0) {
+					this.broadcastPreferences(globalUpdates, originatingWebview);
+				}
+			})
+			.catch((err: unknown) => {
+				this.logger.error(`Failed to persist preferences: ${err}`);
+			});
+		return this.preferenceUpdateQueue;
 	}
 
 	/**
@@ -444,6 +554,19 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	public async resolveCustomTextEditor(document: vscode.TextDocument, webviewPanel: vscode.WebviewPanel, _token: vscode.CancellationToken): Promise<void> {
 		const webview = webviewPanel.webview;
 
+		// A hot-exit restored untitled pipeline comes back with empty content
+		// (VS Code does not preserve the programmatically-seeded text), which
+		// would parse to no project and render a blank canvas. Restore our own
+		// auto-backup of the in-progress pipeline if there is one; otherwise
+		// seed the empty-pipeline template so the starting-point wizard shows.
+		if (document.isUntitled && document.getText().trim() === '') {
+			const backup = this.context.workspaceState.get<string>(`${UNTITLED_BACKUP_PREFIX}${document.uri.toString()}`);
+			const seedText = backup && backup.trim() !== '' ? backup : JSON.stringify({ components: [] }, null, 2);
+			const seed = new vscode.WorkspaceEdit();
+			seed.insert(document.uri, new vscode.Position(0, 0), seedText);
+			await vscode.workspace.applyEdit(seed);
+		}
+
 		const fileName = document.uri.fsPath.split(/[\\/]/).pop() ?? document.uri.fsPath;
 		webviewPanel.title = fileName.replace(/\.pipe(\.json)?$/i, '');
 
@@ -509,7 +632,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					// Load layout defaults + prefs
 					const layouts = this.context.workspaceState.get<Record<string, Record<string, unknown>>>(LAYOUTS_KEY) ?? {};
 					const layout = layouts[document.uri.toString()] ?? {};
-					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
+					const storedPrefs = this.getPreferences();
 					const cached = this.connectionManager.getCachedServices();
 					const client = this.connectionManager.getClient();
 					let envKeys: string[] | undefined;
@@ -526,14 +649,18 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						viewState: { mode: 'design', ...layout },
 						prefs: storedPrefs,
 						services: cached.services,
+						icons: cached.icons,
 						isConnected: this.connectionManager.isConnected(),
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
+						cloudConnectionConfigured: this.isCloudConnectionConfigured(),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
 						// The OAuth broker only allows https://*.rocketride.ai redirect URLs,
-						// so tokens bounce off this hosted page, which forwards them to the
-						// `<uriScheme>://rocketride.rocketride/auth/google` deep link.
-						oauthReturnUrl: `https://api.rocketride.ai/auth/vscode/google?scheme=${vscode.env.uriScheme}`,
+						// so tokens bounce off the CLOUD SERVER's hosted page, which forwards
+						// them to the `<uriScheme>://rocketride.rocketride/auth/google` deep
+						// link. The bounce host is the effective cloud target (a setting,
+						// never a bake) — a custom server hosts its own bounce endpoint.
+						oauthReturnUrl: `${ConfigManager.getInstance().getEffectiveCloudUrl()}/auth/vscode/google?scheme=${vscode.env.uriScheme}`,
 						envKeys,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
@@ -569,6 +696,12 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					if (data.project) {
 						const content = typeof data.project === 'string' ? data.project : JSON.stringify(data.project);
 						const { applied } = await this.applyDocumentEdit(document, content);
+						// Auto-backup untitled pipelines so in-progress work survives
+						// a VS Code restart (hot exit does not preserve custom-editor
+						// untitled documents). Cleared when the editor closes.
+						if (document.isUntitled) {
+							void this.context.workspaceState.update(`${UNTITLED_BACKUP_PREFIX}${document.uri.toString()}`, document.getText());
+						}
 						// One-shot save after an OAuth token apply: tokens must reach
 						// the .pipe on disk without requiring a manual save.
 						if (editorState.saveAfterOAuthApply) {
@@ -597,8 +730,43 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
+				case 'project:getNodeSchema': {
+					// The bulk services payload is summary-only; the canvas requests
+					// one provider's FULL definition (config schema) on demand and
+					// caches it webview-side, so this fires once per provider.
+					try {
+						const client = this.connectionManager.getClient();
+						if (!client) throw new Error('Not connected to server');
+						const service = await client.getService(data.provider);
+						webview.postMessage({ type: 'project:nodeSchemaResponse', requestId: data.requestId, service });
+					} catch (error) {
+						const msg = error instanceof Error ? error.message : String(error);
+						this.logger.error(`Fetching service definition for '${data.provider}': ${msg}`);
+						webview.postMessage({ type: 'project:nodeSchemaResponse', requestId: data.requestId, error: msg });
+					}
+					break;
+				}
+
 				case 'project:requestSave': {
-					await document.save();
+					// Same save flow as the Ctrl+S keybinding: in place for
+					// titled files, the native OS Save dialog (defaulted into the
+					// pipelines directory, .pipe filter) for untitled ones.
+					// Reveal first so the revert-and-close inside the untitled
+					// branch targets this editor.
+					try {
+						webviewPanel.reveal(undefined, false);
+						await savePipelineDocument(document);
+					} catch (error) {
+						vscode.window.showErrorMessage(`Failed to save pipeline: ${error instanceof Error ? error.message : String(error)}`);
+					}
+					break;
+				}
+
+				case 'project:openCloudSetup': {
+					// Focus the Development tab only. The prompt must not stage a connection-mode
+					// change the user never typed: `development.connectionMode` is workspace-global,
+					// and a later Save would tear down their running dev engine.
+					await vscode.commands.executeCommand('rocketride.page.settings.open', 'development');
 					break;
 				}
 
@@ -620,17 +788,44 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							break;
 						}
 						const uriKey = document.uri.toString();
+						let savedKey: string | undefined;
 						this.savesForRun.add(uriKey);
 						try {
-							await this.saveDocument(document, document.getText());
-							const parsed = JSON.parse(document.getText());
-							const pipeName = path.basename(document.uri.fsPath, '.pipe');
-							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							// Capture the text up front: the untitled save flow below
+							// closes the buffer, after which the document is disposed.
+							const text = document.getText();
+							let runTarget: vscode.Uri | undefined = document.uri;
+							if (document.isUntitled) {
+								// saveDocument() cannot name an untitled buffer (identical
+								// content is a no-op), which would let the pipeline run
+								// nameless and unsaved. Drive the full untitled save flow
+								// (OS Save dialog) and run ONLY once it succeeded — a
+								// cancelled dialog cancels the run. Reveal first so the
+								// revert-and-close inside targets this editor (same rule
+								// as project:requestSave).
+								webviewPanel.reveal(undefined, false);
+								runTarget = await savePipelineDocument(document);
+							} else {
+								await this.saveDocument(document, text);
+							}
+							if (runTarget) {
+								// The untitled save reopens the file under a NEW URI —
+								// the save-for-run suppression must follow it, or the
+								// saved document's own change events escape the guard.
+								savedKey = runTarget.toString();
+								this.savesForRun.add(savedKey);
+								const parsed = JSON.parse(text);
+								const pipeName = path.basename(runTarget.fsPath, '.pipe');
+								await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							}
 						} catch (error: unknown) {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
 						}
-						setTimeout(() => this.savesForRun.delete(uriKey), 2000);
+						setTimeout(() => {
+							this.savesForRun.delete(uriKey);
+							if (savedKey) this.savesForRun.delete(savedKey);
+						}, 2000);
 					} else if (action === 'stop') {
 						if (source) {
 							await this.stopPipeline(source, document);
@@ -674,6 +869,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						}
 						if (parsedUrl.protocol !== 'https:') {
 							this.logger.error(`[ProjectProvider] Blocked OAuth URL scheme: ${parsedUrl.protocol}`);
+							// A silent break here turns a misconfigured broker URL
+							// (e.g. an http:// dev override baked into the webview)
+							// into a dead button with no feedback — say so instead.
+							vscode.window.showErrorMessage(`Sign-in blocked: the OAuth broker URL must use https (got "${parsedUrl.protocol}//"). Rebuild the extension without a non-https REACT_APP_OAUTH_ROOT_URL override.`);
 							break;
 						}
 						// Key the waiter by the node that started the login so the
@@ -695,7 +894,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							// A dead waiter would swallow a later unrelated deep link.
 							unregister();
 							this.logger.error(`[ProjectProvider] Failed to open OAuth URL: ${error}`);
-							vscode.window.showErrorMessage('Could not open the browser for Google sign-in. Check your default browser and try again.');
+							vscode.window.showErrorMessage('Could not open the browser for sign-in. Check your default browser and try again.');
 						}
 					}
 					break;
@@ -719,17 +918,28 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
-				// Prefs change — persist globally
+				// Prefs change — dismissal is global; other preferences remain workspace-scoped.
 				case 'project:prefsChange': {
-					if (data.prefs) {
-						this.context.workspaceState.update(PREFS_KEY, data.prefs).then(undefined, (err: unknown) => {
-							this.logger.error(`Failed to persist prefs: ${err}`);
-						});
+					if (typeof data.prefs === 'object' && data.prefs !== null && !Array.isArray(data.prefs)) {
+						await this.updatePreferences(data.prefs, webview);
 					}
 					break;
 				}
 
 				// Checkout flow — bridge billing SDK calls for the CheckoutModal
+				case 'checkout:getStripeKey': {
+					// Server-supplied publishable key (cached per URI) so the
+					// CheckoutModal mounts Stripe for THIS server's account. An
+					// empty key carries a reason (no connection, failed probe,
+					// or a server without billing) so the webview can explain
+					// the gap.
+					const client = this.connectionManager.getClient();
+					const { key, probed } = await getStripePublishableKey(client);
+					const reason: StripeKeyUnavailableReason | undefined = key ? undefined : !client ? 'no-connection' : probed ? 'no-billing' : 'probe-failed';
+					webview.postMessage({ type: 'checkout:stripeKey', key, requestId: data.requestId, ...(reason ? { reason } : {}) });
+					break;
+				}
+
 				case 'checkout:fetchPlans': {
 					try {
 						const billingClient = this.connectionManager.getClient();
@@ -827,7 +1037,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 									?.replace(/\.pipe(?:\.json)?$/, '') ||
 								document.uri.path,
 						};
-						await deployClient.deploy.publish(pipeline, { ...(data.comment ? { comment: data.comment as string } : {}), ...(data.deployTo ? { deployTo: data.deployTo as string } : {}) });
+						await deployClient.deploy.add({ pipeline, ...(data.comment ? { comment: data.comment as string } : {}), ...(data.deployTo ? { deployTo: data.deployTo as string } : {}) });
 						webview.postMessage({ type: 'deploy:actionResult', requestId: data.requestId });
 						// Re-push the lifecycle so the strip/history show the new truth.
 						await this.sendDeployData(webview, editorState);
@@ -1014,7 +1224,11 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	 */
 	private async handleDeploymentMessage(webview: vscode.Webview, editorState: EditorState, message: DeploymentWebviewToHost): Promise<void> {
 		const projectId = editorState.projectId ?? '';
-		const teamId = message.teamId;
+		// Personal rows arrive with their raw 'user~{uid}' owner key — the
+		// server only accepts '@me' for the caller's own space, so translate
+		// ONCE here and every fetch/action below addresses it correctly.
+		const ownUid = this.connectionManager.getClient()?.getAccountInfo?.()?.userId ?? '';
+		const teamId = wireTeamIdOf(message.teamId, ownUid);
 
 		switch (message.type) {
 			// -- Snapshot (drawer open, push-triggered and post-mutation refresh) --
@@ -1023,7 +1237,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// team-scoped task monitor's events trigger the webview's
 				// re-fetches instead of an interval.
 				await this.ensureDeployTaskMonitor(teamId, projectId);
-				await this.fetchAndPushDeployment(webview, teamId, projectId, message.sourceId);
+				// Echo message.teamId (the RAW row id the drawer opened with) on the
+				// pushes so its stale-record guard matches — teamId here is the
+				// translated wire id used only for the fetch.
+				await this.fetchAndPushDeployment(webview, teamId, projectId, message.sourceId, message.teamId);
 				break;
 			}
 
@@ -1169,11 +1386,21 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	 * versions → preview of the FOCUSED source's schedule → running scan.
 	 *
 	 * @param webview - The project panel's webview.
-	 * @param teamId - The deployment's team.
+	 * @param teamId - The WIRE team id the API calls address ('@me' for the
+	 *                 caller's own space).
 	 * @param projectId - The deployed project.
 	 * @param sourceId - The focused source (the record identity).
+	 * @param echoTeamId - The RAW id the webview opened the drawer with
+	 *                     (mapTeamDeploymentRows emits `dep.teamId`, e.g.
+	 *                     `user~{uid}`); stamped on the pushes so the drawer's
+	 *                     stale-record guard matches. Defaults to `teamId`.
 	 */
-	private async fetchAndPushDeployment(webview: vscode.Webview, teamId: string, projectId: string, sourceId?: string): Promise<void> {
+	private async fetchAndPushDeployment(webview: vscode.Webview, teamId: string, projectId: string, sourceId?: string, echoTeamId?: string): Promise<void> {
+		// The API calls address the WIRE id, but every push must carry the exact
+		// value the webview opened with: a personal deployment opens keyed on the
+		// raw 'user~{uid}' row id while the wire id is '@me', so stamping the wire
+		// id would make the drawer reject its own load and spin forever.
+		const recordTeamId = echoTeamId ?? teamId;
 		try {
 			const client = this.requireDeployClient();
 
@@ -1223,11 +1450,33 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 
 			// Step 5: which sources have a LIVE run right now — server task
-			// registry, attributed to THIS team via the descriptor's teamId.
-			const tasks = (await client.call('rrext_get_tasks')) as { tasks?: Array<{ source?: string; teamId?: string; pipeline?: { project_id?: string } }> };
+			// registry. A TEAM deployment matches on the descriptor's teamId;
+			// a PERSONAL (@me) deployment cannot — its row carries the billing
+			// team, never the wire '@me' — so it matches on the trusted owner
+			// scope instead (ownerKind/ownerId from rrext_get_tasks), with the
+			// uid taken from the record's own 'user~{uid}' key.
+			const tasks = (await client.call('rrext_get_tasks')) as {
+				tasks?: Array<{
+					source?: string;
+					teamId?: string;
+					runKind?: string;
+					ownerKind?: string;
+					ownerId?: string;
+					pipeline?: { project_id?: string };
+				}>;
+			};
+			const personalUid = recordTeamId.startsWith('user~') ? recordTeamId.slice('user~'.length) : undefined;
 			const runningSources: Record<string, boolean> = {};
 			for (const t of tasks.tasks ?? []) {
-				if (t.teamId === teamId && t.pipeline?.project_id === projectId && t.source) runningSources[t.source] = true;
+				if (t.pipeline?.project_id !== projectId || !t.source) continue;
+				// runKind on BOTH branches: without it a team's ordinary
+				// pipeline run on the same project/source would mark the
+				// source as deploy-running, exactly as the personal branch
+				// already guards against.
+				const matches = personalUid
+					? t.ownerKind === 'user' && t.ownerId === personalUid && t.runKind === 'deploy'
+					: t.teamId === teamId && t.runKind === 'deploy';
+				if (matches) runningSources[t.source] = true;
 			}
 
 			// Step 6: resolve teams (names + control) and map into view models.
@@ -1254,18 +1503,18 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				schedules: mapScheduleRows(pipeline, dep),
 				...(Object.keys(nextRuns).length > 0 ? { nextRuns } : {}),
 				versions: mapVersionCards(versions.rows ?? []),
-				history: mapHistoryRows(history.rows ?? [], teams),
+				history: mapHistoryRows(history.rows ?? [], teams, client.getAccountInfo?.()?.userId ?? ''),
 				...(nextRun ? { nextRun } : {}),
 				runningSources,
 				canControl: teams.find((t) => t.id === teamId)?.canControl ?? false,
 				isConnected: this.connectionManager.isConnected(),
 			};
-			webview.postMessage({ type: 'deployment:load', teamId, ...payload });
+			webview.postMessage({ type: 'deployment:load', teamId: recordTeamId, ...payload });
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
 			// Stamp the addressed record (team + optional source) so the
 			// webview can drop errors from a stale fetch after switching.
-			webview.postMessage({ type: 'deployment:error', teamId, ...(sourceId ? { sourceId } : {}), error: msg });
+			webview.postMessage({ type: 'deployment:error', teamId: recordTeamId, ...(sourceId ? { sourceId } : {}), error: msg });
 		}
 	}
 
@@ -1310,7 +1559,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			webview.postMessage({
 				type: 'deploy:data',
 				versions: mapVersionCards(versions.rows ?? []),
-				deployments: mapTeamDeploymentRows(deploymentRows, projectId, teams),
+				deployments: mapTeamDeploymentRows(deploymentRows, projectId, teams, client.getAccountInfo?.()?.userId ?? ''),
 				teams,
 			});
 		} catch (error) {

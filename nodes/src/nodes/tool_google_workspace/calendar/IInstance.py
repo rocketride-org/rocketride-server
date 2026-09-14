@@ -150,14 +150,15 @@ class IInstance(GoogleToolInstanceBase):
 
     @tool_function(
         description=(
-            'Check the Google Calendar connection and verify that the granted OAuth scopes cover the '
-            "node's configured access tier. Call this when a Calendar operation fails with a scope or "
-            'permission error. Returns connection_ok: true when the required scopes are present.'
+            'Check the Google Calendar connection: makes a live calendarList().list call and verifies '
+            "that the granted OAuth scopes cover the node's configured access tier. Call this when a "
+            'Calendar operation fails with a scope or permission error. Returns connection_ok: true '
+            'only when the live probe succeeds and the required scopes are present.'
         ),
         input_schema={'type': 'object', 'properties': {}, 'required': []},
     )
     def check_connection(self, args: dict) -> dict:
-        """Check Calendar connection status and whether granted OAuth scopes cover the access tier. Read-only."""
+        """Check Calendar connection status: live calendar-list probe plus granted-scope coverage. Read-only."""
         return self._check_connection_impl(probe=lambda s: execute(s.calendarList().list(maxResults=1)))
 
     # =======================================================================

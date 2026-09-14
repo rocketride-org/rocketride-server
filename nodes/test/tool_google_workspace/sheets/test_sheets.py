@@ -310,12 +310,76 @@ def test_default_tier_is_write():
 # ---------------------------------------------------------------------------
 
 
+class _HttpErr(Exception):
+    def __init__(self, status, reason, content=b''):
+        super().__init__(reason)
+        self.resp = types.SimpleNamespace(status=status)
+        self.reason = reason
+        self.content = content
+
+
 def test_check_connection_reports_ok():
     inst = _make()
     out = inst.check_connection({})
     assert out['connection_ok'] is True
     assert out['access'] == 'write'
     assert any('spreadsheets' in s for s in out['requiredScopes'])
+    assert inst.IGlobal.service.call_for('get') is not None
+
+
+def test_check_connection_probe_swallows_expected_404():
+    """A 404 on the probe's made-up spreadsheet id proves the Sheets API IS reachable."""
+    inst = _make(results={'get': _HttpErr(404, 'notFound')})
+    out = inst.check_connection({})
+    assert out['connection_ok'] is True
+
+
+def test_check_connection_reports_probe_failure():
+    """A disabled Sheets API (accessNotConfigured) must flip connection_ok, not be swallowed."""
+    err = _HttpErr(403, 'Forbidden', content=b'{"error": {"errors": [{"reason": "accessNotConfigured"}]}}')
+    inst = _make(results={'get': err})
+    out = inst.check_connection({})
+    assert out['connection_ok'] is False
+    assert out['errorReason'] == 'accessNotConfigured'
+
+
+def test_check_connection_reports_probe_failure_one_platform_shape():
+    """Sheets is a One Platform API: its disabled-API error carries the reason in
+    error.details[] (a google.rpc.ErrorInfo), not error.errors[] like Gmail/Drive —
+    this is the actual body Google returns for the #1694 scenario, and it has no
+    errors[] array at all.
+    """
+    body = {
+        'error': {
+            'code': 403,
+            'message': 'Google Sheets API has not been used in project 123456789 before or it is disabled.',
+            'status': 'PERMISSION_DENIED',
+            'details': [
+                {
+                    '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+                    'reason': 'SERVICE_DISABLED',
+                    'domain': 'googleapis.com',
+                }
+            ],
+        }
+    }
+    err = _HttpErr(403, 'Forbidden', content=json.dumps(body).encode())
+    inst = _make(results={'get': err})
+    out = inst.check_connection({})
+    assert out['connection_ok'] is False
+    assert out['errorReason'] == 'SERVICE_DISABLED'
+
+
+def test_check_connection_falls_back_to_grpc_status_without_error_info():
+    """When even the details[] ErrorInfo is absent, errorReason falls back to the
+    coarser gRPC error.status rather than staying unset.
+    """
+    body = {'error': {'code': 403, 'message': 'Permission denied.', 'status': 'PERMISSION_DENIED'}}
+    err = _HttpErr(403, 'Forbidden', content=json.dumps(body).encode())
+    inst = _make(results={'get': err})
+    out = inst.check_connection({})
+    assert out['connection_ok'] is False
+    assert out['errorReason'] == 'PERMISSION_DENIED'
 
 
 def test_check_connection_reports_missing_user_oauth_scope(monkeypatch):
@@ -654,7 +718,7 @@ def test_check_connection_reports_malformed_token(monkeypatch):
     inst.IGlobal.glb = types.SimpleNamespace(logicalType='tool_sheets', connConfig={})
     out = inst.check_connection({})
     assert out['connection_ok'] is False
-    assert 'invalid user token' in out['error']
+    assert 'invalid user token' in out['scopeError']
 
 
 def test_validate_config_warns_for_malformed_user_token(monkeypatch):

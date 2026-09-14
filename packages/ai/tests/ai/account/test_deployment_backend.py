@@ -94,6 +94,52 @@ class TestPublish:
         assert entry['pipelineName'] == 'Invoice Ingest'
 
     @pytest.mark.asyncio
+    async def test_publish_stamps_kind_state_and_metadata(self, backend):
+        """The rail contract: kind rides the artifact dict, state is stamped by kind."""
+        pipe = await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        assert (pipe['kind'], pipe['state']) == ('pipe', 'ready')
+        # Display name always lives in metadata.manifest (pipelineName is legacy)
+        assert pipe['metadata']['manifest']['name'] == 'Invoice Ingest'
+
+        # App artifacts carry kind:'app' and deploy 'private' (internal-eligible;
+        # the developer submits for review separately)
+        app_artifact = {'kind': 'app', 'appId': 'acme.brandy', 'name': 'Brandy', 'appVersion': '1.0.0'}
+        app = await backend.publish('org-1', 'acme.brandy', app_artifact, ACTOR)
+        assert (app['kind'], app['state']) == ('app', 'private')
+        assert app['metadata']['manifest']['name'] == 'Brandy'
+
+    @pytest.mark.asyncio
+    async def test_publish_persists_caller_metadata(self, backend):
+        """A caller-supplied metadata blob is stored; manifest.name is synthesized when absent."""
+        metadata = {'manifest': {'id': 'acme.brandy', 'categories': ['tools']}, 'build': {'errors': []}}
+        entry = await backend.publish(
+            'org-1', 'acme.brandy', {'kind': 'app', 'name': 'Brandy'}, ACTOR, metadata=metadata
+        )
+        assert entry['metadata']['build'] == {'errors': []}
+        assert entry['metadata']['manifest']['categories'] == ['tools']
+        # The synthesized display name fills the gap the caller left
+        assert entry['metadata']['manifest']['name'] == 'Brandy'
+
+    @pytest.mark.asyncio
+    async def test_pre_rail_entries_read_without_new_keys(self, backend, store):
+        """Old meta.json entries (no kind/state/metadata) still list and load."""
+        entry = await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        # Strip the rail keys in place — simulating a pre-0012 meta.json
+        meta_path = 'orgs/org-1/files/.deployments/proj-1/meta.json'
+        import json as _json
+
+        meta = _json.loads(await store.read_file(meta_path))
+        for key in ('kind', 'state', 'metadata'):
+            meta['versions'][0].pop(key, None)
+        await store.write_file(meta_path, _json.dumps(meta))
+
+        versions = await backend.versions('org-1', 'proj-1')
+        assert versions[0]['version'] == entry['version']
+        assert 'kind' not in versions[0]  # readers tolerate absence via .get()
+        artifact = await backend.artifact('org-1', 'proj-1', entry['version'])
+        assert artifact['name'] == 'Invoice Ingest'
+
+    @pytest.mark.asyncio
     async def test_publish_requires_actor_and_pipeline(self, backend):
         with pytest.raises(ValueError, match='actor.userId'):
             await backend.publish('org-1', 'proj-1', PIPE, {})
@@ -107,6 +153,129 @@ class TestPublish:
                 await backend.publish('org-1', bad, PIPE, ACTOR)
             with pytest.raises(ValueError):
                 await backend.publish(bad, 'proj-1', PIPE, ACTOR)
+
+
+# ============================================================================
+# Publishes — audience pointers (user | team | public)
+# ============================================================================
+
+AUD_USER = {'type': 'user', 'id': 'user-1'}
+AUD_TEAM = {'type': 'team', 'id': 'team-1'}
+AUD_PUBLIC = {'type': 'public', 'id': ''}
+APP = {'kind': 'app', 'appId': 'acme.brandy', 'name': 'Brandy', 'appVersion': '1.0.0'}
+
+
+class TestPublishes:
+    @pytest.mark.asyncio
+    async def test_publish_set_upserts_one_binding_per_audience(self, backend):
+        """publish_set creates the audience binding (born 'enabled') and
+        repoints it in place; artifactState joins the deployment's review state.
+        """
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)  # 'private'
+        v2 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR, comment='swapped the icon')
+
+        row = await backend.publish_set(
+            'org-1', 'app', 'acme.brandy', AUD_TEAM, v1['version'], {'name': 'Brandy', 'mode': 'free'}, ACTOR
+        )
+        assert (row['audience'], row['state'], row['version']) == (AUD_TEAM, 'enabled', 1)
+        assert row['artifactState'] == 'private'  # the bound deployment's review state
+        assert row['snapshot']['name'] == 'Brandy'
+
+        # Repoint the SAME audience — still exactly one binding for it
+        row = await backend.publish_set(
+            'org-1', 'app', 'acme.brandy', AUD_TEAM, v2['version'], {'name': 'Brandy v2'}, ACTOR
+        )
+        assert row['version'] == 2
+        rows = await backend.publish_of_app('org-1', 'app', 'acme.brandy')
+        assert len(rows) == 1 and rows[0]['snapshot']['name'] == 'Brandy v2'
+
+        # History rows are self-describing: the audience rides with a display
+        # handle (composed from the type when the caller passed a bare dict),
+        # and a repoint records the version it moved OFF of.
+        binds = [
+            r
+            for r in (await backend.history('org-1', 'acme.brandy'))['rows']
+            if r['action'] == 'publish' and (r.get('data') or {}).get('audience')
+        ]
+        assert [b['data']['audience']['handle'] for b in binds] == ['@team/team-1', '@team/team-1']
+        assert binds[0]['data']['previousVersion'] == 1  # newest first: the repoint
+        assert 'previousVersion' not in binds[1]['data']  # the first bind moved off nothing
+
+        # The DEPLOY rows (no audience) ride the developer's comment when
+        # one was given, and stay bare when not.
+        deploys = [
+            r
+            for r in (await backend.history('org-1', 'acme.brandy'))['rows']
+            if r['action'] == 'publish' and not (r.get('data') or {}).get('audience')
+        ]
+        assert deploys[0]['data'] == {'comment': 'swapped the icon'}  # newest first: v2
+        assert not (deploys[1].get('data') or {})  # v1 had no comment
+
+    @pytest.mark.asyncio
+    async def test_publish_set_requires_a_registry_version(self, backend):
+        """Publishing a version the rail has never seen is refused."""
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        with pytest.raises(StorageError):
+            await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_TEAM, 99, {}, ACTOR)
+
+    @pytest.mark.asyncio
+    async def test_publish_lifecycle_get_list_and_binding_state(self, backend):
+        """get/list see live bindings; binding-state flips disable/remove."""
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_USER, v1['version'], {'name': 'B'}, ACTOR)
+        await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_PUBLIC, v1['version'], {'name': 'B'}, ACTOR)
+
+        # Bindings are born 'enabled'; the deployment's review state rides as artifactState
+        got = await backend.publish_get('org-1', 'app', 'acme.brandy', AUD_USER)
+        assert (got['state'], got['artifactState']) == ('enabled', 'private')
+        rows = await backend.publish_list('org-1', 'app', [AUD_USER, AUD_PUBLIC, AUD_TEAM])
+        assert {(r['audience']['type'], r['state']) for r in rows} == {('user', 'enabled'), ('public', 'enabled')}
+
+        # disable pulls the binding; soft-remove hides it from every reader
+        flipped = await backend.publish_set_state('org-1', 'app', 'acme.brandy', AUD_PUBLIC, 'disabled', ACTOR)
+        assert flipped['state'] == 'disabled'
+        await backend.publish_set_state('org-1', 'app', 'acme.brandy', AUD_USER, 'removed', ACTOR)
+        assert await backend.publish_get('org-1', 'app', 'acme.brandy', AUD_USER) is None
+        with pytest.raises(ValueError):
+            await backend.publish_set_state('org-1', 'app', 'acme.brandy', AUD_PUBLIC, 'ready', ACTOR)
+
+        # Unbind rows say WHICH rung was touched — "v1 removed" alone would
+        # read as the version vanishing from the registry.
+        by_action = {r['action']: r for r in (await backend.history('org-1', 'acme.brandy'))['rows']}
+        assert by_action['disabled']['data']['audience']['handle'] == '@public'
+        assert by_action['removed']['data']['audience']['handle'] == '@me'
+
+    @pytest.mark.asyncio
+    async def test_set_artifact_state_review_lifecycle(self, backend):
+        """The review lifecycle lives on the deployment: private -> submit ->
+        ready | rejected, with illegal transitions refused and a history event
+        per move. The seeder may also override the born state directly.
+        """
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)  # 'private'
+        assert v1['state'] == 'private'
+
+        submitted = await backend.set_artifact_state('org-1', 'acme.brandy', 1, 'submit', ACTOR)
+        assert submitted['state'] == 'submit'
+        approved = await backend.set_artifact_state('org-1', 'acme.brandy', 1, 'ready', ACTOR)
+        assert approved['state'] == 'ready'
+
+        # ready -> submit is not a legal move
+        with pytest.raises(ValueError):
+            await backend.set_artifact_state('org-1', 'acme.brandy', 1, 'submit', ACTOR)
+
+        # The seeder can register a pre-approved artifact directly
+        seeded = await backend.publish('org-1', 'acme.brandy', APP, ACTOR, state='ready')
+        assert seeded['state'] == 'ready'
+        with pytest.raises(ValueError):
+            await backend.publish('org-1', 'acme.brandy', APP, ACTOR, state='enabled')
+
+        # The review events land on the one history stream (newest first),
+        # each carrying both endpoints of its transition.
+        envelope = await backend.history('org-1', 'acme.brandy')
+        review = {r['action']: r for r in envelope['rows'] if r['action'] in ('request', 'approved', 'rejected')}
+        assert list(review) == ['approved', 'request']
+        assert review['request']['data'] == {'from': 'private', 'to': 'submit'}
+        assert review['approved']['data'] == {'from': 'submit', 'to': 'ready'}
 
 
 # ============================================================================
@@ -126,6 +295,28 @@ class TestDeploy:
         # projectId, so a raw internal dict here silently breaks scheduling.
         assert dep['projectId'] == 'proj-1'
         assert dep['pipelineName'] == 'Invoice Ingest'
+
+    @pytest.mark.asyncio
+    async def test_deploy_persists_and_restamps_the_billing_team(self, backend):
+        # The ABSOLUTE billing stamp: written at pointer time, re-stamped on
+        # every pointer move, and returned on the joined record ('' on
+        # records from before the field existed).
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        dep = await backend.deploy('org-1', 'user~u1', 'proj-1', 1, ACTOR, 'team-dev')
+        assert dep['billingTeamId'] == 'team-dev'
+        # deploy() returns the joined record from the mutation path, which does
+        # not prove the write landed — read it back from storage to assert both
+        # the version pointer AND the billing stamp actually persisted.
+        stored = await backend.get('org-1', 'user~u1', 'proj-1')
+        assert stored['version'] == 1
+        assert stored['billingTeamId'] == 'team-dev'
+        # A pointer move re-decides the stamp.
+        dep = await backend.deploy('org-1', 'user~u1', 'proj-1', 2, ACTOR, 'team-prod')
+        assert dep['billingTeamId'] == 'team-prod'
+        stored = await backend.get('org-1', 'user~u1', 'proj-1')
+        assert stored['version'] == 2
+        assert stored['billingTeamId'] == 'team-prod'
 
     @pytest.mark.asyncio
     async def test_unpublished_version_refused(self, backend):

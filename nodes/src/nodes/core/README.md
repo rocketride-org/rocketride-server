@@ -10,13 +10,13 @@ The directory holds three kinds of content:
 
 - **Concrete service definitions**: `services.filesys.json`, `services.parse.json`, `services.hash.json`, `services.indexer.json`, `services.zip.json`, and `services.null.json` each register one engine service (title, protocol, class type, capabilities, lanes, and config shape).
 - **Shared field libraries**: the `services.common*.json` files define reusable field groups (cloud-provider credentials, include/exclude path forms, vector-store settings, LLM access, anonymization, remote processing) that are merged into other service definitions as required.
-- **Shared code and assets**: `google_access.py` (the access/scope resolver used by Google tool nodes) and the SVG icons displayed in the UI for connector and processing nodes (Amazon S3, Azure Blob, Google Drive, OneDrive, SharePoint, Outlook, Gmail, Confluence, Slack, SMB, and others).
+- **Shared code and assets**: `google_access.py` (the access/scope resolver used by Google tool nodes), `gcp_auth.py` (ADC and service-account credentials for GCP nodes), and the SVG icons displayed in the UI for connector and processing nodes (Amazon S3, Azure Blob, Google Drive, OneDrive, SharePoint, Outlook, Gmail, Confluence, Slack, SMB, and others).
 
 The `hash/` and `parser/` subdirectories carry the per-service documentation pages for the Fingerprinter and Parser services.
 
 ---
 
-## Services
+### Protocol-bearing services
 
 | Service | File | Protocol | Class type | Lanes |
 |---------|------|----------|------------|-------|
@@ -72,7 +72,21 @@ An internal no-op endpoint registered as both a source shape and a target shape 
 
 ---
 
-## Shared field libraries
+## Lanes
+
+| Lane in | Lane out | Description |
+|---------|----------|-------------|
+| `_source` | `tags` | Local File System emits source tags for downstream processing. |
+| `tags` | `tags` | The Fingerprinter preserves the tags lane while adding its deterministic content fingerprint. |
+| `source` | `tags` | The internal null endpoint forwards a source lane into tags without an external system. |
+
+The parser also accepts `tags` and emits `text`, `table`, `image`, `video`, and `audio`; its protocol-specific documentation is in the `parser/` subdirectory.
+
+## Configuration
+
+This directory supplies several built-in services as well as shared field definitions used by other nodes. Configure the protocol-bearing service selected in a pipeline; the generated schema below is the field reference. The shared field files do not register a selectable service themselves.
+
+### Shared field libraries
 
 These files define common fields that are merged into a service definition as required. Field names below are exact.
 
@@ -92,6 +106,14 @@ These files define common fields that are merged into a service definition as re
 | `aws.accessKey` | string, secure, optional | Access key used to sign requests to Amazon S3. |
 | `aws.secretKey` | string, secure, optional | Secret key used to access AWS services. |
 | `aws.region` | enum | AWS region (us-east-1 through sa-east-1; default empty "Select Region"). |
+
+### Google Cloud Platform credentials (`services.common.gcp.json`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gcp.authType` | enum `adc` / `service_account`, default `adc` | Choose how to authenticate to Google Cloud Platform. |
+| `gcp.serviceAccountKey` | data-url (`.json` upload) | Service Account JSON key file (used when authType is `service_account`). |
+| `gcp.projectId` | string, optional | Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials. |
 
 ### Google Workspace credentials (`services.common.google.json`)
 
@@ -150,7 +172,7 @@ Combines services into single selectable types for pipelines that pick one provi
 
 ---
 
-## Google access helper (`google_access.py`)
+### Google access helper (`google_access.py`)
 
 A single reader that turns a Google tool node's `access` enum and capability toggles into one resolved object: the OAuth scopes to request, plus the write/destructive gates the node's tool functions check at invoke time.
 
@@ -176,11 +198,19 @@ Bundled specs:
 
 ---
 
-## Running the tests
+### Running the tests
 
 ```bash
 pytest nodes/test/core/test_google_access.py -v
 ```
+
+## Limitations
+
+The Local File System service reads local paths and is marked for filesystem access, security-sensitive use, non-remote execution, and non-SaaS deployment. Run pipelines that use it where the intended files are locally accessible; it is not available in hosted RocketRide deployments and cannot be moved to a remote execution host.
+
+## Notes
+
+The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing engine services but are not normal user-selectable nodes. The `core` directory also contains reusable JSON field fragments; those fragments are included in the generated schema but do not themselves register pipeline protocols.
 
 ---
 

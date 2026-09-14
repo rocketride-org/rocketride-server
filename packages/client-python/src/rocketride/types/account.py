@@ -78,12 +78,15 @@ class AccountOrganization(TypedDict, total=False):
     Attributes:
         id: Unique identifier for the organization.
         name: Display name of the organization.
+        developerId: Public developer slug — the org's app publisher identity.
+            None/absent until the org registers as a marketplace developer.
         permissions: Permissions the user holds at the organization level.
         teams: Teams the user belongs to within this organization.
     """
 
     id: str
     name: str
+    developerId: str | None
     permissions: list[str]
     teams: list[AccountOrgTeam]
 
@@ -106,7 +109,7 @@ class AccountProfile(TypedDict, total=False):
         phoneNumber: Primary phone number in E.164 format.
         phoneNumberVerified: Whether the phone number has been verified.
         locale: Locale / language preference (e.g. "en").
-        defaultTeam: The ID of the user's default team context.
+        devTeam: The ID of the user's dev team context.
         organization: The organization the user belongs to, or None.
     """
 
@@ -120,7 +123,7 @@ class AccountProfile(TypedDict, total=False):
     phoneNumber: str
     phoneNumberVerified: bool
     locale: str
-    defaultTeam: str
+    devTeam: str
     organization: AccountOrganization
 
 

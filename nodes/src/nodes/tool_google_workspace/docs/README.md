@@ -52,8 +52,9 @@ operation and lives in `tool_drive`.
     Optional `width`/`height` in points (PT).
   - `table_insert` — insert an empty `rows`×`columns` table at the end of the
     body (`insertTable`); `rows` is clamped to 1..1000 and `columns` to 1..25.
-- **Diagnostics:** `check_connection` verifies that granted OAuth scopes cover
-  the configured access tier.
+- **Diagnostics:** `check_connection` probes the Docs API with a live call; for
+  user OAuth it also verifies that granted scopes cover the configured access
+  tier (service-account auth has no per-user scope grant to check).
 
 The entire Docs v1 surface is `documents().get` / `create` / `batchUpdate`; the
 wrappers are conveniences over `batch_update`.

@@ -6,7 +6,7 @@
 /**
  * One-shot icon migration script.
  *
- * Moves every SVG from `packages/shared-ui/src/assets/nodes/` into the
+ * Moves every SVG from `packages/shared/src/assets/nodes/` into the
  * directories of the service JSONs that reference it. Same icon may be
  * referenced by multiple nodes — in that case we copy it into each owning
  * directory (byte-identical duplicates by design).
@@ -34,7 +34,7 @@ const NODES_DIR = path.join(REPO_ROOT, 'nodes', 'src', 'nodes');
 const LEGACY_DIR = path.join(
 	REPO_ROOT,
 	'packages',
-	'shared-ui',
+	'shared',
 	'src',
 	'assets',
 	'nodes',

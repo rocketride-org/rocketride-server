@@ -35,6 +35,47 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 
+# Binder methods that are lifecycle hooks rather than data lanes. Every bound
+# component listens on them, so they say nothing about what the pipeline reads.
+LIFECYCLE_METHODS = frozenset({'open', 'closing', 'close'})
+
+
+def _connectedLanes(target) -> list:
+    """Return the data lanes that some component downstream of this source reads.
+
+    Published in the endpoint note so the UI can offer the Content-Type that
+    actually reaches a component: the MIME type of a request selects the lane it
+    is delivered on, and a body sent on an unread lane is answered ``200 OK``
+    while reaching nobody.
+
+    Borrows a pipe solely to ask the binder which lanes have listeners and
+    returns it immediately. Any failure yields an empty list — the lanes are a
+    display hint, and losing the hint must never stop the endpoint from serving.
+
+    Args:
+        target: The target endpoint (``IServiceEndpoint``) this source feeds.
+
+    Returns:
+        list: Sorted lane names, or an empty list if they could not be read.
+    """
+    if target is None:
+        return []
+
+    pipe = None
+    try:
+        pipe = target.getPipe()
+        return sorted(set(pipe.getListeners()) - LIFECYCLE_METHODS)
+    except Exception as e:
+        debug(f'Could not read the connected lanes: {e}')
+        return []
+    finally:
+        if pipe is not None:
+            try:
+                target.putPipe(pipe)
+            except Exception as e:
+                debug(f'Could not return the borrowed pipe: {e}')
+
+
 class IEndpoint(IEndpointBase):
     """
     The IEndpoint class handles the actual HTTP request endpoint.
@@ -102,6 +143,9 @@ class IEndpoint(IEndpointBase):
                     'auth-key': '{public_auth}',
                     'token-text': 'Private Token',
                     'token-key': '{token}',
+                    # Lets the endpoint panel preselect a Content-Type that
+                    # actually reaches a component. Empty when unavailable.
+                    'lanes': _connectedLanes(self.target),
                 }
                 monitorOther('usr', json.dumps([info]))
                 monitorStatus('Webhook ready - system is ready to accept requests')

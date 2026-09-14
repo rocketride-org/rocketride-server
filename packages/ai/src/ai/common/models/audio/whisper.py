@@ -55,6 +55,14 @@ class WhisperLoader(BaseLoader):
         an identical copy of the weights per language. `compute_type` stays — precision
         genuinely changes the loaded weights.
 
+        `beam_size`, `vad_filter`, `vad_parameters` and `word_timestamps` are excluded
+        for the same reason — all four are decode-time (#1809). The exclusion is
+        enforced by _SERVER_PARAMS, so it holds even when an old client sends them.
+
+        Anything else in `**kwargs` is treated as a genuine WhisperModel option and
+        forwarded to it, so `revision` or `download_root` change both the weights and
+        the identity, as they should.
+
     Performance Note:
         - Typical throughput: ~8-15 req/s depending on model size and audio length
     """
@@ -70,6 +78,25 @@ class WhisperLoader(BaseLoader):
     # `language` is not here — it is a per-request decode hint, not a load param.
     _DEFAULTS = {
         'compute_type': 'float16',
+    }
+
+    # Excluded from the identity hash, not merely omitted by the facade: an older client
+    # that still sends these in loader_options would otherwise hash to a different
+    # model_id and duplicate the weights for the length of a rolling upgrade. Same
+    # reasoning as GLiNER's #1750; load() absorbs them and never applies them.
+    _SERVER_PARAMS = BaseLoader._SERVER_PARAMS | {
+        'language',
+        'beam_size',
+        'vad_filter',
+        'vad_parameters',
+        'word_timestamps',
+    }
+
+    # Merged under a caller's vad_parameters. Unlike _DEFAULTS, never reaches identity.
+    _VAD_DEFAULTS = {
+        'threshold': 0.5,
+        'min_silence_duration_ms': 500,
+        'speech_pad_ms': 400,
     }
 
     # Cached result of GPU compatibility probe (None = not yet tested)
@@ -153,6 +180,14 @@ class WhisperLoader(BaseLoader):
         exclude_gpus: Optional[List[int]] = None,
         language: str = 'en',
         compute_type: str = 'float16',
+        # Named so they are absorbed rather than forwarded to WhisperModel(), which does
+        # not accept them and would raise. An older client can still put them in
+        # loader_options; forwarding **kwargs blindly would trade one bug for a worse
+        # one (#1750). Everything else in **kwargs is a genuine WhisperModel option.
+        beam_size: Optional[int] = None,
+        vad_filter: Optional[bool] = None,
+        vad_parameters: Optional[Dict[str, Any]] = None,
+        word_timestamps: Optional[bool] = None,
         **kwargs,
     ) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
         """
@@ -169,7 +204,12 @@ class WhisperLoader(BaseLoader):
             exclude_gpus: GPUs to exclude (server mode)
             language: Language code for transcription (default: 'en')
             compute_type: Precision type (float16, int8, float32)
-            **kwargs: Additional arguments (ignored for compatibility)
+            beam_size: Absorbed, not applied — decode-time, see the class docstring
+            vad_filter: Absorbed, not applied
+            vad_parameters: Absorbed, not applied
+            word_timestamps: Absorbed, not applied
+            **kwargs: Forwarded to WhisperModel() as genuine loader options
+                (revision, download_root, cpu_threads, …)
 
         Returns:
             Tuple of (model_bundle, metadata_dict, gpu_index)
@@ -256,6 +296,7 @@ class WhisperLoader(BaseLoader):
                     model_name,
                     device='cpu',
                     compute_type=compute_type,
+                    **kwargs,
                 )
             else:
                 # Extract real device index from torch_device (e.g., 'cuda:0' -> 0)
@@ -266,6 +307,7 @@ class WhisperLoader(BaseLoader):
                     device='cuda',
                     device_index=real_device_index,
                     compute_type=compute_type,
+                    **kwargs,
                 )
         except Exception as e:
             logger.error(f'Failed to load whisper model: {e}')
@@ -344,6 +386,12 @@ class WhisperLoader(BaseLoader):
         metadata: Optional[Dict] = None,
         stream: Optional[Any] = None,
         language: Optional[str] = None,
+        beam_size: int = 5,
+        # Upstream defaults this to False; True is ours. Flipping it turns VAD off for
+        # every existing caller.
+        vad_filter: bool = True,
+        vad_parameters: Optional[Dict[str, Any]] = None,
+        word_timestamps: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Run Whisper transcription.
@@ -358,6 +406,15 @@ class WhisperLoader(BaseLoader):
             language: Per-request decode language. Falls back to the value carried on
                 preprocessed/the bundle, so callers that do not pass it keep the
                 previous load-time behaviour.
+            beam_size: Per-request beam size.
+            vad_filter: Per-request VAD toggle.
+            vad_parameters: Merged over _VAD_DEFAULTS rather than replacing them, so
+                setting one key leaves the others at our defaults. A nested None means
+                "unset"; 0 is a real value. Mapping only — unlike upstream, not a
+                VadOptions.
+            word_timestamps: Populate each segment's `words`. Off by default, matching
+                upstream — turning it on costs an alignment pass and moves segment
+                boundaries. The `words` block below was unreachable until this existed.
 
         Returns:
             List of transcription results with segments
@@ -374,6 +431,13 @@ class WhisperLoader(BaseLoader):
         # Per-request language wins; fall back to whatever the model was loaded with.
         if language is None:
             language = preprocessed.get('language', models.get('language', 'en'))
+
+        # Merge, not replace: setting only `threshold` must keep our 500ms min-silence
+        # instead of inheriting upstream's 2000ms. `is None`, not truthiness — 0 is real.
+        vad_options = {
+            **WhisperLoader._VAD_DEFAULTS,
+            **{k: v for k, v in (vad_parameters or {}).items() if v is not None},
+        }
 
         # Get lock for this model instance (faster-whisper is NOT thread-safe)
         model_lock = WhisperLoader._get_model_lock(id(whisper_model))
@@ -394,13 +458,10 @@ class WhisperLoader(BaseLoader):
                     segments_gen, info = whisper_model.transcribe(
                         audio,
                         language=language,
-                        beam_size=5,
-                        vad_filter=True,
-                        vad_parameters={
-                            'threshold': 0.5,
-                            'min_silence_duration_ms': 500,
-                            'speech_pad_ms': 400,
-                        },
+                        beam_size=beam_size,
+                        vad_filter=vad_filter,
+                        vad_parameters=vad_options,
+                        word_timestamps=word_timestamps,
                     )
 
                     # Convert generator to list and build result
@@ -583,7 +644,9 @@ class Whisper:
             device: Device ('server', 'cuda', 'cpu', 'cuda:N', or None for auto)
             language: Language code for transcription
             compute_type: Compute type ('float16', 'int8', etc.)
-            **kwargs: Additional arguments (ignored for compatibility)
+            **kwargs: Loader options, forwarded to WhisperModel() and part of model
+                identity. Decode parameters do not belong here — pass them to
+                transcribe() instead; sent here they are absorbed and ignored.
         """
         self.model_name = model_name
         self.output_fields = output_fields or ['$text']
@@ -644,6 +707,7 @@ class Whisper:
         vad_filter: bool = True,
         vad_parameters: Optional[Dict[str, Any]] = None,
         language: Optional[str] = None,
+        word_timestamps: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -653,8 +717,12 @@ class Whisper:
             audio: Raw PCM int16 bytes (16kHz mono)
             beam_size: Beam size for decoding
             vad_filter: Enable voice activity detection (Silero VAD)
-            vad_parameters: VAD parameters dict
+            vad_parameters: VAD settings, merged over WhisperLoader._VAD_DEFAULTS rather
+                than replacing them. Mapping only; a VadOptions is not accepted.
             language: Override the instance's default decode language for this call
+            word_timestamps: Populate each segment's `words` with per-word timings.
+                Off by default; turning it on costs an alignment pass and shifts
+                segment boundaries.
             **kwargs: Additional transcription arguments
 
         Returns:
@@ -670,12 +738,25 @@ class Whisper:
 
         if self._proxy_mode:
             # Model server mode — ModelClient.send_command handles perf timing
-            return self._transcribe_remote(audio, beam_size, vad_filter, vad_parameters, language, **kwargs)
+            return self._transcribe_remote(
+                audio, beam_size, vad_filter, vad_parameters, language, word_timestamps, **kwargs
+            )
         else:
             # Local mode — time each phase
-            return self._transcribe_local(audio, language, **kwargs)
+            return self._transcribe_local(
+                audio, beam_size, vad_filter, vad_parameters, language, word_timestamps, **kwargs
+            )
 
-    def _transcribe_local(self, audio: bytes, language: str, **kwargs) -> Dict[str, Any]:
+    def _transcribe_local(
+        self,
+        audio: bytes,
+        beam_size: int,
+        vad_filter: bool,
+        vad_parameters: Optional[Dict[str, Any]],
+        language: str,
+        word_timestamps: bool = False,
+        **kwargs,
+    ) -> Dict[str, Any]:
         """Execute local transcription with perf timing."""
         # Preprocess phase — convert raw PCM bytes to model input format
         t0 = time.perf_counter()
@@ -684,7 +765,16 @@ class Whisper:
 
         # GPU inference phase — run transcription model
         t0 = time.perf_counter()
-        raw_output = WhisperLoader.inference(self._model, preprocessed, self._metadata, language=language)
+        raw_output = WhisperLoader.inference(
+            self._model,
+            preprocessed,
+            self._metadata,
+            language=language,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
+            vad_parameters=vad_parameters,
+            word_timestamps=word_timestamps,
+        )
         t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract requested output fields
@@ -719,6 +809,7 @@ class Whisper:
         vad_filter: bool,
         vad_parameters: Optional[Dict[str, Any]],
         language: str,
+        word_timestamps: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """Execute remote transcription via model server.
@@ -734,6 +825,7 @@ class Whisper:
                 'vad_filter': vad_filter,
                 'vad_parameters': vad_parameters,
                 'language': language,
+                'word_timestamps': word_timestamps,
                 'output_fields': self.output_fields,
                 **kwargs,
             },

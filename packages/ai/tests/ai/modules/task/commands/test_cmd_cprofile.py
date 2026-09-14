@@ -24,9 +24,9 @@
 
 Coverage focus: PROXY-MODE AUTHORIZATION. The proxy path forwards profiler
 commands into a pipeline's engine subprocess, so the target lookup must
-require ``task.control`` on the TARGET TASK'S team — a defaultTeam holder
+require ``task.control`` on the TARGET TASK'S team — a devTeam holder
 must not be able to profile another team's engine (the cross-team hole this
-suite pins closed). Direct mode (no target) keeps its defaultTeam check.
+suite pins closed). Direct mode (no target) keeps its devTeam check.
 
 Same harness conventions as the sibling suites: __init__ bypassed via
 ``__new__``; ``_server``/``_account_info`` seeded; DAP helpers mocked.
@@ -54,7 +54,7 @@ def _make_conn(*, account_info=None, server=None, connection_id=7):
     conn._server = server or MagicMock()
     conn._connection_id = connection_id
     conn.build_response = MagicMock(side_effect=lambda req, body=None: {'type': 'response', 'body': body})
-    conn.verify_permission = MagicMock()  # defaultTeam gate, granted by default
+    conn.verify_permission = MagicMock()  # devTeam gate, granted by default
     return conn
 
 
@@ -64,7 +64,7 @@ def _account_info():
         userId='user-1',
         auth='ak_x',
         userToken='token-user-1',
-        defaultTeam='team-1',
+        devTeam='team-1',
         organization={'id': 'org-1', 'teams': [{'id': 'team-1', 'permissions': ['task.control']}]},
         sysPermissions=[],
     )
@@ -87,7 +87,7 @@ def _running_control():
 @pytest.mark.asyncio
 async def test_proxy_requires_task_control_on_the_targets_team():
     """The target lookup passes account_info + require='task.control' so
-    authorization resolves against the TASK's team, not defaultTeam.
+    authorization resolves against the TASK's team, not devTeam.
     """
     account = _account_info()
     server = MagicMock()

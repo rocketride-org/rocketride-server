@@ -381,14 +381,16 @@ class EventMixin(DAPClient):
         Add a monitor subscription. If the key already exists, the new types
         are merged via reference counting and the merged set is sent to the server.
 
-        The scope IS the kind: a ``"team_id"`` in the key addresses the
-        team's DEPLOYED run; without it the server binds the subscription to
-        the caller's own dev run — there is no run-kind argument.
+        A ``"team_id"`` in the key addresses the team's DEPLOYED run.
+        Without it the server binds the subscription to the caller's OWN
+        run — the dev run by default, or the caller's PERSONAL (@me) deploy
+        run when ``"run_kind": "deploy"`` is set (deploy-kind but
+        user-owned, the one case team-presence cannot express).
 
         Args:
             key: Monitor key — ``{"token": "..."}`` for a running task,
                  or ``{"project_id": "...", "source": "..."}`` (optionally
-                 with ``"pipe_id"`` and/or ``"team_id"``).
+                 with ``"pipe_id"``, ``"team_id"``, and/or ``"run_kind"``).
             types: Event types to subscribe to (e.g. ``['summary', 'flow']``).
         """
         key_str = self._monitor_key_to_string(key)
@@ -490,10 +492,13 @@ class EventMixin(DAPClient):
             }
             if 'pipe_id' in key and key['pipe_id'] is not None:
                 args['pipeId'] = key['pipe_id']
-            # The scope IS the kind: teamId addresses the team's deploy run,
-            # absent addresses the caller's own dev run.
+            # teamId addresses the team's deploy run. Absent, runKind selects
+            # the caller's own continuum: dev (default) or the personal @me
+            # deploy run.
             if key.get('team_id'):
                 args['teamId'] = key['team_id']
+            elif key.get('run_kind') == 'deploy':
+                args['runKind'] = key['run_kind']
             await self.call('rrext_monitor', **args)
 
     async def _resubscribe_all_monitors(self) -> None:
@@ -525,7 +530,37 @@ class EventMixin(DAPClient):
         """
         if 'token' in key:
             return f't:{key["token"]}'
-        payload = [key['project_id'], key['source'], key.get('pipe_id'), key.get('team_id') or '']
+        # Canonicalize run_kind to its WIRE semantics before it enters the
+        # registry string, so keys that produce an identical server
+        # subscription collapse to one entry (otherwise they ref-count
+        # separately and the second _sync_monitor clobbers the first caller's
+        # merged type set).
+        team_id = key.get('team_id') or ''
+        if team_id:
+            # A team scope is ALWAYS the deploy continuum server-side (teamId
+            # wins); run_kind is ignored there, so a team key WITH
+            # run_kind='deploy' and one WITHOUT must collapse. Clear it.
+            run_kind = ''
+        else:
+            # Teamless: 'dev' is the default continuum and _sync_monitor sends
+            # runKind only for 'deploy', so a 'dev' key and a default (missing)
+            # key produce an IDENTICAL subscription and MUST collapse. Only
+            # 'deploy' stays distinct in slot 5. Anything else would key a dead
+            # slot no run ever matches — reject rather than silently fork it.
+            run_kind = key.get('run_kind') or ''
+            if run_kind == 'dev':
+                run_kind = ''
+            if run_kind not in ('', 'deploy'):
+                raise ValueError(f"invalid run_kind {run_kind!r} — expected 'dev' or 'deploy'")
+        # run_kind rides LAST so a registry string written before the field
+        # existed still parses (missing element -> '' -> dev).
+        payload = [
+            key['project_id'],
+            key['source'],
+            key.get('pipe_id'),
+            team_id,
+            run_kind,
+        ]
         return f'p:{json.dumps(payload)}'
 
     @staticmethod
@@ -535,8 +570,12 @@ class EventMixin(DAPClient):
             return {'token': key_str[2:]}
         if key_str.startswith('p:'):
             try:
-                project_id, source, pipe_id, team_id = json.loads(key_str[2:])
-            except (ValueError, TypeError):
+                # run_kind was appended in a later revision — tolerate the
+                # 4-element legacy payload (missing -> '' -> dev).
+                parts = json.loads(key_str[2:])
+                project_id, source, pipe_id, team_id = parts[:4]
+                run_kind = parts[4] if len(parts) > 4 else ''
+            except (ValueError, TypeError, IndexError):
                 # A malformed registry string has no valid key — skip it.
                 return None
             key: Dict[str, Any] = {'project_id': project_id, 'source': source}
@@ -544,5 +583,7 @@ class EventMixin(DAPClient):
                 key['pipe_id'] = pipe_id
             if team_id:
                 key['team_id'] = team_id
+            if run_kind == 'deploy':
+                key['run_kind'] = run_kind
             return key
         return None

@@ -1,0 +1,99 @@
+# Publishes packages/n8n-nodes to npm as `n8n-nodes-rocketride` with provenance.
+#
+# Mirrors the monorepo's _release.yaml approach: npm OIDC TRUSTED PUBLISHING
+# (no NPM_TOKEN) + --provenance. Kept separate from the server release because
+# this package versions on its own cadence (n8n-nodes-vX.Y.Z), not the server's.
+#
+# ONE-TIME SETUP (on npmjs.com, by a maintainer of the npm package):
+#   Package n8n-nodes-rocketride -> Settings -> Trusted Publisher -> GitHub Actions:
+#     Repository:  rocketride-org/rocketride-server
+#     Workflow:    n8n-nodes-release.yml
+#     Environment: release
+#
+# RELEASE: bump packages/n8n-nodes/package.json version, then push a matching tag:
+#   git tag n8n-nodes-v0.1.0 && git push origin n8n-nodes-v0.1.0
+name: n8n-nodes Release
+
+on:
+  push:
+    tags:
+      - 'n8n-nodes-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # OIDC: npm trusted publishing + provenance attestation
+    defaults:
+      run:
+        working-directory: packages/n8n-nodes
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Guard — tag must match package.json version
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/n8n-nodes-v*) ;;
+            *)
+              echo "::error::Release must run from an n8n-nodes-v* tag."
+              exit 1
+              ;;
+          esac
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#n8n-nodes-}"
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ($TAG) does not match package.json version ($PKG_VERSION)."
+            exit 1
+          fi
+
+      - name: Install + verify
+        run: |
+          npm install -g npm@11.19.0
+          npm ci --no-audit --no-fund
+          npm run build
+          npm run lint
+          npm test
+
+      # TEMPORARY — remove once the package exists on the registry.
+      #
+      # Trusted publishing cannot be configured for a package that has never
+      # been published: `npm trust github n8n-nodes-rocketride ...` returns
+      # 404 POST /-/package/n8n-nodes-rocketride/trust. So the FIRST publish
+      # has to authenticate with a token.
+      #
+      # Provenance is unaffected by how we authenticate — it comes from
+      # `id-token: write` plus `--provenance`, which are already here. That
+      # matters because n8n Cloud requires provenance as of 1 May 2026, so a
+      # local `npm publish` would produce a package unusable where it is meant
+      # to be installed.
+      #
+      # AFTER THE FIRST SUCCESSFUL RUN:
+      #   1. npm trust github n8n-nodes-rocketride --file n8n-nodes-release.yml \
+      #        --repo rocketride-org/rocketride-server --env release
+      #   2. delete the NPM_TOKEN secret
+      #   3. revert this commit — the step below returns to tokenless OIDC
+      - name: Publish to npm (token auth for first publish + provenance)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN is not set. This workflow is in its first-publish"
+            echo "::error::configuration and needs a one-time granular token scoped to"
+            echo "::error::n8n-nodes-rocketride. See the comment above this step."
+            exit 1
+          fi
+          # npm 11.19.0 supports OIDC trusted publishing and npm trust configuration (npm trust requires >= 11.15.0).
+          npm publish --provenance --access public

@@ -145,11 +145,13 @@ export class BarStatus {
 			this.statusBarItem.backgroundColor = undefined;
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', true);
 		} else if (status.state === ConnectionState.CONNECTING) {
+			// Transitional, nothing is wrong yet — normal color per the rule
+			// "normal when everything is ok, red when it is not".
 			const msg = status.progressMessage || 'Connecting...';
 			this.statusBarItem.text = `$(sync~spin) RocketRide: ${msg}`;
 			this.statusBarItem.command = undefined;
 			this.statusBarItem.tooltip = msg;
-			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+			this.statusBarItem.backgroundColor = undefined;
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
 		} else if (status.state === ConnectionState.AUTH_FAILED) {
 			this.statusBarItem.text = '$(key) RocketRide: Sign In Required';
@@ -161,7 +163,7 @@ export class BarStatus {
 			this.statusBarItem.text = '$(key) RocketRide: Setup Required';
 			this.statusBarItem.command = 'rocketride.page.settings.open';
 			this.statusBarItem.tooltip = 'Click to open settings page';
-			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+			this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
 		} else {
 			this.statusBarItem.text = '$(debug-disconnect) RocketRide: Disconnected';
@@ -176,10 +178,11 @@ export class BarStatus {
 	 * Sets status bar to "needs setup" state — shown before the welcome page is dismissed
 	 */
 	public setNeedsSetup(): void {
+		// First run, nothing is wrong — normal color per the binary color rule.
 		this.statusBarItem.text = '$(gear) RocketRide: Setup';
 		this.statusBarItem.command = 'rocketride.page.welcome.open';
 		this.statusBarItem.tooltip = 'Click to open the welcome page and configure your connection';
-		this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+		this.statusBarItem.backgroundColor = undefined;
 	}
 
 	/**
@@ -218,8 +221,8 @@ export class BarStatus {
 	private updateStatus(): void {
 		const connectionManager = this.getConnectionManager();
 		if (connectionManager) {
-			// Trigger a status update
-			connectionManager.getConnectionStatus();
+			// Re-render from the authoritative status snapshot.
+			this.handleConnectionStatusChange(connectionManager.getConnectionStatus());
 		}
 	}
 

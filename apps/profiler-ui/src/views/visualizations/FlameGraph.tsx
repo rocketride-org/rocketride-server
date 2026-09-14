@@ -34,8 +34,9 @@ import React, { useRef, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import * as d3 from 'd3';
 import type { HierarchyRectangularNode } from 'd3';
-import { commonStyles } from 'shared/themes/styles';
+import { commonStyles } from 'shell';
 import type { ProfileTreeNode, OnRootChange } from './types';
+import { pruneTree, limitDepth } from './treeUtils';
 
 // =============================================================================
 // CONSTANTS
@@ -104,34 +105,6 @@ const styles = {
 		whiteSpace: 'pre-line',
 	} as CSSProperties,
 };
-
-// =============================================================================
-// HELPERS
-// =============================================================================
-
-/**
- * Apply cutoff pruning to a tree node.
- * Children whose cumtime is less than cutoff * parent.cumtime are removed.
- */
-function pruneTree(node: ProfileTreeNode, cutoff: number): ProfileTreeNode {
-	if (cutoff <= 0 || !node.children.length) return node;
-	const threshold = cutoff * node.cumtime;
-	const prunedChildren = node.children
-		.filter((c) => c.cumtime >= threshold)
-		.map((c) => pruneTree(c, cutoff));
-	return { ...node, children: prunedChildren };
-}
-
-/**
- * Limit tree depth to maxDepth levels.
- */
-function limitDepth(node: ProfileTreeNode, maxDepth: number, depth: number = 0): ProfileTreeNode {
-	if (depth >= maxDepth) return { ...node, children: [] };
-	return {
-		...node,
-		children: node.children.map((c) => limitDepth(c, maxDepth, depth + 1)),
-	};
-}
 
 // =============================================================================
 // PROPS

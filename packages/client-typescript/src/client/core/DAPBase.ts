@@ -46,6 +46,8 @@ export class DAPBase {
 	protected _msgType: string;
 	protected _seqCounter = 0; // Counter for generating unique message sequence numbers
 	protected _transport?: TransportBase;
+	protected _transportEpoch = 0;
+	private _nextTransportEpoch = 0;
 	protected _callDebugMessage?: (message: string) => void;
 	protected _callDebugProtocol?: (message: string) => void;
 	protected _logger?: unknown; // User-provided logger instance
@@ -65,10 +67,7 @@ export class DAPBase {
 		this._callDebugMessage = config.onDebugMessage;
 		this._callDebugProtocol = config.onProtocolMessage;
 
-		this._transport = transport;
-		if (this._transport) {
-			this._bindTransport(this._transport);
-		}
+		if (transport) this._bindTransport(transport);
 	}
 
 	/**
@@ -76,14 +75,72 @@ export class DAPBase {
 	 * Use when creating the transport lazily (e.g. in _internalConnect).
 	 */
 	protected _bindTransport(transport: TransportBase): void {
+		const previousTransport = this._transport;
+		const previousEpoch = this._transportEpoch;
+		if (previousTransport) {
+			this._transport = undefined;
+			this._transportEpoch = ++this._nextTransportEpoch;
+			this._onTransportEpochInvalidated(previousEpoch, new Error('Transport replaced'));
+		}
+
+		const epoch = ++this._nextTransportEpoch;
 		this._transport = transport;
-		this._transport.bind({
-			onDebugMessage: this.debugMessage.bind(this),
-			onDebugProtocol: this.debugProtocol.bind(this),
-			onReceive: this.onReceive.bind(this),
-			onConnected: this.onConnected.bind(this),
-			onDisconnected: this.onDisconnected.bind(this),
+		this._transportEpoch = epoch;
+		transport.bind({
+			onDebugMessage: (message) => {
+				if (this._isCurrentTransport(transport, epoch)) this.debugMessage(message);
+			},
+			onDebugProtocol: (message) => {
+				if (this._isCurrentTransport(transport, epoch)) this.debugProtocol(message);
+			},
+			onReceive: async (message) => {
+				if (!this._isCurrentTransport(transport, epoch)) return;
+				await this._onTransportReceive(message, epoch);
+			},
+			onConnected: async (connectionInfo) => {
+				if (!this._isCurrentTransport(transport, epoch)) return;
+				await this.onConnected(connectionInfo);
+			},
+			onDisconnected: async (reason, hasError) => {
+				if (!this._isCurrentTransport(transport, epoch)) return;
+				this._transport = undefined;
+				this._transportEpoch = ++this._nextTransportEpoch;
+				this._onTransportEpochInvalidated(epoch, new Error(reason || 'Connection lost'));
+				await this.onDisconnected(reason, hasError);
+			},
 		});
+	}
+
+	/**
+	 * True only while both the bound transport identity and its DAP epoch match.
+	 */
+	protected _isCurrentTransport(transport: TransportBase, epoch: number): boolean {
+		return this._transport === transport && this._transportEpoch === epoch;
+	}
+
+	/**
+	 * Invalidate a bound transport before an explicit disconnect. Its late
+	 * callbacks retain their old wrappers and are therefore ignored.
+	 */
+	protected _invalidateBoundTransport(transport: TransportBase, reason: Error): void {
+		if (!this._isCurrentTransport(transport, this._transportEpoch)) return;
+		const epoch = this._transportEpoch;
+		this._transport = undefined;
+		this._transportEpoch = ++this._nextTransportEpoch;
+		this._onTransportEpochInvalidated(epoch, reason);
+	}
+
+	/**
+	 * Hook for clients that associate work (such as pending requests) with a
+	 * transport epoch.
+	 */
+	protected _onTransportEpochInvalidated(_epoch: number, _reason: Error): void {}
+
+	/**
+	 * Epoch-aware receive hook. Public callback signatures remain unchanged.
+	 */
+	protected async _onTransportReceive(message: DAPMessage, _epoch: number): Promise<void> {
+		await this.onReceive(message);
 	}
 
 	/**

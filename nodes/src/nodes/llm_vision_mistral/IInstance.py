@@ -111,3 +111,7 @@ class IInstance(LLMBase):
             self.instance.writeDocuments(
                 [Doc(type='Text', page_content=answer.getText(), metadata=rename_ext(doc.metadata, 'txt'))]
             )
+
+        # Prevent the original Image docs from flowing downstream, matching the other
+        # llm_vision_* nodes.
+        return self.preventDefault()

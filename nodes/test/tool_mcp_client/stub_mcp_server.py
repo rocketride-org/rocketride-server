@@ -20,9 +20,16 @@ two degenerate shapes we care about, plus a normal tool as a control:
 ``tools/call`` echoes back the exact ``arguments`` object the server received
 under ``received_arguments`` so tests can assert that the synthesized no-op
 placeholder (``rr_no_args``) is stripped before the call reaches the server.
+
+If ``STUB_MCP_TOOLS_FILE`` names a readable JSON file holding a list of tool
+definitions, that list is re-read on every ``tools/list`` and ``tools/call``,
+so a test can add or rename tools while the server keeps running (the
+catalog-staleness scenario of issue #1402). Otherwise the static ``TOOLS`` list
+above is served.
 """
 
 import json
+import os
 import sys
 
 TOOLS = [
@@ -46,6 +53,20 @@ TOOLS = [
         },
     },
 ]
+
+
+def _current_tools():
+    """Return the live tool list: the JSON file if configured, else ``TOOLS``."""
+    path = os.environ.get('STUB_MCP_TOOLS_FILE')
+    if path:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                tools = json.load(f)
+            if isinstance(tools, list):
+                return tools
+        except (OSError, ValueError):
+            pass
+    return TOOLS
 
 
 def _write(msg):
@@ -77,12 +98,12 @@ def _handle(msg):
         }
 
     if method == 'tools/list':
-        return {'jsonrpc': '2.0', 'id': msg_id, 'result': {'tools': TOOLS}}
+        return {'jsonrpc': '2.0', 'id': msg_id, 'result': {'tools': _current_tools()}}
 
     if method == 'tools/call':
         name = params.get('name')
         arguments = params.get('arguments', {})
-        known = {t['name'] for t in TOOLS}
+        known = {t['name'] for t in _current_tools()}
         if name not in known:
             return {
                 'jsonrpc': '2.0',

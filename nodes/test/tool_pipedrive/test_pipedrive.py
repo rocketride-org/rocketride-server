@@ -21,7 +21,10 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
+from test.zone_audit import audit_time_fields
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes'))
+
 
 _STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
 
@@ -1090,3 +1093,22 @@ class TestCursorPagination:
         result = _instance().person_search({'term': 'ada', 'cursor': 'page1'})
         assert mock_request.call_args[1]['params']['cursor'] == 'page1'
         assert result['next_cursor'] == 'page2'
+
+
+# ---------------------------------------------------------------------------
+# Every field that carries a time of day names its zone
+# ---------------------------------------------------------------------------
+# The rule, the bug behind it and the audit's own tests live with the helper:
+# nodes/test/zone_audit.py and nodes/test/test_zone_audit.py. What is this
+# node's own is the verdict and its exemptions.
+
+
+class TestEveryTimeFieldNamesItsZone:
+    #: A LENGTH, not an instant. "A two-hour meeting" is 02:00 in every zone
+    #: there is, and converting it would turn a duration into a wrong duration.
+    #: Exempt by decision rather than by the matcher missing it, and scoped to
+    #: the two tools that publish it.
+    ALLOWED = ('activity_create.duration', 'activity_update.duration')
+
+    def test_no_published_parameter_describes_a_time_without_saying_which_zone(self):
+        assert audit_time_fields(IInstance, self.ALLOWED) == []

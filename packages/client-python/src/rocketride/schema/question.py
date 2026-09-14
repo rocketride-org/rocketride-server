@@ -85,6 +85,10 @@ class Answer(BaseModel):
 
     answer: Optional[Union[str, dict, list]] = None
     expectJson: bool = False
+    # Turn-total LLM token usage (input/output/cache/model/calls) plus a per-call
+    # `breakdown` list; surfaced in the Trace and the action history. Billing is
+    # unaffected — it flows through the separate per-call metrics.counter path.
+    tokens: Optional[Dict[str, Any]] = None
 
     @field_validator('answer', mode='before')
     @classmethod

@@ -26,9 +26,11 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, useSidebarContent, BxPlus } from 'shell-ui';
-import { Explorer, SidebarMenu, SidebarCollapsedGate } from 'shared';
-import type { ExplorerEntry, ExplorerConfig, IVirtualFileSystem, ViewMenu } from 'shared';
+import { useShellConnection, BxPlus } from 'shell';
+import { Explorer } from 'shell';
+import { SidebarMenu, SidebarCollapsedGate } from 'shell';
+import type { ExplorerEntry, ExplorerConfig } from 'shell';
+import type { IVirtualFileSystem, ViewMenu } from 'shell';
 import { getDocs } from './docs';
 import { listChatDir, saveChat, deleteChat, renameChat } from './chatStore';
 
@@ -99,13 +101,10 @@ const NEW_CHAT_MENU: ViewMenu = {
 /**
  * Sidebar for the Aparavi AQL Chat app.
  *
- * Registration-only component (models-ui / rocket-ui pattern): it builds the
- * chat-file Explorer node — the shared Explorer plus a "New Chat" action — and
- * publishes it into the shell sidebar's scrolling slot via useSidebarContent(),
- * so it composes with the shell's fixed header/footer. Renders null itself;
- * mounted by AparaviApp (not the legacy components.Sidebar slot). The
- * registered node's root SidebarCollapsedGate hides this free-form content
- * while the sidebar is collapsed.
+ * The app's AppLayout sidebar node: builds the chat-file Explorer — the
+ * shared Explorer plus a "New Chat" action — and renders it behind a
+ * SidebarCollapsedGate (this free-form content has no icon-rail form).
+ * AparaviApp passes this component as its root layout's `sidebar` prop.
  */
 const AparaviSidebar: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
@@ -250,12 +249,9 @@ const AparaviSidebar: React.FC = () => {
 		</div>
 	);
 
-	// Publish to the shell sidebar slot (behind the collapse gate); withdrawn
-	// automatically on unmount.
-	useSidebarContent(<SidebarCollapsedGate>{content}</SidebarCollapsedGate>);
-
-	// Registration-only component — nothing rendered inline.
-	return null;
+	// Render behind the collapse gate — this free-form content has no
+	// icon-rail form, so it hides while the sidebar is collapsed.
+	return <SidebarCollapsedGate>{content}</SidebarCollapsedGate>;
 };
 
 export default AparaviSidebar;
