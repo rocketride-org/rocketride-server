@@ -176,7 +176,7 @@ def test_empty_retrieval_gets_an_abstain_instruction(node):
     body = _grounding_text(node)
     assert body is not None
     assert 'do not have the information' in body
-    assert 'Do not answer from memory' in body
+    assert 'rather than answering from memory' in body
 
 
 def test_a_retrieval_miss_beside_another_lane_still_grounds(node):

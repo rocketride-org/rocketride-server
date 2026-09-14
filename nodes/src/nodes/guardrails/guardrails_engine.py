@@ -394,6 +394,13 @@ class GuardrailsEngine:
     # Nothing is grounded in the empty-retrieval branch, so a stated amount is
     # unsupported however the sentence around it is hedged.
     _WHITESPACE = re.compile(r'\s+')
+    # 12.0 and 12 are one amount, 94.70 and 94.7 are one amount.
+    _TRAILING_ZEROS = re.compile(r'(\d+\.\d*?)0+(?=\D|$)')
+    _TRAILING_POINT = re.compile(r'(\d+)\.(?=\D|$)')
+    # A refusal negates or reports an inability; an affirmation does neither.
+    _NEGATION = re.compile(
+        r"\b(?:no|not|none|nothing|never|cannot|can't|couldn't|unable|n't|without|outside|beyond|lacks?|lacking)\b"
+    )
     # A question writing $94.7B and an answer writing $94.7 billion name the same
     # amount, so the scale word is folded to its initial before they are compared.
     _SCALE_WORDS = (('billion', 'b'), ('bn', 'b'), ('million', 'm'), ('thousand', 'k'))
@@ -423,12 +430,23 @@ class GuardrailsEngine:
             return False
         if not question_text.strip():
             return not cls._declines(output)
-        return bool(stated - cls._figures(question_text))
+        if stated - cls._figures(question_text):
+            return True
+        # Every figure came from the question. Handing one back as fact asserts it
+        # as much as inventing one, so only a refusal is allowed to repeat it.
+        return not cls._declines(output)
 
     @classmethod
     def _declines(cls, output: str) -> bool:
-        """Report whether *output* is worded as an explicit refusal."""
+        """Report whether *output* refuses rather than answers.
+
+        A refusal carries a negation or an inability somewhere in it, which holds
+        for wordings the phrase list never anticipated. The list stays for the few
+        that state a shortfall without negating anything.
+        """
         body = output.strip().lower().replace('\u2019', "'")
+        if cls._NEGATION.search(body):
+            return True
         return any(marker in body for marker in cls.ABSTENTION_MARKERS)
 
     @classmethod
@@ -438,11 +456,19 @@ class GuardrailsEngine:
 
     @classmethod
     def _normalise(cls, text: str) -> str:
-        """Reduce a figure to the form the comparison is made in."""
+        """Reduce a figure to the form the comparison is made in.
+
+        One amount has one spelling here: the scale word folds to its initial,
+        grouping separators go, and a decimal tail that adds nothing is dropped,
+        so $1,200 and $1200, or 12% and 12.0%, are the same figure. The currency
+        symbol and the scale letter are kept, since they change the amount.
+        """
         out = text.lower()
         for word, initial in cls._SCALE_WORDS:
             out = out.replace(word, initial)
-        return cls._WHITESPACE.sub('', out).strip('.,')
+        out = cls._WHITESPACE.sub('', out).strip('.,').replace(',', '')
+        out = cls._TRAILING_ZEROS.sub(r'\1', out)
+        return cls._TRAILING_POINT.sub(r'\1', out)
 
     def check_hallucination(
         self,

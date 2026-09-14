@@ -34,11 +34,13 @@ _GROUNDING_INSTRUCTION = (
     'facts, figures or dates that do not appear there.'
 )
 
-# Appended when retrieval ran and returned nothing. Saying so is the useful answer;
-# answering anyway is where invented figures come from.
+# Appended when retrieval ran and returned nothing. The node cannot tell a question
+# that needs the missing material from a greeting or a follow-up that does not, so the
+# condition is left to the model: answering from memory is what this rules out, not
+# answering at all.
 _ABSTAIN_INSTRUCTION = (
-    'No documents were retrieved for this question. Say that you do not have the '
-    'information to answer it. Do not answer from memory.'
+    'No documents were retrieved for this question. If answering it needs that '
+    'material, say you do not have the information rather than answering from memory.'
 )
 
 
