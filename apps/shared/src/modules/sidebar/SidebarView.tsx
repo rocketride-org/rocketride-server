@@ -174,7 +174,7 @@ const PIPELINE_CONFIG: ExplorerConfig = {
  * Maps ISidebarViewProps (pipeline-specific) to IExplorerProps (generic).
  * The Explorer component handles all file tree rendering internally.
  */
-export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath, appBuilder, showModeStrip = false, sidebarMode = 'pipelines', onSidebarModeChange }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath, appBuilder, showModeStrip = false, sidebarMode = 'pipelines', onSidebarModeChange, agentSlot }) => {
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
 
@@ -307,6 +307,9 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 						})}
 				</div>
 			)}
+
+			{/* ── Agent sessions (Phase 4) — host slot, absent = zero DOM */}
+			{agentSlot}
 		</div>
 	);
 

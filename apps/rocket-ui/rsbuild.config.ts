@@ -84,6 +84,15 @@ export default defineConfig(() => {
 			// production default URL.
 			define: {
 				'process.env.REACT_APP_OAUTH_ROOT_URL': JSON.stringify(env.REACT_APP_OAUTH_ROOT_URL ?? ''),
+				// OSS dev override for agentApi.ts's agentBase(): bake the local rocket-agent
+				// URL so the panel targets it instead of the engine. Inject the LITERAL
+				// `undefined` when unset (not ''), so the `?? ConnectionManager.getHttpUrl()`
+				// fallback still fires in SaaS/prod — an empty string is not nullish and would
+				// wrongly win the `??`. Also replaces the token unconditionally, avoiding a
+				// bare `process` reference at runtime when the agent panel is enabled.
+				'process.env.REACT_APP_AGENT_URL': env.REACT_APP_AGENT_URL
+					? JSON.stringify(env.REACT_APP_AGENT_URL)
+					: 'undefined',
 			},
 		},
 		tools: {

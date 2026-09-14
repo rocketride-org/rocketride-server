@@ -200,6 +200,12 @@ export interface IProjectViewProps {
 	/** Save the document and resolve when it is on disk — the DEPLOY page's
 	    'Save & publish' path for a dirty document. */
 	onSaveDocument?: () => Promise<void>;
+	/**
+	 * Renders the canvas right-rail agent drawer (Phase 4, `agent.enabled`).
+	 * Forwarded verbatim to {@link CanvasPanel} — see `ICanvasProps.agentPanelSlot`
+	 * on FlowCanvas for why this is a host-injected slot rather than a direct import.
+	 */
+	agentPanelSlot?: (close: () => void) => ReactNode;
 }
 
 // =============================================================================
@@ -295,7 +301,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, onContentChanged, onValidate, getNodeSchema, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, fetchDeployLifecycle, teamDeployments = [], deployTeams = [], onDeployPublish, onDeployVersion, onOpenDeployment, onDeploySetDisabled, onDeploySetSchedule, onDeploySetSchedulePaused, onDeployPreviewSchedule, fetchDeployArtifact, onSaveDocument }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, onContentChanged, onValidate, getNodeSchema, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, fetchDeployLifecycle, teamDeployments = [], deployTeams = [], onDeployPublish, onDeployVersion, onOpenDeployment, onDeploySetDisabled, onDeploySetSchedule, onDeploySetSchedulePaused, onDeployPreviewSchedule, fetchDeployArtifact, onSaveDocument, agentPanelSlot }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -601,7 +607,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		design: {
 			content: (
 				<div style={styles.canvasPadding}>
-					<PrefsProvider value={prefsApi}>{project && <CanvasPanel oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} getNodeSchema={getNodeSchema ? handleGetNodeSchema : undefined} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</PrefsProvider>
+					<PrefsProvider value={prefsApi}>{project && <CanvasPanel oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} getNodeSchema={getNodeSchema ? handleGetNodeSchema : undefined} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} agentPanelSlot={agentPanelSlot} />}</PrefsProvider>
 				</div>
 			),
 		},

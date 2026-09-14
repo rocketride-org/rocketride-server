@@ -41,6 +41,7 @@ import ProjectProvider from './providers/ProjectProvider';
 import MonitorProvider from './providers/MonitorProvider';
 import WebviewProvider from './providers/WebviewProvider';
 import SidebarProvider from './providers/SidebarProvider';
+import { AgentTab } from './components/agent/AgentTab';
 
 // =============================================================================
 // STYLES
@@ -373,9 +374,19 @@ const RocketEditorContent: React.FC<{
 	// ("Maximum update depth exceeded").
 	const handleProjectContentChanged = useCallback((updatedPipeline: any) => onContentChanged(uri, updatedPipeline), [onContentChanged, uri]);
 
+	// Gates the `agent:` branch below. A tab persisted from a session where
+	// the flag was ON still restores after the flag is turned OFF (appstate
+	// survives the toggle) — this is the one document route that isn't
+	// reached exclusively through a flag-gated mount point (AgentSidebarSection
+	// / AgentPanel both already check the flag before opening one), so it must
+	// check for itself to keep flag-off === zero /agent calls everywhere.
+	const { prefs } = useWorkspace();
+	const agentEnabled = prefs['agent.enabled'] === true;
+
 	// Static document routes — not backed by VFS
 	if (uri === 'monitor') return <MonitorProvider />;
 	if (uri.startsWith('webview:')) return <WebviewProvider uri={uri} />;
+	if (uri.startsWith('agent:')) return agentEnabled ? <AgentTab uri={uri} /> : <div style={styles.welcome}>Agent is disabled.</div>;
 
 	// Content is the pipeline object directly — no parsing needed
 	const pipeline = content as any;

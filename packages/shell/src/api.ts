@@ -362,6 +362,11 @@ export {
 export type { EventTone } from './modules/server/components';
 export type { CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './modules/checkout/types';
 export type { EnvironmentSlotConfig, EnvironmentScope } from './modules/environment';
+// The widened section union AccountView emits (SDK AccountSection + 'agent-keys').
+// Named distinctly from the SDK's `AccountSection` so it isn't shadowed by the
+// `export type * from 'rocketride'` above. Apps hosting AccountView import this to
+// type their active-section state; the frozen `AccountSection` contract stays clean.
+export type { AccountViewSection } from './modules/account';
 
 // The FULL pipeline-schema type family — shared's project module and the
 // vscode Project webview consume all of it, so the whole set is surface.

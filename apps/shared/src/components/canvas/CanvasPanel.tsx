@@ -36,7 +36,7 @@
  */
 
 import { ThemeProvider, CssBaseline } from '@mui/material';
-import { useMemo, useState, useEffect } from 'react';
+import { ReactNode, useMemo, useState, useEffect } from 'react';
 
 import FlowContainer from './components/FlowContainer';
 import FlowCanvas from './components/FlowCanvas';
@@ -142,13 +142,20 @@ export interface ICanvasPanelProps {
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
+
+	/**
+	 * Renders the canvas right-rail agent drawer (Phase 4, `agent.enabled`).
+	 * Forwarded verbatim to {@link FlowCanvas} — see `ICanvasProps.agentPanelSlot`
+	 * there for why this is a host-injected slot rather than a direct import.
+	 */
+	agentPanelSlot?: (close: () => void) => ReactNode;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, project, servicesJson, getNodeSchema, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, isReadonly = false, envKeys }: ICanvasPanelProps) {
+export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, project, servicesJson, getNodeSchema, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, isReadonly = false, envKeys, agentPanelSlot }: ICanvasPanelProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -208,7 +215,7 @@ export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExter
 				}}
 			>
 				<FlowContainer oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} getNodeSchema={getNodeSchema} inventory={inventory} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} handleValidatePipeline={handleValidatePipeline} onOpenLink={onOpenLink} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} onExport={onExport} isReadonly={isReadonly} envKeys={envKeys}>
-					<FlowCanvas />
+					<FlowCanvas agentPanelSlot={agentPanelSlot} />
 				</FlowContainer>
 			</div>
 		</ThemeProvider>

@@ -34,9 +34,9 @@
  *   - Applies navigation mode (pan vs lasso-select) and lock state
  */
 
-import { ReactElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ReactElement, ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
-import { Settings } from 'lucide-react';
+import { Settings, Bot } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 
 import './reactflow-overrides.css';
@@ -188,6 +188,25 @@ const ToolbarDivider = () => {
 };
 
 // =============================================================================
+// Props
+// =============================================================================
+
+/**
+ * Props accepted by the {@link Canvas} component. Every field is optional so
+ * existing hosts (`<FlowCanvas />`, no args) keep compiling unchanged.
+ */
+export interface ICanvasProps {
+	/**
+	 * Renders the canvas right-rail agent drawer (Phase 4, `agent.enabled`).
+	 * FlowCanvas lives in `apps/shared` and cannot import the app's
+	 * `AgentPanel` directly, so the host injects it as a slot — called with a
+	 * `close` callback when the panel should open, left undefined otherwise
+	 * (flag off, or the host has no agent feature at all).
+	 */
+	agentPanelSlot?: (close: () => void) => ReactNode;
+}
+
+// =============================================================================
 // Component
 // =============================================================================
 
@@ -197,9 +216,10 @@ const ToolbarDivider = () => {
  * Reads graph state (nodes, edges, event handlers) from FlowGraphContext
  * and preferences (navigation mode, lock) from FlowPreferencesContext.
  *
+ * @param props - {@link ICanvasProps}.
  * @returns The ReactFlow canvas with background grid.
  */
-export default function Canvas(): ReactElement {
+export default function Canvas({ agentPanelSlot }: ICanvasProps = {}): ReactElement {
 	// --- Graph state from context ------------------------------------------
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady, configSnackbar, setConfigSnackbar } = useFlowGraph();
 
@@ -208,6 +228,12 @@ export default function Canvas(): ReactElement {
 
 	// The one shared prefs accessor — the same getPref/setPref every app uses.
 	const { getPref, setPref } = usePrefs();
+
+	// Phase 4 feature flag: the right-rail agent drawer. usePrefs() reaches
+	// this tree (the host's PrefsProvider wraps the whole ProjectView subtree
+	// FlowCanvas renders under), unlike the sidebar's sibling tree which needs
+	// useWorkspace() instead — see SidebarProvider.tsx for that workaround.
+	const agentEnabled = getPref('agent.enabled') === true;
 
 	// --- Floating toolbar position (persisted via workspace prefs) ----------
 	const toolbarPosition = getPref('toolbarPosition') as IToolbarPosition | undefined;
@@ -320,15 +346,21 @@ export default function Canvas(): ReactElement {
 
 	// --- Panel state -------------------------------------------------------
 	const [showCreatePanel, setShowCreatePanel] = useState(false);
+	// Right-rail agent drawer (Phase 4, `agent.enabled`) — mutually exclusive
+	// with the create/config panels below, same pattern.
+	const [showAgentPanel, setShowAgentPanel] = useState(false);
 
 	/** Whether the node config panel should be shown. */
 	const showConfigPanel = !!editingNodeId;
 	/** The node being edited (derived from editingNodeId). */
 	const editingNode = editingNodeId ? nodeMap[editingNodeId] : undefined;
 
-	// Close create panel when config panel opens
+	// Close create/agent panels when config panel opens
 	useEffect(() => {
-		if (showConfigPanel) setShowCreatePanel(false);
+		if (showConfigPanel) {
+			setShowCreatePanel(false);
+			setShowAgentPanel(false);
+		}
 	}, [showConfigPanel]);
 
 	// Ctrl+A / Cmd+A — select all nodes and suppress browser text selection
@@ -352,7 +384,10 @@ export default function Canvas(): ReactElement {
 					title="Add node"
 					onClick={() => {
 						setShowCreatePanel((v) => {
-							if (!v) setEditingNodeId(undefined);
+							if (!v) {
+								setEditingNodeId(undefined);
+								setShowAgentPanel(false);
+							}
 							return !v;
 						});
 					}}
@@ -365,6 +400,23 @@ export default function Canvas(): ReactElement {
 			{!isLocked && (
 				<ToolbarButton title="Add annotation" onClick={addAnnotation}>
 					<NoteIcon color="currentColor" size={18} />
+				</ToolbarButton>
+			)}
+			{agentEnabled && (
+				<ToolbarButton
+					title="Agent"
+					onClick={() => {
+						setShowAgentPanel((v) => {
+							if (!v) {
+								setEditingNodeId(undefined);
+								setShowCreatePanel(false);
+							}
+							return !v;
+						});
+					}}
+					isActive={showAgentPanel}
+				>
+					<Bot size={18} />
 				</ToolbarButton>
 			)}
 			{!isLocked && <ToolbarDivider />}
@@ -479,6 +531,9 @@ export default function Canvas(): ReactElement {
 
 			{/* Node config panel — slides in from the right */}
 			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode} onClose={() => setEditingNodeId(undefined)} />}
+
+			{/* Agent drawer (Phase 4, `agent.enabled`) — host-injected slot; see ICanvasProps.agentPanelSlot. */}
+			{agentEnabled && showAgentPanel && agentPanelSlot?.(() => setShowAgentPanel(false))}
 			{/* Configuration reminder after template instantiation */}
 			{configSnackbar !== null && (
 				<div

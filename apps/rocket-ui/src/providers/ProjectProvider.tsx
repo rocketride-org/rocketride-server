@@ -54,6 +54,7 @@ import { saveProject, deleteProject, displayName as projectDisplayName } from '.
 import { createProjectVfs } from '../utils/projectVfs';
 import { downloadJson } from '../utils/downloadFile';
 import DeploymentProvider from './DeploymentProvider';
+import { AgentPanel } from '../components/agent/AgentPanel';
 
 // =============================================================================
 // CONSTANTS
@@ -889,6 +890,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 					onSave={handleSave}
 					onExport={handleExport}
 					envKeys={envKeys}
+					agentPanelSlot={(close: () => void) => <AgentPanel uri={uri} onClose={close} />}
 				/>
 				{/* Deployment record drawer — keyed by identity so switching teams
 				    remounts fresh state (React key identity rule). Inside the

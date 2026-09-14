@@ -100,7 +100,7 @@ const ThinkingGroup: React.FC<{ messages: ChatMessage[] }> = ({ messages }) => {
 		<div style={styles.thinkingGroup}>
 			<button type="button" style={styles.thinkingToggle} onClick={() => setOpen((o) => !o)}>
 				<span style={styles.thinkingChevron(open)} />
-				Thinking…
+				Trace · {messages.length} {messages.length === 1 ? 'step' : 'steps'}
 			</button>
 			{open && (
 				<div style={styles.thinkingBody}>
@@ -161,7 +161,7 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 		let group: ChatMessage[] | null = null;
 
 		for (const msg of messages) {
-			if (msg.sender === 'status' && msg.sseType === 'thinking') {
+			if (msg.sender === 'status' && (msg.sseType === 'thinking' || msg.sseType === 'reasoning' || msg.sseType === 'tool')) {
 				if (!group) {
 					group = [];
 					out.push({ kind: 'thinking-group', id: msg.id, messages: group });

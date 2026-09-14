@@ -33,7 +33,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useShellConnection, ConnectionManager, ConfirmDialog } from 'shell';
+import { useShellConnection, useWorkspace, ConnectionManager, ConfirmDialog } from 'shell';
 import { getDocs } from '../docs';
 import { SidebarView } from 'shared/modules/sidebar/SidebarView';
 import { BxExport, useSidebarCollapsed } from 'shell';
@@ -42,6 +42,7 @@ import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, Sideba
 import type { TaskLifecycleEvent } from 'shared/modules/sidebar/taskFold';
 import { loadProject, listProjectDir, isPipelineFile, pipelineExtension } from '../utils/projectStore';
 import { downloadJson } from '../utils/downloadFile';
+import { AgentSidebarSection } from '../components/agent/AgentSidebarSection';
 
 // =============================================================================
 // COLLAPSED GATE
@@ -79,6 +80,18 @@ const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) =
  */
 const SidebarProvider: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
+
+	// --- Agent sessions gate (Phase 4) ----------------------------------------
+	// P4-V5: usePrefs()/PrefsProvider (shell's ambient { getPref, setPref })
+	// is mounted only INSIDE ProjectProvider, scoped to the open pipeline's
+	// subtree (ProjectProvider.tsx:863) — it never reaches this sibling
+	// component, so it would silently read the no-op accessor here. Read the
+	// same workspace-prefs bag directly via useWorkspace() instead (the source
+	// ProjectProvider itself reads from — ProjectProvider.tsx:154), which
+	// reaches every descendant of the app-root WorkspaceProvider RocketApp
+	// mounts under (RocketApp.tsx also calls useWorkspace() directly).
+	const { prefs } = useWorkspace();
+	const agentEnabled = prefs['agent.enabled'] === true;
 
 	// --- Build entries from server file tree ----------------------------------
 
@@ -471,7 +484,7 @@ const SidebarProvider: React.FC = () => {
 	return (
 		<>
 			<SidebarCollapsedGate>
-				<SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} activeFilePath={activeFilePath} onNavigate={handleNavigate} onOpenFile={handleOpenFile} onFileManage={handleFileManage} fileActions={[{ id: 'export', label: 'Export', icon: <BxExport size={16} />, onSelect: handleExportPipeline }]} onSourceAction={handleSourceAction} onOpenUnknownTask={handleOpenUnknownTask} onRefresh={refresh} showModeStrip sidebarMode={sidebarMode} onSidebarModeChange={setSidebarMode} />
+				<SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} activeFilePath={activeFilePath} onNavigate={handleNavigate} onOpenFile={handleOpenFile} onFileManage={handleFileManage} fileActions={[{ id: 'export', label: 'Export', icon: <BxExport size={16} />, onSelect: handleExportPipeline }]} onSourceAction={handleSourceAction} onOpenUnknownTask={handleOpenUnknownTask} onRefresh={refresh} showModeStrip sidebarMode={sidebarMode} onSidebarModeChange={setSidebarMode} agentSlot={agentEnabled ? <AgentSidebarSection /> : undefined} />
 			</SidebarCollapsedGate>
 			{confirmState && <ConfirmDialog title={confirmState.title} message={confirmState.message} confirmLabel={confirmState.confirmLabel} cancelLabel="Cancel" onConfirm={() => handleConfirmResult(true)} onCancel={() => handleConfirmResult(false)} />}
 			{actionError && <ConfirmDialog title="Pipeline Error" message={actionError} confirmLabel="OK" onConfirm={() => setActionError(null)} onCancel={() => setActionError(null)} />}

@@ -59,8 +59,13 @@ const defaultPrefs: WorkspacePrefs = {
 const makeDefaultAppState = (_appId: string): AppWorkspaceState => {
 	// Restore theme from localStorage if available (persists across unauthenticated sessions)
 	const savedTheme = (() => { try { return localStorage.getItem('rr:theme') || ''; } catch { return ''; } })();
+	// Local-dev seed for the undeclared, non-persisted `agent.enabled` pref (no settings-UI
+	// toggle exists). Set localStorage 'rr:pref:agent.enabled' = 'true' and reload to reveal
+	// the embedded agent surface. Default-off is unchanged — this only turns the flag on when
+	// the key is explicitly present, mirroring the theme-from-localStorage restore above.
+	const savedAgentEnabled = (() => { try { return localStorage.getItem('rr:pref:agent.enabled') === 'true'; } catch { return false; } })();
 	return {
-		prefs: { ...defaultPrefs, ...(savedTheme ? { theme: savedTheme } : {}) },
+		prefs: { ...defaultPrefs, ...(savedTheme ? { theme: savedTheme } : {}), ...(savedAgentEnabled ? { 'agent.enabled': true } : {}) },
 		appState: {},
 	};
 };
@@ -323,14 +328,19 @@ export function useWorkspaceState(
 				// Build the resolved state, overlaying global prefs
 				const baseState = appStateData ?? makeDefaultAppState(restoredAppId);
 				const sp = global?.shellPrefs;
-				const mergedState: AppWorkspaceState = sp ? {
+				// TEMP dev force-on (debugging): reveal the agent surface unconditionally to
+				// verify the render path. The console marker confirms this edited code is the
+				// bundle actually running. Revert to a localStorage-gated seed once confirmed.
+				const mergedState: AppWorkspaceState = {
 					...baseState,
 					prefs: {
 						...baseState.prefs,
-						...(sp.theme !== undefined && { theme: sp.theme }),
-						...(sp.sidePanelOpen !== undefined && { sidePanelOpen: sp.sidePanelOpen }),
+						...(sp?.theme !== undefined && { theme: sp.theme }),
+						...(sp?.sidePanelOpen !== undefined && { sidePanelOpen: sp.sidePanelOpen }),
+						'agent.enabled': true,
 					},
-				} : baseState;
+				};
+				console.log('[dev] RR agent.enabled forced ON in resolved prefs for app:', restoredAppId);
 
 				// Ensure appState exists (handle v2 files that don't have it)
 				if (!mergedState.appState) mergedState.appState = {};

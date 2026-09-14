@@ -213,4 +213,8 @@ export interface ISidebarViewProps {
 	sidebarMode?: SidebarMode;
 	/** Mode tab selection callback (hosts persist the choice). */
 	onSidebarModeChange?: (mode: SidebarMode) => void;
+
+	// ── Agent (Phase 4) ─────────────────────────────────────────────────────
+	/** Optional Agent sessions section, rendered at the end of the pipelines panel. */
+	agentSlot?: ReactNode;
 }
