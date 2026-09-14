@@ -81,6 +81,16 @@ _GONE_STATES = frozenset({'TERMINATING', 'TERMINATED', 'USER_SHUTDOWN'})
 _LIFECYCLE_ERRORS = (SessionNotFoundError, SessionTerminatedError, InvalidStateError)
 
 
+class SessionEndedError(Exception):
+    """The session has ended, and the call was one a fresh, empty session could not serve."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            'the sandbox session has ended, so its files are gone; the next command or file write '
+            'starts a fresh, empty sandbox'
+        )
+
+
 def _int_or(value, default: int, *, lo: int, hi: int) -> int:
     try:
         n = int(value)
@@ -212,23 +222,27 @@ class IGlobal(IGlobalBase):
         except Exception as e:
             warning(f'tool_tenki: could not close the sandbox a failed create left running: {e}')
 
-    def call_with_session(self, call):
+    def call_with_session(self, call, *, replace: bool = True):
         """Return ``call(session)``, recovering the session once if it stopped being usable.
 
         A lifecycle error only prompts a look at the session's state (see
         ``recover_session``). The call is retried once, on the recovered session, when that
         state explains the failure; every other error propagates unchanged.
+
+        ``replace=False`` is for calls that only look at existing state (reading, listing or
+        deleting files). If the session turns out to have ended, a fresh, empty one could not
+        serve them, so ``SessionEndedError`` is raised instead of creating a session for nothing.
         """
         epoch = self.session_epoch
         session = self.get_session()
         try:
             return call(session)
         except _LIFECYCLE_ERRORS:
-            if not self.recover_session(session, epoch):
+            if not self.recover_session(session, epoch, replace=replace):
                 raise
         return call(self.get_session())
 
-    def recover_session(self, session: Sandbox, epoch: int) -> bool:
+    def recover_session(self, session: Sandbox, epoch: int, *, replace: bool = True) -> bool:
         """Bring a session that failed a call back to a usable state; return whether to retry.
 
         Decided by the session's real state, because the error that led here is only a hint:
@@ -236,7 +250,8 @@ class IGlobal(IGlobalBase):
         * Already recovered by a concurrent call (a different session or epoch): retry.
         * Unknown to the service, or in a gone state: forget it (closing it first unless the
           service already did), so the next ``get_session`` creates a fresh one. Its files
-          are lost either way.
+          are lost either way. With ``replace=False`` the caller is not retried on that fresh
+          session: ``SessionEndedError`` is raised instead.
         * Paused by Tenki's idle timeout: resume it and wait until it runs. Never replace
           it, since a pause preserves the agent's memory and files.
         * Any other state (running, starting, pausing): the failure had another cause, so
@@ -244,6 +259,10 @@ class IGlobal(IGlobalBase):
         """
         with self._session_lock:
             if self.session is not session or self.session_epoch != epoch:
+                # A concurrent call already dealt with this session. If it dropped it, retrying
+                # would create a fresh session, which a caller passing replace=False cannot use.
+                if self.session is None and not replace:
+                    raise SessionEndedError()
                 return True
             try:
                 state = session.refresh().state
@@ -257,7 +276,9 @@ class IGlobal(IGlobalBase):
                         warning(f'tool_tenki: could not close session {session.id}: {e}')
                 self.session = None
                 self.session_epoch += 1
-                debug(f'tool_tenki: session {session.id} is {state or "gone"}; creating a new one')
+                debug(f'tool_tenki: session {session.id} is {state or "gone"}; the next call creates a new one')
+                if not replace:
+                    raise SessionEndedError()
                 return True
             if state == 'PAUSED':
                 session.resume()

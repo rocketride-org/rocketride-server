@@ -35,18 +35,21 @@ terminated one.
 
 from __future__ import annotations
 
+import json
 import posixpath
+import re
 import shlex
 import uuid
 from typing import Callable
 
 from rocketlib import IInstanceBase
 
-from ai.common.utils import normalize_tool_input
+from ai.common.utils import normalize_tool_input, optional_bool
 
-from tenki import CommandTimeoutError, SandboxError
+from tenki import CommandTimeoutError, PermissionDeniedError, SandboxError
+from tenki import FileNotFoundError as TenkiFileNotFoundError  # also subclasses the builtin it shadows
 
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, SessionEndedError
 from .tool_groups import tenki_tool
 
 #: The session's home and default working directory, and the only root Tenki's file API accepts.
@@ -61,6 +64,10 @@ _SESSION_NOTE = (
     'and resumed on the next call: memory and files under /home/tenki survive, but /tmp is '
     'cleared and open network connections drop, so keep work under /home/tenki. When the '
     'session reaches its maximum lifetime it is replaced by a fresh, empty one.'
+)
+
+_PATH_NOTE = (
+    'Paths are relative to /home/tenki or absolute under it; anything outside /home/tenki, including /tmp, is rejected.'
 )
 
 #: run_code languages: the interpreter to run, and the file extension it expects.
@@ -87,6 +94,62 @@ _EXEC_OUTPUT_SCHEMA = {
         'error': {'type': 'string', 'description': 'Error message if the sandbox call failed.'},
     },
 }
+
+
+_CHANGE_OUTPUT_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'success': {'type': 'boolean'},
+        'path': {'type': 'string', 'description': 'Absolute path in the sandbox.'},
+        'error': {'type': 'string', 'description': 'Error message if the operation failed.'},
+    },
+}
+
+
+def _normalize_path(path) -> str:
+    """Resolve an agent-supplied path to an absolute path under /home/tenki.
+
+    Tenki's file API accepts nothing outside /home/tenki, including /tmp, and refuses it with a
+    bare permission error. Agents reach for /tmp first, so paths are checked here instead, and
+    refused with a message that says where files belong. Relative paths, and ``~``, resolve
+    against /home/tenki. This is a usability check, not a security boundary: run_command can
+    reach the whole VM anyway.
+
+    Raises:
+        ValueError: If ``path`` is empty or resolves outside /home/tenki.
+    """
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError('"path" is required and must be a non-empty string')
+    given = path.strip()
+    if given == '~' or given.startswith('~/'):
+        given = _HOME + given[1:]
+    # Slash runs collapsed first, because normpath keeps a leading '//'.
+    resolved = posixpath.normpath(re.sub(r'/+', '/', posixpath.join(_HOME, given)))
+    if resolved != _HOME and not resolved.startswith(_HOME + '/'):
+        raise ValueError(f'paths must be under /home/tenki (relative paths resolve there), but {given!r} is outside it')
+    return resolved
+
+
+def _fs_error(error: Exception, path: str) -> str:
+    """A readable message for a failed file operation."""
+    if isinstance(error, TenkiFileNotFoundError):
+        return f'no such file or directory: {path}'
+    if isinstance(error, PermissionDeniedError):
+        return f'{error} (file operations are limited to paths under /home/tenki)'
+    return str(error)
+
+
+def _listing(entries, cap: int) -> tuple[list[dict], bool]:
+    """Shape directory entries by name, stopping before the listing's JSON would pass ``cap``."""
+    shaped, used = [], 2  # the enclosing brackets
+    # In a listing, a FileInfo's path holds the entry's name.
+    for entry in sorted(entries, key=lambda info: info.path):
+        item = {'name': entry.path, 'is_dir': bool(entry.is_dir), 'size': int(entry.size)}
+        used += len(json.dumps(item)) + 2  # the entry and its separator
+        if used > cap:
+            return shaped, True
+        shaped.append(item)
+    return shaped, False
 
 
 def _truncate(text: str, cap: int) -> tuple[str, bool]:
@@ -272,3 +335,212 @@ class IInstance(IInstanceBase):
         except SandboxError as e:
             return _exec_error(e)
         return _exec_result(result, self.IGlobal.max_output_chars)
+
+    # -----------------------------------------------------------------------
+    # Group: filesystem
+    #
+    # Every path goes through _normalize_path before any call. Reads, listings and deletes pass
+    # replace=False: if the session has ended, a fresh, empty one cannot contain what they look
+    # for, so creating one would only add cost.
+    # -----------------------------------------------------------------------
+
+    @tenki_tool(
+        group='filesystem',
+        input_schema={
+            'type': 'object',
+            'required': ['path', 'content'],
+            'properties': {
+                'path': {'type': 'string', 'description': 'File to write, e.g. "app/main.py".'},
+                'content': {'type': 'string', 'description': 'Text to write (UTF-8); it replaces the whole file.'},
+            },
+        },
+        output_schema=_CHANGE_OUTPUT_SCHEMA,
+        description=lambda self: (
+            'Write a text file in the remote Tenki sandbox, creating it or replacing its content, '
+            f'along with any missing parent directories. {_PATH_NOTE} {_SESSION_NOTE}'
+        ),
+    )
+    def write_file(self, args):
+        """Write a text file in the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        path = _normalize_path(args.get('path'))
+        content = args.get('content')
+        if not isinstance(content, str):
+            raise ValueError('"content" is required and must be a string')
+
+        def write(session):
+            try:
+                session.fs.write_text(path, content)
+            except TenkiFileNotFoundError:
+                # The parent directory is missing: create it, with its own parents, and write again.
+                session.fs.mkdir(posixpath.dirname(path))
+                session.fs.write_text(path, content)
+
+        try:
+            self.IGlobal.call_with_session(write)
+        except SandboxError as e:
+            return {'success': False, 'path': path, 'error': _fs_error(e, path)}
+        return {'success': True, 'path': path}
+
+    @tenki_tool(
+        group='filesystem',
+        input_schema={
+            'type': 'object',
+            'required': ['path'],
+            'properties': {
+                'path': {'type': 'string', 'description': 'File to read, e.g. "app/main.py".'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'path': {'type': 'string', 'description': 'Absolute path in the sandbox.'},
+                'content': {'type': 'string', 'description': 'File content decoded as UTF-8.'},
+                'truncated': {'type': 'boolean', 'description': 'True if the content was cut at the output cap.'},
+                'error': {'type': 'string', 'description': 'Error message if the file could not be read.'},
+            },
+        },
+        description=lambda self: (
+            'Read a text file from the remote Tenki sandbox, decoded as UTF-8. At most '
+            f'{self.IGlobal.max_output_chars} characters are returned. {_PATH_NOTE} {_SESSION_NOTE}'
+        ),
+    )
+    def read_file(self, args):
+        """Read a text file from the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        path = _normalize_path(args.get('path'))
+        cap = self.IGlobal.max_output_chars
+        # UTF-8 spends at most 4 bytes on a character. Reading that many bytes per character, plus
+        # one, returns the whole file whenever it fits in `cap` characters, and more than `cap`
+        # characters whenever it does not, so truncation is still detected.
+        limit = cap * 4 + 1
+
+        def read(session):
+            stream = session.fs.read_stream(path, length=limit)
+            data = bytearray()
+            try:
+                # Bounded here as well as by length: a multi-gigabyte file must never be pulled
+                # whole into the engine's memory, whatever the service does with the hint.
+                for chunk in stream:
+                    data += chunk
+                    if len(data) >= limit:
+                        break
+            finally:
+                close = getattr(stream, 'close', None)
+                if callable(close):
+                    close()
+            return bytes(data[:limit])
+
+        try:
+            data = self.IGlobal.call_with_session(read, replace=False)
+        except (SandboxError, SessionEndedError) as e:
+            return {'path': path, 'content': '', 'truncated': False, 'error': _fs_error(e, path)}
+        content, truncated = _truncate(data.decode('utf-8', errors='replace'), cap)
+        return {'path': path, 'content': content, 'truncated': truncated}
+
+    @tenki_tool(
+        group='filesystem',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'path': {'type': 'string', 'description': 'Directory to list. Defaults to /home/tenki.'},
+                'include_hidden': {
+                    'type': 'boolean',
+                    'description': 'Include entries whose names start with a dot. Defaults to false.',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'path': {'type': 'string', 'description': 'Absolute path of the listed directory.'},
+                'entries': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'name': {'type': 'string'},
+                            'is_dir': {'type': 'boolean'},
+                            'size': {'type': 'integer', 'description': 'Size in bytes.'},
+                        },
+                    },
+                },
+                'truncated': {'type': 'boolean', 'description': 'True if the listing was cut at the output cap.'},
+                'error': {'type': 'string', 'description': 'Error message if the directory could not be listed.'},
+            },
+        },
+        description=lambda self: (
+            "List a directory in the remote Tenki sandbox: each entry's name, whether it is a "
+            f'directory, and its size, sorted by name. {_PATH_NOTE} {_SESSION_NOTE}'
+        ),
+    )
+    def list_files(self, args):
+        """List a directory in the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        path = _normalize_path(args.get('path') or '.')
+        include_hidden = optional_bool(args, 'include_hidden', default=False, tool_name='tenki')
+
+        try:
+            entries = self.IGlobal.call_with_session(
+                lambda session: session.fs.list(path, include_hidden=include_hidden), replace=False
+            )
+        except (SandboxError, SessionEndedError) as e:
+            return {'path': path, 'entries': [], 'truncated': False, 'error': _fs_error(e, path)}
+        shaped, truncated = _listing(entries, self.IGlobal.max_output_chars)
+        return {'path': path, 'entries': shaped, 'truncated': truncated}
+
+    @tenki_tool(
+        group='filesystem',
+        input_schema={
+            'type': 'object',
+            'required': ['path'],
+            'properties': {
+                'path': {'type': 'string', 'description': 'Directory to create, e.g. "data/raw".'},
+            },
+        },
+        output_schema=_CHANGE_OUTPUT_SCHEMA,
+        description=lambda self: (
+            'Create a directory in the remote Tenki sandbox, including any missing parent directories. '
+            f'{_PATH_NOTE} {_SESSION_NOTE}'
+        ),
+    )
+    def make_directory(self, args):
+        """Create a directory in the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        path = _normalize_path(args.get('path'))
+
+        try:
+            self.IGlobal.call_with_session(lambda session: session.fs.mkdir(path))
+        except SandboxError as e:
+            return {'success': False, 'path': path, 'error': _fs_error(e, path)}
+        return {'success': True, 'path': path}
+
+    @tenki_tool(
+        group='filesystem',
+        input_schema={
+            'type': 'object',
+            'required': ['path'],
+            'properties': {
+                'path': {'type': 'string', 'description': 'File or directory to delete, e.g. "build".'},
+            },
+        },
+        output_schema=_CHANGE_OUTPUT_SCHEMA,
+        description=lambda self: (
+            'Delete a file or directory in the remote Tenki sandbox. A directory is deleted recursively, '
+            'with everything inside it, and cannot be recovered. /home/tenki itself cannot be deleted. '
+            f'{_PATH_NOTE} {_SESSION_NOTE}'
+        ),
+    )
+    def delete_path(self, args):
+        """Delete a file or directory, recursively, in the shared Tenki session."""
+        args = normalize_tool_input(args, tool_name='tenki')
+        path = _normalize_path(args.get('path'))
+        if path == _HOME:
+            # The agent's whole workspace: never a sensible target for one tool call.
+            raise ValueError('refusing to delete /home/tenki itself; name a file or directory inside it')
+
+        try:
+            self.IGlobal.call_with_session(lambda session: session.fs.remove(path), replace=False)
+        except (SandboxError, SessionEndedError) as e:
+            return {'success': False, 'path': path, 'error': _fs_error(e, path)}
+        return {'success': True, 'path': path}

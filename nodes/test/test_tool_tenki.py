@@ -30,6 +30,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import posixpath
 import sys
 import threading
 import time
@@ -80,6 +81,14 @@ class _StubInvalidStateError(_StubSandboxError):
 
 
 class _StubCommandTimeoutError(_StubSandboxError):
+    pass
+
+
+class _StubFileNotFoundError(_StubSandboxError, FileNotFoundError):
+    """Mirror of the SDK, whose FileNotFoundError also subclasses the builtin."""
+
+
+class _StubPermissionDeniedError(_StubSandboxError):
     pass
 
 
@@ -140,6 +149,8 @@ def _build_import_stubs():
     tenki.SessionTerminatedError = _StubSessionTerminatedError
     tenki.InvalidStateError = _StubInvalidStateError
     tenki.CommandTimeoutError = _StubCommandTimeoutError
+    tenki.FileNotFoundError = _StubFileNotFoundError
+    tenki.PermissionDeniedError = _StubPermissionDeniedError
     tenki.WaitReadyFailedError = _StubWaitReadyFailedError
     tenki.TemplateRuntimeFailedError = _StubTemplateRuntimeFailedError
 
@@ -198,7 +209,9 @@ class _FakeSession:
         close_error=None,
         exec_result=None,
         exec_error=None,
-        remove_error=None,
+        files=None,
+        dirs=None,
+        fail=None,
     ):
         self.id = session_id
         self.state = state
@@ -208,7 +221,7 @@ class _FakeSession:
         self._exec_result = exec_result
         self._exec_error = exec_error
         self.calls = []
-        self.fs = _FakeFS(self, remove_error=remove_error)
+        self.fs = _FakeFS(self, files=files, dirs=dirs, fail=fail)
 
     def exec(self, *argv, cwd=None, env=None, timeout=None, input=None, check=False, privileged=False):
         kwargs = {'cwd': cwd, 'env': env, 'timeout': timeout, 'input': input, 'check': check, 'privileged': privileged}
@@ -245,21 +258,115 @@ class _FakeSession:
 
 
 class _FakeFS:
-    """Stand-in for tenki's SandboxFS, with the real signatures, logging into the session's calls."""
+    """Stand-in for tenki's SandboxFS over an in-memory tree, with the SDK's signatures.
 
-    def __init__(self, session, *, remove_error=None):
+    Calls are logged into the session's call log, a paused session refuses them like the fake
+    exec does, and ``fail`` maps an operation name to the error it raises. ``read_stream``
+    deliberately ignores ``length``, so a test can show that the reader bounds itself.
+    """
+
+    chunk_bytes = 4096
+
+    def __init__(self, session, *, files=None, dirs=None, fail=None):
         self._session = session
-        self._remove_error = remove_error
+        self._fail = dict(fail or {})
+        self.files = dict(files or {})
+        self.dirs = {'/home/tenki', *(dirs or ())}
         self.written = {}
+        self.streamed_bytes = 0
+        self.stream_closed = None
+        # Holding the generators keeps garbage collection from closing them, so a test sees
+        # whether the reader closed its stream itself.
+        self.streams = []
+
+    def _enter(self, operation):
+        if self._session.state == 'PAUSED':
+            raise mod.InvalidStateError('session is paused')
+        if operation in self._fail:
+            raise self._fail[operation]
+
+    def _missing(self, path):
+        # Without the path, as a terse service message may be: the tool has to name it.
+        return inst_mod.TenkiFileNotFoundError('no such file or directory')
 
     def write_text(self, path, text, *, encoding='utf-8'):
         self._session.calls.append(('write_text', path))
+        self._enter('write_text')
+        if posixpath.dirname(path) not in self.dirs:
+            raise self._missing(path)
+        self.files[path] = text
         self.written[path] = text
 
+    def read_stream(self, path, *, offset=0, length=0, chunk_bytes=0):
+        self._session.calls.append(('read_stream', path, {'offset': offset, 'length': length}))
+        stream = self._stream(path)
+        self.streams.append(stream)
+        return stream
+
+    def _stream(self, path):
+        self.stream_closed = False
+        try:
+            self._enter('read_stream')
+            if path not in self.files:
+                raise self._missing(path)
+            data = self.files[path].encode()
+            for start in range(0, len(data), self.chunk_bytes):
+                chunk = data[start : start + self.chunk_bytes]
+                self.streamed_bytes += len(chunk)
+                yield chunk
+        finally:
+            self.stream_closed = True
+
+    def list(self, path, *, include_hidden=False):
+        self._session.calls.append(('list', path, include_hidden))
+        self._enter('list')
+        if path not in self.dirs:
+            raise self._missing(path)
+        children = {}
+        for child in self.dirs:
+            if child != path and posixpath.dirname(child) == path:
+                name = posixpath.basename(child)
+                children[name] = _FileInfo(path=name, size=0, mode=0o755, is_dir=True, modified_unix_ns=0)
+        for file_path, text in self.files.items():
+            if posixpath.dirname(file_path) == path:
+                name = posixpath.basename(file_path)
+                children[name] = _FileInfo(
+                    path=name, size=len(text.encode()), mode=0o644, is_dir=False, modified_unix_ns=0
+                )
+        return [info for name, info in children.items() if include_hidden or not name.startswith('.')]
+
+    def mkdir(self, path, *, recursive=True, mode=0o755):
+        self._session.calls.append(('mkdir', path))
+        self._enter('mkdir')
+        if not recursive and posixpath.dirname(path) not in self.dirs:
+            raise self._missing(path)
+        while path not in self.dirs:
+            self.dirs.add(path)
+            path = posixpath.dirname(path)
+
     def remove(self, path, *, recursive=True):
-        self._session.calls.append(('remove', path))
-        if self._remove_error is not None:
-            raise self._remove_error
+        self._session.calls.append(('remove', path, recursive))
+        self._enter('remove')
+        inside = [p for p in (*self.files, *self.dirs) if p.startswith(path + '/')]
+        if path not in self.files and path not in self.dirs:
+            raise self._missing(path)
+        if inside and not recursive:
+            raise mod.InvalidStateError(f'directory not empty: {path}')
+        self.files = {p: t for p, t in self.files.items() if p != path and not p.startswith(path + '/')}
+        self.dirs = {d for d in self.dirs if d != path and not d.startswith(path + '/')}
+
+
+@dataclass(frozen=True)
+class _FileInfo:
+    """Mirror of tenki.FileInfo. In a directory listing, ``path`` holds the entry's name."""
+
+    path: str
+    size: int
+    mode: int
+    is_dir: bool
+    modified_unix_ns: int
+    is_symlink: bool = False
+    symlink_target: str = ''
 
 
 @dataclass(frozen=True)
@@ -811,15 +918,23 @@ def test_validate_config_warns_about_unknown_tool_groups(monkeypatch, logs):
     assert any('gti' in message for message in logs)
 
 
-def test_default_groups_publish_the_execution_tools(monkeypatch, logs):
+_EXECUTION_TOOLS = {'run_command', 'run_code'}
+_FILESYSTEM_TOOLS = {'write_file', 'read_file', 'list_files', 'make_directory', 'delete_path'}
+
+
+def test_default_groups_publish_the_execution_and_filesystem_tools(monkeypatch, logs):
     inst, _ = _instance(monkeypatch)
-    assert set(inst._collect_tool_methods()) == {'run_command', 'run_code'}
+    assert set(inst._collect_tool_methods()) == _EXECUTION_TOOLS | _FILESYSTEM_TOOLS
 
 
-def test_tools_outside_the_configured_groups_are_not_published(monkeypatch, logs):
-    # tool.invoke looks tool names up in the same collection, so this also refuses the call.
-    inst, _ = _instance(monkeypatch, cfg={'toolGroups': ['git']})
-    assert inst._collect_tool_methods() == {}
+@pytest.mark.parametrize(
+    ('group', 'tools'),
+    [('execution', _EXECUTION_TOOLS), ('filesystem', _FILESYSTEM_TOOLS), ('git', set())],
+)
+def test_each_group_publishes_exactly_its_own_tools(monkeypatch, logs, group, tools):
+    # tool.invoke looks tool names up in the same collection, so this also refuses the others.
+    inst, _ = _instance(monkeypatch, cfg={'toolGroups': [group]})
+    assert set(inst._collect_tool_methods()) == tools
 
 
 def test_every_tool_is_tagged_with_a_known_group():
@@ -833,15 +948,17 @@ def test_every_tool_is_tagged_with_a_known_group():
     assert all(group in groups.ALL_GROUPS for group in tagged.values()), tagged
 
 
-def test_tool_descriptions_resolve_and_state_the_configured_timeout(monkeypatch, logs):
+def test_tool_descriptions_resolve_and_state_the_configured_limits(monkeypatch, logs):
     # Descriptions are evaluated at tool.query time; one that raises breaks the whole catalog.
-    inst, _ = _instance(monkeypatch, cfg={'exec_timeout_secs': 45})
+    inst, _ = _instance(monkeypatch, cfg={'toolGroups': ['all'], 'exec_timeout_secs': 45})
     published = inst._collect_tool_methods()
     assert published
     for name, method in published.items():
         description = method.__tool_meta__['description']
         text = description(inst) if callable(description) else description
-        assert '45s' in text, name
+        assert isinstance(text, str) and text, name
+        if name in _EXECUTION_TOOLS:
+            assert '45s' in text, name
 
 
 # ---------------------------------------------------------------------------
@@ -987,7 +1104,7 @@ def test_run_code_writes_the_code_to_a_file_then_runs_the_interpreter_on_it(
     assert executed[0] == 'exec'
     assert executed[1][-2:] == (interpreter, path)
     assert executed[2]['timeout'] == 45
-    assert removed == ('remove', path)
+    assert removed[:2] == ('remove', path)
 
 
 def test_run_code_uses_a_new_file_for_every_call(monkeypatch, logs):
@@ -1004,7 +1121,7 @@ def test_run_code_returns_the_result_even_if_cleanup_fails(monkeypatch, logs):
     session = _FakeSession(
         'sb-1',
         exec_result=_CommandResult(argv=['bash'], exit_code=0, stdout=b'42\n'),
-        remove_error=inst_mod.SandboxError('remove failed'),
+        fail={'remove': inst_mod.SandboxError('remove failed')},
     )
     inst, _ = _instance(monkeypatch, session)
     assert inst.run_code({'code': 'print(42)'})['stdout'] == '42\n'
@@ -1017,4 +1134,331 @@ def test_run_code_on_a_paused_session_resumes_it_and_runs_the_code(monkeypatch, 
     inst, client = _instance(monkeypatch, session)
     assert inst.run_code({'code': 'print("ok")'})['stdout'] == 'ok\n'
     assert session.calls.count('resume') == 1
+    assert len(client.create_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Paths: every file tool is confined to /home/tenki
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('given', 'resolved'),
+    [
+        ('notes.txt', '/home/tenki/notes.txt'),
+        ('  app/main.py  ', '/home/tenki/app/main.py'),
+        ('.', '/home/tenki'),
+        ('~', '/home/tenki'),
+        ('~/app', '/home/tenki/app'),
+        ('/home/tenki/app/../lib', '/home/tenki/lib'),
+        ('//home//tenki///app', '/home/tenki/app'),
+    ],
+)
+def test_paths_resolve_under_home(given, resolved):
+    assert inst_mod._normalize_path(given) == resolved
+
+
+@pytest.mark.parametrize(
+    'given',
+    ['/tmp', '/tmp/build.log', '..', '../etc/passwd', 'app/../../x', '/home/tenki2/x', '/home/tenki/../tenki2', '/etc'],
+)
+def test_paths_outside_home_are_rejected_with_a_message_naming_home(given):
+    # Tenki's file API refuses these with a bare permission error, and agents reach for /tmp first.
+    with pytest.raises(ValueError, match='/home/tenki'):
+        inst_mod._normalize_path(given)
+
+
+@pytest.mark.parametrize('given', [None, '', '   ', 42])
+def test_a_missing_path_is_rejected(given):
+    with pytest.raises(ValueError):
+        inst_mod._normalize_path(given)
+
+
+# ---------------------------------------------------------------------------
+# write_file / make_directory
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'args',
+    [
+        {},
+        {'path': 'a.txt'},
+        {'path': '', 'content': 'x'},
+        {'path': 'a.txt', 'content': 7},
+        {'path': '/tmp/a.txt', 'content': 'x'},
+    ],
+)
+def test_write_file_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.write_file(args)
+    assert client.create_calls == []
+
+
+@pytest.mark.parametrize('content', ['line one\n  "quoted" \\n and a tab\t\n', ''])
+def test_write_file_writes_the_content_verbatim(monkeypatch, logs, content):
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.write_file({'path': 'notes.md', 'content': content}) == {
+        'success': True,
+        'path': '/home/tenki/notes.md',
+    }
+    assert session.fs.files['/home/tenki/notes.md'] == content
+
+
+def test_write_file_creates_missing_parent_directories(monkeypatch, logs):
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.write_file({'path': 'src/app/main.py', 'content': 'print(1)'})['success'] is True
+    assert session.fs.files['/home/tenki/src/app/main.py'] == 'print(1)'
+
+
+def test_write_file_explains_a_refused_path(monkeypatch, logs):
+    # The lexical check cannot see everything the service refuses, such as a symlink out of home.
+    refused = inst_mod.PermissionDeniedError('permission denied')
+    session = _FakeSession('sb-1', fail={'write_text': refused})
+    inst, _ = _instance(monkeypatch, session)
+    result = inst.write_file({'path': 'escape/out.txt', 'content': 'x'})
+    assert result['success'] is False
+    assert '/home/tenki' in result['error']
+
+
+@pytest.mark.parametrize('args', [{}, {'path': ''}, {'path': '/tmp/x'}])
+def test_make_directory_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.make_directory(args)
+    assert client.create_calls == []
+
+
+def test_make_directory_creates_the_directory_and_its_parents(monkeypatch, logs):
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.make_directory({'path': 'data/raw'}) == {'success': True, 'path': '/home/tenki/data/raw'}
+    assert {'/home/tenki/data', '/home/tenki/data/raw'} <= session.fs.dirs
+
+
+@pytest.mark.parametrize(
+    ('tool', 'args'), [('write_file', {'path': 'a.txt', 'content': 'x'}), ('make_directory', {'path': 'data'})]
+)
+def test_writing_to_an_ended_session_continues_on_a_fresh_one(monkeypatch, logs, tool, args):
+    ended = mod.SessionTerminatedError('session_terminated')
+    dead = _FakeSession('sb-dead', state='TERMINATED', fail={'write_text': ended, 'mkdir': ended})
+    fresh = _FakeSession('sb-fresh')
+    inst, client = _instance(monkeypatch, dead, fresh)
+    assert getattr(inst, tool)(args)['success'] is True
+    assert len(client.create_calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# read_file
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('args', [{}, {'path': ''}, {'path': 5}, {'path': '../etc/passwd'}])
+def test_read_file_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.read_file(args)
+    assert client.create_calls == []
+
+
+def test_read_file_returns_the_file_text(monkeypatch, logs):
+    session = _FakeSession('sb-1', files={'/home/tenki/notes.md': 'h\u00e9llo\n'})
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.read_file({'path': 'notes.md'}) == {
+        'path': '/home/tenki/notes.md',
+        'content': 'h\u00e9llo\n',
+        'truncated': False,
+    }
+
+
+def test_read_file_asks_the_service_for_a_bounded_number_of_bytes(monkeypatch, logs):
+    session = _FakeSession('sb-1', files={'/home/tenki/big.log': 'x'})
+    inst, _ = _instance(monkeypatch, session, cfg={'max_output_chars': 1000})
+    inst.read_file({'path': 'big.log'})
+    [(_, _, kwargs)] = [call for call in session.calls if call[0] == 'read_stream']
+    assert 0 < kwargs['length'] <= 4001  # UTF-8's worst case of 4 bytes per character, plus one
+
+
+def test_read_file_stops_reading_a_huge_file_even_if_the_service_sends_it_all(monkeypatch, logs):
+    # The fake ignores length, like a service that does not honour it: a multi-megabyte file
+    # must not be pulled whole into the engine's memory just to be cut down afterwards.
+    session = _FakeSession('sb-1', files={'/home/tenki/huge.log': 'x' * 1_000_000})
+    inst, _ = _instance(monkeypatch, session, cfg={'max_output_chars': 1000})
+    result = inst.read_file({'path': 'huge.log'})
+    assert result['content'] == 'x' * 1000
+    assert result['truncated'] is True
+    assert session.fs.streamed_bytes <= 4001 + _FakeFS.chunk_bytes
+    assert session.fs.stream_closed is True
+
+
+@pytest.mark.parametrize(
+    ('text', 'truncated'),
+    [
+        ('\u00e9' * 1000, False),  # two bytes a character, exactly at the cap
+        ('\u00e9' * 1001, True),
+        ('\U0001f600' * 1001, True),  # four bytes a character, just past the byte bound
+    ],
+)
+def test_read_file_truncates_by_characters_not_bytes(monkeypatch, logs, text, truncated):
+    session = _FakeSession('sb-1', files={'/home/tenki/t.txt': text})
+    inst, _ = _instance(monkeypatch, session, cfg={'max_output_chars': 1000})
+    result = inst.read_file({'path': 't.txt'})
+    assert result['content'] == text[:1000]
+    assert result['truncated'] is truncated
+
+
+def test_read_file_reports_a_missing_file(monkeypatch, logs):
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    result = inst.read_file({'path': 'missing.txt'})
+    assert result['content'] == ''
+    assert '/home/tenki/missing.txt' in result['error']
+
+
+def test_read_file_on_a_paused_session_resumes_it_and_reads(monkeypatch, logs):
+    session = _FakeSession('sb-1', state='PAUSED', files={'/home/tenki/notes.md': 'kept across the pause'})
+    inst, client = _instance(monkeypatch, session)
+    assert inst.read_file({'path': 'notes.md'})['content'] == 'kept across the pause'
+    assert session.calls.count('resume') == 1
+    assert len(client.create_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# list_files
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('args', [{'path': '/tmp'}, {'path': 3}, {'include_hidden': 'yes'}])
+def test_list_files_rejects_invalid_input_without_touching_the_sandbox(monkeypatch, logs, args):
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.list_files(args)
+    assert client.create_calls == []
+
+
+def test_list_files_lists_home_by_name_without_hidden_entries(monkeypatch, logs):
+    session = _FakeSession(
+        'sb-1',
+        files={
+            '/home/tenki/zeta.txt': 'zz',
+            '/home/tenki/.bashrc': 'export A=1',
+            '/home/tenki/app/main.py': 'print(1)',
+        },
+        dirs={'/home/tenki/app'},
+    )
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.list_files({}) == {
+        'path': '/home/tenki',
+        'entries': [{'name': 'app', 'is_dir': True, 'size': 0}, {'name': 'zeta.txt', 'is_dir': False, 'size': 2}],
+        'truncated': False,
+    }
+
+
+def test_list_files_includes_hidden_entries_when_asked(monkeypatch, logs):
+    session = _FakeSession('sb-1', files={'/home/tenki/.gitignore': 'node_modules\n'})
+    inst, _ = _instance(monkeypatch, session)
+    result = inst.list_files({'path': '~', 'include_hidden': True})
+    assert [entry['name'] for entry in result['entries']] == ['.gitignore']
+
+
+def test_list_files_cuts_a_huge_listing_to_the_cap(monkeypatch, logs):
+    session = _FakeSession('sb-1', files={f'/home/tenki/file-{i:05d}.txt': '' for i in reversed(range(5000))})
+    inst, _ = _instance(monkeypatch, session, cfg={'max_output_chars': 1000})
+    result = inst.list_files({})
+    names = [entry['name'] for entry in result['entries']]
+    assert result['truncated'] is True
+    assert 0 < len(names) < 5000
+    assert names == [f'file-{i:05d}.txt' for i in range(len(names))]
+    assert len(json.dumps(result['entries'])) <= 1000
+
+
+def test_list_files_reports_a_missing_directory(monkeypatch, logs):
+    inst, _ = _instance(monkeypatch, _FakeSession('sb-1'))
+    result = inst.list_files({'path': 'nope'})
+    assert result['entries'] == []
+    assert '/home/tenki/nope' in result['error']
+
+
+# ---------------------------------------------------------------------------
+# delete_path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'args',
+    [{}, {'path': ''}, {'path': '/tmp/x'}, {'path': '.'}, {'path': '~'}, {'path': '/home/tenki'}, {'path': 'app/..'}],
+)
+def test_delete_path_refuses_home_itself_and_invalid_paths_without_touching_the_sandbox(monkeypatch, logs, args):
+    # Deleting /home/tenki would take the agent's whole workspace with it.
+    inst, client = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.delete_path(args)
+    assert client.create_calls == []
+
+
+def test_delete_path_removes_a_directory_with_everything_in_it(monkeypatch, logs):
+    session = _FakeSession(
+        'sb-1',
+        files={'/home/tenki/build/out/app.bin': 'x', '/home/tenki/keep.txt': 'y'},
+        dirs={'/home/tenki/build', '/home/tenki/build/out'},
+    )
+    inst, _ = _instance(monkeypatch, session)
+    assert inst.delete_path({'path': 'build'}) == {'success': True, 'path': '/home/tenki/build'}
+    assert session.fs.files == {'/home/tenki/keep.txt': 'y'}
+    assert session.fs.dirs == {'/home/tenki'}
+
+
+def test_delete_path_reports_a_missing_path(monkeypatch, logs):
+    inst, _ = _instance(monkeypatch, _FakeSession('sb-1'))
+    result = inst.delete_path({'path': 'gone.txt'})
+    assert result['success'] is False
+    assert '/home/tenki/gone.txt' in result['error']
+
+
+# ---------------------------------------------------------------------------
+# A session that ended cannot answer a read, a listing or a delete
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('tool', 'args'), [('read_file', {'path': 'a.txt'}), ('list_files', {}), ('delete_path', {'path': 'a.txt'})]
+)
+def test_looking_at_an_ended_session_does_not_start_a_new_one(monkeypatch, logs, tool, args):
+    # A fresh, empty session cannot contain what these look for, so creating one only adds cost.
+    ended = mod.SessionTerminatedError('session_terminated')
+    dead = _FakeSession('sb-dead', state='TERMINATED', fail={'read_stream': ended, 'list': ended, 'remove': ended})
+    inst, client = _instance(monkeypatch, dead, _FakeSession('sb-fresh'))
+    result = getattr(inst, tool)(args)
+    assert result['error']
+    assert len(client.create_calls) == 1
+    # The ended session was forgotten, so the next call that can use a fresh session gets one.
+    assert inst.write_file({'path': 'b.txt', 'content': 'x'})['success'] is True
+    assert len(client.create_calls) == 2
+
+
+def test_a_call_that_cannot_use_a_fresh_session_is_not_given_one(monkeypatch, logs):
+    dead = _FakeSession('sb-dead', state='TERMINATED')
+    glb, client = _started(monkeypatch, dead, _FakeSession('sb-fresh'))
+    with pytest.raises(mod.SessionEndedError):
+        glb.call_with_session(lambda session: _raise(mod.SessionTerminatedError('session_terminated')), replace=False)
+    assert len(client.create_calls) == 1
+    assert glb.session is None
+
+
+def test_a_concurrently_dropped_session_is_not_replaced_for_a_call_that_cannot_use_it(monkeypatch, logs):
+    dead = _FakeSession('sb-dead', state='TERMINATED')
+    glb, client = _started(monkeypatch, dead, _FakeSession('sb-fresh'))
+
+    def call(session):
+        # Another read found the session ended and dropped it while this call was failing.
+        with glb._session_lock:
+            glb.session = None
+            glb.session_epoch += 1
+        raise mod.SessionTerminatedError('session_terminated')
+
+    with pytest.raises(mod.SessionEndedError):
+        glb.call_with_session(call, replace=False)
     assert len(client.create_calls) == 1
