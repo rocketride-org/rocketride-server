@@ -211,14 +211,14 @@ export default function ResultsPanel({ evaluation, runs, selectedRunId, onSelect
 				</div>
 			</section>
 			{!run ? (
-				<Empty title={runs.length ? 'Select a run to inspect' : 'No runs yet'}>Save a revision with reviewed cases, then run it against the configured environment.</Empty>
+				<Empty title={runs.length ? 'Select a run to inspect' : 'Your first results will appear here'}>In Setup, add an example, choose your checks, and select Run evaluation. You’ll see the actual response and why each check passed or failed.</Empty>
 			) : (
 				<>
 					<section className="rr-eval-section">
 						<div className="rr-eval-section-heading">
 							<div>
 								<h3>
-									Run report <Status status={run.status} />
+									{isActiveRun(run) ? 'Checking your examples…' : run.summary.gate === 'pass' ? 'Your evaluation met its pass criteria' : 'Your evaluation needs attention'} <Status status={run.status} />
 								</h3>
 								<p>
 									Revision {run.revision} · {run.spec.environment} · {run.spec.source} · Report revision {run.reportRevision}
@@ -242,6 +242,7 @@ export default function ResultsPanel({ evaluation, runs, selectedRunId, onSelect
 							</div>
 						</div>
 						{run.error && <Notice error>{run.error}</Notice>}
+						{!isActiveRun(run) && <p className="rr-eval-guidance">{run.summary.error > 0 ? 'Some examples could not execute. Open their details to see the error before drawing conclusions about quality.' : run.summary.incomplete > 0 || run.summary.abstain > 0 ? 'Some results need evidence or human review. Open an example below to finish reviewing it.' : run.summary.fail > 0 ? 'Open a failed example below to compare the expected answer with the actual response and inspect its trace.' : 'Use this run as a baseline, change your pipeline, and run again to see whether the results improve.'}</p>}
 						<div className="rr-eval-progress" role="status">
 							<span>
 								{run.summary.completed} / {run.summary.total} trials completed

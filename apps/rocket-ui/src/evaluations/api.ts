@@ -12,13 +12,14 @@ export class EvaluationApiError extends Error {
 	}
 }
 
-export function evaluationBaseUrl(uri: string): string {
+export function evaluationBaseUrl(uri: string, pageOrigin?: string): string {
 	if (!uri) throw new Error('Connect to a RocketRide server to use evaluations.');
 	const url = new URL(uri);
 	if (url.protocol === 'ws:') url.protocol = 'http:';
 	if (url.protocol === 'wss:') url.protocol = 'https:';
 	if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Evaluations require an HTTP or WebSocket server connection.');
-	if (url.protocol === 'http:' && !/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(url.hostname)) throw new Error('Remote evaluations require HTTPS. Plain HTTP is supported only for loopback development.');
+	const samePageOrigin = pageOrigin !== undefined && new URL(pageOrigin).origin === url.origin;
+	if (url.protocol === 'http:' && !/^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(url.hostname) && !samePageOrigin) throw new Error('Remote evaluations require HTTPS. Plain HTTP is supported only for loopback or same-origin development.');
 	return `${url.origin}/evals/v1`;
 }
 
@@ -39,7 +40,7 @@ export class EvaluationApi {
 		}
 	}
 	private async response(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
-		const base = evaluationBaseUrl(this.client.getConnectionInfo().uri);
+		const base = evaluationBaseUrl(this.client.getConnectionInfo().uri, window.location.origin);
 		const key = this.client.getApiKey();
 		if (!key) throw new Error('Connect with a RocketRide credential to use evaluations.');
 		const response = await fetch(`${base}${path}`, {

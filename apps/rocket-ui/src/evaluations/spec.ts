@@ -1,4 +1,5 @@
 import { SCORER_KINDS, type EvaluationCase, type EvaluationSpec } from './types';
+import { randomUuid } from '../utils/randomUuid';
 
 export const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 export const pretty = (value: unknown): string => JSON.stringify(value, null, 2) ?? '';
@@ -24,17 +25,26 @@ export function pipelineSources(pipeline: Record<string, unknown>): { id: string
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 export function newSpec(project: Record<string, unknown>, name: string): EvaluationSpec {
+	const source = pipelineSources(project)[0]?.id ?? '';
+	const lanes = (Array.isArray(project.components) ? project.components : []).filter(isRecord).flatMap((component) =>
+		Array.isArray(component.input)
+			? component.input
+					.filter(isRecord)
+					.filter((input) => input.from === source)
+					.map((input) => input.lane)
+			: []
+	);
 	return {
 		schemaVersion: 1,
 		name: `${name || 'Pipeline'} evaluation`,
 		projectId: typeof project.project_id === 'string' ? project.project_id : '',
 		pipeline: clone(project),
-		source: pipelineSources(project)[0]?.id ?? '',
-		inputMode: 'chat',
+		source,
+		inputMode: lanes.includes('text') && !lanes.includes('questions') ? 'text' : 'chat',
 		environment: 'development',
 		datasetName: 'Reviewed cases',
 		cases: [],
-		scorers: [{ id: crypto.randomUUID(), name: 'Reference match', kind: 'contains' }],
+		scorers: [{ id: randomUuid(), name: 'Includes the expected answer', kind: 'contains' }],
 		repetitions: 1,
 		passCriteria: { minimumPassRate: 1, maxRegressions: 0 },
 	};
@@ -234,7 +244,7 @@ export function importCases(text: string, format: 'json' | 'csv', existing: Eval
 	const imported = values.map((value, index) => {
 		if (!isRecord(value) || Object.keys(value).some((key) => !['id', 'name', 'input', 'reference', 'approved', 'tags', 'provenance'].includes(key))) throw new Error(`Imported case ${index + 1} has unsupported fields.`);
 		const item = value as Record<string, unknown>;
-		const id = item.id === undefined || item.id === '' ? crypto.randomUUID() : item.id;
+		const id = item.id === undefined || item.id === '' ? randomUuid() : item.id;
 		if (typeof id !== 'string' || !id.trim() || ids.has(id)) throw new Error(`Imported case ${index + 1} needs a unique id. Existing cases are never overwritten.`);
 		ids.add(id);
 		if (typeof item.input !== 'string' || (item.reference !== undefined && typeof item.reference !== 'string')) throw new Error(`Imported case ${index + 1}: input and reference must be strings.`);

@@ -122,12 +122,16 @@ export default defineConfig(({ command }) => {
 				// The dev server relays the engine's live paths so the shell can
 				// self-target window.location.origin in dev exactly as it does in
 				// every deployment (no address is baked into any bundle). The
-				// engine listens on 5565; /task and /api carry WebSockets.
+				// engine listens on 5565; /task and /api carry WebSockets. Versioned
+				// /apps bundles come from the engine's deployment registry rather than
+				// the unversioned build directory served above.
 				// Root-level SEO files are FastAPI routes on the backend (they embed
 				// request-derived absolute URLs, so they can't be static assets here).
 				// Without this proxy, the dev server's SPA html fallback would answer
 				// them with index.html. Prod has a single origin, so no proxy needed.
 				proxy: {
+					'/apps': { target: 'http://localhost:5565' },
+					'/evals': { target: 'http://localhost:5565' },
 					'/task': { target: 'http://localhost:5565', ws: true },
 					'/auth': { target: 'http://localhost:5565' },
 					'/api': { target: 'http://localhost:5565', ws: true },

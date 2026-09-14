@@ -4,6 +4,7 @@ import CasesEditor from './CasesEditor';
 import { Notice, SelectField, TextArea, TextField } from './controls';
 import { clone, isRecord, pipelineSources, pretty, same } from './spec';
 import { SCORER_KINDS, type Capabilities, type EvaluationSpec, type Scorer } from './types';
+import { randomUuid } from '../utils/randomUuid';
 
 function JudgePipeline({ value, onChange, disabled, onDirty }: { value?: Record<string, unknown>; onChange: (value: Record<string, unknown> | undefined) => void; disabled: boolean; onDirty: (dirty: boolean) => void }): React.ReactElement {
 	const [text, setText] = useState(value ? pretty(value) : '');
@@ -134,7 +135,7 @@ export default function SpecEditor({ spec, project, capabilities, disabled, onCh
 							</h3>
 							<p>Missing evidence is incomplete. Human scoring starts as abstain.</p>
 						</div>
-						<Button small variant="secondary" disabled={disabled} onClick={() => patch({ scorers: [...spec.scorers, { id: crypto.randomUUID(), name: 'Reference match', kind: 'contains' }] })}>
+						<Button small variant="secondary" disabled={disabled} onClick={() => patch({ scorers: [...spec.scorers, { id: randomUuid(), name: 'Reference match', kind: 'contains' }] })}>
 							Add scorer
 						</Button>
 					</div>

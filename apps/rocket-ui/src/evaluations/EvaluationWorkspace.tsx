@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, ConfirmDialog, TabControl } from 'shell';
 import AssistantPanel from './AssistantPanel';
 import ResultsPanel from './ResultsPanel';
-import SpecEditor from './SpecEditor';
+import GuidedSetup from './GuidedSetup';
 import { EvaluationApi, EvaluationApiError, downloadArtifact, retryablePollError } from './api';
 import { dateLabel, Notice, SelectField, Status, TextArea } from './controls';
 import { clone, newSpec, parseSpec, pretty, same, validateSpec } from './spec';
 import { isActiveRun, type Capabilities, type CaseResult, type Evaluation, type EvaluationSpec, type EvaluationWorkspaceProps, type Revision, type Run, type HumanReviewStatus } from './types';
 import { mergeRuns, reviewRequest } from './state';
+import { randomUuid } from '../utils/randomUuid';
 import './evaluations.css';
 
 export type { EvaluationWorkspaceProps, TraceLocator } from './types';
@@ -313,9 +314,8 @@ function Workspace({ project, projectName, client, onOpenTrace }: EvaluationWork
 		);
 	};
 	const runBlockers = [...validation];
-	if (!evaluation) runBlockers.push('Save this evaluation before running.');
-	else if (dirty || jsonDirty) runBlockers.push('Save the draft and apply pending JSON edits before running.');
-	if (fieldPending) runBlockers.push('Apply or reset the judge pipeline editor and finish any case import before running.');
+	if (jsonDirty) runBlockers.push('Apply or reset the pending JSON edits before running.');
+	if (fieldPending) runBlockers.push('Finish or clear your draft example, complete any import, and apply pending judge edits in Setup.');
 	if (conflict) runBlockers.push('Reload the latest revision to resolve the save conflict.');
 	if (!capabilities) runBlockers.push('Evaluation capabilities must load before a run can start.');
 	else {
@@ -325,20 +325,42 @@ function Workspace({ project, projectName, client, onOpenTrace }: EvaluationWork
 	}
 	if (!spec.cases.some((item) => item.approved)) runBlockers.push('Review at least one case before running.');
 	if (!spec.scorers.length) runBlockers.push('Add at least one scorer before running.');
+	for (const scorer of spec.scorers.filter((item) => ['equals', 'contains', 'not_contains'].includes(item.kind))) {
+		if (spec.cases.some((item) => item.approved && !(scorer.expected ?? item.reference))) runBlockers.push(`Add an expected answer to each reviewed example for “${scorer.name}”, or choose a check that does not compare answers.`);
+	}
 	const startRun = (): void => {
-		if (!evaluation || runBlockers.length) return;
-		const signature = `${evaluation.id}:${evaluation.revision}:${baselineId || evaluation.baselineRunId || ''}`;
-		if (runRequest.current?.signature !== signature) runRequest.current = { signature, key: crypto.randomUUID() };
-		const idempotencyKey = runRequest.current.key;
-		void perform('Starting run…', async (signal) => {
-			const result = await api.request<{ run: Run }>(`/evaluations/${encodeURIComponent(evaluation.id)}/runs`, { revision: evaluation.revision, idempotencyKey, ...(baselineId ? { baselineRunId: baselineId } : {}) }, signal);
-			if (signal.aborted) return;
-			setRuns((current) => mergeRuns(current, [result.run]));
-			setSelectedRunId(result.run.id);
-			setTab('results');
-			setNotice(`Run ${result.run.id} accepted by the server.`);
-			runRequest.current = null;
-		});
+		if (runBlockers.length) return;
+		void perform(
+			'Starting run…',
+			async (signal) => {
+				let saved = evaluation;
+				if (!saved || dirty) {
+					const result = await api.save(spec, saved, signal);
+					if (signal.aborted) return;
+					saved = result.evaluation;
+					setEvaluation(saved);
+					setSpec(clone(saved.spec));
+					remember(saved);
+					setRevisions([]);
+				}
+				const signature = `${saved.id}:${saved.revision}:${baselineId || saved.baselineRunId || ''}`;
+				if (runRequest.current?.signature !== signature) runRequest.current = { signature, key: randomUuid() };
+				const result = await api.request<{ run: Run }>(`/evaluations/${encodeURIComponent(saved.id)}/runs`, { revision: saved.revision, idempotencyKey: runRequest.current.key, ...(baselineId ? { baselineRunId: baselineId } : {}) }, signal);
+				if (signal.aborted) return;
+				setRuns((current) => mergeRuns(current, [result.run]));
+				setSelectedRunId(result.run.id);
+				setTab('results');
+				setNotice('Evaluation started. Results update automatically as each example finishes.');
+				runRequest.current = null;
+				try {
+					const detail = await api.detail(saved.id, signal);
+					if (!signal.aborted) setRevisions(detail.revisions);
+				} catch {
+					if (!signal.aborted) setNotice('Evaluation started. Revision history could not refresh; reload this evaluation to retry. Results continue updating.');
+				}
+			},
+			true
+		);
 	};
 	const refreshRuns = (): void => {
 		if (!evaluation) return;
@@ -368,10 +390,10 @@ function Workspace({ project, projectName, client, onOpenTrace }: EvaluationWork
 			<TabControl
 				menu={{
 					entries: [
-						{ id: 'definition', label: 'Definition' },
+						{ id: 'definition', label: 'Setup' },
 						{ id: 'results', label: 'Results', count: runs.length },
 						{ id: 'assistant', label: 'Assistant' },
-						{ id: 'json', label: 'Spec JSON' },
+						{ id: 'json', label: 'Advanced JSON' },
 					],
 				}}
 				activeId={tab}
@@ -381,44 +403,52 @@ function Workspace({ project, projectName, client, onOpenTrace }: EvaluationWork
 				<header className="rr-eval-header">
 					<div>
 						<h2>Evaluations</h2>
-						<p>Test {projectName || 'this pipeline'} against reviewed cases and inspect the evidence.</p>
+						<p>Find out what works. Catch what breaks. Improve {projectName || 'your pipeline'}.</p>
 					</div>
 					<div className="rr-eval-actions">
 						<Status status={dirty || jsonDirty || fieldPending ? 'unsaved' : evaluation ? 'saved' : 'draft'} />
-						<Button variant="ghost" onClick={() => downloadArtifact(`${spec.name || 'evaluation'}.json`, pretty(spec))}>
-							Export draft
-						</Button>
-						<Button variant="secondary" disabled={locked || jsonDirty || fieldPending || conflict || validation.length > 0 || Boolean(evaluation && !dirty)} onClick={save}>
-							{busy === 'Saving revision…' ? busy : evaluation ? 'Save revision' : 'Save evaluation'}
-						</Button>
-						<Button disabled={locked || runBlockers.length > 0} title={runBlockers.join('\n')} onClick={startRun}>
-							{busy === 'Starting run…' ? busy : 'Run saved revision'}
-						</Button>
-					</div>
-				</header>
-				<div className="rr-eval-library">
-					<SelectField label="Saved evaluation" value={evaluation?.id ?? ''} disabled={locked || loading} onChange={(event) => navigate(event.target.value)}>
-						<option value="">New evaluation draft</option>
-						{evaluations.map((item) => (
-							<option key={item.id} value={item.id}>
-								{item.name} · r{item.revision}
-							</option>
-						))}
-					</SelectField>
-					<div className="rr-eval-actions">
-						<Button small variant="ghost" disabled={locked} onClick={() => navigate('')}>
-							New evaluation
-						</Button>
-						<Button small variant="ghost" disabled={locked || loading} onClick={() => setRefresh((value) => value + 1)}>
-							{loading ? 'Checking server…' : 'Refresh availability & list'}
-						</Button>
-						{evaluation && (
-							<Button small variant="ghost" disabled={locked} onClick={() => navigate(evaluation.id)}>
-								Reload latest revision
+						{spec.cases.length > 0 && (
+							<Button disabled={locked || runBlockers.length > 0} title={runBlockers.join('\n')} onClick={startRun}>
+								{busy === 'Starting run…' ? busy : 'Run evaluation'}
 							</Button>
 						)}
 					</div>
-				</div>
+				</header>
+				<details className="rr-eval-library-disclosure">
+					<summary>
+						{evaluation ? evaluation.name : 'Your evaluations'}
+						{evaluations.length > 0 ? ` · ${evaluations.length} saved` : ' · Start with the setup below'}
+					</summary>
+					<div className="rr-eval-library">
+						<SelectField label="Saved evaluation" value={evaluation?.id ?? ''} disabled={locked || loading} onChange={(event) => navigate(event.target.value)}>
+							<option value="">New evaluation draft</option>
+							{evaluations.map((item) => (
+								<option key={item.id} value={item.id}>
+									{item.name} · r{item.revision}
+								</option>
+							))}
+						</SelectField>
+						<div className="rr-eval-actions">
+							<Button small variant="ghost" onClick={() => downloadArtifact(`${spec.name || 'evaluation'}.json`, pretty(spec))}>
+								Export draft
+							</Button>
+							<Button small variant="secondary" disabled={locked || jsonDirty || fieldPending || conflict || validation.length > 0 || Boolean(evaluation && !dirty)} onClick={save}>
+								{busy === 'Saving revision…' ? busy : 'Save without running'}
+							</Button>
+							<Button small variant="ghost" disabled={locked} onClick={() => navigate('')}>
+								New evaluation
+							</Button>
+							<Button small variant="ghost" disabled={locked || loading} onClick={() => setRefresh((value) => value + 1)}>
+								{loading ? 'Checking server…' : 'Refresh availability & list'}
+							</Button>
+							{evaluation && (
+								<Button small variant="ghost" disabled={locked} onClick={() => navigate(evaluation.id)}>
+									Reload latest revision
+								</Button>
+							)}
+						</div>
+					</div>
+				</details>
 				{busy && (
 					<p role="status" className="rr-eval-muted">
 						{busy}
@@ -431,8 +461,8 @@ function Workspace({ project, projectName, client, onOpenTrace }: EvaluationWork
 				{conflict && <Notice>A newer revision exists. Your draft is preserved. Export it, then reload the latest revision and reapply your changes before saving.</Notice>}
 				{notice && <Notice>{notice}</Notice>}
 				{jsonDirty && <Notice>The JSON editor contains unapplied changes. Apply or reset them in Spec JSON before editing the definition, applying an assistant proposal, saving, or running.</Notice>}
-				{fieldPending && <Notice>Finish the case import or apply/reset the judge pipeline JSON in Definition before saving, running, or applying another spec.</Notice>}
-				{runBlockers.length > 0 && (
+				{fieldPending && tab !== 'definition' && <Notice>There are unfinished edits in Setup. Finish your example, import, or judge configuration there before running.</Notice>}
+				{runBlockers.length > 0 && (evaluation || tab !== 'definition') && (
 					<details className="rr-eval-help">
 						<summary>Before you can run ({runBlockers.length})</summary>
 						<ul>
@@ -442,9 +472,8 @@ function Workspace({ project, projectName, client, onOpenTrace }: EvaluationWork
 						</ul>
 					</details>
 				)}
-				{spec.cases.some((item) => !item.approved) && <p className="rr-eval-muted">{spec.cases.filter((item) => !item.approved).length} unreviewed cases remain in this cohort. Their missing review evidence cannot certify a pass.</p>}
 				<div hidden={tab !== 'definition'} role="tabpanel" aria-label="Evaluation definition">
-					<SpecEditor key={editorEpoch} spec={spec} project={project} capabilities={capabilities} disabled={locked || jsonDirty} onChange={updateDraft} onPendingChange={setFieldPending} />
+					<GuidedSetup key={editorEpoch} spec={spec} project={project} capabilities={capabilities} disabled={locked || jsonDirty} onChange={updateDraft} onPendingChange={setFieldPending} onRun={startRun} blockers={runBlockers} busy={busy} />
 					{evaluation && (
 						<details className="rr-eval-section">
 							<summary>

@@ -725,7 +725,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, eval
 			<TabControl menu={viewMenu} activeId={activeMode} onSelect={handleModeChange} />
 			{/* Page title, PINNED with the strip — canvas (Design) has none;
 			    only the panel bodies below scroll. */}
-			{documentTitle && activeMode !== 'design' && <ContentHeader title={documentTitle} subtitle={DOC_SUBVIEW_SUBTITLES[activeMode as DocSubView]} />}
+			{documentTitle && activeMode !== 'design' && activeMode !== 'evaluations' && <ContentHeader title={documentTitle} subtitle={DOC_SUBVIEW_SUBTITLES[activeMode as DocSubView]} />}
 			{/* Page bodies fill the space below the strip. */}
 			<div style={styles.pageBody}>
 				<TabPanel panels={panels} activeId={activeMode} />

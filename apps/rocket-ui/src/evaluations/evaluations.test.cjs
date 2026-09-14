@@ -15,10 +15,37 @@ const { evaluationBaseUrl, EvaluationApiError, retryablePollError } = load('api.
 const { newSpec, clone, same, validateSpec, importCases, parseCsv, parseSpec, retainReviews, specChanges, pipelineSources } = load('spec.ts');
 const { traceUnavailableReason, canBeBaseline, isActiveRun } = load('types.ts');
 const { mergeRuns, reviewRequest } = load('state.ts');
+const { randomUuid } = load('../utils/randomUuid.ts');
 const project = { project_id: 'project-1', components: [{ id: 'chat_1', name: 'Chat input', config: { mode: 'Source' } }] };
 function spec() {
 	return { ...newSpec(project, 'Refund'), cases: [{ id: 'refund', name: 'Refund policy', input: 'Can I return this?', reference: 'Within 30 days', approved: true, tags: ['refund'], provenance: { kind: 'manual' } }] };
 }
+
+test('new evaluations choose text for a text-connected source and preserve chat for question lanes', () => {
+	const pipeline = { ...project, components: [...project.components, { id: 'response', input: [{ from: 'chat_1', lane: 'text' }] }] };
+	assert.equal(newSpec(pipeline, 'Echo').inputMode, 'text');
+	pipeline.components[1].input.push({ from: 'chat_1', lane: 'questions' });
+	assert.equal(newSpec(pipeline, 'Mixed').inputMode, 'chat');
+	assert.equal(newSpec(project, 'Chat').inputMode, 'chat');
+});
+
+test('UUID generation works on plaintext development origins without crypto.randomUUID', () => {
+	const nativeCrypto = globalThis.crypto;
+	Object.defineProperty(globalThis, 'crypto', {
+		configurable: true,
+		value: {
+			getRandomValues(bytes) {
+				for (let index = 0; index < bytes.length; index += 1) bytes[index] = index;
+				return bytes;
+			},
+		},
+	});
+	try {
+		assert.equal(randomUuid(), '00010203-0405-4607-8809-0a0b0c0d0e0f');
+	} finally {
+		Object.defineProperty(globalThis, 'crypto', { configurable: true, value: nativeCrypto });
+	}
+});
 
 test('managed API derives the HTTP origin and drops websocket path, credentials, query and fragment', () => {
 	assert.equal(evaluationBaseUrl('wss://example.test:8443/custom/engine?token=not-a-real-key#socket'), 'https://example.test:8443/evals/v1');
@@ -31,6 +58,8 @@ test('managed API derives the HTTP origin and drops websocket path, credentials,
 test('managed UI refuses remote plaintext before sending a bearer credential', () => {
 	for (const uri of ['http://remote.example.test', 'ws://192.168.1.2:5565', 'http://localhost.evil.test']) assert.throws(() => evaluationBaseUrl(uri), /HTTPS/);
 	assert.equal(evaluationBaseUrl('http://[::1]:5565'), 'http://[::1]:5565/evals/v1');
+	assert.equal(evaluationBaseUrl('ws://192.168.1.2:3000/task/service', 'http://192.168.1.2:3000'), 'http://192.168.1.2:3000/evals/v1');
+	assert.throws(() => evaluationBaseUrl('ws://192.168.1.2:5565/task/service', 'http://192.168.1.2:3000'), /HTTPS/);
 });
 
 test('polling stops on permanent HTTP failures but retries temporary failures', () => {

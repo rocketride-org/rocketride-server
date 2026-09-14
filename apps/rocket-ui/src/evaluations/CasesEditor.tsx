@@ -4,6 +4,7 @@ import { Empty, Notice, Status, TextArea, TextField } from './controls';
 import { importCases, pretty } from './spec';
 import { downloadArtifact } from './api';
 import type { EvaluationCase } from './types';
+import { randomUuid } from '../utils/randomUuid';
 
 function TagsField({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }): React.ReactElement {
 	const value = tags.join(', ');
@@ -37,7 +38,7 @@ function TagsField({ tags, onChange }: { tags: string[]; onChange: (tags: string
 	);
 }
 
-export default function CasesEditor({ cases, onChange, disabled, onImporting }: { cases: EvaluationCase[]; onChange: (cases: EvaluationCase[]) => void; disabled: boolean; onImporting: (pending: boolean) => void }): React.ReactElement {
+export default function CasesEditor({ cases, onChange, disabled, onImporting, compactEmpty = false }: { cases: EvaluationCase[]; onChange: (cases: EvaluationCase[]) => void; disabled: boolean; onImporting: (pending: boolean) => void; compactEmpty?: boolean }): React.ReactElement {
 	const [editing, setEditing] = useState<string | null>(null);
 	const [search, setSearch] = useState('');
 	const [error, setError] = useState('');
@@ -85,9 +86,9 @@ export default function CasesEditor({ cases, onChange, disabled, onImporting }: 
 			<div className="rr-eval-section-heading">
 				<div>
 					<h3>
-						Reviewed cases <span className="rr-eval-count">{cases.length}</span>
+						{compactEmpty && !cases.length ? 'Already have test data?' : 'Test examples'} <span className="rr-eval-count">{cases.length}</span>
 					</h3>
-					<p>{cases.filter((item) => item.approved).length} reviewed · Review inputs and references before trusting a case.</p>
+					<p>{compactEmpty && !cases.length ? 'Import a CSV or JSON file, then review the expected answers.' : `${cases.filter((item) => item.approved).length} reviewed · Select an example to edit or review it.`}</p>
 				</div>
 				<div className="rr-eval-actions">
 					<Button small variant="ghost" disabled={cases.length === 0} onClick={() => downloadArtifact('evaluation-cases.json', pretty(cases))}>
@@ -101,12 +102,12 @@ export default function CasesEditor({ cases, onChange, disabled, onImporting }: 
 						variant="secondary"
 						disabled={disabled || importing}
 						onClick={() => {
-							const id = crypto.randomUUID();
+							const id = randomUuid();
 							onChange([...cases, { id, name: `Case ${cases.length + 1}`, input: '', reference: '', approved: false, tags: [], provenance: { kind: 'manual' } }]);
 							setEditing(id);
 						}}
 					>
-						Add case
+						Add example
 					</Button>
 				</div>
 			</div>
@@ -128,7 +129,7 @@ export default function CasesEditor({ cases, onChange, disabled, onImporting }: 
 				<p>JSON: an array of cases with input and optional id, name, reference, tags, approved, provenance. CSV: id,name,input,reference,tags (semicolon-separated tags; quote multiline text). Existing IDs cannot be overwritten. All imported cases start unreviewed, even if the file says approved.</p>
 			</details>
 			{cases.length === 0 ? (
-				<Empty title="Add your first reference case">Start with a real input and a reviewed expected answer. Empty cohorts cannot pass a gate.</Empty>
+				!compactEmpty && <Empty title="Add your first example">Start with a real input and the answer you expect.</Empty>
 			) : (
 				<>
 					<TextField label="Find cases" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, case ID, or tag" />
@@ -191,10 +192,9 @@ export default function CasesEditor({ cases, onChange, disabled, onImporting }: 
 			>
 				{active && (
 					<fieldset className="rr-eval-fields" disabled={disabled}>
-						<TextField label="Case ID (stable)" value={active.id} readOnly />
-						<TextField label="Case name" value={active.name} onChange={(event) => patchCase({ name: event.target.value })} />
+						<TextField label="Example name" value={active.name} onChange={(event) => patchCase({ name: event.target.value })} />
 						<TextArea label="Input sent to the pipeline" rows={5} value={active.input} onChange={(event) => patchCase({ input: event.target.value })} />
-						<TextArea label="Expected reference" hint="Used by reference-based scorers. Never sent as target input." rows={5} value={active.reference ?? ''} onChange={(event) => patchCase({ reference: event.target.value })} />
+						<TextArea label="Expected answer" hint="Used to check the response. Your pipeline only receives the input above." rows={5} value={active.reference ?? ''} onChange={(event) => patchCase({ reference: event.target.value })} />
 						<TagsField key={active.id} tags={active.tags ?? []} onChange={(tags) => patchCase({ tags })} />
 						<p className="rr-eval-muted">Provenance: {active.provenance?.kind ?? 'Not supplied'}. Editing input or reference requires another review.</p>
 						{active.provenance && (

@@ -42,6 +42,7 @@ import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, Sideba
 import type { TaskLifecycleEvent } from 'shared/modules/sidebar/taskFold';
 import { loadProject, listProjectDir, isPipelineFile, pipelineExtension } from '../utils/projectStore';
 import { downloadJson } from '../utils/downloadFile';
+import { randomUuid } from '../utils/randomUuid';
 
 // =============================================================================
 // COLLAPSED GATE
@@ -294,7 +295,7 @@ const SidebarProvider: React.FC = () => {
 		const docs = getDocs();
 		if (!docs) return;
 		if (target === 'new') {
-			docs.createDocument(undefined, { project_id: crypto.randomUUID(), components: [] });
+			docs.createDocument(undefined, { project_id: randomUuid(), components: [] });
 		} else if (target === 'monitor') {
 			docs.openStaticDocument('monitor', 'Monitor');
 		}
@@ -359,7 +360,7 @@ const SidebarProvider: React.FC = () => {
 						await mkdirProject(client, path);
 						break;
 					case 'createFile':
-						await saveProject(client, path, { project_id: crypto.randomUUID(), components: [] });
+						await saveProject(client, path, { project_id: randomUuid(), components: [] });
 						break;
 				}
 				refresh();
