@@ -1,62 +1,57 @@
-# NVIDIA Nemotron LLM Node (`llm_nemotron`)
+# llm_nemotron
 
-Connects RocketRide pipelines to NVIDIA's **Nemotron** family of open-weight
-reasoning models, served through NVIDIA's OpenAI-compatible cloud API
-([build.nvidia.com](https://build.nvidia.com)) or self-hosted with NIM
-containers, vLLM, or SGLang.
+A RocketRide LLM node that connects NVIDIA's Nemotron family of open-weight reasoning models to a pipeline through the OpenAI-compatible build.nvidia.com cloud API or a self-hosted NIM, vLLM, or SGLang deployment.
 
-- **Lane:** `questions → answers`
-- **Endpoint (cloud):** `https://integrate.api.nvidia.com/v1`
+## About NVIDIA Nemotron
 
-## Models
+Nemotron is NVIDIA's family of open-weight hybrid Mamba-Transformer MoE reasoning models with configurable thinking budgets, served through the OpenAI-compatible NVIDIA cloud API ([build.nvidia.com](https://build.nvidia.com)) at `https://integrate.api.nvidia.com/v1`. Weights, training data, and recipes are openly published, so the same models can be served locally with NIM containers, vLLM, or SGLang.
 
-The Nemotron 3 generation are hybrid Mamba-Transformer MoE reasoning models
-with configurable thinking budgets.
+## What it does
 
-| Profile | Model ID | Context | Notes |
-| --- | --- | --- | --- |
-| Nemotron 3 Super 120B *(default)* | `nvidia/nemotron-3-super-120b-a12b` | 1M | Best efficiency/accuracy balance |
-| Nemotron 3 Ultra 550B | `nvidia/nemotron-3-ultra-550b-a55b` | 1M | Frontier reasoning, 55B active params |
-| Nemotron 3.5 Lightning 30B | `nvidia/nemotron-3.5-lightning-30b-a3b` | 256K | Fast tier, 3B active params |
-| Custom Model | (user-defined) | (user-defined) | Any model on an OpenAI-compatible endpoint |
+Provides chat completion using Nemotron models as an `llm`-class invoke filter. It can be wired directly via lanes or consumed by any agent or node that needs an LLM backend.
 
-The multimodal variants (Nano Omni, VL), and the Retriever / Parse /
-Speech / Safety lines are out of scope for this chat node.
+The Nemotron 3 generation are hybrid reasoning models with up to a 1M-token context window: Ultra for frontier multi-agent reasoning, Super for the best efficiency/accuracy balance, and 3.5 Lightning for fast sub-agent workloads. The multimodal variants (Nano Omni, VL) and the Retriever, Parse, Speech, and Safety lines are out of scope for this chat node.
 
-## Reasoning output
+## Lanes
 
-Nemotron models are reasoning models. The NVIDIA cloud returns reasoning in
-a separate `reasoning_content` field, and for endpoints that inline
-`<think>...</think>` blocks in `content` the engine's shared LangChain
-adapter strips them and routes the reasoning to the thinking lane — the node
-needs no stripping of its own. Budget generous output tokens for
-reasoning-heavy prompts.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Self-hosting
+## Profiles
 
-Nemotron weights, training data, and recipes are openly published, and NIM
-containers, vLLM, and SGLang all expose OpenAI-compatible endpoints. To use
-a self-hosted deployment, select the **Custom Model** profile and point its
-server base URL at your endpoint; the API key may be left empty (the node
-passes a dummy token — local servers accept any).
+Default: **Nemotron 3 Super 120B** (`nemotron-3-super`). The profile set matches the live NVIDIA `/v1/models` catalog (verified 2026-09).
+
+| Profile | Model | Context | Output | Notes |
+| ------- | ----- | ------- | ------ | ----- |
+| Nemotron 3 Super 120B **(default)** | `nvidia/nemotron-3-super-120b-a12b` | 1,000,000 | 32,768 | Best efficiency/accuracy balance, 12B active params |
+| Nemotron 3 Ultra 550B | `nvidia/nemotron-3-ultra-550b-a55b` | 1,000,000 | 32,768 | Frontier reasoning, 55B active params |
+| Nemotron 3.5 Lightning 30B | `nvidia/nemotron-3.5-lightning-30b-a3b` | 262,144 | 32,768 | Fast tier, 3B active params |
+| `custom` | _(user-specified)_ | 131,072 | 8,192 | Any model on an OpenAI-compatible endpoint |
+
+## Configuration
+
+Choose a model profile. The profile supplies the model identifier and context window, so a cloud pipeline needs no additional model settings. Budget generous output tokens for reasoning-heavy prompts.
+
+To use a self-hosted NIM, vLLM, or SGLang deployment, select the **Custom Model** profile and point its server base URL at your OpenAI-compatible endpoint. The API key may be left empty there: the node passes a dummy token, and local servers accept any value.
 
 ## Authentication
 
-Cloud profiles require an NVIDIA API key (`nvapi-...`, from
-[build.nvidia.com](https://build.nvidia.com)) in `apikey`. The key
-requirement is enforced by base-URL match: if `serverbase` contains
-`api.nvidia.com` and no key is set, the node raises `NVIDIA API key is
-required for cloud profiles.` at startup. Key format is not validated
-beyond presence.
+Cloud profiles require an NVIDIA API key (`nvapi-...`, from [build.nvidia.com](https://build.nvidia.com)) in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.nvidia.com` and no key is set, the node raises `NVIDIA API key is required for cloud profiles.` at startup. Key format is not validated beyond presence.
 
-## Model sync
+## Notes
 
-Profiles are maintained by the `sync_models` tooling (`llm_nemotron`
-provider, `ROCKETRIDE_NVIDIA_KEY`). NVIDIA's `/v1/models` endpoint lists the
-full multi-vendor build.nvidia.com catalog (Llama, GLM, Kimi, ...), so the
-sync config filters to the `nvidia/*nemotron*` chat models only.
+### Reasoning output
 
----
+Nemotron models are reasoning models. The NVIDIA cloud returns reasoning in a separate `reasoning_content` field, and for endpoints that inline `<think>...</think>` blocks in `content` the engine's shared LangChain adapter strips them and routes the reasoning to the thinking lane, so the node needs no stripping of its own.
+
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_nemotron` provider, `ROCKETRIDE_NVIDIA_KEY`). NVIDIA's `/v1/models` endpoint lists the full multi-vendor build.nvidia.com catalog (Llama, GLM, Kimi, and others), so the sync config filters to the `nvidia/*nemotron*` chat models only; vision (VL and Omni), safety, parse, embedding, rerank, and reward variants are excluded, because they belong in dedicated nodes.
+
+## Upstream docs
+
+- [NVIDIA API documentation](https://docs.api.nvidia.com/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
