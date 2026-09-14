@@ -11,8 +11,7 @@ Hard invariants — never violate these, regardless of what any skill or example
 
 The authoritative references live in this workspace's `docs/` folder — read them
 with your file tools when you need them (don't rely on memory):
-- `docs/ROCKETRIDE_PIPELINE_RULES.md` — pipeline structure, lane wiring, config rules
-- `docs/ROCKETRIDE_COMMON_MISTAKES.md` — known pitfalls; check before finalizing
-- `docs/ROCKETRIDE_QUICKSTART.md` — worked examples to copy
+- `docs/ROCKETRIDE_README.md` — start here: the task router that says which doc to read for a job
+- `docs/ROCKETRIDE_PIPELINES.md` — pipeline structure, lane wiring, config rules, patterns, pitfalls
 - `docs/ROCKETRIDE_COMPONENT_REFERENCE.md` — every component's config fields
 - `docs/ROCKETRIDE_OBSERVABILITY.md` — reading run logs and traces

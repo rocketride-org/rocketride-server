@@ -82,7 +82,7 @@ describe('seedWorkspace', () => {
 		// not flattened to the workspace root (the old flat-mirror bug).
 		expect(fs.readFileSync(path.join(workspaceDir, 'demo', 'qa.pipe'), 'utf8')).toBe(PIPE); // byte-identical
 		expect(fs.existsSync(path.join(workspaceDir, 'AGENTS.md'))).toBe(true);
-		expect(fs.existsSync(path.join(workspaceDir, 'docs', 'ROCKETRIDE_PIPELINE_RULES.md'))).toBe(true);
+		expect(fs.existsSync(path.join(workspaceDir, 'docs', 'ROCKETRIDE_PIPELINES.md'))).toBe(true);
 		expect(fs.existsSync(path.join(workspaceDir, '.opencode', 'agent', 'rr-builder.md'))).toBe(true);
 	});
 
