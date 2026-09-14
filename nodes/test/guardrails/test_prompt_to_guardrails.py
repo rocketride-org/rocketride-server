@@ -92,8 +92,32 @@ def test_an_answer_that_hands_back_the_question_figure_is_still_blocked(prompt_n
     question = 'Was Apple net income $94.7B?'
     _turn(prompt_node, question, [])
 
-    for answer in ('Yes. Apple net income was $94.7B.', 'Correct, it was $94.7B.'):
+    for answer in (
+        'Yes. Apple net income was $94.7B.',
+        'Correct, it was $94.7B.',
+        'Apple net income was $94.7B.',
+        # An affirmation can carry a negation that has nothing to do with the figure,
+        # so the refusal test cannot be "is the word no anywhere in this".
+        'Yes, it was $94.7B. There is no doubt.',
+        'Correct. That is not in dispute: $94.7B.',
+        'Indeed, $94.7B is the figure.',
+    ):
         assert _verdict(answer, question) == 'block', answer
+
+
+def test_a_refusal_is_kept_however_it_negates_the_figure(prompt_node):
+    """The mirror of the affirmation case, so tightening one does not break the other."""
+    question = 'Was Apple net income $94.7B?'
+    _turn(prompt_node, question, [])
+
+    for answer in (
+        'I cannot confirm whether it was $94.7B.',
+        'The figure of $94.7 billion is not in the documents.',
+        'There is no record of $94.7B in the sources.',
+        'I was unable to verify $94.7B.',
+        'That $94.7B figure does not appear anywhere in the material.',
+    ):
+        assert _verdict(answer, question) != 'block', answer
 
 
 def test_a_refusal_naming_the_same_amount_another_way_is_kept(prompt_node):
