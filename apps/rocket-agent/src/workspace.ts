@@ -58,7 +58,12 @@ function gitEnv(): NodeJS.ProcessEnv {
 }
 
 async function git(workspaceDir: string, args: string[]): Promise<string> {
-	const { stdout } = await run('git', args, { cwd: workspaceDir, env: gitEnv() });
+	// GIT_CEILING_DIRECTORIES pins repository discovery to the workspace itself: a workspace that
+	// has no .git yet (or lost it) must fail loudly, never fall through to an enclosing checkout.
+	// Without it, `add -A` + `commit` from such a workspace once landed in the repo that happened
+	// to contain the temp dir (2026-09-14).
+	const env = { ...gitEnv(), GIT_CEILING_DIRECTORIES: path.dirname(path.resolve(workspaceDir)) };
+	const { stdout } = await run('git', args, { cwd: workspaceDir, env });
 	return stdout;
 }
 
