@@ -300,6 +300,12 @@ class _FakeRegistry:
                 }
             )
 
+        # The suite's default is the REVIEW-LADDER server (the full
+        # private -> submit -> ready track under test). The singleton is
+        # whichever edition this environment built — OSS pins the ladder
+        # OFF — so pin it ON here; the no-ladder arm has its own tests.
+        monkeypatch.setattr(account_singleton, 'review_ladder', True, raising=False)
+
         for name, fn in (
             ('deployments_versions', deployments_versions),
             ('deployments_artifact', deployments_artifact),
@@ -604,6 +610,19 @@ async def test_add_withdraws_stale_pending_reviews(registry, content_store):
 
 
 @pytest.mark.asyncio
+async def test_add_without_review_ladder_is_born_ready(registry, content_store, monkeypatch):
+    """Without the review ladder (OSS — the deployer IS the approver) a
+    deployment is born 'ready', the same pre-approved state seeded platform
+    apps get, instead of the ladder's 'private' draft.
+    """
+    monkeypatch.setattr(account_singleton, 'review_ladder', False, raising=False)
+    conn = _FakeConn()
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+    assert result['success'] is True
+    assert registry.versions[0]['state'] == 'ready'
+
+
+@pytest.mark.asyncio
 async def test_add_app_version_is_package_json_top_level_only(registry, content_store):
     """package.json is the CONTROL-PLANE truth: appVersion comes from its
     top-level ``version``, full stop. The appManifest block is a projection
@@ -847,6 +866,27 @@ async def test_public_publish_requires_dev_org_and_ready_deployment(registry, qu
     result = await handle_deploy_app(dev, _request('publish', version=1, target='@public'))
     assert result['success'] is True
     assert result['body']['publish']['state'] == 'enabled'
+
+
+@pytest.mark.asyncio
+async def test_public_publish_without_review_ladder_skips_ready_gate(registry, quiet_push, monkeypatch):
+    """Without the review ladder (OSS) @public publishes directly — no
+    approval step exists. The 'failed'/built gates still apply: a version
+    with no servable build never reaches any rung.
+    """
+    monkeypatch.setattr(account_singleton, 'review_ladder', False, raising=False)
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='private')
+    registry.add_version(2, '1.1.0', publisher_id='u1', state='failed')
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    # An unapproved ('private') deployment publishes straight to the store.
+    result = await handle_deploy_app(dev, _request('publish', version=1, target='@public'))
+    assert result['success'] is True
+    assert result['body']['publish']['state'] == 'enabled'
+
+    # A failed deployment is still refused — no ladder does not mean no gates.
+    refused = await handle_deploy_app(dev, _request('publish', version=2, target='@public'))
+    assert refused['success'] is False
 
 
 @pytest.mark.asyncio
@@ -1365,6 +1405,47 @@ async def test_resolve_public_serves_only_ready_deployments(registry):
     resolved = await resolve_app_pins('org1', 'other-user', [])
     assert [r['id'] for r in resolved] == ['acme.brandy']
     assert resolved[0]['public'] is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_public_without_ladder_serves_unapproved(registry, monkeypatch):
+    """Without the review ladder (OSS) a public binding serves like an
+    internal rung: any non-'failed' deployment reaches the desktop.
+    """
+    monkeypatch.setattr(account_singleton, 'review_ladder', False, raising=False)
+    registry.add_version(1, '1.0.0', state='private')
+    registry.seed_publish(AUD_PUBLIC, 1)
+
+    resolved = await resolve_app_pins('org1', 'other-user', [])
+    assert [r['id'] for r in resolved] == ['acme.brandy']
+
+    # 'failed' still never serves — the built gate outranks the open rung.
+    registry.versions[0]['state'] = 'failed'
+    assert await resolve_app_pins('org1', 'other-user', []) == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_rewrites_relative_icon_to_versioned_url(registry):
+    """The manifest's app-relative icon ('./icon.svg') resolves to the
+    version's constructed serving URL — the build harvest copies the asset
+    into the version's dist/ tree, so the desktop's <img> can load it. A
+    seeded absolute path passes through verbatim; an empty one stays ''.
+    """
+    registry.add_version(1, '1.0.0', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    row = registry.publishes[('acme.brandy', 'public~')]
+
+    row['snapshot'] = {'name': 'Brandy', 'iconPath': './icon.svg'}
+    resolved = await resolve_app_pins('org1', 'u1', [])
+    assert resolved[0]['icon'] == '/apps/acme.brandy/v1/icon.svg'
+
+    row['snapshot'] = {'name': 'Brandy', 'iconPath': '/apps/acme.brandy/icon.svg'}
+    resolved = await resolve_app_pins('org1', 'u1', [])
+    assert resolved[0]['icon'] == '/apps/acme.brandy/icon.svg'
+
+    row['snapshot'] = {'name': 'Brandy'}
+    resolved = await resolve_app_pins('org1', 'u1', [])
+    assert resolved[0]['icon'] == ''
 
 
 @pytest.mark.asyncio

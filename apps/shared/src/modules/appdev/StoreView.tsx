@@ -507,7 +507,11 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 												{onNavigate && (
 													<Button onClick={() => onNavigate('deploy')}>Ready to deploy</Button>
 												)}
-												<span style={styles.actionNote}>everything the store requires is in place — deploy a version and submit it for review on the Deploy tab.</span>
+												<span style={styles.actionNote}>
+													{host.submitForReview
+														? 'everything the store requires is in place — deploy a version and submit it for review on the Deploy tab.'
+														: 'everything the store requires is in place — deploy a version and publish it to the store on the Deploy tab.'}
+												</span>
 											</div>
 										) : packageFails > 0 ? (
 											<div style={styles.submitMsg}>

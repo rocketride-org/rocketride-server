@@ -946,7 +946,11 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 										)}
 									</div>
 								))}
-								<div style={styles.liveFoot}>Deploy pins a rung to an immutable version — first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.</div>
+								<div style={styles.liveFoot}>
+									{host.submitForReview
+										? 'Deploy pins a rung to an immutable version — first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.'
+										: 'Deploy pins a rung to an immutable version — first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server — the store publishes directly.'}
+								</div>
 							</>
 						)}
 					</div>
@@ -1008,7 +1012,11 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 						</Button>
 					}
 				>
-					<div style={styles.dialogHint}>Points the chosen audience at this version — first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.</div>
+					<div style={styles.dialogHint}>
+						{host.submitForReview
+							? 'Points the chosen audience at this version — first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
+							: 'Points the chosen audience at this version — first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
+					</div>
 					<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@me')}>
 						Me<span style={styles.pubRowState}>{pinStateOf('@me', publishFor)}</span>
 					</button>
@@ -1018,7 +1026,10 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 							<span style={styles.pubRowState}>{pinStateOf(`@team/${t.name}`, publishFor)}</span>
 						</button>
 					))}
-					{publishFor.state === 'ready' ? (
+					{/* Without a review ladder on the host (OSS — the server accepts
+					    any servable version on @public) the store row is as open as
+					    the internal rows; with one, only 'ready' unlocks it. */}
+					{(host.submitForReview ? publishFor.state === 'ready' : publishFor.state !== 'failed') ? (
 						<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@public')}>
 							Public — the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
 						</button>

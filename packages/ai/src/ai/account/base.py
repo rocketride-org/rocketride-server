@@ -54,6 +54,13 @@ class AccountBase(ABC):
     # and copied into every AccountInfo returned by authenticate().
     capabilities: tuple[str, ...] = ()
 
+    # Whether the @public rung is gated behind the review ladder (submit ->
+    # admin approve -> 'ready'). SaaS keeps the ladder; OSS overrides to
+    # False so a single-operator server can publish to its own store
+    # directly. Consulted by the app_deploy publish gate — the DEFAULT is
+    # the safe, gated behavior.
+    review_ladder: bool = True
+
     # =========================================================================
     # ABSTRACT — must be implemented by both OSS and SaaS
     # =========================================================================

@@ -187,8 +187,17 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 							type: 'appdev:init',
 							app: this.buildAppSummary(appId, app),
 							previewUrl: this.buildPreviewUrl(appId),
-							// VSCode variant: files are native, F5 debugs, no Code pane
-							capabilities: { hasCodePane: false, hasNativeFiles: true, canDebug: true },
+							// VSCode variant: files are native, F5 debugs, no Code pane.
+							// hasReviewLadder mirrors the server's account backend
+							// (base.py review_ladder): only a server declaring 'oss'
+							// publishes @public directly; unknown/disconnected keeps
+							// the gated default.
+							capabilities: {
+								hasCodePane: false,
+								hasNativeFiles: true,
+								canDebug: true,
+								hasReviewLadder: !(this.connectionManager.getClient()?.getAccountInfo()?.capabilities ?? []).includes('oss'),
+							},
 							stage: AppScreenProvider.normalizeStage(this.context.workspaceState.get(`appdev.stage.${appId}`)),
 							// App Builder UI preferences (preview layout, zoom, …)
 							// — per-workspace, per-app; written back via appdev:pref
