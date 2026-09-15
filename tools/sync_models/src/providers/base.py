@@ -420,6 +420,19 @@ class CloudProvider(ABC):
             report.error = f'Failed to fetch models from {primary_source}: {e}'
             return report
 
+        # --- Empty-source guard ---
+        # A source that answered but matched nothing is a filter or ID-format bug
+        # (prefixes written in a form the source never reports), not a catalogue
+        # with no models. Letting it through would let the merge treat every
+        # unprotected profile as gone while the run reports success having done
+        # nothing. Fail the provider instead, loudly.
+        if not api_models:
+            report.error = (
+                f'{primary_source} listed no models matching the {self.provider_name} filter; '
+                'check model_filter.include_prefixes against the IDs that source actually reports.'
+            )
+            return report
+
         # Set deprecation_source label based on the actual primary source. The label
         # is prose for the migration message; primary_source is the canonical key that
         # decides authority, and is passed through unchanged.

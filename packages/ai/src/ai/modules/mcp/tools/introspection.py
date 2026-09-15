@@ -60,13 +60,18 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
         spec = catalog.get(name)
         if spec is not None:
             state = credentials_mod.evaluate(spec, env_keys)
-            if state['status'] != 'configured':
+            if state['status'] not in ('configured', 'partial'):
                 # Not ready to use: omit rather than list a component the
                 # caller can't actually run yet (env_error included -- a
                 # read failure must never be mistaken for readiness).
                 skipped += 1
                 continue
             entry['wiring'] = state['wiring']
+            if state['status'] == 'partial':
+                # Usable now on the profiles its missing variables do not
+                # gate; say which profiles still need what so the caller can
+                # pick a profile instead of being told the node is unusable.
+                entry['conditional'] = state['conditional']
         components.append(entry)
 
     result = {'ok': True, 'components': components}
@@ -233,7 +238,8 @@ def register(registry: ToolRegistry) -> None:
     """Register the authoring/introspection tools against ``registry``."""
     registry.register(
         'list_components',
-        'List RocketRide components ready to use now (zero-config plus integrations you have configured). '
+        'List RocketRide components ready to use now (zero-config plus integrations you have configured; '
+        'an entry with a conditional block works on some profiles and names those still needing a variable). '
         'Call describe_component for a config schema, list_integrations for integrations needing setup.',
         {'type': 'object', 'properties': {}},
     )(_list_components)

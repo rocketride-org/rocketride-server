@@ -116,3 +116,109 @@ def test_shipped_catalog_loads():
         for field in integration.fields:
             assert field.suggests
             assert field.suggests.startswith('ROCKETRIDE_')
+
+
+# A node that needs its key only on some profiles (the llm_nemotron shape:
+# NVIDIA-cloud profiles need the key, the self-hosted `custom` profile does not).
+RAW_CONDITIONAL = {
+    'llm_nimlike': {
+        'title': 'NIM-like LLM',
+        'docs': 'https://example.invalid/docs',
+        'fields': [
+            {
+                'path': 'llm.apikey',
+                'title': 'Cloud API key',
+                'kind': 'secret',
+                'required': True,
+                'required_for_profiles': ['cloud-a', 'cloud-b'],
+                'suggests': 'ROCKETRIDE_NIMLIKE_KEY',
+            },
+        ],
+    },
+}
+
+
+def _conditional_spec():
+    return creds.catalog_from_dict(RAW_CONDITIONAL)['llm_nimlike']
+
+
+def test_conditional_field_present_is_configured():
+    state = creds.evaluate(_conditional_spec(), ['ROCKETRIDE_NIMLIKE_KEY'])
+    assert state['status'] == 'configured'
+    assert state['missing'] == []
+    assert state['wiring'] == {'llm.apikey': '${ROCKETRIDE_NIMLIKE_KEY}'}
+    assert state['conditional'] == [
+        {
+            'variable': 'ROCKETRIDE_NIMLIKE_KEY',
+            'path': 'llm.apikey',
+            'required_for_profiles': ['cloud-a', 'cloud-b'],
+            'configured': True,
+        }
+    ]
+
+
+def test_conditional_field_missing_is_partial_not_hidden():
+    """A gap only in a profile-conditional field must not read as 'not configured':
+    the keyless profiles work now, and the caller is told which profiles still
+    need the variable.
+    """
+    spec = _conditional_spec()
+    state = creds.evaluate(spec, ['ROCKETRIDE_ANTHROPIC_KEY'])
+    assert state['status'] == 'partial'
+    assert state['missing'] == ['ROCKETRIDE_NIMLIKE_KEY']
+    assert state['candidates'] == []
+    assert state['conditional'][0]['configured'] is False
+    assert state['conditional'][0]['required_for_profiles'] == ['cloud-a', 'cloud-b']
+
+    shaped = creds.describe_state(spec, state)
+    assert shaped['status'] == 'partial'
+    assert 'wiring' not in shaped
+    assert shaped['setup']['variables'] == ['ROCKETRIDE_NIMLIKE_KEY']
+    assert shaped['conditional'] == state['conditional']
+
+
+def test_conditional_field_does_not_mask_an_unconditional_gap():
+    raw = {
+        'llm_nimlike': {
+            'title': 'NIM-like LLM',
+            'fields': [
+                {'path': 'llm.endpoint', 'kind': 'endpoint', 'required': True, 'suggests': 'ROCKETRIDE_NIMLIKE_URL'},
+                {
+                    'path': 'llm.apikey',
+                    'kind': 'secret',
+                    'required': True,
+                    'required_for_profiles': ['cloud-a'],
+                    'suggests': 'ROCKETRIDE_NIMLIKE_KEY',
+                },
+            ],
+        },
+    }
+    spec = creds.catalog_from_dict(raw)['llm_nimlike']
+    state = creds.evaluate(spec, ['ROCKETRIDE_ANTHROPIC_KEY'])
+    assert state['status'] == 'available'
+    assert state['missing'] == ['ROCKETRIDE_NIMLIKE_URL', 'ROCKETRIDE_NIMLIKE_KEY']
+    assert creds.describe_state(spec, state)['setup']['variables'] == [
+        'ROCKETRIDE_NIMLIKE_URL',
+        'ROCKETRIDE_NIMLIKE_KEY',
+    ]
+
+
+def test_conditional_field_env_error_is_unconfirmed_with_unknown_state():
+    state = creds.evaluate(_conditional_spec(), None)
+    assert state['status'] == 'unconfirmed'
+    assert state['env_error'] is True
+    assert state['conditional'][0]['configured'] is None
+
+
+def test_unconditional_entries_report_no_conditional_block():
+    state = creds.evaluate(_spec(), ['ROCKETRIDE_QDRANT_URL', 'ROCKETRIDE_QDRANT_APIKEY'])
+    assert state['conditional'] == []
+    assert 'conditional' not in creds.describe_state(_spec(), state)
+
+
+def test_shipped_catalog_gates_the_nemotron_key_on_cloud_profiles_only():
+    field = creds.load_catalog()['llm_nemotron'].fields[0]
+    assert field.suggests == 'ROCKETRIDE_NVIDIA_KEY'
+    assert field.required is True
+    assert field.required_for_profiles == ('nemotron-3-super', 'nemotron-3-ultra', 'nemotron-3-5-lightning')
+    assert 'custom' not in field.required_for_profiles
