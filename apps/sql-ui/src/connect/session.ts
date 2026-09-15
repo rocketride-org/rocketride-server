@@ -26,8 +26,9 @@
 //
 // Attach-mechanics live here on purpose (see types.ts). Today a session
 // resolves the owning task's token lazily and drives the node's shared SQL
-// tools (execute / get_schema / dialect) via client.tool. When the attach
-// path changes, this file changes — the ISqlSession contract does not.
+// tools (execute / get_schema / refresh_schema / dialect) via client.tool.
+// When the attach path changes, this file changes — the ISqlSession contract
+// does not.
 // =============================================================================
 
 import type { RocketRideClient } from 'shell';
@@ -105,40 +106,72 @@ class SqlToolSession implements ISqlSession {
 	}
 
 	/**
-	 * Invoke one of the node's tools, retrying exactly once with a fresh token
-	 * when the first attempt fails (covers task restarts between calls).
+	 * Invoke one of the node's tools.
 	 *
-	 * @param tool - Tool name (execute / get_schema / dialect).
+	 * The cached task token goes stale whenever the owning task restarts, and
+	 * a stale token fails exactly like a rejected statement — the transport
+	 * gives no way to tell them apart. Retrying is therefore a per-CALL
+	 * decision, not a transport policy: reflection and dialect reads are safe
+	 * to repeat, a write is not. When `retryOnStaleToken` is false the first
+	 * failure is the answer, and the tool is never invoked a second time.
+	 *
+	 * @param tool - Tool name (execute / get_schema / refresh_schema / dialect).
 	 * @param input - Tool input arguments.
+	 * @param retryOnStaleToken - Whether ONE re-resolved-token retry is safe.
 	 * @returns The tool's result value.
 	 */
-	private async invoke<T>(tool: string, input: Record<string, unknown>): Promise<T> {
+	private async invoke<T>(tool: string, input: Record<string, unknown>, retryOnStaleToken: boolean): Promise<T> {
 		const token = await this.resolveToken();
 		try {
 			return await this.client.tool<T>({ token, tool, nodeId: this.endpoint.nodeId, input });
 		} catch (err) {
-			// One retry with a re-resolved token: the cached token goes stale
-			// whenever the owning task restarts. Any second failure is real.
+			// Drop the cached token either way: it may well be the stale one,
+			// and the next call should resolve a fresh one from scratch.
 			this.token = null;
+			if (!retryOnStaleToken) throw err;
 			const fresh = await this.resolveToken();
+			// Same token back = the task did not restart, so the failure was
+			// real. Only a genuinely different token justifies a second call.
 			if (fresh === token) throw err;
 			return await this.client.tool<T>({ token: fresh, tool, nodeId: this.endpoint.nodeId, input });
 		}
 	}
 
 	/** @inheritdoc */
-	async execute(sql: string): Promise<ISqlExecuteResult> {
-		return this.invoke<ISqlExecuteResult>('execute', { sql });
+	async execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<ISqlExecuteResult> {
+		// Omit `params` entirely when there is nothing to bind: the node's
+		// placeholder rewriting is skipped for an empty list, so an unbound
+		// statement keeps travelling exactly as it did before.
+		const params = opts?.params;
+		const input = params && params.length > 0 ? { sql, params } : { sql };
+		// Default NO retry: an unmarked statement may well be a write.
+		return this.invoke<ISqlExecuteResult>('execute', input, opts?.idempotent === true);
 	}
 
 	/** @inheritdoc */
 	async getSchema(table?: string): Promise<ISqlSchemaResponse> {
-		return this.invoke<ISqlSchemaResponse>('get_schema', table ? { table } : {});
+		return this.invoke<ISqlSchemaResponse>('get_schema', table ? { table } : {}, true);
+	}
+
+	/** @inheritdoc */
+	async refreshSchema(): Promise<ISqlSchemaResponse> {
+		try {
+			return await this.invoke<ISqlSchemaResponse>('refresh_schema', {}, true);
+		} catch {
+			// ANY failure falls back. A node without the tool and a node that
+			// simply could not answer are indistinguishable at this layer, and
+			// matching the engine's error wording would rot the first time it
+			// changed. Serve the task-start snapshot and flag it, rather than
+			// present it as freshly reflected; when the fallback ALSO fails,
+			// its error is the one the caller sees.
+			const schema = await this.getSchema();
+			return { ...schema, stale: true };
+		}
 	}
 
 	/** @inheritdoc */
 	async dialect(): Promise<SqlDialect> {
-		const result = await this.invoke<{ dialect?: string }>('dialect', {});
+		const result = await this.invoke<{ dialect?: string }>('dialect', {}, true);
 		return toDialect(result?.dialect);
 	}
 }

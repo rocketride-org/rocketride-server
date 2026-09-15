@@ -40,6 +40,9 @@ import type { ISqlSchemaTable, SqlDialect } from '../connect';
  * Quote an identifier (table/column name) for the dialect: backticks for
  * MySQL/ClickHouse, double quotes elsewhere (Postgres and ANSI engines).
  *
+ * Identifiers are the ONLY thing this module renders into SQL text. Values
+ * are bound (see {@link buildPageStatements}).
+ *
  * @param dialect - The engine dialect.
  * @param name - The identifier to quote.
  * @returns The quoted identifier.
@@ -51,18 +54,6 @@ export function quoteIdent(dialect: SqlDialect, name: string): string {
 	return '"' + name.replace(/"/g, '""') + '"';
 }
 
-/**
- * Quote a literal value for embedding in a statement: single quotes with
- * doubled embedded quotes. Numbers pass through bare.
- *
- * @param value - The value to quote.
- * @returns The quoted literal.
- */
-export function quoteValue(value: string): string {
-	if (/^-?\d+(\.\d+)?$/.test(value)) return value;
-	return "'" + value.replace(/'/g, "''") + "'";
-}
-
 // =============================================================================
 // PREDICATES
 // =============================================================================
@@ -70,24 +61,49 @@ export function quoteValue(value: string): string {
 /** Column-type test: text-ish columns participate in the free-text search. */
 const TEXT_TYPE = /char|text|string|uuid|enum/i;
 
+/** A WHERE clause plus the values its `$n` placeholders bind to. */
+interface IWhereClause {
+	/** The clause (with leading ' WHERE ') or ''. */
+	clause: string;
+	/** Bind values, in placeholder order. */
+	params: unknown[];
+}
+
 /**
  * Build the WHERE clause for a page request: the title-bar search term ORed
  * across the table's text columns, ANDed with the committed per-column
  * filters (string = contains, array = IN, __gte/__lte = range bounds).
  *
+ * Every value the user typed is bound as `$n`, never rendered into the
+ * statement. The search term binds ONCE and its placeholder repeats across
+ * the ORed columns.
+ *
  * @param dialect - The engine dialect.
  * @param table - The table's reflected schema (drives the search columns).
  * @param req - The grid's page request.
- * @returns The WHERE clause (with leading ' WHERE ') or ''.
+ * @returns The clause and its bind values.
  */
-function buildWhere(dialect: SqlDialect, table: ISqlSchemaTable, req: IDataGridPageRequest): string {
+function buildWhere(dialect: SqlDialect, table: ISqlSchemaTable, req: IDataGridPageRequest): IWhereClause {
 	const clauses: string[] = [];
+	const params: unknown[] = [];
+
+	/**
+	 * Append one bind value and return its placeholder.
+	 *
+	 * @param value - The value to bind.
+	 * @returns The `$n` placeholder naming it.
+	 */
+	const bind = (value: unknown): string => {
+		params.push(value);
+		return `$${params.length}`;
+	};
 
 	// Free-text search across text-typed columns.
 	if (req.search) {
-		const term = quoteValue(`%${req.search}%`);
 		const targets = table.columns.filter((c) => TEXT_TYPE.test(c.type));
 		if (targets.length > 0) {
+			// One placeholder, reused: the same pattern for every column.
+			const term = bind(`%${req.search}%`);
 			clauses.push('(' + targets.map((c) => `${quoteIdent(dialect, c.column)} LIKE ${term}`).join(' OR ') + ')');
 		}
 	}
@@ -98,20 +114,21 @@ function buildWhere(dialect: SqlDialect, table: ISqlSchemaTable, req: IDataGridP
 		if (key.endsWith('__gte') || key.endsWith('__lte')) {
 			const field = key.slice(0, -5);
 			const op = key.endsWith('__gte') ? '>=' : '<=';
-			clauses.push(`${quoteIdent(dialect, field)} ${op} ${quoteValue(String(value))}`);
+			clauses.push(`${quoteIdent(dialect, field)} ${op} ${bind(String(value))}`);
 			continue;
 		}
 		if (Array.isArray(value)) {
 			if (value.length > 0) {
-				clauses.push(`${quoteIdent(dialect, key)} IN (${value.map((v) => quoteValue(v)).join(', ')})`);
+				clauses.push(`${quoteIdent(dialect, key)} IN (${value.map((v) => bind(v)).join(', ')})`);
 			}
 			continue;
 		}
-		// String value = contains.
-		clauses.push(`${quoteIdent(dialect, key)} LIKE ${quoteValue(`%${value}%`)}`);
+		// String value = contains. The wrapping `%` belongs to the VALUE, not
+		// to the statement (see the placeholder caveat on buildPageStatements).
+		clauses.push(`${quoteIdent(dialect, key)} LIKE ${bind(`%${value}%`)}`);
 	}
 
-	return clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
+	return { clause: clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '', params };
 }
 
 // =============================================================================
@@ -124,16 +141,30 @@ export interface IPageStatements {
 	select: string;
 	/** The COUNT(*) over the same WHERE (drives the pager total). */
 	count: string;
+	/** Bind values for the `$n` placeholders — the SAME list for both. */
+	params: unknown[];
 }
 
 /**
  * Build the SELECT + COUNT statements for one grid page request.
  *
+ * Filter and search values are bound as positional `$1..$n` parameters and
+ * passed to `ISqlSession.execute` alongside the statement; nothing the user
+ * typed is rendered into SQL text. Only identifiers (quoted) and the grid's
+ * own page numbers reach the statement directly.
+ *
+ * Placeholder caveat: the node rewrites `$n` TEXTUALLY before binding
+ * (packages/ai/src/ai/common/database/tx_registry.py:43-45), so a literal
+ * `$1` inside a string body would be rewritten too. Every statement this
+ * module emits is generated here and never places a placeholder inside a
+ * literal — which is precisely why LIKE patterns are assembled as bind
+ * VALUES (`%term%`) instead of as `'%' || $1 || '%'` or an inlined pattern.
+ *
  * @param dialect - The engine dialect.
  * @param tableName - The table to page over.
  * @param table - The table's reflected schema.
  * @param req - The grid's page request.
- * @returns The page statements.
+ * @returns The page statements and their bind values.
  */
 export function buildPageStatements(
 	dialect: SqlDialect,
@@ -142,10 +173,11 @@ export function buildPageStatements(
 	req: IDataGridPageRequest,
 ): IPageStatements {
 	const target = quoteIdent(dialect, tableName);
-	const where = buildWhere(dialect, table, req);
+	const { clause: where, params } = buildWhere(dialect, table, req);
 
 	// ORDER BY from the grid's sorters; fall back to the primary key so
-	// paging is deterministic even without a user sort.
+	// paging is deterministic even without a user sort. A table with neither
+	// pages unordered — the data browser says so above the grid.
 	const sorters = req.sort.length > 0
 		? req.sort
 		: (table.primary_key ?? []).map((c) => ({ field: c, dir: 'asc' as const }));
@@ -153,9 +185,12 @@ export function buildPageStatements(
 		? ` ORDER BY ${sorters.map((s) => `${quoteIdent(dialect, s.field)} ${s.dir.toUpperCase()}`).join(', ')}`
 		: '';
 
+	// LIMIT/OFFSET stay inline: they are the grid's own numbers, never user
+	// text, and several engines reject a bind parameter in those positions.
 	const offset = (req.page - 1) * req.size;
 	return {
 		select: `SELECT * FROM ${target}${where}${orderBy} LIMIT ${req.size} OFFSET ${offset}`,
 		count: `SELECT COUNT(*) AS total FROM ${target}${where}`,
+		params,
 	};
 }

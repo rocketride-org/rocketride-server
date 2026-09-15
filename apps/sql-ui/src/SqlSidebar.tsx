@@ -108,7 +108,7 @@ const SqlSidebar: React.FC = () => {
 					entries={entries}
 					isConnected={isConnected}
 					onOpenFile={(path) => requestTableRecord(activeKey, path)}
-					onRefresh={() => { if (client) void refreshSchema(client, activeEndpoint); }}
+					onRefresh={() => { if (client) void refreshSchema(client, activeEndpoint, { fresh: true }); }}
 				/>
 			)}
 		</>

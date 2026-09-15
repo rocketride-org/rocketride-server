@@ -32,23 +32,12 @@
 
 import type { ISqlSession, SqlDialect } from '../connect';
 
-// =============================================================================
-// HELPERS
-// =============================================================================
-
-/**
- * Quote a string literal for embedding in a statement: single quotes with
- * doubled embedded quotes. Table names here are DATA (compared against
- * INFORMATION_SCHEMA columns) and must ALWAYS be quoted — paging's
- * quoteValue passes numeric-looking values through unquoted, which would
- * turn an all-digit table name into a number comparison.
- *
- * @param value - The literal value.
- * @returns The quoted literal.
- */
-function quoteLiteral(value: string): string {
-	return "'" + value.replace(/'/g, "''") + "'";
-}
+// NOTE: the table name below is DATA (compared against INFORMATION_SCHEMA
+// columns), not an identifier, so it rides as a `$1` BIND on both dialects.
+// Quoting it into the text would leave the predicate's shape depending on the
+// connection's escape rules — a MySQL server that honours backslash escapes
+// reads `\'` inside a literal as an escaped quote, which a doubling quoter
+// cannot neutralise. The driver never sees a bound value as syntax.
 
 // =============================================================================
 // FOREIGN KEY NAMES
@@ -81,7 +70,7 @@ export async function fetchForeignKeyNames(session: ISqlSession, dialect: SqlDia
 		sql =
 			'SELECT CONSTRAINT_NAME AS name, COLUMN_NAME AS col, REFERENCED_TABLE_NAME AS ref ' +
 			'FROM information_schema.KEY_COLUMN_USAGE ' +
-			`WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${quoteLiteral(table)} AND REFERENCED_TABLE_NAME IS NOT NULL`;
+			'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = $1 AND REFERENCED_TABLE_NAME IS NOT NULL';
 	} else if (dialect === 'postgres') {
 		// Constraint names are only unique PER SCHEMA in Postgres, so every
 		// join carries constraint_schema. The referenced side pairs through
@@ -98,12 +87,12 @@ export async function fetchForeignKeyNames(session: ISqlSession, dialect: SqlDia
 			'JOIN information_schema.key_column_usage ref_kcu ' +
 			'ON ref_kcu.constraint_schema = rc.unique_constraint_schema AND ref_kcu.constraint_name = rc.unique_constraint_name ' +
 			'AND ref_kcu.ordinal_position = kcu.position_in_unique_constraint ' +
-			`WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = ${quoteLiteral(table)} AND tc.table_schema = current_schema()`;
+			'WHERE tc.constraint_type = \'FOREIGN KEY\' AND tc.table_name = $1 AND tc.table_schema = current_schema()';
 	} else {
 		return [];
 	}
 
-	const result = await session.execute(sql);
+	const result = await session.execute(sql, { params: [table] });
 	return result.rows.map((row) => ({
 		name: String((row as { name?: unknown }).name ?? ''),
 		column: String((row as { col?: unknown }).col ?? ''),

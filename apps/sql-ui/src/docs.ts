@@ -32,6 +32,7 @@
 
 import { Documents } from 'shell';
 import { NOOP_VFS } from 'shell';
+import type { ISqlEndpoint } from './connect';
 
 /** The app's Documents instance. Set by SqlApp on mount. */
 let _docs: Documents | null = null;
@@ -66,6 +67,30 @@ export function destroyDocs(): void {
 }
 
 // =============================================================================
+// DOCUMENT PAYLOADS
+// =============================================================================
+
+/**
+ * What a query document carries as its static content.
+ *
+ * It lives here, beside the URI builders, because every producer of a query
+ * document already imports this module and none of them should have to
+ * import a VIEW to describe what they are handing it. Typing the payload at
+ * the call site is what stops a generated query from quietly shipping a
+ * misspelled field that the reader would never see.
+ */
+export interface IQueryDocPayload {
+	/** The connection the document is pinned to for life. */
+	endpoint: ISqlEndpoint;
+	/** Tab label ("Query 3"). */
+	label: string;
+	/** Text to seed the editor with. */
+	initialSql?: string;
+	/** `generated` marks SQL the app wrote rather than the user. */
+	origin?: 'generated';
+}
+
+// =============================================================================
 // DOCUMENT URIS
 // =============================================================================
 
@@ -97,6 +122,11 @@ export function endpointKeyFromUri(uri: string): string | null {
  * schema tree stays bound while a query/table/design/diagram tab is active.
  * The key itself contains colons (`projectId:source:nodeId`), so the suffixed
  * schemes strip exactly ONE trailing `:segment` instead of splitting on ':'.
+ *
+ * That split is only sound because every suffix is colon-free: query and
+ * design-draft suffixes are generated counters, and table names are
+ * percent-encoded by {@link tableDataUri} / {@link designUri}
+ * (encodeURIComponent escapes ':' as '%3A').
  *
  * @param uri - A document URI of any scheme.
  * @returns The endpoint key, or null for non-endpoint documents (landing doc).
@@ -136,14 +166,16 @@ export function isQueryUri(uri: string): boolean {
 }
 
 /**
- * Build the URI for a table's data-browser document.
+ * Build the URI for a table's data-browser document. The table name is
+ * percent-encoded so a name containing ':' cannot fake a scheme separator
+ * (see {@link endpointKeyFromAnyUri}).
  *
  * @param endpointKey - The endpoint's stable key.
  * @param table - The table name.
  * @returns The document URI.
  */
 export function tableDataUri(endpointKey: string, table: string): string {
-	return `table:${endpointKey}:${table}`;
+	return `table:${endpointKey}:${encodeURIComponent(table)}`;
 }
 
 /**
@@ -160,7 +192,9 @@ export function isTableDataUri(uri: string): boolean {
 let designSeq = 0;
 
 /**
- * Build the URI for a table-designer document.
+ * Build the URI for a table-designer document. An existing table's name is
+ * percent-encoded for the same reason as in {@link tableDataUri}; a draft's
+ * `*new*N` suffix is generated here and needs no encoding.
  *
  * @param endpointKey - The endpoint's stable key.
  * @param table - The table to design, or null for a fresh create-table draft.
@@ -171,7 +205,7 @@ export function designUri(endpointKey: string, table: string | null): string {
 		designSeq += 1;
 		return `design:${endpointKey}:*new*${designSeq}`;
 	}
-	return `design:${endpointKey}:${table}`;
+	return `design:${endpointKey}:${encodeURIComponent(table)}`;
 }
 
 /**
