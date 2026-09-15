@@ -28,7 +28,7 @@
   <a href="https://docs.rocketride.org/">Documentation</a> |
   <a href="https://pypi.org/project/rocketride/">Python SDK</a> |
   <a href="https://www.npmjs.com/package/rocketride">TypeScript SDK</a> |
-  <a href="https://pypi.org/project/rocketride-mcp/">MCP Server</a> |
+  <a href="https://docs.rocketride.org/connect/mcp/http">MCP Server</a> |
   <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride">VS Code Marketplace</a> |
   <a href="https://open-vsx.org/extension/RocketRide/rocketride">Open VSX Registry</a>
 </p>
@@ -137,7 +137,7 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
    asyncio.run(main())
    ```
 
-   TypeScript works the same way: [`npm install rocketride`](https://www.npmjs.com/package/rocketride) · [SDK docs](https://docs.rocketride.org/sdk/node-sdk)
+   TypeScript works the same way: [`npm install rocketride`](https://www.npmjs.com/package/rocketride) · [SDK docs](https://docs.rocketride.org/clients/typescript)
 
 **Next steps, one at a time:**
 
@@ -188,7 +188,7 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
 
    - **RocketRide Cloud** - Skip the setup and ship straight to [managed hosting](https://cloud.rocketride.ai/). Same portable pipeline JSON, zero infrastructure to run, from prototype to production. [Get started](https://cloud.rocketride.ai/)
 
-6. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
+6. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/clients/python) and [TypeScript/JS](https://docs.rocketride.org/clients/typescript) applications utilizing our SDK.
 
 ## Observability
 
@@ -197,6 +197,21 @@ Selecting running pipelines allows for in-depth analytics. Trace call trees, tok
 <p align="center">
   <img src="docs/public/assets/tracing.gif" alt="Pipeline observability and tracing">
 </p>
+
+## Documentation
+
+Everything on [docs.rocketride.org](https://docs.rocketride.org/) is built from the [`docs/`](docs/) tree in this repo, split by audience. [`docs/README.md`](docs/README.md) is the full map; the short version:
+
+| Looking for | Start at |
+|---|---|
+| Using RocketRide: quickstart, concepts, guides, cloud, self-hosting | [`docs/public/product/`](docs/public/product/) (the site, page for page) |
+| SDK guides | [TypeScript](docs/public/typescript/) · [Python](docs/public/python/) · [MCP](docs/public/mcp/) |
+| Building your own client on the engine protocol | [`docs/public/product/connect/websocket/`](docs/public/product/connect/websocket/) |
+| Contributing: setup, builder, engine internals, node authoring | [`docs/development/`](docs/development/index.md) |
+| Node catalog | each node's `README.md` under [`nodes/src/nodes/`](nodes/src/nodes) |
+| Pointing an AI assistant at RocketRide | [`docs/agents/`](docs/agents/README.md) |
+
+Repo-wide contributor rules live in [AGENTS.md](AGENTS.md).
 
 ## Contributing
 
