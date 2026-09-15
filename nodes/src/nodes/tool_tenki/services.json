@@ -9,7 +9,7 @@
 	"prefix": "tenki",
 	"icon": "tenki.svg",
 	"documentation": "https://docs.rocketride.org",
-	"description": ["Gives agents a disposable Tenki Sandbox Linux VM for running code and shell commands, editing files and working with git repositories.", "One session, created on first use, is shared by every caller of a running pipeline: its files, installed packages and GitHub token are visible to all of them, so use one pipeline per user or trust boundary."],
+	"description": ["Gives agents a disposable Tenki Sandbox Linux VM for running code and shell commands, editing files and working with git repositories.", "One session, created on first use, is shared by every caller of a running pipeline: its files and installed packages are visible to all of them, so use one pipeline per user or trust boundary."],
 	"tile": [],
 	"lanes": {},
 	"preconfig": {
@@ -27,17 +27,6 @@
 			"title": "API Key",
 			"description": "Tenki workspace API key (starts with tk_), from the API Keys screen in the Tenki console.",
 			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
-		},
-		"tenki.github_token": {
-			"type": "string",
-			"title": "GitHub Token",
-			"description": "Optional GitHub token that lets git clone private repositories. Tenki makes it available inside the sandbox as the <code>GH_TOKEN</code> and <code>GIT_TOKEN</code> environment variables, so any command the agent runs, and anyone else using the same pipeline, can read it: use a fine-grained, read-only token limited to the repositories the agent needs.",
-			"default": "",
-			"optional": true,
 			"secure": true,
 			"ui": {
 				"ui:widget": "ApiKeyWidget"
@@ -145,7 +134,7 @@
 		{
 			"section": "Pipe",
 			"title": "Tenki Sandbox",
-			"properties": ["type", "tenki.apikey", "tenki.github_token", "tenki.base_url", "tenki.cpu_cores", "tenki.memory_mb", "tenki.disk_size_gb", "tenki.idle_timeout_minutes", "tenki.max_duration_minutes", "tenki.exec_timeout_secs", "tenki.max_output_chars", "tenki.image", "tenki.toolGroups"]
+			"properties": ["type", "tenki.apikey", "tenki.base_url", "tenki.cpu_cores", "tenki.memory_mb", "tenki.disk_size_gb", "tenki.idle_timeout_minutes", "tenki.max_duration_minutes", "tenki.exec_timeout_secs", "tenki.max_output_chars", "tenki.image", "tenki.toolGroups"]
 		}
 	]
 }

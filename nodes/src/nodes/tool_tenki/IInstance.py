@@ -715,7 +715,7 @@ class IInstance(IInstanceBase):
         },
         description=lambda self: (
             "Clone a git repository into the remote Tenki sandbox, returning git's output and the folder "
-            'it was cloned into. Private GitHub repositories need a GitHub token configured on this node. '
+            'it was cloned into. Private repositories cannot be cloned: this node holds no git credentials. '
             f'The clone must finish within {self.IGlobal.rpc_timeout_secs}s, so use depth for large '
             f'repositories. {_SESSION_NOTE}'
         ),

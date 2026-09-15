@@ -150,7 +150,6 @@ def test_create_accepts_every_option_the_node_sends():
         'max_duration',
         'allow_inbound',
         'image',
-        'github_token',
         'name',
         'tags',
         'metadata',
@@ -165,15 +164,6 @@ def test_the_resource_rules_the_node_clamps_to(options):
     # IGlobal clamps disk_size_gb to at least 5 and rounds memory_mb down to even because of these.
     with pytest.raises(tenki.InvalidResourceConfigError):
         build_create_session_request(**options)
-
-
-def test_the_github_token_reaches_the_vm_as_environment_variables():
-    # The config field warns that anything running in the sandbox can read the token; this is why.
-    request = build_create_session_request(github_token='mock-github-token-placeholder-for-tests')
-    assert dict(request.env) == {
-        'GH_TOKEN': 'mock-github-token-placeholder-for-tests',
-        'GIT_TOKEN': 'mock-github-token-placeholder-for-tests',
-    }
 
 
 # ---------------------------------------------------------------------------

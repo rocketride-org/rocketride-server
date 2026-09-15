@@ -1541,21 +1541,24 @@ def test_a_concurrently_dropped_session_is_not_replaced_for_a_call_that_cannot_u
 
 
 # ---------------------------------------------------------------------------
-# GitHub token: a create-time option, so it is node config rather than a tool argument
+# No secret enters the VM: its user has passwordless sudo, so nothing placed there
+# could be kept from the commands an agent runs
 # ---------------------------------------------------------------------------
 
 
-def test_a_configured_github_token_is_given_to_the_session_at_create(monkeypatch, logs):
-    cfg = {'github_token': '  mock-github-token-placeholder-for-tests  '}
+def test_nothing_secret_is_sent_into_the_vm(monkeypatch, logs):
+    # A github_token left in an older pipeline's config is ignored rather than injected.
+    cfg = {'github_token': 'mock-github-token-placeholder-for-tests'}
     glb, client = _started(monkeypatch, _FakeSession('sb-1'), cfg=cfg)
     glb.get_session()
-    assert client.create_calls[0]['github_token'] == 'mock-github-token-placeholder-for-tests'
+    [call] = client.create_calls
+    assert not {'github_token', 'env', 'setup_env', 'setup_secrets', 'clone_repo_url'} & set(call)
 
 
-def test_end_global_forgets_the_github_token(monkeypatch, logs):
-    glb, _ = _started(monkeypatch, cfg={'github_token': 'mock-github-token-placeholder-for-tests'})
-    glb.endGlobal()
-    assert glb.github_token == ''
+def test_the_api_key_is_the_only_secret_field():
+    services = json.loads((_NODES_SRC / 'nodes' / 'tool_tenki' / 'services.json').read_text())
+    secret = {name for name, field in services['fields'].items() if field.get('secure')}
+    assert secret == {'tenki.apikey'}
 
 
 # ---------------------------------------------------------------------------
