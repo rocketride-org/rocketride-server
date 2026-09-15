@@ -404,6 +404,9 @@ class GuardrailsEngine:
     # An answer that opens by agreeing is affirming the figure, whatever it negates later.
     _AFFIRMS = re.compile(r"^\W*(?:yes|correct|indeed|true|confirmed|that is right|that's right)\b")
     _SENTENCE = re.compile(r'(?<=[.!?])\s+|\n+')
+    # A negation binds to its own clause: "nothing else to add, it was $94.7B" states
+    # the figure, it does not decline it.
+    _CLAUSE = re.compile(r',\s*|;\s*|\s+(?:but|though|although|however|while|whereas)\s+')
     # A question writing $94.7B and an answer writing $94.7 billion name the same
     # amount, so the scale word is folded to its initial before they are compared.
     _SCALE_WORDS = (('billion', 'b'), ('bn', 'b'), ('million', 'm'), ('thousand', 'k'))
@@ -445,9 +448,9 @@ class GuardrailsEngine:
 
         A refusal negates the figure it declines to state, which holds for wordings
         the phrase list never anticipated. The negation is looked for in the figure's
-        own sentence, so an affirmation carrying an unrelated "no" is not mistaken
-        for one, and an answer that opens by agreeing is never a refusal. The phrase
-        list stays for the few that state a shortfall without negating anything.
+        own clause, so an affirmation carrying an unrelated "no" is not mistaken for
+        one, and an answer that opens by agreeing is never a refusal. The phrase list
+        stays for the few that state a shortfall without negating anything.
         """
         body = output.strip().lower().replace('\u2019', "'")
         if cls._AFFIRMS.match(body):
@@ -455,8 +458,9 @@ class GuardrailsEngine:
         # The negation has to sit with the figure. A refusal negates the thing it
         # declines to state, while an affirmation can carry an unrelated "no".
         for sentence in cls._SENTENCE.split(body):
-            if cls.FIGURE_PATTERN.search(sentence) and cls._NEGATION.search(sentence):
-                return True
+            for clause in cls._CLAUSE.split(sentence):
+                if cls.FIGURE_PATTERN.search(clause) and cls._NEGATION.search(clause):
+                    return True
         return any(marker in body for marker in cls.ABSTENTION_MARKERS)
 
     @classmethod
