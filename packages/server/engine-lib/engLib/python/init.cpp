@@ -282,6 +282,9 @@ thread_local bool tls_debug_attached = false;
 thread_local int tls_debug_processed = 0;
 thread_local bool tls_thread_named = false;
 
+// Guards one-time profiler registration per thread
+thread_local bool tls_profiler_checked = false;
+
 //---------------------------------------------------------------------
 /// @details
 ///		Force a garbage collect
@@ -373,6 +376,48 @@ void setupDebug() noexcept {
 
         // Only attempt this once
         tls_thread_named = true;
+    }
+}
+
+//---------------------------------------------------------------------
+/// @details
+///		Registers the calling thread with the Python profiler if a
+///		profiling session is active. yappi hooks a thread either at
+///		start(), which sweeps the thread states existing at that moment,
+///		or through threading.Thread's bootstrap; a worker thread whose
+///		PyThreadState is created mid-session matches neither, so
+///		everything it runs would be invisible.
+///
+///		Once per thread is sufficient ONLY because LockPython's
+///		unbalanced inc_ref() pins the thread state for the process
+///		lifetime -- see lock.hpp:42-45. A thread that finds no session
+///		is swept up by any later start().
+///
+///		This MUST be called while the GIL is locked, and AFTER
+///		setupDebug(): that names the thread in threading._active, which
+///		is where yappi resolves context names from.
+///--------------------------------------------------------------------
+void setupProfiler() noexcept {
+    // Only ever attempt this once per thread
+    if (tls_profiler_checked)
+        return;
+    tls_profiler_checked = true;
+
+    try {
+        // If the manager was never imported no session can exist, and
+        // checking sys.modules avoids triggering an import here
+        auto sys_modules = py::module_::import("sys").attr("modules");
+        if (!sys_modules.contains("ai.common.cprofile_manager"))
+            return;
+
+        // Register with the active session; a no-op when none is running
+        auto mgr = py::module_::import("ai.common.cprofile_manager");
+        mgr.attr("profiler").attr("register_current_thread")();
+    } catch (const py::error_already_set &e) {
+        LOG(Python, "Python error during profiler registration {}", e.what());
+    } catch (...) {
+        // Profiling support must never break an engine->Python call
+        LOG(Python, "Error registering thread with the profiler");
     }
 }
 
