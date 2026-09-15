@@ -24,6 +24,7 @@
 from rocketlib import IInstanceBase
 from .IGlobal import IGlobal
 from ai.common.schema import Question
+from ai.common.utils import merge_metadata
 from rocketlib import debug, error, Entry
 
 
@@ -58,6 +59,16 @@ class IInstance(IInstanceBase):
         self.question = Question()
 
     def open(self, entry: Entry):
+        """Start each object from a clean question.
+
+        The engine builds one IInstance per filter instance and calls open()
+        once per object, so the accumulator this node merges into has to be
+        reset here rather than only in __init__. Without the reset a second
+        object inherits the first object's collected text, a duplicate copy of
+        the configured instructions, and its metadata — which downstream turns
+        a missing reference into a wrong one. Every other accumulating node
+        (tool_guild, tool_n8n, guardrails, answer_documents) resets the same way.
+        """
         # The turn starts here, so the question does too.
         self.has_output = False
         self._reset()
@@ -68,6 +79,14 @@ class IInstance(IInstanceBase):
         """
         for q in question.questions:
             self.question.addQuestion(q.text)
+
+        # This node emits a Question it built itself rather than forwarding the
+        # one it received, so metadata an upstream node attached would be lost
+        # here. Carry it across: metadata is the channel non-prompt pipeline
+        # state travels on (e.g. dataset_cobalt's expected answer, which
+        # eval_cobalt scores against downstream), and it must not be rendered
+        # into the prompt. Merging unions the keys of every question collected.
+        merge_metadata(self.question, getattr(question, 'metadata', None))
 
     def writeDocuments(self, documents):
         """

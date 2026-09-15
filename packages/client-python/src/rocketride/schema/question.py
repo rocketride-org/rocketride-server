@@ -89,6 +89,9 @@ class Answer(BaseModel):
     # `breakdown` list; surfaced in the Trace and the action history. Billing is
     # unaffected — it flows through the separate per-call metrics.counter path.
     tokens: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description='Metadata carried from the originating question or pipeline context.'
+    )
 
     @field_validator('answer', mode='before')
     @classmethod
@@ -354,6 +357,7 @@ class Question(BaseModel):
         context: Additional context information
         documents: Specific documents to reference
         questions: List of questions to ask
+        metadata: Pipeline metadata carried alongside the question.
     """
 
     type: QuestionType = Field(
@@ -390,6 +394,10 @@ class Question(BaseModel):
     )
     questions: Optional[List[QuestionText]] = Field(
         default_factory=list, description='List of questions to ask (usually just one).'
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description='Pipeline metadata that should not be rendered into the LLM prompt (used by evaluator/dataset nodes to carry expected values).',
     )
 
     def addInstruction(self, title: str, instruction: str):
