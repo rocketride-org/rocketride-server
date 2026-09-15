@@ -45,6 +45,7 @@ Caller responsibilities:
 
 import asyncio
 import heapq
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
@@ -132,6 +133,8 @@ class TaskScheduler:
         # Cancel every existing entry for this (team, project).
         for key in [k for k in self._entries if k[0] == team_id and k[1] == project_id]:
             self._entries.pop(key).cancelled = True
+
+        self._debug_sync(team_id, project_id, deployment)
 
         if deployment.get('state') != 'enabled':
             # Disabled/errored/removed deployments also lose their overlap guards.
@@ -308,7 +311,7 @@ class TaskScheduler:
                     # Skip if the previous run for this (team, project, source)
                     # is still active — schedules never overlap themselves.
                     if self._is_previous_run_active(entry.key):
-                        debug(f'[SCHEDULER] {entry.key}: previous run still active, skipping')
+                        self._debug_skip(entry.key)
                         self._note_skip(entry.key)
                         continue
 
@@ -454,7 +457,7 @@ class TaskScheduler:
             self._active_tokens[entry.key] = task_token
             await account.deployments_mark_run(org_id, team_id, project_id, source_id)
             await self._notify_deploy_changed(org_id, team_id, project_id, 'run')
-            debug(f'[SCHEDULER] {entry.key}: dispatched -> task {task_token}')
+            self._debug_dispatch(entry.key, task_token, ttl)
         finally:
             # A dispatch that succeeded replaced the in-flight marker with
             # the real token above; every other exit clears the marker so
@@ -485,3 +488,64 @@ class TaskScheduler:
         failed broadcast never fails the scheduler's bookkeeping.
         """
         await broadcast_deploy_changed(self._server, org_id, team_id, project_id, action)
+
+    # =========================================================================
+    # LOGGING
+    # =========================================================================
+
+    def _debug_sync(self, team_id: str, project_id: str, deployment: Dict[str, Any]) -> None:
+        """Log the deployment state a sync applies.
+
+        Enabled: every schedule with its cron, run window and pause state.
+        Otherwise: the runs whose overlap guard the sync is about to drop —
+        they are not stopped and keep running.
+        """
+        state = deployment.get('state')
+        if state == 'enabled':
+            schedules = [
+                f"{source_id} '{sched['cron']}' ttl={self._format_ttl(sched.get('ttl'))}"
+                + (' (paused)' if sched.get('paused', False) else '')
+                for source_id, sched in (deployment.get('schedules') or {}).items()
+                if (sched or {}).get('cron')
+            ]
+            debug(
+                f'[SCHEDULER] {team_id}/{project_id}: sync state=enabled, schedules: {", ".join(schedules) or "none"}'
+            )
+            return
+
+        running = [
+            f'"{self._server._task_control[token].id}"'
+            for key, token in self._active_tokens.items()
+            if key[0] == team_id
+            and key[1] == project_id
+            and token != _DISPATCHING
+            and self._is_previous_run_active(key)
+        ]
+        suffix = f', still running: {", ".join(running)} (not stopped)' if running else ''
+        debug(f'[SCHEDULER] {team_id}/{project_id}: sync state={state}{suffix}')
+
+    def _debug_skip(self, key: RunKey) -> None:
+        """Log a fire skipped by the overlap guard, naming the run that holds it.
+
+        Runs are named by task id, never by token: a task token is a bearer
+        credential for the task.
+        """
+        token = self._active_tokens.get(key)
+        ctrl = self._server._task_control.get(token) if token and token != _DISPATCHING else None
+        if ctrl and ctrl.task:
+            start = ctrl.task.get_status().startTime
+            running = f' (task "{ctrl.id}", running {int(time.time() - start) if start else 0}s)'
+        else:
+            running = ''
+        debug(f'[SCHEDULER] {key}: previous run still active{running}, skipping')
+
+    def _debug_dispatch(self, key: RunKey, task_token: str, ttl: Any) -> None:
+        """Log a successful dispatch with the run window it was given."""
+        ctrl = self._server._task_control.get(task_token)
+        task = f'"{ctrl.id}"' if ctrl else 'started'
+        debug(f'[SCHEDULER] {key}: dispatched -> task {task} (ttl: {self._format_ttl(ttl)})')
+
+    @staticmethod
+    def _format_ttl(ttl: Any) -> str:
+        """Render a run window as '1500s', or 'none' when unset."""
+        return f'{int(ttl)}s' if isinstance(ttl, (int, float)) and ttl else 'none'

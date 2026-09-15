@@ -937,19 +937,19 @@ class Task(DAPBase):
             if self._is_restarting:
                 self._status.status = 'Restarting'
                 self._status.state = TASK_STATE.CANCELLED.value
-                self.debug_message('Task restarted by user request')
+                self.debug_task_message('restarted by user request')
             else:
                 self._status.status = 'Stopped'
                 self._status.state = TASK_STATE.CANCELLED.value
-                self.debug_message('Task stopped by user request')
+                self.debug_task_message('stopped', reason=self._stop_reason or 'user')
         elif self._status.exitCode == 0:
             self._status.status = 'Completed'
             self._status.state = TASK_STATE.COMPLETED.value
-            self.debug_message('Task completed successfully')
+            self.debug_task_message('completed successfully')
         else:
             self._status.status = 'Stopped'
             self._status.state = TASK_STATE.CANCELLED.value
-            self.debug_message(f'Task terminated abnormally with exit code {exit_code}')
+            self.debug_task_message(f'terminated abnormally with exit code {exit_code}')
 
         # Send final status update — the stream's LAST status. For a real
         # termination the utilization gauges are explicitly zeroed: the
@@ -1677,6 +1677,23 @@ class Task(DAPBase):
         or performs any activity that indicates it's in active use.
         """
         self._idle_time = 0
+
+    def debug_task_message(self, title: str, reason: Optional[str] = None) -> None:
+        """
+        Log a task lifecycle event with the run classification and lifetime.
+
+        Args:
+            title: What happened, e.g. 'completed successfully'.
+            reason: Why it happened, when not implied by the title (e.g. 'ttl').
+        """
+        run = (
+            self._run_kind
+            if self._run_kind == 'dev' or not self._run_trigger
+            else f'{self._run_kind}/{self._run_trigger}'
+        )
+        lifetime = int(time.time() - self._status.startTime) if self._status.startTime else 0
+        details = f'reason: {reason}, ' if reason else ''
+        self.debug_message(f'Task {title} ({details}run: {run}, lifetime: {lifetime}s)')
 
     async def detach_task(self, conn: TaskConn) -> Dict[str, Any]:
         """

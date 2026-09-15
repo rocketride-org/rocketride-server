@@ -426,6 +426,8 @@ class TaskServer(DAPBase):
                         # run records as completed, never as cancelled.
                         await self.stop_task(control.token, reason='ttl')
 
+                self._debug_task_census()
+
             except Exception as e:
                 # Log errors but continue operation to maintain system stability
                 self.debug_message(f'Error during TTL monitoring cycle: {e}')
@@ -1507,8 +1509,7 @@ class TaskServer(DAPBase):
             # Start task execution
             await control.task.start_task()
 
-            # Log successful task creation
-            self.debug_message(f'Task "{control.id}" started... (type: {control.launch_type.value})')
+            self._debug_task_started(control, trigger, ttl)
 
             # Retrieve the task instance for status monitoring
             if wait_for_running:
@@ -1735,7 +1736,7 @@ class TaskServer(DAPBase):
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
                 await control.task.stop_task(reason)
-                self.debug_message(f'Task "{control.id}" stopped on request')
+                self.debug_message(f'Task "{control.id}" stopped on request (reason: {reason})')
 
         except Exception as e:
             # Log but ignore errors - task may already be stopped or removed
@@ -2005,3 +2006,40 @@ class TaskServer(DAPBase):
             f'{tallies["reserved"]} reserved by the operating system, '
             f'{tallies["unexpected"]} unexpected probe failures). {hint}{clamped}'
         )
+
+    def _debug_task_started(self, control: TASK_CONTROL, trigger: str, ttl: int) -> None:
+        """Log a started task with its launch type, run classification and run window."""
+        run = control.run_kind if control.run_kind == 'dev' or not trigger else f'{control.run_kind}/{trigger}'
+        window = f'{ttl}s' if ttl else 'none'
+        self.debug_message(
+            f'Task "{control.id}" started... (type: {control.launch_type.value}, run: {run}, ttl: {window})'
+        )
+
+    def _debug_task_census(self) -> None:
+        """
+        Log a one-line summary of live tasks.
+
+        Counts running tasks by run kind and how many are unbounded (ttl 0,
+        never stopped by the TTL monitor), naming the oldest unbounded one.
+        Silent when no task is running.
+        """
+        live = [c for c in list(self._task_control.values()) if c and c.task and not c.task.is_task_complete()]
+        if not live:
+            return
+
+        by_kind: Dict[str, int] = {}
+        for control in live:
+            by_kind[control.run_kind] = by_kind.get(control.run_kind, 0) + 1
+        kinds = ', '.join(f'{kind}: {count}' for kind, count in sorted(by_kind.items()))
+
+        now = time.time()
+        unbounded = [
+            (c, int(now - c.task.get_status().startTime) if c.task.get_status().startTime else 0)
+            for c in live
+            if c.task._ttl == 0
+        ]
+        message = f'Tasks running: {len(live)} ({kinds}), unbounded: {len(unbounded)}'
+        if unbounded:
+            oldest, lifetime = max(unbounded, key=lambda item: item[1])
+            message += f', oldest unbounded: "{oldest.id}" {lifetime}s'
+        self.debug_message(message)
