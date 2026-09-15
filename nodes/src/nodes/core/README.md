@@ -320,7 +320,7 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `microsoft.oAuthButton` | `string` | **Login with Microsoft** |  |
 | `microsoft.tenantId` | `string` | **Tenant ID**<br/>Enter your Microsoft Entra ID tenant (directory) ID.<br/><br/>Found in the Azure portal under Microsoft Entra ID > Overview. |  |
 | `microsoft.userPrincipalName` | `string` | **Acting User (UPN)**<br/>User principal name (e-mail) the app acts as. App-only Graph calls target /users/{upn}; this is required for App authentication. |  |
-| `microsoft.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Microsoft Graph API. |  |
+| `microsoft.userToken` | `string` | **Access Token**<br/>It is a long-term token that allows you to get new access tokens to access the Microsoft Graph API. |  |
 
 ### `services.common.remote.json`
 

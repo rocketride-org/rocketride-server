@@ -52,7 +52,7 @@
 		"microsoft.userToken": {
 			"type": "string",
 			"title": "Access Token",
-			"description": "It is a long term token that allows you to get new access tokens to access the Microsoft Graph API.",
+			"description": "It is a long-term token that allows you to get new access tokens to access the Microsoft Graph API.",
 			"ui:widget": "password",
 			"ui:disabled": true
 		}
