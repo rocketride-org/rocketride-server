@@ -267,6 +267,17 @@ async def shell_static(request: Request):
     if file_path.exists() and file_path.is_file():
         return FileResponse(file_path)
 
+    # A missing build asset under /shell/static/ must 404 — it must NOT fall
+    # through to the index.html SPA response below. Those are content-hashed
+    # bundles, not navigation routes; behind the staging CloudFront the 200
+    # HTML gets cached under the .js/.css URL (the /shell/static/* behavior is
+    # edge-cached + immutable), so every viewer is then served HTML-as-JS and
+    # the app fails to boot. A real 404 keeps the missing chunk uncacheable as
+    # a valid asset and lets the client recover. Only genuine navigation routes
+    # get the SPA fallback.
+    if request.url.path.startswith('/shell/static/'):
+        raise HTTPException(status_code=404, detail='Not found')
+
     # SPA fallback: serve index.html for any unmatched route so that
     # client-side routing (React Router, etc.) can handle it.
     index_path = Path(_shell_root) / 'index.html'
