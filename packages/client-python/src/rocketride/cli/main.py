@@ -30,6 +30,7 @@ Command surface (kept in exact parity with the TypeScript client's CLI):
     list                       List active tasks
     start / stop / upload      Task lifecycle
     validate <files...>        Validate pipeline files (CI-friendly exit codes)
+    eval <specs...>            Run golden-dataset evals (CI-friendly exit codes)
     otel                       OpenTelemetry bridge: traces + metrics over OTLP
     store dir/type/write/...   File store operations
     app create/deploy/verify   App lifecycle
@@ -238,6 +239,45 @@ def setup_parser() -> argparse.ArgumentParser:
     _add_connection_args(validate_parser)
     validate_parser.add_argument('files', nargs='+', help='Pipeline .pipe files or glob patterns to validate')
     validate_parser.add_argument('--source', default=None, help='Override source component ID for validation')
+
+    # ── eval ─────────────────────────────────────────────────────────────
+    eval_parser = subparsers.add_parser(
+        'eval',
+        help='Run golden-dataset evals against pipelines',
+        description='Run golden-dataset eval specs (<name>.eval.json) against their pipelines. '
+        'Exit codes: 0 = all cases passed; 1 = at least one case failed or a spec could not '
+        'run to completion; 2 = usage error, spec parse/validation error, connection failure, '
+        'or no case produced a result. A spec, connection, or JUnit-write error writes the shared '
+        '{"error": ...} envelope to --json [FILE] in place of the report, so a report file '
+        'from an earlier run is never left behind as the result of this one.',
+    )
+    _add_connection_args(eval_parser)
+
+    # Eval spec files as positional arguments - supports glob patterns
+    eval_parser.add_argument(
+        'files',
+        nargs='+',
+        help='Eval spec files or glob patterns (<name>.eval.json)',
+    )
+
+    # Optional substring filter on case names
+    eval_parser.add_argument(
+        '--case',
+        help='Only run cases whose name contains this substring',
+    )
+
+    # Stop at the first failing case
+    eval_parser.add_argument(
+        '--fail-fast',
+        action='store_true',
+        help='Stop at the first failing case',
+    )
+
+    # Optional JUnit XML report path
+    eval_parser.add_argument(
+        '--junit',
+        help='Write a JUnit XML report to this path (in addition to normal output)',
+    )
 
     # ── otel ─────────────────────────────────────────────────────────────
     # A long-running foreground bridge: it streams to an OTLP collector and
@@ -508,6 +548,7 @@ async def _dispatch(args) -> int:
     from .commands.app import run_app
     from .commands.auth import run_init, run_login
     from .commands.deploy import run_deploy
+    from .commands.eval import run_eval
     from .commands.otel import run_otel
     from .commands.store import run_store
     from .commands.tasks import run_list, run_start, run_stop, run_upload
@@ -527,6 +568,8 @@ async def _dispatch(args) -> int:
         return await run_upload(args)
     if args.command == 'validate':
         return await run_validate(args)
+    if args.command == 'eval':
+        return await run_eval(args)
     if args.command == 'otel':
         return await run_otel(args)
     if args.command == 'store':
