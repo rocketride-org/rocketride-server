@@ -558,3 +558,56 @@ def test_sweeper_reaps_an_abandoned_session_without_further_traffic():
     out = reg.execute(sid2, 'SELECT count(*) AS n FROM t')
     reg.commit(sid2)
     assert out['rows'][0]['n'] == 0
+
+
+# ---------------------------------------------------------------------------
+# Session-after-error contract on non-aborting dialects
+# ---------------------------------------------------------------------------
+
+
+def test_failed_statement_leaves_the_session_committable_on_non_aborting_dialects():
+    """A failed statement no longer rolls the session back; the client owns recovery.
+
+    Postgres aborts the whole transaction and the registry refuses the later
+    commit (see test_commit_refused_on_an_aborted_transaction). MySQL and SQLite
+    do not: the transaction stays usable, so a commit persists the work that
+    preceded the error. SQLite stands in for that dialect class here — it is not
+    MySQL, but it shares the non-aborting behaviour this test pins.
+
+    Before this change the node rolled the session back and closed it on any
+    failed statement, so a later commit raised `unknown or expired transaction
+    session`. Committing pre-error work is now reachable, which is what makes
+    savepoint recovery possible at all.
+    """
+    reg = TransactionRegistry(_engine_shared(), max_rows=1000)
+    sid = reg.begin()
+    reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['before-error'])
+    with pytest.raises(Exception):
+        reg.execute(sid, 'INSERT INTO nonexistent_table (v) VALUES ($1)', ['boom'])
+
+    # The session survives the failure rather than being rolled back and dropped.
+    assert sid in reg._sessions
+    reg.commit(sid)
+
+    sid2 = reg.begin()
+    out = reg.execute(sid2, 'SELECT v FROM t')
+    reg.commit(sid2)
+    assert [r['v'] for r in out['rows']] == ['before-error']
+
+
+def test_client_can_recover_a_failed_statement_with_rollback_to_savepoint():
+    """The documented recovery path: roll back to a savepoint, then carry on."""
+    reg = TransactionRegistry(_engine_shared(), max_rows=1000)
+    sid = reg.begin()
+    reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['keep'])
+    reg.execute(sid, 'savepoint sp1')
+    with pytest.raises(Exception):
+        reg.execute(sid, 'INSERT INTO nonexistent_table (v) VALUES ($1)', ['boom'])
+    reg.execute(sid, 'rollback to savepoint sp1')
+    reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['after-recovery'])
+    reg.commit(sid)
+
+    sid2 = reg.begin()
+    out = reg.execute(sid2, 'SELECT v FROM t ORDER BY v')
+    reg.commit(sid2)
+    assert [r['v'] for r in out['rows']] == ['after-recovery', 'keep']

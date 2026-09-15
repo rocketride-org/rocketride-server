@@ -68,6 +68,15 @@ ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`.
 write-capable operations fail when **Allow direct query execution** is off;
 unknown or expired session IDs also fail. Invalid tool input raises an error.
 
+A failed statement does **not** roll the session back. The session stays open
+and MySQL leaves its transaction usable, so a later `commit` persists the work
+that preceded the error — recovery is the client's responsibility. Issue
+`rollback` to discard the session, or `rollback to savepoint <name>` to undo
+only the failed portion and continue; the idle reaper is the backstop for
+sessions that are abandoned instead. (Postgres differs: it aborts the whole
+transaction on any failure, so the node refuses the later commit rather than
+letting it degrade to a silent rollback.)
+
 ## Configuration
 
 Start with the default connection values, then set the database endpoint and
