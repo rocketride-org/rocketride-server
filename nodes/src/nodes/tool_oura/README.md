@@ -112,7 +112,7 @@ Oura HTTP errors are mapped to descriptive failures the agent can act on:
 
 ## Dependencies
 
-- `requests` `>=2.34.2`
+- `requests`
 
 ## Source
 

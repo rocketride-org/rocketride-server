@@ -262,7 +262,7 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `google.customerId` | `string` | **Customer ID**<br/>Enter your Google Workspace Customer ID.<br/><br/>This unique identifier is assigned to your organization by Google. It is used to specify the particular Google Workspace domain you want to manage. |  |
 | `google.oAuthButton` | `string` | **Login with Google** |  |
 | `google.serviceKey` | `string` | **Service Account Key File**<br/>Upload the JSON key file for your Google Workspace service account.<br/><br/>This file contains the credentials necessary to authenticate API requests. |  |
-| `google.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Google API. |  |
+| `google.userToken` | `string` | **Access Token**<br/>It is a long-term token that allows you to get new access tokens to access the Google API. |  |
 
 ### `services.common.json`
 
@@ -321,7 +321,7 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `microsoft.oAuthButton` | `string` | **Login with Microsoft** |  |
 | `microsoft.tenantId` | `string` | **Tenant ID**<br/>Enter your Microsoft Entra ID tenant (directory) ID.<br/><br/>Found in the Azure portal under Microsoft Entra ID > Overview. |  |
 | `microsoft.userPrincipalName` | `string` | **Acting User (UPN)**<br/>User principal name (e-mail) the app acts as. App-only Graph calls target /users/{upn}; this is required for App authentication. |  |
-| `microsoft.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Microsoft Graph API. |  |
+| `microsoft.userToken` | `string` | **Access Token**<br/>It is a long-term token that allows you to get new access tokens to access the Microsoft Graph API. |  |
 
 ### `services.common.remote.json`
 

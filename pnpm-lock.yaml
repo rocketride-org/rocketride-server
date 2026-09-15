@@ -1115,6 +1115,58 @@ importers:
         specifier: ^5.3.0
         version: 5.9.3
 
+  docs/docusaurus:
+    dependencies:
+      '@docusaurus/core':
+        specifier: 3.8.1
+        version: 3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3)
+      '@docusaurus/plugin-client-redirects':
+        specifier: 3.8.1
+        version: 3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3)
+      '@docusaurus/preset-classic':
+        specifier: 3.8.1
+        version: 3.8.1(@algolia/client-search@5.53.0)(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(@types/react@18.3.31)(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(search-insights@2.17.3)(typescript@5.6.3)
+      '@easyops-cn/docusaurus-search-local':
+        specifier: ^0.55.1
+        version: 0.55.2(@docusaurus/theme-common@3.8.1(@docusaurus/plugin-content-docs@3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3)
+      '@mdx-js/react':
+        specifier: ^3.0.0
+        version: 3.1.1(@types/react@18.3.31)(react@19.2.7)
+      clsx:
+        specifier: ^2.0.0
+        version: 2.1.1
+      prism-react-renderer:
+        specifier: ^2.3.0
+        version: 2.4.1(react@19.2.7)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.7(react@19.2.7)
+      react-icons:
+        specifier: ^5.6.0
+        version: 5.6.0(react@19.2.7)
+    devDependencies:
+      '@docusaurus/module-type-aliases':
+        specifier: 3.8.1
+        version: 3.8.1(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@docusaurus/plugin-content-docs':
+        specifier: 3.8.1
+        version: 3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3)
+      '@docusaurus/theme-common':
+        specifier: 3.8.1
+        version: 3.8.1(@docusaurus/plugin-content-docs@3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@docusaurus/tsconfig':
+        specifier: 3.8.1
+        version: 3.8.1
+      '@docusaurus/types':
+        specifier: 3.8.1
+        version: 3.8.1(clean-css@5.3.3)(cssnano@6.1.2(postcss@8.5.26))(html-minifier-terser@7.2.0)(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      typescript:
+        specifier: ~5.6.2
+        version: 5.6.3
+
   packages/ai/src/ai/modules/mcp/apps:
     dependencies:
       '@modelcontextprotocol/ext-apps':
@@ -1237,58 +1289,6 @@ importers:
       ws:
         specifier: '>=8.21.0 <9'
         version: 8.21.0
-
-  docs/docusaurus:
-    dependencies:
-      '@docusaurus/core':
-        specifier: 3.8.1
-        version: 3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3)
-      '@docusaurus/plugin-client-redirects':
-        specifier: 3.8.1
-        version: 3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3)
-      '@docusaurus/preset-classic':
-        specifier: 3.8.1
-        version: 3.8.1(@algolia/client-search@5.53.0)(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(@types/react@18.3.31)(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(search-insights@2.17.3)(typescript@5.6.3)
-      '@easyops-cn/docusaurus-search-local':
-        specifier: ^0.55.1
-        version: 0.55.2(@docusaurus/theme-common@3.8.1(@docusaurus/plugin-content-docs@3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3)
-      '@mdx-js/react':
-        specifier: ^3.0.0
-        version: 3.1.1(@types/react@18.3.31)(react@19.2.7)
-      clsx:
-        specifier: ^2.0.0
-        version: 2.1.1
-      prism-react-renderer:
-        specifier: ^2.3.0
-        version: 2.4.1(react@19.2.7)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.7
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.7(react@19.2.7)
-      react-icons:
-        specifier: ^5.6.0
-        version: 5.6.0(react@19.2.7)
-    devDependencies:
-      '@docusaurus/module-type-aliases':
-        specifier: 3.8.1
-        version: 3.8.1(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@docusaurus/plugin-content-docs':
-        specifier: 3.8.1
-        version: 3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3)
-      '@docusaurus/theme-common':
-        specifier: 3.8.1
-        version: 3.8.1(@docusaurus/plugin-content-docs@3.8.1(@mdx-js/react@3.1.1(@types/react@18.3.31)(react@19.2.7))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@5.6.3))(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@docusaurus/tsconfig':
-        specifier: 3.8.1
-        version: 3.8.1
-      '@docusaurus/types':
-        specifier: 3.8.1
-        version: 3.8.1(clean-css@5.3.3)(cssnano@6.1.2(postcss@8.5.26))(html-minifier-terser@7.2.0)(postcss@8.5.26)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      typescript:
-        specifier: ~5.6.2
-        version: 5.6.3
 
   packages/shell:
     dependencies:

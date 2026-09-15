@@ -57,11 +57,17 @@ For each object, the node derives a target path, hash-truncates over-long path c
 
 ## Schema
 
-_No configuration fields._
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `anonymize` |  |  |  |
+| `text_output.password` | `string` | **Password**<br/>Password for the SMB user name above. |  |
+| `text_output.server` | `string` | **Server Name**<br/>Host name or IP address of the SMB server hosting the share, e.g. files.example.com or 10.0.0.12. |  |
+| `text_output.username` | `string` | **User Name**<br/>User name used to authenticate against the SMB share. Leave the user name and password empty to connect with the engine's own credentials. |  |
 
 ## Dependencies
 
 - `cffi`
+- `cryptography`
 - `pycparser`
 - `pyspnego`
 - `smbprotocol`

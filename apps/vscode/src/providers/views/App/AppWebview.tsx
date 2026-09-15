@@ -40,7 +40,7 @@ type IncomingMessage =
 			type: 'appdev:init';
 			app: AppSummary;
 			previewUrl: string;
-			capabilities: { hasCodePane: boolean; hasNativeFiles: boolean; canDebug: boolean };
+			capabilities: { hasCodePane: boolean; hasNativeFiles: boolean; canDebug: boolean; hasReviewLadder: boolean };
 			stage?: AppBuilderStage;
 			prefs?: Record<string, unknown>;
 	  }
@@ -447,7 +447,9 @@ const AppWebview: React.FC = () => {
 	// ── Init payload from the extension host ────────────────────────────
 	const [app, setApp] = useState<AppSummary | null>(null);
 	const [previewUrl, setPreviewUrl] = useState('');
-	const [capabilities, setCapabilities] = useState({ hasCodePane: false, hasNativeFiles: true, canDebug: true });
+	// hasReviewLadder defaults true (the gated flow) until init declares the
+	// server; an OSS server flips it off and @public publishes directly.
+	const [capabilities, setCapabilities] = useState({ hasCodePane: false, hasNativeFiles: true, canDebug: true, hasReviewLadder: true });
 	const [initialStage, setInitialStage] = useState<AppBuilderStage>('dashboard');
 	const [reloadSeq, setReloadSeq] = useState(0);
 	const [devEntry, setDevEntry] = useState('');
@@ -810,21 +812,29 @@ const AppWebview: React.FC = () => {
 			// One version's server build log ('' = none) — the Deploy card's
 			// "failed" badge opens it in the log modal.
 			loadBuildLog: async (version) => await rpc<string>('buildLog', [version]),
-			submitForReview: async (version) => {
-				await rpc('submit', [version]);
-			},
-			withdrawReview: async (version) => {
-				await rpc('withdraw', [version]);
-			},
+			// Review verbs exist only where the server runs the ladder (SaaS);
+			// omitting them tells the appdev views to open @public directly.
+			submitForReview: capabilities.hasReviewLadder
+				? async (version) => {
+						await rpc('submit', [version]);
+					}
+				: undefined,
+			withdrawReview: capabilities.hasReviewLadder
+				? async (version) => {
+						await rpc('withdraw', [version]);
+					}
+				: undefined,
 			getWhereLive: async () => {
 				const pins = await rpc<WirePin[]>('where');
 				return pins.map((p) => {
 					const rung = (p.rung === 'personal' || p.rung === 'team' || p.rung === 'public' ? p.rung : 'personal') as 'personal' | 'team' | 'public';
 					// p.state is the bound DEPLOYMENT's review state
 					// (private|submit|ready|rejected). Internal rungs serve live;
-					// the public rung shows the review gate — 'ready' = approved,
-					// anything else = still in review.
-					const state: 'enabled' | 'approved' | 'pending' = rung !== 'public' ? 'enabled' : p.state === 'ready' ? 'approved' : 'pending';
+					// on a review-ladder server the public rung shows the gate —
+					// 'ready' = approved, anything else = still in review. Without
+					// the ladder (OSS) a public pin serves as soon as it exists.
+					const state: 'enabled' | 'approved' | 'pending' =
+						rung !== 'public' ? 'enabled' : !capabilities.hasReviewLadder || p.state === 'ready' ? 'approved' : 'pending';
 					return {
 						rung,
 						label: rung.charAt(0).toUpperCase() + rung.slice(1),

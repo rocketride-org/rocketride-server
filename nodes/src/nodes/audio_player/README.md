@@ -58,7 +58,7 @@ _No configuration fields._
 ## Dependencies
 
 - `imageio_ffmpeg`
-- `sounddevice`
+- `sounddevice` `>=0.5`
 
 ## Source
 

@@ -55,7 +55,7 @@
 		"gohighlevel.toolGroups": {
 			"type": "array",
 			"title": "Tool groups",
-			"description": "Which groups of GoHighLevel tools this node publishes to the agent. This node implements 101 tools across 18 groups, far more than an LLM can choose between reliably, so only the listed groups are exposed. <b>Leave this empty for the recommended set</b>: the 71 tools marked default below, which is everything an agent needs to run lead nurture and appointment booking end to end. Use <b>all</b> to publish all 101. Naming groups replaces the default set rather than adding to it, and a value that names only unknown groups stops the pipeline at startup rather than widening back to the defaults. <b>message_sending</b> (send a message, cancel a scheduled send) is a deliberate opt-in: sends from an unattended pipeline cannot be recalled.",
+			"description": "Which groups of GoHighLevel tools this node publishes to the agent. This node implements 101 tools across 18 groups, far more than an LLM can choose between reliably, so only the listed groups are exposed. <b>Leave this empty for the recommended set</b>: the 71 tools marked default below, which is everything an agent needs to run lead nurture and appointment booking end-to-end. Use <b>all</b> to publish all 101. Naming groups replaces the default set rather than adding to it, and a value that names only unknown groups stops the pipeline at startup rather than widening back to the defaults. <b>message_sending</b> (send a message, cancel a scheduled send) is a deliberate opt-in: sends from an unattended pipeline cannot be recalled.",
 			"uniqueItems": true,
 			"items": {
 				"type": "string",

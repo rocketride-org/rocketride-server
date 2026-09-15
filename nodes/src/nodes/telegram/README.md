@@ -68,7 +68,7 @@ Webhook delivery uses the pipeline’s shared web server and requires the proces
 
 ## Dependencies
 
-- `aiohttp` `>=3.13.5`
+- `aiohttp` `>=3.14.1`
 - `requests`
 - `fastapi`
 

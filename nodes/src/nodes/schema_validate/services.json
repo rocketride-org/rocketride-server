@@ -133,7 +133,7 @@
 		"schema_validate.category_metric_map": {
 			"type": "object",
 			"title": "Category → metric keywords",
-			"description": "Map of canonical category to metric keyword substrings that imply it. Drives the cost-as-revenue check. Leave empty to skip the metric/category mismatch check."
+			"description": "Map of canonical category to metric keyword substrings that imply it. Drives the cost-as-revenue check. Leave unset to use the built-in map covering revenue, expense, asset, and liability; set an explicit empty map to disable the metric/category mismatch check."
 		},
 		"schema_validate.sign": {
 			"type": "string",
