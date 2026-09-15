@@ -32,7 +32,9 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 Each document lists every constructor option, method, type, and usage example for that client.
 
 Both SDK packages also install the [`rocketride` CLI](/connect/cli) — the same
-operations from a terminal.
+operations from a terminal. The Python package additionally ships the
+[OpenTelemetry bridge](/clients/python/otel-bridge) (`rocketride otel`), which
+exports live pipeline traces and metrics over OTLP.
 
 ---
 

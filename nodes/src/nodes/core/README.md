@@ -147,6 +147,7 @@ These files define common fields that are merged into a service definition as re
 | `vector.host` / `vector.port` | string / number | Vector-store server address and port (with `vector.cloud.*` and `vector.local.*` variants, plus `vector.local.grpc_port`). |
 | `vector.collection` | string, default `ROCKETRIDE` | Collection name. |
 | `vector.score` | number 0-1, default `0.7` | Minimum retrieval score, from `0.0` "All results" to `1.0` "Almost identical". |
+| `vector.top_k` | integer or string 1-1000, optional | Chroma only: overrides the caller's retrieval limit (25 on the data lane) in either direction for semantic and keyword search. Unset keeps the caller's limit. |
 | `vector.apikey` | string, secure | API key. |
 | `vectorizer.embedding` | combo `embedding` | Embedding provider selector. |
 | `vectorizer.store` | combo `store` | Vector-store provider selector. |
@@ -261,7 +262,7 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `google.customerId` | `string` | **Customer ID**<br/>Enter your Google Workspace Customer ID.<br/><br/>This unique identifier is assigned to your organization by Google. It is used to specify the particular Google Workspace domain you want to manage. |  |
 | `google.oAuthButton` | `string` | **Login with Google** |  |
 | `google.serviceKey` | `string` | **Service Account Key File**<br/>Upload the JSON key file for your Google Workspace service account.<br/><br/>This file contains the credentials necessary to authenticate API requests. |  |
-| `google.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Google API. |  |
+| `google.userToken` | `string` | **Access Token**<br/>It is a long-term token that allows you to get new access tokens to access the Google API. |  |
 
 ### `services.common.json`
 
@@ -348,6 +349,7 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `vector.local.port` | `number` | **Port**<br/>Enter the port number |  |
 | `vector.port` | `number` | **Port**<br/>Enter the port number |  |
 | `vector.score` | `number` | **Retrieval Score**<br/>Minumum retrieval score | `0.7` |
+| `vector.top_k` | `integer,string` | **Top K**<br/>Chroma only: overrides the caller's retrieval limit in either direction (raising or lowering it) for semantic and keyword search; an integer or integer string from 1 to 1000, and when left unset the caller's own limit applies. |  |
 | `vectorizer.embedding` |  | **Embedding** |  |
 | `vectorizer.store` |  | **Vector Store** |  |
 

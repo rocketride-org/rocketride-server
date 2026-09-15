@@ -74,8 +74,15 @@ class Store(DocumentStoreBase):
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
     similarity: str = 'Cosine'
+    top_k: int | None = None
     client: chromadb.HttpClient
     collectionObj: chromadb.Collection | None = None
+
+    # Upper bound for the configured top_k. Generous enough for reranker
+    # fan-in (40x the data-lane default of 25, 10x the chroma.search tool's
+    # own cap of 100) while keeping a fat-fingered value from turning a query
+    # into a full-collection scan.
+    MAX_TOP_K: int = 1000
 
     @staticmethod
     def _coerceBool(value: Any) -> bool:
@@ -106,6 +113,12 @@ class Store(DocumentStoreBase):
         self.host = re.sub(r'^https?://', '', config.get('host', 'localhost').strip()).rstrip('/')
         self.port = self._coercePort(config.get('port', 8000))
         self.threshold_search = config.get('score', 0.5)
+
+        # Optional per-node retrieval limit. When set, it controls how many
+        # candidate documents are fetched from Chroma before score filtering,
+        # overriding the incoming DocFilter default (25). Left unset it falls
+        # back to the caller-supplied limit, so existing pipelines are unchanged.
+        self.top_k = self._coerceTopK(config.get('top_k', None))
 
         # Strip API key also
         self.apikey = config.get('apikey', None)
@@ -228,6 +241,79 @@ class Store(DocumentStoreBase):
             debug(f'chroma: port {parsed} is out of range 1-65535; using default {default}')
             return default
         return parsed
+
+    @staticmethod
+    def _coerceTopK(value: Any) -> int | None:
+        """
+        Validate the configured top_k and coerce it to a positive int, or None.
+
+        Accepts an int, a whole-number float, or an integer string, rejecting
+        bool. Like the port field, the schema accepts both a number and a
+        string because env-var interpolation always yields a string (e.g.
+        '${ROCKETRIDE_TOP_K}').
+
+        Returns None -- meaning "no override", so retrieval falls back to the
+        incoming DocFilter limit -- for an unset/blank value and for a still
+        unresolved '${...}' placeholder. Falling back to the *absence of an
+        override* is the correct answer here rather than a hardcoded 25: the
+        whole design is that an unset top_k means "use the caller's limit".
+
+        An explicit but malformed value still raises: a fractional number, a
+        non-integer string, or anything outside 1..``MAX_TOP_K`` is a pipeline
+        misconfiguration this node deliberately rejects instead of quietly
+        retrieving a different number of documents than the author asked for.
+
+        Note: this deliberately does not reuse ``ai.common.utils.config_int``.
+        That helper always returns an int (never None, so "unset" could not
+        fall back to ``docFilter.limit``), treats ``<= 0`` as "unspecified",
+        and silently clamps out-of-range values instead of raising. Here an
+        out-of-range top_k is a pipeline misconfiguration worth failing on at
+        startup rather than quietly retrieving a different number of documents
+        than the author asked for. Do not "simplify" this to ``config_int``
+        without changing those semantics on purpose.
+        """
+        if value is None:
+            return None
+        invalid = f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}'
+        # bool is an int subclass; reject it explicitly.
+        if isinstance(value, bool):
+            raise ValueError(invalid)
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, float):
+            # A JSON 'number' may arrive as a float (e.g. 50.0). Accept
+            # whole-number floats; a fractional top_k is meaningless.
+            if not value.is_integer():
+                raise ValueError(invalid)
+            parsed = int(value)
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            # An unresolved '${...}' placeholder is not a limit the author
+            # chose, so it falls back to the caller's limit rather than
+            # failing the node -- the same fallback _coercePort makes.
+            if re.fullmatch(r'\$\{[^{}]+\}', text):
+                debug("chroma: top_k contains an unresolved env var; using the caller's DocFilter.limit")
+                return None
+            try:
+                parsed = int(text)
+            except ValueError:
+                raise ValueError(invalid) from None
+        else:
+            raise ValueError(invalid)
+        if not 1 <= parsed <= Store.MAX_TOP_K:
+            raise ValueError(invalid)
+        return parsed
+
+    def _effectiveLimit(self, docFilter: DocFilter) -> int | None:
+        """
+        Resolve the retrieval limit: the configured top_k wins when set,
+        otherwise the caller-supplied DocFilter limit is used.
+        """
+        if self.top_k is not None:
+            return self.top_k
+        return docFilter.limit
 
     def _getServerVersion(self) -> str | None:
         """
@@ -412,7 +498,7 @@ class Store(DocumentStoreBase):
             where=filters,
             where_document={'$contains': query.text},
             offset=docFilter.offset,
-            limit=docFilter.limit,
+            limit=self._effectiveLimit(docFilter),
             include=['metadatas', 'documents'],
         )
 
@@ -450,7 +536,9 @@ class Store(DocumentStoreBase):
             raise BaseException('Non-zero offset is not supported in semantic searching')
 
         # Perform the search
-        results = self.collectionObj.query(query_embeddings=[query.embedding], n_results=docFilter.limit, where=filters)
+        results = self.collectionObj.query(
+            query_embeddings=[query.embedding], n_results=self._effectiveLimit(docFilter), where=filters
+        )
 
         # Convert the points into groups
         docs = self._convertToDocs(results)
@@ -471,6 +559,11 @@ class Store(DocumentStoreBase):
         filter_dict = self._convertFilter(docFilter)
 
         # Perform the query
+        #
+        # Note: get() is an exact-fetch path (QuestionType.GET and, internally,
+        # full-table/full-document rehydration). It must honor the caller's
+        # limit directly — the node-level top_k applies only to similarity
+        # search (searchSemantic/searchKeyword), not to whole-object fetches.
         results = self.collectionObj.get(
             where=filter_dict,
             offset=docFilter.offset,

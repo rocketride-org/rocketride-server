@@ -64,6 +64,14 @@ Semantic retrieval needs a question embedding and does not support a non-zero of
 
 The retrieval score controls which semantic hits are emitted after distance conversion. It affects semantic questions only, not keyword containment. Default filters exclude records with `isDeleted` metadata set to true, while records without that key are treated as active. The same filter conversion supports node, parent, object, table, chunk range, and permission constraints, so prefer filters over copying data into many collections merely to narrow a query.
 
+### Top K
+
+**Top K** (`top_k`) sets how many candidate chunks Chroma fetches for a semantic or keyword question before score filtering. It overrides the caller's request limit in both directions rather than only widening it: on the data lane that limit is 25, so `50` doubles the candidate pool while `20` shrinks it. Leave it unset to use the caller's limit as-is. The `chroma.search` tool sets its own `top_k` (default 10, maximum 100), and whole-object fetches are unaffected.
+
+Valid values are `1` to `1000`, written as an integer (`50`) or an integer string (`"50"`). The string form exists because environment interpolation always resolves to a string, so a `${ROCKETRIDE_TOP_K}` placeholder validates; a placeholder still unresolved at run time falls back to the caller's limit rather than failing the node, the same way `port` falls back to its default. Any other non-integer value, or an integer outside that range, is rejected when the node starts instead of being silently clamped, so a mistyped value surfaces immediately rather than quietly changing how many documents you retrieve.
+
+To widen the pool for a reranker or for hard, specific questions, pick a value comfortably above the caller's limit, for example `50`, and place a `rerank_cohere` node after this one to reorder the candidates and keep a small, high-relevance set. A complete example is at [`examples/rag-rerank-pipeline.pipe`](../../../../examples/rag-rerank-pipeline.pipe).
+
 ### Profile choice and collection creation
 
 Use **Your own ChromaDB server** when you control a reachable server and do not need token authentication. Use **ChromaDB Cloud Server** when that server expects the configured API key. The profile determines how the HTTP client is constructed, so switching profiles is not just a different display label for the same connection.
