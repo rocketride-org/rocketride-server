@@ -5,7 +5,12 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-/** Verify that pinned GitHub Action SHAs agree with their version comments. */
+/**
+ * Verify that pinned GitHub Action SHAs agree with their version comments.
+ *
+ * Covers both `.github/workflows/*.yml` and the composite actions under
+ * `.github/actions/<name>/action.yml`.
+ */
 
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -100,11 +105,45 @@ async function workflowFiles(root) {
 	return entries.filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name)).map((entry) => path.join(workflowDir, entry.name));
 }
 
+/**
+ * Return every composite action definition in `.github/actions/<name>/`.
+ *
+ * A composite action pins third-party actions exactly the way a workflow does,
+ * and those pins were outside this guard entirely — a composite action could
+ * carry an unpinned or mismatched `uses:` and CI would pass. The directory is
+ * optional: a repository with no composite actions gets an empty list.
+ */
+async function compositeActionFiles(root) {
+	const actionsDir = path.join(root, '.github', 'actions');
+	let entries;
+	try {
+		entries = await fs.readdir(actionsDir, { withFileTypes: true });
+	} catch (error) {
+		if (error.code === 'ENOENT') return [];
+		throw error;
+	}
+	const files = [];
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		for (const name of ['action.yml', 'action.yaml']) {
+			const candidate = path.join(actionsDir, entry.name, name);
+			try {
+				await fs.access(candidate);
+				files.push(candidate);
+			} catch {
+				// The other spelling, or no action definition in this directory.
+			}
+		}
+	}
+	return files;
+}
+
 /** Run the repository-wide verifier and emit GitHub annotation commands. */
 async function main() {
 	const root = process.cwd();
 	const pins = [];
-	for (const filename of await workflowFiles(root)) {
+	const sources = [...(await workflowFiles(root)), ...(await compositeActionFiles(root))];
+	for (const filename of sources) {
 		const relative = path.relative(root, filename).replaceAll('\\', '/');
 		pins.push(...parseWorkflow(await fs.readFile(filename, 'utf8'), relative));
 	}
@@ -125,7 +164,7 @@ async function main() {
 		process.exitCode = 1;
 		return;
 	}
-	console.log(`Verified ${pins.length} action pins against ${cache.size} upstream tags.`);
+	console.log(`Verified ${pins.length} action pins across ${sources.length} workflow and composite-action files against ${cache.size} upstream tags.`);
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
