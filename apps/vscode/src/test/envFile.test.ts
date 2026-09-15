@@ -23,7 +23,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeEnvText, resolveConnectionEnv } from '../shared/util/envFile';
+import { applyManagedComments, DEPLOY_PAIR_COMMENT, DEV_PAIR_COMMENT, mergeEnvText, resolveConnectionEnv } from '../shared/util/envFile';
 
 const URI = 'http://localhost:54321';
 const KEY = 'MYAPIKEY';
@@ -163,18 +163,46 @@ for (const mode of ['local', 'docker', 'service', 'onprem'] as const) {
 	});
 }
 
-test('skips cloud mode (OAuth token is not an SDK key)', () => {
-	assert.equal(
-		resolveConnectionEnv({ group: 'development', mode: 'cloud', httpUrl: 'https://api.rocketride.ai', apiKey: 'oauth-token' }),
-		null,
+test('writes the dev pair for cloud mode (the credential is a persistent rr_* key)', () => {
+	assert.deepEqual(
+		resolveConnectionEnv({ group: 'development', mode: 'cloud', httpUrl: 'https://api.rocketride.ai', apiKey: 'rr_cloud_key' }),
+		{ ROCKETRIDE_URI: 'https://api.rocketride.ai', ROCKETRIDE_APIKEY: 'rr_cloud_key' },
 	);
 });
 
-test('skips the deployment group so it never fights over .env', () => {
-	assert.equal(
-		resolveConnectionEnv({ group: 'deployment', mode: 'local', httpUrl: URI, apiKey: KEY }),
-		null,
+test('the deployment group writes its own DEPLOY pair, never the dev keys', () => {
+	assert.deepEqual(
+		resolveConnectionEnv({ group: 'deployment', mode: 'cloud', httpUrl: 'https://api.rocketride.ai', apiKey: 'rr_cloud_key' }),
+		{ ROCKETRIDE_DEPLOY_URI: 'https://api.rocketride.ai', ROCKETRIDE_DEPLOY_APIKEY: 'rr_cloud_key' },
 	);
+});
+
+// --- applyManagedComments ----------------------------------------------------
+
+test('adds the doctrine comment above each managed pair', () => {
+	const text = mergeEnvText('', { ROCKETRIDE_URI: URI, ROCKETRIDE_APIKEY: KEY, ROCKETRIDE_DEPLOY_URI: URI, ROCKETRIDE_DEPLOY_APIKEY: KEY });
+	const commented = applyManagedComments(text);
+	const lines = commented.split('\n');
+	assert.equal(lines[lines.indexOf(`ROCKETRIDE_URI=${URI}`) - 1], DEV_PAIR_COMMENT);
+	assert.equal(lines[lines.indexOf(`ROCKETRIDE_DEPLOY_URI=${URI}`) - 1], DEPLOY_PAIR_COMMENT);
+});
+
+test('applyManagedComments is idempotent', () => {
+	const text = applyManagedComments(mergeEnvText('', { ROCKETRIDE_URI: URI, ROCKETRIDE_APIKEY: KEY }));
+	assert.equal(applyManagedComments(text), text);
+});
+
+test('applyManagedComments leaves files without managed pairs untouched', () => {
+	assert.equal(applyManagedComments('FOO=bar\n'), 'FOO=bar\n');
+	assert.equal(applyManagedComments(''), '');
+});
+
+test('applyManagedComments re-anchors a moved comment instead of duplicating it', () => {
+	const stale = `${DEV_PAIR_COMMENT}\nFOO=bar\nROCKETRIDE_URI=${URI}\n`;
+	const fixed = applyManagedComments(stale);
+	const lines = fixed.split('\n');
+	assert.equal(lines.filter((l) => l === DEV_PAIR_COMMENT).length, 1);
+	assert.equal(lines[lines.indexOf(`ROCKETRIDE_URI=${URI}`) - 1], DEV_PAIR_COMMENT);
 });
 
 test('returns null when there is no resolvable URI', () => {

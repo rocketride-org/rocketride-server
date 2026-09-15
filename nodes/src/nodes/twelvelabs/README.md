@@ -1,64 +1,70 @@
 # twelvelabs
 
-A RocketRide filter node that sends a video to TwelveLabs along with instructions and returns the generated text response.
+A RocketRide video node that sends an incoming video to TwelveLabs and emits
+the service's generated text response.
+
+## About TwelveLabs
+
+TwelveLabs is the video-analysis service that this node contacts. RocketRide
+uses it to index a submitted video temporarily and request text generated from
+that indexed video.
 
 ## What it does
 
-Analyzes video using the TwelveLabs **Pegasus** model (`pegasus1.2`, with both `visual` and `audio` model options) and emits the generated text. For each incoming video stream the node:
+The node receives `video` data, collects the stream, submits the resulting
+temporary file for analysis, and writes the returned text to `text` when that
+lane has a listener. Pick it when a pipeline needs a hosted analysis response
+for a complete video, rather than local playback, transcription, or speech
+generation. There is no agent-tool interface.
 
-1. Buffers the video chunks in memory and writes them to a temporary file when the stream ends.
-2. Creates a temporary TwelveLabs index named `rocketride-<random>`.
-3. Uploads the video as an indexing task and polls every 5 seconds until the task is `ready` (raises an error if the task reports `failed`, or after a **15-minute timeout**).
-4. Calls the TwelveLabs analyze endpoint with your configured instructions as the prompt and writes the result to the `text` lane.
-5. Deletes the temporary index and the temporary file, even on failure.
+## Lanes
 
-Uses the official **`twelvelabs`** Python SDK. If no instructions are configured, the prompt defaults to `Describe this video.`. If TwelveLabs returns an empty result, the node outputs the string `No data from TwelveLabs`.
-
-Supported input formats (by MIME type): MP4, MOV (QuickTime), AVI, WebM, MKV, and MPG. Unrecognized video MIME types are written to a `.mp4` temp file before upload.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `video` | `text` | Submit the completed video stream and emit its generated text response. |
 
 ## Configuration
 
-### Lanes
+Set the API key and add instructions only when the default description prompt
+is not enough. The node has one `default` profile, so profile selection itself
+does not change its behavior.
 
-| Lane in | Lane out | Description                          |
-| ------- | -------- | ------------------------------------ |
-| `video` | `text`   | Analyze video and return text output |
+### Instructions
 
-The text result is only emitted when a downstream node is listening on the `text` lane.
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | TwelveLabs API key. |
-| `instructions` | array | Instructions to guide TwelveLabs when analyzing the video. |
-| `profile` | string | Default "default".  |
-
-The node ships a single `default` profile containing both fields.
-
----
+The instruction strings are joined with newlines and sent as the analysis
+prompt. Leave the list empty to use `Describe this video.`. Add instructions
+when the response needs to answer a particular question or follow a particular
+format; use separate entries for distinct constraints so they remain readable
+in the configuration panel.
 
 ## Authentication
 
-Provide your TwelveLabs API key in the `apikey` field. The key is loaded once when the pipeline starts and shared by all instances of the node. Get a key from the [TwelveLabs dashboard](https://docs.twelvelabs.io).
+Set `apikey` to the API key accepted by the TwelveLabs client. The key and
+instructions are loaded once when the pipeline starts and shared by the node's
+instances.
 
----
+## Notes
 
-## Operational notes
+### Submission lifecycle and failures
 
-- Each video processed creates and then deletes its own TwelveLabs index, no persistent index is reused, so nothing accumulates in your TwelveLabs account, but indexing happens from scratch on every video.
-- Indexing time depends on video length; tasks that take longer than 15 minutes raise `TwelveLabs task timed out`.
-- Videos are currently buffered fully in memory before being written to the temp file, so very large videos increase memory usage accordingly.
+Every stream is buffered in memory, written to a temporary file when it ends,
+and analyzed through a new index named `rocketride-<random>`. The node polls
+the indexing task every five seconds, fails if that task reports `failed`, and
+raises `TwelveLabs task timed out` after 15 minutes. It attempts to delete both
+the temporary index and the local temporary file even when processing fails;
+an empty service response is emitted as `No data from TwelveLabs`.
 
----
+### Input file suffix
+
+The local temporary-file suffix follows the input MIME type for MP4, QuickTime,
+AVI, WebM, Matroska, and MPEG video. Any other MIME type is written with an
+`.mp4` suffix. This only determines the temporary filename; choose a MIME type
+that accurately describes the input so the upload is not mislabeled.
 
 ## Upstream docs
 
 - [TwelveLabs documentation](https://docs.twelvelabs.io)
 
----
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

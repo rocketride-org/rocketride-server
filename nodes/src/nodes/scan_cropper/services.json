@@ -55,7 +55,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "scan_cropper.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/scan_cropper",
 	//
 	// Optional:
 	//		Summary line shown on the node's tile on the canvas

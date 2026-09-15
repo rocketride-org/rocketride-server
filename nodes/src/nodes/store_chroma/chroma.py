@@ -29,7 +29,6 @@ depends(requirements)
 
 from typing import List, Dict, Any, Callable, cast
 import chromadb
-from chromadb.config import Settings
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
@@ -75,8 +74,27 @@ class Store(DocumentStoreBase):
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
     similarity: str = 'Cosine'
+    top_k: int | None = None
     client: chromadb.HttpClient
     collectionObj: chromadb.Collection | None = None
+
+    # Upper bound for the configured top_k. Generous enough for reranker
+    # fan-in (40x the data-lane default of 25, 10x the chroma.search tool's
+    # own cap of 100) while keeping a fat-fingered value from turning a query
+    # into a full-collection scan.
+    MAX_TOP_K: int = 1000
+
+    @staticmethod
+    def _coerceBool(value: Any) -> bool:
+        """Read a boolean that may arrive as a string from an env-var placeholder."""
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ('false', '0', 'no', 'off'):
+            return False
+        # An unresolved '${...}' placeholder is not a deliberate 'off', so it
+        # keeps the safe default rather than silently dropping TLS.
+        return True
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -96,15 +114,35 @@ class Store(DocumentStoreBase):
         self.port = self._coercePort(config.get('port', 8000))
         self.threshold_search = config.get('score', 0.5)
 
+        # Optional per-node retrieval limit. When set, it controls how many
+        # candidate documents are fetched from Chroma before score filtering,
+        # overriding the incoming DocFilter default (25). Left unset it falls
+        # back to the caller-supplied limit, so existing pipelines are unchanged.
+        self.top_k = self._coerceTopK(config.get('top_k', None))
+
         # Strip API key also
         self.apikey = config.get('apikey', None)
         if self.apikey is not None:
             self.apikey = self.apikey.strip()
 
+        # Chroma Cloud multi-tenancy - both are required by Chroma Cloud
+        # accounts and optional for self-hosted servers
+        self.tenant = (config.get('tenant') or '').strip() or None
+        self.database = (config.get('database') or '').strip() or None
+
+        # TLS for the cloud/remote profile. Defaults on, since Chroma Cloud is
+        # HTTPS-only; a self-hosted server behind plain HTTP turns it off.
+        self.ssl = self._coerceBool(config.get('ssl', True))
+
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
 
-        profile = config.get('profile', 'local')
+        # The merged node config carries the profile selection in 'mode':
+        # getNodeConfig consumes the 'profile' key while merging the selected
+        # profile's contents, so 'profile' is absent when configured through
+        # a service/autopipe config and the cloud branch was never taken.
+        # Keep 'profile' as a fallback for direct configurations.
+        profile = config.get('mode') or config.get('profile') or 'local'
 
         # check if the similarity matches qdrant configuration options
         similarity = config.get('similarity', 'cosine')
@@ -121,13 +159,26 @@ class Store(DocumentStoreBase):
             if profile == 'local':
                 self.client = chromadb.HttpClient(host=self.host, port=self.port)
             else:
+                # Cloud / remote server. Chroma Cloud only serves HTTPS, and a
+                # plain HTTP request against the TLS port hangs or is rejected
+                # with "illegal request line" -- so TLS is the default. It stays
+                # configurable because this profile also covers a self-hosted
+                # server reached over plain HTTP with token auth, which the
+                # removed Settings path supported and which would otherwise lose
+                # its only working configuration.
+                # The API key travels in the x-chroma-token header, and Chroma
+                # Cloud additionally requires the tenant and database.
+                kwargs: Dict[str, Any] = {}
+                if self.tenant:
+                    kwargs['tenant'] = self.tenant
+                if self.database:
+                    kwargs['database'] = self.database
                 self.client = chromadb.HttpClient(
                     host=self.host,
                     port=self.port,
-                    settings=Settings(
-                        chroma_client_auth_provider='chromadb.auth.token_authn.TokenAuthClientProvider',
-                        chroma_client_auth_credentials=self.apikey,
-                    ),
+                    ssl=self.ssl,
+                    headers={'x-chroma-token': self.apikey} if self.apikey else None,
+                    **kwargs,
                 )
         except Exception as e:
             self.client = None
@@ -190,6 +241,79 @@ class Store(DocumentStoreBase):
             debug(f'chroma: port {parsed} is out of range 1-65535; using default {default}')
             return default
         return parsed
+
+    @staticmethod
+    def _coerceTopK(value: Any) -> int | None:
+        """
+        Validate the configured top_k and coerce it to a positive int, or None.
+
+        Accepts an int, a whole-number float, or an integer string, rejecting
+        bool. Like the port field, the schema accepts both a number and a
+        string because env-var interpolation always yields a string (e.g.
+        '${ROCKETRIDE_TOP_K}').
+
+        Returns None -- meaning "no override", so retrieval falls back to the
+        incoming DocFilter limit -- for an unset/blank value and for a still
+        unresolved '${...}' placeholder. Falling back to the *absence of an
+        override* is the correct answer here rather than a hardcoded 25: the
+        whole design is that an unset top_k means "use the caller's limit".
+
+        An explicit but malformed value still raises: a fractional number, a
+        non-integer string, or anything outside 1..``MAX_TOP_K`` is a pipeline
+        misconfiguration this node deliberately rejects instead of quietly
+        retrieving a different number of documents than the author asked for.
+
+        Note: this deliberately does not reuse ``ai.common.utils.config_int``.
+        That helper always returns an int (never None, so "unset" could not
+        fall back to ``docFilter.limit``), treats ``<= 0`` as "unspecified",
+        and silently clamps out-of-range values instead of raising. Here an
+        out-of-range top_k is a pipeline misconfiguration worth failing on at
+        startup rather than quietly retrieving a different number of documents
+        than the author asked for. Do not "simplify" this to ``config_int``
+        without changing those semantics on purpose.
+        """
+        if value is None:
+            return None
+        invalid = f'top_k must be an integer 1..{Store.MAX_TOP_K}, got {value!r}'
+        # bool is an int subclass; reject it explicitly.
+        if isinstance(value, bool):
+            raise ValueError(invalid)
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, float):
+            # A JSON 'number' may arrive as a float (e.g. 50.0). Accept
+            # whole-number floats; a fractional top_k is meaningless.
+            if not value.is_integer():
+                raise ValueError(invalid)
+            parsed = int(value)
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            # An unresolved '${...}' placeholder is not a limit the author
+            # chose, so it falls back to the caller's limit rather than
+            # failing the node -- the same fallback _coercePort makes.
+            if re.fullmatch(r'\$\{[^{}]+\}', text):
+                debug("chroma: top_k contains an unresolved env var; using the caller's DocFilter.limit")
+                return None
+            try:
+                parsed = int(text)
+            except ValueError:
+                raise ValueError(invalid) from None
+        else:
+            raise ValueError(invalid)
+        if not 1 <= parsed <= Store.MAX_TOP_K:
+            raise ValueError(invalid)
+        return parsed
+
+    def _effectiveLimit(self, docFilter: DocFilter) -> int | None:
+        """
+        Resolve the retrieval limit: the configured top_k wins when set,
+        otherwise the caller-supplied DocFilter limit is used.
+        """
+        if self.top_k is not None:
+            return self.top_k
+        return docFilter.limit
 
     def _getServerVersion(self) -> str | None:
         """
@@ -374,7 +498,7 @@ class Store(DocumentStoreBase):
             where=filters,
             where_document={'$contains': query.text},
             offset=docFilter.offset,
-            limit=docFilter.limit,
+            limit=self._effectiveLimit(docFilter),
             include=['metadatas', 'documents'],
         )
 
@@ -412,7 +536,9 @@ class Store(DocumentStoreBase):
             raise BaseException('Non-zero offset is not supported in semantic searching')
 
         # Perform the search
-        results = self.collectionObj.query(query_embeddings=[query.embedding], n_results=docFilter.limit, where=filters)
+        results = self.collectionObj.query(
+            query_embeddings=[query.embedding], n_results=self._effectiveLimit(docFilter), where=filters
+        )
 
         # Convert the points into groups
         docs = self._convertToDocs(results)
@@ -433,6 +559,11 @@ class Store(DocumentStoreBase):
         filter_dict = self._convertFilter(docFilter)
 
         # Perform the query
+        #
+        # Note: get() is an exact-fetch path (QuestionType.GET and, internally,
+        # full-table/full-document rehydration). It must honor the caller's
+        # limit directly — the node-level top_k applies only to similarity
+        # search (searchSemantic/searchKeyword), not to whole-object fetches.
         results = self.collectionObj.get(
             where=filter_dict,
             offset=docFilter.offset,

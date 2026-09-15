@@ -222,7 +222,7 @@ export interface ProfilePanelProps {
 	/** Async handler that persists a ProfileUpdate and resolves on success. */
 	onSave: (fields: ProfileUpdate) => Promise<void>;
 	/** Assigns the team the user's development runs execute under, by its ID. */
-	onSetDefaultTeam: (teamId: string) => void;
+	onSetDevTeam: (teamId: string) => void;
 	/** Switches the user's active organization by its ID. */
 	onSetDefaultOrg: (orgId: string) => void;
 }
@@ -245,7 +245,7 @@ const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} 
  * a list of their organizations and team memberships with a development-team
  * assignment action per team, and an inline Edit Profile modal.
  */
-export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onSetDefaultOrg }) => {
+export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDevTeam, onSetDefaultOrg }) => {
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
 	 * Called exactly when the edit panel OPENS — the concurrent-edit ruling
@@ -392,7 +392,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 												<span style={styles.teamsCaptionText}>Teams</span>
 											</div>
 											{o.teams.map((t, i) => {
-												const isDefaultTeam = authUser?.defaultTeam === t.id;
+												const isDevTeam = authUser?.devTeam === t.id;
 												const isLast = i === o.teams.length - 1;
 												return (
 													<div key={t.id} style={styles.teamRow(isLast, oi < memberships.length - 1)}>
@@ -400,10 +400,10 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 														<div style={S.rowInfo}>
 															<div style={S.rowName}>{t.name}</div>
 														</div>
-														{isDefaultTeam ? (
+														{isDevTeam ? (
 															<span style={styles.activeLabel}>{'✓'} Development team</span>
 														) : (
-															<Button variant="ghost" small onClick={() => onSetDefaultTeam(t.id)}>
+															<Button variant="ghost" small onClick={() => onSetDevTeam(t.id)}>
 																Set as development team
 															</Button>
 														)}

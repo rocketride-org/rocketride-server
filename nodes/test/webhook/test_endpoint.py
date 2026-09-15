@@ -22,7 +22,7 @@ NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 if str(NODES_SRC) not in sys.path:
     sys.path.insert(0, str(NODES_SRC))
 
-from webhook.IEndpoint import IEndpoint  # noqa: E402
+from webhook.IEndpoint import IEndpoint, _connectedLanes  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -257,3 +257,56 @@ def test_run_does_not_start_waiting_when_guard_fails():
             ep._run()
 
     event_ctor.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _connectedLanes — the lanes published in the endpoint note
+# ---------------------------------------------------------------------------
+
+
+def _target_with_listeners(listeners):
+    """A target endpoint whose borrowed pipe reports the given listeners."""
+    target = MagicMock(name='target-endpoint')
+    pipe = MagicMock(name='pipe')
+    pipe.getListeners = MagicMock(return_value=list(listeners))
+    target.getPipe = MagicMock(return_value=pipe)
+    return target, pipe
+
+
+def test_connected_lanes_reports_data_lanes_sorted():
+    """The panel needs the readable lanes, so lifecycle hooks are filtered out."""
+    target, _ = _target_with_listeners(['text', 'open', 'closing', 'close', 'json'])
+
+    assert _connectedLanes(target) == ['json', 'text']
+
+
+def test_connected_lanes_returns_the_borrowed_pipe():
+    """The pipe is borrowed from a pool — never leak it, or the pool starves."""
+    target, pipe = _target_with_listeners(['json'])
+
+    _connectedLanes(target)
+
+    target.putPipe.assert_called_once_with(pipe)
+
+
+def test_connected_lanes_returns_the_pipe_even_when_reading_fails():
+    """A failure while reading must not leak the pipe either."""
+    target, pipe = _target_with_listeners([])
+    pipe.getListeners = MagicMock(side_effect=RuntimeError('boom'))
+
+    assert _connectedLanes(target) == []
+    target.putPipe.assert_called_once_with(pipe)
+
+
+def test_connected_lanes_is_empty_when_no_pipe_can_be_borrowed():
+    """Losing the hint is acceptable; failing the endpoint startup is not."""
+    target = MagicMock(name='target-endpoint')
+    target.getPipe = MagicMock(side_effect=RuntimeError('endpoint not open'))
+
+    assert _connectedLanes(target) == []
+    target.putPipe.assert_not_called()
+
+
+def test_connected_lanes_is_empty_without_a_target():
+    """A source with no bound target advertises nothing rather than raising."""
+    assert _connectedLanes(None) == []

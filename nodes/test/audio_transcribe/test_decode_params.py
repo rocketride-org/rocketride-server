@@ -53,6 +53,7 @@ class _FakeWhisper:
     def __init__(self, model_name, output_fields=None, language=None, compute_type=None, **kwargs):
         self.model_name = model_name
         self.language = language
+        self.compute_type = compute_type
         self.calls = []
 
     def transcribe(self, audio, **kw):
@@ -66,7 +67,7 @@ class _FakeWhisper:
 def _load_iglobal():
     """Load IGlobal.py from source behind stubs. Returns (IGlobal, config_holder)."""
     saved = {}
-    config_holder = {'raw': {}}
+    config_holder = {'raw': {}, 'debug': []}
 
     class FakeIGlobalBase:
         glb = None
@@ -79,7 +80,7 @@ def _load_iglobal():
         'ai.common.models': types.ModuleType('ai.common.models'),
     }
     stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
-    stubs['rocketlib'].debug = lambda *a, **kw: None
+    stubs['rocketlib'].debug = lambda message='', *a, **kw: config_holder['debug'].append(str(message))
     stubs['ai.common.config'].Config = type(
         'FakeConfig', (), {'getNodeConfig': staticmethod(lambda lt, cc: config_holder['raw'])}
     )
@@ -125,6 +126,17 @@ def _parse_services_json():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod._parse_service_json(_SERVICES_JSON)
+
+
+def _profile_groups(service):
+    """The per-profile object groups, keyed by profile name (#2067).
+
+    Each declared profile gets its own group, so a check that used to read
+    transcribe.default alone now has five more places to be wrong.
+    """
+    return {
+        field['object']: field for field in service['fields'].values() if isinstance(field, dict) and 'object' in field
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -206,11 +218,57 @@ def test_language_defaults_to_english():
 
 
 def test_language_is_declared_in_services_json():
-    fields = _parse_services_json()['fields']
+    service = _parse_services_json()
+    fields = service['fields']
 
     assert 'transcribe.language' in fields
-    assert 'transcribe.language' in fields['transcribe.default']['properties']
     assert fields['transcribe.language']['default'] == 'en'
+
+    for profile, group in _profile_groups(service).items():
+        assert 'transcribe.language' in group['properties'], f'language missing from profile {profile}'
+
+
+def test_compute_type_reaches_the_whisper_constructor():
+    """Read by IGlobal since the initial commit, undeclared until #2067."""
+    assert _built_whisper({'compute_type': 'int8'}).compute_type == 'int8'
+
+
+def test_compute_type_defaults_to_float16():
+    assert _built_whisper({}).compute_type == 'float16'
+
+
+def test_compute_type_is_declared_in_services_json():
+    service = _parse_services_json()
+    fields = service['fields']
+
+    assert fields['transcribe.compute_type']['default'] == 'float16'
+
+    for profile, group in _profile_groups(service).items():
+        assert 'transcribe.compute_type' in group['properties'], f'compute_type missing from profile {profile}'
+
+
+def _debug_lines(raw_config):
+    """Build an IGlobal from a node config and return everything it logged."""
+    IGlobal, holder = _load_iglobal()
+    holder['raw'] = raw_config
+
+    ig = IGlobal.__new__(IGlobal)
+    ig.glb = types.SimpleNamespace(logicalType='audio_transcribe://', connConfig={})
+    ig.beginGlobal()
+    return holder['debug']
+
+
+def test_the_startup_log_names_what_was_actually_loaded():
+    """The only runtime signal of which model is running.
+
+    Both #1809 and #2067 are bugs where the node loaded a different model than the one on
+    screen and said nothing, so the line has to name every value that identifies the model.
+    """
+    logged = ' '.join(_debug_lines({'model': 'medium', 'language': 'de', 'compute_type': 'int8'}))
+
+    assert 'model=medium' in logged
+    assert 'language=de' in logged
+    assert 'compute_type=int8' in logged
 
 
 # -----------------------------------------------------------------------------
@@ -262,11 +320,12 @@ def test_services_json_declares_every_field_iglobal_reads():
     """
     service = _parse_services_json()
     fields = service['fields']
-    properties = fields['transcribe.default']['properties']
+    groups = _profile_groups(service)
 
     for name in _NEW_FIELDS:
         assert f'transcribe.{name}' in fields, f'{name} missing from services.json fields'
-        assert f'transcribe.{name}' in properties, f'{name} missing from transcribe.default'
+        for profile, group in groups.items():
+            assert f'transcribe.{name}' in group['properties'], f'{name} missing from profile {profile}'
 
 
 def test_services_json_defaults_match_the_python_fallbacks():
@@ -430,12 +489,13 @@ def test_dead_fields_are_gone():
     """Nothing reads these, so declaring them offers knobs that silently do nothing."""
     service = _parse_services_json()
     fields = service['fields']
-    properties = fields['transcribe.default']['properties']
+    groups = _profile_groups(service)
 
     for name in _DEAD_FIELDS:
         key = f'transcribe.{name}'
         assert key not in fields, f'{name} is declared again but nothing reads it'
-        assert key not in properties, f'{name} is back in transcribe.default'
+        for profile, group in groups.items():
+            assert key not in group['properties'], f'{name} is back in profile {profile}'
 
     for profile, values in service['preconfig']['profiles'].items():
         leftovers = sorted(set(values) & set(_DEAD_FIELDS))

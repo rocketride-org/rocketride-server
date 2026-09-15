@@ -34,6 +34,7 @@
 
 import type { IAuthProvider } from '../types/connection';
 import { LS_TOKEN } from '../constants';
+import { tokenStore } from '../util/devGate';
 
 // =============================================================================
 // CLASS
@@ -84,7 +85,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	 */
 	private async storeToken(token: string): Promise<void> {
 		try {
-			localStorage.setItem(LS_TOKEN, token);
+			tokenStore().setItem(LS_TOKEN, token);
 		} catch (e) {
 			console.error('[ApiKeyAuthProvider] Failed to store token:', e);
 		}
@@ -97,7 +98,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	 */
 	public async getToken(): Promise<string | null> {
 		try {
-			const token = localStorage.getItem(LS_TOKEN);
+			const token = tokenStore().getItem(LS_TOKEN);
 			// For API key mode, empty string is valid (open access)
 			return token;
 		} catch {
@@ -111,7 +112,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	 */
 	public async isSignedIn(): Promise<boolean> {
 		try {
-			return localStorage.getItem(LS_TOKEN) !== null;
+			return tokenStore().getItem(LS_TOKEN) !== null;
 		} catch {
 			return false;
 		}
@@ -126,14 +127,9 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 	 */
 	public async signOut(): Promise<void> {
 		try {
-			localStorage.removeItem(LS_TOKEN);
+			tokenStore().removeItem(LS_TOKEN);
 		} catch (e) {
 			console.error('[ApiKeyAuthProvider] Failed to clear token:', e);
-		}
-		try {
-			sessionStorage.removeItem(LS_TOKEN);
-		} catch (e) {
-			console.error('[ApiKeyAuthProvider] Failed to clear legacy session token:', e);
 		}
 	}
 }

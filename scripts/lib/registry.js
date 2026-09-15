@@ -24,7 +24,7 @@ class ModuleRegistry {
 		// which makes every produced glob match nothing — strip it.
 		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath).map((g) => g.replace(/\r/g, '')) : [];
 
-		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools,shared}/**/scripts/tasks.{js,cjs}', 'scripts/tasks.{js,cjs}'], {
+		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools,shared,docs}/**/scripts/tasks.{js,cjs}', 'scripts/tasks.{js,cjs}'], {
 			cwd: rootDir,
 			// A tasks.js inside any node_modules is never a build module
 			// (installed/materialized packages ship their dev files), so it

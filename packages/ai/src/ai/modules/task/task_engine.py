@@ -8,7 +8,7 @@ data processing systems.
 
 Key Features:
 - Isolated subprocess execution with complete lifecycle management
-- Multi-interface debugging (DAP, debugpy, stdio) with IDE integration
+- Multi-interface communication (DAP, stdio) with the task subprocess
 - Real-time status monitoring and event broadcasting
 - Resource management (ports, temporary files, cleanup)
 - Multi-client support for collaborative debugging
@@ -50,6 +50,7 @@ from ai.constants import (
     CONST_READY_POLL_INTERVAL,
     CONST_SUBPROCESS_BUFFER_LIMIT,
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
+    CONST_STATUS_HISTORY_LIMIT,
     CONST_ANALYTICS_SLOWEST_DOCS,
 )
 from ai import CONST_AI_NODE_SCRIPT
@@ -64,10 +65,9 @@ from rocketride import (
     TASK_STATE,
     EVENT_TYPE,
 )
-from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
 from .pipeline import resolve_pipeline_env
-from .types import LAUNCH_TYPE
+from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
 
@@ -155,7 +155,6 @@ class Task(DAPBase):
 
     Communication Interfaces:
         DAP: Debug Adapter Protocol for standardized debugging
-        debugpy: Python debugger for IDE integration
         stdio: Direct subprocess communication
         WebSocket: Real-time event broadcasting
 
@@ -166,10 +165,8 @@ class Task(DAPBase):
         _status (TASK_STATUS): Task state and statistics
         _engine_process (Optional[Process]): Subprocess handle
         _debugger (Optional[TaskConn]): Primary debugging connection
-        _debug_python (Optional[DbgDebugpy]): debugpy interface
         _debug_stdio (Optional[DbgStdio]): stdio interface
         _data_client (Optional[DAPClient]): Data communication client
-        _debug_port (Optional[int]): debugpy communication port
         _data_port (Optional[int]): Data communication port
         _status_update_task (Optional[Task]): Background status broadcasting
         _is_terminating (bool): Termination state flag
@@ -217,38 +214,11 @@ class Task(DAPBase):
             """
             await self._parent_task._terminated()
 
-    class TaskDbgDebugpy(DbgDebugpy):
-        """DAP client for debugpy server connections."""
-
-        def __init__(self, parent_task: 'Task', **kwargs):
-            """Initialize debugpy client with parent task integration."""
-            self._parent_task = parent_task
-            super().__init__(**kwargs)
-
-        async def on_event(self, event: Dict[str, Any]) -> None:
-            """
-            Handle DAP events from debugpy server.
-
-            Routes events to parent Task for broadcasting to connected clients.
-
-            Args:
-                event: DAP event message from debugpy
-            """
-            # Get the type of event
-            event_type = event.get('event', '')
-
-            # Our initialization sequence and termination sequence handles sending these
-            # events when it is ready
-            if event_type == 'initialized' or event_type == 'terminated':
-                return
-
-            await self._parent_task.on_event(event)
-
     class TaskData(DAPClient):
         """DAP client for data communication with pipeline."""
 
         def __init__(self, parent_task: 'Task', **kwargs):
-            """Initialize debugpy client with parent task integration."""
+            """Initialize the data client with parent task integration."""
             self._parent_task = parent_task
             super().__init__(**kwargs)
 
@@ -277,6 +247,7 @@ class Task(DAPBase):
         org_id: str = '',
         env: Dict[str, str] = None,
         run_kind: str = 'dev',
+        owner_kind: str = '',
         trigger: str = 'manual',
         **kwargs,
     ) -> None:
@@ -369,8 +340,6 @@ class Task(DAPBase):
         self._monitors: Dict[TaskConn, EVENT_TYPE] = {}
 
         # Debug interfaces
-        self._debug_port: Optional[int] = None
-        self._debug_python: Optional[Task.TaskDbgDebugpy] = None
         self._debug_stdio: Optional[Task.TaskDbgStdio] = None
 
         # Data communication
@@ -426,15 +395,22 @@ class Task(DAPBase):
             raise ValueError(f'invalid run_kind: {run_kind!r}')
         if trigger not in ('', 'manual', 'schedule'):
             raise ValueError(f'invalid trigger: {trigger!r}')
+        # owner_kind picks the storage/run-log tree exactly like run_kind picks
+        # the continuum: any value outside the closed vocabulary ('Team',
+        # 'teams', ...) would silently take the user branch and write a
+        # team-owned deploy's files into the dispatcher's user tree.
+        if owner_kind not in ('', 'user', 'team'):
+            raise ValueError(f'invalid owner_kind: {owner_kind!r}')
         self._run_log: Optional[RunLogWriter] = None
         self._run_kind: str = run_kind
+        # Owner scope: 'user' (interactive .use OR a personal @me deploy) vs
+        # 'team' (a @team deploy). Decides where the run's working files and
+        # run-log live — user tree vs team tree — independently of run_kind.
+        self._owner_kind: str = owner_kind or ('team' if run_kind == 'deploy' else 'user')
         self._run_trigger: str = trigger
 
         # Subprocess debugging flag
         self._debug_subprocess = False
-
-        # Launch configuration
-        self._noDebug = launch_args.get('noDebug', False)
 
         # Termination management
         self._is_restarting = False
@@ -503,7 +479,13 @@ class Task(DAPBase):
             try:
                 from ai.account import account
 
-                dsn = await account.resolve_db_dsn(self.client_id)
+                # Tenant = the ORG (fixes the two holes of user keying: a
+                # team deploy run has client_id='' and would die at the
+                # resolver's empty-tenant guard, and an org switch would
+                # silently re-point a user's DB nodes at a different
+                # database). client_id remains the OSS/single-user fallback
+                # where no org exists.
+                dsn = await account.resolve_db_dsn(self.org_id or self.client_id)
                 subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
             except NotImplementedError:
                 # Broker env not configured (open-source default) — the
@@ -620,9 +602,13 @@ class Task(DAPBase):
         """
         from ai.account.file_store import validate_storage_root
 
-        if self._run_kind == 'deploy':
+        # A TEAM-owned run (a @team deploy) anchors in the team tree so
+        # teammates can watch/replay; a USER-owned run (an interactive .use or
+        # a personal @me deploy) anchors in the owner's user tree — private and
+        # never colliding with the team's @team run of the same project.
+        if self._owner_kind == 'team':
             if not self.team_id:
-                raise ValueError('deploy runs require a team_id for their storage anchor')
+                raise ValueError('team-owned runs require a team_id for their storage anchor')
             return validate_storage_root(f'teams/{self.team_id}/files/tasks/{self.project_id}')
         # Anonymous dev runs (client_id='' — OSS/standalone launches) carry
         # NO anchor instead of failing the launch: identity.userId rides
@@ -871,19 +857,6 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up stdio: {e}')
 
         try:
-            if self._debug_python:
-                try:
-                    await self._debug_python.disconnect()
-                    self.debug_message('debugpy interface cleaned up')
-                except Exception as e:
-                    self.debug_message(f'Error cleaning up debugpy interface: {e}')
-                finally:
-                    self._debug_python = None
-
-        except Exception as e:
-            self.debug_message(f'Error cleaning up debugpy: {e}')
-
-        try:
             if self._data_client:
                 try:
                     await self._data_client.disconnect()
@@ -922,14 +895,6 @@ class Task(DAPBase):
 
         try:
             # Release ports
-            if self._debug_port:
-                self._server.release_port(self._debug_port)
-                self.debug_message('Debug port released')
-                self._debug_port = None
-        except Exception as e:
-            self.debug_message(f'Error cleaning up debug port: {e}')
-
-        try:
             if self._data_port:
                 self._server.release_port(self._data_port)
                 self.debug_message(f'Data port {self._data_port} released')
@@ -1373,16 +1338,16 @@ class Task(DAPBase):
             error_message = body.get('message', '')
             self._status.errors.append(error_message)
 
-            if len(self._status.errors) > 50:
-                self._status.errors = self._status.errors[-50:]
+            if len(self._status.errors) > CONST_STATUS_HISTORY_LIMIT:
+                self._status.errors = self._status.errors[-CONST_STATUS_HISTORY_LIMIT:]
 
         # Handle warning messages with buffer management
         elif event_type == 'apaevt_status_warning':
             warning_message = body.get('message', '')
             self._status.warnings.append(warning_message)
 
-            if len(self._status.warnings) > 50:
-                self._status.warnings = self._status.warnings[-50:]
+            if len(self._status.warnings) > CONST_STATUS_HISTORY_LIMIT:
+                self._status.warnings = self._status.warnings[-CONST_STATUS_HISTORY_LIMIT:]
 
         # Handle download progress
         elif event_type == 'apaevt_status_download':
@@ -1467,6 +1432,10 @@ class Task(DAPBase):
         event_type = message.get('event', '')
         body = message.get('body', {})
 
+        # Pipeline events count as dev-task activity; deploy uses ttl as a run window.
+        if self._run_kind == 'dev' and event_type.startswith('apaevt_'):
+            self.reset_idle_timer()
+
         # Handle service state changes
         if event_type == 'apaevt_status_state':
             service_up = body.get('service', False)
@@ -1497,8 +1466,8 @@ class Task(DAPBase):
             )
 
         elif event_type == 'apaevt_exit':
-            # Get the exit info
-            exit_code = body.get('exit_code', 1)
+            # exitCode is the spelling every emitter in dap/transport_stdio.py writes.
+            exit_code = body.get('exitCode', 1)
             exit_message = body.get('message', 'Task exited unexpectedly')
 
             # Save it
@@ -1547,8 +1516,21 @@ class Task(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
-            # If this task is started with tracing
-            if self._pipelineTraceLevel:
+            # If this task is started with tracing.
+            #
+            # `'none'` IS A LEVEL, NOT AN ABSENCE. It is a non-empty string and
+            # so was truthy here, which meant a caller asking for no tracing got
+            # the payload suppressed on the engine side and every enter/leave
+            # still derived, seq-stamped, broadcast and written to the run log —
+            # a flow event carrying `trace: {}`. Roughly 379 bytes of identity
+            # and envelope for no signal, one pair per component per request.
+            #
+            # A settings stream that answers UI clicks and is deliberately kept
+            # out of the Runs timeline had accumulated 325 MB that way, 94% of
+            # it empty-payload flow. The level names are documented as
+            # none/metadata/summary/full, and `none` is documented as "no flow
+            # traces"; this is the code catching up with that.
+            if self._pipelineTraceLevel and self._pipelineTraceLevel != 'none':
                 # Clamp oversized payloads HERE, before the rebuilt body
                 # fans out to the broadcast, the derived flow, and the
                 # run-log continuum.
@@ -1660,11 +1642,11 @@ class Task(DAPBase):
 
             # We completed it, so raise an error -- this is about being read to accept data
             if current_state == TASK_STATE.COMPLETED.value:
-                raise RuntimeError('Task has already completed')
+                raise TaskError(TaskError.COMPLETED, 'Task has already completed')
 
             # If we were cancelled, throw an error
             if current_state == TASK_STATE.CANCELLED.value:
-                raise RuntimeError(self._status.exitMessage)
+                raise TaskError(TaskError.STOPPED, self._status.exitMessage or 'Task was stopped')
 
             # Calculate timeouts
             time_since_last_event = time.time() - self._last_event_time
@@ -1677,15 +1659,6 @@ class Task(DAPBase):
 
             # Wait before next poll
             await asyncio.sleep(CONST_READY_POLL_INTERVAL)
-
-    def is_debug_available(self) -> bool:
-        """
-        Check if debug interface is available.
-
-        Returns:
-            True if debug interface available, False otherwise
-        """
-        return self._debug_port is not None
 
     def get_status(self) -> TASK_STATUS:
         """
@@ -1704,55 +1677,6 @@ class Task(DAPBase):
         or performs any activity that indicates it's in active use.
         """
         self._idle_time = 0
-
-    async def attach_task(self, conn: TaskConn) -> Dict[str, Any]:
-        """
-        Attach debugging client with debugpy interface setup.
-
-        Args:
-            conn: DAP connection to attach as primary debugger
-
-        Returns:
-            Pipeline configuration for debugging client
-
-        Raises:
-            RuntimeError: If debugger already attached or connection fails
-        """
-        if self._debugger:
-            raise RuntimeError('Debugger is already attached to this task')
-
-        if self._debug_port is None:
-            raise RuntimeError('Debugging on this task is not enabled')
-
-        try:
-            self._debugger = conn
-            self._status.debuggerAttached = True
-
-            uri = f'tcp://localhost:{self._debug_port}'
-
-            self._debug_python = Task.TaskDbgDebugpy(
-                parent_task=self,
-                id=self.id,
-                token=self.token,
-                uri=uri,
-                launch_args=self._launch_args,
-                launch_type=self._launch_type,
-            )
-
-            await self._debug_python.connect()
-            await self._send_status_update()
-
-            self.debug_message('Debugger attached successfully')
-
-            return self._pipeline
-
-        except Exception as e:
-            self._status.debuggerAttached = False
-            self._debug_python = None
-            self._debugger = None
-
-            self.debug_message(f'Failed to attach debugger to task: {e}')
-            raise
 
     async def detach_task(self, conn: TaskConn) -> Dict[str, Any]:
         """
@@ -2076,22 +2000,9 @@ class Task(DAPBase):
 
                 exec_path = execpython
             else:
-                # Production environment with full debug support
+                # Production environment
                 self._debug_subprocess = True
                 exec_path = sys.executable
-
-                if not self._noDebug:
-                    self._debug_port = self._server.assign_port()
-
-                    child_args.extend(
-                        [
-                            f'--debug_port={self._debug_port}',
-                            '--debug_host=localhost',
-                        ]
-                    )
-
-                if self._launch_type == LAUNCH_TYPE.LAUNCH:
-                    child_args.append('--wait_for_client')
 
             # Configure data communication
             self._data_port = self._server.assign_port()
@@ -2183,15 +2094,19 @@ class Task(DAPBase):
                 from ai.account import RequestContext, Store
 
                 # The store view anchors at the run's OWNER namespace: the
-                # TEAM for deploy runs (which carry no user identity — every
-                # path they write is '@/Team/=<id>/'-prefixed anyway), the
-                # user for dev runs. An internal-context store REQUIRES a
-                # concrete anchor — an empty one raises, and the except below
-                # would silently disable the run log for the whole run.
+                # TEAM for team-owned (@team) deploys — which carry no user
+                # identity, every path they write is '@/Team/=<id>/'-prefixed
+                # anyway — and the USER for user-owned runs (an interactive
+                # .use or a personal @me deploy: private, so its continuum
+                # must never land in the billing team's tree). An
+                # internal-context store REQUIRES a concrete anchor — an empty
+                # one raises, and the except below would silently disable the
+                # run log for the whole run.
+                owner_is_team = self._owner_kind == 'team'
                 self._run_log = RunLogWriter(
                     Store.file_store(
                         RequestContext.internal('run-log'),
-                        client_id=self.team_id if self._run_kind == 'deploy' else self.client_id,
+                        client_id=self.team_id if owner_is_team else self.client_id,
                     ),
                     self.client_id,
                     self.project_id,
@@ -2199,11 +2114,17 @@ class Task(DAPBase):
                     self._run_kind,
                     self.stamp_log_event,
                     self.raise_log_seq_floor,
-                    # Deploy runs write the TEAM continuum (teams are the
+                    # team_id is the run's real BILLING team (provenance for
+                    # the control record) for EVERY owner kind; owner_kind
+                    # decides where the logs physically live. Team-owned
+                    # deploys write the TEAM continuum (teams are the
                     # environments — teammates watch/replay the same stream);
-                    # dev runs stay in the owner's tree. The writer's scope
-                    # helper turns this into the '@/Team/=<id>/' store prefix.
-                    team_id=self.team_id if self._run_kind == 'deploy' else '',
+                    # user-owned (@me) runs stay private in the owner's tree.
+                    # Passing team_id here for an @me run keeps its billing
+                    # provenance without leaking its logs into the team tree.
+                    team_id=self.team_id,
+                    owner_kind=self._owner_kind,
+                    org_id=self.org_id,
                     debug=self.debug_message,
                 )
                 await self._run_log.open(

@@ -1,65 +1,57 @@
 # embedding_transformer
 
-A RocketRide embedding node that converts text into vector representations using local sentence-transformer models.
+A RocketRide embedding node that turns document chunks and questions into local sentence-transformer vectors; choose it when text must stay in the model runtime rather than use an external embedding API.
+
+## About Hugging Face
+
+Hugging Face develops open-source libraries and repositories for machine-learning models. Sentence Transformers is a model interface for creating sentence and passage embeddings used in semantic retrieval.
 
 ## What it does
 
-Generates text embeddings using local sentence-transformer models. Runs on the model server, so no API key is required. GPU-accelerated when available (the node declares the `gpu` capability).
+The node embeds the `documents` and `questions` lanes, storing each result as a float list and recording the producing model. Choose it over `embedding_openai` when using a locally loaded sentence-transformer model and over the image or video embedders for text. Documents are buffered in groups of 64 and remaining documents flush when the input closes, while questions are encoded immediately.
 
-Uses the `SentenceTransformer` class to load the configured Hugging Face model at pipeline start. On load, the node reports the model's vector size and maximum token count, and streams loading progress via monitor status so long model downloads are visible in the UI.
+## Lanes
 
-Documents are encoded in batches: incoming document chunks are buffered until 64 documents accumulate, then encoded in a single batch and written downstream. Any remaining documents are flushed when the input closes. Questions are encoded immediately, all questions in a request in one batch.
-
-Each encoded item gets two fields set: `embedding` (the vector as a list of floats) and `embedding_model` (the model name that produced it).
-
----
-
-## Configuration
-
-### Lanes
-
-| Lane in     | Lane out    | Description                                           |
-| ----------- | ----------- | ----------------------------------------------------- |
-| `documents` | `documents` | Embed document chunks, attach vector to each document |
-| `questions` | `questions` | Embed a question for vector similarity lookup         |
-
-The `questions` lane is used when querying a vector store: the store expects an embedded question to compare against stored document vectors.
-
-### Fields
-
-| Field | Type | Description |
+| Lane in | Lane out | Description |
 |---|---|---|
-| `model` | string | Hugging face model to use for embedding |
-| `truncate_dim` | number | Truncate embeddings to this dimensionality (0 = use model default) |
-| `document_prefix` | string | Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ') |
-| `query_prefix` | string | Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ') |
-| `profile` | string | Default "miniLM". Embedding model |
-
-**Custom model options** (shown when the `custom` profile is selected):
-
-| Field                       | Type / Default | Description                                                                              |
-| --------------------------- | -------------- | ---------------------------------------------------------------------------------------- |
-| `embedding.model`           | string         | Any Hugging Face sentence-transformer model name                                         |
-| `embedding.truncate_dim`    | number         | Truncate embeddings to this dimensionality (0 = use model default)                       |
-| `embedding.document_prefix` | string         | Prefix prepended to document text before encoding (e.g. `search_document: `, `passage: `) |
-| `embedding.query_prefix`    | string         | Prefix prepended to query text before encoding (e.g. `search_query: `, `query: `)        |
-
-The prefixes matter for asymmetric models (such as Nomic or E5) that were trained with distinct document/query markers; leave both blank for the bundled symmetric profiles.
-
-The node also exposes an `embedding.preprocessor` combo field (default `preprocessor_langchain`) that selects the chunking preprocessor used ahead of embedding.
-
----
+| `documents` | `documents` | Embeds document chunks. |
+| `questions` | `questions` | Embeds questions for vector retrieval. |
 
 ## Profiles
 
-| Profile            | Model                                              | Notes                         |
-| ------------------ | -------------------------------------------------- | ----------------------------- |
-| miniLM _(default)_ | `sentence-transformers/multi-qa-MiniLM-L6-cos-v1`  | General use, good performance |
-| miniAll            | `sentence-transformers/all-MiniLM-L6-v2`           | General use alternative       |
-| mpnet              | `sentence-transformers/multi-qa-mpnet-base-cos-v1` | Higher quality                |
-| custom             | _(user-specified)_                                 | Any Hugging Face model        |
+Default: **miniLM - General use embeddings, good performance** (`miniLM`).
 
----
+| Profile | Model | Context |
+|---|---|---|
+| `miniLM` *(default)* | `sentence-transformers/multi-qa-MiniLM-L6-cos-v1` | Default model. |
+| `miniAll` | `sentence-transformers/all-MiniLM-L6-v2` | Alternative model. |
+| `mpnet` | `sentence-transformers/multi-qa-mpnet-base-cos-v1` | Alternative model. |
+| `custom` | User-provided | Enter a compatible Hugging Face model identifier. |
+
+## Configuration
+
+Start with `miniLM`; its vector size and maximum token count are read from the loaded model. Custom settings are relevant only when the model expects a different retrieval format or output shape.
+
+### Model
+
+Custom model names are passed to `SentenceTransformer`. Change the model only with a compatible downstream vector index, because the node writes the model’s vectors directly to documents and questions.
+
+### Truncate dimensions
+
+`truncate_dim` is passed to the model as `truncate_dim`; zero preserves its normal dimensionality. Set a positive value only when the selected model supports shorter embeddings and the vector store was created for that dimension; otherwise leave it at zero to avoid incompatible vectors.
+
+### Document and query prefixes
+
+The node prepends `document_prefix` to every document and `query_prefix` to every question before encoding. Leave both empty for models that do not require a role marker. For a model trained with separate passage and query prefixes, set the matching pair consistently during ingestion and retrieval; applying a prefix on only one side changes the representations being compared.
+
+## Requirements
+
+The node declares GPU capability. It loads a `SentenceTransformer` through the model provider; the source does not specify a CPU-only fallback, so provision the compatible model runtime.
+
+## Upstream docs
+
+- [Sentence Transformers documentation](https://www.sbert.net/)
+- [Hugging Face documentation](https://huggingface.co/docs)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

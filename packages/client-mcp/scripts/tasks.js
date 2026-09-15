@@ -57,9 +57,10 @@ const SRC_HASH_KEY = 'client-mcp.srcHash';
 // Glob patterns to ignore when copying to build
 const IGNORE = ['**/node_modules/**', '**/__pycache__/**', '**/.pytest_cache/**', '**/tests/**', '**/.git/**', '**/scripts/**'];
 
-// Canonical README lives in docs/; copy it into the build dir for wheel packaging
-const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
-const README_SRC = path.join(DOCS_DIR, 'README-mcp-client.md');
+// README is the committed docs:export copy at the package root (maintained by
+// `./builder docs:export`, drift-checked by docs:check); copy it into the
+// build dir for wheel packaging.
+const README_SRC = path.join(PACKAGE_DIR, 'README.md');
 const README_DEST = path.join(BUILD_DIR, 'README.md');
 
 // ============================================================================
@@ -216,9 +217,6 @@ module.exports = {
     name: 'client-mcp',
     description: 'MCP Client (Model Context Protocol)',
 
-    // Co-located docs gathered by docs:gather.
-    docs: [{ source: 'docs', mount: 'protocols/mcp' }],
-
     actions: [
         // Internal actions
         { name: 'client-mcp:copy-readme', action: makeCopyReadmeAction },
@@ -230,6 +228,7 @@ module.exports = {
             description: 'Build client-mcp',
             steps: [
                 'server:build',
+                'client-docs:agent',
                 'client-mcp:sync-source',
                 'client-mcp:copy-readme',
                 'client-mcp:build-wheel',

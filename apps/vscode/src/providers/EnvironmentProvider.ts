@@ -287,13 +287,13 @@ export class EnvironmentProvider {
 		const orgPermissions: string[] = org?.permissions ?? [];
 		const isOrgAdmin = orgPermissions.includes('org.admin');
 
-		// Extract default team and check team-admin permission.
+		// Extract the dev team and check team-admin permission.
 		// Org admins get implicit team.admin on all teams.
-		const defaultTeamId = resolved?.accountInfo?.defaultTeam;
+		const devTeamId = resolved?.accountInfo?.devTeam;
 		let isTeamAdmin = isOrgAdmin; // org admin → implicit team admin
-		if (!isTeamAdmin && defaultTeamId && org?.teams) {
-			// Check if the user has explicit team.admin on the default team
-			const team = org.teams.find((t: { id: string; permissions: string[] }) => t.id === defaultTeamId);
+		if (!isTeamAdmin && devTeamId && org?.teams) {
+			// Check if the user has explicit team.admin on the dev team
+			const team = org.teams.find((t: { id: string; permissions: string[] }) => t.id === devTeamId);
 			isTeamAdmin = team?.permissions?.includes('team.admin') ?? false;
 		}
 
@@ -305,7 +305,7 @@ export class EnvironmentProvider {
 			isOrgAdmin,
 			isTeamAdmin,
 			orgId,
-			teamId: defaultTeamId,
+			teamId: devTeamId,
 		};
 	}
 

@@ -59,7 +59,6 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
-import logging
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -68,16 +67,22 @@ from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
 from .commands.cmd_monitor import MonitorCommands
-from .commands.cmd_debug import DebugCommands
 from .commands.cmd_misc import MiscCommands
 from .commands.cmd_cprofile import CProfileCommands
 from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
 from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
+from .commands.cmd_pipe import DeployPipeCommands
 from .commands.cmd_log import LogCommands
 from .commands.cmd_store import StoreCommands
-from ai.account.models import AccountInfo, RequestContext, resolve_task_permissions, resolve_team_permissions
+from ai.account.models import (
+    AccountInfo,
+    RequestContext,
+    resolve_run_permissions,
+    resolve_task_permissions,
+    resolve_team_permissions,
+)
 from ai.common.account import AccountPipelineValidation
 
 # Only import for type checking to avoid circular import errors
@@ -99,13 +104,13 @@ class TaskConn(
     TaskCommands,
     DataCommands,
     MonitorCommands,
-    DebugCommands,
     MiscCommands,
     CProfileCommands,
     AccountCommands,
     AppCommands,
     PublicCommands,
     DeployCommands,
+    DeployPipeCommands,
     LogCommands,
     StoreCommands,
     DAPConn,
@@ -134,10 +139,9 @@ class TaskConn(
     - Generic task commands → delegated to task instances
 
     Inheritance Hierarchy:
-    - TaskCommands: Task lifecycle and debugging operations
+    - TaskCommands: Task lifecycle operations
     - DataCommands: Real-time data processing interface
     - MonitorCommands: Event subscription and monitoring
-    - DebugCommands: Debugging session management
     - MiscCommands: Miscellaneous utility commands (services, etc.)
     - CProfileCommands: cProfile process profiling (start, stop, status, report)
     - AccountCommands: Account management (profile, keys, organizations, teams, billing)
@@ -191,12 +195,12 @@ class TaskConn(
         MonitorCommands.__init__(self, connection_id, server, transport, **kwargs)
         DataCommands.__init__(self, connection_id, server, transport, **kwargs)
         TaskCommands.__init__(self, connection_id, server, transport, **kwargs)
-        DebugCommands.__init__(self, connection_id, server, transport, **kwargs)
         MiscCommands.__init__(self, connection_id, server, transport, **kwargs)
         CProfileCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
         DeployCommands.__init__(self, connection_id, server, transport, **kwargs)
+        DeployPipeCommands.__init__(self, connection_id, server, transport, **kwargs)
         LogCommands.__init__(self, connection_id, server, transport, **kwargs)
         StoreCommands.__init__(self, connection_id, server, transport, **kwargs)
 
@@ -377,38 +381,42 @@ class TaskConn(
         return self.build_response(request, body={})
 
     def has_permission(self, perm: Union[list, str]) -> bool:
-        """Check if the authenticated user has the given permission for their default team."""
+        """Check if the user holds the permission on ANY of their membership teams.
+
+        The visibility model: what a session may see/do ambiently is the
+        UNION of its team memberships — the resolver expands org.admin, and
+        the sys.admin/internal superusers pass outright (they may hold no
+        membership rows at all). The session's devTeam carries NO
+        authorization meaning: it exists for dev-run billing and
+        environment layering only. Commands that target a SPECIFIC object
+        use verify_team_permission against the addressed team instead.
+
+        Task-scoped synthetic identities are unchanged by the union: their
+        organization carries exactly the run's one team.
+        """
         if not self._account_info:
-            return False
-        try:
-            perms = resolve_team_permissions(self._account_info, self._account_info.defaultTeam)
-        except PermissionError as exc:
-            # The session's defaultTeam is not resolvable inside account_info.organization
-            # (AccountInfo carries a single org). Deny — but never silently: without this
-            # line the caller sees a bare "Permission 'x' denied" and the real cause, an
-            # unresolvable default team, is invisible in the logs.
-            #
-            # stdlib logging, not rocketlib.debug()/warning(). Two reasons, both checked
-            # against the running cloud ALB rather than assumed:
-            #   * debug() is gated on the engine trace level, and prod runs without one
-            #     (`./engine ./ai/eaas.py --saas --host=0.0.0.0 --port=5565 ...`).
-            #   * rocketlib output goes to the engine job log, which is delivered to the
-            #     connected client — not to container stdout. The prod ALB's log is
-            #     uvicorn access lines and nothing else, so neither call would have been
-            #     visible to us. Denying a client and then reporting the reason only to
-            #     that same client is not observability.
-            # uvicorn configures root logging, so this lands on stdout and reaches
-            # CloudWatch. Volume is bounded by actual denials, and a flood of these is
-            # itself the signal — that is exactly the shape #373 had.
-            logging.getLogger(__name__).warning(
-                f'[auth] has_permission: cannot resolve defaultTeam '
-                f'{self._account_info.defaultTeam!r} for user {self._account_info.userId!r} '
-                f'-> denying {perm!r} ({exc})'
-            )
             return False
         if isinstance(perm, str):
             perm = [perm]
-        return any(p in perms for p in perm)
+        # Superusers hold everything regardless of memberships (mirrors
+        # resolve_team_permissions' rule, which the loop below can never
+        # reach when the membership list is empty).
+        sys_perms = getattr(self._account_info, 'sysPermissions', []) or []
+        if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+            return True
+        org = getattr(self._account_info, 'organization', None) or {}
+        teams = org.get('teams') if isinstance(org, dict) else getattr(org, 'teams', None)
+        for team in teams or []:
+            team_id = team.get('id') if isinstance(team, dict) else getattr(team, 'id', None)
+            if not team_id:
+                continue
+            try:
+                perms = resolve_team_permissions(self._account_info, team_id)
+            except PermissionError:
+                continue
+            if any(p in perms for p in perm):
+                return True
+        return False
 
     def verify_permission(self, perm: str) -> None:
         """Raise PermissionError if the authenticated user lacks the given permission."""
@@ -433,8 +441,8 @@ class TaskConn(
     def verify_team_permission(self, team_id: str, perm: str) -> None:
         """Raise PermissionError unless the user holds ``perm`` on the GIVEN team.
 
-        The counterpart to verify_permission (which resolves only against the
-        caller's defaultTeam): use this whenever a command targets an object
+        The counterpart to verify_permission (which resolves the UNION of
+        the caller's memberships): use this whenever a command targets an object
         that belongs to a SPECIFIC team — executing onto a team, touching a
         team's deployment, reading a team's logs. ``sys.admin`` bypasses, the
         same as the get_task path. A team outside the caller's org resolves to
@@ -591,7 +599,13 @@ class TaskConn(
         # sys.admin bypasses all team permission checks.
         if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
             if 'sys.admin' not in (self._account_info.sysPermissions or []):
-                perms = resolve_task_permissions(self._account_info, control.teamId)
+                # Run-scoped resolution: a USER-owned run (dev or @me deploy)
+                # is private — full access for its owner (surviving an org
+                # switch: the owner is unchanged even when the run's team is
+                # now foreign), none for anyone else, and the billing teamId
+                # never grants a teammate access. Team-owned runs resolve
+                # through team membership.
+                perms = resolve_run_permissions(self._account_info, control)
                 if not perms:
                     raise PermissionError('Access denied: no permissions for this task')
                 if permissions and permissions not in perms:
@@ -611,95 +625,24 @@ class TaskConn(
         """
         return self._connection_id
 
-    async def request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_command(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process DAP debugging commands.
+        Reject any DAP command this connection has no handler for.
+
+        DAPConn dispatches ``on_{command}`` first and falls back here. Without
+        this method the fallback in ``dap_conn.on_receive`` builds a default
+        SUCCESS response, so a command that went nowhere would look like it
+        worked — a misspelled ``rrext_*`` in a script, or a stale client still
+        sending the removed debugger commands, would both get ``success: true``.
 
         Args:
-            request: DAP command from debugging client
+            request (Dict[str, Any]): The unhandled DAP request
 
         Returns:
-            DAP-compliant response from debugpy interface
+            Dict[str, Any]: An error response naming the command
         """
-        # Get the command - we may have already done this, but
-        # we need to make sure...
-        request_command = request.get('command', '')
-
-        # Reject internal commands
-        if not request_command or request_command.startswith('rrext_'):
-            return self.build_error(request, f'Invalid command: {request_command}')
-
-        # Get the task
-        task = self.get_task(request, 'task.debug')
-
-        # Validate debug interface
-        if task._debug_python is None:
-            return self.build_error(request, 'Debug interface not available')
-
-        # Make the request to debugpy
-        response = await task._debug_python.request(request)
-
-        # Build the response in our context
-        server_response = self.build_response(
-            request,
-            body=response.get('body', None),
-        )
-
-        # And return the response
-        return server_response
-
-    async def on_command(self, request: Dict[str, Any]) -> None:
-        """
-        Handle generic DAP commands by delegating to appropriate task instances.
-
-        This method serves as the fallback command handler for DAP commands that
-        are not handled by the specialized command mixins. It performs task lookup
-        and delegates the command to the appropriate task instance for processing.
-        This enables standard DAP debugging commands (breakpoints, step, evaluate, etc.)
-        to be forwarded directly to the task's debugging engine. This method is
-        mainly used to forward commands on to the debugger.
-
-        Args:
-            request (Dict[str, Any]): DAP command request containing:
-                - apikey: Authentication key for task access control
-                - token: Unique identifier for the target task instance
-                - command: DAP command type (step, breakpoint, evaluate, etc.)
-                - arguments: Command-specific parameters and options
-
-        Command Flow:
-        1. Extract authentication credentials and task identification
-        2. Locate the target task instance through server registry
-        3. Forward the complete command request to task's request handler
-        4. Return the task's response (handled by task's DAP implementation)
-
-        Delegation Logic:
-        - Commands handled by mixins (launch, ext_process, ext_monitor) bypass this method
-        - Standard DAP commands (step, breakpoint, evaluate, etc.) are routed here
-        - Task instances implement their own DAP command processing
-        - This provides seamless integration with task-specific debugging engines
-
-        Raises:
-            Exception: If task lookup fails, authentication is invalid,
-                      or command processing encounters errors
-
-        Note:
-        - This method assumes the task exists and is accessible with provided credentials
-        - Error handling includes diagnostic logging before re-raising exceptions
-        - The actual command processing logic resides in individual task instances
-        """
-        # Get the command
-        request_command = request.get('command', '')
-
-        # Reject internal commands
-        if not request_command or request_command.startswith('rrext_'):
-            return self.build_error(request, f'Invalid command: {request_command}')
-
-        # We know this is now a vscode debugging command. Inject
-        # the debug token if it was not specified
-        request.setdefault('token', self._debug_token)
-
-        # Call it
-        return await self.request(request)
+        command = request.get('command', '')
+        return self.build_error(request, f'Unsupported command: {command}')
 
     async def on_rrext_identify(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Update the client display name for this connection.

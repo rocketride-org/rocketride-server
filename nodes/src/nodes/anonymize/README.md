@@ -1,125 +1,130 @@
 # anonymize
 
-A RocketRide filter node that detects and redacts sensitive entities in text flowing through a pipeline.
+A RocketRide text filter that detects configured entity types and replaces their
+spans before text continues downstream. Pick it to redact PII-like content
+while preserving the rest of the document, rather than dropping the document
+or relying on a fixed pattern matcher alone.
+
+## About GLiNER
+
+GLiNER is the named-entity recognizer used by this node through RocketRide's
+GLiNER model adapter. The recognizer receives a list of labels, returns entity
+spans, and is used here to replace those spans in pipeline text. This node can
+also combine those detections with spans and labels supplied by an upstream
+classification stage.
 
 ## What it does
 
-Scans text for sensitive entities — names, emails, phone numbers, organizations, and more — using a locally-run GLiNER zero-shot NER model, then replaces each detected span. You control **which** entity types are detected (the `entityTypes` field) and **how** matches are replaced (the `redactionStyle` field):
+The node accumulates text for an input object, detects entities when that
+object closes, and writes the redacted text to the `text` lane. Without
+classification input it detects the configured entity types; with
+classification input it also uses its reported character spans and associated
+rule labels. Choose it over an exact-match redaction step when the data needs
+entity detection over configurable labels or integration with classifier
+results.
 
-- **`mask`** (default) overwrites every character of the span with a configurable masking character (default `█`, U+2588), preserving text length and structure.
-- **`token`** replaces each span with a labelled placeholder tag such as `[PERSON]` or `[EMAIL]`.
+In mask mode each detected span is replaced with the configured character for
+the original span length. Token mode replaces it with a label such as
+`[EMAIL]`; a classifier-only match becomes `[REDACTED]` unless an overlapping
+GLiNER match supplies a more specific label.
 
-Example (mask):
+## Lanes
 
-```
-Input:  John Smith is a patient at St. Mary's Hospital.
-Output: ████ █████ is a patient at ██ █████████████████.
-```
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `text` | Collect text for an object, redact detected spans at closing, and emit it. |
 
-Example (token):
+## Profiles
 
-```
-Input:  John Smith is a patient at St. Mary's Hospital.
-Output: [PERSON] is a patient at [ORGANIZATION].
-```
+Default: **GLiNER Small - Lightweight general-purpose model** (`glinerSmall`).
 
-Overlapping spans are merged before replacement (mask style also merges directly-adjacent spans, since the masked output is identical either way; token style keeps adjacent spans separate so each entity keeps its own tag).
-
-Models are loaded via `ai.common.models.GLiNER`, which runs inference locally and automatically routes to a model server when the engine is started with the `--modelserver` flag. Models are downloaded from Hugging Face on first use; no API key is required. The node declares the `gpu` capability, so GPU acceleration is used when available.
-
-Large documents are split into 1024-character chunks with a 128-character overlap so entities at chunk boundaries are not missed. Chunks are processed in parallel using up to 4 threads, entity labels are batched in groups of 32, and entities found in the overlap regions are de-duplicated before the final replacement pass.
-
-Note: AI-based detection cannot guarantee 100% accuracy. Review results before using in production.
-
----
+| Profile | Model |
+| --- | --- |
+| `glinerMultiPII` | `urchade/gliner_multi_pii-v1` |
+| `glinerPIILarge` | `knowledgator/gliner-pii-large-v1.0` |
+| `glinerMergedLarge` | `xomad/gliner-model-merge-large-v1.0` |
+| `glinerSmall` **(default)** | `urchade/gliner_small-v2.1` |
+| `glinerMedium` | `urchade/gliner_medium-v2.1` |
+| `glinerLarge` | `urchade/gliner_large-v2.1` |
+| `glinerMulti` | `urchade/gliner_multi` |
+| `gretelSmall` | `gretelai/gretel-gliner-bi-small-v1.0` |
+| `gretelLarge` | `gretelai/gretel-gliner-bi-large-v1.0` |
+| `glinerKo` | `taeminlee/gliner_ko` |
+| `glinerIt` | `DeepMount00/GLiNER_PII_ITA` |
+| `glinerAr` | `NAMAA-Space/gliner_arabic-v2.1` |
+| `glinerCommunitySmall` | `gliner-community/gliner_small-v2.5` |
+| `glinerCommunityMedium` | `gliner-community/gliner_medium-v2.5` |
+| `glinerCommunityLarge` | `gliner-community/gliner_large-v2.5` |
+| `glinerBiomedSmall` | `Ihor/gliner-biomed-small-v1.0` |
+| `glinerBiomedLarge` | `Ihor/gliner-biomed-large-v1.0` |
+| `custom` | _(your own GLiNER-compatible model)_ |
 
 ## Configuration
 
-### Lanes
+Choose a profile when one of the supplied model choices suits the text you
+process, or choose `custom` and supply a model name. Most pipelines then only
+need to tailor the entity labels and decide whether retaining entity labels in
+the output is useful. The profile selected when adding the node is
+`glinerSmall`; the configuration field itself defaults to `glinerMergedLarge`.
 
-| Lane   | Direction | Behaviour |
-|--------|-----------|-----------|
-| `text` | in -> out | Incoming text chunks are buffered for the whole object (downstream delivery is suspended via `preventDefault`). At object close, the buffered text is anonymized once and forwarded downstream as a single write. |
+### Model
 
-When an upstream classifier node is present, the node also receives classifications and adjusts its behaviour (see "Entity labels" below).
+Profiles supply a model name, while the `custom` profile exposes **Model name**
+for a name at least two characters long. Change models when the supplied
+profile's intended language, domain, or resource trade-off is a closer match
+for the data. The recognizer loads the configured model through the RocketRide
+GLiNER adapter, which uses a model server when one is configured and otherwise
+runs locally.
 
-### Fields
+### Entity types to anonymize
 
-The node is configured by choosing a model profile. Each profile exposes the entity-type, redaction-style, and masking-character fields; the `custom` profile additionally exposes a free-form model name field.
+**Entity types to anonymize** is a list of zero-shot labels. Its default has
+15 common PII-style labels, including `person`, `email`, `phone number`, and
+`credit card number`. Replace or extend this list for the kinds of entities
+your pipeline must hide. Blank and non-string list items are ignored; a
+non-list or an empty resulting list falls back to the default labels, so an
+attempt to clear the list does not silently disable detection.
 
-| Field | Type | Description |
-|---|---|---|
-| `entityTypes` | array | Entity types to detect. Pre-filled with 15 common PII types; remove any you don't want or add your own (the model is zero-shot, so any label works). An empty value falls back to the defaults. |
-| `redactionStyle` | string | How matches are replaced: `mask` (default) overwrites with the masking character; `token` replaces with a labelled tag like `[PERSON]`. |
-| `anonymizeChar` | string | Character used for masking (mask style only) |
-| `model` | string | Gliner model to use for anonymization |
-| `profile` | string | Default "glinerMergedLarge". Anonymize model |
+### Redaction style and character
 
----
+Use `mask` (the default) when it is important to preserve the original text
+length: each matched character is overwritten by **Character to use for
+anonymization**, which defaults to `█`. Use `token` when downstream processing
+needs to know what was removed; it substitutes label tokens instead and does
+not use the masking character. Adjacent mask spans merge into one replacement;
+token spans remain separate unless they actually overlap.
 
-## Model profiles
+## Requirements
 
-| Profile key | Model | Best for |
-|-------------|-------|----------|
-| `glinerSmall` | `urchade/gliner_small-v2.1` | General English PII, fastest |
-| `glinerMedium` | `urchade/gliner_medium-v2.1` | General English PII, balanced |
-| `glinerLarge` | `urchade/gliner_large-v2.1` | General English PII, highest accuracy |
-| `glinerPIILarge` | `knowledgator/gliner-pii-large-v1.0` | High-accuracy English PII |
-| `glinerMergedLarge` (default) | `xomad/gliner-model-merge-large-v1.0` | Combined from multiple datasets, broad coverage |
-| `glinerMulti` | `urchade/gliner_multi` | Multilingual text |
-| `glinerMultiPII` | `urchade/gliner_multi_pii-v1` | Multilingual PII |
-| `gretelSmall` | `gretelai/gretel-gliner-bi-small-v1.0` | Business-oriented NER, compact |
-| `gretelLarge` | `gretelai/gretel-gliner-bi-large-v1.0` | Business-oriented NER, large scale |
-| `glinerKo` | `taeminlee/gliner_ko` | Korean |
-| `glinerIt` | `DeepMount00/GLiNER_PII_ITA` | Italian |
-| `glinerAr` | `NAMAA-Space/gliner_arabic-v2.1` | Arabic |
-| `glinerCommunitySmall` | `gliner-community/gliner_small-v2.5` | Community general, compact |
-| `glinerCommunityMedium` | `gliner-community/gliner_medium-v2.5` | Community general, balanced |
-| `glinerCommunityLarge` | `gliner-community/gliner_large-v2.5` | Community general, largest |
-| `glinerBiomedSmall` | `Ihor/gliner-biomed-small-v1.0` | Biomedical and clinical text, compact |
-| `glinerBiomedLarge` | `Ihor/gliner-biomed-large-v1.0` | Biomedical and clinical text, high accuracy |
-| `custom` | user-supplied | Any Hugging Face GLiNER model name |
+The node declares GPU capability and installs GLiNER plus an ONNX Runtime.
+Outside macOS its requirements select `onnxruntime-gpu`; on macOS they select
+the non-GPU `onnxruntime` package. Model loading is therefore a runtime cost to
+plan for, especially before selecting a larger profile.
 
-The default profile when adding the node is `glinerSmall` (as set in `preconfig.default`); the `anonymize.profile` field UI default is `glinerMergedLarge`.
+## Notes
 
----
+### Long text and prediction failures
 
-## Entity labels
+Text is processed in 1,024-character chunks with 128-character overlap, label
+lists are sent in batches of 32, and up to four chunks run concurrently.
+Duplicate entities from overlapping chunks are removed. A model error for one
+label batch or chunk is logged and processing continues, so review redaction
+results when complete coverage is required.
 
-What gets detected and redacted depends on whether an upstream classifier node feeds this node.
+### Classifier input
 
-### Standalone (no upstream classifier)
+When classification data arrives, the node uses three independent inputs.
+`classificationPolicy` `idRef` values become GLiNER labels only when the local
+Nucleuz `rulePack.dat` maps them; if the rule pack is unavailable, those labels
+are omitted. `<Term>` values from `classificationRules` remain GLiNER labels
+without the rule pack. Classifier-reported `textMatches` are redacted directly,
+independent of both label sources. If neither source produces labels, GLiNER
+adds no classification-derived detections, but the reported text matches are
+still redacted.
 
-The node runs GLiNER with the labels from the `entityTypes` field. This is pre-filled with a default set of 15 common PII labels, which you can edit freely (the model is zero-shot, so any label works):
+## Upstream docs
 
-`person`, `name`, `email`, `phone number`, `address`, `social security number`, `credit card number`, `date of birth`, `organization`, `company`, `location`, `ip address`, `bank account`, `passport number`, `driver license`
-
-### With an upstream classifier
-
-When classification data arrives before the object closes, the node:
-
-1. Redacts the exact character spans (`offset`, `length`) reported in the classification `textMatches`. In `token` style these carry no entity type, so they are tagged `[REDACTED]` unless a more specific NER detection covers the same span.
-2. Resolves classification rule `idRef` values to English names via the Nucleuz rule pack (`nucleuz/rulePack.dat` under the engine path).
-3. Extracts keyword `<Term>` entries from the classification rules as additional GLiNER labels.
-4. Runs GLiNER with the combined label set and merges the results with the spans from step 1.
-
-If `nucleuz/rulePack.dat` is not present, rule-name resolution silently produces no results and the node falls back to GLiNER-only mode using the labels extracted from the classification rules.
-
----
-
-## Running the tests
-
-The node ships automated test cases in `services.json`. The standard test runs against the `glinerSmall` profile; the full test exercises every model profile. Server-free unit tests for the pure redaction logic live in `nodes/test/test_anonymize_logic.py`.
-
-```bash
-# Standard test (glinerSmall profile)
-builder nodes:test
-
-# Full test across all model profiles
-builder nodes:test-full
-```
-
----
+- [GLiNER documentation](https://github.com/urchade/GLiNER)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

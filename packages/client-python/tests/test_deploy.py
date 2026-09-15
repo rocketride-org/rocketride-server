@@ -24,7 +24,7 @@
 Integration tests for the deploy client API (teams-as-environments).
 
 These tests connect to a live server and exercise the published contract:
-publish (immutable registry versions), deploy (pointing a team at a
+add (immutable registry versions), deploy (pointing a team at a
 version — promotion and rollback alike), the standard list envelopes on
 list/versions/history, pause/resume, soft remove with a surviving audit
 trail, per-source schedules, and the single cron evaluator.
@@ -96,7 +96,7 @@ class TestDeploy:
     @pytest.mark.asyncio
     async def test_publish_returns_immutable_artifact(self):
         project = fresh_project()
-        result = await self.client.deploy.publish(make_pipeline(project), comment='first cut')
+        result = await self.client.deploy.add(make_pipeline(project), comment='first cut')
         artifact = result['artifact']
         assert artifact['version'] == 1
         assert artifact['sha256'] and artifact['bytes'] > 0
@@ -106,7 +106,7 @@ class TestDeploy:
         assert 'deployment' not in result
 
         # A second publish allocates the NEXT version; v1 is untouched.
-        result2 = await self.client.deploy.publish(make_pipeline(project))
+        result2 = await self.client.deploy.add(make_pipeline(project))
         assert result2['artifact']['version'] == 2
         versions = await self.client.deploy.versions(project)
         assert [v['version'] for v in versions['rows']] == [2, 1]
@@ -115,7 +115,7 @@ class TestDeploy:
     async def test_artifact_returns_the_published_pipeline(self):
         project = fresh_project()
         pipeline = make_pipeline(project)
-        await self.client.deploy.publish(pipeline)
+        await self.client.deploy.add(pipeline)
         fetched = await self.client.deploy.artifact(project, 1)
         # Byte-for-byte the published definition (sha-verified server-side).
         assert fetched == pipeline
@@ -126,7 +126,7 @@ class TestDeploy:
     async def test_publish_with_deploy_to_is_one_step(self):
         project = fresh_project()
         try:
-            result = await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            result = await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             dep = result['deployment']
             assert dep['teamId'] == TEAM
             assert dep['projectId'] == project
@@ -141,8 +141,8 @@ class TestDeploy:
     async def test_deploy_and_rollback_move_the_pointer(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project))
-            await self.client.deploy.publish(make_pipeline(project))
+            await self.client.deploy.add(make_pipeline(project))
+            await self.client.deploy.add(make_pipeline(project))
 
             dep = await self.client.deploy.deploy(project, 2, TEAM)
             assert dep['version'] == 2
@@ -164,7 +164,7 @@ class TestDeploy:
     @pytest.mark.asyncio
     async def test_deploy_unpublished_version_raises(self):
         project = fresh_project()
-        await self.client.deploy.publish(make_pipeline(project))
+        await self.client.deploy.add(make_pipeline(project))
         with pytest.raises(RuntimeError):
             await self.client.deploy.deploy(project, 7, TEAM)
 
@@ -172,7 +172,7 @@ class TestDeploy:
     async def test_run_now_dispatches_and_is_stoppable(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             result = await self.client.deploy.run(project, 'webhook_1', TEAM)
             assert result['token']
             # The UI's stop path: resolve the live task and terminate it.
@@ -188,7 +188,7 @@ class TestDeploy:
     async def test_run_now_refuses_disabled(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             await self.client.deploy.disable(project, TEAM)
             with pytest.raises(RuntimeError):
                 await self.client.deploy.run(project, 'webhook_1', TEAM)
@@ -201,7 +201,7 @@ class TestDeploy:
     async def test_list_returns_the_standard_envelope(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
 
             body = await self.client.deploy.list()
             assert set(body) == {'rows', 'total', 'page', 'pageSize'}
@@ -217,7 +217,7 @@ class TestDeploy:
     async def test_get_returns_joined_record(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             dep = await self.client.deploy.get(project, TEAM)
             assert dep['projectId'] == project
             assert dep['sha256']
@@ -236,7 +236,7 @@ class TestDeploy:
     async def test_disable_enable(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             dep = await self.client.deploy.disable(project, TEAM)
             assert dep['state'] == 'disabled'
             dep = await self.client.deploy.enable(project, TEAM)
@@ -247,7 +247,7 @@ class TestDeploy:
     @pytest.mark.asyncio
     async def test_remove_is_soft_and_history_survives(self):
         project = fresh_project()
-        await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+        await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
         dep = await self.client.deploy.remove(project, TEAM)
         assert dep['state'] == 'removed'
 
@@ -264,7 +264,7 @@ class TestDeploy:
     async def test_set_schedule_and_clear(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
 
             dep = await self.client.deploy.set_schedule(project, 'webhook_1', '0 * * * *', TEAM)
             assert dep['schedules']['webhook_1']['cron'] == '0 * * * *'
@@ -280,7 +280,7 @@ class TestDeploy:
     async def test_pause_and_resume_one_schedule(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             await self.client.deploy.set_schedule(project, 'webhook_1', '0 * * * *', TEAM, ttl=600)
 
             # Pause keeps cron/ttl; a cron edit must not unpause it.
@@ -304,7 +304,7 @@ class TestDeploy:
     async def test_set_schedule_invalid_cron_raises(self):
         project = fresh_project()
         try:
-            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             with pytest.raises(RuntimeError):
                 await self.client.deploy.set_schedule(project, 'webhook_1', 'not-a-cron', TEAM)
         finally:

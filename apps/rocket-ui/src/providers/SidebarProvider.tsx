@@ -192,12 +192,12 @@ const SidebarProvider: React.FC = () => {
 	useEffect(() => {
 		entriesRef.current = entries;
 		// Re-evaluate unknown tasks — some may now match newly-parsed entries
-		setUnknownTasks((prev) => prev.filter((ut) => !entries.some((e) => (!e.type || e.type === 'file') && e.projectId === ut.projectId && e.sources?.some((s) => s.id === ut.sourceId))));
+		setUnknownTasks((prev) => prev.filter((ut) => !entries.some((e) => (!e.type || e.type === 'file') && e.projectId === ut.projectId && e.sources?.some((s: { id: string }) => s.id === ut.sourceId))));
 	}, [entries]);
 
 	/** Check if a projectId+sourceId matches any known local pipeline file. */
 	const isKnownTask = useCallback((projectId: string, sourceId: string): boolean => {
-		return entriesRef.current.some((e) => (!e.type || e.type === 'file' ? e.projectId === projectId && e.sources?.some((s) => s.id === sourceId) : false));
+		return entriesRef.current.some((e) => (!e.type || e.type === 'file' ? e.projectId === projectId && e.sources?.some((s: { id: string }) => s.id === sourceId) : false));
 	}, []);
 
 	useEffect(() => {

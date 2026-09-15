@@ -29,8 +29,10 @@
 # so it can never redirect straight to vscode://... . The extension therefore
 # sends the broker here (an allowlisted https page), and this page's script
 # forwards the broker's query parameters to the editor deep link
-# ``<scheme>://rocketride.rocketride/auth/google``, which
-# CloudAuthProvider.handleGoogleOAuth consumes.
+# ``<scheme>://rocketride.rocketride/auth/<provider>``, which
+# CloudAuthProvider.handleProviderOAuth consumes. The provider comes from the
+# route path (``/auth/vscode/google`` or ``/auth/vscode/microsoft``) so each
+# sign-in lands on its own deep link and the editor labels results correctly.
 #
 # Token material stays in the browser: it arrives in ``location.search`` and is
 # re-emitted client-side only — it is never interpolated into the HTML and this
@@ -48,6 +50,12 @@ from .auth_callback import _js_literal
 _ALLOWED_SCHEMES = frozenset({'vscode', 'vscode-insiders', 'cursor', 'windsurf', 'vscodium'})
 _DEFAULT_SCHEME = 'vscode'
 
+# Providers with a registered editor deep link. The provider is taken from the
+# route path's last segment; anything unrecognized falls back to google (the
+# original, sole provider) rather than building an unhandled deep link.
+_ALLOWED_PROVIDERS = frozenset({'google', 'microsoft'})
+_DEFAULT_PROVIDER = 'google'
+
 # The script runs at the end of <body> so the manual-fallback link exists when
 # it executes. Only the parameters CloudAuthProvider.handleGoogleOAuth reads
 # are forwarded; anything else in the query (e.g. our own ``scheme``) is
@@ -63,7 +71,7 @@ a{color:#4da3ff;}</style>
 <script>
 // Forward the broker's OAuth result to the editor deep link.
 var scheme = __RR_SCHEME_JS__;
-var target = scheme + '://rocketride.rocketride/auth/google';
+var target = scheme + '://rocketride.rocketride/auth/' + __RR_PROVIDER_JS__;
 var src = new URLSearchParams(window.location.search);
 var out = new URLSearchParams();
 ['tokens', 'state', 'oauth_error', 'error', 'error_description'].forEach(function (k) {
@@ -87,7 +95,9 @@ async def vscode_oauth_bounce(request: Request) -> HTMLResponse:
     optional ``scheme`` query parameter naming the editor's URI scheme); the
     broker appends ``tokens``/``state`` (or error parameters) and redirects the
     browser here. The returned page immediately re-navigates to
-    ``<scheme>://rocketride.rocketride/auth/google`` carrying those parameters.
+    ``<scheme>://rocketride.rocketride/auth/<provider>`` carrying those
+    parameters, where the provider is the route path's last segment
+    (``/auth/vscode/google`` or ``/auth/vscode/microsoft``).
 
     Args:
         request (Request): The incoming redirect from the OAuth broker.
@@ -100,5 +110,10 @@ async def vscode_oauth_bounce(request: Request) -> HTMLResponse:
     if scheme not in _ALLOWED_SCHEMES:
         scheme = _DEFAULT_SCHEME
 
+    provider = request.url.path.rstrip('/').rsplit('/', 1)[-1]
+    if provider not in _ALLOWED_PROVIDERS:
+        provider = _DEFAULT_PROVIDER
+
     html = _BOUNCE_HTML.replace('__RR_SCHEME_JS__', _js_literal(scheme))
+    html = html.replace('__RR_PROVIDER_JS__', _js_literal(provider))
     return HTMLResponse(html)

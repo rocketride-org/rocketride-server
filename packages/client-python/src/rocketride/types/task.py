@@ -360,10 +360,12 @@ class TASK_STATUS(BaseModel):
 
     # Error and Warning Management with History
     warnings: List[str] = Field(
-        default_factory=list, description='Warning message history (limited to 50 recent entries)'
+        default_factory=list, description='Warning message history (limited to 1000 recent entries)'
     )
 
-    errors: List[str] = Field(default_factory=list, description='Error message history (limited to 50 recent entries)')
+    errors: List[str] = Field(
+        default_factory=list, description='Error message history (limited to 1000 recent entries)'
+    )
 
     # Current Processing Context
     currentObject: str = Field(default='', description='Name/identifier of the item currently being processed')

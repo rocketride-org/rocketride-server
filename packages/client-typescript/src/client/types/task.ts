@@ -249,10 +249,10 @@ export interface TASK_STATUS {
 
 	// Error and Warning Management with History
 
-	/** Warning message history (limited to 50 recent entries) */
+	/** Warning message history (limited to 1000 recent entries) */
 	warnings: string[];
 
-	/** Error message history (limited to 50 recent entries) */
+	/** Error message history (limited to 1000 recent entries) */
 	errors: string[];
 
 	// Current Processing Context

@@ -40,10 +40,11 @@ any command starting with ``rrext_public_`` without requiring a prior
 and server probing.
 """
 
+import os
 import sys
 from typing import TYPE_CHECKING, Dict, Any
 
-from rocketlib import getVersion
+from rocketlib import debug, getVersion
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 
@@ -84,6 +85,11 @@ class PublicCommands(DAPConn):
         Replaces the former ``auth { infoOnly: true }`` hack. Returns
         version, capabilities, platform, and public apps list.
 
+        Also carries the Stripe publishable key (``pk_*`` — public by
+        design) when the server has one configured, so browser and
+        extension clients receive the key matching THIS server's Stripe
+        account instead of a value baked into their bundles at build time.
+
         Args:
             request: Raw DAP request dict.
 
@@ -96,7 +102,29 @@ class PublicCommands(DAPConn):
             'capabilities': acct.capabilities,
             'platform': sys.platform,
             'apps': await acct.get_public_apps(),
+            # The server's public addresses. ALWAYS present, both keys, so no
+            # client ever branches on absence: each value is an absolute URL
+            # or the literal 'origin' = "the address you probed me at" (the
+            # SDK substitutes it client-side; a server behind a proxy cannot
+            # know its public name). Managed deployments declare both
+            # explicitly; RR_BACKEND_ORIGIN only carries a real URL when the
+            # API is reachable somewhere OTHER than where the UI is served
+            # (CDN split) — clients then bypass the edge after this probe.
+            'endpoints': {
+                'api': os.environ.get('RR_BACKEND_ORIGIN', '').strip() or 'origin',
+                'ui': os.environ.get('RR_FRONTEND_ORIGIN', '').strip() or 'origin',
+            },
         }
+        # Publishable key only — the secret key (sk_*) must never leave the
+        # server. Omitted entirely when unset (OSS / no billing). Enforce the
+        # pk_ prefix before returning: if a secret key (sk_*) or a restricted
+        # key (rk_*) is misconfigured into this env var, publishing it to every
+        # client would leak a server credential — refuse to emit it and warn.
+        stripe_pk = os.environ.get('RR_STRIPE_PUBLISHABLE_KEY', '').strip()
+        if stripe_pk.startswith('pk_'):
+            info['stripePublishableKey'] = stripe_pk
+        elif stripe_pk:
+            debug('[public] RR_STRIPE_PUBLISHABLE_KEY is not a pk_ publishable key — omitting it from the public probe')
         return self.build_response(request, body=info)
 
     # ── rrext_public_catalog ────────────────────────────────────────────────

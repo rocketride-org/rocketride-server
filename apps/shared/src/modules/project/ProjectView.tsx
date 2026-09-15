@@ -23,7 +23,7 @@
  * player, and DVR session (sorted A→Z by source name).
  */
 
-import React, { useState, useCallback, useRef, useMemo, ComponentProps, CSSProperties, ReactNode } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect, ComponentProps, CSSProperties, ReactNode } from 'react';
 
 import { TabPanel } from 'shell';
 import { ContentHeader } from 'shell';
@@ -47,6 +47,9 @@ import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './hooks/u
 import { createLiveEventStore, type LiveEventStore } from './hooks/liveEventSession';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent } from './types';
 import { TASK_STATE } from './types';
+import { writeProjectPreference } from './projectPreferences';
+
+const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
 // =============================================================================
 // PROPS
@@ -74,6 +77,8 @@ export interface IProjectViewProps {
 	servicesJson: Record<string, any>;
 	/** Whether the host is connected to the RocketRide server. */
 	isConnected: boolean;
+	/** Whether a connection is configured to use RocketRide Cloud. */
+	cloudConnectionConfigured?: boolean;
 	/** Per-source task status map (source ID → status). */
 	statusMap: Record<string, TaskStatus>;
 	/** Server host URL for {host} placeholder replacement in endpoint URLs. */
@@ -107,10 +112,12 @@ export interface IProjectViewProps {
 	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	/** Called when view state changes (mode, flowViewMode, viewport). */
 	onViewStateChange?: (viewState: ViewState) => void;
-	/** Called when user preferences change (e.g. panel widths, toggles). */
+	/** Called when one user preference changes (e.g. panel widths, toggles). */
 	onPrefsChange?: (prefs: Record<string, unknown>) => void;
 	/** Called when the user clicks an external link in the canvas. */
 	onOpenLink?: (url: string, displayName?: string) => void;
+	/** Opens the host's RocketRide Cloud setup flow. */
+	onOpenCloudSetup?: () => void;
 	/**
 	 * OAuth broker base URL for the social-login buttons. Defaults to the
 	 * built-in {@link OAUTH_ROOT_URL}; hosts may override (e.g. for staging).
@@ -186,6 +193,8 @@ export interface IProjectViewProps {
 	onOpenDeployment?: (teamId: string, sourceId?: string) => void;
 	/** Toggle one team deployment's kill switch (where-live state dot). */
 	onDeploySetDisabled?: (teamId: string, disabled: boolean) => Promise<void>;
+	/** Soft-remove one team's deployment from the where-live header. */
+	onDeployRemove?: (teamId: string) => Promise<void>;
 	/** Set/clear one source's schedule on a team deployment (where-live pill). */
 	onDeploySetSchedule?: (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => Promise<void>;
 	/** Pause/resume ONE source's schedule, preserving cron/ttl. */
@@ -295,7 +304,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, onContentChanged, onValidate, getNodeSchema, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, fetchDeployLifecycle, teamDeployments = [], deployTeams = [], onDeployPublish, onDeployVersion, onOpenDeployment, onDeploySetDisabled, onDeploySetSchedule, onDeploySetSchedulePaused, onDeployPreviewSchedule, fetchDeployArtifact, onSaveDocument }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, onContentChanged, onValidate, getNodeSchema, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, fetchDeployLifecycle, teamDeployments = [], deployTeams = [], onDeployPublish, onDeployVersion, onOpenDeployment, onDeploySetDisabled, onDeployRemove, onDeploySetSchedule, onDeploySetSchedulePaused, onDeployPreviewSchedule, fetchDeployArtifact, onSaveDocument }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -307,6 +316,14 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	}));
 
 	const [prefs, setPrefs] = useState<Record<string, unknown>>(() => initialPrefs ?? {});
+	useEffect(() => {
+		if (!initialPrefs) return;
+		setPrefs((prev) => {
+			const next = { ...prev, ...initialPrefs };
+			const hasChanged = Object.keys(next).length !== Object.keys(prev).length || Object.keys(next).some((key) => next[key] !== prev[key]);
+			return hasChanged ? next : prev;
+		});
+	}, [initialPrefs]);
 
 	// --- Stable callback refs ------------------------------------------------
 
@@ -382,8 +399,8 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 
 	// The ONE prefs accessor the canvas — and every DetailPanel inside it — reads
 	// and writes through, handed down via <PrefsProvider> below. getPref reads the
-	// local prefs bag; setPref merges a key and threads the whole bag to the host
-	// (onPrefsChange → useWorkspace on web / the extension host in VS Code).
+	// local prefs bag; setPref merges a key locally and sends only that key to the
+	// host (onPrefsChange → useWorkspace on web / the extension host in VS Code).
 	//
 	// getPref reads through a ref so prefsApi keeps a STABLE identity across pref
 	// writes: memoizing on [prefs] would hand FlowPreferences a fresh getPref on
@@ -395,15 +412,28 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	const prefsApi = useMemo<IPrefsApi>(
 		() => ({
 			getPref: (key) => prefsRef.current?.[key],
-			setPref: (key, value) =>
-				setPrefs((prev) => {
-					const next = { ...prev, [key]: value };
-					onPrefsChangeRef.current?.(next);
-					return next;
-				}),
+			setPref: (key, value) => writeProjectPreference(setPrefs, onPrefsChangeRef.current, key, value),
 		}),
 		[]
 	);
+
+	const [cloudPromptDismissedForActivation, setCloudPromptDismissedForActivation] = useState(false);
+
+	const handleOpenCloudSetup = useCallback(() => {
+		setCloudPromptDismissedForActivation(true);
+		onOpenCloudSetup?.();
+	}, [onOpenCloudSetup]);
+
+	const handleDismissCloudPrompt = useCallback(() => {
+		setCloudPromptDismissedForActivation(true);
+	}, []);
+
+	const handleDismissCloudPromptForever = useCallback(() => {
+		prefsApi.setPref(CLOUD_CANVAS_PROMPT_DISMISSED_KEY, true);
+		setCloudPromptDismissedForActivation(true);
+	}, [prefsApi]);
+
+	const cloudPromptDismissed = cloudPromptDismissedForActivation || prefsApi.getPref(CLOUD_CANVAS_PROMPT_DISMISSED_KEY) === true;
 
 	// --- Validate callback for CanvasPanel -------------------------------------
 
@@ -595,13 +625,48 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	}, []);
 
 	/** Render the stacked SourcePanels for one continuum. */
-	const renderSections = (runKind: 'dev' | 'deploy'): ReactNode => (sources.length > 0 ? sources.map((src) => <SourcePanel key={`${projectId}.${src.id}.${runKind}`} source={src} runKind={runKind} projectId={projectId} liveEvents={runKind === 'dev' ? (liveBySource.get(src.id) ?? []) : []} openSession={openEventStream ? () => openEventStream({ source: src.id, runKind }) : () => liveStore(`${src.id}.${runKind}.${projectId}`).open()} fetchTimeline={fetchTimeline ? () => fetchTimeline({ source: src.id, runKind }) : null} liveTaskStatus={runKind === 'dev' ? statusMap[src.id] : undefined} componentNames={componentNames} isConnected={isConnected} isSubscribed={isSubscribed} isReadonly={isReadonly} serverHost={serverHost} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} />) : <div style={commonStyles.empty}>No source components found</div>);
+	const renderSections = (runKind: 'dev' | 'deploy'): ReactNode => (sources.length > 0 ? sources.map((src) => <SourcePanel key={`${projectId}.${src.id}.${runKind}`} source={src} runKind={runKind} projectId={projectId} liveEvents={runKind === 'dev' ? (liveBySource.get(src.id) ?? []) : []} openSession={openEventStream ? () => openEventStream({ source: src.id, runKind }) : () => liveStore(`${src.id}.${runKind}.${projectId}`).open()} fetchTimeline={fetchTimeline ? () => fetchTimeline({ source: src.id, runKind }) : null} liveTaskStatus={runKind === 'dev' ? statusMap[src.id] : undefined} componentNames={componentNames} isSubscribed={isSubscribed} isReadonly={isReadonly} serverHost={serverHost} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} />) : <div style={commonStyles.empty}>No source components found</div>);
 
 	const panels = {
 		design: {
 			content: (
 				<div style={styles.canvasPadding}>
-					<PrefsProvider value={prefsApi}>{project && <CanvasPanel oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} getNodeSchema={getNodeSchema ? handleGetNodeSchema : undefined} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</PrefsProvider>
+					<PrefsProvider value={prefsApi}>
+						{project && (
+							<CanvasPanel
+								oauth2RootUrl={oauth2RootUrl}
+								oauthReturnUrl={oauthReturnUrl}
+								onOpenExternal={onOpenExternal}
+								pendingOAuthTokens={pendingOAuthTokens}
+								clearPendingOAuthTokens={clearPendingOAuthTokens}
+								project={project}
+								servicesJson={servicesJson}
+								getNodeSchema={getNodeSchema ? handleGetNodeSchema : undefined}
+								taskStatuses={statusMap}
+								handleValidatePipeline={handleValidate}
+								onContentChanged={isReadonly ? undefined : handleContentChanged}
+								onViewportChange={handleViewportChange}
+								onRunPipeline={isReadonly ? undefined : handleRunPipeline}
+								onStopPipeline={isReadonly ? undefined : handleStopPipeline}
+								onOpenLink={handleOpenLink}
+								onOpenCloudSetup={onOpenCloudSetup ? handleOpenCloudSetup : undefined}
+								cloudPromptDismissed={cloudPromptDismissed}
+								onDismissCloudPrompt={handleDismissCloudPrompt}
+								onDismissCloudPromptForever={handleDismissCloudPromptForever}
+								serverHost={serverHost}
+								isConnected={isConnected}
+								cloudConnectionConfigured={cloudConnectionConfigured}
+								isSubscribed={isSubscribed}
+								initialViewport={viewState.viewport}
+								isDirty={isReadonly ? false : isDirty}
+								isNew={isReadonly ? false : isNew}
+								onSave={isReadonly ? undefined : handleSave}
+								onExport={isReadonly ? undefined : onExport}
+								isReadonly={isReadonly}
+								envKeys={envKeys}
+							/>
+						)}
+					</PrefsProvider>
 				</div>
 			),
 		},
@@ -627,7 +692,25 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			// would fetch a lifecycle the user can never open.
 			content: renderDocPanel(
 				!isReadonly && fetchDeployLifecycle && onDeployPublish && onDeployVersion ? (
-					<DeployPanel fetchLifecycle={fetchDeployLifecycle} deployments={teamDeploymentRows} teams={deployTeams} pipelineName={project?.name ?? ''} {...(onDeploySetDisabled ? { onSetDisabled: onDeploySetDisabled } : {})} {...(onDeploySetSchedule ? { onSetSchedule: onDeploySetSchedule } : {})} {...(onDeploySetSchedulePaused ? { onSetSchedulePaused: onDeploySetSchedulePaused } : {})} {...(fetchDeployArtifact ? { fetchArtifact: fetchDeployArtifact, servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})} {...(onDeployPreviewSchedule ? { previewSchedule: onDeployPreviewSchedule } : {})} canPublish={!isDirty && !isNew} {...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})} requiresSave={isDirty && !isNew} {...(onSaveDocument ? { onSaveDocument } : {})} onPublish={onDeployPublish} onDeploy={onDeployVersion} {...(onOpenDeployment ? { onOpenDeployment } : {})} />
+					<DeployPanel
+						fetchLifecycle={fetchDeployLifecycle}
+						deployments={teamDeploymentRows}
+						teams={deployTeams}
+						pipelineName={project?.name ?? ''}
+						{...(onDeploySetDisabled ? { onSetDisabled: onDeploySetDisabled } : {})}
+						{...(onDeployRemove ? { onRemove: onDeployRemove } : {})}
+						{...(onDeploySetSchedule ? { onSetSchedule: onDeploySetSchedule } : {})}
+						{...(onDeploySetSchedulePaused ? { onSetSchedulePaused: onDeploySetSchedulePaused } : {})}
+						{...(fetchDeployArtifact ? { fetchArtifact: fetchDeployArtifact, servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})}
+						{...(onDeployPreviewSchedule ? { previewSchedule: onDeployPreviewSchedule } : {})}
+						canPublish={!isDirty && !isNew}
+						{...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})}
+						requiresSave={isDirty && !isNew}
+						{...(onSaveDocument ? { onSaveDocument } : {})}
+						onPublish={onDeployPublish}
+						onDeploy={onDeployVersion}
+						{...(onOpenDeployment ? { onOpenDeployment } : {})}
+					/>
 				) : (
 					<div style={commonStyles.empty}>Deployment lifecycle is not available in this host yet</div>
 				)

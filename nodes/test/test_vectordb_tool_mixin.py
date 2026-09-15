@@ -423,6 +423,29 @@ def test_two_instances_share_bare_names() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tool schema contract (#1092 — advertised keys must match what dispatch reads)
+# ---------------------------------------------------------------------------
+
+
+def test_search_filter_schema_enumerates_only_honored_keys() -> None:
+    """The filter schema must reject keys search() does not read (#1092)."""
+    schema = VectorStoreToolMixin.search.__tool_meta__['input_schema']
+    filter_schema = schema['properties']['filter']
+
+    assert filter_schema['additionalProperties'] is False
+    assert set(filter_schema['properties']) == {'objectId', 'nodeId', 'parent'}
+
+
+def test_upsert_metadata_schema_enumerates_only_honored_keys() -> None:
+    """The per-document metadata schema must reject keys upsert() does not store (#1092)."""
+    schema = VectorStoreToolMixin.upsert.__tool_meta__['input_schema']
+    meta_schema = schema['properties']['documents']['items']['properties']['metadata']
+
+    assert meta_schema['additionalProperties'] is False
+    assert set(meta_schema['properties']) == {'nodeId', 'parent', 'chunkId'}
+
+
+# ---------------------------------------------------------------------------
 # Tool dispatch
 # ---------------------------------------------------------------------------
 

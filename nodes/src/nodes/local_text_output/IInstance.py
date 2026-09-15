@@ -24,6 +24,7 @@
 import os
 from rocketlib import IInstanceBase, Entry, warning, extended_length_path, shorten_path_components
 from .IGlobal import IGlobal
+from .path_prefix import strip_exclude_prefix
 
 
 class IInstance(IInstanceBase):
@@ -86,16 +87,12 @@ class IInstance(IInstanceBase):
                 abs_path = self.current_object.path
                 exclude = self.IGlobal.exclude
 
-                # Determine if the absolute path should be used or if we need to exclude a path
-                relative_path = ''
-                if exclude == 'N/A':
-                    relative_path = abs_path
-                else:
-                    if abs_path.startswith(exclude):
-                        relative_path = abs_path.replace(exclude, '')
-                    else:
-                        warning(f'The path {abs_path} does not start with {exclude}')
-                        return
+                # Remove one complete leading path prefix. Raw string replacement
+                # would also remove matching text from later path components.
+                relative_path = strip_exclude_prefix(abs_path, exclude)
+                if relative_path is None:
+                    warning(f'The path {abs_path} does not start with {exclude}')
+                    return
 
                 # Remove the file extension and add .txt
                 # e.g. Hackathon/folder1/gradient_terms_of_use.txt

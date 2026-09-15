@@ -55,6 +55,21 @@ _MAX_TABLE_ROWS = 1000
 _MAX_TABLE_COLS = 25
 _DOCUMENT_FIELDS = 'documentId,title,revisionId,body(content(paragraph(elements(textRun(content)))))'
 
+# The Docs API has no list/about-style endpoint to probe cheaply, so check_connection asks
+# for a document that can't exist. Google's front-end enforces API-enablement before it
+# resolves the resource, so a 404 here still proves the API itself is reachable; anything
+# else (esp. a 403 accessNotConfigured) is a real connectivity problem and must propagate.
+_CONNECTION_PROBE_DOCUMENT_ID = 'rocketride-connection-probe-0000000000000000'
+
+
+def _probe_connection(svc) -> None:
+    try:
+        execute(svc.documents().get(documentId=_CONNECTION_PROBE_DOCUMENT_ID, fields='documentId'))
+    except ValueError as exc:
+        if getattr(exc, 'status', None) == 404:
+            return
+        raise
+
 
 class IInstance(GoogleToolInstanceBase):
     IGlobal: IGlobal
@@ -85,15 +100,17 @@ class IInstance(GoogleToolInstanceBase):
 
     @tool_function(
         description=(
-            'Check the Google Docs connection and verify that the granted OAuth scopes cover the '
-            "node's configured access tier. Call this when a Docs operation fails with a scope or "
-            'permission error. Returns connection_ok: true when the required scopes are present.'
+            'Check the Google Docs connection: makes a live probe call against the Docs API and '
+            "verifies that the granted OAuth scopes cover the node's configured access tier. Call "
+            'this when a Docs operation fails with a scope or permission error. Returns '
+            'connection_ok: true only when the live probe succeeds and the required scopes are '
+            'present.'
         ),
         input_schema={'type': 'object', 'properties': {}, 'required': []},
     )
     def check_connection(self, args: dict) -> dict:
-        """Check Docs connection status and whether granted OAuth scopes cover the access tier. Read-only."""
-        return self._check_connection_impl()
+        """Check Docs connection status: live API probe plus granted-scope coverage. Read-only."""
+        return self._check_connection_impl(probe=_probe_connection)
 
     # =======================================================================
     # READ

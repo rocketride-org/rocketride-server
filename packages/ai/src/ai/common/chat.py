@@ -17,8 +17,14 @@ from typing import Dict, Any, Callable, Optional
 from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
-from ai.common.util import parseJson
-from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
+from ai.common.util import ThinkTruncatedError, parseJson
+from ai.common.validation import (
+    validate_model_name,
+    validate_max_tokens,
+    validate_prompt,
+    check_output_token_config,
+    hand_supplied_token_fields,
+)
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
 
@@ -98,6 +104,21 @@ class ChatBase:
         self._model = validate_model_name(config.get('model'))
         self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
         self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
+
+        # Check what the author wrote, before the clamp below rewrites it — a value the
+        # provider would reject can be clamped into a plausible-looking one, and then
+        # there is nothing left to report. Only when a token field was hand-supplied:
+        # catalogue profiles are checked by the model sync, and warning about those on
+        # every run would be noise. Hand-written config is what the sync never sees.
+        if hand_supplied_token_fields(connConfig):
+            problem = check_output_token_config(
+                self._model,
+                self._modelOutputTokens,
+                self._modelTotalTokens,
+                Config.getNodeProfiles(provider),
+            )
+            if problem:
+                warning(f'{provider}: {problem}')
 
         # Validate and clamp output tokens against known safe maximums
         self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
@@ -580,7 +601,19 @@ class ChatBase:
                     answer.setAnswer(parsed_response)
                     return answer
 
-                except (json.JSONDecodeError, ValueError):
+                # Listed before the generic arm below, which would otherwise swallow it —
+                # ThinkTruncatedError IS a ValueError.
+                except ThinkTruncatedError as e:
+                    # Not a formatting mistake: the model never reached the JSON because it
+                    # ran out of output budget mid-reasoning. The repair prompt tells it to
+                    # "examine your JSON", which is the wrong instruction, and a resample
+                    # rarely fits a budget that has already overflowed. So surface the cause
+                    # now instead of buying two more model calls to arrive at a message that
+                    # no longer names it.
+                    debug(f'Error: {e}')
+                    raise
+
+                except (json.JSONDecodeError, ValueError) as e:
                     # JSON parsing failed
                     if retry_count < max_retries - 1:
                         debug(f'JSON validation failed on attempt {retry_count + 1}, retrying...')
@@ -589,10 +622,15 @@ class ChatBase:
                         # This will again use chat_string with full network retry logic
                         response = self.chat_string(question.getPrompt(has_previous_json_failed=True))
                     else:
-                        # Max retries reached, raise ValueError
-                        error_msg = f'Failed to get valid JSON response after {max_retries + 1} attempts. Last response: {response[:200]}...'
+                        # Max retries reached, raise ValueError. Carry the last parse error:
+                        # without it the caller sees only a truncated response and has to
+                        # guess what was wrong with it.
+                        error_msg = (
+                            f'Failed to get valid JSON response after {max_retries + 1} attempts. '
+                            f'Cause: {e}. Last response: {response[:200]}...'
+                        )
                         debug(f'Error: {error_msg}')
-                        raise ValueError(error_msg)
+                        raise ValueError(error_msg) from e
 
         else:
             # Create the answer and assign the text

@@ -1,114 +1,168 @@
 # graph_neo4j
 
-A RocketRide graph and tool node that answers natural-language questions against a Neo4J graph database by translating them to Cypher with a connected LLM.
+A RocketRide graph and tool node that uses a connected LLM to answer
+natural-language questions against a Neo4j graph database. Pick it for
+knowledge-graph retrieval when Cypher generation and graph-schema awareness are
+more useful than a native memory-store search.
+
+## About Neo4j
+
+Neo4j is a graph database accessed here through its Python driver and Bolt
+connection protocol. Its data model represents nodes and the relationships
+between them, which this node reflects for use in generated Cypher queries.
 
 ## What it does
 
-Connects to a Neo4J instance over the Bolt protocol using the official **neo4j Python driver** and plays two roles. As a **pipeline node**, it receives natural-language questions on the `questions` lane, asks the connected LLM to generate a Cypher query, executes it against the graph, and emits results downstream on `table`, `text`, and `answers`. As a **tool node**, it exposes `get_data`, `get_query`, `get_schema`, `execute`, and `dialect` to an agent, plus a deprecated `get_cypher` alias for `get_query` kept for agents written against the previous tool surface. Designed for knowledge graph retrieval, entity linking, and graph-based RAG workflows.
-
-It derives from `ai.common.graph.GraphInstanceBase`, the base class shared by every graph database node (also used by `graph_falkordb`): the lane handling, the natural-language-to-Cypher loop and the common tools live there, so this node only implements what is specific to Neo4J — the Bolt driver, READ access-mode sessions, and schema reflection.
-
-The graph schema (node labels with property types, and relationship types with their start/end labels) is reflected once at pipeline start using `db.schema.nodeTypeProperties()` and `db.schema.visualization()` (falling back to `db.labels()` and `db.relationshipTypes()` on older servers) and included in every LLM prompt so Cypher is generated against the real graph structure.
-
-The node is **read-only by design**: every generated or supplied Cypher statement must pass a safety check that rejects write and admin clauses (`CREATE`, `MERGE`, `DELETE`, `DETACH DELETE`, `SET`, `REMOVE`, `DROP`, `FOREACH`, `LOAD CSV`, and mutating `apoc` procedures), with comments stripped before checking. Queries time out after 30 seconds. The only escape hatch is the opt-in `QuestionType.EXECUTE` path, gated by `allow_execute`, which is **off by default**.
-
----
+On the `questions` lane, the node gives a connected LLM the reflected graph
+schema and turns the question into a read-only Cypher query. It can emit query
+results on `table`, `text`, and `answers`, and it exposes the same graph access
+to agents as tools. Choose it over `graph_hydradb` when you need questions
+translated to Cypher for an existing Neo4j graph; HydraDB instead offers native
+memory operations and no data lanes.
 
 ## Connections
 
 | Connection | Required | Description |
-|------------|----------|-------------|
-| `llm` | yes (min 1) | LLM used to generate Cypher from natural language |
+| --- | --- | --- |
+| `llm` | yes | LLM used to generate Cypher from natural-language questions. |
 
----
+## Lanes
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `questions` | `table` | Emit executed query results as a Markdown table. |
+| `questions` | `text` | Emit the result as text. |
+| `questions` | `answers` | Emit executed results as a Markdown table, or an LLM reply when no graph query is produced. |
+
+For regular questions, the LLM generates and validates Cypher before the node
+runs it. A `DIALECT` question emits `{"dialect": "neo4j"}` on `answers`.
+An `EXECUTE` question is handled separately and runs its text as raw Cypher
+only when **Allow direct query execution** is enabled.
+
+## As a tool
+
+The functions are registered under the `neo4j` service prefix: for example,
+`neo4j.get_data`. There is no configurable tool-server-name field.
+
+| Function | Description |
+| --- | --- |
+| `neo4j.get_data` | Turn a natural-language request into a read-only Cypher query, run it, and return rows. |
+| `neo4j.get_schema` | Return the reflected labels, properties, and relationship types. |
+| `neo4j.get_query` | Return generated read-only Cypher without executing it. |
+| `neo4j.execute` | Run raw Cypher only when direct execution is enabled. |
+| `neo4j.dialect` | Return `{"dialect": "neo4j"}`. |
+| `neo4j.get_cypher` | Deprecated compatibility alias for `get_query`; it also includes the statement under `cypher`. |
+
+`get_data`, `get_query`, and `get_cypher` require a non-empty `question` and
+accept an optional integer `limit`; absent or invalid limits resolve to 250 and
+the maximum is 25,000. `get_data` returns `{valid, rows, query, row_limit,
+truncated}` on success. Failed validation or execution returns `valid: false`
+with `error`; a non-graph question returns `valid: false` with an `answer`
+instead of rows.
+
+`get_schema` accepts an optional `label`; an unknown label returns an `error`,
+otherwise the response includes `{database, labels, nodes, relationships}`.
+`execute` requires a non-empty raw `query` and returns `{rows, affected_rows}`;
+it raises an error while direct execution is disabled. `dialect` accepts no
+meaningful arguments. Generation failures return an error rather than an
+executable query, and `get_cypher` preserves those outcomes while adding
+`cypher` when a query is available.
 
 ## Configuration
 
-### Lanes
+Start with a working Bolt URI and authentication method, then describe the
+graph so the LLM has useful domain context. The generated schema below lists
+the fields; these settings control connection validation, generated-query
+quality, and the intentionally restricted direct-execution path.
 
-| Lane in | Lanes out | Description |
-|---------|-----------|-------------|
-| `questions` | `table`, `text`, `answers` | Translate question to Cypher, execute, emit results on each connected lane |
+### Connection URI and database
 
-For a normal question, results are emitted as a markdown table on `table` and `answers`, and as plain text on `text`. If the LLM judges the question unrelated to the graph, its text reply is forwarded in place of a query result. Rows read on this lane are capped at 25,000 so a broad query cannot exhaust worker memory.
+**Connection URI** defaults to `neo4j://localhost:7687`; use the `neo4j://` or
+`bolt://` forms for plaintext connections and the `neo4j+s://` or `bolt+s://`
+forms for TLS. **Database name** defaults to `neo4j`. Change either to point at
+the instance and database containing the graph the node should query. At
+startup and when saving configuration, the driver verifies connectivity and
+runs `RETURN 1` against that specific database, so a wrong database name or
+missing access surfaces before the first question.
 
-Two special question types are handled on the `questions` lane:
+### Graph description
 
-- **`QuestionType.DIALECT`**: emits `{"dialect": "neo4j"}` on the `answers` lane so SDK callers can detect they are talking to a graph database rather than a relational one.
-- **`QuestionType.EXECUTE`**: treats the question text as raw Cypher and runs it without LLM translation or the read-only safety check. Requires `allow_execute: true`; otherwise the request is silently rejected with a warning. Results are capped at 25,000 rows (the query fails if exceeded), and when a write returns no rows the emitted JSON reports `affected_rows` derived from the result summary counters (nodes/relationships created or deleted, properties set).
+**Graph description** is appended to the LLM's query-generation context, along
+with the reflected labels, property types, and relationships. Leave it empty
+when the schema is self-explanatory; add a concise description of the graph's
+domain when labels alone would be ambiguous. This helps the LLM choose the
+correct interpretation, but it cannot replace a connection that exposes the
+actual schema.
 
-### Fields
+### Max validation attempts
 
-| Field | Type | Description |
-|---|---|---|
-| `uri` | string | Default "neo4j://localhost:7687". Bolt URI for the Neo4J instance. Use neo4j:// or bolt:// for plaintext, neo4j+s:// or bolt+s:// for TLS (e.g. Neo4J Aura cloud) |
-| `auth_method` | string | Default "userpass".  |
-| `user` | string | Default "neo4j". Username to authenticate with the Neo4J instance. |
-| `password` | string | Password to authenticate with the Neo4J instance. |
-| `token` | string | Bearer token for token-based authentication (e.g. Neo4J Aura cloud). |
-| `database` | string | Default "neo4j". Name of the Neo4J database to connect to. Use 'neo4j' for the default database. |
-| `db_description` | string | Default empty. What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries. |
-| `max_attempts` | integer | Default 5. Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query |
-| `allow_execute` | boolean | Default false. Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly. |
-| `profile` | string | Default "default".  |
+**Max validation attempts** controls how many times a rejected generated query
+is repaired after Neo4j rejects it under `EXPLAIN`. The setting defaults to 5;
+the runtime clamps it to 1–10. Increase it only if valid requests routinely
+need additional repair attempts, since each retry calls the LLM and delays the
+answer. When all attempts fail, the node returns the database error rather than
+running the last rejected query.
 
-The default profile sets `database: neo4j`. Saving the node config runs a connectivity probe (`RETURN 1` against the configured database) and surfaces driver errors (wrong password, unreachable host, bad database name) as warnings before the pipeline starts.
+### Allow direct query execution
 
----
-
-## Available tools
-
-When connected to an agent, the node exposes three functions namespaced under the node's prefix (e.g. `neo4j.get_data`):
-
-### Data retrieval
-
-| Tool | Description |
-|---|---|---|
-| `get_data` | Accepts a natural-language description of the graph data you want, converts it to a safe Cypher MATCH query, executes it against the Neo4J graph database, and returns the result rows. No schema lookup or Cypher knowledge required, just describe what you need. Results may be large, consider using peek or store. |
-| `get_schema` | Returns the Neo4J graph schema: node labels with their properties and types, and relationship types with their start and end node labels. Do NOT call this preemptively, only use when get_data fails or returns unexpected results. |
-| `get_cypher` | Accepts a natural-language description and returns the equivalent Cypher MATCH statement without executing it. Only use when the user explicitly asks to see the Cypher, for actual data retrieval, use get_data instead. |
-
-### Schema inspection
-
-| Tool | Description |
-|------|-------------|
-| `get_schema` | Returns the cached graph schema: node labels with `{property, type}` lists and `{type, start, end}` relationship descriptors, plus the database name. Optional `label` argument filters to a single node label and its relationships. Intended for recovery when `get_data` fails or returns unexpected results; agents are instructed not to call it preemptively. |
-
-### Cypher generation
-
-| Tool | Description |
-|------|-------------|
-| `get_cypher` | Translates a natural-language question to a Cypher `MATCH` statement without executing it. Returns `{cypher, valid: true}` on success, an `error` key if the generated Cypher is unsafe, or an `answer` text reply when the question is not a graph query. Use only when the caller explicitly needs to see the Cypher; for data retrieval use `get_data` instead. |
-
----
-
-## Cypher generation and validation
-
-Each generated query goes through a validate-and-retry loop:
-
-1. The LLM is prompted with the question, the reflected graph schema, the optional graph description, and strict instructions: only `MATCH`, `OPTIONAL MATCH`, `WITH`, `WHERE`, `RETURN`, `ORDER BY`, `SKIP`, and `LIMIT` are permitted, and a `LIMIT` clause must terminate the query.
-2. The generated Cypher is checked by the read-only safety filter (`_is_cypher_safe`).
-3. If the safety check passes, the query is validated with `EXPLAIN` against the live database. Any syntax error is fed back to the LLM together with the failing query, and the LLM retries up to `max_attempts` times (default 5, range 1-20).
-
-As defence-in-depth, the safety filter also runs at execution time inside `_run_query`, so an unsafe statement is refused even if a caller bypasses the generation path.
-
-Result values are serialised to plain JSON: graph nodes gain a `_labels` key, relationships a `_type` key, paths become `{nodes, relationships}`, and Neo4J temporal types are ISO-formatted.
-
----
+**Allow direct query execution** is off by default. Keep it off for normal
+agent and lane traffic: generated reads pass the Cypher safety gate and use a
+READ access-mode session. Turn it on only for a trusted caller that must issue
+raw Cypher through `execute` or `QuestionType.EXECUTE`, because that path skips
+both LLM translation and the read-only gate and can write to the database.
+Raw execution is still limited to 25,000 returned rows; exceeding that limit
+raises an error.
 
 ## Authentication
 
-### Username and password
+Choose **Username & Password** (the default) to send the configured user and
+password to the driver; a blank user resolves to `neo4j`. Choose **Bearer
+Token** to use the configured token through `neo4j.bearer_auth`. The save-time
+probe reports authentication, connectivity, and Neo4j errors as warnings;
+pipeline startup then fails fast if the configured server or database cannot
+be verified.
 
-Set `auth_method: userpass` (the default), then provide `user` and `password`. A blank username falls back to `neo4j`.
+## Limitations
 
-### Bearer token
+The `noremote` capability pins this node to the local worker because it holds a
+database client and credentials. The ordinary graph-query flow uses a
+client-side best-effort blacklist for selected write and administrative clauses
+and Neo4j READ access mode. Neither is a guaranteed read-only boundary: READ
+access controls routing, and the blacklist cannot cover every mutating procedure.
+Enabling direct execution grants trusted callers an explicit write-capable escape
+hatch.
 
-Set `auth_method: token` and provide `token`. The node passes it as Neo4J bearer auth (`neo4j.bearer_auth`). Use this for token-based setups such as Neo4J Aura cloud.
+## Notes
 
-Connectivity and authentication are verified at pipeline start with `verify_connectivity()` plus an explicit `RETURN 1` probe of the configured database, so a wrong database name or missing permissions fail fast rather than mid-pipeline.
+### Schema reflection and query generation
 
----
+At startup, the node reflects node labels and property types through
+`db.schema.nodeTypeProperties()` and relationship information through
+`db.schema.visualization()`. On servers where those procedures fail, it falls
+back to `db.labels()` and `db.relationshipTypes()`. Reflection failure only
+warns and leaves an empty schema cache, so the connection can continue but the
+LLM has less structure to ground its Cypher generation.
+
+The LLM is instructed to generate queries only from the reflected schema;
+generated output is checked for unsafe clauses after comments are removed and
+validated with `EXPLAIN`. The safety
+gate rejects `CREATE`, `MERGE`, `DELETE`, `SET`, `DROP`, and other write or
+admin clauses including mutating `apoc` procedures. The actual read query has a
+30-second timeout and the implementation returns one row beyond the requested
+limit to report `truncated` correctly.
+
+### Result serialization
+
+Returned graph values are made JSON-safe: nodes include `_labels`,
+relationships include `_type`, paths become `{nodes, relationships}`, and
+temporal values use their ISO representation. For raw execution, `affected_rows`
+counts created or deleted nodes and relationships, changed properties, and
+label changes reported by the Neo4j result summary.
+
+## Upstream docs
+
+- [Neo4j Python driver documentation](https://neo4j.com/docs/python-manual/)
+- [Cypher manual](https://neo4j.com/docs/cypher-manual/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

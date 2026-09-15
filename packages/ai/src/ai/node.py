@@ -1,6 +1,5 @@
 import argparse
 import sys
-import os
 import asyncio
 import threading
 import time
@@ -9,9 +8,6 @@ from typing import Optional, Tuple, Any
 # Remove auto-added script directory to avoid import conflicts with the ai package
 if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or sys.path[0].endswith('ai/')):
     sys.path.pop(0)
-
-# Suppress debugpy frozen modules warning (Python 3.12+)
-os.environ['PYDEVD_DISABLE_FILE_VALIDATION'] = '1'
 
 # Import directly from C++
 from engLib import debug, warning
@@ -274,46 +270,6 @@ def run():
     mock_path = os.environ.get('ROCKETRIDE_MOCK')
     if mock_path:
         sys.path.insert(0, mock_path)
-
-    # Parse arguments
-    parser = argparse.ArgumentParser(add_help=False)  # Don't interfere with main arg parsing
-    parser.add_argument('--debug_host', type=str, default=None)
-    parser.add_argument('--debug_port', type=int, default=None)
-    parser.add_argument('--wait_for_client', action='store_true', default=False)
-
-    # Parse only the args we care about, ignore unknown ones
-    parsed_args, _ = parser.parse_known_args(sys.argv)
-
-    # Connect to parent process debugpy if arguments provided
-    if parsed_args.debug_host and parsed_args.debug_port:
-        try:
-            import debugpy
-
-            # Get connection details (use debug_host if data_host not provided)
-            debug_host = parsed_args.debug_host
-            debug_port = parsed_args.debug_port
-
-            debugpy.listen(
-                (
-                    debug_host,
-                    debug_port,
-                ),
-                in_process_debug_adapter=True,
-            )
-
-            # Enable debugging for this thread
-            debugpy.debug_this_thread()
-
-            # If we are supposed to wait for the client attach, do so
-            if parsed_args.wait_for_client:
-                debugpy.wait_for_client()
-
-        except Exception as e:
-            # Non-fatal: debugging is optional. Named, though — a debug port in
-            # an OS exclusion range fails here and otherwise looks like
-            # "debugging is off". `warning`, not `debug`: engLib's debug() is
-            # gated on the DebugOut level, which is off by default.
-            warning(f'failed to initialize debugpy on {parsed_args.debug_host}:{parsed_args.debug_port}: {e}')
 
     # Start the global event loop for async operations
     _start_event_loop()

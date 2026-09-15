@@ -92,14 +92,15 @@ class AccountApi:
         """
         await self._client.call('rrext_account_me', subcommand='update', **fields)
 
-    async def set_default_team(self, team_id: str) -> None:
+    async def set_dev_team(self, team_id: str) -> None:
         """
-        Set the user's preferred default team.
+        Set the user's DEV team — the team dev-mode runs bill to and whose environment layer applies.
 
         Args:
-            team_id: The team ID to set as default.
+            team_id: The team ID to set as the dev team — dev-run billing and
+                the environment (ROCKETRIDE_*) layer both resolve against it.
         """
-        await self._client.call('rrext_account_me', subcommand='set_default_team', teamId=team_id)
+        await self._client.call('rrext_account_me', subcommand='set_dev_team', teamId=team_id)
 
     async def delete_account(self) -> None:
         """Permanently delete the current user's account."""

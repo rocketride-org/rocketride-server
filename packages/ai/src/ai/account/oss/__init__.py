@@ -114,12 +114,19 @@ class Account(AccountBase):
             phoneNumber='',
             phoneNumberVerified=False,
             locale='',
-            defaultTeam='local',
+            devTeam='local',
             # Single synthetic organisation with org.admin so that
             # resolve_team_permissions expands to the full permission set.
             organization={
                 'id': 'local',
                 'name': 'Local',
+                # Standalone publishes under the shared platform namespace:
+                # anyone running the OSS server can deploy modified
+                # rocketride.* apps to their own server's rungs (@me/@team) —
+                # upstreaming a change to the common apps happens via PR, and
+                # the @public rung stays unreachable without the SaaS review
+                # ladder, so the namespace grant never leaves this install.
+                'developerId': 'rocketride',
                 'permissions': ['org.admin'],
                 'teams': [
                     {
@@ -140,14 +147,115 @@ class Account(AccountBase):
                 ],
             },
             # OSS: all apps are on the desktop and free — return full manifest
-            # entries so the shell can register MF remotes after auth
-            apps=[
-                {**a, 'appStatus': 'free', 'onDesktop': True}
-                for a in self._read_apps_json(public_only=False)
-                if a.get('id')
-            ],
+            # entries so the shell can register MF remotes after auth. The
+            # scope walk resolves EVERY app (built-ins are seeded registry
+            # rows) so the INITIAL connect sees them, not just refreshes.
+            apps=await self._assemble_apps(),
             capabilities=self.capabilities,
         )
+
+    async def _assemble_apps(self) -> List[Dict]:
+        """The full OSS app list — registry-only (single source of truth).
+
+        Built-ins are seeded into the deployment registry at init
+        (``_seed_builtin_apps``), so runtime assembly never consults
+        apps.json: every app — seeded or user-published — resolves through
+        the ONE scope walk over the publish bindings, with the dev overlay
+        applied on top. OSS decoration: everything is free and on the
+        desktop.
+        """
+        from ai.account.app_deploy import resolve_app_pins
+        from ai.account.dev_overlay import apply_overlay
+
+        try:
+            entries = await resolve_app_pins('local', 'local', ['local'])
+        except Exception as exc:
+            # A broken publish store must never block sign-in — but say so.
+            debug(f'[oss] app pin resolution failed: {exc}')
+            entries = []
+        apps: List[Dict] = []
+        for entry in entries:
+            if not entry.get('id'):
+                # Skip ONE malformed pin, not the whole set.
+                continue
+            entry['appStatus'] = 'free'
+            entry['onDesktop'] = True
+            apps.append(entry)
+        return apply_overlay('local', apps)
+
+    # =========================================================================
+    # INIT — seed built-ins into the registry (apps.json is the seed)
+    # =========================================================================
+
+    async def init_account(self, server) -> None:
+        """
+        OSS startup: seed the built-in apps from apps.json into the registry.
+
+        Single process, so seeding rides the init sequence directly (SaaS
+        runs the shared seeder from its pod-deploy tool instead — many pods
+        must not race at boot). Failures never block startup: the engine is
+        useful without the app rail.
+
+        Args:
+            server: ``WebServer`` instance (unused by OSS).
+        """
+        try:
+            await self._seed_builtin_apps()
+        except Exception as exc:
+            debug(f'[oss] built-in app seeding failed: {exc}')
+
+    async def _seed_builtin_apps(self) -> None:
+        """
+        Seed absent built-ins and version-march changed ones.
+
+        The OSS orchestration around the shared seeder:
+        - no rail rows for an id     -> fresh seed (v1 + public binding)
+        - seed rows current          -> no-op (binding self-heal only)
+        - seed rows behind apps.json -> force: mint the NEXT version and
+          repoint the public binding (append-only — older versions and any
+          session pins on them survive)
+        - rail rows but NO seed rows (a user deployed the id first) ->
+          force: bind the public rung to a fresh SEED version, never to a
+          user row
+        """
+        from ai.account.seed_apps import (
+            SEED_COMMENT,
+            SYSTEM_ACTOR,
+            load_manifest_entries,
+            seed_manifest_app,
+        )
+
+        try:
+            entries = load_manifest_entries()
+        except FileNotFoundError as exc:
+            debug(f'[oss] app seed skipped: {exc}')
+            return
+        seeded = 0
+        for entry in entries:
+            app_id = entry.get('id')
+            if not app_id:
+                continue
+            try:
+                # Step 1: decide the per-app policy (see docstring).
+                force = False
+                rows = await self.deployments_versions('local', str(app_id))
+                if rows:
+                    # Rows are newest-first; the newest SEED row carries the
+                    # manifest this install last seeded for the app.
+                    seeds = [r for r in rows if r.get('comment') == SEED_COMMENT]
+                    if not seeds:
+                        force = True
+                    else:
+                        stored = (((seeds[0].get('metadata') or {}).get('manifest')) or {}).get('version')
+                        shipped = entry.get('version')
+                        force = bool(shipped) and str(stored or '') != str(shipped)
+                # Step 2: run the shared seeder with that policy.
+                if await seed_manifest_app(self, 'local', entry, SYSTEM_ACTOR, force=force):
+                    seeded += 1
+            except Exception as exc:
+                debug(f'[oss] seed failed for {app_id}: {exc}')
+        if seeded:
+            debug(f'[oss] seeded/updated {seeded} built-in app(s)')
 
     # =========================================================================
     # ACCOUNT MANAGEMENT  (not available in OSS)
@@ -176,7 +284,7 @@ class Account(AccountBase):
     async def update_user(self, user_id: str, display_name: str):
         self._saas_only()
 
-    async def set_default_team(self, user_id: str, team_id: str):
+    async def set_dev_team(self, user_id: str, team_id: str):
         self._saas_only()
 
     async def list_keys(self, user_id: str) -> List:
@@ -240,29 +348,42 @@ class Account(AccountBase):
     # the environment is not configured — the open-source default.
 
     # =========================================================================
-    # APP MANIFEST — read from static apps.json
+    # APP MANIFEST — registry-only resolution (apps.json is only the seed)
     # =========================================================================
 
     async def get_public_apps(self) -> list:
         """
         Return apps visible to unauthenticated users.
 
-        Reads ``dist/server/static/apps.json`` from disk and returns only
-        entries where ``public`` is not explicitly ``False``.
+        Registry-only: walks the public publish rung and hides entries whose
+        seeded manifest declared ``public: false`` (the binding snapshot
+        carries the flag on the file backend). The dev overlay applies on
+        top so a register_dev'd bundle previews pre-auth too.
 
         Returns:
             List of app manifest dicts.
         """
-        return self._read_apps_json(public_only=True)
+        from ai.account.app_deploy import resolve_app_pins
+        from ai.account.dev_overlay import apply_overlay
+
+        try:
+            # Snapshot 'public' flags live on the binding rows; the walk
+            # output does not carry them, so read both and subtract.
+            rows = await self.publish_list('local', 'app', [{'type': 'public', 'id': ''}])
+            hidden = {r.get('appId') for r in rows if (r.get('snapshot') or {}).get('public', True) is False}
+            entries = [e for e in await resolve_app_pins('local', None, []) if e.get('id') not in hidden]
+        except Exception as exc:
+            debug(f'[oss] public app resolution failed: {exc}')
+            entries = []
+        return apply_overlay('local', entries)
 
     async def get_apps_for_user(self, user_id: str, organizations: list) -> list:
         """
         Return all apps for an authenticated OSS user.
 
-        In OSS mode, APIKEY grants full access — all apps are returned
-        regardless of the ``public`` flag, plus the publish ladder's pins
-        (org < team < personal scope walk over the single 'local' scopes),
-        with the dev overlay applied on top inside the reader.
+        Registry-only: the SAME single scope walk as the login assembly —
+        built-ins are seeded rows, so there is no static merge and the two
+        paths can never disagree.
 
         Args:
             user_id:       Internal user ID (always 'local' in OSS).
@@ -271,55 +392,7 @@ class Account(AccountBase):
         Returns:
             List of all app manifest dicts.
         """
-        apps = self._read_apps_json(public_only=False)
-        # Deployed apps (kind:'app' registry pins) — OSS single-scope walk
-        try:
-            from ai.account.app_deploy import resolve_app_pins
-
-            pinned = await resolve_app_pins('local', 'local', ['local'])
-            if pinned:
-                by_id = {a.get('id'): a for a in apps}
-                for entry in pinned:
-                    by_id[entry['id']] = {**by_id.get(entry['id'], {}), **entry}
-                apps = list(by_id.values())
-        except Exception as exc:
-            # registry empty/unavailable — the static manifest stands
-            debug(f'[oss] app pin resolution failed: {exc}')
-        return apps
-
-    def _read_apps_json(self, public_only: bool = False) -> list:
-        """
-        Read and parse the static apps.json manifest from disk.
-
-        Args:
-            public_only: If True, filter out entries with ``public: False``.
-
-        Returns:
-            List of app manifest dicts, or empty list if the file is missing.
-        """
-        import sys
-        import json
-
-        # apps.json is written by registerApp.js during the build
-        apps_path = os.path.join(os.path.dirname(sys.executable), 'static', 'apps.json')
-        try:
-            with open(apps_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-
-        apps = data.get('apps', [])
-        if public_only:
-            # Default is public (True) — only exclude explicitly private apps
-            apps = [a for a in apps if a.get('public', True)]
-
-        # Apply the dev overlay for the single implicit OSS user: a developer
-        # who register_dev'd a local bundle sees it override (or extend) the
-        # static apps.json manifest on every assembly path (authenticate,
-        # probe, get_apps_for_user).
-        from ai.account.dev_overlay import apply_overlay
-
-        return apply_overlay('local', apps)
+        return await self._assemble_apps()
 
     # =========================================================================
     # HANDLE ACCOUNT — env-only support for OSS
