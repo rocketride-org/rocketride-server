@@ -377,9 +377,15 @@ class IGlobal(IGlobalBase):
             warning(f"tool_tenki: could not list this run's sessions to clean up: {e}")
             return
         for sandbox in leftover:
+            if getattr(sandbox, 'state', '') in ('TERMINATING', 'TERMINATED'):
+                # Already on its way out, and almost always the session the close above just ended:
+                # terminating takes a moment, so a list right after still returns it. Reporting a
+                # close here would fire on every clean shutdown and bury the case below.
+                continue
             try:
                 sandbox.close_if_open()
-                debug(f'tool_tenki: closed leftover session {getattr(sandbox, "id", "?")}')
+                # A warning, not debug: something escaped the scoped close and was still billing.
+                warning(f'tool_tenki: closed session {getattr(sandbox, "id", "?")}, which shutdown had left running')
             except Exception as e:
                 warning(f'tool_tenki: could not close leftover session {getattr(sandbox, "id", "?")}: {e}')
 

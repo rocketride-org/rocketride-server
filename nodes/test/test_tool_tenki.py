@@ -1982,6 +1982,28 @@ def test_shutdown_closes_sessions_left_running_under_this_runs_tag(monkeypatch, 
     assert 'close' in orphan.calls
 
 
+def test_a_clean_shutdown_does_not_claim_it_closed_anything(monkeypatch, logs):
+    # The scoped close leaves the session TERMINATING, and a list right after still shows it. Saying
+    # "closed" then would cry wolf on every shutdown and bury the one case that matters.
+    messages = []
+    monkeypatch.setattr(mod, 'debug', lambda message, *a, **kw: messages.append(str(message)), raising=False)
+    already_going = _FakeSession('sb-going', state='TERMINATING')
+    glb, _ = _started(monkeypatch, _FakeSession('sb-live'), leftover=[already_going])
+    glb.get_session()
+    glb.endGlobal()
+    assert not [message for message in messages + logs if 'sb-going' in message]
+
+
+def test_a_session_shutdown_left_running_is_closed_and_reported_to_the_operator(monkeypatch, logs):
+    # This is the case worth hearing about: something escaped the scoped close and was still billing.
+    leaked = _FakeSession('sb-leaked')
+    glb, _ = _started(monkeypatch, _FakeSession('sb-live'), leftover=[leaked])
+    glb.get_session()
+    glb.endGlobal()
+    assert 'close' in leaked.calls
+    assert any('sb-leaked' in message for message in logs)
+
+
 def test_a_failed_shutdown_sweep_is_logged_and_the_client_still_closes(monkeypatch, logs):
     glb, client = _started(monkeypatch, _FakeSession('sb-1'), list_error=RuntimeError('connection reset'))
     glb.get_session()
