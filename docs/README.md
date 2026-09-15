@@ -31,12 +31,16 @@ product content — `docs:gather` assembles the site
 from `public/`, from the co-located node docs, and from the one content folder
 below:
 
-- **`apps/`** — pages about shipped apps that only the site renders, one folder
-  per app: `vscode/` (mounted at `/clients/vscode`), and `app-builder/` when its
-  user docs land. An app's *README* is not here: it lives with the app
-  (`apps/vscode/README.md`, `apps/<app>/README.md`), next to its `assets/`. Not
-  to be confused with `development/apps/`, which is about building apps inside
-  the monorepo.
+- **`apps/`** — site pages for the two apps that are documented on the site:
+  `vscode/` (mounted at `/clients/vscode`) and, via
+  `public/product/guides/apps/app-builder.md`, the App Builder. These are the
+  only exceptions to the app-docs rule: **every other app's documentation
+  lives in its own package under `apps/<app>/`** (`README.md`, `docs/`,
+  `assets/`) and is not staged into the site. Do not add a per-app page or
+  spine entry under `guides/apps/` or here. An app's *README* is never here in
+  any case: it lives with the app (`apps/vscode/README.md`,
+  `apps/<app>/README.md`), next to its `assets/`. Not to be confused with
+  `development/apps/`, which is about building apps inside the monorepo.
 
 ## `development/` — contributors
 
@@ -64,7 +68,9 @@ which name the schema paths in their output.
 **Nothing here is published, with no exceptions.** `docs:gather` only sweeps
 `public/` and `docusaurus/apps/`, so a page whose audience is outside the repo
 belongs in one of those — move it there rather than mounting out of
-`development/`.
+`development/`. Per-app user docs are the one kind of
+outside-the-repo page that stays out of the site: they live in `apps/<app>/`
+(see the `apps/` note under `docusaurus/` for the two exceptions).
 
 ## `agents/` — AI assistants
 

@@ -27,6 +27,7 @@ Read the doc for your task before writing code. Paths are repo-relative.
 | WebSocket (5565) protocol | `docs/public/product/connect/websocket/` |
 | Crash reporting / minidumps | `docs/development/engine/crash-reporting.md` |
 | Shell apps | `docs/public/product/guides/apps/index.md` (app API), `docs/development/apps/index.md` (monorepo setup) |
+| Document a shipped app | `apps/<app>/` only (`README.md`, `docs/`, `assets/`); never a site page or spine entry. Exceptions: VS Code (`docs/docusaurus/apps/vscode/`) and App Builder (`docs/public/product/guides/apps/app-builder.md`) |
 | Builder / hooks | `docs/development/builder/reference.md` (run builds), `docs/development/builder/authoring.md` (write tasks.js), `docs/development/builder/pre-commit-hooks.md` |
 | Product docs (site spine) | `docs/public/product/` |
 
@@ -75,6 +76,9 @@ update the corresponding doc in the SAME change:
 - `.pipe` schema (`packages/client-typescript/src/client/types/pipeline.ts`) →
   reference regenerates to `/reference/pipeline-reference` (generated — do not edit).
 - VS Code extension surface → site pages in `docs/docusaurus/apps/vscode/`; marketplace README in `apps/vscode/README.md`.
+- Any other app (`apps/<app>/`) → docs stay inside that app's folder. Per-app
+  docs are never staged into the site; App Builder and VS Code are the only
+  exceptions, and no new ones are added.
 - Contributor docs (setup, builder, engine internals, node authoring, hooks) →
   `docs/development/`.
 - Third-party integration guides → `docs/public/product/connect/`.

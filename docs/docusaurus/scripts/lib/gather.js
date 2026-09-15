@@ -22,7 +22,11 @@ const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('.
 // markers (GitHub-standard naming); legacy READMEs without markers are ignored.
 const NODES_GLOB = 'nodes/src/nodes/*/README.md';
 const GENERATED_START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->';
-const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
+// apps/ is deliberately not swept: per-app documentation lives inside the app's
+// own folder and is never staged into the site (docs/README.md, "apps/"). The
+// two apps with site pages — VS Code and App Builder — are authored under
+// docs/, not apps/, so nothing under apps/ mounts.
+const DOCS_GLOB = '{nodes,packages}/**/docs/**/*.{md,mdx}';
 // Top-level docs/ tree mounts (docs consolidation): source dir -> spine slot.
 // A README.md inside these roots is a package-README export source
 // (docs:export) and is normally not a site page — except when the mount root
