@@ -101,6 +101,10 @@ def test_an_answer_that_hands_back_the_question_figure_is_still_blocked(prompt_n
         'Yes, it was $94.7B. There is no doubt.',
         'Correct. That is not in dispute: $94.7B.',
         'Indeed, $94.7B is the figure.',
+        # A negation binds to its own clause. These state the figure in one clause
+        # while negating something else in another, which is not a refusal.
+        'Nothing else to add, it was $94.7B.',
+        'I cannot confirm this, but the document mentions $94.7B.',
     ):
         assert _verdict(answer, question) == 'block', answer
 
@@ -116,6 +120,7 @@ def test_a_refusal_is_kept_however_it_negates_the_figure(prompt_node):
         'There is no record of $94.7B in the sources.',
         'I was unable to verify $94.7B.',
         'That $94.7B figure does not appear anywhere in the material.',
+        'Unfortunately, I could not find $94.7B.',
     ):
         assert _verdict(answer, question) != 'block', answer
 
