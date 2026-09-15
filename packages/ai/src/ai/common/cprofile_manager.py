@@ -45,7 +45,6 @@ Usage:
     report = profiler.report()
 """
 
-import io
 import os
 import sys
 import threading
@@ -124,6 +123,49 @@ def _is_project_code(path: str) -> bool:
     return path.startswith(_PROJECT_PREFIXES)
 
 
+# Text report column layout, mirroring yappi's print_all() defaults
+# (yappi.py:1015-1025): name 36, ncall 5, tsub/ttot/tavg 8, two-space gap.
+_COLUMNS = (('name', 36), ('ncall', 5), ('tsub', 8), ('ttot', 8), ('tavg', 8))
+_COLUMN_GAP = '  '
+
+
+def _ltrim(text: Any, size: int) -> str:
+    """Drop the head behind '..' when too long, else pad to size (yappi.py:393)."""
+    text = str(text)
+    if len(text) > size:
+        return '..' + text[-size:][2:]
+    return text.ljust(size)
+
+
+def _rtrim(text: Any, size: int) -> str:
+    """Drop the tail after '..' when too long, else pad to size (yappi.py:393).
+
+    Padding is right-hand in both directions — yappi's StatString pads short
+    values identically whichever trim was asked for, so columns read as left
+    aligned.  Kept as-is: the report is user-visible and this is not the commit
+    to restyle it.
+    """
+    text = str(text)
+    if len(text) > size:
+        return text[:size][:-2] + '..'
+    return text.ljust(size)
+
+
+def _fmt_time(value: float) -> str:
+    """Format a duration to fit a column, dropping precision as needed."""
+    for precision in range(6, 0, -1):
+        formatted = f'{value:0.{precision}f}'
+        if len(formatted) <= 8:
+            return formatted
+    return formatted
+
+
+# Column header line for the text report sections
+_COLUMN_HEADER = _COLUMN_GAP.join(
+    _ltrim(name, size) if name == 'name' else _rtrim(name, size) for name, size in _COLUMNS
+)
+
+
 # =============================================================================
 # CPROFILE MANAGER
 # =============================================================================
@@ -144,8 +186,13 @@ class CProfileManager:
         _owner_id: Identifier of the connection that started the session.
         _session_name: Human-readable name for the session.
         _start_time: Unix timestamp when profiling started.
-        _last_report: Text of the most recently completed report.
+        _last_report: Cached report text, built on demand by report().
         _last_stats_data: Structured stats from the last session for report_tree().
+        _last_session_name: Session name of the last completed session.
+        _last_owner_id: Owner of the last completed session.
+        _last_runtime: Duration of the last completed session.
+        _last_clock_type: yappi clock the last session's timings came from.
+        _session_seq: Counter bumped by every stop(), used to detect stale builds.
         _lock: Guards all mutable state.
     """
 
@@ -163,8 +210,19 @@ class CProfileManager:
         # When profiling started (unix timestamp)
         self._start_time: Optional[float] = None
 
-        # Most recent completed report text
+        # Most recent completed report text. Built lazily by report() — stop()
+        # only captures the data, so it never formats while holding the lock
         self._last_report: Optional[str] = None
+
+        # Header fields of the last completed session, kept for the lazy report
+        self._last_session_name: Optional[str] = None
+        self._last_owner_id: Optional[str] = None
+        self._last_runtime: Optional[float] = None
+        self._last_clock_type: Optional[str] = None
+
+        # Bumped by every stop(); lets report() detect that the data it built
+        # from has since been replaced, and skip caching a stale result
+        self._session_seq: int = 0
 
         # Structured stats from the last completed session for report_tree().
         # Stored as a list of dicts, each with:
@@ -172,6 +230,7 @@ class CProfileManager:
         #   ncall: int
         #   ttot: float (cumulative time)
         #   tsub: float (self time)
+        #   builtin: bool (affects how the text report names it)
         #   children: list of (child_key, ncall, ttot, tsub)
         self._last_stats_data: Optional[List[Dict]] = None
 
@@ -277,14 +336,6 @@ class CProfileManager:
             # Capture function stats before clearing
             func_stats = yappi.get_func_stats()
 
-            # Generate text report
-            self._last_report = self._build_text_report(
-                func_stats,
-                self._session_name,
-                self._owner_id,
-                runtime,
-            )
-
             # Build structured stats data for report_tree()
             self._last_stats_data = self._capture_stats_data(func_stats)
 
@@ -293,6 +344,17 @@ class CProfileManager:
 
             # Capture session info before clearing ownership
             session_name = self._session_name
+
+            # Keep what the report header needs; the text itself is formatted on
+            # demand in report(), so no cold worker thread blocks on _lock here
+            # waiting for a full sort-and-format of every profiled function
+            self._last_session_name = session_name
+            self._last_owner_id = self._owner_id
+            self._last_runtime = runtime
+            # yappi printed this per section; keep it, the default is not 'wall'
+            self._last_clock_type = yappi.get_clock_type()
+            self._last_report = None
+            self._session_seq += 1
 
             # Reset state
             self._active = False
@@ -333,7 +395,8 @@ class CProfileManager:
                     'owner': None,
                     'session': None,
                     'runtime': None,
-                    'has_report': self._last_report is not None,
+                    # Captured data counts as a report — the text is built on demand
+                    'has_report': self._last_report is not None or self._last_stats_data is not None,
                 }
 
     def report(self) -> Dict[str, Any]:
@@ -342,14 +405,42 @@ class CProfileManager:
 
         Anyone can call this — no ownership check.
 
+        The text is formatted here rather than in stop(), so stop() never holds
+        _lock across a full sort-and-format — every engine worker thread's first
+        Python entry would otherwise block on it.  Follows the same "copy under
+        lock, process outside" shape as report_tree().
+
         Returns:
             Dict with 'report' key containing the full report text,
             or a placeholder message if no report is available.
         """
         with self._lock:
-            return {
-                'report': self._last_report or 'No profiling data available. Run a session first.',
-            }
+            # No session has ever completed
+            if self._last_stats_data is None:
+                return {'report': 'No profiling data available. Run a session first.'}
+
+            # Already formatted for this session
+            if self._last_report is not None:
+                return {'report': self._last_report}
+
+            stats_data = list(self._last_stats_data)
+            session_name = self._last_session_name
+            owner_id = self._last_owner_id
+            runtime = self._last_runtime
+            clock_type = self._last_clock_type
+            built_from = self._session_seq
+
+        # Format outside the lock (read-only on the copied data)
+        text = self._build_text_report_from_data(stats_data, session_name, owner_id, runtime, clock_type)
+
+        with self._lock:
+            # Cache only if this is still the current session. A newer stop()
+            # owns the cache slot; this text is still the right answer for the
+            # session that was current when the call arrived, so return it
+            if self._session_seq == built_from:
+                self._last_report = text
+
+        return {'report': text}
 
     def report_tree(
         self,
@@ -496,55 +587,73 @@ class CProfileManager:
     # =========================================================================
 
     @staticmethod
-    def _build_text_report(
-        func_stats: yappi.YFuncStats,
-        session_name: str,
-        owner_id: str,
-        runtime: float,
+    def _build_text_report_from_data(
+        stats_data: List[Dict],
+        session_name: Optional[str],
+        owner_id: Optional[str],
+        runtime: Optional[float],
+        clock_type: Optional[str] = None,
     ) -> str:
         """
-        Generate a pstats-style text report from yappi function stats.
+        Generate a pstats-style text report from captured stats data.
+
+        Works from the plain dicts captured by _capture_stats_data() rather than
+        a live yappi stats object, so it can run outside the lock and long after
+        yappi.clear_stats() freed the C-level data.  Reproduces yappi's
+        print_all() layout: entries are in whatever order yappi yielded them, so
+        each section sorts explicitly.
 
         Args:
-            func_stats: yappi's function statistics object.
+            stats_data: Captured entries, each with key/ncall/ttot/tsub.
             session_name: Human-readable session name.
             owner_id: Connection that owned the session.
             runtime: Total profiling duration in seconds.
+            clock_type: yappi clock the timings came from ('wall' or 'cpu').
 
         Returns:
             Formatted report string.
         """
-        report_buf = io.StringIO()
+        lines = [
+            f'Session: {session_name}',
+            f'Owner: {owner_id}',
+            f'Duration: {runtime or 0.0:.2f}s',
+            f'Clock: {clock_type or "unknown"}',
+            '=' * 80,
+            '',
+        ]
 
-        # Header
-        report_buf.write(f'Session: {session_name}\n')
-        report_buf.write(f'Owner: {owner_id}\n')
-        report_buf.write(f'Duration: {runtime:.2f}s\n')
-        report_buf.write('=' * 80 + '\n\n')
+        def section(title: str, entries: List[Dict]) -> None:
+            """Append one sorted, formatted stats section."""
+            lines.append(f'{title}:')
+            lines.append('-' * 50)
+            lines.append(_COLUMN_HEADER)
+            for entry in entries:
+                module, lineno, func = entry['key']
+                # Match yappi's full_name: dotted for builtins, located otherwise
+                full_name = f'{module}.{func}' if entry.get('builtin') else f'{module}:{lineno} {func}'
+                ncall = entry['ncall']
+                # yappi derives tavg; guard the division it never has to
+                tavg = entry['ttot'] / ncall if ncall else 0.0
+                lines.append(
+                    _COLUMN_GAP.join(
+                        (
+                            _ltrim(full_name, 36),
+                            _rtrim(ncall, 5),
+                            _rtrim(_fmt_time(entry['tsub']), 8),
+                            _rtrim(_fmt_time(entry['ttot']), 8),
+                            _rtrim(_fmt_time(tavg), 8),
+                        )
+                    )
+                )
+            lines.append('')
 
-        # Cumulative time sort — full stats
-        report_buf.write('FUNCTIONS BY CUMULATIVE TIME:\n')
-        report_buf.write('-' * 50 + '\n')
-        stat_buf = io.StringIO()
-        func_stats.sort('ttot', 'desc')
-        func_stats.print_all(out=stat_buf)
-        report_buf.write(stat_buf.getvalue())
-        report_buf.write('\n')
+        by_ttot = sorted(stats_data, key=lambda e: e['ttot'], reverse=True)
+        section('FUNCTIONS BY CUMULATIVE TIME', by_ttot)
 
-        # Total (self) time sort — top 30
-        report_buf.write('TOP 30 BY TOTAL TIME:\n')
-        report_buf.write('-' * 50 + '\n')
-        stat_buf = io.StringIO()
-        func_stats.sort('tsub', 'desc')
-        func_stats.print_all(out=stat_buf, limit=30)
-        report_buf.write(stat_buf.getvalue())
+        by_tsub = sorted(stats_data, key=lambda e: e['tsub'], reverse=True)
+        section('TOP 30 BY TOTAL TIME', by_tsub[:30])
 
-        # Strip absolute paths from the report text — both dist and source tree
-        report_text = report_buf.getvalue()
-        # Dist root (both slash styles)
-        report_text = report_text.replace(_SERVER_ROOT.replace('/', '\\'), './')
-        report_text = report_text.replace(_SERVER_ROOT, './')
-        return report_text
+        return '\n'.join(lines)
 
     @staticmethod
     def _capture_stats_data(func_stats: yappi.YFuncStats) -> List[Dict]:
@@ -586,6 +695,10 @@ class CProfileManager:
                     'ncall': stat.ncall,
                     'ttot': stat.ttot,
                     'tsub': stat.tsub,
+                    # Builtins are named 'module.name', not 'module:lineno name'
+                    # (yappi.py:167). Only the text report needs this, so it is
+                    # not carried on children, which only the tree consumes.
+                    'builtin': bool(stat.builtin),
                     'children': children,
                 }
             )
