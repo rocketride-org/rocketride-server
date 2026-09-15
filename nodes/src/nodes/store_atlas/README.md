@@ -109,6 +109,7 @@ The agent `search` function performs semantic retrieval and the agent `upsert` f
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `atlas.provider` | `string` |  | const: `"atlas"` |
+| `atlas.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'atlas' exposes tools as atlas.search / atlas.upsert / atlas.delete. Change this when running multiple Atlas nodes in the same pipeline so their tool names do not collide. | `"atlas"` |
 | `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-name>.<region>.atlas.io |  |
 | `vector.database` |  |  | `"rocketride_db"` |
 

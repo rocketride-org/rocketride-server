@@ -66,6 +66,10 @@ The endpoint registers its target with the shared web server initialized by `ai.
 |---|---|---|---|
 | `Pipe.source.parameters` |  |  |  |
 
+### Tools (`services.tools.json`)
+
+_No configuration fields._
+
 ### Webhook (`services.webhook.json`)
 
 _No configuration fields._

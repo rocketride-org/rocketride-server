@@ -132,6 +132,7 @@ transaction across the prior objects and the new batch.
 | `vector.local.port` |  |  | `8080` |
 | `weaviate.profile` | `string` | **Type of Weaviate host**<br/>Connect to... | `"local"` |
 | `weaviate.provider` | `string` |  | const: `"weaviate"` |
+| `weaviate.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'weaviate' exposes tools as weaviate.search / weaviate.upsert / weaviate.delete. Change this when running multiple Weaviate nodes in the same pipeline so their tool names do not collide. | `"weaviate"` |
 
 ## Dependencies
 
@@ -143,7 +144,7 @@ transaction across the prior objects and the new batch.
 - `pydantic`
 - `requests`
 - `validators`
-- `weaviate-client`
+- `weaviate-client` `>=4.20.0`
 - `numpy`
 
 ## Source

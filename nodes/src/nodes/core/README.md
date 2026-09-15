@@ -244,6 +244,14 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `aws.region` | `string` | **Region**<br/>This is defined and provided by the service provider. | `""` |
 | `aws.secretKey` | `string` | **Secret key**<br/>This is a key used to access the AWS services. |  |
 
+### `services.common.gcp.json`
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `gcp.authType` | `string` | **Authentication Type**<br/>Choose how to authenticate to Google Cloud Platform. | `"adc"` |
+| `gcp.projectId` | `string` | **Project ID**<br/>Optional: Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials. |  |
+| `gcp.serviceAccountKey` | `string` | **Service Account Key JSON**<br/>Upload the JSON key file for your Google Cloud service account. |  |
+
 ### `services.common.google.json`
 
 | Field | Type | Description | Default |
@@ -301,6 +309,18 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `llm.cloud.modelSource` | `string` | **Model source** |  |
 | `llm.cloud.project` | `string` | **Project (Organization)**<br/>LLM project or organization name |  |
 | `llm.local.serverbase` | `string` | **LLM URL**<br/>Base url the model is hosted under. | `"http://localhost:11434/v1"` |
+
+### `services.common.microsoft.json`
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `microsoft.authType` | `string` | **Authentication Type** | `"service"` |
+| `microsoft.clientId` | `string` | **Client ID**<br/>Application (client) ID of your Entra app registration. |  |
+| `microsoft.clientSecret` | `string` | **Client Secret**<br/>Client secret of your Entra app registration. The app needs Microsoft Graph application permissions for this service, with admin consent granted. |  |
+| `microsoft.oAuthButton` | `string` | **Login with Microsoft** |  |
+| `microsoft.tenantId` | `string` | **Tenant ID**<br/>Enter your Microsoft Entra ID tenant (directory) ID.<br/><br/>Found in the Azure portal under Microsoft Entra ID > Overview. |  |
+| `microsoft.userPrincipalName` | `string` | **Acting User (UPN)**<br/>User principal name (e-mail) the app acts as. App-only Graph calls target /users/{upn}; this is required for App authentication. |  |
+| `microsoft.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Microsoft Graph API. |  |
 
 ### `services.common.remote.json`
 

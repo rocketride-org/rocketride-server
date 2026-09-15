@@ -170,7 +170,7 @@ When the configuration is saved, the node validates it with a fast read-only pro
 - `pydantic`
 - `urllib3`
 - `httpx`
-- `qdrant_client`
+- `qdrant_client` `==1.17.1`
 - `numpy`
 
 ## Source

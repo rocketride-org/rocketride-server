@@ -224,6 +224,7 @@ pytest nodes/test/tool_github/test_tools.py -v
 ## Dependencies
 
 - `requests` `>=2.34.2`
+- `tenacity`
 
 ## Source
 

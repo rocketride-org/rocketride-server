@@ -76,6 +76,8 @@ if synthesis raises an exception.
 ## Dependencies
 
 - `numpy`
+- `--only-binary` `docopt`
+- `--only-binary` `num2words`
 - `kokoro` `>=0.9.4`
 - `soundfile` `>=0.13.1`
 

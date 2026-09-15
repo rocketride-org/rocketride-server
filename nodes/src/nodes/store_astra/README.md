@@ -118,6 +118,7 @@ Agent `search` needs an embedding for semantic retrieval, and agent `upsert` nee
 | `astra_db.api_endpoint` | `string` | **API Endpoint**<br/>Enter the server API endpoint e.g. <instance-name>.<region>.apps.astra.datastax.com |  |
 | `astra_db.application_token` | `string` | **Application Token**<br/>Enter the server API application token |  |
 | `astra_db.provider` | `string` |  | const: `"astra_db"` |
+| `astra_db.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'astra' exposes tools as astra.search / astra.upsert / astra.delete. Change this when running multiple Astra DB nodes in the same pipeline so their tool names do not collide. | `"astra"` |
 
 ## Dependencies
 
