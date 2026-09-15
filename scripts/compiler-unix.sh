@@ -271,17 +271,74 @@ ensure_llvm_repo() {
     $SUDO apt-get update || { $SUDO rm -f "$list"; return 1; }
 }
 
+# Run a privileged command, or explain how to recover when it can't. The build
+# spawns this script with stdio captured and no controlling terminal, so sudo
+# cannot prompt for a password — without this the build dies on sudo's bare
+# "a password is required" with no indication of what to do about it.
+run_privileged() {
+    if $SUDO "$@"; then
+        return 0
+    fi
+    {
+        echo ""
+        echo "=========================================="
+        echo "ERROR: a required privileged step failed:"
+        echo "    $SUDO $*"
+        echo ""
+        echo "Read the error printed above it. A read-only filesystem or wrong"
+        echo "permissions fail here the same way credentials do."
+        if [ -n "$SUDO" ]; then
+            echo ""
+            echo "If it is credentials: the build captures output, so sudo has no"
+            echo "terminal to prompt for a password. Run the setup once directly in"
+            echo "your terminal, then re-run the build:"
+            echo "    ./scripts/compiler-unix.sh --autoinstall"
+            echo ""
+            echo "Granting passwordless sudo for this command also works. Note that"
+            echo "'sudo -v' in your terminal may not carry over — sudo's credential"
+            echo "cache is keyed to the terminal, and the builder has none."
+        fi
+        echo "=========================================="
+    } >&2
+    exit 1
+}
+
+# True when $1 and $2 are the same file (-ef resolves symlinks and is false when
+# either path is missing, unlike comparing two failed `readlink` outputs). Makes the
+# cc/c++ -> clang symlinking idempotent, so a fully-provisioned machine doesn't
+# invoke sudo just to recreate links that are already correct.
+link_points_to() {
+    [[ "$1" -ef "$2" ]]
+}
+
+# Point $2 at $1 unless it already resolves there. Checked per link so one stale
+# entry doesn't trigger privileged writes for the three that are already right.
+# -nT keeps a destination that is (or points to) a directory from making ln
+# create the link *inside* it and report success.
+link_clang_tool() {
+    link_points_to "$2" "$1" && return 0
+    run_privileged ln -sfnT "$1" "$2"
+    return 1
+}
+
 # Force bare clang/clang++/cc/c++ at clang-$1 via /usr/local/bin (ahead of /usr/bin)
 # — a versioned apt install leaves /usr/bin/clang pointing at the old default.
 force_system_clang() {
     local v="$1" cc cxx
     cc=$(command -v "clang-$v" 2>/dev/null); cxx=$(command -v "clang++-$v" 2>/dev/null)
     { [ -z "$cc" ] || [ -z "$cxx" ]; } && { echo "ERROR: clang-$v not on PATH after install"; exit 1; }
-    $SUDO ln -sf "$cc" /usr/local/bin/clang
-    $SUDO ln -sf "$cxx" /usr/local/bin/clang++
-    $SUDO ln -sf "$cc" /usr/local/bin/cc
-    $SUDO ln -sf "$cxx" /usr/local/bin/c++
-    echo "✓ clang/clang++/cc/c++ -> clang-$v (/usr/local/bin)"
+    # A box where all four already resolve correctly never reaches sudo — which is
+    # the no-terminal build case this guard exists for.
+    local relinked=0
+    link_clang_tool "$cc"  /usr/local/bin/clang   || relinked=1
+    link_clang_tool "$cxx" /usr/local/bin/clang++ || relinked=1
+    link_clang_tool "$cc"  /usr/local/bin/cc      || relinked=1
+    link_clang_tool "$cxx" /usr/local/bin/c++     || relinked=1
+    if [ "$relinked" -eq 0 ]; then
+        echo "✓ clang/clang++/cc/c++ already -> clang-$v (/usr/local/bin)"
+    else
+        echo "✓ clang/clang++/cc/c++ -> clang-$v (/usr/local/bin)"
+    fi
 }
 
 # --system-compiler: pick a system-wide clang install. Sets CLANG_PKGS /
