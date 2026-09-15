@@ -54,18 +54,9 @@ planned as a follow-up.
 
 Configuration is mostly optional: the default profile normalizes with plain-text
 labels (`label`/`value`) and auto-detected currency and decimal format. The
-fields below only need attention for a non-default field naming convention,
-specialized label→metric mappings, or a non-US number format.
-
-### Fields
-
-| Field              | Type    | Default  | Description                                                                                       |
-|--------------------|---------|----------|---------------------------------------------------------------------------------------------------|
-| `label_field`      | string  | `label`  | The fact field holding the free-text metric label.                                                |
-| `value_field`      | string  | `value`  | The fact field holding the raw numeric value to parse.                                             |
-| `default_currency` | string  | `""`     | 3-letter ISO code to tag when none is detected (upper-cased; anything else is warned about and ignored). Empty leaves facts untagged. |
-| `decimal_format`   | string  | `auto`   | `auto`/`us`: comma = thousands, dot = decimal. `eu`: dot = thousands, comma = decimal.            |
-| `label_to_metric`  | object  | `{}`     | `{synonym: metric}` map merged over the built-in mapping (user entries win, case-insensitive).    |
+fields — each documented in the generated [Schema](#schema) table below — only
+need attention for a non-default field naming convention, specialized
+label→metric mappings, or a non-US number format.
 
 The node never fails the run on misconfiguration: an invalid `label_to_metric`,
 `decimal_format` or `default_currency` is warned about and ignored, and facts still

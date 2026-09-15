@@ -183,7 +183,7 @@ This node is marked **experimental**.
 |---|---|---|---|
 | `schema_validate.amount_field` | `string` | **Amount field**<br/>The fact field holding the numeric amount (presence and sign checks). | `"amount"` |
 | `schema_validate.category_field` | `string` | **Category field**<br/>The fact field holding the declared classification (e.g. revenue, expense) — checked against the metric. | `"category"` |
-| `schema_validate.category_metric_map` | `object` | **Category → metric keywords**<br/>Map of canonical category to metric keyword substrings that imply it. Drives the cost-as-revenue check. Leave empty to skip the metric/category mismatch check. |  |
+| `schema_validate.category_metric_map` | `object` | **Category → metric keywords**<br/>Map of canonical category to metric keyword substrings that imply it. Drives the cost-as-revenue check. Leave unset to use the built-in map covering revenue, expense, asset, and liability; set an explicit empty map to disable the metric/category mismatch check. |  |
 | `schema_validate.currency_field` | `string` | **Currency field**<br/>The fact field holding the currency code (presence check only). | `"currency"` |
 | `schema_validate.metric_field` | `string` | **Metric field**<br/>The fact field naming the line item (e.g. 'Cost of goods sold') — the classifier input for the mismatch check. | `"metric"` |
 | `schema_validate.profile` | `string` | **Validation**<br/>Schema validation configuration | `"default"` |

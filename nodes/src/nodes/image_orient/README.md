@@ -26,17 +26,13 @@ costs it nothing in quality.
 
 ## Configuration
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| **How sure before rotating** | Balanced (1.1) | How clearly the winning orientation must beat the next best. Trades coverage, not correctness — see below |
-| **Faces needed to decide** | 2 | How many faces must back the winner. Lower to 1 for portraits, where there is only ever one face |
-| **Face clarity vs face size** | Balanced (1) | When one rotation shows a *bigger* face and another a *clearer* one, this decides which wins. See below |
-| **Minimum face score** | 0.6 | How certain the detector must be that something *is* a face before it gets a vote. Raising it ignores doubtful faces but also discards real ones in dim or grainy scans; lowering it admits things that are not faces. Rarely worth changing — it was the least useful dial in testing, and moving it in either direction cost accuracy |
-| **Detection size (px)** | 800 | How big a copy the face search runs on. Your image is never scaled; this only affects the search. Raise it if faces in group photos are missed. Cost grows with the square — 1600 is about 4× the work of 800 |
-| **JPEG quality** | `auto` | Quality to re-save a rotated JPEG at. `auto` matches what the photo already had. Ignored for PNG; photos that are not rotated are never re-saved at all |
+Every setting — display name, type, guidance, and default — is documented in the
+generated [Schema](#schema) table below; the descriptions there are the same ones
+the pipeline builder shows.
 
-The first two are the ones worth touching. Both defaults were **measured** over 98 real album
-photographs, not guessed:
+**How sure before rotating** and **Faces needed to decide** are the ones worth
+touching. Their defaults were **measured** over 98 real album photographs, not
+guessed:
 
 | **How sure before rotating** | Fixed | Turned the wrong way |
 | --- | --- | --- |
