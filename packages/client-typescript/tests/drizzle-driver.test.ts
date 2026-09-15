@@ -98,6 +98,25 @@ describe('drizzle() over pipes', () => {
 		};
 	}
 
+	it('throws instead of yielding empty rows when the engine ignores row_mode', async () => {
+		// An engine that predates row_mode answers a positional query with object
+		// rows. Drizzle reads those positionally, so every column is undefined and
+		// select() silently returns the right number of empty records.
+		const fake = makeMockDb({ rows: [{ id: 1, name: 'ada' }], affected_rows: 0 });
+		const db = drizzle({ client: fake as any, token: 'tok' });
+		// Drizzle wraps transport failures in DrizzleQueryError and keeps ours on `.cause`.
+		const err = await db.select().from(users).then(() => null, (e: any) => e);
+		expect(err).not.toBeNull();
+		expect(String(err.cause?.message ?? err.message)).toMatch(/does not support `row_mode`/);
+	});
+
+	it('accepts an empty result set from a positional query', async () => {
+		// Nothing can be mis-mapped when there are no rows, so the guard must not fire.
+		const fake = makeMockDb({ rows: [], affected_rows: 0 });
+		const db = drizzle({ client: fake as any, token: 'tok' });
+		await expect(db.select().from(users)).resolves.toEqual([]);
+	});
+
 	it('exposes rowCount for writes without returning', async () => {
 		const fake = makeMockDb({ rows: [], affected_rows: 3 });
 		const db = drizzle({ client: fake as any, token: 'tok' });

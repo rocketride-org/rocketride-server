@@ -21,11 +21,19 @@
 # SOFTWARE.
 # =============================================================================
 
+import time
 from unittest.mock import MagicMock
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 import pytest
-from ai.common.database.tx_registry import TransactionRegistry, shape_execute_result, to_sqlalchemy_text
+from ai.common.database import tx_registry as tx_registry_mod
+from ai.common.database.tx_registry import (
+    TransactionAbortedError,
+    TransactionRegistry,
+    _transaction_aborted,
+    shape_execute_result,
+    to_sqlalchemy_text,
+)
 
 
 def _engine_shared():
@@ -424,3 +432,129 @@ def test_rollback_to_destroys_descendants_but_keeps_target(registry_and_engine):
     with pytest.raises(ValueError, match='unknown savepoint: sp2'):
         reg.execute(sid, 'rollback to savepoint sp2')
     reg.execute(sid, 'release savepoint sp1')  # target survived the rollback
+
+
+def test_transaction_aborted_reads_the_driver_status():
+    """Psycopg reports an aborted transaction block as transaction_status 3."""
+    conn = MagicMock()
+    conn.connection.dbapi_connection.info.transaction_status = 3
+    assert _transaction_aborted(conn) is True
+
+    conn.connection.dbapi_connection.info.transaction_status = 2  # INTRANS
+    assert _transaction_aborted(conn) is False
+
+
+def test_transaction_aborted_is_false_when_the_driver_cannot_say():
+    """MySQL/SQLite drivers expose no transaction status; committing is legitimate."""
+    conn = MagicMock()
+    del conn.connection.dbapi_connection.info  # attribute access raises
+    assert _transaction_aborted(conn) is False
+
+
+def test_commit_refused_on_an_aborted_transaction(monkeypatch):
+    """Postgres degrades COMMIT to ROLLBACK after a failed statement, and the
+    driver raises nothing — so the caller would be told a discarded write
+    succeeded. The registry must refuse the commit instead.
+    """
+    reg = TransactionRegistry(_engine_shared(), max_rows=1000)
+    sid = reg.begin()
+    reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['doomed'])
+    with pytest.raises(Exception):
+        reg.execute(sid, 'INSERT INTO nonexistent_table (v) VALUES ($1)', ['boom'])
+
+    monkeypatch.setattr(tx_registry_mod, '_transaction_aborted', lambda conn: True)
+    with pytest.raises(TransactionAbortedError):
+        reg.commit(sid)
+
+    # The session is gone and the write was discarded, not committed.
+    assert sid not in reg._sessions
+    monkeypatch.undo()  # the verification session is a healthy one
+    sid2 = reg.begin()
+    out = reg.execute(sid2, 'SELECT count(*) AS n FROM t')
+    reg.commit(sid2)
+    assert out['rows'][0]['n'] == 0
+
+
+def test_rollback_of_an_aborted_transaction_does_not_raise():
+    """Only commit is refused; an explicit rollback is the documented recovery."""
+    reg = TransactionRegistry(_engine_shared(), max_rows=1000)
+    sid = reg.begin()
+    with pytest.raises(Exception):
+        reg.execute(sid, 'SELECT * FROM nonexistent_table')
+    reg.rollback(sid)
+    assert sid not in reg._sessions
+
+
+# ---------------------------------------------------------------------------
+# Short savepoint forms (RELEASE / ROLLBACK TO without the SAVEPOINT keyword)
+# ---------------------------------------------------------------------------
+
+
+def test_release_without_the_savepoint_keyword_is_intercepted(registry_and_engine):
+    """Postgres accepts `RELEASE sp1`; it must not fall through to raw SQL.
+
+    _FakeConn has no execute(), so raw fall-through raises AttributeError.
+    """
+    reg, eng = registry_and_engine
+    sid = reg.begin()
+    reg.execute(sid, 'savepoint sp1')
+    reg.execute(sid, 'release sp1')
+    assert eng.last_conn.nested[0].committed is True
+    assert reg._sessions[sid].savepoints == []
+
+
+def test_rollback_to_without_the_savepoint_keyword_is_intercepted(registry_and_engine):
+    """Postgres accepts `ROLLBACK TO sp1`, and keeps the target re-rollbackable."""
+    reg, eng = registry_and_engine
+    sid = reg.begin()
+    reg.execute(sid, 'savepoint sp1')
+    reg.execute(sid, 'ROLLBACK TO sp1;')
+    assert eng.last_conn.nested[0].rolled_back is True
+    # Target re-minted via a fresh begin_nested(), not left desynced.
+    assert eng.last_conn.begin_nested_calls == 2
+    assert [name for name, _ in reg._sessions[sid].savepoints] == ['sp1']
+
+
+def test_bare_rollback_is_not_treated_as_a_savepoint(registry_and_engine):
+    """`ROLLBACK` alone is a session rollback, not `ROLLBACK TO <name>`."""
+    reg, eng = registry_and_engine
+    sid = reg.begin()
+    with pytest.raises(AttributeError):  # falls through to raw execute(), as it should
+        reg.execute(sid, 'rollback')
+    assert eng.last_conn.begin_nested_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Background idle sweeper
+# ---------------------------------------------------------------------------
+
+
+def test_sweeper_starts_on_first_begin_and_is_retired_by_close_all():
+    reg = TransactionRegistry(_engine_shared(), max_rows=1000)
+    assert reg._sweeper is None  # no sessions yet, nothing to sweep
+    reg.begin()
+    assert reg._sweeper is not None and reg._sweeper.is_alive()
+    reg.close_all()
+    reg._sweeper.join(timeout=5)
+    assert not reg._sweeper.is_alive()
+    assert reg._sessions == {}
+
+
+def test_sweeper_reaps_an_abandoned_session_without_further_traffic():
+    """The whole point of the fix: no begin() call is needed to trigger a sweep."""
+    reg = TransactionRegistry(_engine_shared(), idle_timeout=0.05, max_rows=1000)
+    sid = reg.begin()
+    reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['abandoned'])
+    try:
+        deadline = time.monotonic() + 5.0
+        while sid in reg._sessions and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert sid not in reg._sessions, 'sweeper did not reap the idle session'
+    finally:
+        reg.close_all()
+
+    # The abandoned work was rolled back, not committed.
+    sid2 = reg.begin()
+    out = reg.execute(sid2, 'SELECT count(*) AS n FROM t')
+    reg.commit(sid2)
+    assert out['rows'][0]['n'] == 0

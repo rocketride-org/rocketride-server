@@ -37,8 +37,17 @@ from sqlalchemy.sql.elements import TextClause
 # fall through to execute as raw SQL, bypassing the begin_nested() recovery
 # path in _handle_savepoint. Acceptable: Drizzle only ever emits simple spN
 # identifiers for its savepoints.
+# Matched at a '$' while rewriting placeholders. Compiled once and matched in
+# place (re.Pattern.match accepts a start offset) so a bulk INSERT with many
+# placeholders doesn't copy the rest of the statement at every '$'.
+_PLACEHOLDER_RE = re.compile(r'\$(\d+)')
+_DOLLAR_TAG_RE = re.compile(r'\$([A-Za-z_][\w]*)?\$')
+
 _SAVEPOINT_STMT = re.compile(
-    r'^\s*(?:(?P<sp>savepoint)|(?P<rel>release)\s+savepoint|(?P<rb>rollback)\s+to\s+savepoint)'
+    # Postgres accepts RELEASE and ROLLBACK TO without the SAVEPOINT keyword;
+    # both forms must route through begin_nested() rather than falling through
+    # to raw execution, which would desync held.savepoints from reality.
+    r'^\s*(?:(?P<sp>savepoint)|(?P<rel>release)(?:\s+savepoint)?|(?P<rb>rollback)\s+to(?:\s+savepoint)?)'
     r'\s+(?P<name>[A-Za-z_][\w]*)\s*;?\s*$',
     re.IGNORECASE,
 )
@@ -97,7 +106,7 @@ def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
             out.append(sql[i:j])
             i = j
         elif ch == '$':
-            m = re.match(r'\$(\d+)', sql[i:])
+            m = _PLACEHOLDER_RE.match(sql, i)
             if m:  # $<digits> is never a dollar-quote tag (tags cannot start with a digit)
                 idx = int(m.group(1))
                 if idx < 1 or idx > len(params):
@@ -105,9 +114,9 @@ def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
                 key = f'b{idx}'
                 binds[key] = params[idx - 1]
                 out.append(f':{key}')
-                i += m.end()
+                i = m.end()
                 continue
-            tag = re.match(r'\$([A-Za-z_][\w]*)?\$', sql[i:])
+            tag = _DOLLAR_TAG_RE.match(sql, i)
             if tag:  # dollar-quoted body — copy through to the closing tag
                 delim = tag.group(0)
                 end = sql.find(delim, i + len(delim))
@@ -158,6 +167,31 @@ def shape_execute_result(result, max_rows: int, row_mode: str = 'object') -> dic
     return {'rows': [], 'affected_rows': rc if isinstance(rc, int) and rc >= 0 else 0}
 
 
+class TransactionAbortedError(RuntimeError):
+    """Commit refused: a failed statement left the transaction unrecoverable."""
+
+
+# psycopg2/psycopg3 report an aborted transaction block as status 3 (INERROR).
+_TRANSACTION_STATUS_INERROR = 3
+
+
+def _transaction_aborted(conn) -> bool:
+    """True when the backend reports the open transaction as unrecoverable.
+
+    Postgres aborts the whole transaction on any failed statement: a later
+    COMMIT silently degrades to ROLLBACK and the driver raises nothing, so the
+    caller would be told the write succeeded when it was discarded. Drivers that
+    don't expose a transaction status (MySQL, SQLite — where a failed statement
+    leaves the transaction usable and committing the rest is legitimate) report
+    False and commit normally.
+    """
+    try:
+        info = conn.connection.dbapi_connection.info
+    except Exception:
+        return False
+    return getattr(info, 'transaction_status', None) == _TRANSACTION_STATUS_INERROR
+
+
 @dataclass
 class _Held:
     conn: object
@@ -188,9 +222,13 @@ class TransactionRegistry:
         self._clock = clock
         self._sessions: dict[str, _Held] = {}
         self._registry_lock = threading.Lock()  # guards the _sessions dict only
+        self._stop = threading.Event()  # set by close_all() to retire the sweeper
+        self._sweeper: threading.Thread | None = None
+        self._sweeper_lock = threading.Lock()
 
     def begin(self) -> str:
         """Checkout a connection, open a transaction, return a new session_id."""
+        self._ensure_sweeper()
         self.reap_idle()
         with self._registry_lock:
             if len(self._sessions) >= self._max_sessions:
@@ -264,8 +302,40 @@ class TransactionRegistry:
                 held.lock.release()
         return reaped
 
+    def _ensure_sweeper(self) -> None:
+        """Start the background idle sweeper once, on the first begin().
+
+        reap_idle() otherwise runs only from begin(), so a node that goes quiet
+        never sweeps: a client that starts a transaction and then disappears
+        leaves its pooled connection — and every row lock it holds — checked out
+        indefinitely, which blocks other clients of that database, not just this
+        node. Started lazily because a registry with no sessions has nothing to
+        sweep, and retired by close_all().
+        """
+        with self._sweeper_lock:
+            if self._sweeper is not None:
+                return
+            self._sweeper = threading.Thread(
+                target=self._sweep_loop,
+                name='tx-registry-reaper',
+                daemon=True,
+            )
+            self._sweeper.start()
+
+    def _sweep_loop(self) -> None:
+        """Reap idle sessions until close_all() sets the stop event."""
+        interval = max(1.0, self._idle_timeout / 4)
+        while not self._stop.wait(interval):
+            try:
+                self.reap_idle()
+            except Exception:
+                # A failed sweep must never retire the thread; the next tick
+                # retries, and close_all() remains the hard backstop.
+                pass
+
     def close_all(self) -> None:
-        """Rollback+close every session (for endGlobal)."""
+        """Rollback+close every session, and retire the sweeper (for endGlobal)."""
+        self._stop.set()
         with self._registry_lock:
             items = list(self._sessions.items())
         for sid, held in items:
@@ -325,12 +395,20 @@ class TransactionRegistry:
             if self._sessions.get(session_id) is not held:
                 return False
             del self._sessions[session_id]
+        aborted = commit and _transaction_aborted(held.conn)
+        if aborted:
+            commit = False  # unwind as a rollback, then tell the caller
         try:
             for _, sp in reversed(held.savepoints):
                 if sp.is_active:
                     sp.commit() if commit else sp.rollback()
             held.savepoints.clear()
             held.trans.commit() if commit else held.trans.rollback()
+            if aborted:
+                raise TransactionAbortedError(
+                    'commit refused: an earlier statement failed and aborted this transaction. '
+                    'It has been rolled back and the session is closed; no changes were committed.'
+                )
         finally:
             held.conn.close()
         return True

@@ -50,6 +50,26 @@ export interface DrizzleOverPipesOptions {
 	nodeId?: string;
 }
 
+/**
+ * Reject object rows where positional rows were requested.
+ *
+ * An engine that predates `row_mode` ignores the unknown argument and answers
+ * with object rows and the correct row count. Drizzle reads those positionally,
+ * so every column resolves to `undefined` and `select()` yields `[{}, {}, ...]`
+ * — the right number of empty records, with no error anywhere. The SDK and the
+ * engine ship on separate trains and there is no capability negotiation, so
+ * fail loudly on the skew instead of returning silently wrong data.
+ */
+function assertPositionalRows(rows: readonly unknown[]): asserts rows is unknown[][] {
+	if (rows.length > 0 && !Array.isArray(rows[0])) {
+		throw new Error(
+			'The database node returned object rows for a positional query, which means it does not '
+			+ 'support `row_mode`. rocketride/drizzle requires it; upgrade the RocketRide engine '
+			+ 'serving this database node.',
+		);
+	}
+}
+
 function makeTransport(db: DrizzleDatabaseLike, token: string, nodeId?: string, sessionId?: string): PipesTransport {
 	return {
 		async query(sqlText, params, method) {
@@ -60,9 +80,12 @@ function makeTransport(db: DrizzleDatabaseLike, token: string, nodeId?: string, 
 				sessionId,
 				params: params.length > 0 ? params : undefined,
 			};
-			const res = method === 'all'
-				? await db.query({ ...options, rowMode: 'array' })
-				: await db.query(options);
+			if (method === 'all') {
+				const res = await db.query({ ...options, rowMode: 'array' });
+				assertPositionalRows(res.rows);
+				return { rows: res.rows, affectedRows: res.affected_rows ?? 0 };
+			}
+			const res = await db.query(options);
 			return { rows: res.rows, affectedRows: res.affected_rows ?? 0 };
 		},
 		async begin() {

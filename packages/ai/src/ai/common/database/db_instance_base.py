@@ -302,10 +302,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             except KeyError:
                 raise ValueError(f'unknown or expired transaction session: {session_id}')
             # A failed statement leaves the session OPEN: Postgres marks the
-            # transaction aborted (commit degrades to rollback), MySQL leaves it
-            # usable. The client owns recovery — `rollback`, or `rollback to
-            # savepoint` for nested transactions — and the idle reaper is the
-            # backstop for abandoned sessions.
+            # transaction aborted, MySQL leaves it usable. The client owns
+            # recovery — `rollback`, or `rollback to savepoint` for nested
+            # transactions — and the idle reaper is the backstop for abandoned
+            # sessions. Committing an aborted transaction would degrade to a
+            # silent ROLLBACK, so the registry refuses it and raises instead.
         else:
             result = self._executeRawQuery(sql.strip(), params, row_mode)
             if result is None:
