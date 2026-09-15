@@ -255,7 +255,7 @@
 				"model": "qwen3-235b-a22b-2507",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelOutputTokens": 235929, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -321,7 +321,7 @@
 				"model": "qwen3.5-122b-a10b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 81920, // openrouter
+				"modelOutputTokens": 65536, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -354,7 +354,7 @@
 				"model": "qwen3.5-397b-a17b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelOutputTokens": 235929, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -475,7 +475,7 @@
 				"model": "qwen3.8-2.4t-a95b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 262144, // openrouter
+				"modelOutputTokens": 131072, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -618,7 +618,7 @@
 				"model": "qwen3-next-80b-a3b-instruct",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 235929, // openrouter
+				"modelOutputTokens": 16384, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},

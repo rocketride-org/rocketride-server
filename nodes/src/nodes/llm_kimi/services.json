@@ -136,7 +136,7 @@
 				"model": "kimi-k2",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 100352, // openrouter
+				"modelOutputTokens": 98304, // openrouter
 				"apikey": ""
 			},
 			"kimi-k2-0905": {
@@ -144,7 +144,7 @@
 				"model": "kimi-k2-0905",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 100352, // openrouter
+				"modelOutputTokens": 98304, // openrouter
 				"apikey": ""
 			},
 			"kimi-k2-7-code": {
@@ -163,7 +163,7 @@
 				"model": "kimi-k2-thinking",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 100352, // openrouter
+				"modelOutputTokens": 98304, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
