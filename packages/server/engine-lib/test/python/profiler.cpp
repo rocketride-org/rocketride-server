@@ -260,11 +260,10 @@ TEST_CASE("python::profiler::control") {
 // per item as the engine does, so registration on the first entry has to
 // survive the rest — this covers pinning within a single session too.
 //
-// Tagged [!shouldfail] until the seam lands: on this commit it must fail, and
-// if it unexpectedly passes Catch2 reports that as an error, so a case that
-// does not discriminate cannot slip in.
+// It carried [!shouldfail] on the commit that introduced it, where it failed
+// with 0 == 100; the seam is what turns it green.
 //-----------------------------------------------------------------------------
-TEST_CASE("python::profiler::cold_threads", "[!shouldfail]") {
+TEST_CASE("python::profiler::cold_threads") {
     REQUIRE_NO_ERROR(callPython(localfcn()->Error {
         definePythonHelpers();
         startSession("engtest-cold");
@@ -339,7 +338,8 @@ TEST_CASE("python::profiler::pinned_across_sessions") {
         entered.signal();
 
         // Park natively while the session is swapped underneath
-        if (!proceed.wait(1)) return;
+        if (!proceed.wait(1))
+            return;
 
         for (int c = 0; c < kCallsPerThread; ++c)
             if (callPython(localfcn()->Error {

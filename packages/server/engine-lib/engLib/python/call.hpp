@@ -184,6 +184,10 @@ inline Error __callPython(Location location, Call &&cb,
     // Setup our thread debug if needed
     engine::python::setupDebug();
 
+    // Hook this thread into an active profiling session. MUST stay after
+    // setupDebug(), which is what names the thread for yappi's contexts
+    engine::python::setupProfiler();
+
     // Call it
     if (auto res = engine::python::__call(location, std::forward<Call>(cb),
                                           std::forward<Args>(args)...);
