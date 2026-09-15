@@ -166,3 +166,74 @@ def test_litellm_fallback_discovers_native_nemotron_ids(monkeypatch):
         'nvidia/nemotron-3.5-lightning-30b-a3b': 65536,
     }
     assert {m['_source'] for m in models} == {'litellm'}
+
+
+_SEEDED_CLOUD_PROFILES = {
+    'nemotron-3-super': {
+        'title': 'Nemotron 3 Super 120B',
+        'model': 'nvidia/nemotron-3-super-120b-a12b',
+        'modelSource': 'provider',
+        'modelTotalTokens': 1000000,
+        'modelOutputTokens': 32768,
+        'apikey': '',
+    },
+    'nemotron-3-ultra': {
+        'title': 'Nemotron 3 Ultra 550B',
+        'model': 'nvidia/nemotron-3-ultra-550b-a55b',
+        'modelSource': 'provider',
+        'modelTotalTokens': 1000000,
+        'modelOutputTokens': 32768,
+        'apikey': '',
+    },
+    'nemotron-3-5-lightning': {
+        'title': 'Nemotron 3.5 Lightning 30B',
+        'model': 'nvidia/nemotron-3.5-lightning-30b-a3b',
+        'modelSource': 'provider',
+        'modelTotalTokens': 262144,
+        'modelOutputTokens': 32768,
+        'apikey': '',
+    },
+}
+
+
+def _keyless_openrouter_sync(monkeypatch, tmp_path, bare_ids):
+    """Run the real sync() the way the scheduled fallback job does: no NVIDIA key, OpenRouter as the source."""
+    import providers.base as base
+
+    cache = {bare: (131072, 32768, bare, None, True) for bare in bare_ids}
+    monkeypatch.setattr(base, 'get_openrouter_cache', lambda: cache)
+    monkeypatch.setattr(base, 'is_openrouter_available', lambda: True)
+    monkeypatch.delenv('ROCKETRIDE_NVIDIA_KEY', raising=False)
+    provider = _real_provider()
+    return provider.sync(
+        current_profiles={k: dict(v) for k, v in _SEEDED_CLOUD_PROFILES.items()},
+        title_mappings={},
+        output_token_overrides={},
+        default_output_tokens=4096,
+        extra_profile_fields={'apikey': ''},
+        apply=False,
+        services_json_path=str(tmp_path / 'services.json'),
+        model_sources=['openrouter'],
+        enable_discovery=True,
+        allow_fallback_discovery=True,
+        global_protected_profiles=['custom'],
+    )
+
+
+def test_keyless_openrouter_sync_discovers_instead_of_no_op(monkeypatch, tmp_path):
+    """The scheduled fallback (no ROCKETRIDE_NVIDIA_KEY) keeps the seeded profiles and proposes what NVIDIA serves."""
+    report = _keyless_openrouter_sync(monkeypatch, tmp_path, _OPENROUTER_LIVE_BARE_IDS)
+
+    assert report.error is None
+    assert [profile['model'] for _key, profile in report.added] == ['nvidia/nemotron-nano-3-30b-a3b']
+    assert report.deprecated == []
+
+
+def test_sync_fails_loudly_when_the_source_matches_nothing(monkeypatch, tmp_path):
+    """An empty discovery result is a filter bug, not an empty catalogue: the run must not succeed silently."""
+    report = _keyless_openrouter_sync(monkeypatch, tmp_path, ['claude-sonnet-4-6', 'llama-3.3-70b-instruct'])
+
+    assert report.error is not None
+    assert 'listed no models matching the llm_nemotron filter' in report.error
+    assert report.added == []
+    assert report.deprecated == []
