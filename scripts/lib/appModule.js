@@ -46,7 +46,9 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const {
 	execCommand,
@@ -103,6 +105,96 @@ function readAppId(appRoot, fallback) {
 		console.warn(`  Warning: could not read appManifest.id from ${appRoot} package.json — serving under "${fallback}"; apps_static will 403 at runtime (no matching catalog entry)`);
 		return fallback;
 	}
+}
+
+/**
+ * SHA-256 of a file, or '' when it is not there.
+ *
+ * @param {string} file - Absolute path.
+ * @returns {string} Hex digest, or '' when absent.
+ */
+function sha256(file) {
+	try {
+		return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+	} catch {
+		return '';
+	}
+}
+
+/**
+ * The newest published snapshot of one app in the local file store.
+ *
+ * Versions live at `<store>/orgs/<org>/files/.deployments/<appId>/v0000NN-<sha>/dist/`,
+ * which is exactly the tree the versioned serving route streams. Every org is
+ * searched because the developer namespace that owns an app is not knowable
+ * from here — a laptop has one, and taking the highest version across them is
+ * the same answer the seed's own "latest" is.
+ *
+ * @param {string} appId - The app id.
+ * @returns {{version: number, dir: string}|null} The newest snapshot, or null.
+ */
+function latestSnapshot(appId) {
+	const store = process.env.ROCKETLIB_STORE || path.join(os.homedir(), '.rocketlib', 'store');
+	const orgs = path.join(store, 'orgs');
+	let best = null;
+	let orgDirs = [];
+	try {
+		orgDirs = fs.readdirSync(orgs);
+	} catch {
+		return null;
+	}
+	for (const org of orgDirs) {
+		const appDir = path.join(orgs, org, 'files', '.deployments', appId);
+		let entries = [];
+		try {
+			entries = fs.readdirSync(appDir, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			// Each snapshot directory has a `v<N>-<sha>.json` record beside it.
+			// Picking the record hashes `<record>.json/dist/remoteEntry.js`, which
+			// is absent — an empty digest, and a false "not published".
+			if (!entry.isDirectory()) continue;
+			const match = /^v(\d+)-/.exec(entry.name);
+			if (!match) continue;
+			const version = Number.parseInt(match[1], 10);
+			if (!best || version > best.version) best = { version, dir: path.join(appDir, entry.name) };
+		}
+	}
+	return best;
+}
+
+/**
+ * Whether the newest published version already carries what is built.
+ *
+ * The question `<app>:verify` asks, minus the throwing — a caller deciding
+ * WHETHER to seed wants a boolean, not an exception.
+ *
+ * Compares the file the seeder would actually copy, out of
+ * `dist/server/static/apps/<id>/`, rather than `build/apps/<id>/`. The two are
+ * the same after a `:copy` step, but dist is what gets published, so dist is
+ * the honest answer to "would seeding change anything".
+ *
+ * @param {string} appId - The app id, as the store names its deployment dir.
+ * @param {string} distAppsDir - The served `apps` directory under dist.
+ * @returns {boolean} True when a seed would publish nothing new. False when
+ *   nothing is built under this id: absent an artifact there is nothing a skip
+ *   could be justified by.
+ */
+function publishedCarriesBuild(appId, distAppsDir) {
+	const built = path.join(distAppsDir, appId, 'remoteEntry.js');
+	// Nothing built under this id: a seed cannot be SKIPPED on the strength of an
+	// artifact that is not there. A wrong `distAppsDir`, or a `:copy` that never
+	// ran, would otherwise read as "already published" and skip the deploy — the
+	// silent no-op deploy this helper and `:verify` exist to catch.
+	// `makeVerifyAction` throws on the same condition; a boolean caller gets the
+	// same answer as "not published".
+	if (!fs.existsSync(built)) return false;
+	const snap = latestSnapshot(appId);
+	// Never published at all: it has to be seeded.
+	if (!snap) return false;
+	return sha256(built) === sha256(path.join(snap.dir, 'dist', 'remoteEntry.js'));
 }
 
 /**
@@ -179,6 +271,64 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 		};
 	}
 
+	/**
+	 * Compare what the browser would be served against what was just built.
+	 *
+	 * The shell loads every remote from `/apps/<appId>/v<N>/remoteEntry.js`, and
+	 * a version is an IMMUTABLE SNAPSHOT taken by the seed — not a view of
+	 * build/. So a build that lands without a seed is invisible: the toolchain
+	 * reports success at every step and the page keeps running the last
+	 * snapshot, which is indistinguishable from a change that "did not work".
+	 * Whole evenings have gone into that gap.
+	 *
+	 * Local files only, deliberately: the check must work with the server down,
+	 * and the snapshot on disk IS what the versioned route streams.
+	 */
+	function makeVerifyAction() {
+		return {
+			run: async (ctx, task) => {
+				const built = path.join(buildDir, 'remoteEntry.js');
+				if (!fs.existsSync(built)) {
+					throw new Error(`${name}: nothing built yet — run ${name}:build first`);
+				}
+
+				// The seeder publishes the STAGED copy under dist/, not build/, and
+				// publishedCarriesBuild() judges by it. A stage behind the build
+				// means a "carries this build" here and a re-seed of the old bytes
+				// there — so the stage has to match before the snapshot is asked.
+				const staged = path.join(serverStaticDir, 'remoteEntry.js');
+				if (!fs.existsSync(staged)) {
+					throw new Error(`${name}: nothing staged yet — run ${name}:copy first`);
+				}
+				if (sha256(staged) !== sha256(built)) {
+					throw new Error(`${name}: the staged bundle in dist/ is not this build — run ${name}:copy before seeding`);
+				}
+
+				const snapshot = latestSnapshot(appId);
+				if (!snapshot) {
+					throw new Error(
+						`${name}: no published version found in the store for "${appId}" — ` +
+						'seed one with `engine extension/saas/tools/appseed.py --force`',
+					);
+				}
+
+				const a = sha256(built);
+				const b = sha256(path.join(snapshot.dir, 'dist', 'remoteEntry.js'));
+				if (a !== b) {
+					throw new Error(
+						`${name}: v${snapshot.version} does NOT carry this build ` +
+						`(built ${a.slice(0, 10)}, published ${b.slice(0, 10)}). ` +
+						'Re-seed: `engine extension/saas/tools/appseed.py --force`',
+					);
+				}
+				// The version number is the point of the success line: it is what
+				// the browser's network tab shows, so a tab loading any other
+				// version is loading a bundle nobody here built.
+				task.output = `v${snapshot.version} carries this build (${a.slice(0, 10)})`;
+			},
+		};
+	}
+
 	// =========================================================================
 	// MODULE DEFINITION
 	// =========================================================================
@@ -188,6 +338,16 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 		{ name: `${name}:bundle`,   action: makeBundleAction },
 		{ name: `${name}:register`, action: () => registerApp(appRoot) },
 		{ name: `${name}:copy`,     action: makeCopyAction },
+
+		// "Is what the browser gets what I just built?" — the one question the
+		// rest of this pipeline cannot answer. Its own action rather than a
+		// step of :build, because the answer only becomes true after the SEED,
+		// which is a separate command run against a running database.
+		{
+			name: `${name}:verify`,
+			action: makeVerifyAction,
+			description: `Check the published version of ${name} carries this build`,
+		},
 
 		// Full build: bundle → register → copy. Every app depends on the
 		// shell, so in repos that CARRY the shell module its build runs
@@ -247,4 +407,4 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 	return { name, description, actions };
 }
 
-module.exports = { createAppModule };
+module.exports = { createAppModule, publishedCarriesBuild };
