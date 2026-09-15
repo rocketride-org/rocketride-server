@@ -52,6 +52,7 @@ from ai.account.app_deploy import (
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
+    manifest_snapshot,
     open_version_dirs,
     resolve_app_pins,
 )
@@ -148,12 +149,16 @@ class _FakeRegistry:
         """The fake's audience key (mirrors the backends' encodings)."""
         return f'{audience["type"]}~{audience.get("id", "")}'
 
-    def seed_publish(self, audience, version, art_state=None):
+    def seed_publish(self, audience, version, art_state=None, snapshot=None):
         """Bind one audience to a version (binding born 'enabled').
 
         The REVIEW state lives on the deployment, so ``art_state`` (when
         given) sets that version's deployment state; the read fakes join it
         back onto the row as ``artifactState``.
+
+        ``snapshot`` overrides the row's manifest snapshot — the shape
+        ``manifest_snapshot`` writes at publish time and the resolver reads
+        every listing field back out of.
         """
         if art_state is not None:
             for v in self.versions:
@@ -165,7 +170,7 @@ class _FakeRegistry:
             'audience': dict(audience),
             'version': version,
             'state': 'enabled',
-            'snapshot': {'name': 'Brandy'},
+            'snapshot': snapshot if snapshot is not None else {'name': 'Brandy'},
             'publishedAt': 2000 + version,
         }
 
@@ -1381,3 +1386,47 @@ async def test_resolve_internal_serves_unapproved_but_not_failed(registry):
     registry.versions[0]['state'] = 'failed'
     resolved = await resolve_app_pins('org1', 'u1', ['t1'])
     assert resolved == []
+
+
+# =============================================================================
+# PUBLISHER — who makes the app, shown under its name in the store
+# =============================================================================
+
+
+def test_manifest_snapshot_carries_the_publisher():
+    """The store card reads it off the snapshot; nothing else records it."""
+    entry = {'metadata': {'manifest': {'name': 'Brandy', 'publisher': 'Acme Ltd'}}}
+
+    assert manifest_snapshot(entry, {'appId': 'acme.brandy'})['publisher'] == 'Acme Ltd'
+
+
+def test_manifest_snapshot_publisher_is_empty_when_the_manifest_declares_none():
+    """Empty, not missing: the key is part of the snapshot's shape."""
+    entry = {'metadata': {'manifest': {'name': 'Brandy'}}}
+
+    assert manifest_snapshot(entry, {'appId': 'acme.brandy'})['publisher'] == ''
+
+
+@pytest.mark.asyncio
+async def test_resolve_app_pins_sends_the_publisher(registry):
+    registry.add_version(1, '1.0.0')
+    registry.seed_publish(AUD_PUBLIC, 1, snapshot={'name': 'Brandy', 'publisher': 'Acme Ltd'})
+
+    resolved = await resolve_app_pins('org1', 'u1', ['t1'])
+
+    assert resolved[0]['publisher'] == 'Acme Ltd'
+
+
+@pytest.mark.asyncio
+async def test_resolve_app_pins_omits_an_absent_publisher(registry):
+    """
+    OMITTED, NOT SENT EMPTY — the same rule `configuration` follows. A present
+    None fails the client's AppManifestEntry validation, and absence is what
+    makes the store card fall back to the first category.
+    """
+    registry.add_version(1, '1.0.0')
+    registry.seed_publish(AUD_PUBLIC, 1, snapshot={'name': 'Brandy', 'publisher': ''})
+
+    resolved = await resolve_app_pins('org1', 'u1', ['t1'])
+
+    assert 'publisher' not in resolved[0]
