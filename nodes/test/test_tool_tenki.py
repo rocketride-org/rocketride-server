@@ -463,14 +463,17 @@ class _CommandResult:
 class _FakeClient:
     """Stand-in for tenki.Client: hands out the given sessions in order and records calls."""
 
-    def __init__(self, *sessions, create_error=None, create_delay=0.0):
+    def __init__(self, *sessions, create_error=None, create_delay=0.0, leftover=None, list_error=None):
         self._sessions = list(sessions)
         self._create_error = create_error
         self._create_delay = create_delay
+        self._leftover = list(leftover or [])
+        self._list_error = list_error
         self.create_started = threading.Event()
         self.closing = threading.Event()
         self.close_gate = None
         self.create_calls = []
+        self.list_calls = []
         self.fetched = {}
         self.closed = False
 
@@ -485,6 +488,12 @@ class _FakeClient:
     def get(self, session_id):
         session = self.fetched[session_id] = _FakeSession(session_id)
         return session
+
+    def list(self, *, tags=None, **kwargs):
+        self.list_calls.append(tags)
+        if self._list_error is not None:
+            raise self._list_error
+        return list(self._leftover)
 
     def close(self):
         self.closing.set()
@@ -1911,7 +1920,10 @@ def test_sessions_are_labelled_so_an_orphan_can_be_found(monkeypatch, logs):
     glb.session = None
     glb.get_session()
     first, second = client.create_calls
-    assert first['tags'] == ['rocketride']
+    assert first['tags'][0] == 'rocketride'
+    run_tag = first['tags'][1]
+    assert run_tag.startswith('run-')
+    assert second['tags'] == first['tags']  # one run, one tag
     assert first['metadata'] == {'created_by': 'rocketride', 'node': 'tool_tenki'}
     assert first['name'].startswith('rocketride-tool-tenki-')
     assert first['name'] != second['name']
@@ -1921,3 +1933,47 @@ def test_groups_without_tools_are_no_longer_offered():
     # Selecting one used to validate and then publish nothing at all.
     with pytest.raises(ValueError):
         groups.normalize_groups(['ports'])
+
+
+# ---------------------------------------------------------------------------
+# Leak-proof cleanup: close a dropped session, and sweep this run's tag at shutdown
+# ---------------------------------------------------------------------------
+
+
+def test_a_session_reported_not_found_is_still_closed_before_being_forgotten(monkeypatch, logs):
+    # "not found" can be a transient wrong answer, so the handle is closed anyway; otherwise a
+    # still-running VM would bill until max_duration.
+    gone = _FakeSession('sb-gone', refresh_error=mod.SessionNotFoundError('session not found'))
+    glb, _ = _started(monkeypatch, gone, _FakeSession('sb-fresh'))
+    glb.call_with_session(
+        lambda session: _raise(mod.SessionNotFoundError('session not found')) if session is gone else session.id
+    )
+    assert 'close' in gone.calls
+
+
+def test_two_runs_tag_their_sessions_differently(monkeypatch, logs):
+    glb_a, client_a = _started(monkeypatch, _FakeSession('a'))
+    glb_a.get_session()
+    glb_b, client_b = _started(monkeypatch, _FakeSession('b'))
+    glb_b.get_session()
+    assert client_a.create_calls[0]['tags'][1] != client_b.create_calls[0]['tags'][1]
+
+
+def test_shutdown_closes_sessions_left_running_under_this_runs_tag(monkeypatch, logs):
+    # A create that raced the RPC deadline can leave a VM the node never got an id for; it still
+    # carries this run's tag, so a sweep at shutdown finds and closes it.
+    orphan = _FakeSession('sb-orphan')
+    glb, client = _started(monkeypatch, _FakeSession('sb-1'), leftover=[orphan])
+    glb.get_session()
+    glb.endGlobal()
+    run_tag = client.create_calls[0]['tags'][1]
+    assert client.list_calls == [[run_tag]]
+    assert 'close' in orphan.calls
+
+
+def test_a_failed_shutdown_sweep_is_logged_and_the_client_still_closes(monkeypatch, logs):
+    glb, client = _started(monkeypatch, _FakeSession('sb-1'), list_error=RuntimeError('connection reset'))
+    glb.get_session()
+    glb.endGlobal()
+    assert client.closed is True
+    assert any('connection reset' in message for message in logs)

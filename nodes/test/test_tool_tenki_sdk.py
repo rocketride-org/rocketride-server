@@ -171,6 +171,13 @@ def test_the_resource_rules_the_node_clamps_to(options):
 # ---------------------------------------------------------------------------
 
 
+def test_sessions_can_be_listed_by_tag_and_closed_for_shutdown_cleanup():
+    # endGlobal lists this run's sessions by tag and closes each; a rename here would let a
+    # leaked, billing VM survive teardown while the stubbed unit tests stayed green.
+    assert 'tags' in _parameters(tenki.Client.list)
+    assert callable(tenki.Sandbox.close_if_open)
+
+
 def test_the_session_methods_the_node_calls():
     for name in ('start', 'refresh', 'resume', 'wait_ready', 'close', 'close_if_open'):
         assert callable(getattr(tenki.Sandbox, name)), name

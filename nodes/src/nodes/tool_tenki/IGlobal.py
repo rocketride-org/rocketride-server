@@ -133,6 +133,10 @@ class IGlobal(IGlobalBase):
     last_recovery: str = ''
     # Set as endGlobal starts. No session may be created after that: nothing would close it.
     _ending: bool = False
+    # A tag unique to this pipeline run, set in beginGlobal. Every session created here carries it,
+    # so endGlobal can find and close any this run left running, without touching another run's.
+    _run_tag: str = ''
+
     rpc_timeout_secs: int = 120
     image: str = ''
     cpu_cores: int = 2
@@ -150,6 +154,7 @@ class IGlobal(IGlobalBase):
 
         self._session_lock = threading.Lock()
         self._ending = False
+        self._run_tag = f'run-{uuid.uuid4().hex[:12]}'
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         apikey = str((cfg.get('apikey') or '')).strip()
@@ -223,7 +228,7 @@ class IGlobal(IGlobalBase):
             # So that a session a crashed engine left behind can be recognised in Tenki's console
             # and listed by tag. The suffix keeps names distinct in case the service requires it.
             'name': f'rocketride-tool-tenki-{uuid.uuid4().hex[:8]}',
-            'tags': ['rocketride'],
+            'tags': ['rocketride', self._run_tag],
             'metadata': {'created_by': 'rocketride', 'node': 'tool_tenki'},
         }
         if self.image:
@@ -311,11 +316,13 @@ class IGlobal(IGlobalBase):
             except SessionNotFoundError:
                 state = None
             if state is None or state in _GONE_STATES:
-                if state is not None:
-                    try:
-                        session.close_if_open()
-                    except Exception as e:
-                        warning(f'tool_tenki: could not close session {session.id}: {e}')
+                # Close it even when the service reported it not-found (state None): that report can
+                # be wrong, and a still-running VM would otherwise bill until max_duration. A close
+                # that fails here is expected when the session really is gone, so it is only logged.
+                try:
+                    session.close_if_open()
+                except Exception as e:
+                    debug(f'tool_tenki: could not close dropped session {session.id}: {e}')
                 self.session = None
                 self.session_epoch += 1
                 self.last_recovery = 'replaced'
@@ -353,6 +360,29 @@ class IGlobal(IGlobalBase):
         except Exception as e:
             warning(str(e))
 
+    def _close_tagged_sessions(self) -> None:
+        """Close any still-running session carrying this run's tag.
+
+        The scoped close above handles the session the node is holding. This catches the ones it is
+        not: a session dropped in recovery whose close did not take, or a create that raced the RPC
+        deadline and left a VM the node never got a handle for. The unique run tag keeps the sweep to
+        this run's own sessions. Best-effort: listing needs the network, and max_duration is the
+        final backstop.
+        """
+        if not self._run_tag:
+            return
+        try:
+            leftover = self.client.list(tags=[self._run_tag])
+        except Exception as e:
+            warning(f"tool_tenki: could not list this run's sessions to clean up: {e}")
+            return
+        for sandbox in leftover:
+            try:
+                sandbox.close_if_open()
+                debug(f'tool_tenki: closed leftover session {getattr(sandbox, "id", "?")}')
+            except Exception as e:
+                warning(f'tool_tenki: could not close leftover session {getattr(sandbox, "id", "?")}: {e}')
+
     def endGlobal(self) -> None:
         # First, so that no tool call can create a session after the close below.
         self._ending = True
@@ -368,6 +398,7 @@ class IGlobal(IGlobalBase):
                 finally:
                     self.session = None
         if self.client is not None:
+            self._close_tagged_sessions()
             try:
                 self.client.close()
             except Exception as e:
