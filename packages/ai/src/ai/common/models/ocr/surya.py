@@ -78,7 +78,7 @@ class SuryaLoader(BaseLoader):
         from surya.foundation import FoundationPredictor  # contract-check: ignore  see comment above
         from surya.recognition import RecognitionPredictor  # contract-check: ignore  see comment above
         from surya.detection import DetectionPredictor  # contract-check: ignore  see comment above
-        from ai.common.torch import torch
+        from ai.common.torch import torch, probe_cuda
 
         languages = languages or ['en']
         exclude_gpus = exclude_gpus or []
@@ -100,6 +100,11 @@ class SuryaLoader(BaseLoader):
             else:
                 gpu_index = 0
                 torch_device = 'cuda:0'
+
+            if torch_device != 'cpu' and not probe_cuda(gpu_index):
+                logger.warning(f'CUDA device {gpu_index} kernel probe failed, falling back to CPU')
+                torch_device = 'cpu'
+                gpu_index = -1
 
         logger.info(f'Loading Surya OCR on {torch_device}')
 
