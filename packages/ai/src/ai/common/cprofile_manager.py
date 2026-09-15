@@ -24,8 +24,10 @@
 CProfileManager: Process-Level yappi Profiler Singleton.
 
 Provides a single, thread-safe profiling session per Python process using
-yappi, which profiles all threads (unlike cProfile which only profiles
-the calling thread).
+yappi.  Unlike cProfile, yappi profiles more than the calling thread — but
+only threads that exist when the session starts or that start through
+``threading.Thread``.  A thread that first enters Python mid-session (e.g.
+an engine worker thread) must call ``register_current_thread()``.
 
 Any DAP connection handler can import the module-level ``profiler``
 instance and call start/stop/status/report.
@@ -461,6 +463,32 @@ class CProfileManager:
                 self._owner_id = None
                 self._session_name = None
                 self._start_time = None
+
+    def register_current_thread(self) -> bool:
+        """
+        Hook the calling thread into the active profiling session.
+
+        yappi only hooks threads that exist at start() or that start through
+        threading.Thread.  Engine worker threads get their PyThreadState lazily
+        on first Python entry, so one entering mid-session stays invisible
+        unless it registers itself here (the engine calls this once per thread).
+
+        The check and the install must stay under _lock: stop() and release()
+        call yappi.clear_stats(), and installing the bootstrap after that sends
+        the next profile event into freed memory and crashes the process.
+
+        Returns:
+            True if the thread was hooked into an active session, False if no
+            session is running.
+        """
+        with self._lock:
+            # Installing the hook with no session active breaks yappi globally
+            if not self._active:
+                return False
+
+            # yappi's per-thread bootstrap; its first event registers the context
+            sys.setprofile(yappi._profile_thread_callback)
+            return True
 
     # =========================================================================
     # PRIVATE HELPERS
