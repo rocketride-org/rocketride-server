@@ -133,7 +133,7 @@ class CProfileManager:
     """
     Process-level singleton managing a single yappi profiling session.
 
-    Thread-safe via a threading.Lock — safe to call from asyncio handlers
+    Thread-safe via a threading.RLock — safe to call from asyncio handlers
     and from worker threads in the model server.
 
     yappi is process-global (start/stop are module-level), so this manager
@@ -175,8 +175,9 @@ class CProfileManager:
         #   children: list of (child_key, ncall, ttot, tsub)
         self._last_stats_data: Optional[List[Dict]] = None
 
-        # Thread lock protecting all mutable state
-        self._lock = threading.Lock()
+        # Guards all mutable state. Reentrant because register_current_thread()
+        # is reachable from the engine's GIL-attach path on every thread.
+        self._lock = threading.RLock()
 
     def start(
         self,
