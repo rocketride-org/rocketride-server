@@ -142,6 +142,23 @@ const styles = {
 		color: 'var(--rr-text-secondary)',
 		lineHeight: '1.3',
 	},
+	details: {
+		width: '100%',
+	},
+	summary: {
+		fontSize: '12px',
+		fontWeight: 500,
+		color: 'var(--rr-text-secondary)',
+		cursor: 'pointer',
+		userSelect: 'none' as const,
+		padding: '4px 0',
+	},
+	note: {
+		margin: '8px 0 10px 0',
+		fontSize: '11.5px',
+		color: 'var(--rr-text-secondary)',
+		lineHeight: '1.4',
+	},
 };
 
 // =============================================================================
@@ -154,6 +171,13 @@ interface IEmptyCanvasPromptProps {
 	onNodeAdded: (nodeId: string, formDataValid: boolean) => void;
 }
 
+/**
+ * EmptyCanvasPrompt renders the starting point overlay when the pipeline canvas has no nodes.
+ * Prioritizes curated starter templates and nests raw source components in an advanced collapsible section.
+ *
+ * @param props - Component properties including template instantiation and node addition callbacks.
+ * @returns The rendered empty canvas prompt overlay or null if no sources/templates are available.
+ */
 export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: IEmptyCanvasPromptProps): ReactElement | null {
 	const { servicesJson } = useFlowProject();
 	const { addNode } = useFlowGraph();
@@ -231,39 +255,11 @@ export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: 
 		<>
 			<div style={styles.overlay}>
 				<div style={styles.card}>
-					{/* Sources section */}
-					<h3 style={styles.heading}>Select your starting point</h3>
-					<p style={styles.subheading}>Choose a source to begin building your pipeline</p>
-					<div style={styles.grid}>
-						{sources.map(({ key, service }) => (
-							<button
-								key={key}
-								style={{
-									...styles.item,
-									...(hoveredKey === key
-										? {
-												backgroundColor: 'var(--rr-bg-widget-hover)',
-												borderColor: 'var(--rr-accent)',
-											}
-										: {}),
-								}}
-								onClick={() => onClickSource(key)}
-								onMouseEnter={() => setHoveredKey(key)}
-								onMouseLeave={() => setHoveredKey(null)}
-							>
-								<Icon name={service.icon} width="18px" height="18px" style={styles.itemIcon} />
-
-								<span style={styles.itemTitle}>{service.title ?? key}</span>
-							</button>
-						))}
-					</div>
-
 					{/* Templates section */}
 					{templateList.length > 0 && (
 						<>
-							<div style={styles.divider} />
-							<h3 style={styles.heading}>Or start from a template</h3>
-							<p style={styles.subheading}>Pre-built pipeline skeletons you can customize</p>
+							<h3 style={styles.heading}>Choose a Starter Pipeline</h3>
+							<p style={styles.subheading}>Select a working template to customize</p>
 							<div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
 								{templateList.map(({ slug, template }) => (
 									<button
@@ -293,6 +289,40 @@ export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: 
 									</button>
 								))}
 							</div>
+						</>
+					)}
+
+					{/* Raw sources section (wrapped in <details>) */}
+					{sources.length > 0 && (
+						<>
+							{templateList.length > 0 && <div style={styles.divider} />}
+							<details style={styles.details}>
+								<summary style={styles.summary}>Advanced: Start with a raw source component</summary>
+								<p style={styles.note}>Every pipeline must begin with a single source component.</p>
+								<div style={styles.grid}>
+									{sources.map(({ key, service }) => (
+										<button
+											key={key}
+											style={{
+												...styles.item,
+												...(hoveredKey === key
+													? {
+															backgroundColor: 'var(--rr-bg-widget-hover)',
+															borderColor: 'var(--rr-accent)',
+														}
+													: {}),
+											}}
+											onClick={() => onClickSource(key)}
+											onMouseEnter={() => setHoveredKey(key)}
+											onMouseLeave={() => setHoveredKey(null)}
+										>
+											<Icon name={service.icon} width="18px" height="18px" style={styles.itemIcon} />
+
+											<span style={styles.itemTitle}>{service.title ?? key}</span>
+										</button>
+									))}
+								</div>
+							</details>
 						</>
 					)}
 				</div>
