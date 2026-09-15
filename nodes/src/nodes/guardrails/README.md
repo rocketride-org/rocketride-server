@@ -40,8 +40,6 @@ checks need to be selected individually.
 | `strict` | All checks enabled, nonce fencing on, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `enable_nonce_fencing`, `max_tokens_estimate`, and `expected_format`. |
 | `custom` | All checks enabled, nonce fencing off, `warn` mode. Exposes every individual check, limit, topic, format, and policy control. |
 
-## Configuration
-
 The generated schema is the field reference. Use the checks below to select what to enforce, then choose the policy mode that determines whether an observed violation should stop the pipeline.
 
 ### Input checks

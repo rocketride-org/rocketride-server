@@ -279,7 +279,7 @@
 			"default": false
 		},
 		"nonce_length": {
-			"type": "number",
+			"type": "integer",
 			"title": "Nonce length (bytes)",
 			"description": "Length of the cryptographic nonce in bytes (min 16, max 128)",
 			"default": 16,
