@@ -1168,7 +1168,6 @@ def test_run_code_rejects_invalid_input_without_touching_the_sandbox(monkeypatch
         (None, 'python3', '.py'),
         ('python', 'python3', '.py'),
         ('javascript', 'node', '.js'),
-        ('typescript', 'ts-node', '.ts'),
     ],
 )
 def test_run_code_writes_the_code_to_a_file_then_runs_the_interpreter_on_it(
@@ -1190,6 +1189,18 @@ def test_run_code_writes_the_code_to_a_file_then_runs_the_interpreter_on_it(
     assert executed[1][-2:] == (interpreter, path)
     assert executed[2]['timeout'] == 45
     assert removed[:2] == ('remove', path)
+
+
+def test_typescript_is_not_offered_because_the_base_image_lacks_ts_node(monkeypatch, logs):
+    # Checked live against Tenki's image: ts-node is not installed there, and run_code on a .ts file
+    # came back with exit 0 and empty output - a silent failure an agent would read as success.
+    meta = inst_mod.IInstance.run_code.__tool_meta__
+    assert meta['input_schema']['properties']['language']['enum'] == ['javascript', 'python']
+    description = meta['description'](SimpleNamespace(IGlobal=SimpleNamespace(exec_timeout_secs=120)))
+    assert 'ts-node' not in description and 'typescript' not in description.lower()
+    inst, _ = _instance(monkeypatch, _FakeSession('sb-1'))
+    with pytest.raises(ValueError):
+        inst.run_code({'code': 'const x: number = 1', 'language': 'typescript'})
 
 
 def test_run_code_uses_a_new_file_for_every_call(monkeypatch, logs):

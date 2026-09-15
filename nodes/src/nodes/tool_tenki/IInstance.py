@@ -90,11 +90,13 @@ _SESSION_EVENT = {
     ),
 }
 
-#: run_code languages: the interpreter to run, and the file extension it expects.
+#: run_code languages: the interpreter to run, and the file extension it expects. TypeScript is
+#: absent on purpose: ts-node is not in Tenki's base image, and running a .ts file through it
+#: returned exit 0 with no output, which an agent would read as a successful run. Node 24 in the
+#: image can strip types from a .ts file directly, so this can come back once that is verified live.
 _LANGUAGES = {
     'python': ('python3', '.py'),
     'javascript': ('node', '.js'),
-    'typescript': ('ts-node', '.ts'),
 }
 
 _EXEC_OUTPUT_SCHEMA = {
@@ -399,10 +401,7 @@ class IInstance(IInstanceBase):
                 'language': {
                     'type': 'string',
                     'enum': sorted(_LANGUAGES),
-                    'description': (
-                        'Language of the code: python (python3), javascript (node) or typescript (ts-node). '
-                        'Defaults to python.'
-                    ),
+                    'description': ('Language of the code: python (python3) or javascript (node). Defaults to python.'),
                 },
             },
         },
