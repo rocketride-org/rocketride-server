@@ -123,10 +123,16 @@ def _is_project_code(path: str) -> bool:
     return path.startswith(_PROJECT_PREFIXES)
 
 
-# Text report column layout, mirroring yappi's print_all() defaults
-# (yappi.py:1015-1025): name 36, ncall 5, tsub/ttot/tavg 8, two-space gap.
-_COLUMNS = (('name', 36), ('ncall', 5), ('tsub', 8), ('ttot', 8), ('tavg', 8))
+# Text report column layout.  Numeric widths and the two-space gap are yappi's
+# print_all() defaults (yappi.py:1015-1025); the name column is deliberately
+# wider than its 36, which truncated almost every row to an unidentifiable tail
+# ("..' of '_queue.SimpleQueue' objects>").  Safe to widen: profiler-ui renders
+# the report in a <pre> with pre-wrap, so longer lines wrap (ReportText.tsx:59).
+_COLUMNS = (('name', 72), ('ncall', 5), ('tsub', 8), ('ttot', 8), ('tavg', 8))
 _COLUMN_GAP = '  '
+
+# Unpacked once so rows and the header cannot drift apart
+_NAME_W, _NCALL_W, _TSUB_W, _TTOT_W, _TAVG_W = (width for _, width in _COLUMNS)
 
 
 def _ltrim(text: Any, size: int) -> str:
@@ -637,11 +643,11 @@ class CProfileManager:
                 lines.append(
                     _COLUMN_GAP.join(
                         (
-                            _ltrim(full_name, 36),
-                            _rtrim(ncall, 5),
-                            _rtrim(_fmt_time(entry['tsub']), 8),
-                            _rtrim(_fmt_time(entry['ttot']), 8),
-                            _rtrim(_fmt_time(tavg), 8),
+                            _ltrim(full_name, _NAME_W),
+                            _rtrim(ncall, _NCALL_W),
+                            _rtrim(_fmt_time(entry['tsub']), _TSUB_W),
+                            _rtrim(_fmt_time(entry['ttot']), _TTOT_W),
+                            _rtrim(_fmt_time(tavg), _TAVG_W),
                         )
                     )
                 )

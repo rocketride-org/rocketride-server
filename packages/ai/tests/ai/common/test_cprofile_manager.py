@@ -48,7 +48,11 @@ from pathlib import Path
 import pytest
 import yappi
 
-from ai.common.cprofile_manager import CProfileManager, profiler
+from ai.common.cprofile_manager import _COLUMNS, CProfileManager, profiler
+
+# Rows are fixed-width, so the numeric columns start right after the name one.
+# Taken from the module rather than hardcoded: the width is a tuning knob.
+_NAME_WIDTH = _COLUMNS[0][1]
 
 # Source tree root (.../packages/ai/src), derived from THIS test file so a
 # subprocess imports the code under test rather than the dist copy that sits
@@ -331,7 +335,7 @@ def test_unlocked_install_after_clear_crashes():
 # verbatim in a <pre>), so pinning bytes would only create churn.
 
 
-# Name kept short and distinctive so it survives the 36-char name column
+# Name kept short and distinctive so it survives the name column trim
 def report_marker():
     """Marker whose call count must show up in the report."""
     return 1
@@ -351,7 +355,7 @@ def _section_rows(report_text: str, title: str) -> list[str]:
 
 def _columns(row: str) -> list[str]:
     """Split a data row's numeric columns: [ncall, tsub, ttot, tavg]."""
-    return row[36:].split()
+    return row[_NAME_WIDTH:].split()
 
 
 def _run_session(owner: str, session: str, calls: int = 50) -> None:
