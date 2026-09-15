@@ -209,6 +209,7 @@ Everything on [docs.rocketride.org](https://docs.rocketride.org/) is built from 
 | Building your own client on the engine protocol | [`docs/public/product/connect/websocket/`](docs/public/product/connect/websocket/) |
 | Contributing: setup, builder, engine internals, node authoring | [`docs/development/`](docs/development/index.md) |
 | Node catalog | each node's `README.md` under [`nodes/src/nodes/`](nodes/src/nodes) |
+| Apps: VS Code extension and the shell UIs | each app's own folder under [`apps/`](apps/); how they fit the monorepo in [`docs/development/apps/`](docs/development/apps/index.md) |
 | Pointing an AI assistant at RocketRide | [`docs/agents/`](docs/agents/README.md) |
 
 Repo-wide contributor rules live in [AGENTS.md](AGENTS.md).
