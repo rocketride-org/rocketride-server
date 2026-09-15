@@ -393,6 +393,9 @@ void setupDebug() noexcept {
 ///		lifetime -- see lock.hpp:42-45. A thread that finds no session
 ///		is swept up by any later start().
 ///
+///		The guard is set once an attempt was made; the paths that skip
+///		the attempt leave it unset so a later call retries.
+///
 ///		This MUST be called while the GIL is locked, and AFTER
 ///		setupDebug(): that names the thread in threading._active, which
 ///		is where yappi resolves context names from.
@@ -401,7 +404,6 @@ void setupProfiler() noexcept {
     // Only ever attempt this once per thread
     if (tls_profiler_checked)
         return;
-    tls_profiler_checked = true;
 
     try {
         // If the manager was never imported no session can exist, and
@@ -413,6 +415,11 @@ void setupProfiler() noexcept {
         // Register with the active session; a no-op when none is running
         auto mgr = py::module_::import("ai.common.cprofile_manager");
         mgr.attr("profiler").attr("register_current_thread")();
+
+        // On the attempt, not on the returned bool: false only means "no
+        // session", and this thread is pinned, so start() will sweep it up.
+        // Gating on it would take the manager lock on every call from here on
+        tls_profiler_checked = true;
     } catch (const py::error_already_set &e) {
         LOG(Python, "Python error during profiler registration {}", e.what());
     } catch (...) {
