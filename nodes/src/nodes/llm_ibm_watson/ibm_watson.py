@@ -25,6 +25,7 @@ import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_adapter import report_llm_tokens
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
 from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
@@ -72,6 +73,21 @@ def _validate_location(location):
             f'Unknown IBM Cloud location: {location!r}. Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}'
         )
     return f'https://{location}.ml.cloud.ibm.com'
+
+
+def _report_watson_usage(response: Any, model: str) -> None:
+    """Report a ``ModelInference.chat`` response's usage on the token counters.
+
+    This node overrides ``_chat``, so it never reaches ``LangChainAdapter`` — without
+    this the provider bills zero. watsonx answers the OpenAI-compatible shape; it
+    reports no cache detail, so both cache counters stay at zero.
+    """
+    usage = response.get('usage') if hasattr(response, 'get') else None
+    if not isinstance(usage, dict):
+        return
+    # Passed through raw: report_llm_tokens coerces inside its own best-effort try, so a
+    # non-numeric count is swallowed there rather than costing this turn its answer.
+    report_llm_tokens(usage.get('prompt_tokens'), usage.get('completion_tokens'), model=model)
 
 
 class Chat(ChatBase):
@@ -143,6 +159,9 @@ class Chat(ChatBase):
         messages = [{'role': 'user', 'content': prompt}]
 
         response = self._llm.chat(messages=messages)
+
+        # Before the empty-answer check below: an empty completion still burnt the prompt.
+        _report_watson_usage(response, self._model)
 
         # Gets the text from response
         message = response['choices'][0]['message']['content']

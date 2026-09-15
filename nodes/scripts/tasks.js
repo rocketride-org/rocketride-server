@@ -223,6 +223,14 @@ function makeRunPytestAction(options = {}) {
                 extraArgs,
                 execOpts: { task, cwd: PACKAGE_DIR, env: testEnv },
             });
+
+            // The node README schema validator's own tests live at the repo
+            // root; they are part of the node contract, so they run here.
+            await runPytest({
+                engine: ENGINE,
+                testsDir: path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py'),
+                execOpts: { task, cwd: PROJECT_ROOT, env: testEnv },
+            });
         }
     };
 }
@@ -231,6 +239,22 @@ function makeDocsGenerateAction() {
     return {
         run: async (ctx, task) => {
             await execCommand('node', [path.join(__dirname, 'gen-node-tables.mjs')], { task, cwd: PACKAGE_DIR });
+        }
+    };
+}
+
+function makeCredentialsGenerateAction() {
+    return {
+        run: async (ctx, task) => {
+            await execCommand('node', [path.join(__dirname, 'gen-credentials.mjs')], { task, cwd: PACKAGE_DIR });
+        }
+    };
+}
+
+function makeCredentialsCheckAction() {
+    return {
+        run: async (ctx, task) => {
+            await execCommand('node', [path.join(__dirname, 'gen-credentials.mjs'), '--check'], { task, cwd: PACKAGE_DIR });
         }
     };
 }
@@ -290,11 +314,13 @@ module.exports = {
         { name: 'nodes:stop-server', action: makeStopTestServerAction },
         { name: 'nodes:run-contracts', action: makeRunContractTestsAction },
         { name: 'nodes:docs-generate', action: makeDocsGenerateAction },
+        { name: 'nodes:credentials-generate', action: makeCredentialsGenerateAction },
+        { name: 'nodes:credentials-check', action: makeCredentialsCheckAction },
 
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({
             description: 'Build nodes',
-            steps: ['server:build', 'nodes:sync', 'nodes:docs-generate']
+            steps: ['server:build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate']
         })},
         { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
         { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },

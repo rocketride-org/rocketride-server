@@ -1,0 +1,299 @@
+/**
+ * Docs Build Module
+ *
+ * Co-located documentation site. Discovered by the build orchestrator at
+ * docs/docusaurus/scripts/tasks.js; exposes `docs:build` (gather -> index ->
+ * compile), `docs:dev`, `docs:serve`, `docs:test`, and `docs:clean`. Bare
+ * `builder build` includes docs:build via global-command expansion because it
+ * carries a description.
+ */
+const path = require('path');
+const { readdir } = require('node:fs/promises');
+const { execCommand, exists, mkdir, rm, setState, parallel, runPytest, isWindows, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
+
+// Light, in-tree reference generators that deposit before gather collects them.
+// Heavier emitters (Python SDKs, engine) refresh via their own :build under
+// global `builder build`; gather then collects whatever is present in-tree.
+const DOC_GENERATORS = ['nodes:docs-generate', 'client-typescript:docs-generate'];
+
+const DOCS_DIR = path.join(__dirname, '..');
+// Engine (built by server:build; execCommand resolves extension on Windows).
+// Its Python carries pytest; the ambient python3 on PATH may not.
+const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
+// Spine pages now live in the top-level docs/ tree (docs consolidation).
+const CONTENT_STATIC_DIR = path.join(PROJECT_ROOT, 'docs', 'public', 'product');
+const STATIC_DIR = path.join(DOCS_DIR, 'static');
+
+// Assembled content tree Docusaurus reads (gather populates it).
+const CONTENT_DIR = path.join(BUILD_ROOT, 'docs-content');
+// Final static site output.
+const SITE_OUT = path.join(DIST_ROOT, 'docs');
+
+const GATHER_HASH_KEY = 'docs.gatherHash';
+
+/** Build env for Docusaurus: content path + metadata threaded from CLI flags. */
+function docsEnv(options = {}) {
+	return {
+		...process.env,
+		ROCKETRIDE_DOCS_CONTENT: CONTENT_DIR,
+		DOCS_VERSION: options.buildVersion || '',
+		DOCS_HASH: options.buildHash || '',
+		DOCS_STAMP: options.buildStamp || '',
+		DOCS_SAAS: options.saas ? '1' : '',
+	};
+}
+
+function makeGatherAction(mode = 'copy') {
+	return {
+		run: async (ctx, task) => {
+			const { gather, assertNoUnexpectedPlaceholders } = require('./lib/gather');
+			const manifest = await gather({ projectRoot: PROJECT_ROOT, contentStaticDir: CONTENT_STATIC_DIR, contentDir: CONTENT_DIR, staticDir: STATIC_DIR, mode, task });
+			// Guardrail: an unexpected placeholder means a spine id and a file path
+			// drifted apart, which otherwise publishes a live "coming soon" URL in
+			// silence. Fails docs:build (and so CI) instead.
+			assertNoUnexpectedPlaceholders(manifest);
+		},
+	};
+}
+
+function makeReleaseNotesAction() {
+	return {
+		run: async (ctx, task) => {
+			const { buildReleaseNotes } = require('./lib/release-notes');
+			await buildReleaseNotes({ contentDir: CONTENT_DIR, staticDir: STATIC_DIR, task });
+		},
+	};
+}
+
+function makeIndexAction() {
+	return {
+		run: async (ctx, task) => {
+			const { buildIndex } = require('./lib/llms');
+			await buildIndex({ contentDir: CONTENT_DIR, staticDir: STATIC_DIR, task });
+		},
+	};
+}
+
+function makeCompileAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			await mkdir(SITE_OUT);
+			await execCommand('pnpm', ['exec', 'docusaurus', 'build', '--out-dir', SITE_OUT], { task, cwd: DOCS_DIR, env: docsEnv(options) });
+			task.output = `Built docs site at ${SITE_OUT}`;
+		},
+	};
+}
+
+function makeDevStartAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			await execCommand('pnpm', ['exec', 'docusaurus', 'start'], { task, cwd: DOCS_DIR, env: docsEnv(options), stdio: 'inherit' });
+		},
+	};
+}
+
+/**
+ * Preview the built static site from SITE_OUT. `docusaurus serve` defaults to
+ * docs/docusaurus/build, but the pipeline emits to SITE_OUT (dist/docs), so point
+ * --dir there. Fails fast with an actionable message when nothing is built yet.
+ *
+ * The `serve` script in package.json mirrors this with a path relative to
+ * docs/docusaurus (`../../dist/docs`), which resolves to the same repo-root
+ * dist/docs as the absolute SITE_OUT here.
+ */
+function makeServeAction() {
+	return {
+		description: 'Serve built docs',
+		run: async (ctx, task) => {
+			if (!(await exists(SITE_OUT))) {
+				throw new Error(`No built docs at ${SITE_OUT}. Run 'builder docs:build' first.`);
+			}
+			await execCommand('pnpm', ['exec', 'docusaurus', 'serve', '--dir', SITE_OUT, '--port', '3000'], { task, cwd: DOCS_DIR, stdio: 'inherit' });
+		},
+	};
+}
+
+/** Recursively collect `*.test.mjs` files under `dir` (absolute paths). */
+async function findTestFiles(dir) {
+	const entries = await readdir(dir, { withFileTypes: true });
+	const files = [];
+	for (const entry of entries) {
+		const full = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			files.push(...(await findTestFiles(full)));
+		} else if (entry.name.endsWith('.test.mjs')) {
+			files.push(full);
+		}
+	}
+	return files;
+}
+
+/** Run unit tests for the docs site's pure helpers via Node's test runner. */
+function makeTestAction() {
+	return {
+		description: 'Test docs helpers',
+		run: async (ctx, task) => {
+			const srcDir = path.join(DOCS_DIR, 'src');
+			const testFiles = (await findTestFiles(srcDir)).map((f) => path.relative(DOCS_DIR, f));
+			if (testFiles.length === 0) {
+				task.output = 'No test files found under src/';
+				return;
+			}
+			await execCommand('node', ['--test', '--test-reporter=spec', ...testFiles], { task, cwd: DOCS_DIR });
+		},
+	};
+}
+
+/**
+ * docs:validate — the deterministic documentation checks, run as a builder
+ * task so `docs:test` (and therefore `./builder test`) carries them; CI does
+ * not own them. Three phases:
+ *   1. client-doc parity — blocking
+ *   2. the whole node corpus (--all) — blocking
+ *   3. the node README schema validator's own unit tests — blocking
+ */
+function makeValidateAction() {
+	return {
+		description: 'Validate documentation schemas',
+		run: async (ctx, task) => {
+			// 1. client-doc parity — blocking
+			await execCommand('python3', ['scripts/validate-client-docs.py'], { task, cwd: PROJECT_ROOT });
+
+			// 2. the whole node corpus — blocking now that it is clean
+			await execCommand('python3', ['scripts/validate-node-readme.py', '--all', 'nodes/src/nodes'], { task, cwd: PROJECT_ROOT });
+
+			// 3. the validator's own regression tests — the only per-PR gate on
+			// scripts/validate-node-readme.py itself; nodes:test also runs this
+			// file, but nothing in .github/workflows invokes nodes:test.
+			// Run them under the engine's Python like every other pytest task:
+			// a bare `python3` is whatever the runner has on PATH, and the
+			// Windows CI interpreter ships without pytest. docs:validate also
+			// runs where no engine is built (docs-schemas.yml, a clean
+			// checkout), so skip there instead of failing on ENOENT; the full
+			// build jobs still exercise the tests. nodes:test keeps hard-failing
+			// on a missing engine, which is why this guard is local.
+			const testsFile = path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py');
+			if (!(await exists(ENGINE + (isWindows() ? '.exe' : '')))) {
+				task.output = `pytest: engine not built at ${ENGINE}, skipping ${path.relative(PROJECT_ROOT, testsFile)} (run server:build to include it)`;
+				return;
+			}
+			await runPytest({
+				engine: ENGINE,
+				testsDir: testsFile,
+				execOpts: { task, cwd: PROJECT_ROOT },
+			});
+		},
+	};
+}
+
+function makeExportAction() {
+	return {
+		description: 'Export docs-owned files to their package destinations',
+		run: async (ctx, task) => {
+			const { exportDocs } = require('./lib/export');
+			const { written } = await exportDocs({ projectRoot: PROJECT_ROOT, task });
+			task.output = `Exported ${written.length} files`;
+		},
+	};
+}
+
+function makeCheckAction() {
+	return {
+		description: 'Verify exported docs copies are in sync',
+		run: async (ctx, task) => {
+			const { exportDocs } = require('./lib/export');
+			const { drifted } = await exportDocs({ projectRoot: PROJECT_ROOT, check: true, task });
+			if (drifted.length) {
+				throw new Error(`docs:check: exported copies are out of sync:\n${drifted.map((d) => `  ${d}`).join('\n')}\nRun './builder docs:export' to refresh them.`);
+			}
+			task.output = 'Docs exports in sync';
+		},
+	};
+}
+
+function makeCleanAction() {
+	return {
+		description: 'Clean docs',
+		run: async (ctx, task) => {
+			await rm(CONTENT_DIR);
+			await rm(SITE_OUT);
+			await rm(path.join(DOCS_DIR, '.docusaurus'));
+			await rm(path.join(DOCS_DIR, 'build'));
+			await setState(GATHER_HASH_KEY, null);
+			task.output = 'Cleaned docs';
+		},
+	};
+}
+
+module.exports = {
+	name: 'docs',
+	description: 'Documentation site',
+	_root: PROJECT_ROOT,
+
+	actions: [
+		// Internal actions
+		{ name: 'docs:gather', action: () => makeGatherAction('copy') },
+		// Dev must copy too, not symlink: Docusaurus hardcodes webpack
+		// `resolve.symlinks: true`, so symlinked MDX compiles under its real
+		// source path outside the docs plugin's content dir. The plugin's
+		// mdx-loader rule then never attaches the doc metadata export and every
+		// page crashes at runtime with "Cannot read properties of undefined
+		// (reading 'id')" in DocItem. Source edits need a re-run of docs:dev
+		// (or docs:gather) to show up.
+		{ name: 'docs:gather-dev', action: () => makeGatherAction('copy') },
+		{ name: 'docs:release-notes', action: makeReleaseNotesAction },
+		{ name: 'docs:index', action: makeIndexAction },
+		{ name: 'docs:compile', action: makeCompileAction },
+		{ name: 'docs:dev-start', action: makeDevStartAction },
+
+		// docs:build is intentionally description-less. The aggregate `builder build`
+		// only expands to actions that carry a `description` (see the
+		// `actionObj?.description` gate in scripts/lib/registry.js `listCommands` and
+		// scripts/build.js `expandGlobalCommands`), so omitting one keeps the docs
+		// site out of `builder build` — it is built on its own cadence and deployed
+		// by .github/workflows/docs.yml. CAVEAT: this overloads `description` as both
+		// "public/help-listed" and "part of aggregate build", so adding a description
+		// here to make it discoverable would silently RE-COUPLE it to `builder build`.
+		// Run it explicitly with `builder docs:build`.
+		{
+			name: 'docs:build',
+			action: () => ({
+				steps: [parallel(DOC_GENERATORS, 'Generate reference docs'), 'docs:gather', 'docs:release-notes', 'docs:index', 'docs:compile'],
+			}),
+		},
+
+		// Public actions (have descriptions)
+		{
+			name: 'docs:dev',
+			action: () => ({
+				description: 'Start docs dev server',
+				steps: ['docs:gather-dev', 'docs:release-notes', 'docs:dev-start'],
+			}),
+		},
+		{
+			name: 'docs:serve',
+			action: makeServeAction,
+		},
+		{ name: 'docs:validate', action: makeValidateAction },
+		{
+			name: 'docs:test',
+			action: () => ({
+				description: 'Test docs helpers',
+				steps: ['docs:validate', 'docs:unit'],
+			}),
+		},
+		{ name: 'docs:unit', action: makeTestAction },
+		{
+			name: 'docs:export',
+			action: makeExportAction,
+		},
+		{
+			name: 'docs:check',
+			action: makeCheckAction,
+		},
+		{
+			name: 'docs:clean',
+			action: makeCleanAction,
+		},
+	],
+};

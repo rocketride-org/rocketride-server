@@ -5,27 +5,37 @@
 	"license": "MIT",
 	"description": "TypeScript client for RocketRide data processing and AI services",
 	"type": "commonjs",
-	"main": "./dist/cjs/index.js",
-	"module": "./dist/esm/index.js",
-	"types": "./dist/types/index.d.ts",
+	"main": "./dist/cjs/client/index.js",
+	"module": "./dist/esm/client/index.js",
+	"types": "./dist/types/client/index.d.ts",
 	"bin": {
-		"rocketride": "./dist/cli/cli/rocketride.js"
+		"rocketride": "./dist/cli/packages/client-typescript/src/cli/rocketride.js"
 	},
 	"exports": {
 		".": {
-			"types": "./dist/types/index.d.ts",
-			"import": "./dist/esm/index.js",
-			"require": "./dist/cjs/index.js"
+			"types": "./dist/types/client/index.d.ts",
+			"import": "./dist/esm/client/index.js",
+			"require": "./dist/cjs/client/index.js"
+		},
+		"./app-scaffold": {
+			"types": "./dist/types/app-scaffold/index.d.ts",
+			"import": "./dist/esm/app-scaffold/index.js",
+			"require": "./dist/cjs/app-scaffold/index.js"
 		},
 		"./app-sdk": {
 			"types": "./dist/types/app-sdk/index.d.ts",
 			"import": "./dist/esm/app-sdk/index.js",
 			"require": "./dist/cjs/app-sdk/index.js"
 		},
+		"./app-pack": {
+			"types": "./dist/types/app-pack/index.d.ts",
+			"import": "./dist/esm/app-pack/index.js",
+			"require": "./dist/cjs/app-pack/index.js"
+		},
 		"./analytics": {
-			"types": "./dist/types/analytics/index.d.ts",
-			"import": "./dist/esm/analytics/index.js",
-			"require": "./dist/cjs/analytics/index.js"
+			"types": "./dist/types/client/analytics/index.d.ts",
+			"import": "./dist/esm/client/analytics/index.js",
+			"require": "./dist/cjs/client/analytics/index.js"
 		}
 	},
 	"files": [
@@ -50,8 +60,10 @@
 		"typescript"
 	],
 	"dependencies": {
+		"adm-zip": "^0.6.0",
 		"commander": "^12.0.0",
-		"glob": "^10.5.0"
+		"glob": "^10.5.0",
+		"ignore": "^7.0.5"
 	},
 	"peerDependencies": {
 		"sequelize": "^6.37.8"
@@ -66,6 +78,7 @@
 	},
 	"devDependencies": {
 		"@jest/globals": "^30.4.1",
+		"@types/adm-zip": "^0.5.8",
 		"@types/jest": "^30.0.0",
 		"@types/node": "^20.19.41",
 		"@types/ws": "^8.18.1",

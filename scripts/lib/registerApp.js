@@ -29,7 +29,7 @@
  * It does not need to be declared in package.json.
  *
  * The icon file is copied to the app's build output dir and served at:
- *   /${APPS_BASE_URL}/${dirName}/icon.svg
+ *   /${APPS_BASE_URL}/${appManifest.id}/icon.svg
  *
  * apps.json is written to both build/ (dev server publicDir) and
  * dist/server/static/ (production server static root).
@@ -138,6 +138,29 @@ function toModuleId(appId) {
 	return appId.replace(/[^a-zA-Z0-9_$]/g, '_');
 }
 
+/**
+ * Validates that an app id is a filesystem-safe slug before it is joined into a
+ * build path or embedded in a public URL. The served directory and every public
+ * URL (entry/icon/readme) key on the app id, so an id containing a path
+ * separator or a ".." segment could write copies outside build/apps/ and emit a
+ * broken public URL. App ids are dotted slugs (e.g. 'rocketride.hello'): letters,
+ * digits, dot, hyphen and underscore are allowed; any ".." sequence is rejected,
+ * as is an id that is ENTIRELY dots ('.', '...') — a bare '.' passes the
+ * character class and the '..' check yet joins to the apps root itself, writing
+ * copies beside every other app and emitting a '/apps/./…' entry URL.
+ *
+ * @param {string} appId - The app identifier to validate.
+ * @throws {Error} When appId is not a safe slug.
+ */
+function assertSafeAppId(appId) {
+	if (typeof appId !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(appId) || appId.includes('..') || /^\.+$/.test(appId)) {
+		throw new Error(
+			`App id "${appId}" is not a valid slug. `
+			+ 'Must contain only letters, digits, ".", "-" and "_" (no path separators, no ".." segments, not all dots).'
+		);
+	}
+}
+
 // =============================================================================
 // REGISTER APP
 // =============================================================================
@@ -167,8 +190,21 @@ function registerApp(appRoot) {
 				return;
 			}
 
-			const dirName  = path.basename(appRoot);
-			const buildDir = path.join(BUILD_ROOT, APPS_BASE, dirName);
+			// The app id is joined into the build path and embedded in every
+			// public URL (entry/icon/readme) below, so it MUST be a
+			// filesystem-safe slug — an id with a path separator or a ".."
+			// segment could write copies outside build/apps/.
+			assertSafeAppId(appManifest.id);
+
+			// The SERVED name is the app id, not the source folder: rsbuild
+			// bundles to build/apps/<appId>, appModule's copy step lands it at
+			// dist/server/static/apps/<appId>/, so every public URL
+			// (entry/icon/readme) points there and the server authorizes each
+			// fetch by app id. The icon/readme copies below MUST target the
+			// same appId dir — keying them on the source folder name would
+			// recreate the old build/apps/<folder>-ui dirs.
+			const servedName = appManifest.id;
+			const buildDir = path.join(BUILD_ROOT, APPS_BASE, servedName);
 
 			// Derive moduleId from appId
 			const moduleId = appManifest.moduleId ?? toModuleId(appManifest.id);
@@ -247,7 +283,7 @@ function registerApp(appRoot) {
 				try {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(iconSrc, path.join(buildDir, 'icon.svg'));
-					icon = `/${APPS_BASE}/${dirName}/icon.svg`;
+					icon = `/${APPS_BASE}/${servedName}/icon.svg`;
 				} catch {
 					warnings.push(`Warning: icon not found at ${appManifest.icon}`);
 				}
@@ -260,7 +296,7 @@ function registerApp(appRoot) {
 				try {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(readmeSrc, path.join(buildDir, 'README.md'));
-					readme = `/${APPS_BASE}/${dirName}/README.md`;
+					readme = `/${APPS_BASE}/${servedName}/README.md`;
 
 					// Copy sibling assets/ directory if it exists (images referenced by the README)
 					const assetsSrc = path.join(path.dirname(readmeSrc), 'assets');
@@ -286,12 +322,16 @@ function registerApp(appRoot) {
 				publisher:     appManifest.publisher ?? '',
 				name:          appManifest.name,
 				description:   appManifest.description ?? '',
+				// Built-in app version (package.json) — surfaces on the desktop
+				// tile version chip; SaaS marketplace apps get theirs from the
+				// active AppVersion row in enrich_apps instead.
+				...(pkg.version ? { version: pkg.version } : {}),
 				readme,
 				icon,
 				categories:    appManifest.categories ?? [],
 				// Settings contribution (VSCode contributes.configuration shape)
 				...(configuration ? { configuration } : {}),
-				entry:         `/${APPS_BASE}/${dirName}/remoteEntry.js`,
+				entry:         `/${APPS_BASE}/${servedName}/remoteEntry.js`,
 				// Shell contract version this app was built against (for prune analysis).
 				...(shellApiVersion !== null ? { shellApiVersion } : {}),
 				// App monetization mode
@@ -334,4 +374,4 @@ function registerApp(appRoot) {
 	};
 }
 
-module.exports = { registerApp };
+module.exports = { registerApp, assertSafeAppId };

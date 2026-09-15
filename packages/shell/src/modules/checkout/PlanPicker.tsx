@@ -210,6 +210,26 @@ const S = {
 		marginTop: 1,
 	} as CSSProperties,
 
+	cardImage: {
+		display: 'block',
+		width: '100%',
+		height: 'auto',
+		// Full-bleed within the card (the card has overflow: 'hidden').
+	} as CSSProperties,
+
+	// Panorama mode: the shared image is one wide strip and each card crops its
+	// own horizontal segment. Setting the element's aspect-ratio to (strip
+	// aspect / card count) makes the covered crop exactly 1/count of the strip
+	// wide, and object-position i/(count-1) then tiles the segments edge to
+	// edge — card i shows exactly [i/count, (i+1)/count] of the artwork.
+	cardImageSlice: (aspect: number, index: number, count: number): CSSProperties => ({
+		display: 'block',
+		width: '100%',
+		aspectRatio: String(aspect / count),
+		objectFit: 'cover' as const,
+		objectPosition: `${count > 1 ? (index / (count - 1)) * 100 : 50}% 50%`,
+	}),
+
 	cardFeatures: {
 		flex: 1,
 		padding: '8px 12px 12px',
@@ -358,6 +378,42 @@ export interface PlanPickerProps {
 	 * selection, e.g. the upgrade/top-up modals).
 	 */
 	autoSelectDefault?: boolean;
+
+	/**
+	 * Optional decorative image rendered inside each plan card, directly under
+	 * the card header and above the feature list. When omitted, no image is
+	 * rendered (the default — keeps the checkout modal unchanged). Host apps
+	 * (e.g. the pricing page) pass a themed asset URL here.
+	 */
+	cardImageSrc?: string;
+
+	/**
+	 * Aspect ratio (width / height) of the ``cardImageSrc`` asset. When set,
+	 * the image is treated as a single wide panorama sliced across the visible
+	 * cards: card *i* of *n* shows the *i*-th horizontal segment of the strip,
+	 * so the artwork reads continuously across the card row. When omitted, the
+	 * image renders whole in every card (the original behavior).
+	 */
+	cardImageAspect?: number;
+
+	/**
+	 * When true, every card's feature list is padded (with invisible spacer
+	 * rows) to the largest description length across ALL passed plans — both
+	 * intervals included. Because the grid stretches cards to equal height, this
+	 * keeps card height constant when toggling Monthly/Annual, even though the
+	 * annual tiers carry extra bonus lines. Default ``false`` (checkout/upgrade
+	 * modals render their natural, unpadded height).
+	 */
+	uniformCardHeight?: boolean;
+
+	/**
+	 * Overrides the feature-line font size (in px). When set, feature lines are
+	 * also forced onto a single line (``white-space: nowrap``) so the larger
+	 * size does not wrap inside the card. Default undefined → the base 11px with
+	 * wrapping allowed (checkout/upgrade modals). The pricing page passes a
+	 * larger value for bigger, single-line bullets.
+	 */
+	featureFontSize?: number;
 }
 
 // =============================================================================
@@ -384,6 +440,10 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	footer,
 	defaultInterval = 'month',
 	autoSelectDefault = false,
+	cardImageSrc,
+	cardImageAspect,
+	uniformCardHeight = false,
+	featureFontSize,
 }) => {
 	// ── Internal interval state ──────────────────────────────────────────
 	const [interval, setInterval] = useState<'month' | 'year'>(defaultInterval);
@@ -424,6 +484,15 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 			: plans;
 		return [...filtered].sort((a, b) => planOrder(a) - planOrder(b));
 	}, [plans, interval, showToggle]);
+
+	// Largest description length across ALL plans (both intervals). Drives the
+	// ``uniformCardHeight`` spacer padding so a card reserves the tallest feature
+	// list even when the current interval's own list is shorter — the height
+	// stays constant across the Monthly/Annual toggle.
+	const maxDescLines = useMemo(
+		() => (uniformCardHeight ? plans.reduce((m, p) => Math.max(m, planDescription(p)?.length ?? 0), 0) : 0),
+		[plans, uniformCardHeight],
+	);
 
 	// The lowest-order billable plan visible at the current interval -- the
 	// "Starter" default. ``visiblePlans`` is already sorted by order ascending.
@@ -517,7 +586,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 				role={onSelectPlan ? 'radiogroup' : undefined}
 				aria-label={onSelectPlan ? 'Subscription plans' : undefined}
 			>
-				{visiblePlans.map((plan) => {
+				{visiblePlans.map((plan, planIdx) => {
 					const action = planAction(plan);
 					const isAction = !!action;
 					const selected = !isAction && selectedPlan?.stripePriceId === plan.stripePriceId;
@@ -534,7 +603,13 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 
 					return (
 						<div
-							key={plan.stripePriceId || plan.id}
+							// When a card image is shown (home-ui pricing page), key by tier
+							// (nickname) so the SAME card node persists across the Monthly/Annual
+							// toggle — otherwise the per-interval price IDs change the key, the
+							// card remounts, and its <img> reloads (a visible flash). Without an
+							// image (checkout/upgrade modals) keep the original price-ID key so
+							// those consumers are unaffected.
+							key={cardImageSrc ? (plan.nickname || plan.stripePriceId || plan.id) : (plan.stripePriceId || plan.id)}
 							style={S.planCard(selected, interactive)}
 							onClick={interactive ? () => onSelectPlan!(plan) : undefined}
 							onKeyDown={
@@ -556,18 +631,40 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 								{isCurrent && <div style={S.currentBadge}>Current plan</div>}
 								<div style={S.cardTier}>{plan.nickname}</div>
 								<div style={S.cardPrice}>{planDisplayAmount(plan)}</div>
-								{planIntervalLabel(plan) && (
+								{planIntervalLabel(plan) ? (
 									<div style={S.cardInterval}>{planIntervalLabel(plan)}</div>
-								)}
+								) : cardImageSrc ? (
+									<div style={S.cardInterval} aria-hidden="true">&#160;</div>
+								) : null}
 							</div>
 
-							{/* Feature description lines */}
-							{desc && desc.length > 0 && (
+							{/* Optional decorative image (host-supplied) */}
+							{cardImageSrc && (
+								<img
+									src={cardImageSrc}
+									alt=""
+									aria-hidden="true"
+									style={cardImageAspect
+										? S.cardImageSlice(cardImageAspect, planIdx, visiblePlans.length)
+										: S.cardImage}
+								/>
+							)}
+
+							{/* Feature description lines. In uniform-height mode the list is
+							    padded with invisible spacer rows up to ``maxDescLines`` so
+							    every card reserves the same feature-area height. */}
+							{((desc && desc.length > 0) || (uniformCardHeight && maxDescLines > 0)) && (
 								<div style={S.cardFeatures}>
-									{desc.map((line, i) => (
-										<div key={i} style={S.featureLine}>
+									{(desc ?? []).map((line, i) => (
+										<div key={i} style={featureFontSize ? { ...S.featureLine, fontSize: featureFontSize } : S.featureLine}>
 											<span style={S.featureCheck}>&#10003;</span>
-											<span>{line}</span>
+											<span style={featureFontSize ? { whiteSpace: 'nowrap' as const } : undefined}>{line}</span>
+										</div>
+									))}
+									{uniformCardHeight && Array.from({ length: Math.max(0, maxDescLines - (desc?.length ?? 0)) }).map((_, i) => (
+										<div key={`pad-${i}`} style={{ ...S.featureLine, visibility: 'hidden', ...(featureFontSize ? { fontSize: featureFontSize } : null) }} aria-hidden="true">
+											<span style={S.featureCheck}>&#10003;</span>
+											<span>&#160;</span>
 										</div>
 									))}
 								</div>

@@ -146,6 +146,12 @@ function parseArgs(args) {
 			// shell:freeze --check: CI mode — verify the frozen shell-api
 			// contract is current without writing a new version.
 			options.check = true;
+		} else if (arg === '--reseed') {
+			// saas:seed --reseed: fleet bump — roll a NEW version of every
+			// platform app. Deliberately NOT the global --force flag: that
+			// one forces full rebuilds (C++ recompile included) of every
+			// step in the dependency chain.
+			options.reseed = true;
 		} else if (arg === '--rebuild-cache') {
 			// test-integrity: nuke <engine-cache>/{constraints.txt,requirements.hash}
 			// so depends.ensure_constraints() does a full uv pip compile.
@@ -264,7 +270,7 @@ Options:
   --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
   --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated)
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
-  --rebuild-cache     check-externals:run: force ensure_constraints() to recompile (deletes constraints.txt + requirements.hash)
+  --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt, requirements.hash and the satisfied/ verdicts)
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)

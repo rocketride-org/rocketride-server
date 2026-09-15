@@ -28,10 +28,12 @@
  * A task's run log is ONE continuous JSONL event stream per identity;
  * individual runs are chapters (tracks) inside it. Streams are addressed by
  * the plain identity pair (`projectId` + `source`) plus the SCOPE — never by
- * token. THE SCOPE IS THE KIND: `teamId` present addresses that team's
- * DEPLOY continuum (deploy runs execute as the team and log into its tree —
- * teammates with monitor rights can watch/replay); absent addresses the
- * caller's own DEV stream. There is no run-kind wire argument.
+ * token. `teamId` present addresses that team's DEPLOY continuum (deploy
+ * runs execute as the team and log into its tree — teammates with monitor
+ * rights can watch/replay). Absent, the optional `runKind` selects the
+ * caller's OWN continuum: the dev stream (default) or the caller's PERSONAL
+ * (@me) deploy stream — deploy-kind but user-owned, the one case
+ * teamId-presence cannot express.
  */
 
 // =============================================================================
@@ -39,8 +41,8 @@
 // =============================================================================
 
 /**
- * The two run kinds. Not part of stream addressing (the scope decides) —
- * still stamped on event bodies for client-side filtering.
+ * The two run kinds. Stamped on event bodies for client-side filtering,
+ * and usable as the teamless-scope selector on LogStreamRef (the @me case).
  */
 export type LogRunKind = 'dev' | 'deploy';
 
@@ -50,9 +52,15 @@ export interface LogStreamRef {
 	source: string;
 	/**
 	 * A team id addresses that team's deploy continuum; omitted = the
-	 * caller's own dev stream.
+	 * caller's own stream (see runKind).
 	 */
 	teamId?: string;
+	/**
+	 * Teamless-scope selector: omitted/'dev' = the caller's dev stream;
+	 * 'deploy' = the caller's personal (@me) deploy stream. Ignored when
+	 * teamId is set (a team scope is always the deploy continuum).
+	 */
+	runKind?: LogRunKind;
 }
 
 /** One chapter (track) — a run inside the continuum. */

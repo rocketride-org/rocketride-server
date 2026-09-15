@@ -30,6 +30,11 @@
 
 import { registerRemotes, loadRemote } from '@module-federation/runtime';
 import type { AppManifestEntry, AppDescriptor, AppConfiguration } from '../components/workspace/types';
+// Session version overrides — read-only here (registration-time entry
+// substitution); the write side lives in versionOverride.ts. The two
+// modules reference each other strictly through function calls at runtime,
+// so the import cycle carries no module-evaluation (TDZ) risk.
+import { getAppVersionOverrides, versionedEntryUrl } from './versionOverride';
 
 /**
  * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
@@ -52,12 +57,31 @@ export interface ServerAppEntry {
 	configuration?: unknown;
 	/** @deprecated Legacy flat settings list from pre-configuration servers. */
 	settings?: unknown[];
-	/** URL to the MF remote entry file. */
-	entry: string;
+	/**
+	 * URL to the MF remote entry file — present ONLY on dev-overlay entries
+	 * (a localhost dev server is not constructible from a number). Published
+	 * versions carry `registryVersion` and the shell constructs the stable
+	 * `/apps/<appId>/v<N>/remoteEntry.js` URL itself (versionedEntryUrl).
+	 */
+	entry?: string;
+	/** Registry version number the entry resolves to (the scope-walk winner). */
+	registryVersion?: number;
 	/** Whether the app UI requires auth to render. */
 	authenticated?: boolean;
 	/** Whether the app is visible to unauthenticated users. */
 	public?: boolean;
+	/** Resolved app version (semver) — built-in package version, marketplace active version, or deployed pin. */
+	version?: string;
+	/** True when the entry is a dev-overlay override (live watch build). */
+	dev?: boolean;
+	/**
+	 * Every live dev-server registration for this app — one per editor
+	 * session, newest first; `entry` already carries the newest. A page
+	 * launched from a specific editor carries that editor's session nonce
+	 * (`?rrsession=`) and prefers ITS registration, so two editors can
+	 * dev-serve the same app simultaneously without fighting.
+	 */
+	devEntries?: Array<{ url: string; session?: string; registeredAt?: number }>;
 }
 
 /**
@@ -74,6 +98,54 @@ export interface ServerAppEntry {
 // resetRemote() can tear down and re-register a container without callers
 // having to thread the entry URL through.
 const registeredEntries = new Map<string, string>();
+
+// MF containers whose remote has successfully LOADED this document. A loaded
+// container is committed to its version (identity is the name — repointing a
+// loaded container corrupts its shared getters), so the version selector
+// consults this to decide repoint-in-place vs full reload.
+const loadedModules = new Set<string>();
+
+// MF containers with a descriptor load currently IN FLIGHT. A container is
+// committed to its entry from the moment its load STARTS, not when it
+// resolves: forced re-registration drops the runtime's cached promise but
+// does NOT cancel the running operation, so replacing the entry mid-load
+// races two initializations of one container name. The dev takeover treats
+// pending like loaded. A Set suffices — loadDescriptor dedups concurrent
+// loads per app, so at most one load per container is in flight.
+const pendingModules = new Set<string>();
+
+/**
+ * Whether an MF container's remote has successfully loaded this document.
+ *
+ * @param moduleId - The MF container name.
+ */
+export function isRemoteLoaded(moduleId: string): boolean {
+	return loadedModules.has(moduleId);
+}
+
+/**
+ * Force re-register an MF container at a new entry URL (version override
+ * apply/boot). Refuses dev-owned containers — the live dev build always
+ * wins — AND containers that have already LOADED this document: repointing a
+ * loaded container corrupts its consume-shared getters (identity is the name;
+ * MF commits a container to its version once its remote resolves). The
+ * precondition is ENFORCED here rather than trusted to callers — a refusal
+ * returns false so the caller can fall back to a full page reload.
+ *
+ * @param moduleId - The MF container name.
+ * @param entry - The new remoteEntry.js URL.
+ * @returns True when the container was repointed; false when refused
+ *          (dev-owned, or already loaded — reload the page instead).
+ */
+export function repointRemote(moduleId: string, entry: string): boolean {
+	if (devRemoteModules.has(moduleId)) return false;
+	// A loaded container is committed to its version for the document's
+	// lifetime — force-repointing it corrupts its shared getters.
+	if (loadedModules.has(moduleId)) return false;
+	registerRemotes([{ name: moduleId, entry }], { force: true });
+	registeredEntries.set(moduleId, entry);
+	return true;
+}
 
 // =============================================================================
 // LOCAL APP OVERRIDES (DEV HOOKS)
@@ -100,28 +172,21 @@ let localAppsListener: (() => void) | null = null;
 // (older) published bundle mid-session — the dev preview then loads THAT
 // and dies on platform mismatch (RUNTIME-012).
 //
-// Ownership is PERSISTED per tab (sessionStorage) and loaded at module init:
-// the probe registers manifest remotes at boot, BEFORE any dev injection can
-// arrive — and force-overriding an already-initialized container corrupts
-// its consume-shared getters (MF's "overriding may cause unexpected errors"
-// → "getter for the shared module is not a function"). With persisted
-// ownership, every boot after the first skips the manifest registration
-// entirely and the dev entry is the container's ONLY registration.
-const DEV_OWNED_KEY = 'rr:devOwnedModules';
-const devRemoteModules = new Set<string>(((): string[] => {
-	try {
-		return JSON.parse(sessionStorage.getItem(DEV_OWNED_KEY) ?? '[]') as string[];
-	} catch {
-		return [];
-	}
-})());
+// PAGE-LIFETIME ONLY, never persisted. Ownership used to be persisted in
+// sessionStorage on a per-browser-tab assumption, but a VS Code window is
+// ONE browsing context: every App Builder preview iframe against the same
+// engine origin shares a single sessionStorage (which also survives
+// workspace switches), so ownership accumulated across every app ever
+// designed and stranded them all as mapped-but-unregistered (RUNTIME-004
+// on launch). The boot-time "keep the container clean for the dev entry"
+// job is DERIVED instead: a dev-preview page skips the manifest
+// registration of its session-locked app (see registerAndMapApps), so the
+// injection is the container's first registration without any stored state.
+const devRemoteModules = new Set<string>();
 
-/** Persists the current dev-owned module set for this tab. */
-function persistDevOwned(): void {
-	try {
-		sessionStorage.setItem(DEV_OWNED_KEY, JSON.stringify([...devRemoteModules]));
-	} catch { /* storage unavailable — ownership lasts this page only */ }
-}
+// One-time migration: drop the legacy persisted ownership set so windows
+// poisoned by the old accumulate-forever behavior heal on their next boot.
+try { sessionStorage.removeItem('rr:devOwnedModules'); } catch { /* storage unavailable */ }
 
 /**
  * Whether an MF container is currently dev-owned (see devRemoteModules).
@@ -227,10 +292,7 @@ export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>,
 export function unregisterLocalApp(id: string): void {
 	const hadOverride = localOverrides.delete(id);
 	const meta = localAppMetas.get(id);
-	if (meta) {
-		devRemoteModules.delete(meta.moduleId);
-		persistDevOwned();
-	}
+	if (meta) devRemoteModules.delete(meta.moduleId);
 	if (localAppMetas.delete(id)) localAppsListener?.();
 	if (hadOverride) {
 		console.log(`[appLoader] Local override removed for "${id}"`);
@@ -251,21 +313,47 @@ export function unregisterLocalApp(id: string): void {
  * @param entry - The dev server's remoteEntry.js URL.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string): void {
-	// First takeover of a module the MANIFEST already registered this boot:
-	// the container may be half-initialized and force-overriding it corrupts
-	// its shared getters. Persist ownership and reboot — the next boot skips
-	// the manifest registration, making the dev entry the FIRST and ONLY
-	// registration this container ever sees.
-	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId)) {
-		devRemoteModules.add(moduleId);
-		persistDevOwned();
-		console.log(`[appLoader] taking dev ownership of manifest-registered "${moduleId}" — rebooting for a clean container`);
-		window.location.reload();
-		return;
+	// Injection for a container the manifest registered AND that is LOADED or
+	// mid-load this document: such a container is committed to its entry
+	// (repointing corrupts its consume-shared getters; a forced registration
+	// does not cancel an in-flight load, it races it), so only a reboot can
+	// hand the dev entry a clean container. Normally unreachable — the
+	// dev-preview boot skips the locked app's manifest registration, so the
+	// injection lands first — this covers a lock/injection mismatch and the
+	// late-injection-after-fallback case. The reboot spends from a persisted
+	// per-module BUDGET, not a rate limit: a pure rate limit never bounds the
+	// count (a mismatch recurring once per interval reloads forever), while a
+	// permanent one-shot would strand the legitimate recurrence (an app
+	// fallback-loaded again long after its dev server revived). Budget
+	// exhausted → degrade to the force-registration below instead.
+	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId) && (loadedModules.has(moduleId) || pendingModules.has(moduleId))) {
+		const TAKEOVER_WINDOW_MS = 30 * 60_000;
+		const TAKEOVER_MAX_RELOADS = 2;
+		let reboot = false;
+		try {
+			const key = `rr:devTakeover:${moduleId}`;
+			// Budget window anchors at the FIRST reload of a burst; it resets
+			// only once the window has fully elapsed since that first attempt.
+			let guard = { n: 0, at: Date.now() };
+			const raw = sessionStorage.getItem(key);
+			if (raw) {
+				const parsed = JSON.parse(raw) as { n: number; at: number };
+				if (Number.isFinite(parsed.n) && Number.isFinite(parsed.at) && Date.now() - parsed.at <= TAKEOVER_WINDOW_MS) guard = parsed;
+			}
+			if (guard.n < TAKEOVER_MAX_RELOADS) {
+				sessionStorage.setItem(key, JSON.stringify({ n: guard.n + 1, at: guard.at }));
+				reboot = true;
+			}
+		} catch { /* storage unavailable — cannot bound a reload loop, so never reload */ }
+		if (reboot) {
+			console.log(`[appLoader] dev registration for active container "${moduleId}" — rebooting for a clean container`);
+			window.location.reload();
+			return;
+		}
+		console.error(`[appLoader] dev takeover of active container "${moduleId}" exhausted its reload budget — force-registering in place; its shared getters may be stale`);
 	}
 
 	devRemoteModules.add(moduleId);
-	persistDevOwned();
 	registerRemotes([{ name: moduleId, entry }], { force: true });
 	registeredEntries.set(moduleId, entry);
 	registerLocalApp(
@@ -298,6 +386,32 @@ export function registerDevRemote(appId: string, moduleId: string, name: string,
 const devRegisteredApps = new Set<string>();
 /** Pending load releases per app id, resolved by registerDevRemote. */
 const devRemoteWaiters = new Map<string, Array<() => void>>();
+/**
+ * Manifest entries the dev-preview boot skipped for the session-locked app
+ * (appId → container + URL), stashed so the dev-remote wait can fall back
+ * to the published bundle when no injection ever arrives.
+ */
+const skippedManifestEntries = new Map<string, { moduleId: string; url: string }>();
+
+/**
+ * Last-resort registration of a dev-skipped app from its stashed manifest
+ * entry. The boot skip assumes the embedder's injection will arrive; when
+ * it never does (dev server dead, lock mismatch), registering the published
+ * bundle beats a permanently dead app. No-op once a real dev registration
+ * has arrived, or when nothing was skipped.
+ *
+ * @param appId - The preview-locked app id whose dev-remote wait timed out.
+ * @returns True when the manifest fallback was registered.
+ */
+export function fallbackSkippedRemote(appId: string): boolean {
+	if (devRegisteredApps.has(appId)) return false;
+	const stash = skippedManifestEntries.get(appId);
+	if (!stash) return false;
+	registerRemotes([{ name: stash.moduleId, entry: stash.url }], { force: true });
+	registeredEntries.set(stash.moduleId, stash.url);
+	console.warn(`[appLoader] dev remote for "${appId}" never registered — falling back to the published bundle at ${stash.url}`);
+	return true;
+}
 
 /**
  * Whether this page is an embedded dev preview (`rrdev=1`, or the session
@@ -441,27 +555,112 @@ export function resetRemote(moduleId: string): void {
 	registerRemotes([{ name: moduleId, entry }], { force: true });
 }
 
+// Session-affine dev entry: a page launched from a specific editor
+// carries that editor's session nonce and prefers ITS dev server over
+// the newest-registration default the server pre-picked into `entry` —
+// two editors dev-serving one app each preview their own build. The
+// nonce persists per tab because the OAuth redirect strips the query.
+function sessionNonce(): string {
+	try {
+		const fromUrl = new URLSearchParams(window.location.search).get('rrsession') ?? '';
+		if (fromUrl) {
+			sessionStorage.setItem('rr:devSession', fromUrl);
+			return fromUrl;
+		}
+		return sessionStorage.getItem('rr:devSession') ?? '';
+	} catch {
+		return '';
+	}
+}
+
+/**
+ * The COMPLETE load-URL resolution for one server app entry.
+ *
+ * The wire carries version NUMBERS, never URL strings: only dev entries
+ * ship a URL (a localhost dev server is not constructible from a number);
+ * everything else constructs the stable versioned URL from the tab's
+ * session override or the manifest's resolved default. Session version
+ * overrides (desktop version selector / `?version=` deep link) substitute
+ * the default SYNCHRONOUSLY at registration time — the boot path can then
+ * never race a load with an async repoint.
+ *
+ * Precedence: App Builder preview session (nonce) > explicit version
+ * override > dev overlay > published default. An explicit override
+ * outranks the dev overlay on purpose — the user picked a SERVER version
+ * from the desktop selector, so the tile serves (and presents as) that
+ * version even while an editor keeps a live registration. The App Builder
+ * preview is unaffected: its session nonce always wins, so the editor's
+ * own preview never loses its live build.
+ *
+ * @param a - The server app entry.
+ * @returns The load URL, or null when nothing resolves (no built UI yet).
+ */
+export function resolveServerEntry(a: ServerAppEntry): string | null {
+	const nonce = sessionNonce();
+	const sessionDev = nonce && a.devEntries?.length ? a.devEntries.find((d) => d.session === nonce)?.url : undefined;
+	if (sessionDev) return sessionDev;
+	const o = getAppVersionOverrides()[a.id];
+	if (o) return versionedEntryUrl(a.id, o.version);
+	if (a.dev) return a.entry ?? null;
+	return typeof a.registryVersion === 'number' ? versionedEntryUrl(a.id, a.registryVersion) : null;
+}
+
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
-	// Drop entries missing a remoteEntry URL — the server may include
-	// apps that have no built UI yet (e.g. server-only nodes).
-	// Without this guard, MF's normalizeRemote crashes on undefined.
-	const validApps = serverApps.filter((a) => a.entry);
+	const overrides = getAppVersionOverrides();
+	const nonce = sessionNonce();
+	// An explicit override applies to dev-flagged entries too — it outranks
+	// the dev overlay (see resolveServerEntry's precedence), so the mapped
+	// entry's version chip must reflect the overridden server version. The
+	// session-affine dev entry, however, outranks the override THERE too, so
+	// it must silence the chip's override here — otherwise the tile names a
+	// server version while the dev build is what actually loads.
+	const overrideOf = (a: ServerAppEntry): { version: number; appVersion?: string } | null => {
+		if (nonce && a.devEntries?.some((d) => d.session === nonce)) return null;
+		return overrides[a.id] ?? null;
+	};
+
+	// Resolve ONCE per entry, then reuse: resolveServerEntry reads
+	// sessionStorage and JSON.parses the override map on every call, and this
+	// runs for every manifest registration during boot.
+	//
+	// Entries that resolve to no load URL are dropped here — the server may
+	// include apps that have no built UI yet (e.g. server-only nodes).
+	// Without that guard, MF's normalizeRemote crashes on undefined.
+	const resolved: Array<{ app: ServerAppEntry; url: string }> = [];
+	for (const a of serverApps) {
+		const url = resolveServerEntry(a);
+		if (url !== null) resolved.push({ app: a, url });
+	}
 
 	// Register all MF remotes so loadRemote() can resolve them.
 	// force: true overwrites any previously registered remotes (e.g. from
 	// the pre-auth probe) with the post-auth set. Dev-owned containers are
 	// NEVER (re)registered from the manifest — the dev entry stays live.
-	const registrable = validApps.filter((a) => !devRemoteModules.has(a.moduleId));
+	//
+	// A dev-preview page additionally skips its SESSION-LOCKED app: the
+	// embedder's injection must be that container's FIRST registration
+	// (force-overriding an initialized container corrupts its consume-shared
+	// getters). Derived fresh per call from the URL/session lock — never
+	// persisted — so the skip cannot leak to other apps or outlive the
+	// preview. The skipped entry is stashed for the dev-remote wait's
+	// manifest fallback (fallbackSkippedRemote).
+	const lockedAppId = isDevPreviewPage() ? previewLockedAppId() : '';
+	const registrable = resolved.filter(({ app }) => !devRemoteModules.has(app.moduleId) && app.id !== lockedAppId);
+	for (const { app, url } of resolved) {
+		if (app.id === lockedAppId && !devRemoteModules.has(app.moduleId)) {
+			skippedManifestEntries.set(app.id, { moduleId: app.moduleId, url });
+		}
+	}
 	registerRemotes(
-		registrable.map((a) => ({ name: a.moduleId, entry: a.entry })),
+		registrable.map(({ app, url }) => ({ name: app.moduleId, entry: url })),
 		{ force: true },
 	);
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
-	for (const a of registrable) registeredEntries.set(a.moduleId, a.entry);
+	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
-	return validApps.map((a) => ({
+	return resolved.map(({ app: a }) => ({
 		id:            a.id,
 		moduleId:      a.moduleId,
 		name:          a.name,
@@ -474,14 +673,27 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		configuration: a.configuration as AppConfiguration | undefined,
 		authenticated: a.authenticated,
 		public:        a.public,
+		// Version chip data — an applied override wins the display
+		version:       overrideOf(a)?.appVersion ?? a.version,
+		registryVersion: overrideOf(a)?.version ?? a.registryVersion,
+		dev:           a.dev,
 		load: () => {
 			// Local override wins over the MF remote — checked per CALL so a
 			// dev registration made after mapping still takes effect (and its
 			// removal restores the remote) without re-mapping the manifest.
 			const local = localOverrides.get(a.id);
 			if (local) return local();
+			// Pending marks the container committed for the WHOLE load — the
+			// dev takeover must not force-register it mid-flight.
+			pendingModules.add(a.moduleId);
 			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
-				.then((m) => m.default);
+				.then((m) => {
+					// A resolved remote commits this container to its version
+					// for the document's lifetime (see isRemoteLoaded).
+					loadedModules.add(a.moduleId);
+					return m.default;
+				})
+				.finally(() => pendingModules.delete(a.moduleId));
 		},
 	}));
 }

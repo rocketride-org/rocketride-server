@@ -45,6 +45,7 @@
 	//		The icon to display in the UI for this node.
 	//
 	"icon": "tavily.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_tavily",
 	//
 	// Optional:
 	//		Description of this node shown in the pipeline builder.

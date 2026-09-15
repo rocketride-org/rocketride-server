@@ -23,7 +23,12 @@
 
 /**
  * Pure helpers for maintaining the workspace `.env` file that the RocketRide
- * SDK/CLI read (`ROCKETRIDE_URI` / `ROCKETRIDE_APIKEY`).
+ * SDK/CLI read. Two variable pairs mirror the extension's two connection
+ * groups: `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` for the DEVELOPMENT connection
+ * (run/validate/iterate) and `ROCKETRIDE_DEPLOY_URI`/`ROCKETRIDE_DEPLOY_APIKEY`
+ * for the DEPLOYMENT TARGET (deploy/publish/schedule). The deploy pair's
+ * presence is the signal that a deploy target is configured — agents must
+ * never fall back to the dev pair for lifecycle verbs.
  *
  * These functions are deliberately free of any `vscode` import so they can be
  * unit-tested standalone with `node:test` (see envFile.test.ts). The actual
@@ -32,11 +37,29 @@
  */
 
 import type { ConnectionGroup, ConnectionMode } from '../../config';
-import { connectionModeUsesOAuth } from './connectionModeAuth';
 
-/** The two keys the RocketRide SDK/CLI look up to reach the engine. */
+/** The keys the RocketRide SDK/CLI look up to reach the development engine. */
 export const ROCKETRIDE_URI_KEY = 'ROCKETRIDE_URI';
 export const ROCKETRIDE_APIKEY_KEY = 'ROCKETRIDE_APIKEY';
+
+/** The keys automation uses to reach the DEPLOYMENT TARGET server. */
+export const ROCKETRIDE_DEPLOY_URI_KEY = 'ROCKETRIDE_DEPLOY_URI';
+export const ROCKETRIDE_DEPLOY_APIKEY_KEY = 'ROCKETRIDE_DEPLOY_APIKEY';
+
+/** The `.env` variable pair a connection group owns. */
+export function envKeysForGroup(group: ConnectionGroup): { uriKey: string; apiKeyKey: string } {
+	return group === 'deployment'
+		? { uriKey: ROCKETRIDE_DEPLOY_URI_KEY, apiKeyKey: ROCKETRIDE_DEPLOY_APIKEY_KEY }
+		: { uriKey: ROCKETRIDE_URI_KEY, apiKeyKey: ROCKETRIDE_APIKEY_KEY };
+}
+
+/**
+ * Doctrine comments the sync maintains directly above each managed pair —
+ * the one documentation layer that reaches every agent, because it travels
+ * with the credential itself.
+ */
+export const DEV_PAIR_COMMENT = '# RocketRide development connection (managed): use for running, validating, and iterating - use(), send/chat, monitors, the app dev loop.';
+export const DEPLOY_PAIR_COMMENT = '# RocketRide deployment target (managed): use for deploy.*, schedules, publishApp/submitApp, build logs. If these lines are absent, no deploy target is configured - ask the user; never deploy to the dev connection.';
 
 /** Quote a value only when it contains characters that would break parsing. */
 function quoteIfNeeded(value: string): string {
@@ -153,29 +176,56 @@ export interface ConnectionEnvArgs {
  * `.env` at all.
  *
  * Rules:
- * - Only the `development` connection writes `.env` (the SDK/CLI dev workflow);
- *   the `deployment` group must never fight over the same file.
- * - Cloud is skipped: it authenticates with a short-lived OAuth token, which is
- *   not usable as an SDK API key. Self-hosted modes (local/docker/service/
- *   onprem) get a real, reusable URI + key.
+ * - Each group writes ITS OWN pair: development owns `ROCKETRIDE_URI`/
+ *   `ROCKETRIDE_APIKEY`, deployment owns the `ROCKETRIDE_DEPLOY_*` pair —
+ *   the two never fight over the same keys.
+ * - Every mode writes, cloud included: the cloud credential is the same
+ *   persistent `rr_*` key the extension itself connects with (minted at
+ *   sign-in; it is NOT a short-lived OAuth access token), so it is exactly
+ *   as usable by the SDK/CLI as a self-hosted API key.
  * - A missing/empty `httpUrl` yields `null` (nothing useful to write).
  */
 export function resolveConnectionEnv(args: ConnectionEnvArgs): Record<string, string> | null {
-	const { group, mode, httpUrl, apiKey } = args;
+	const { group, httpUrl, apiKey } = args;
 
-	if (group !== 'development') {
-		return null;
-	}
-	if (connectionModeUsesOAuth(mode)) {
-		return null;
-	}
 	if (!httpUrl || /[\r\n]/.test(httpUrl) || /[\r\n]/.test(apiKey)) {
 		return null;
 	}
 
-	const updates: Record<string, string> = { [ROCKETRIDE_URI_KEY]: httpUrl };
+	const { uriKey, apiKeyKey } = envKeysForGroup(group);
+	const updates: Record<string, string> = { [uriKey]: httpUrl };
 	if (apiKey) {
-		updates[ROCKETRIDE_APIKEY_KEY] = apiKey;
+		updates[apiKeyKey] = apiKey;
 	}
 	return updates;
+}
+
+/**
+ * Ensures the doctrine comment sits directly above each managed pair's URI
+ * line, so any agent reading `.env` learns which pair serves which purpose
+ * at the moment of use. Idempotent: comments are added only when the line
+ * immediately above the URI assignment is not already the managed comment,
+ * and stale copies of the managed comments elsewhere are removed first.
+ */
+export function applyManagedComments(envText: string): string {
+	if (!envText.trim()) {
+		return envText;
+	}
+	const eol = envText.includes('\r\n') ? '\r\n' : '\n';
+	const managed: Array<[string, string]> = [
+		[ROCKETRIDE_URI_KEY, DEV_PAIR_COMMENT],
+		[ROCKETRIDE_DEPLOY_URI_KEY, DEPLOY_PAIR_COMMENT],
+	];
+	// Drop stale managed comments so moved/re-appended pairs re-anchor cleanly.
+	const managedComments = new Set(managed.map(([, comment]) => comment));
+	const lines = envText.split(/\r?\n/).filter((line) => !managedComments.has(line.trim()));
+
+	for (const [uriKey, comment] of managed) {
+		const index = lines.findIndex((line) => line.trim().startsWith(`${uriKey}=`));
+		if (index === -1) {
+			continue;
+		}
+		lines.splice(index, 0, comment);
+	}
+	return lines.join(eol);
 }

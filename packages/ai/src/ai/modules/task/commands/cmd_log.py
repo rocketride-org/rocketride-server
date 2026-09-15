@@ -125,20 +125,27 @@ class LogCommands(DAPConn):
         """
         Resolve the stream scope from the addressing arguments.
 
-        THE SCOPE IS THE KIND: ``teamId`` present addresses that team's
-        DEPLOY continuum (deploy runs execute as the team and log into its
-        tree); absent addresses the caller's own DEV stream. Run kind is
-        derived from the scope — it is not part of the wire contract.
+        ``teamId`` present addresses that team's DEPLOY continuum (deploy
+        runs execute as the team and log into its tree). Absent, the scope
+        is the caller's OWN tree, where the optional ``runKind`` argument
+        picks the continuum: absent/'dev' is the dev stream (today's
+        behavior); 'deploy' is the caller's personal @me deploy stream —
+        the one case teamId-presence cannot express, since an @me run is
+        deploy-kind but user-owned. teamId WINS over runKind: a team scope
+        is always the deploy continuum.
 
         Args:
             args: The subcommand arguments.
 
         Returns:
-            ``(team_id, run_kind)`` — ``('', 'dev')`` for own streams,
-            ``(<id>, 'deploy')`` for a team scope.
+            ``(team_id, run_kind)`` — ``('', 'dev')`` for own dev streams,
+            ``('', 'deploy')`` for own @me streams, ``(<id>, 'deploy')``
+            for a team scope.
         """
         team_id = args.get('teamId') or ''
-        return team_id, ('deploy' if team_id else 'dev')
+        if team_id:
+            return team_id, 'deploy'
+        return '', ('deploy' if args.get('runKind') == 'deploy' else 'dev')
 
     def _verify_log_access(self, args: Dict[str, Any], perm: str) -> None:
         """

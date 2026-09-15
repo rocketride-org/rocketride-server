@@ -1,0 +1,19 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"module": "commonjs",
+		"noUnusedLocals": false,
+		"types": [
+			"jest",
+			"node"
+		]
+	},
+	"include": [
+		"./src/**/*",
+		"./tests/**/*"
+	],
+	"exclude": [
+		"node_modules",
+		"dist"
+	]
+}

@@ -59,7 +59,7 @@ const {
 	exists,
 } = require('./index');
 const { BUILD_ROOT, DIST_ROOT, PROJECT_ROOT } = require('./paths');
-const { registerApp } = require('./registerApp');
+const { registerApp, assertSafeAppId } = require('./registerApp');
 const registry = require('./registry');
 
 // Shared dependency sources — same for every remote app. Dual-layout:
@@ -76,6 +76,36 @@ const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'apps', 'shared', 's
 	: path.join(PROJECT_ROOT, 'shared', 'src');
 
 /**
+ * Read an app's id from its package.json (appManifest.id), falling back to the
+ * source folder name when absent/unreadable. The SERVED directory keys on this
+ * so bundles live at dist/server/static/apps/<appId>/ and the server can
+ * authorize each fetch by app id.
+ *
+ * Emits a build WARNING whenever the fallback is used: the served directory then
+ * carries the folder name instead of an app id, so apps_static answers every
+ * fetch with a runtime 403 (no catalog entry matches) with no other build-time
+ * signal. The fallback behaviour is kept — just made loud.
+ *
+ * @param {string} appRoot  - The app's root directory.
+ * @param {string} fallback - Value to use when the id can't be read.
+ * @returns {string} The app id (served directory name).
+ */
+function readAppId(appRoot, fallback) {
+	try {
+		const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
+		const id = pkg.appManifest && pkg.appManifest.id;
+		if (id) return id;
+		// No appManifest.id — serve under the folder name and warn loudly.
+		console.warn(`  Warning: ${appRoot} has no appManifest.id — serving under "${fallback}"; apps_static will 403 at runtime (no matching catalog entry)`);
+		return fallback;
+	} catch {
+		// package.json missing / unreadable / invalid JSON — same runtime-403 hazard.
+		console.warn(`  Warning: could not read appManifest.id from ${appRoot} package.json — serving under "${fallback}"; apps_static will 403 at runtime (no matching catalog entry)`);
+		return fallback;
+	}
+}
+
+/**
  * Create a standard builder module for an MF remote app.
  *
  * Generates actions: bundle, register, copy, build, clean, and optionally dev.
@@ -88,9 +118,17 @@ const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'apps', 'shared', 's
  * @returns {object} Builder module definition with name, description, and actions.
  */
 function createAppModule({ name, description, appRoot, dev = false }) {
-	// Derived paths
-	const buildDir       = path.join(BUILD_ROOT, 'apps', name);
-	const serverStaticDir = path.join(DIST_ROOT, 'server', 'static', 'apps', name);
+	// Derived paths — EVERYTHING keys on the app id (rsbuild's distPath, the
+	// served static dir, apps.json URLs): build/apps/<appId> -> copied to
+	// dist/server/static/apps/<appId>/ so the server serves + authorizes
+	// bundles by id, matching the apps.json entry that registerApp writes.
+	const appId = readAppId(appRoot, name);
+	// appId is joined into the build/dist paths and public URLs below, so it
+	// MUST be a filesystem-safe slug — the same guard registerApp enforces, so
+	// a manifest id with a path separator or ".." can't escape build/apps/.
+	assertSafeAppId(appId);
+	const buildDir        = path.join(BUILD_ROOT, 'apps', appId);
+	const serverStaticDir = path.join(DIST_ROOT, 'server', 'static', 'apps', appId);
 
 	// Build input tracking
 	const srcDir       = path.join(appRoot, 'src');

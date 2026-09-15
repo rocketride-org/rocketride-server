@@ -85,12 +85,33 @@ class _StubQuestion:
 
 
 class _StubAnswer:
+    """Mirrors rocketride.schema.Answer: getJson is a bare json.loads that raises.
+
+    Agents write their answer as text (``Answer(expectJson=False)``), so the
+    stub must reproduce that path exactly - a stub that returned None for prose
+    would hide the failure the answers lane exists to survive.
+    """
+
     def __init__(self, payload=None):
         self._payload = payload
         self.answer = None
 
     def getJson(self):
-        return self._payload
+        if self._payload is None:
+            return None
+        if isinstance(self._payload, (dict, list)):
+            return self._payload
+        try:
+            return json.loads(self._payload)
+        except json.JSONDecodeError:
+            raise ValueError('Answer is not in JSON format.')
+
+    def getText(self):
+        if self._payload is None:
+            return ''
+        if isinstance(self._payload, (dict, list)):
+            return json.dumps(self._payload)
+        return str(self._payload)
 
     def setAnswer(self, text):
         self.answer = text
@@ -265,6 +286,8 @@ def _global(**overrides):
     g.client = SimpleNamespace()
     g.apikey = 'sk-secret-key'
     g.workspace_id = 'ws-1'
+    g.database_id = ''
+    g.attached = False
     g.ttl = '24h'
     g.max_execute_rows = 25000
     g.allow_execute = True
@@ -343,6 +366,89 @@ def test_get_read_timeout_is_retried():
     assert len(rec.calls) == 2
 
 
+def _locked(message='another operation is already running for conn:x:main:t; retry shortly'):
+    return _Resp(409, {'error': {'message': message, 'code': 'RESOURCE_LOCKED'}})
+
+
+def test_resource_locked_is_retried_on_post():
+    """Hotdata serializes writes per table: concurrent publishers into one shared
+    table get 409 RESOURCE_LOCKED. Measured live, 7 of 8 concurrent appends were
+    rejected. The request is refused before doing anything, so replaying a POST
+    here cannot double-load.
+    """
+    c, rec = _client([_locked(), _locked(), _Resp(200, {'load_id': 'ld-1'})])
+    assert c.load_table(database_id='db-1', schema='main', table='t', upload_id='up-1') == {'load_id': 'ld-1'}
+    assert len(rec.calls) == 3
+
+
+def test_resource_locked_honors_retry_after(monkeypatch):
+    slept = []
+    monkeypatch.setattr(client_mod.time, 'sleep', lambda d: slept.append(d))
+    locked = _locked()
+    locked.headers = {'Retry-After': '2'}
+    c, _ = _client([locked, _Resp(200, {})])
+    c.load_table(database_id='db-1', schema='main', table='t', upload_id='up-1')
+    assert slept == [2.0]
+
+
+def test_plain_conflict_is_not_retried():
+    """409 also means 'table already exists' and 'upload already consumed'. Those
+    describe work that DID happen - replaying them is wrong, and _ensure_table
+    depends on seeing the status.
+    """
+    c, rec = _client([_Resp(409, {'error': {'message': 'table exists', 'code': 'CONFLICT'}}), _Resp(200, {})])
+    with pytest.raises(client_mod.HotdataError) as excinfo:
+        c.create_table(database_id='db-1', schema='main', name='t')
+    assert excinfo.value.status_code == 409
+    assert len(rec.calls) == 1
+
+
+def test_resource_locked_budget_exhaustion_names_the_writer_contention(monkeypatch):
+    """Exhaustion must come from actually looping, not from one oversized
+    Retry-After aborting on the first attempt. Backoff is capped at
+    MAX_BACKOFF_S, so a short budget is spent over several real retries.
+    """
+    slept = []
+    monkeypatch.setattr(client_mod.time, 'sleep', lambda d: slept.append(d))
+    c, rec = _client([_locked() for _ in range(50)])
+    c.retry_budget_s = 4.0
+    err = None
+    try:
+        c.load_table(database_id='db-1', schema='main', table='t', upload_id='up-1')
+    except client_mod.HotdataError as e:
+        err = e
+    assert err is not None and 'locked by another writer' in str(err)
+    assert err.status_code == 409 and err.error_code == 'RESOURCE_LOCKED', (
+        'callers branch on the code to tell contention from "already exists"'
+    )
+    assert len(rec.calls) > 1, f'must actually retry before giving up, made {len(rec.calls)} call(s)'
+    assert slept, 'must back off between attempts'
+
+
+def test_database_creation_is_never_replayed_on_a_lock():
+    """The one request whose replay is not provably harmless: it mints a billable
+    resource and returns the only copy of its id, so a replay after the server
+    did create one would orphan it until its TTL fired.
+    """
+    c, rec = _client([_locked(), _Resp(200, {'id': 'db-1'})])
+    with pytest.raises(client_mod.HotdataError):
+        c.create_database('n', '24h')
+    assert len(rec.calls) == 1
+
+
+def test_lock_retry_still_applies_to_table_writes():
+    c, rec = _client([_locked(), _Resp(200, {})])
+    c.create_table(database_id='db-1', schema='main', name='t')
+    assert len(rec.calls) == 2
+
+
+def test_error_code_reads_both_body_shapes():
+    assert client_mod._error_code(_Resp(409, {'error': {'code': 'RESOURCE_LOCKED'}})) == 'RESOURCE_LOCKED'
+    assert client_mod._error_code(_Resp(409, {'code': 'CONFLICT'})) == 'CONFLICT'
+    assert client_mod._error_code(_Resp(409, {})) == ''
+    assert client_mod._error_code(_Resp(409, 'not json')) == ''
+
+
 def test_pre_response_connection_error_is_retried_on_post():
     c, rec = _client([_ConnectTimeout('never left'), _Resp(200, {'id': 'db-1'})])
     assert c.create_database('n', '24h') == {'id': 'db-1'}
@@ -414,6 +520,30 @@ def test_concurrent_get_database_creates_exactly_one():
     assert all(r is results[0] for r in results)
 
 
+def test_attached_get_database_does_not_create_database():
+    created = []
+    g = _global(database_id='db-shared')
+    g.client = SimpleNamespace(create_database=lambda **kw: created.append(kw))
+
+    assert g.get_database() == {
+        'id': 'db-shared',
+        'default_schema': 'main',
+        'attached': True,
+    }
+    assert created == []
+    assert g.attached is True
+
+
+def test_non_attached_get_database_still_creates_database():
+    created = []
+    g = _global()
+    g.client = SimpleNamespace(create_database=lambda **kw: created.append(kw) or {'id': 'db-created'})
+
+    assert g.get_database() == {'id': 'db-created'}
+    assert len(created) == 1
+    assert g.attached is False
+
+
 def test_drop_database_clears_only_the_matching_handle():
     g = _global()
     handle = {'id': 'db-1'}
@@ -422,6 +552,16 @@ def test_drop_database_clears_only_the_matching_handle():
     assert g.database is handle
     g.drop_database(handle)
     assert g.database is None
+
+
+def test_drop_database_keeps_an_attached_handle():
+    g = _global(database_id='db-shared', attached=True)
+    handle = {'id': 'db-shared', 'default_schema': 'main', 'attached': True}
+    g.database = handle
+
+    g.drop_database(handle)
+
+    assert g.database is handle
 
 
 def test_end_global_deletes_and_clears_secrets():
@@ -433,6 +573,48 @@ def test_end_global_deletes_and_clears_secrets():
     assert deleted == ['db-1']
     assert g.database is None and g.client is None
     assert g.apikey == '' and g.workspace_id == ''
+
+
+def test_end_global_does_not_delete_attached_database():
+    """Only the remote delete is skipped. The local handle is dropped either way.
+
+    Keeping it would let a second beginGlobal on the same object - which resets
+    `attached` to False - inherit a database it does not own and delete it at the
+    next teardown.
+    """
+    deleted = []
+    g = _global(database_id='db-shared', attached=True)
+    g.database = {'id': 'db-shared', 'default_schema': 'main', 'attached': True}
+    g.client = SimpleNamespace(delete_database=lambda i: deleted.append(i))
+
+    g.endGlobal()
+
+    assert deleted == [], 'an attached database must never be deleted'
+    assert g.database is None and g.attached is False
+    assert any('left in place' in message for message in _DEBUG_CALLS)
+
+
+def test_a_reopened_global_cannot_inherit_an_attached_database():
+    """The stale-handle path, end to end: attach, tear down, reopen without
+    database_id, and confirm the second run creates its own database instead of
+    adopting - and then deleting - the shared one.
+    """
+    deleted = []
+    g = _global(database_id='db-shared', attached=True)
+    g.database = {'id': 'db-shared', 'default_schema': 'main', 'attached': True}
+    g.client = SimpleNamespace(delete_database=lambda i: deleted.append(i))
+    g.endGlobal()
+
+    # Reopen with no database_id: this run owns whatever it creates.
+    g.database_id = ''
+    g.attached = False
+    g.client = SimpleNamespace(
+        create_database=lambda **_kw: {'id': 'db-own'},
+        delete_database=lambda i: deleted.append(i),
+    )
+    assert g.get_database()['id'] == 'db-own'
+    g.endGlobal()
+    assert deleted == ['db-own'], f'must delete only its own database, deleted={deleted}'
 
 
 def test_end_global_warns_but_does_not_raise_on_delete_failure():
@@ -520,6 +702,17 @@ def test_execute_returns_inline_rows_and_applies_limit():
     assert out['row_count'] == 2
     assert out['rows'] == [{'a': 1}, {'a': 2}]
     assert 'execute' in _NORMALIZE_CALLS
+
+
+def test_run_sql_surfaces_result_id_when_present():
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {'rows': [{'a': 1}], 'result_id': 'result-1'},
+    )
+
+    out = _instance(g)._run_sql('SELECT 1 AS a', 10)
+
+    assert out['result_id'] == 'result-1'
 
 
 def test_execute_limit_is_clamped_and_booleans_rejected():
@@ -922,12 +1115,25 @@ def test_build_index_validates_type_and_required_args():
         inst.build_index({'table': 'docs', 'column': 'body', 'index_type': 'magic'})
 
 
-def test_build_index_without_connection_id_raises():
-    g = _loaded_global()
+def test_build_index_on_an_attached_database_names_the_owning_run():
+    g = _loaded_global(attached=True)
+    g.database = {'id': 'db-shared', 'default_schema': 'main', 'attached': True}
+    g.client = SimpleNamespace(create_index=lambda **_kw: {})
+    inst = _instance(g)
+    with pytest.raises(ValueError, match='run that created the database'):
+        inst.build_index({'table': 'docs', 'column': 'body'})
+
+
+def test_build_index_on_an_owned_database_reports_the_real_symptom():
+    """Only an attached run is EXPECTED to lack a connection id. A database we
+    created that has none is an unexpected create response, and blaming
+    attachment would send the caller looking in the wrong place.
+    """
+    g = _loaded_global(attached=False)
     g.database = {'id': 'db-1', 'default_schema': 'main'}
     g.client = SimpleNamespace(create_index=lambda **_kw: {})
     inst = _instance(g)
-    with pytest.raises(RuntimeError, match='default_connection_id'):
+    with pytest.raises(RuntimeError, match='no default_connection_id'):
         inst.build_index({'table': 'docs', 'column': 'body'})
 
 
@@ -949,6 +1155,52 @@ def test_get_schema_uses_information_schema_not_show_tables():
     assert 'database_id' not in seen
     assert seen['include_columns'] is True
     assert 'get_schema' in _NORMALIZE_CALLS
+
+
+def test_get_schema_falls_back_to_sql_without_connection_id():
+    seen = {}
+
+    def _query(**kw):
+        seen.update(kw)
+        return {
+            'rows': [
+                {
+                    'table_schema': 'main',
+                    'table_name': 'orders',
+                    'column_name': 'id',
+                    'data_type': 'Int64',
+                },
+                {
+                    'table_schema': 'main',
+                    'table_name': 'orders',
+                    'column_name': 'total',
+                    'data_type': 'Float64',
+                },
+            ]
+        }
+
+    g = _global(database_id='db-shared', attached=True)
+    g.database = {'id': 'db-shared', 'default_schema': 'main', 'attached': True}
+    g.client = SimpleNamespace(query=_query)
+
+    out = _instance(g).get_schema({})
+
+    assert out == {
+        'summary': ['main.orders(id Int64, total Float64)'],
+        'tables': [
+            {
+                'schema': 'main',
+                'table': 'orders',
+                'columns': [
+                    {'name': 'id', 'data_type': 'Int64'},
+                    {'name': 'total', 'data_type': 'Float64'},
+                ],
+            }
+        ],
+        'database_id': 'db-shared',
+    }
+    assert 'FROM information_schema.columns' in seen['sql']
+    assert seen['database_id'] == 'db-shared'
 
 
 # ---------------------------------------------------------------------------
@@ -1069,6 +1321,120 @@ def test_answers_lane_wraps_a_single_dict():
     assert [json.loads(ln) for ln in lines] == [{'a': 1}]
 
 
+def _captured_rows(payload, table='sales'):
+    """Run a payload through the answers lane and return the rows that got loaded."""
+    seen = {}
+    g = _loaded_global(table=table)
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda body, **_k: seen.setdefault('payload', body) or 'up-1',
+        load_table=lambda **_kw: {'row_count': 1},
+    )
+    inst = _instance(g)
+    inst.writeAnswers(_StubAnswer(payload))
+    lines = [ln for ln in seen.get('payload', b'').decode().split('\n') if ln.strip()]
+    return [json.loads(ln) for ln in lines]
+
+
+def test_answers_lane_accepts_a_fenced_json_object():
+    """Agents emit their answer as text and fence it. getJson() alone would raise,
+    which would make structural publishing as unreliable as agent-driven writes.
+    """
+    fenced = '```json\n{"room": "room-1", "note": "C4"}\n```'
+    assert _captured_rows(fenced) == [{'room': 'room-1', 'note': 'C4'}]
+
+
+def test_answers_lane_accepts_json_after_prose():
+    answer = 'Here is my verdict:\n{"room": "room-2", "note": "G4"}\nHope that helps.'
+    assert _captured_rows(answer) == [{'room': 'room-2', 'note': 'G4'}]
+
+
+def test_answers_lane_accepts_a_plain_json_string():
+    assert _captured_rows('{"room": "room-3"}') == [{'room': 'room-3'}]
+
+
+def test_answers_lane_unwraps_only_the_reserved_rows_envelope():
+    """{"rows": [...]} becomes N rows. Nothing else does.
+
+    `items`, `data` and `results` are all plausible business column names, so
+    unwrapping them would turn one legitimate record into several and drop the
+    column - a silent loss. Guessing wrong the other way is visible.
+    """
+    assert _captured_rows('{"rows": [{"id": 1}, {"id": 2}]}') == [{'id': 1}, {'id': 2}]
+    for key in ('records', 'items', 'data', 'results', 'entries'):
+        payload = f'{{"{key}": [{{"id": 3}}]}}'
+        assert _captured_rows(payload) == [{key: [{'id': 3}]}], f'{key} must not be unwrapped'
+
+
+def test_answers_lane_does_not_explode_an_unnamed_nested_list():
+    """Only the documented wrapper names unwrap. A row that legitimately holds a
+    list of objects is ONE row - exploding it would drop the column and multiply
+    the row count, silently.
+    """
+    rows = _captured_rows('{"line_items": [{"sku": "A"}, {"sku": "B"}]}')
+    assert rows == [{'line_items': [{'sku': 'A'}, {'sku': 'B'}]}]
+
+
+def test_answers_lane_keeps_a_multi_key_object_as_one_row():
+    rows = _captured_rows('{"room": "room-1", "notes": ["C4", "G4"]}')
+    assert rows == [{'room': 'room-1', 'notes': ['C4', 'G4']}]
+
+
+def test_answers_lane_rejects_prose_with_the_text_quoted():
+    """Silently skipping would leave an empty table with nothing to explain it."""
+    g = _loaded_global()
+    g.client = SimpleNamespace(create_table=lambda **_kw: pytest.fail('must not reach the API'))
+    inst = _instance(g)
+    with pytest.raises(ValueError, match='I looked at the data'):
+        inst.writeAnswers(_StubAnswer('I looked at the data and found nothing of note.'))
+
+
+def test_answers_lane_rejects_a_list_of_scalars():
+    g = _loaded_global()
+    g.client = SimpleNamespace(create_table=lambda **_kw: pytest.fail('must not reach the API'))
+    inst = _instance(g)
+    with pytest.raises(ValueError, match='must be an object'):
+        inst.writeAnswers(_StubAnswer('["C4", "G4"]'))
+
+
+def test_answers_lane_rejects_a_partly_malformed_batch():
+    """Filtering the bad entries out would load a subset and report success."""
+    g = _loaded_global()
+    g.client = SimpleNamespace(create_table=lambda **_kw: pytest.fail('must not reach the API'))
+    inst = _instance(g)
+    with pytest.raises(ValueError, match='must be an object'):
+        inst.writeAnswers(_StubAnswer('[{"id": 1}, "unavailable", {"id": 2}]'))
+
+
+def test_answers_lane_finds_the_row_after_an_unrelated_json_value():
+    """The first decodable value in the prose is often not the row. Taking it and
+    giving up would discard an answer that is right there.
+    """
+    assert _captured_rows('Scores: [1, 2, 3]. Row: {"id": 7}') == [{'id': 7}]
+
+
+def test_answers_lane_treats_an_empty_object_as_no_rows():
+    g = _loaded_global()
+    g.client = SimpleNamespace(create_table=lambda **_kw: pytest.fail('must not reach the API'))
+    inst = _instance(g)
+    inst.writeAnswers(_StubAnswer('{}'))
+
+
+def test_answers_lane_ignores_blank_text():
+    g = _loaded_global()
+    g.client = SimpleNamespace(create_table=lambda **_kw: pytest.fail('must not reach the API'))
+    inst = _instance(g)
+    inst.writeAnswers(_StubAnswer('   '))
+
+
+def test_json_from_text_offers_candidates_in_preference_order():
+    assert iinstance_mod._json_from_text('```\n{"a": {"b": 1}}\n```')[0] == {'a': {'b': 1}}
+    assert iinstance_mod._json_from_text('noise {"a": "}"} tail')[0] == {'a': '}'}
+    assert iinstance_mod._json_from_text('no json here') == []
+    # A fence whose first line IS the JSON must not have that line eaten as a tag.
+    assert iinstance_mod._json_from_text('```\n{"a":1}\n```')[0] == {'a': 1}
+
+
 def test_rows_are_uploaded_as_ndjson_not_a_json_array():
     """Hotdata rejects a JSON array with 'Expected JSON record to be an object'."""
     payload = iinstance_mod._to_ndjson([{'a': 1}, {'a': 2}])
@@ -1092,6 +1458,303 @@ def test_answers_lane_ignores_empty_payloads():
     )
     inst = _instance(g)
     inst.writeAnswers(_StubAnswer(None))
+
+
+class _MissingColumn(RuntimeError):
+    """The live 400: an append that omits a column the table already has."""
+
+    status_code = 400
+
+    def __init__(self, column='room'):
+        super().__init__(
+            f"hotdata: POST /loads failed with HTTP 400: upload is missing column '{column}'; "
+            'an append must carry every column the table has, since a column left out of the '
+            'write would be dropped from the table.'
+        )
+
+
+def _widening_global(columns, uploads, loads):
+    """A global whose first load is refused for a missing column, second accepted."""
+    calls = {'load': 0}
+
+    def _load(**kw):
+        calls['load'] += 1
+        if calls['load'] == 1:
+            raise _MissingColumn()
+        loads.append(kw)
+        return {'row_count': 1}
+
+    g = _loaded_global(table='agent_answers')
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda payload, **_k: (uploads.append(payload), f'up-{len(uploads)}')[1],
+        load_table=_load,
+        query=lambda **_kw: {'rows': [{'column_name': c} for c in columns]},
+    )
+    return g
+
+
+def test_load_widens_rows_to_the_tables_full_column_set():
+    """Hotdata refuses a write that omits a column: leaving one out would drop it.
+
+    Two producers writing different shapes into one shared table is the whole
+    point of a shared-evidence or telemetry database, so the second producer
+    must not simply fail.
+    """
+    uploads, loads = [], []
+    g = _widening_global(['session', 'room', 'beat', 'note'], uploads, loads)
+    inst = _instance(g)
+    out = inst.load_data({'table': 'agent_answers', 'rows': [{'session': 's', 'beat': 1, 'agent': 'a'}]})
+
+    assert len(uploads) == 2, 'the refused upload is consumed; the retry needs a fresh one'
+    widened = [json.loads(ln) for ln in uploads[1].decode().split('\n') if ln.strip()]
+    assert widened == [{'session': 's', 'room': None, 'beat': 1, 'note': None, 'agent': 'a'}], (
+        'absent columns fill with null, and a new column the table lacks is kept'
+    )
+    assert out.get('row_count') == 1
+
+
+def test_widening_re_reads_a_table_that_grew_under_it():
+    """A concurrent producer can add a column between our schema read and our
+    retry, so the widened payload arrives stale and is refused for a DIFFERENT
+    missing column. One attempt would surface that as an unactionable failure.
+    """
+    uploads, loads = [], []
+    schema_reads = {'n': 0}
+    calls = {'load': 0}
+
+    def _load(**kw):
+        calls['load'] += 1
+        if calls['load'] == 1:
+            raise _MissingColumn('room')
+        if calls['load'] == 2:
+            raise _MissingColumn('wave')  # another writer widened the table
+        loads.append(kw)
+        return {'row_count': 1}
+
+    def _query(**_kw):
+        schema_reads['n'] += 1
+        cols = ['session', 'room'] if schema_reads['n'] == 1 else ['session', 'room', 'wave']
+        return {'rows': [{'column_name': c} for c in cols]}
+
+    g = _loaded_global(table='agent_answers')
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda payload, **_k: (uploads.append(payload), f'up-{len(uploads)}')[1],
+        load_table=_load,
+        query=_query,
+    )
+    inst = _instance(g)
+    out = inst.load_data({'table': 'agent_answers', 'rows': [{'session': 's'}]})
+
+    assert schema_reads['n'] == 2, 'must re-read the schema after the second refusal'
+    widened = [json.loads(ln) for ln in uploads[-1].decode().split('\n') if ln.strip()]
+    assert widened == [{'session': 's', 'room': None, 'wave': None}]
+    assert out.get('row_count') == 1
+
+
+def test_widening_gives_up_after_a_bounded_number_of_attempts():
+    """Each attempt costs an upload, so a table that keeps growing must not spin."""
+    uploads = []
+
+    def _load(**_kw):
+        raise _MissingColumn('always-something-new')
+
+    g = _loaded_global(table='t')
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda payload, **_k: (uploads.append(payload), 'up')[1],
+        load_table=_load,
+        query=lambda **_kw: {'rows': [{'column_name': c} for c in ('a', 'b')]},
+    )
+    inst = _instance(g)
+    with pytest.raises(RuntimeError, match='missing column'):
+        inst.load_data({'table': 't', 'rows': [{'a': 1}]})
+    # Exactly: one original upload plus one per widening attempt. `<=` would let a
+    # regression that stopped retrying after the first attempt pass unnoticed.
+    assert len(uploads) == iinstance_mod._WIDEN_ATTEMPTS + 1
+
+
+def test_load_does_not_widen_when_nothing_would_change():
+    """No column is missing after all - re-loading would duplicate rows for nothing."""
+    uploads, loads = [], []
+    g = _widening_global(['session', 'beat'], uploads, loads)
+    inst = _instance(g)
+    with pytest.raises(RuntimeError, match='missing column'):
+        inst.load_data({'table': 'agent_answers', 'rows': [{'session': 's', 'beat': 1}]})
+    assert len(uploads) == 1, 'must not re-upload an identical payload'
+
+
+def test_load_does_not_widen_on_an_unrelated_failure():
+    def _boom(**_kw):
+        raise RuntimeError('load rejected')
+
+    uploads = []
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda payload, **_k: (uploads.append(payload), 'u')[1],
+        load_table=_boom,
+        query=lambda **_kw: pytest.fail('an unrelated failure must not trigger schema introspection'),
+    )
+    inst = _instance(g)
+    with pytest.raises(RuntimeError, match='load rejected'):
+        inst.load_data({'table': 't', 'rows': [{'a': 1}]})
+    assert len(uploads) == 1
+
+
+class _TypeConflict(RuntimeError):
+    """The live 409 that follows null-filling a numeric column."""
+
+    status_code = 409
+
+    def __init__(self):
+        super().__init__(
+            "hotdata: POST /loads failed with HTTP 409: column 'confidence' can't change type from "
+            'float64 to varchar automatically'
+        )
+
+
+def test_widening_a_numeric_column_to_null_explains_the_real_fix():
+    """Null in every row re-types the column, and the server refuses.
+
+    No payload satisfies both "carry every column" and "do not re-type a column",
+    so the node has to name the design fix rather than pass a bare CONFLICT up.
+    """
+    calls = {'load': 0}
+
+    def _load(**_kw):
+        calls['load'] += 1
+        raise _MissingColumn('confidence') if calls['load'] == 1 else _TypeConflict()
+
+    g = _loaded_global(table='agent_answers')
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda *_a, **_k: 'up',
+        load_table=_load,
+        query=lambda **_kw: {'rows': [{'column_name': c} for c in ('session', 'confidence')]},
+    )
+    inst = _instance(g)
+    with pytest.raises(ValueError) as excinfo:
+        inst.load_data({'table': 'agent_answers', 'rows': [{'session': 's'}]})
+    message = str(excinfo.value)
+    assert 'confidence' in message
+    assert 'own table' in message, 'the message must name the fix, not just the symptom'
+
+
+def test_type_conflict_detection_is_status_scoped():
+    assert iinstance_mod._is_type_conflict(_TypeConflict()) is True
+    assert iinstance_mod._is_type_conflict(_MissingColumn()) is False
+
+
+def test_projection_is_append_only():
+    """Null-filling is additive for an append and destructive for anything else:
+    an upsert of {"id": 7, "note": "x"} widened with balance=null would wipe the
+    stored balance. Those modes must fail instead.
+    """
+    calls = {'load': 0}
+
+    def _load(**_kw):
+        calls['load'] += 1
+        raise _MissingColumn('balance')
+
+    g = _loaded_global(table='accounts', allow_destructive_load=True)
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        upload_bytes=lambda *_a, **_k: 'up',
+        load_table=_load,
+        query=lambda **_kw: pytest.fail('a non-append load must not widen'),
+    )
+    inst = _instance(g)
+    for mode in ('upsert', 'update', 'replace'):
+        calls['load'] = 0
+        with pytest.raises(RuntimeError, match='missing column'):
+            inst.load_data({'table': 'accounts', 'rows': [{'id': 7, 'note': 'x'}], 'mode': mode, 'key': ['id']})
+        assert calls['load'] == 1, f'{mode} must not retry with a widened payload'
+
+
+def test_ensure_table_does_not_mistake_lock_exhaustion_for_an_existing_table():
+    """409 carries two opposite meanings. Swallowing RESOURCE_LOCKED as "already
+    exists" would send us on to load into a table that may not be there, and
+    report a confusing table-not-found instead of the real contention.
+    """
+    locked = client_mod.HotdataError('still locked by another writer', status_code=409, error_code='RESOURCE_LOCKED')
+
+    def _create(**_kw):
+        raise locked
+
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        create_table=_create,
+        upload_bytes=lambda *_a, **_k: pytest.fail('must not upload when the table is unresolved'),
+    )
+    inst = _instance(g)
+    with pytest.raises(client_mod.HotdataError, match='locked by another writer'):
+        inst.load_data({'table': 't', 'rows': [{'a': 1}]})
+
+
+def test_ensure_table_still_treats_a_plain_conflict_as_success():
+    loaded = {}
+    exists = client_mod.HotdataError('table exists', status_code=409, error_code='CONFLICT')
+
+    def _create(**_kw):
+        raise exists
+
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        create_table=_create,
+        upload_bytes=lambda *_a, **_k: 'up',
+        load_table=lambda **kw: loaded.update(kw) or {'row_count': 1},
+    )
+    inst = _instance(g)
+    assert inst.load_data({'table': 't', 'rows': [{'a': 1}]})['row_count'] == 1
+    assert loaded['table'] == 't'
+
+
+def test_result_id_append_is_deduplicated():
+    """This path is advertised to agents on execute and get_data, and appending a
+    query result is no more idempotent than appending rows.
+    """
+    loads = []
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        create_table=lambda **_kw: {},
+        load_table=lambda **kw: loads.append(kw) or {'row_count': 5},
+    )
+    inst = _instance(g)
+    first = inst.load_data({'table': 't', 'result_id': 'res-1'})
+    second = inst.load_data({'table': 't', 'result_id': 'res-1'})
+    assert len(loads) == 1, 'the second identical result load must not be sent'
+    assert second.get('deduplicated') is True
+    assert not first.get('deduplicated')
+
+
+def test_result_id_is_withheld_when_the_rows_were_truncated():
+    """result_id names the whole server-side result; rows is only the first
+    `limit` of it. Offering both together invites an agent to materialise far
+    more than it saw.
+    """
+    g = _loaded_global(max_execute_rows=2)
+    g.client = SimpleNamespace(query=lambda **_kw: {'rows': [{'a': 1}, {'a': 2}, {'a': 3}], 'result_id': 'res-9'})
+    inst = _instance(g)
+    out = inst._run_sql('SELECT 1', 2)
+    assert out['row_count'] == 2
+    assert 'result_id' not in out, 'a truncated window must not advertise the full result'
+
+
+def test_missing_column_detection_is_status_scoped():
+    assert iinstance_mod._is_missing_column(_MissingColumn()) is True
+    generic = RuntimeError('upload is missing column x')
+    assert iinstance_mod._is_missing_column(generic) is False, 'no status means not our 400'
+
+
+def test_table_columns_refuses_an_unsafe_identifier():
+    """The name is interpolated into SQL, so it is re-validated rather than trusted."""
+    g = _loaded_global()
+    g.client = SimpleNamespace(query=lambda **_kw: pytest.fail('must not reach the API'))
+    inst = _instance(g)
+    assert inst._table_columns('main', "t'; DROP--") == []
+    assert inst._table_columns('main', 'a.b') == []
 
 
 def test_answers_lane_surfaces_a_load_failure():
@@ -1711,3 +2374,45 @@ def test_all_three_sql_paths_share_one_validator():
         assert invalid, f'{sql!r} should be rejected by the shared validator'
     _cleaned, invalid = inst._validate_generated_sql('SELECT 1;')
     assert not invalid, 'a single statement with a trailing semicolon is fine'
+
+
+# ---------------------------------------------------------------------------
+# Dedup must not outlive the database it describes
+#
+# Seen live during a demo: an identical append was skipped as a duplicate, then
+# the follow-up query failed with "table 'default.main.orders' not found". The
+# fingerprint had been keyed on schema.table + payload only, so a record from a
+# previous database still matched and suppressed the load that would have
+# created the table in the current one.
+# ---------------------------------------------------------------------------
+
+
+def _swappable_db_global(calls):
+    g = _global()
+    g._loaded = {}
+    g.client = SimpleNamespace(
+        create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
+        create_table=lambda **_kw: {},
+        information_schema=lambda **_kw: {'tables': []},
+        upload_bytes=lambda *_a, **_k: 'upl-1',
+        load_table=lambda **_kw: calls.append(1) or {'row_count': 1},
+    )
+    g.database = {'id': 'db-1', 'default_schema': 'main'}
+    return g
+
+
+def test_a_new_database_does_not_inherit_the_previous_dedup_records():
+    calls = []
+    g = _swappable_db_global(calls)
+    inst = _instance(g)
+    rows = [{'a': 1}]
+
+    inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert len(calls) == 1
+
+    # the run moves to a different database; the payload has never been loaded there
+    g.database = {'id': 'db-2', 'default_schema': 'main'}
+    out = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+
+    assert not out.get('deduplicated'), 'a different database must not reuse the old fingerprint'
+    assert len(calls) == 2, 'the load must actually run against the new database'

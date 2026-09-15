@@ -358,11 +358,11 @@ const AccountProvider: React.FC = () => {
 		[client]
 	);
 
-	/** Sets the user's preferred default team. */
-	const handleSetDefaultTeam = useCallback(
+	/** Sets the user's dev team (dev-run billing + env layer). */
+	const handleSetDevTeam = useCallback(
 		async (teamId: string) => {
 			if (!client) return;
-			await client.account.setDefaultTeam(teamId);
+			await client.account.setDevTeam(teamId);
 		},
 		[client]
 	);
@@ -576,7 +576,7 @@ const AccountProvider: React.FC = () => {
 				activeTeamId={activeTeamId}
 				onActiveTeamIdChange={setActiveTeamId}
 				onSaveProfile={handleSaveProfile}
-				onSetDefaultTeam={handleSetDefaultTeam}
+				onSetDevTeam={handleSetDevTeam}
 				onSetDefaultOrg={handleSetDefaultOrg}
 				onLogout={() => logout?.()}
 				onDeleteAccount={handleDeleteAccount}

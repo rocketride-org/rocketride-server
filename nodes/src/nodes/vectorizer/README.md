@@ -1,72 +1,42 @@
 # vectorizer
 
-Chunks incoming text and tables, embeds them, and writes the resulting documents to the configured store.
+An internal RocketRide ingestion filter that chunks flagged text and tables, creates embeddings through configured components, and persists the resulting documents to a configured store.
 
 ## What it does
 
-The vectorizer is an internal (`capabilities: ["internal"]`) filter in the ingestion path,
-registered under the `vectorizer://` protocol. As text and tables flow through, it:
-
-1. Checks whether the current object is flagged for vectorization (`FLAGS.VECTORIZE`),
-   objects without the flag pass through untouched, and empty text is skipped.
-2. Splits the text into chunks using the configured preprocessor.
-3. Builds per-chunk document metadata: chunk id, table flag and table id, deletion flag,
-   and the object's permission id (`-1` when the object carries none). Chunk and table
-   counters reset for every new object.
-4. Computes embeddings for the chunks via the embedding component.
-5. Persists the chunks: either directly to the store (instance mode) or by writing them
-   downstream to the endpoint store driver (transform mode).
-
-On retrieval (`renderObject`), it pulls previously vectorized content back out of the
-store and feeds it to the text writer, suppressing the default rendering path.
-
-There are no user-facing config fields, no lanes, no profiles, and no `classType`, the
-engine wires this node up for you rather than you placing it by hand.
-
----
+The vectorizer runs only for objects marked with `FLAGS.VECTORIZE`. It passes
+each non-empty text or table value through a configured preprocessor, embeds
+the resulting chunks, and either writes them directly to the store or sends
+them downstream for an endpoint store driver. Choose it for the internal
+ingestion path that needs RocketRide's preprocessor, embedding, and store
+components together; it is not a canvas-configured document parser or an agent
+tool.
 
 ## Configuration
 
-The node has no fields of its own. At startup it reads three optional multi-provider
-sections from the connection config and instantiates the matching component for each one
-that is present:
+This node declares no fields or profiles of its own. Outside configuration-open
+mode, it looks for optional multi-provider `preprocessor`, `embedding`, and
+`store` sections in the connection configuration and initializes each present
+component. Vectorization requires the processing path to supply the components
+it uses: text is split with the preprocessor, chunks are encoded with the
+embedding component, and they are persisted or rendered through the store.
 
-| Section        | Resolved via       | Purpose                                      |
-|----------------|--------------------|----------------------------------------------|
-| `preprocessor` | `getPreprocessor`  | Splits incoming text/tables into chunks      |
-| `embedding`    | `getEmbedding`     | Encodes chunks into vectors                  |
-| `store`        | `getStore`         | Persists chunks and serves them back on render |
+## Notes
 
-No credentials are configured here; each component carries its own provider config. In
-config open mode, nothing is initialized at all.
+### Chunk metadata and modes
 
-`requirements.txt` is intentionally empty, the node relies on the separately installed
-AI module, which brings its own dependencies.
+Chunk and table counters reset for every object. Each chunk carries its chunk
+ID, whether it came from a table, its table ID, a false deletion flag, and the
+object permission ID (or `-1` if absent). In instance mode, chunks are added
+directly to the store and the object is marked vectorized on close. In transform
+mode, chunks are written downstream as documents instead.
 
----
+### Rendering
 
-## Modes
-
-Behavior depends on the endpoint's open mode:
-
-- **Instance**: chunks are added directly to the store via `addChunks`. The object's
-  `vectorBatchId` is reset to `0` when processing opens and set to `1` on close, marking
-  the object as vectorized.
-- **Transform**: chunks are written downstream with `writeDocuments` and the endpoint
-  store driver handles persistence.
-- **Config**: no preprocessor, embedding, or store is created.
-
----
-
-## Rendering
-
-When an object is rendered, the node first checks `vectorBatchId`: if the object was
-never vectorized (`vectorBatchId == 0`), it does nothing and default rendering proceeds.
-Otherwise it retrieves the stored text for the object id from the store, streams it back
-through the text writer, and calls `preventDefault()` so the content is served from the
-vector store rather than re-extracted.
-
----
+For an object whose `vectorBatchId` is non-zero, the node asks the store to
+render the saved content into the text writer and prevents the default render
+path. Objects that have not been marked vectorized are left to the default
+renderer.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

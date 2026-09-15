@@ -34,6 +34,7 @@ from ._base import (
     INT,
     PAGING,
     STR,
+    UTC_TIME_DESC,
     PipedriveToolsBase,
     args_of,
     body_from,
@@ -68,7 +69,7 @@ _NOTE_WRITE_PROPS = {
     'lead_id': STR('Lead uuid the note is attached to.'),
     'project_id': INT('Project the note is attached to.'),
     'user_id': INT('Author user id. Defaults to the authenticated user.'),
-    'add_time': STR('Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record.'),
+    'add_time': STR(f'Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record. {UTC_TIME_DESC}'),
     'pinned_to_deal_flag': ENUM('Pin the note to the deal.', ['0', '1']),
     'pinned_to_person_flag': ENUM('Pin the note to the person.', ['0', '1']),
     'pinned_to_organization_flag': ENUM('Pin the note to the organization.', ['0', '1']),
@@ -88,8 +89,11 @@ class NotesMixin(PipedriveToolsBase):
             person_id=INT('Only notes attached to this person.'),
             org_id=INT('Only notes attached to this organization.'),
             lead_id=STR('Only notes attached to this lead uuid.'),
-            start_date=STR('Only notes added on or after this date, YYYY-MM-DD.'),
-            end_date=STR('Only notes added on or before this date, YYYY-MM-DD.'),
+            start_date=STR(
+                'Only notes added on or after this date, YYYY-MM-DD. Filters the UTC add_time, so a '
+                'range that means a whole day to a person may need widening by one day at each end.'
+            ),
+            end_date=STR('Only notes added on or before this date, YYYY-MM-DD. Same UTC caveat as start_date.'),
             sort=STR('Sort clause, e.g. "add_time DESC".'),
         ),
         description='List notes, optionally filtered by the record they are attached to or by date.',

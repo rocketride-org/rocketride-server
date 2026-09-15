@@ -24,7 +24,44 @@
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_adapter import debug_usage_failure, report_llm_tokens
 from google import genai
+
+
+def _report_gemini_usage(response: Any, model: str) -> None:
+    """Report a ``generate_content`` response's usage on the four token counters.
+
+    This node overrides ``_chat`` and sets no ``_llm``, so it never reaches
+    ``LangChainAdapter`` — without this the provider bills zero. Gemini counts
+    ``prompt_token_count`` with the cached prefix included, so the cache is subtracted
+    back out to keep the counters disjoint; ``thoughts_token_count`` is reasoning, which
+    Google bills at the output rate.
+    """
+    um = getattr(response, 'usage_metadata', None)
+    if um is None:
+        return
+
+    def _n(field: str) -> int:
+        return int(getattr(um, field, 0) or 0)
+
+    # Best-effort: this runs on a response the user already paid for, and the caller is
+    # a retry loop that would read a raise as a provider error and lose the answer.
+    try:
+        cache_read = _n('cached_content_token_count')
+        fresh_input = max(0, _n('prompt_token_count') - cache_read)
+        output = _n('candidates_token_count') + _n('thoughts_token_count')
+    except Exception as exc:
+        debug_usage_failure(exc)
+        return
+    report_llm_tokens(fresh_input, output, model=model, cache_read_tokens=cache_read)
+
+
+class GeminiNoTextError(Exception):
+    """A response that carried no text: blocked, out of budget, or non-text only.
+
+    Terminal, not transient. The API has answered — asking again sends the same
+    prompt for the same verdict, and every retry is billed.
+    """
 
 
 class Chat(ChatBase):
@@ -101,7 +138,7 @@ class Chat(ChatBase):
         and use a unified interface for both Developer API and Vertex AI.
         """
 
-    def getTokens(self, value: str) -> int:
+    def getTokens(self, value: str | None) -> int:
         """
         Estimate the number of tokens in a given text string.
 
@@ -110,7 +147,10 @@ class Chat(ChatBase):
         built-in tokenizer if available.
 
         Args:
-            value (str): The text string to estimate tokens for
+            value (str | None): The text string to estimate tokens for. None is
+                accepted and counts as nothing: `.text` is None for a response
+                that carried no text parts, and token accounting must not be
+                the place that discovers it.
 
         Returns:
             int: Estimated number of tokens
@@ -120,6 +160,11 @@ class Chat(ChatBase):
             tokenization schemes. For production use, consider using the
             model's native token counting method if available.
         """
+        # None or empty means nothing to count. The SDK hands back None (not
+        # '') for a response with no text parts, and token accounting must not
+        # be the place that discovers it.
+        if not value:
+            return 0
         # Simple approximation: ~0.75 tokens per word
         word_count = len(value.split())
         return int(word_count / 0.75)
@@ -148,5 +193,36 @@ class Chat(ChatBase):
         # Generate content using the configured model
         response = self._client.models.generate_content(model=self._model, contents=prompt)
 
-        # Extract and return the text response
-        return response.text
+        # Before the text check, deliberately: a response that carried no text
+        # still burned tokens, and a safety block is exactly the run somebody
+        # will be asking about when they look at the bill.
+        _report_gemini_usage(response, self._model)
+
+        # `.text` is None (not '') when the candidate carried no text parts:
+        # safety-blocked, the token budget spent before any visible text (a
+        # thinking model can burn it all mid-thought), or non-text parts only.
+        # Name the API's own reasons rather than letting the None surface
+        # downstream as a token-counting crash that says nothing.
+        text = response.text
+        if text is None:
+            candidates = getattr(response, 'candidates', None) or []
+            finish = getattr(candidates[0], 'finish_reason', None) if candidates else 'no candidates'
+            feedback = getattr(response, 'prompt_feedback', None)
+            block = getattr(feedback, 'block_reason', None) if feedback else None
+            detail = f'finish_reason={finish}'
+            if block:
+                detail += f', block_reason={block}'
+            raise GeminiNoTextError(f'Gemini returned a response with no text ({detail})')
+        return text
+
+    def is_retryable_error(self, error: Exception) -> bool:
+        """
+        Never retry a text-free response.
+
+        ChatBase treats an error it does not recognise as retryable, so without
+        this a safety block would be re-sent — and re-billed — up to
+        ``CONST_CHAT_MAX_RETRIES`` times for the same refusal.
+        """
+        if isinstance(error, GeminiNoTextError):
+            return False
+        return super().is_retryable_error(error)

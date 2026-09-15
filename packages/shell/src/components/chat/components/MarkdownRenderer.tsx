@@ -4,10 +4,10 @@
 // =============================================================================
 
 import React, { type CSSProperties } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ChartRenderer } from './ChartRenderer';
@@ -66,6 +66,33 @@ const S = {
 
 const HTML_WRAPPER = (body: string) => `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{margin:0;padding:16px;font-family:system-ui,sans-serif;}</style></head><body>${body}</body></html>`;
 
+/**
+ * Sanitize schema: the default (GitHub) schema only admits http/https image
+ * sources, but hosts with no filesystem access (VS Code webviews) pre-read
+ * local images and inline them as data: URIs — admit data: for img src, and
+ * keep the width/height sizing attributes the default schema strips. A data:
+ * src cannot execute script from an <img>, so the widening is inert.
+ */
+const SANITIZE_SCHEMA = {
+	...defaultSchema,
+	protocols: {
+		...defaultSchema.protocols,
+		src: [...(defaultSchema.protocols?.src ?? []), 'data'],
+	},
+	attributes: {
+		...defaultSchema.attributes,
+		img: [...(defaultSchema.attributes?.img ?? []), 'width', 'height'],
+	},
+};
+/**
+ * react-markdown's OWN url sanitizer runs independently of rehype-sanitize
+ * and empties every src/href outside http(s)/irc/mailto/xmpp — including
+ * the data: URIs the README preview inlines, so the widened sanitize schema
+ * alone never sees them. Pass data:image/* through untouched; every other
+ * scheme keeps the stock transform, so scriptable URLs stay blocked.
+ */
+const urlTransform = (url: string): string => (url.startsWith('data:image/') ? url : (defaultUrlTransform(url) ?? ''));
+
 export interface MarkdownRendererProps {
 	content: string;
 }
@@ -74,7 +101,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 	<div style={S.wrapper}>
 		<ReactMarkdown
 			remarkPlugins={[remarkGfm]}
-			rehypePlugins={[rehypeRaw, rehypeSanitize]}
+			rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
+			urlTransform={urlTransform}
 			components={{
 				pre: ({ children, ...rest }: any) => {
 					// Skip <pre> wrapper for non-code elements (charts, iframes)

@@ -54,7 +54,7 @@
 	//	  The icon to display in the UI for this node
 	//
 	"icon": "elevenlabs.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/cloud_tts",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes

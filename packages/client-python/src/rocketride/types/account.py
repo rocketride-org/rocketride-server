@@ -109,7 +109,7 @@ class AccountProfile(TypedDict, total=False):
         phoneNumber: Primary phone number in E.164 format.
         phoneNumberVerified: Whether the phone number has been verified.
         locale: Locale / language preference (e.g. "en").
-        defaultTeam: The ID of the user's default team context.
+        devTeam: The ID of the user's dev team context.
         organization: The organization the user belongs to, or None.
     """
 
@@ -123,7 +123,7 @@ class AccountProfile(TypedDict, total=False):
     phoneNumber: str
     phoneNumberVerified: bool
     locale: str
-    defaultTeam: str
+    devTeam: str
     organization: AccountOrganization
 
 

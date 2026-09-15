@@ -23,10 +23,8 @@ import React, { useState, useCallback, CSSProperties } from 'react';
 import { commonStyles } from 'shell';
 import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop, BxGridAlt } from 'shell';
 import { SidebarMenu, TabControl, TabPanel } from 'shell';
-import { StatusBadge } from 'shell';
-import type { StatusVariant } from 'shell';
 import { Explorer, NOOP_VFS } from 'shell';
-import type { AppListItem, ISidebarViewProps } from './types';
+import type { ISidebarViewProps } from './types';
 import type { ViewMenu } from 'shell';
 import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from 'shell';
 
@@ -136,18 +134,6 @@ const S = {
 	} as CSSProperties,
 };
 
-// StatusBadge variant + label per app lifecycle state ('pending' reads
-// "in review" — the mockup's vocabulary).
-const APP_BADGE: Record<AppListItem['status'], { variant: StatusVariant; label: string }> = {
-	local: { variant: 'muted', label: 'local' },
-	dev: { variant: 'warning', label: 'dev' },
-	draft: { variant: 'muted', label: 'draft' },
-	pending: { variant: 'warning', label: 'in review' },
-	approved: { variant: 'success', label: 'approved' },
-	rejected: { variant: 'error', label: 'rejected' },
-	live: { variant: 'info', label: 'live' },
-};
-
 const HOVER_BG = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
 
 // =============================================================================
@@ -156,7 +142,7 @@ const HOVER_BG = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
 
 /** Default configuration for the pipeline Explorer panel. */
 const PIPELINE_CONFIG: ExplorerConfig = {
-	title: 'Pipelines',
+	title: 'My Pipelines',
 	extensions: ['.pipe', '.pipe.json'],
 	displayName: (name: string) => name.replace(/\.pipe(?:\.json)?$/, '') || name,
 	createPlaceholder: 'pipeline name',
@@ -205,9 +191,9 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 	// node-builder placeholder) rides along whenever the tabs render.
 	const modeMenu: ViewMenu = {
 		entries: [
-			{ id: 'pipelines', label: 'Pipelines' },
 			...(hasAppBuilder ? [{ id: 'apps', label: 'Apps' }] : []),
 			{ id: 'nodes', label: 'Nodes' },
+			{ id: 'pipelines', label: 'Pipelines' },
 		],
 	};
 
@@ -332,7 +318,6 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 				{appBuilder.apps.map((app) => {
 					const rowKey = `app:${app.id}`;
 					const active = app.id === appBuilder.activeAppId;
-					const badge = APP_BADGE[app.status] ?? APP_BADGE.local;
 					return (
 						<div
 							key={app.id}
@@ -352,8 +337,6 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 								<BxGridAlt size={16} color="var(--rr-text-secondary)" />
 							)}
 							<span style={S.rowName}>{app.name}</span>
-							<span style={S.spacer} />
-							<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>
 						</div>
 					);
 				})}

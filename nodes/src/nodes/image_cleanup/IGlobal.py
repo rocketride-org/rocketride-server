@@ -28,7 +28,7 @@ from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
-    process: Callable[[str, bytes], bytes]
+    process: Callable[[str, bytes], tuple[str, bytes]]
 
     def beginGlobal(self) -> None:
         # Get the confif info

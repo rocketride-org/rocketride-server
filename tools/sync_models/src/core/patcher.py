@@ -103,6 +103,7 @@ _PROFILE_FIELD_ORDER = [
     'modelOutputTokens',
     '_src_modelOutputTokens',
     'deprecated',
+    'deprecatedBy',
     'deprecatedSince',
     'migration',
 ]

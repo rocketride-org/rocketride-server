@@ -9,7 +9,7 @@
 	"prefix": "agent",
 	"description": ["Managed CrewAI sub-agent. Must be wired into a CrewAI Manager via the crewai channel.", "Cannot be invoked directly, has no questions lane."],
 	"icon": "crewai.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/agent_crewai/crewai_subagent",
 	"invoke": {
 		"llm": {
 			"description": "LLM used by this sub-agent when delegated to",

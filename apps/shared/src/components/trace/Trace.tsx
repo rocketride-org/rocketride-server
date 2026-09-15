@@ -30,7 +30,7 @@ export interface TraceProps {
 }
 
 /** One request's list-row summary, folded from its rows. */
-interface TraceRequestSummary {
+export interface TraceRequestSummary {
 	docId: number;
 	/** Begin-event continuum seq — the permanent identity getTrace resolves. */
 	beginSeq: number | null;
@@ -205,7 +205,7 @@ function buildRequestSummaries(rows: TraceRow[]): TraceRequestSummary[] {
 // SUB-COMPONENT: Request row
 // =============================================================================
 
-const RequestRow: React.FC<{ summary: TraceRequestSummary; onOpen?: (() => void) | undefined }> = ({ summary, onOpen }) => {
+export const RequestRow: React.FC<{ summary: TraceRequestSummary; onOpen?: (() => void) | undefined }> = ({ summary, onOpen }) => {
 	const [hovered, setHovered] = useState(false);
 
 	const timeDisplay = summary.hasError ? <span style={S.timeError}>ERROR</span> : <span style={S.timeCol}>{formatElapsed(summary.totalElapsed)}</span>;

@@ -448,6 +448,140 @@ def test_forward_enriched_image_emits_enriched_triplet():
 
 
 # ---------------------------------------------------------------------------
+# audio / video lane helpers: audio_begin_payload / video_begin_payload /
+# forward_enriched_audio / forward_enriched_video
+#
+# These lanes had no producer helper, so their producers sent a bare BEGIN and
+# the engine filled `size` in from the source object — the wrong number for a
+# synthesized stream. Two differences from the image lane are deliberate and
+# asserted below: `size` is optional (a streaming producer cannot know it), and
+# `origin` defaults to 'generated' rather than 'extracted'.
+# ---------------------------------------------------------------------------
+
+
+def _audio_descriptor(**overrides):
+    """A parsed audio descriptor carrying a nested video `source`."""
+    video = {'source_mime': 'video/mp4', 'duration': 74.05}
+    fields = dict(
+        objectId='v1',
+        parent='/inbox/BBC.mp4',
+        permissionId=0,
+        signature='s',
+        nodeId='n',
+        origin='extracted',
+        source_mime='audio/wav',
+        size=8820,
+        stream_index=0,
+        name='BBC.track0.wav',
+        source=video,
+    )
+    fields.update(overrides)
+    return build_stream_descriptor(None, 'audio', **fields)
+
+
+def test_audio_begin_payload_shape_and_nesting():
+    """audio_begin_payload assembles {origin,size,detail,source,name} and nests a prior chain."""
+    payload = json.loads(
+        D.audio_begin_payload(
+            _audio_descriptor(),
+            size=4410,
+            duration=0.5,
+            sample_rate=24000,
+            channels=1,
+            format='wav',
+            name='speech.wav',
+        ).decode('utf-8')
+    )
+    assert payload['origin'] == 'generated'  # these producers synthesize, they do not extract
+    assert payload['size'] == 4410
+    assert payload['duration'] == 0.5
+    assert payload['sample_rate'] == 24000 and payload['channels'] == 1
+    assert payload['format'] == 'wav'
+    assert payload['name'] == 'speech.wav'
+    assert payload['source']['source_mime'] == 'audio/wav'  # the audio layer
+    assert payload['source']['source'] == {'source_mime': 'video/mp4', 'duration': 74.05}  # video nested
+
+
+def test_video_begin_payload_shape_and_nesting():
+    """video_begin_payload does the same with the video-side detail keys."""
+    payload = json.loads(
+        D.video_begin_payload(
+            _video_descriptor(), size=98765, duration=12.5, fps=30, width=1280, height=720, name='out.mp4'
+        ).decode('utf-8')
+    )
+    assert payload['origin'] == 'generated'
+    assert payload['size'] == 98765
+    assert payload['duration'] == 12.5 and payload['fps'] == 30
+    assert payload['width'] == 1280 and payload['height'] == 720
+    assert payload['name'] == 'out.mp4'
+    assert payload['source']['source_mime'] == 'video/mp4'
+
+
+def test_media_begin_payloads_omit_what_they_were_not_told():
+    """`size` is optional here: a producer streaming its bytes cannot know the total.
+
+    Omitting the key leaves the engine's own fallback in place, which is honest;
+    inventing a number would make every consumer read the stream as truncated.
+    """
+    assert json.loads(D.audio_begin_payload(None).decode('utf-8')) == {'origin': 'generated'}
+    assert json.loads(D.video_begin_payload(None).decode('utf-8')) == {'origin': 'generated'}
+    assert json.loads(D.audio_begin_payload(None, size=10, origin='ingested').decode('utf-8')) == {
+        'origin': 'ingested',
+        'size': 10,
+    }
+
+
+class _CaptureMediaInstance:
+    """Minimal stand-in for a node's ``self.instance``: records writeAudio/writeVideo calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    def writeAudio(self, action, mime, buffer=None):  # noqa: N802 (engine method name)
+        self.calls.append((action, mime, buffer))
+
+    def writeVideo(self, action, mime, buffer=None):  # noqa: N802 (engine method name)
+        self.calls.append((action, mime, buffer))
+
+
+def test_forward_enriched_audio_emits_enriched_triplet():
+    """forward_enriched_audio emits BEGIN(enriched)/WRITE/END and declares the real size."""
+    from rocketlib import AVI_ACTION
+
+    inst = _CaptureMediaInstance()
+    clip = b'RIFF' + b'\x00' * 60
+    D.forward_enriched_audio(inst, _audio_descriptor(), 'audio/wav', clip, format='wav', name='speech.wav')
+
+    assert len(inst.calls) == 3
+    (a0, m0, b0), (a1, m1, b1), (a2, m2, _b2) = inst.calls
+    assert (a0, a1, a2) == (AVI_ACTION.BEGIN, AVI_ACTION.WRITE, AVI_ACTION.END)
+    assert m0 == m1 == m2 == 'audio/wav'
+    assert b1 == clip  # WRITE carries the exact bytes
+    payload = json.loads(b0.decode('utf-8'))
+    assert payload['size'] == len(clip)  # the clip's own length, not the source object's
+    assert payload['format'] == 'wav'
+    assert payload['name'] == 'speech.wav'
+    assert payload['source']['source'] == {'source_mime': 'video/mp4', 'duration': 74.05}
+
+
+def test_forward_enriched_video_emits_enriched_triplet():
+    """The video counterpart, declaring the encoded video's own byte length."""
+    from rocketlib import AVI_ACTION
+
+    inst = _CaptureMediaInstance()
+    movie = b'\x00\x00\x00\x18ftypmp42' + b'\x00' * 40
+    D.forward_enriched_video(inst, None, 'video/mp4', movie, fps=30, duration=2.0, name='out.mp4')
+
+    assert len(inst.calls) == 3
+    (a0, m0, b0), (_a1, _m1, b1), (a2, _m2, _b2) = inst.calls
+    assert (a0, a2) == (AVI_ACTION.BEGIN, AVI_ACTION.END)
+    assert m0 == 'video/mp4'
+    assert b1 == movie
+    payload = json.loads(b0.decode('utf-8'))
+    assert payload == {'origin': 'generated', 'size': len(movie), 'duration': 2.0, 'fps': 30, 'name': 'out.mp4'}
+
+
+# ---------------------------------------------------------------------------
 # guardrail: fixture <-> module constants stay in sync
 # ---------------------------------------------------------------------------
 

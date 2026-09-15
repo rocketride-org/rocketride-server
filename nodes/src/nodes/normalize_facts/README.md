@@ -44,7 +44,36 @@ this experimental version — `value_normalized` comes back `null` while the raw
 is preserved untouched. Handling them (tagging the unit the way scale is tagged) is
 planned as a follow-up.
 
-## Fact-record convention
+## Lanes
+
+| Lane in | Lane out | Description |
+|---|---|---|
+| `answers` | `answers` | Normalizes each fact object and de-duplicates the batch; non-fact records pass through unchanged. |
+
+## Configuration
+
+Configuration is mostly optional: the default profile normalizes with plain-text
+labels (`label`/`value`) and auto-detected currency and decimal format. The
+fields below only need attention for a non-default field naming convention,
+specialized label→metric mappings, or a non-US number format.
+
+### Fields
+
+| Field              | Type    | Default  | Description                                                                                       |
+|--------------------|---------|----------|---------------------------------------------------------------------------------------------------|
+| `label_field`      | string  | `label`  | The fact field holding the free-text metric label.                                                |
+| `value_field`      | string  | `value`  | The fact field holding the raw numeric value to parse.                                             |
+| `default_currency` | string  | `""`     | 3-letter ISO code to tag when none is detected (upper-cased; anything else is warned about and ignored). Empty leaves facts untagged. |
+| `decimal_format`   | string  | `auto`   | `auto`/`us`: comma = thousands, dot = decimal. `eu`: dot = thousands, comma = decimal.            |
+| `label_to_metric`  | object  | `{}`     | `{synonym: metric}` map merged over the built-in mapping (user entries win, case-insensitive).    |
+
+The node never fails the run on misconfiguration: an invalid `label_to_metric`,
+`decimal_format` or `default_currency` is warned about and ignored, and facts still
+pass through normalized as far as possible.
+
+## Notes
+
+### Fact-record convention
 
 A "fact" is a JSON object with a free-text label under `label_field` (default
 `label`) and a raw value under `value_field` (default `value`). An answer payload may
@@ -97,29 +126,7 @@ by the scale factor. Scaled facts must be explicitly de-scaled before conversion
 If the fact already carries a `provenance` list, the normalization entry is
 appended so upstream provenance is preserved.
 
-## Configuration
-
-### Lanes
-
-| Lane      | In → Out              | Behaviour                                                                                             |
-|-----------|-----------------------|------------------------------------------------------------------------------------------------------|
-| `answers` | `answers` → `answers` | Normalizes each fact object and de-duplicates the batch; non-fact records pass through unchanged. |
-
-### Fields
-
-| Field              | Type    | Default  | Description                                                                                       |
-|--------------------|---------|----------|---------------------------------------------------------------------------------------------------|
-| `label_field`      | string  | `label`  | The fact field holding the free-text metric label.                                                |
-| `value_field`      | string  | `value`  | The fact field holding the raw numeric value to parse.                                             |
-| `default_currency` | string  | `""`     | 3-letter ISO code to tag when none is detected (upper-cased; anything else is warned about and ignored). Empty leaves facts untagged. |
-| `decimal_format`   | string  | `auto`   | `auto`/`us`: comma = thousands, dot = decimal. `eu`: dot = thousands, comma = decimal.            |
-| `label_to_metric`  | object  | `{}`     | `{synonym: metric}` map merged over the built-in mapping (user entries win, case-insensitive).    |
-
-The node never fails the run on misconfiguration: an invalid `label_to_metric`,
-`decimal_format` or `default_currency` is warned about and ignored, and facts still
-pass through normalized as far as possible.
-
-## Pipeline position
+### Pipeline position
 
 ```text
 datalab_parse → extract_facts → normalize_facts → currency_convert_explicit → schema_validate → …

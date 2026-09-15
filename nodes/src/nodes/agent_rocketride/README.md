@@ -1,184 +1,74 @@
 # agent_rocketride
 
-RocketRide's native wave-planning agent ("RocketRide Wave"), an experimental agent node that plans each step as a wave of parallel tool calls and uses keyed memory to stay token-efficient.
+A RocketRide agent node that plans batches of tool calls as parallel waves and keeps their full results in keyed memory. Pick it when a task benefits from several independent tool calls per planning step and from reusing large intermediate results without repeatedly placing them in the LLM context.
 
 ## What it does
 
-Runs an iterative planning loop built directly on the RocketRide architecture: there is
-no third-party agent framework underneath. Each iteration the LLM plans a batch of tool
-calls, all tools in the batch run in parallel, results are stored in keyed memory, and
-the loop repeats until the LLM signals `done` or `max_waves` is reached.
+Receives questions on the `questions` lane, uses the required LLM, tool, and memory connections to plan a wave of calls, runs that wave, and eventually writes a final answer to `answers`. Each regular tool result is stored in memory while the next planning prompt receives only a structural summary; the agent can retrieve selected values later or substitute stored data into its final answer. Unlike an agent that takes a single tool action per turn, this node can execute one planned batch concurrently, with up to eight calls in a wave.
 
-Token efficiency comes from a two-level memory model: the planning prompt only ever sees
-structural summaries of tool results (field names, array lengths, sample values). Raw data
-stays in the memory store and is pulled on demand via the built-in `memory.peek` tool
-(JMESPath extraction, implemented with the **jmespath** library) or embedded into the
-final answer via `{{memory.ref:...}}` template tags resolved at render time.
-
-The node has `classType` `["agent", "tool"]`: besides answering questions on its own
-lane, it exposes a `run_agent` tool so parent agents can invoke it for hierarchical
-agent orchestration.
-
-This node is **experimental**.
-
----
-
-## Configuration
-
-
-
-| Field | Type | Description |
-|---|---|---|
-| `agent_description` | string | Default empty. What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly. |
-| `instructions` | array | Additional instructions to guide the agent's planning and responses. |
-| `max_waves` | integer | Default 10. Maximum number of planning iterations before the synthesis fallback fires. |
-| `profile` | string | Default "default".  |
-
-
-
-A single `default` profile exposes all three fields.
-
----
+It can also act as a specialist for a parent agent through its registered `<nodeId>.run_agent` function. The service is marked experimental in its metadata.
 
 ## Connections
 
-### Invoke channels (control-plane)
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used for planning and final-answer synthesis. |
+| `tool` | no | Tools the agent may call through the control plane. |
+| `memory` | yes | Keyed memory service used to store, retrieve, and clear tool results. |
 
-| Channel  | Required     | Description                                       |
-|----------|--------------|---------------------------------------------------|
-| `llm`    | yes (max 1)  | LLM used by the agent for planning and synthesis  |
-| `tool`   | no           | Tools available to the agent via control-plane invoke |
-| `memory` | yes (max 1)  | Keyed memory store for the agent                  |
+The node needs both an LLM and a memory connection to run. A `tool` connection is optional, but without one the agent has no connected external tools to call.
 
-The `memory` channel is required. Connect a memory node before running.
+## Lanes
 
-### Lanes
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `questions` | `answers` | Run the agent for an incoming question and emit its final answer. |
 
-| Lane        | Direction | Description                                   |
-|-------------|-----------|-----------------------------------------------|
-| `questions` | in        | Incoming questions that start an agent run    |
-| `answers`   | out       | Final answer emitted when the run completes   |
+## As a tool
 
----
+The node registers one function under its node-id prefix: `<nodeId>.run_agent`.
 
-## Agent-callable tools
+| Function | Description |
+| --- | --- |
+| `<nodeId>.run_agent` | Run this Wave agent for a query and return its result to the calling agent. |
 
-### `run_agent`
+The input must be an object with a required, non-empty string `query`; it may also contain a `context` object. Invalid input raises a `ValueError`. When `context` is supplied, the node serializes it into the agent question as a `RocketRide.agent.tool_context.v1` context entry; serialization errors are ignored. The returned value is the agent result, whose advertised shape is `{content, meta, stack}`. The configured **Agent description**, when non-empty, is prepended to the registered function description that a parent agent sees.
 
-Exposes this node as a tool to parent agents (addressed as `<nodeId>.run_agent`).
+## Configuration
 
-| Field     | Type               | Description                                           |
-|-----------|--------------------|-------------------------------------------------------|
-| `query`   | string (required)  | The question for the agent. Must be a non-empty string. |
-| `context` | object (optional)  | Extra context passed to the agent as a JSON context block. |
+The sole `default` profile supplies the baseline settings. Most uses need an LLM and memory connected first; then use the fields below to describe the specialist, guide its planning, bound the number of planning waves, and decide whether an answer must include a real tool invocation.
 
-Output: `{content, meta, stack}`. When invoked as a tool, the result is returned to the
-caller instead of being emitted on the `answers` lane.
+### Agent description
 
-### `memory.peek`
+This text is included in the registered `run_agent` description only when the node is used as a tool. Set it to a concise account of the specialist's purpose and capabilities when a parent agent must choose whether to delegate to it. Leave it blank when the node is only driven through its `questions` lane or when no additional delegation cue is useful.
 
-Built-in tool executed locally inside the executor (not routed through the tool pipeline).
-Lets the LLM extract specific values from memory on demand.
+### Instructions
 
-| Field    | Type               | Description                                                                 |
-|----------|--------------------|-----------------------------------------------------------------------------|
-| `key`    | string (required)  | Memory key to read from (e.g. `wave-0.r1`).                                 |
-| `path`   | string (optional)  | JMESPath expression to extract a specific field or slice (e.g. `rows[0:5].city`). Arrays are capped at 50 items per call. |
-| `offset` | integer (optional) | Character offset for chunk reading (default `0`). Only when `path` is omitted. |
-| `length` | integer (optional) | Characters to return for chunk reading (default `8000`). Only when `path` is omitted. |
+Instructions are inserted as separate planning-prompt instruction blocks on every wave. Use them for durable task rules or response guidance that should apply to all iterations; they accompany the system's built-in tool, memory, response-format, and behavioural instructions. Keep them focused because they are part of every LLM planning request.
 
-Peek results are not stored back into memory. The LLM should capture extracted values in
-`scratch` and then remove the peek result key in the same response.
+### Max Waves
 
----
+This integer is the maximum number of planning iterations before the node switches to a best-effort synthesis pass. The default is `10`, with allowed values from `1` to `50`. Lower it when predictable latency or tool usage matters more than continued exploration; raise it only for tasks that genuinely need several plan-and-execute rounds. A malformed empty plan also ends the loop early and uses synthesis rather than consuming additional waves.
 
-## How the wave loop works
+### Require tool call
 
-1. **Plan**: one LLM call per wave. The prompt contains all connected tool descriptors
-   (one compact JSON line each, plus the `memory.peek` descriptor), the operator's
-   `instructions`, memory-usage rules, persistent scratch notes, and structural summaries
-   of all prior results. The LLM responds with either
-   `{"thought", "scratch", "remove", "tool_calls": [...]}` or
-   `{"thought", "scratch", "remove", "done": true, "answer": "..."}`.
-2. **Execute**: all tool calls in the batch run concurrently (max 8 threads, 120 s
-   timeout each). Each result is stored in memory under a key like `wave-0.r0` and only
-   a structural summary is kept in the wave history. `{{memory.ref:...}}` tags inside
-   tool arguments are resolved before invocation, so the LLM can compose tool inputs
-   from previously stored results.
-3. **Prune**: memory keys listed in the LLM's `remove` field are cleared from the store
-   and stripped from wave history, keeping the planning prompt lean on long-running tasks.
-   Tool errors are returned to the LLM as context rather than aborting the run, so it can
-   recover or change approach.
-4. **Repeat** until `done: true` or `max_waves` is hit. On `done`, any
-   `{{memory.ref:...}}` references in the answer are resolved before delivery. If the
-   wave limit is reached without `done`, a synthesis fallback asks the LLM to produce a
-   best-effort answer from all gathered result summaries. An empty plan (no `tool_calls`,
-   no `done`) also short-circuits to synthesis instead of looping.
+Off by default, this guard requires the run to invoke at least one real tool before returning an answer. Enable it for workflows where an answer based only on model reasoning is unacceptable. Internal reads such as `memory.peek` do not use the connected tool pipeline and therefore should not be treated as satisfying this guard; leave the guard off for questions the agent may answer without external tool use.
 
-Progress is surfaced to the UI over the `thinking` SSE lane: per-wave planning status,
-the LLM's one-sentence `thought`, which tools are running, and step completion.
+## Notes
 
----
+### Wave execution and failure handling
 
-## Memory system
+The LLM returns either a final answer or a list of `{tool, args}` calls. Regular calls in that list run concurrently, capped at eight worker threads. A tool failure becomes an error result for the next planning step rather than aborting the whole run. If the wave limit is reached, or a response contains neither `done` nor any tool calls, the node makes a final LLM synthesis request from the accumulated result summaries.
 
-The agent uses a two-level memory model to stay token-efficient:
+The executor defines a 120-second per-call timeout constant, but its submitted futures are not awaited with that timeout in this implementation. Do not rely on that constant to terminate a slow tool call.
 
-- **Structural summaries**: always visible in the planning prompt as "Previous tool
-  results". Show data shape (field names, array lengths, first rows, truncated string
-  previews with char counts) without loading raw values into context.
-- **`memory.peek`**: built-in tool the LLM calls on demand to extract specific values via
-  JMESPath (e.g. `rows[0:5].city`). Arrays are capped at 50 items per call; large raw
-  values can be paged as text with `offset`/`length` (default chunk 8000 chars, with
-  `total_chars` reported so the LLM can page). Peek results are not stored back into
-  memory.
-- **`{{memory.ref:key}}`**: embeds the stored value by key at render time. An exact
-  full-string match returns the native type (dict, list, and so on); inside larger strings
-  the value is substituted as text.
-- **`{{memory.ref:key:format}}`**: renders bulk data in a specific format without ever
-  loading it into LLM context.
-- **`{{memory.ref:key:format:path}}`**: extracts a nested JMESPath path from the stored
-  value before formatting (e.g. `rows[0:20]`). The path is the last segment, so it may
-  itself contain colons (slice notation). All variants are resolved by the executor at
-  render time, in tool arguments and in the final answer.
+### Memory references
 
-The LLM also maintains a **scratch** field: persistent working notes (memory keys,
-extracted values, intermediate calculations) that carry forward across waves. When the
-LLM is done with a result key it signals `remove: ["wave-0.r0"]` to evict it.
+Results are stored under keys such as `wave-0.r0`, and only their structure is carried forward in the planning prompt. The internal `memory.peek` utility can read a key, apply a JMESPath path, or page through serialized data; JMESPath array previews are capped at 50 items and raw reads default to 8,000 characters. Final answers and later tool arguments may use `{{memory.ref:key}}`, optionally followed by a format and JMESPath path. Built-in formats are `markdown_table`, `html_table`, `csv`, `json`, and `text`; an unrecognized format asks the LLM to render the value instead.
 
----
+## Upstream docs
 
-## Formats
-
-Built-in formatters for `{{memory.ref:key:format}}` (no LLM call):
-
-| Format           | Output                                                    |
-|------------------|-----------------------------------------------------------|
-| `markdown_table` | Markdown table with header and separator rows             |
-| `html_table`     | HTML `<table>` with `<thead>`/`<tbody>`, values escaped   |
-| `csv`            | CSV with header row (proper quoting via Python `csv` module) |
-| `json`           | Pretty-printed JSON                                       |
-| `text`           | Plain-text `key: value` blocks per row                    |
-
-Tabular formatters accept several input shapes: a bare list of dicts,
-`{"rows": [...]}` (standard database-driver output), a dict with a single
-list-of-dicts value, or a single dict treated as a one-row table. Any unknown format
-string (e.g. `"bullet list"`) falls back to a secondary LLM call that renders the data
-in the requested style.
-
----
-
-## Fabrication guard
-
-Smaller or weaker planning models occasionally **narrate** a multi-step tool chain in
-prose instead of actually calling the tools, producing a plausible-looking but ungrounded
-answer. The optional **Require tool call** (`require_tool_call`) config field guards against
-this: when enabled, any run that produces an answer without invoking at least one tool fails
-with a `RocketRide.agent.guard.v1` error instead of delivering the ungrounded text. It is off by
-default; enable it for determinism-critical pipelines. The guard counts real tool invocations
-only — internal/local reads (for example the wave agent’s `memory.peek`) do not satisfy it.
-
----
+- [RocketRide documentation](https://docs.rocketride.org)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

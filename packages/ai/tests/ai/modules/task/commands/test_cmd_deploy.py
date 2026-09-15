@@ -35,7 +35,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import ai.modules.task.commands.cmd_deploy as cmd_mod
+import ai.modules.task.commands.cmd_pipe as pipe_mod
 from ai.modules.task.commands.cmd_deploy import DeployCommands
+from ai.modules.task.commands.cmd_pipe import DeployPipeCommands
 from ai.account.models import resolve_team_permissions
 
 
@@ -44,13 +46,13 @@ from ai.account.models import resolve_team_permissions
 # ============================================================================
 
 
-def _account_info(*, teams=None, default_team='team-1', user_id='user-1'):
+def _account_info(*, teams=None, dev_team='team-1', user_id='user-1'):
     """AccountInfo-shaped stub with an organization and teams."""
     return SimpleNamespace(
         userId=user_id,
         displayName='Rod C',
         email='rod@example.com',
-        defaultTeam=default_team,
+        devTeam=dev_team,
         organization={
             'id': 'org-1',
             'name': 'Acme',
@@ -63,10 +65,19 @@ def _account_info(*, teams=None, default_team='team-1', user_id='user-1'):
     )
 
 
+class _DeployConn(DeployCommands, DeployPipeCommands):
+    """Both deploy mixins on one connection, exactly as TaskConn composes them.
+
+    Tests drive the generic rail door (rrext_deploy add/reads) and pipe control
+    (rrext_deploy_pipe deploy/schedule/run/...) on a single connection.
+    """
+
+
 def _make_conn(account_info, scheduler=None):
-    """A DeployCommands instance with __init__ bypassed, real permission math."""
-    conn = DeployCommands.__new__(DeployCommands)
+    """A conn with both deploy mixins, __init__ bypassed, real permission math."""
+    conn = _DeployConn.__new__(_DeployConn)
     DeployCommands.__init__(conn, 1, MagicMock(), MagicMock())
+    DeployPipeCommands.__init__(conn, 1, MagicMock(), MagicMock())
     conn._account_info = account_info
     conn.build_response = MagicMock(side_effect=lambda req, body=None: {'type': 'response', 'body': body})
     conn.debug_message = MagicMock()
@@ -83,10 +94,11 @@ def _make_conn(account_info, scheduler=None):
     # satisfy the chain on the stub server instead of mutating the class.
     sched = scheduler or MagicMock()
     if scheduler is None:
-        # The manual-run overlap guard defaults OPEN (a bare MagicMock would
-        # return a truthy mock and refuse every run); tests exercising the
-        # refusal flip it to True themselves.
-        sched.is_run_active.return_value = False
+        # The manual-run overlap guard defaults OPEN: try_reserve_run returns
+        # True (slot claimed, no live run) so a bare MagicMock's truthy return
+        # doesn't accidentally reserve-then-refuse. Tests exercising the
+        # refusal flip it to False themselves.
+        sched.try_reserve_run.return_value = True
     server = MagicMock()
     # broadcast_server_event is AWAITED by the deploy-change notifier; a
     # plain MagicMock attribute returns a non-awaitable, the await raises,
@@ -102,7 +114,14 @@ def _make_conn(account_info, scheduler=None):
 @pytest.fixture
 def account_stub(monkeypatch):
     """Stub the account module the handlers call."""
-    dep = {'teamId': 'team-1', 'projectId': 'proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}}
+    dep = {
+        'teamId': 'team-1',
+        'projectId': 'proj-1',
+        'state': 'enabled',
+        'version': 1,
+        'schedules': {},
+        'billingTeamId': 'team-1',
+    }
     stub = SimpleNamespace(
         deployments_publish=AsyncMock(return_value={'version': 3, 'sha256': 'abc'}),
         deployments_deploy=AsyncMock(return_value=dep),
@@ -124,7 +143,10 @@ def account_stub(monkeypatch):
         ),
         audit=AsyncMock(),
     )
+    # Both command mixins import `account` independently — patch each module's
+    # binding so pipe handlers (cmd_pipe) hit the stub too.
     monkeypatch.setattr(cmd_mod, 'account', stub)
+    monkeypatch.setattr(pipe_mod, 'account', stub)
     return stub
 
 
@@ -140,7 +162,7 @@ class TestPublish:
     @pytest.mark.asyncio
     async def test_publish_calls_registry_with_org_and_actor(self, account_stub):
         conn = _make_conn(_account_info())
-        resp = await conn._deploy_publish({}, {'pipeline': PIPE, 'comment': 'note'})
+        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'comment': 'note'})
 
         args = account_stub.deployments_publish.await_args.args
         assert args[0] == 'org-1' and args[1] == 'proj-1'
@@ -153,13 +175,13 @@ class TestPublish:
     async def test_publish_denied_without_control_anywhere(self, account_stub):
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
         with pytest.raises(PermissionError):
-            await conn._deploy_publish({}, {'pipeline': PIPE})
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE})
         account_stub.deployments_publish.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_publish_and_deploy_in_one_step(self, account_stub):
         conn = _make_conn(_account_info())
-        resp = await conn._deploy_publish({}, {'pipeline': PIPE, 'deployTo': 'team-1'})
+        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': 'team-1'})
         account_stub.deployments_deploy.assert_awaited_once()
         assert resp['body']['deployment']['teamId'] == 'team-1'
         conn._test_scheduler.sync.assert_called_once()
@@ -168,7 +190,7 @@ class TestPublish:
     async def test_publish_deploy_to_foreign_team_denied(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(PermissionError):
-            await conn._deploy_publish({}, {'pipeline': PIPE, 'deployTo': 'team-foreign'})
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': 'team-foreign'})
         account_stub.deployments_deploy.assert_not_awaited()
 
 
@@ -183,7 +205,12 @@ class TestDeploy:
         conn = _make_conn(_account_info())
         await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': 'team-1'})
         account_stub.deployments_deploy.assert_awaited_once_with(
-            'org-1', 'team-1', 'proj-1', 3, {'userId': 'user-1', 'display': 'Rod C', 'email': 'rod@example.com'}
+            'org-1',
+            'team-1',
+            'proj-1',
+            3,
+            {'userId': 'user-1', 'display': 'Rod C', 'email': 'rod@example.com'},
+            'team-1',
         )
         conn._test_scheduler.sync.assert_called_once()
 
@@ -225,23 +252,58 @@ class TestDeploy:
 
 
 class TestReads:
-    @pytest.mark.asyncio
-    async def test_list_aggregates_monitor_teams_when_no_team_given(self, account_stub):
-        teams = [
-            {'id': 'team-1', 'name': 'A', 'permissions': ['task.monitor']},
-            {'id': 'team-2', 'name': 'B', 'permissions': ['task.monitor']},
-            {'id': 'team-3', 'name': 'C', 'permissions': []},
-        ]
-        conn = _make_conn(_account_info(teams=teams))
-        await conn._deploy_list({}, {})
-        called_teams = [c.args[1] for c in account_stub.deployments_list.await_args_list]
-        assert called_teams == ['team-1', 'team-2']  # team-3 lacks monitor
+    # The org-wide backend snapshot the visibility tests slice: a member
+    # team, a foreign team, the caller's personal space, another user's.
+    _ORG_ROWS = [
+        {'teamId': 'team-1', 'projectId': 'proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
+        {'teamId': 'team-x', 'projectId': 'proj-2', 'state': 'enabled', 'version': 1, 'schedules': {}},
+        {'teamId': 'user~user-1', 'projectId': 'proj-3', 'state': 'enabled', 'version': 1, 'schedules': {}},
+        {'teamId': 'user~other', 'projectId': 'proj-4', 'state': 'enabled', 'version': 1, 'schedules': {}},
+    ]
 
     @pytest.mark.asyncio
-    async def test_list_specific_team_requires_monitor_on_it(self, account_stub):
+    async def test_list_filters_to_member_teams_and_own_personal_space(self, account_stub):
+        # Visibility model: membership alone grants sight — the task.*
+        # permission strings are irrelevant to reads. One org-wide backend
+        # query; the command layer slices out foreign teams and other
+        # users' personal spaces.
+        account_stub.deployments_list.return_value = list(self._ORG_ROWS)
+        teams = [{'id': 'team-1', 'name': 'A', 'permissions': []}]
+        conn = _make_conn(_account_info(teams=teams))
+        result = await conn._deploy_list({}, {})
+        assert account_stub.deployments_list.await_args.args == ('org-1', None)
+        assert [r['teamId'] for r in result['body']['rows']] == ['team-1', 'user~user-1']
+
+    @pytest.mark.asyncio
+    async def test_list_org_admin_sees_everything(self, account_stub):
+        # An org admin sees anything deployed anywhere — every team and
+        # every user's personal space.
+        account_stub.deployments_list.return_value = list(self._ORG_ROWS)
+        conn = _make_conn(_account_info(teams=[]))
+        conn._account_info.organization['permissions'] = ['org.admin']
+        result = await conn._deploy_list({}, {})
+        assert len(result['body']['rows']) == len(self._ORG_ROWS)
+
+    @pytest.mark.asyncio
+    async def test_list_foreign_team_denied_for_non_admin(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(PermissionError):
             await conn._deploy_list({}, {'teamId': 'team-x'})
+        # ...but an org admin may address any team in the org.
+        admin = _make_conn(_account_info())
+        admin._account_info.organization['permissions'] = ['org.admin']
+        await admin._deploy_list({}, {'teamId': 'team-x'})
+        assert account_stub.deployments_list.await_args.args == ('org-1', 'team-x')
+
+    @pytest.mark.asyncio
+    async def test_list_other_users_personal_space_is_admin_only(self, account_stub):
+        conn = _make_conn(_account_info())
+        with pytest.raises(PermissionError):
+            await conn._deploy_list({}, {'teamId': 'user~other'})
+        admin = _make_conn(_account_info())
+        admin._account_info.organization['permissions'] = ['org.admin']
+        await admin._deploy_list({}, {'teamId': 'user~other'})
+        assert account_stub.deployments_list.await_args.args == ('org-1', 'user~other')
 
     @pytest.mark.asyncio
     async def test_get_missing_deployment_is_a_clean_error(self, account_stub):
@@ -251,9 +313,14 @@ class TestReads:
             await conn._deploy_get({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
 
     @pytest.mark.asyncio
-    async def test_versions_requires_monitor_somewhere(self, account_stub):
+    async def test_versions_needs_org_membership_only(self, account_stub):
+        # Registry rail reads carry no team-permission gate: any org user
+        # can see what is deployed. Only a caller with NO org is refused.
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
-        with pytest.raises(PermissionError):
+        result = await conn._deploy_versions({}, {'projectId': 'proj-1'})
+        assert result['body']['rows'] == [{'version': 3}]
+        conn._account_info.organization = None
+        with pytest.raises(PermissionError, match='organisation membership'):
             await conn._deploy_versions({}, {'projectId': 'proj-1'})
 
     @pytest.mark.asyncio
@@ -262,7 +329,7 @@ class TestReads:
         # nameless publish would show as a GUID forever.
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='pipeline.name'):
-            await conn._deploy_publish({}, {'pipeline': {'project_id': 'proj-1', 'components': []}})
+            await conn._deploy_add_pipe({}, {'pipeline': {'project_id': 'proj-1', 'components': []}})
         account_stub.deployments_publish.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -275,7 +342,17 @@ class TestReads:
         dispatched = {}
 
         async def fake_dispatch(
-            server, pipeline, *, org_id, team_id, trigger, ttl=None, trace_level=None, debug_out=False
+            server,
+            pipeline,
+            *,
+            org_id,
+            team_id,
+            trigger,
+            ttl=None,
+            trace_level=None,
+            debug_out=False,
+            owner_kind='team',
+            owner_user_id='',
         ):
             dispatched.update(
                 pipeline=pipeline,
@@ -285,6 +362,8 @@ class TestReads:
                 ttl=ttl,
                 trace_level=trace_level,
                 debug_out=debug_out,
+                owner_kind=owner_kind,
+                owner_user_id=owner_user_id,
             )
             return 'tk_manual'
 
@@ -327,7 +406,8 @@ class TestReads:
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
         conn = _make_conn(_account_info())
-        conn._test_scheduler.is_run_active.return_value = True
+        # A live run holds the slot: the atomic reservation is refused.
+        conn._test_scheduler.try_reserve_run.return_value = False
         with pytest.raises(ValueError, match='already active'):
             await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': 'team-1'})
 
@@ -357,11 +437,18 @@ class TestReads:
         assert account_stub.deployments_artifact.await_args.args == ('org-1', 'proj-1', 3)
 
     @pytest.mark.asyncio
-    async def test_artifact_requires_monitor_and_integer_version(self, account_stub):
-        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
+    async def test_artifact_needs_task_monitor_and_integer_version(self, account_stub):
+        # The artifact BODY is the full pipeline JSON, so reading it requires
+        # task.monitor on a team (the gate develop shipped), not bare org
+        # membership — a member with no team grant is refused.
+        denied = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
         with pytest.raises(PermissionError):
-            await conn._deploy_artifact({}, {'projectId': 'proj-1', 'version': 1})
-        conn = _make_conn(_account_info())
+            await denied._deploy_artifact({}, {'projectId': 'proj-1', 'version': 1})
+        # With the grant it reads; a non-int version is still refused, and the
+        # shape check precedes the gate (so it raises ValueError, not Permission).
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
+        result = await conn._deploy_artifact({}, {'projectId': 'proj-1', 'version': 1})
+        assert result['body']['project_id'] == 'proj-1'
         with pytest.raises(ValueError):
             await conn._deploy_artifact({}, {'projectId': 'proj-1', 'version': '1'})
 
@@ -399,6 +486,99 @@ class TestReads:
 # ============================================================================
 # state / schedules
 # ============================================================================
+
+
+class TestPersonalDeploy:
+    """The @me (personal) deploy target: owner key, dispatch identity, billing."""
+
+    @pytest.mark.asyncio
+    async def test_me_deploy_binds_the_user_audience_without_a_team_check(self, account_stub):
+        # '@me' resolves to the caller's owner key and needs NO team GRANT:
+        # the membership here carries ZERO permissions, so any permission
+        # path would raise — binding still succeeds into user~{uid}, and the
+        # publisher's dev team is STAMPED as the absolute billing team.
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
+        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': '@me', 'version': 1})
+        args = account_stub.deployments_deploy.await_args.args
+        assert args[1] == 'user~user-1'
+        assert args[5] == 'team-1'  # the pointer-time billing stamp
+
+    @pytest.mark.asyncio
+    async def test_me_deploy_refuses_without_a_valid_dev_team(self, account_stub):
+        # Billing never guesses: no dev-team membership in this org means
+        # the @me publish itself refuses — the question is answered at
+        # POINTER time, never deferred to fires.
+        conn = _make_conn(_account_info(teams=[]))
+        with pytest.raises(PermissionError, match='development team'):
+            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': '@me', 'version': 1})
+        account_stub.deployments_deploy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_team_deploy_stamps_its_own_team(self, account_stub):
+        # A team audience is unambiguous — it bills itself, stamped at
+        # pointer time so every row carries the one absolute answer.
+        conn = _make_conn(_account_info())
+        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'version': 1})
+        args = account_stub.deployments_deploy.await_args.args
+        assert args[1] == 'team-1' and args[5] == 'team-1'
+
+    @pytest.mark.asyncio
+    async def test_me_run_dispatches_user_owned_with_billing_team(self, account_stub, monkeypatch):
+        # An @me manual fire dispatches a USER-owned run: the owner rides
+        # owner_user_id, billing is READ from the pointer-time stamp (never
+        # resolved), and the overlap guard keys on the owner key.
+        dispatched = {}
+
+        async def fake_dispatch(server, pipeline, **kw):
+            dispatched.update(kw, pipeline=pipeline)
+            return 'tk_me'
+
+        monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
+        account_stub.deployments_get.return_value = {
+            'teamId': 'user~user-1',
+            'projectId': 'proj-1',
+            'state': 'enabled',
+            'version': 1,
+            'schedules': {},
+            'billingTeamId': 'team-1',
+        }
+        conn = _make_conn(_account_info(teams=[]))
+        result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@me'})
+        assert result['body'] == {'token': 'tk_me', 'version': 1}
+        assert dispatched['owner_kind'] == 'user'
+        assert dispatched['owner_user_id'] == 'user-1'
+        # Billing team is the deployment's ABSOLUTE stamp, not the target.
+        assert dispatched['team_id'] == 'team-1'
+        # Overlap guard + mark_run key on the OWNER key.
+        conn._test_scheduler.register_manual_run.assert_called_once_with('user~user-1', 'proj-1', 's1', 'tk_me')
+        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'user~user-1', 'proj-1', 's1')
+
+    @pytest.mark.asyncio
+    async def test_me_run_refuses_without_a_billing_stamp(self, account_stub, monkeypatch):
+        # A personal record with no stamp (stamped team deleted, pre-stamp
+        # row) cannot bill or resolve team secrets: refuse rather than
+        # misattribute — re-publishing @me re-stamps.
+        async def fake_dispatch(*a, **k):
+            raise AssertionError('must not dispatch')
+
+        monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
+        account_stub.deployments_get.return_value = {
+            'teamId': 'user~user-1',
+            'projectId': 'proj-1',
+            'state': 'enabled',
+            'version': 1,
+            'schedules': {},
+        }
+        conn = _make_conn(_account_info(teams=[]))
+        with pytest.raises(ValueError, match='billing'):
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@me'})
+
+    @pytest.mark.asyncio
+    async def test_me_requires_an_authenticated_user(self, account_stub):
+        # '@me' with no user identity is meaningless — uniform denial.
+        conn = _make_conn(_account_info(user_id='', teams=[]))
+        with pytest.raises(PermissionError, match='authenticated'):
+            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': '@me', 'version': 1})
 
 
 class TestStateAndSchedules:

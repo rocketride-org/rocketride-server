@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
+from rocketlib import Entry, IInstanceBase, AVI_ACTION, debug, warning
 from ai.common.schema import Doc, DocMetadata
 from ai.common.avi.descriptor import descriptor_from_payload, attach_source, attach_name
 from .IGlobal import IGlobal
@@ -60,6 +60,19 @@ class IInstance(IInstanceBase):
         self._video_data = None
         self._mime_type = None
         self._source_descriptor = None
+
+    def open(self, obj: Entry):
+        """Open a new object for processing.
+
+        Frames are numbered within the object they belong to, so the counter starts
+        again here. Instances are pooled and outlive an object, so leaving it running
+        would make both the chunk id and the derived name depend on which instance the
+        object happened to get.
+
+        Args:
+            obj (Entry): The data entry or object to process.
+        """
+        self._frame_chunk_id = 0
 
     def writeVideo(self, action: int, mimeType: str, buffer: bytes):
         """
@@ -204,8 +217,13 @@ class IInstance(IInstanceBase):
 
                     # Source provenance + per-frame name (<video-stem>.frame<N>) from
                     # the descriptor (extensionless: the doc is an embedding, not a file).
+                    #
+                    # The index is the document's ordinal, not its position in the video:
+                    # one object can carry several videos, whose positions both start at 0
+                    # and whose stems match when they share a parent. `frame_number` above
+                    # is where the true position lives.
                     attach_source(metadata, self._source_descriptor)
-                    attach_name(metadata, self._source_descriptor, index=current_frame_pos, marker='frame')
+                    attach_name(metadata, self._source_descriptor, index=self._frame_chunk_id, marker='frame')
 
                     # Create the document with the frame image and embedding.
                     doc = Doc(type='Image', page_content=frame_base64, metadata=metadata)

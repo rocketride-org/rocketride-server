@@ -50,7 +50,8 @@ import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
-import { registerAndMapApps, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote } from '../../util/appLoader';
+import { registerAndMapApps, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
+import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
 
@@ -135,6 +136,52 @@ const styles = {
 type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye' | 'waitlisted';
 
 // =============================================================================
+// ONE-SHOT RELOAD GUARD
+// =============================================================================
+
+/** sessionStorage key prefix for spent automatic-reload claims. */
+const SS_RELOAD_CLAIM_PREFIX = 'rr:reloadClaim:';
+
+/**
+ * Claims the ONE automatic reload allowed for a given (app, target) pair.
+ *
+ * An automatic reload is only worth taking when the next boot can change the
+ * outcome. The claim marker records that this exact pair already spent its
+ * reload: a second attempt means the assumption did not hold (a resolution
+ * boot rebuilds the same way, or a storage write that failed silently), so
+ * the caller must log and carry on rather than reload forever. The marker has
+ * to survive the reload, so a tab without usable storage claims nothing — an
+ * unbounded reload cannot be bounded without it.
+ *
+ * @param key - Stable identity of the reload attempt (app id + target URL).
+ * @returns True when the marker was newly written AND read back.
+ */
+function claimReload(key: string): boolean {
+	try {
+		const ssKey = `${SS_RELOAD_CLAIM_PREFIX}${key}`;
+		if (sessionStorage.getItem(ssKey) !== null) return false;
+		sessionStorage.setItem(ssKey, '1');
+		return sessionStorage.getItem(ssKey) !== null;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Releases a spent reload claim once its target is in place.
+ *
+ * The reload did its job, so the pair may claim another one later in the
+ * session (a second override switch onto the same version, say).
+ *
+ * @param key - The same identity passed to {@link claimReload}.
+ */
+function releaseReload(key: string): void {
+	try {
+		sessionStorage.removeItem(`${SS_RELOAD_CLAIM_PREFIX}${key}`);
+	} catch { /* storage unavailable — nothing was claimed */ }
+}
+
+// =============================================================================
 // SHELL COMPONENT
 // =============================================================================
 
@@ -156,7 +203,7 @@ export interface ShellProps {
  */
 const Shell: React.FC<ShellProps> = ({ config }) => {
 	const cm = ConnectionManager.getInstance();
-	const { ROCKETRIDE_URI, RR_APIKEY, RR_ZITADEL_URL, RR_ZITADEL_CLIENT_ID } = config.apiConfig;
+	const { RR_ZITADEL_URL, RR_ZITADEL_CLIENT_ID } = config.apiConfig;
 
 	// ── Session-locked app ────────────────────────────────────────────────
 	const [sessionAppId] = useState<string>(() => {
@@ -168,6 +215,41 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		}
 		return cm.getSessionAppId();
 	});
+
+	// Deep-link version pin (?appid=X&version=7): seed the session override on
+	// mount — NOT in the useState initializer above, which is impure and would
+	// fire the write twice under StrictMode. REGISTRY INTS ONLY (semver is
+	// developer-controlled display, never a wire identity); a value with any
+	// trailing non-digit (?version=7abc) is REJECTED outright rather than
+	// silently pinned to 7 by parseInt's prefix parsing. The int IS the whole
+	// identity — registration constructs the versioned URL from it directly.
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const fromUrl = params.get('appId') || params.get('appid') || '';
+		const raw = params.get('version') ?? '';
+		if (fromUrl && /^\d+$/.test(raw)) {
+			// Number(), not parseInt(): a digit string too long for a safe
+			// integer must be rejected (parseInt rounds, and overlong input
+			// reaches Infinity — which passes a bare `> 0` check).
+			const version = Number(raw);
+			if (Number.isSafeInteger(version) && version > 0) {
+				setAppVersionOverride(fromUrl, { version });
+			}
+		}
+	}, []);
+
+	// Surface a version pin dropped by the PREVIOUS document: the load
+	// failure path clears the override and reloads, so the notice has to
+	// survive that reload via sessionStorage.
+	useEffect(() => {
+		try {
+			const dropped = sessionStorage.getItem('rr:droppedOverride');
+			if (dropped) {
+				sessionStorage.removeItem('rr:droppedOverride');
+				console.warn(`[shell] pinned version ${dropped} could not be loaded — reverted to the default version`);
+			}
+		} catch { /* storage unavailable */ }
+	}, []);
 
 	// ── Derived flags ─────────────────────────────────────────────────────
 	const isSaas = (config.capabilities ?? []).includes('saas');
@@ -225,8 +307,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			return da ? { ...a, appStatus: da.appStatus, onDesktop: da.onDesktop } : a;
 		});
 
-		// Register and append apps that were NOT in the probe (e.g. permission-gated)
-		const newApps = identityApps.filter((a) => !probeIds.has(a.id) && a.entry && a.moduleId);
+		// Register and append apps that were NOT in the probe (e.g. permission-gated).
+		// Registrable = anything resolveServerEntry can produce a load URL for:
+		// the wire carries version NUMBERS since the store restructure (entry
+		// URLs exist only on dev-overlay rows), so gating on `a.entry` here
+		// would silently drop every auth-only app from the workspace map —
+		// visible tile, dead click.
+		const newApps = identityApps.filter((a) => !probeIds.has(a.id) && a.moduleId && resolveServerEntry(a) !== null);
 		if (newApps.length > 0) {
 			const registered = registerAndMapApps(newApps);
 			for (const app of registered) {
@@ -253,9 +340,12 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				authProvider.initialize({ zitadelUrl: RR_ZITADEL_URL, clientId: RR_ZITADEL_CLIENT_ID });
 			}
 
-			// Initialise the client singleton (idempotent)
+			// Initialise the client singleton (idempotent). The uri is the
+			// probe's resolved endpoints.api when the server declared one;
+			// empty falls through to window.location.origin — the page's
+			// own host IS the server on every single-host deployment.
 			cm.init({
-				uri: RR_APIKEY ? undefined : ROCKETRIDE_URI,
+				uri: config.serverUri || undefined,
 				clientName: 'Cloud Shell-UI',
 				authProvider,
 				zitadelUrl: RR_ZITADEL_URL,
@@ -335,29 +425,81 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// EVENT LISTENERS
 	// =====================================================================
 
-	// Re-register remotes whose entry URL changed and evict their cached
-	// descriptors. The apps memo above only registers apps ABSENT from the
-	// probe set — an account push that repoints an EXISTING app's entry (dev
-	// overlay upsert/expiry, a newly published version) would otherwise leave
-	// the old MF container registered and the stale descriptor cached. Runs
-	// as an effect (not in the memo) because invalidation sets state.
+	// Repoint remotes whose RESOLVED entry URL changed and evict their
+	// cached descriptors. The apps memo above only registers apps ABSENT from
+	// the probe set — an account push that changes an EXISTING app's
+	// resolution (dev overlay upsert/expiry, a repointed default version)
+	// would otherwise leave the old MF container registered and the stale
+	// descriptor cached. resolveServerEntry is the ONE resolution (dev URL,
+	// or a URL constructed from the tab override / manifest default), and
+	// the swap goes through repointRemote — which REFUSES dev-owned
+	// containers and containers that have LOADED this document (a loaded
+	// container is committed to its version; force re-registering it
+	// corrupts the shared getters). A refused loaded container simply keeps
+	// running its current code; the next boot registers the new resolution.
+	// Runs as an effect (not in the memo) because invalidation sets state.
 	useEffect(() => {
 		const identityApps = (identity?.apps ?? []) as ServerAppEntry[];
-		const changed = identityApps.filter((a) => {
-			if (!a.entry || !a.moduleId) return false;
-			// Dev-owned containers are exempt: the manifest entry ALWAYS
-			// differs from the injected dev entry, and repointing would swap
-			// the live dev bundle for the server's published one mid-session.
-			if (isDevRemote(a.moduleId)) return false;
+		for (const a of identityApps) {
+			if (!a.moduleId || isDevRemote(a.moduleId)) continue;
+			const target = resolveServerEntry(a);
+			if (!target) continue;
 			const registered = getRegisteredEntry(a.moduleId);
-			return registered !== undefined && registered !== a.entry;
-		});
-		if (changed.length === 0) return;
-		// Force re-register the MF containers at their new entry URLs, then
-		// evict descriptors so the next activation loads the new container.
-		registerAndMapApps(changed);
-		for (const a of changed) invalidateAppDescriptor(a.id);
+			if (registered === undefined || registered === target) continue;
+			// Invalidate ONLY when the repoint actually happened — evicting
+			// the descriptor of a still-old container would remount the same
+			// stale code for nothing.
+			if (repointRemote(a.moduleId, target)) {
+				invalidateAppDescriptor(a.id);
+			}
+		}
 	}, [identity?.apps]);
+
+	// Reconcile session version overrides once authenticated. The override's
+	// version number constructs its stable URL directly (versionedEntryUrl —
+	// zero server round trips; entitlement is enforced by the serve route at
+	// fetch time), and containers registered elsewhere are repointed — the
+	// same reconciliation the entry-change effect above performs for
+	// server-side resolution changes. Overrides for apps not (yet) in the
+	// manifest stay dormant; an override the serve route refuses simply 404s
+	// at load, where the load-failure path drops it.
+	useEffect(() => {
+		const overrides = getAppVersionOverrides();
+		const appIds = Object.keys(overrides);
+		if (!identity || appIds.length === 0) return;
+		for (const appId of appIds) {
+			const app = apps.find((a) => a.id === appId);
+			// Dev-owned containers keep the live build; unknown apps keep
+			// their override dormant until the app appears in the manifest.
+			if (!app || isDevRemote(app.moduleId)) continue;
+			const url = versionedEntryUrl(appId, overrides[appId].version);
+			const claimKey = `${appId}@${url}`;
+			if (getRegisteredEntry(app.moduleId) === url) {
+				// The registration already sits at the override's URL — any
+				// reload spent getting here did its job, so free the claim.
+				releaseReload(claimKey);
+				continue;
+			}
+			// repointRemote refuses a container that already loaded this
+			// document (repointing corrupts its shared getters); a full
+			// reload re-registers the override's URL at boot, before
+			// anything loads.
+			if (repointRemote(app.moduleId, url)) {
+				invalidateAppDescriptor(appId);
+			} else if (claimReload(claimKey)) {
+				// EVERY automatic reload names itself — a silent reload turns
+				// the next loop regression into an afternoon of inference.
+				console.warn(`[shell] reloading: version override for ${appId} needs ${url} but its container already loaded`);
+				window.location.reload();
+				return;
+			} else {
+				// The reload for this exact target was already spent (or cannot
+				// be recorded), so boot demonstrably does not resolve to it —
+				// reloading again would only loop. Keep the loaded container.
+				console.error(`[shell] version override for ${appId} still needs ${url} after its one reload — leaving the loaded container in place`);
+			}
+		}
+	}, [identity, apps]);
 
 	// Refresh identity on account update
 	useEffect(() => {
@@ -372,6 +514,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			}
 		});
 	}, [cm, renderPhase]);
+
+	// The user's default org changed (this tab or any other connection). The
+	// server only NOTIFIES — what to do is this client's choice. The shell's
+	// choice: reload, which re-authenticates and re-bootstraps under the
+	// user's current default org.
+	useEffect(() => {
+		return cm.on('shell:orgChanged', () => {
+			console.warn('[shell] reloading: default org changed — re-authenticating under the new org');
+			window.location.reload();
+		});
+	}, [cm]);
 
 	// Sign-in request from marketplace
 	useEffect(() => {
@@ -408,6 +561,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			const data = e.data as { type?: string; token?: string } | undefined;
 			if (data?.type === 'login' && data.token) {
 				cm.saveToken(data.token);
+				console.warn('[shell] reloading: auth popup delivered a session over rr:auth');
 				window.location.reload();
 			}
 		};

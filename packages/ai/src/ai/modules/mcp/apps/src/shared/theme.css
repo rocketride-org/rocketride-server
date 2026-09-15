@@ -1,0 +1,230 @@
+/**
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * See LICENSE file for details.
+ *
+ * Shared widget design-system. Neutrals are host-adaptive (currentcolor
+ * mixes over the host's light/dark scheme); RocketRide identity lives in
+ * the accents: Horizon Blue #41b6e6 for interaction, the logo's flame
+ * #F93822 for upload/drag "energy" moments. Palette source:
+ * github.com/rocketride-org/branding (Palette.png).
+ */
+:root {
+	color-scheme: light dark;
+	--rr-accent: #41b6e6;
+	--rr-flame: #f93822;
+	--rr-flame-soft: #ff7a52;
+	--rr-line: color-mix(in srgb, currentcolor 14%, transparent);
+	--rr-line-strong: color-mix(in srgb, currentcolor 26%, transparent);
+	--rr-surface: color-mix(in srgb, currentcolor 4%, transparent);
+	--rr-inset: color-mix(in srgb, currentcolor 7%, transparent);
+	--rr-accent-tint: color-mix(in srgb, var(--rr-accent) 16%, transparent);
+	--rr-flame-tint: color-mix(in srgb, var(--rr-flame) 12%, transparent);
+}
+
+body {
+	font:
+		13px/1.5 system-ui,
+		sans-serif;
+	margin: 12px;
+}
+
+/* --- Header ------------------------------------------------------------ */
+.rr-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 12px;
+}
+.rr-header svg {
+	width: 18px;
+	height: 18px;
+	flex: none;
+}
+.rr-header .rr-title {
+	font-size: 13px;
+	font-weight: 650;
+	letter-spacing: 0.02em;
+}
+
+/* --- Cards ------------------------------------------------------------- */
+.rr-card,
+.result-object {
+	border: 1px solid var(--rr-line);
+	border-radius: 10px;
+	background: var(--rr-surface);
+	padding: 10px 12px;
+	margin: 10px 0;
+}
+.result-object h3 {
+	margin: 0 0 6px;
+	font:
+		11px/1.4 ui-monospace,
+		monospace;
+	font-weight: 600;
+	letter-spacing: 0.03em;
+	opacity: 0.65;
+}
+.result-object pre,
+.rr-card pre {
+	white-space: pre-wrap;
+	word-break: normal;
+	overflow-wrap: break-word;
+	margin: 6px 0 0;
+	padding: 8px 10px;
+	max-height: 320px;
+	overflow: auto;
+	font:
+		12px/1.5 ui-monospace,
+		monospace;
+	background: var(--rr-inset);
+	border-radius: 6px;
+}
+.result-object.error {
+	border-left: 3px solid var(--rr-flame);
+}
+.result-object img,
+.result-object video {
+	max-width: 100%;
+	border-radius: 6px;
+}
+
+/* --- Tabs -------------------------------------------------------------- */
+.tab-nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 10px 0 4px;
+	border-bottom: 1px solid var(--rr-line);
+	padding-bottom: 8px;
+}
+.tab-btn {
+	font: inherit;
+	color: inherit;
+	background: none;
+	border: 1px solid var(--rr-line-strong);
+	border-radius: 999px;
+	padding: 3px 12px;
+	cursor: pointer;
+	opacity: 0.75;
+}
+.tab-btn:hover {
+	opacity: 1;
+	border-color: var(--rr-accent);
+}
+.tab-btn.active {
+	opacity: 1;
+	background: var(--rr-accent-tint);
+	border-color: var(--rr-accent);
+}
+.tab-badge {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 0 6px;
+	border-radius: 8px;
+	font-size: 11px;
+	background: var(--rr-accent-tint);
+}
+
+/* --- Buttons ----------------------------------------------------------- */
+.rr-btn {
+	font: inherit;
+	color: inherit;
+	background: none;
+	border: 1px solid var(--rr-line-strong);
+	border-radius: 6px;
+	padding: 3px 12px;
+	cursor: pointer;
+}
+.rr-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+.rr-btn-ghost {
+	color: var(--rr-accent);
+	border-color: color-mix(in srgb, var(--rr-accent) 45%, transparent);
+}
+.rr-btn-ghost:hover:not(:disabled) {
+	background: var(--rr-accent-tint);
+	border-color: var(--rr-accent);
+}
+.rr-btn-danger {
+	color: var(--rr-flame);
+	border-color: color-mix(in srgb, var(--rr-flame) 40%, transparent);
+}
+.rr-btn-danger:hover:not(:disabled) {
+	background: var(--rr-flame-tint);
+	border-color: var(--rr-flame);
+}
+
+/* --- Progress ---------------------------------------------------------- */
+.bar {
+	height: 8px;
+	border-radius: 4px;
+	background: var(--rr-inset);
+	overflow: hidden;
+	margin: 8px 0;
+}
+.bar > .fill {
+	height: 100%;
+	width: 0%;
+	background: linear-gradient(90deg, var(--rr-flame), var(--rr-flame-soft));
+	transition: width 0.15s ease;
+}
+
+/* --- Dropzone ---------------------------------------------------------- */
+.dropzone {
+	border: 2px dashed var(--rr-line-strong);
+	border-radius: 10px;
+	padding: 32px 12px;
+	text-align: center;
+	cursor: pointer;
+	opacity: 0.85;
+	transition:
+		border-color 0.15s ease,
+		background 0.15s ease;
+}
+.dropzone:hover {
+	border-color: var(--rr-accent);
+	background: color-mix(in srgb, var(--rr-accent) 6%, transparent);
+	opacity: 1;
+}
+.dropzone.drag {
+	border-color: var(--rr-flame);
+	background: var(--rr-flame-tint);
+	opacity: 1;
+}
+
+/* --- Table ------------------------------------------------------------- */
+table {
+	border-collapse: collapse;
+	width: 100%;
+}
+th,
+td {
+	text-align: left;
+	padding: 6px 12px 6px 0;
+	border-bottom: 1px solid var(--rr-line);
+}
+th {
+	font-size: 11px;
+	font-weight: 650;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	opacity: 0.6;
+}
+tbody tr:hover td {
+	background: var(--rr-surface);
+}
+td.rr-mono {
+	font:
+		12px/1.5 ui-monospace,
+		monospace;
+	opacity: 0.8;
+}
+
+/* --- Misc -------------------------------------------------------------- */
+.empty {
+	opacity: 0.6;
+	padding: 8px 0;
+}

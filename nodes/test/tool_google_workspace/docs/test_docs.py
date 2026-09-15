@@ -260,6 +260,14 @@ def test_default_tier_is_write():
     assert access.can_write is True
 
 
+class _HttpErr(Exception):
+    def __init__(self, status, reason, content=b''):
+        super().__init__(reason)
+        self.resp = types.SimpleNamespace(status=status)
+        self.reason = reason
+        self.content = content
+
+
 def test_check_connection_reports_ok():
     inst = _make()
     out = inst.check_connection({})
@@ -267,6 +275,31 @@ def test_check_connection_reports_ok():
     assert out['connection_ok'] is True
     assert out['access'] == 'write'
     assert any('documents' in s for s in out['requiredScopes'])
+    assert inst.IGlobal.service.call_for('get') is not None
+
+
+def test_check_connection_impl_reports_unknown_without_a_probe():
+    """The shared base must not default an unverified connection to True."""
+    inst = _make()
+    out = inst._check_connection_impl()
+    assert out['connection_ok'] == 'unknown'
+    assert out['checked'] == ['client']
+
+
+def test_check_connection_probe_swallows_expected_404():
+    """A 404 on the probe's made-up document id proves the Docs API IS reachable."""
+    inst = _make(results={'get': _HttpErr(404, 'notFound')})
+    out = inst.check_connection({})
+    assert out['connection_ok'] is True
+
+
+def test_check_connection_reports_probe_failure():
+    """A disabled Docs API (accessNotConfigured) must flip connection_ok, not be swallowed."""
+    err = _HttpErr(403, 'Forbidden', content=b'{"error": {"errors": [{"reason": "accessNotConfigured"}]}}')
+    inst = _make(results={'get': err})
+    out = inst.check_connection({})
+    assert out['connection_ok'] is False
+    assert out['errorReason'] == 'accessNotConfigured'
 
 
 def test_check_connection_reports_missing_user_auth_scopes(monkeypatch):
@@ -688,7 +721,7 @@ def test_check_connection_reports_malformed_token(monkeypatch):
     inst.IGlobal.glb = types.SimpleNamespace(logicalType='tool_docs', connConfig={})
     out = inst.check_connection({})
     assert out['connection_ok'] is False
-    assert 'invalid user token' in out['error']
+    assert 'invalid user token' in out['scopeError']
 
 
 def test_validate_config_warns_for_malformed_user_token(monkeypatch):

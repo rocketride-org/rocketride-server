@@ -24,6 +24,15 @@ out/
 .claude/*
 !.claude/CLAUDE.md
 .cursor/
+.windsurf/
+# Agent stubs planted by the RocketRide VS Code extension's agent installer
+# (apps/vscode/src/agents/). It gitignores its own .rocketride/ docs but not
+# these, so they land in commits. Anchored to the root so the deliberate
+# .claude/CLAUDE.md pointer above still applies. AGENTS.md cannot be listed
+# here — it is a real tracked file — so the installer is also switched off in
+# .vscode/settings.json, which is what stops it appending to AGENTS.md.
+/CLAUDE.md
+/.github/copilot-instructions.md
 
 # -----------------------------------------------------------------------------
 # Git hooks (local overrides)
@@ -210,12 +219,6 @@ user.json
 # Build version info (generated)
 version.json
 
-# Package READMEs (copied from docs/ by build; packaging requires them here)
-packages/client-typescript/README.md
-packages/client-python/README.md
-packages/client-mcp/README.md
-apps/vscode/README.md
-
 downloads/jdk-17.zip
 downloads/jre-17.zip
 downloads/jdk-17.tar.gz
@@ -226,6 +229,10 @@ downloads/maven-3.9.6.tar.gz
 include/python3.12/greenlet/greenlet.h
 .rocketride/
 
+# MCP Apps widgets built by apps/mcp-widgets and synced by mcp-widgets:build
+# (already covered by the blanket dist/ rule above; listed explicitly since
+# this directory lives inside packages/ai/src, which is otherwise tracked).
+packages/ai/src/ai/modules/mcp/apps/dist/
 
 # The n8n community node package ships credential *type definitions* (schema only,
 # no secrets); they must be tracked despite the global credentials/ ignore above.
