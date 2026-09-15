@@ -6,6 +6,8 @@
 
 import { ChangeEvent, FocusEvent, useState, useEffect, useCallback, useRef, KeyboardEvent, FC } from 'react';
 import TextField from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import IconButton from '@mui/material/IconButton';
 import { WidgetProps } from '@rjsf/utils';
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
@@ -40,6 +42,15 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 		},
 		[autocomplete, controlledValue, onChange, options.emptyValue],
 	);
+
+	const showVarPicker = envKeys.length > 0 && !(disabled || readonly);
+	const handleOpenPicker = useCallback(() => {
+		const el = inputRef.current;
+		if (!el) return;
+		el.focus();
+		const cursor = el.selectionStart ?? String(controlledValue ?? '').length;
+		autocomplete.openAll(el, cursor);
+	}, [autocomplete, controlledValue]);
 
 	const handleKeyDown = useCallback(
 		// MUI TextField forwards onKeyDown from its root <div>, so the event is
@@ -94,6 +105,26 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 				variant="outlined"
 				InputLabelProps={{ shrink: true }}
 				helperText={typeof options?.description === 'string' ? options.description : schema?.description}
+				InputProps={
+					showVarPicker
+						? {
+								endAdornment: (
+									<InputAdornment position="end">
+										<IconButton
+											size="small"
+											aria-label="Insert variable"
+											title="Insert variable"
+											onClick={handleOpenPicker}
+											edge="end"
+											sx={{ fontSize: '0.75rem', fontFamily: 'monospace', px: 0.75 }}
+										>
+											{'${}'}
+										</IconButton>
+									</InputAdornment>
+								),
+							}
+						: undefined
+				}
 			/>
 			{envKeys.length > 0 && (
 				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />
