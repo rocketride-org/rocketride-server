@@ -311,8 +311,8 @@ class DeployPipeCommands(_DeployBase):
                 # 'manual' means "no schedule row" — normalize to a clear.
                 cron = None
 
-        # Run window: None/absent = until the pipeline finishes; a positive
-        # integer = seconds the task stays up (the 'fixed window' option).
+        # Run window: None/absent = the server's default idle timeout; a
+        # positive integer = seconds the task stays up (the 'fixed window' option).
         ttl = args.get('ttl')
         if ttl is not None and (not isinstance(ttl, int) or ttl <= 0):
             raise ValueError('ttl must be a positive integer (seconds) or omitted')
@@ -489,8 +489,9 @@ class DeployPipeCommands(_DeployBase):
                 )
 
             # A manual run honors the source's execution settings but NOT its
-            # run window: the ttl window belongs to scheduled fires — a run the
-            # user started runs until it finishes or the user stops it.
+            # run window: the ttl window belongs to scheduled fires. Like any
+            # run without a window, it stops once idle for the server's
+            # default idle timeout, or when the user stops it.
             sched = (dep.get('schedules') or {}).get(source_id) or {}
             token = await start_server_task_as_team(
                 self._server,

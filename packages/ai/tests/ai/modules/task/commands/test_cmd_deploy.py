@@ -338,7 +338,7 @@ class TestReads:
         # the run carries NO human identity (who fired it is recorded by the
         # audit call, not on the run); lastRunAt is stamped. The source's
         # execution settings ride along, but its ttl window does NOT — a
-        # manual run has no window (the user stops it).
+        # manual run carries no window (the server's default idle timeout applies).
         dispatched = {}
 
         async def fake_dispatch(

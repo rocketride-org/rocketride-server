@@ -461,7 +461,7 @@ export class DeployApi {
 	 * @param teamId - The team whose deployment to schedule.
 	 * @param options - Optional schedule options.
 	 * @param options.ttl - Run window in seconds ('fixed window'); omitted
-	 *   runs each task until the pipeline finishes.
+	 *   stops each task once idle for the server's default idle timeout.
 	 * @returns The updated deployment record.
 	 */
 	async setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options: { ttl?: number } = {}): Promise<Deployment> {
