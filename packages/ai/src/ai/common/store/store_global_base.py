@@ -36,8 +36,9 @@ and inherits the rest. See ``nodes/src/nodes/store_qdrant/IGlobal.py`` for a
 worked example.
 """
 
+import threading
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 from rocketlib import OPEN_MODE, warning
 
@@ -56,6 +57,14 @@ class StoreGlobalBase(IGlobalTransform, ABC):
 
     # The live store, opened in beginGlobal and read by StoreInstanceBase.
     store: Optional[DocumentStoreBase] = None
+
+    # objectIds already sent to store.addChunks() this task, guarded by
+    # _written_object_ids_lock. addChunks() replaces (not appends to) an
+    # objectId's chunks, so StoreInstanceBase.writeDocuments checks this
+    # before a second call for the same objectId would silently discard an
+    # earlier batch (see #1986). Reset each task in beginGlobal.
+    _written_object_ids: Set[str] = set()
+    _written_object_ids_lock: threading.Lock = threading.Lock()
 
     # Embedder wiring for the control-plane tool path (search/upsert). Bound in
     # beginGlobal only when an embedding sub-block is configured.
@@ -102,6 +111,8 @@ class StoreGlobalBase(IGlobalTransform, ABC):
             return
 
         self.store = None
+        self._written_object_ids = set()
+        self._written_object_ids_lock = threading.Lock()
         bag = self.IEndpoint.endpoint.bag
         connConfig = self.getConnConfig()
 
@@ -166,6 +177,7 @@ class StoreGlobalBase(IGlobalTransform, ABC):
         self.embed_query = None
         self.embed_model_name = None
         self.store = None
+        self._written_object_ids = set()
 
         # Let the transform layer clear TRANFORM_KEY_TAG_NAME on teardown.
         super().endGlobal()

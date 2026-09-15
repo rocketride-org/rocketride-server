@@ -66,10 +66,29 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
         """Take a list of documents and add them to the vector store.
 
         Any chunks in the database that have the same object id will be removed.
+
+        Raises if any objectId in ``documents`` was already written earlier in
+        this task: addChunks() replaces an objectId's existing chunks rather
+        than appending to them, so a second call for the same objectId would
+        silently discard the earlier batch and keep only this one (#1986).
+        Accumulate every chunk for one object and call this once, rather than
+        flushing it across multiple calls.
         """
         # Check it
         if self.IGlobal.store is None:
             raise Exception('No document store')
+
+        object_ids = {doc.metadata.objectId for doc in documents}
+        with self.IGlobal._written_object_ids_lock:
+            repeated = object_ids & self.IGlobal._written_object_ids
+            if repeated:
+                raise Exception(
+                    f'writeDocuments: objectId(s) {sorted(repeated)!r} already written earlier in this '
+                    "task. addChunks() replaces all of an objectId's chunks, so writing it again here "
+                    'would silently discard the earlier batch. Accumulate every chunk for one object and '
+                    'call writeDocuments once, rather than flushing it across multiple calls.'
+                )
+            self.IGlobal._written_object_ids |= object_ids
 
         # Add the document chunks
         self.IGlobal.store.addChunks(documents)
