@@ -179,7 +179,8 @@ print(json.dumps({'ncall': ncall, 'entries': len(data),
 # Reproduces the crash the lock exists to prevent: install the bootstrap on a
 # fresh thread AFTER stats have been cleared -> the next event dereferences
 # freed yappi state.  Self-contained (no manager) so it documents the raw
-# hazard.  Windows-only: deterministic use-after-free there.
+# hazard.  Run on win32 only — see the skipif below for why, it is a choice
+# rather than a platform limit.
 _CRASH_CHILD = r"""
 import sys, threading, yappi
 
@@ -292,8 +293,13 @@ def test_cold_thread_treatment_is_captured():
 
 @pytest.mark.skipif(
     sys.platform != 'win32',
-    reason='use-after-free is deterministic only on win32; the lock guarantee '
-    'itself is covered cross-platform by test_yappi_mutations_happen_under_lock',
+    # It reproduces on Linux too — measured SIGSEGV on Ubuntu 22.04 (3.10) and
+    # 26.04 (3.14). Kept win32-only anyway: whether a use-after-free faults at
+    # all is an allocator and layout accident, so gating three CI distros on it
+    # buys a demonstration at the price of a flake, and each Linux run would
+    # leave a core dump behind where only *.mdmp is cleaned up.
+    reason='win32 only by choice: the lock guarantee itself is covered '
+    'cross-platform by test_yappi_mutations_happen_under_lock',
 )
 def test_unlocked_install_after_clear_crashes():
     """The shape the lock prevents: installing the bootstrap after stats were
