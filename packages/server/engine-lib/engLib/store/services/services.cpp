@@ -1989,6 +1989,24 @@ static const std::function<Error(const Path &, const Text &)> loadServices =
 
 //-------------------------------------------------------------------------
 /// @details
+///		Loads the nodes in a directory and rebuilds the schemas
+//-------------------------------------------------------------------------
+Error IServices::rescan(const Path &directory) noexcept {
+    if (!file::exists(directory) || !file::isDir(directory))
+        return APERR(Ec::NotFound, "Node directory not found:", directory);
+
+    LOG(Services, "Rescanning nodes in", directory);
+
+    // The same three steps init() performs, over one directory instead of the
+    // startup roots. Definitions are added, never cleared: a live pipeline
+    // holds pointers into m_services.
+    if (auto ccode = loadServices(directory, (Text) "*")) return ccode;
+    if (auto ccode = updateDefinitions()) return ccode;
+    return declareDefaultUrlMappers();
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Loads all the service definitions
 //-------------------------------------------------------------------------
 Error IServices::init() noexcept {

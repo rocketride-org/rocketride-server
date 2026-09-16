@@ -161,6 +161,17 @@ public:
     ///	Public API
     //-----------------------------------------------------------------
     static Error init() noexcept;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Loads the nodes in a directory handed to us and rebuilds the
+    ///		schemas, so a node that arrives after startup is seen without a
+    ///		restart. Takes the directory rather than re-reading --node_path,
+    ///		which is fixed at process start and absent on a cloud worker.
+    ///	@param[in] directory
+    ///		The directory to scan, laid out like the nodes directory
+    //-----------------------------------------------------------------
+    static Error rescan(const Path &directory) noexcept;
     static Error deinit() noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr> getServiceDefinition(
         const Text &type) noexcept;
