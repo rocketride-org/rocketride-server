@@ -42,7 +42,8 @@ client.database.sequelize(options: {
 
 > **Why `Sequelize` is passed in:** `sequelize` is a peer dependency, not a hard
 > dependency, of the `rocketride` client. It transitively depends on Node built-ins
-> (`util`, `debug`) that cannot be bundled for browser targets. Importing
+> (`util` directly, `tty`/`util` via its `debug` dependency) that cannot be bundled
+> for browser targets. Importing
 > `Sequelize` yourself and passing the class in keeps `rocketride` safe to bundle
 > in browser apps that never touch this method.
 

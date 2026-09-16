@@ -940,7 +940,7 @@ Typed wrapper for subscriptions, Stripe checkout, credit wallets, and usage.
 
 Direct SQL/Cypher execution against a database pipeline node, bypassing the LLM translation layer that `chat()` uses (and its safety checks — you own the statements you send).
 
-- `query(options): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>` — execute a raw SQL or Cypher statement. Options: `token` and `sql` (required, non-empty); `nodeId?` (empty broadcasts to all tool-lane nodes — the first database node handles it); `sessionId?` (run within a transaction session); `params?: unknown[]` (positional parameters, e.g. `[1, 'foo']` for `$1`, `$2` placeholders); `rowMode?: 'object' | 'array'` (`'array'` returns positional `unknown[][]` rows, which is what ORM drivers need — duplicate column names in joins survive)
+- `query(options): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>` (`rows: unknown[][]` when `rowMode: 'array'`) — execute a raw SQL or Cypher statement. Options: `token` and `sql` (required, non-empty); `nodeId?` (empty broadcasts to all tool-lane nodes — the first database node handles it); `sessionId?` (run within a transaction session); `params?: unknown[]` (positional parameters, e.g. `[1, 'foo']` for `$1`, `$2` placeholders); `rowMode?: 'object' | 'array'` (`'array'` returns positional `unknown[][]` rows, which is what ORM drivers need — duplicate column names in joins survive)
 - `beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>` — begin a transaction; thread the returned `session_id` through subsequent `query`/`commit`/`rollback` calls
 - `commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>` / `rollback(...)` — same shape
 - `dialect(options: { token: string; nodeId?: string }): Promise<DatabaseDialect>` — discover the underlying engine (`DatabaseDialect.POSTGRES | MYSQL | NEO4J`); branch on SQL syntax differences or detect a graph DB
@@ -965,11 +965,11 @@ await db.transaction(async (tx) => {
 });
 ```
 
-Rules: the target node needs `allow_execute: true` (the same flag gates transactions); tables must already exist (drizzle-kit `push`/`studio` are not part of this integration — run migrations via `client.database.query()` from a trusted context); binary (`Buffer`/`bytea`) parameters are rejected because queries transport as JSON; failed statements throw `DrizzleQueryError` whose `cause` holds the pipeline's error; an engine too old to honor `rowMode: 'array'` makes the driver throw rather than return empty records. Full guide: `docs/public/typescript/database-drizzle.md` (site: `/clients/typescript/database-drizzle`).
+Rules: the target node needs `allow_execute: true` (the same flag gates transactions); tables must already exist (drizzle-kit `push`/`studio` are not part of this integration — run migrations via `client.database.query()` from a trusted context); binary (`Buffer`/`bytea`) parameters are rejected because queries transport as JSON; failed statements throw `DrizzleQueryError` whose `cause` holds the pipeline's error; an engine too old to honor `rowMode: 'array'` makes the driver throw rather than return empty records. Full guide: https://docs.rocketride.org/clients/typescript/database-drizzle
 
 ##### `sequelize(options): Sequelize` — deprecated
 
-**Deprecated — prefer `rocketride/drizzle` above.** Kept because it is part of the frozen SDK contract; it will only be removed in a coordinated major release. Builds a Sequelize v6 instance that transports its SQL over the RocketRide pipe instead of a TCP socket. `sequelize` is an optional **peer dependency** that pulls in Node built-ins (`util`, `debug`), so browser bundles need polyfills — import the class yourself and pass it in:
+**Deprecated — prefer `rocketride/drizzle` above.** Kept because it is part of the frozen SDK contract; it will only be removed in a coordinated major release. Builds a Sequelize v6 instance that transports its SQL over the RocketRide pipe instead of a TCP socket. `sequelize` is an optional **peer dependency** that pulls in Node built-ins (`util` directly, `tty`/`util` via its `debug` dependency), so browser bundles need polyfills — import the class yourself and pass it in:
 
 ```typescript
 import { Sequelize } from 'sequelize';
