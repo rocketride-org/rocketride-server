@@ -1982,6 +1982,44 @@ def test_shutdown_closes_sessions_left_running_under_this_runs_tag(monkeypatch, 
     assert 'close' in orphan.calls
 
 
+def test_parallel_tool_calls_on_one_instance_do_not_share_state(monkeypatch, logs):
+    # An agent wave issues its tool calls concurrently against this single IInstance, on different
+    # threads (agent_rocketride runs a wave in a thread pool). Each call needs its own temp file and
+    # its own result; any state held on the instance instead of the call would cross them.
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    outputs = []
+
+    _run_in_threads(8, lambda: outputs.append(inst.run_code({'code': 'print(1)'})))
+
+    assert len(outputs) == 8
+    assert all(out['exit_code'] == 0 and 'error' not in out for out in outputs)
+    ran = [argv[-1] for argv, _ in _execs(session)]
+    assert len(ran) == 8
+    assert len(set(ran)) == 8, ran  # every call ran its own file, none reused another's
+
+
+def test_a_parallel_wave_on_a_paused_session_resumes_once_and_tells_the_agent(monkeypatch, logs):
+    # The real shape of it: Tenki pauses the VM between agent waves, and the next wave arrives as
+    # several tool calls at once. One resume has to serve them all, and the wave has to tell the
+    # agent the VM was resumed rather than replaced.
+    paused = _FakeSession('sb-1', state='PAUSED', resume_delay=0.05)
+    inst, client = _instance(monkeypatch, paused)
+    outputs = []
+
+    _run_in_threads(6, lambda: outputs.append(inst.run_command({'command': 'echo hi'})))
+
+    assert len(outputs) == 6
+    assert all(out['exit_code'] == 0 for out in outputs)
+    reported = [out.get('session') for out in outputs]
+    # A call arriving after the resume has finished never fails, so it recovered nothing and
+    # reports nothing. Only 'resumed' or absent is correct; 'replaced' would mean lost files.
+    assert set(reported) <= {'resumed', None}, reported
+    assert 'resumed' in reported, reported
+    assert paused.calls.count('resume') == 1
+    assert len(client.create_calls) == 1  # resumed, never replaced
+
+
 def test_a_clean_shutdown_does_not_claim_it_closed_anything(monkeypatch, logs):
     # The scoped close leaves the session TERMINATING, and a list right after still shows it. Saying
     # "closed" then would cry wolf on every shutdown and bury the one case that matters.
