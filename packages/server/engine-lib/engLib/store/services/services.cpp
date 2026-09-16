@@ -1613,12 +1613,13 @@ void IServices::resolveDescriptions(json::Value &node) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Loads all the service definitions
+///		Walks a directory tree and loads every services.*json it finds into
+///		m_services. At file scope rather than inside init() so a rescan can
+///		reach it too; a non-local lambda cannot carry a capture-default, and
+///		needs none — it recurses through its own name, which has static storage.
 //-------------------------------------------------------------------------
-Error IServices::init() noexcept {
-    // Lambda to walk the paths
-    const std::function<Error(const Path &, const Text &)> loadServices =
-        localfcn(const Path &path, const Text &mask)->Error {
+static const std::function<Error(const Path &, const Text &)> loadServices =
+        [](const Path &path, const Text &mask) -> Error {
         // Get the scanner
         file::FileScanner scanner(path / mask);
 
@@ -1984,20 +1985,25 @@ Error IServices::init() noexcept {
         }
 
         return {};
-    };
+};
 
+//-------------------------------------------------------------------------
+/// @details
+///		Loads all the service definitions
+//-------------------------------------------------------------------------
+Error IServices::init() noexcept {
     // The sources path if the engine/engtest is running in the dev mode
     auto rootPath = application::projectDir() ? application::projectDir() / "nodes/src/nodes" : "";
     if (!rootPath || !file::exists(rootPath) || !file::isDir(rootPath))
         // The exec path if the engine is running in the prod mode
         rootPath = application::execDir() / "nodes";
-    if (!file::exists(rootPath) || !file::isDir(rootPath)) {
+    // A missing directory is not an error: an engine that ships no nodes still
+    // has to finish init(), because the two steps below are about fields and
+    // url mappers rather than about nodes.
+    if (!file::exists(rootPath) || !file::isDir(rootPath))
         LOG(Services, "Loading skipped: the nodes directory not found");
-        return {};
-    }
-
-    // Start at the root
-    if (auto ccode = loadServices(rootPath, (Text) "*")) return ccode;
+    else if (auto ccode = loadServices(rootPath, (Text) "*"))
+        return ccode;
 
     // Also scan a `local_nodes` folder under --node_path=<dir>, if given. The
     // fixed name keeps these imported as local_nodes.<node>, never clashing
