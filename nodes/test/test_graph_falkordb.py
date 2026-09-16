@@ -669,6 +669,40 @@ def recording_client(monkeypatch):
     return _RecordingFalkorDB
 
 
+class _GraphListingFalkorDB:
+    """Fake client exposing only list_graphs(), for the #2155 graph-existence checks.
+
+    ``graphs_to_list`` is class-level (mirroring _RecordingFalkorDB's last_kwargs/
+    last_url) so a test can set it before either constructor path runs.
+    """
+
+    graphs_to_list: list = ['agent']
+    raise_on_list: Exception | None = None
+
+    def __init__(self, **kwargs):
+        pass
+
+    @classmethod
+    def from_url(cls, url, **kwargs):
+        return cls()
+
+    def list_graphs(self):
+        if type(self).raise_on_list is not None:
+            raise type(self).raise_on_list
+        return type(self).graphs_to_list
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def graph_listing_client(monkeypatch):
+    monkeypatch.setattr(_glb_mod, 'FalkorDB', _GraphListingFalkorDB)
+    _GraphListingFalkorDB.graphs_to_list = ['agent']
+    _GraphListingFalkorDB.raise_on_list = None
+    return _GraphListingFalkorDB
+
+
 def test_manual_profile_connects_with_host_and_port(recording_client):
     """The pre-existing profile must keep building the client from host/port."""
     _glb_mod.IGlobal._connect(
@@ -786,6 +820,103 @@ def test_probe_reports_missing_host_on_manual_profile(monkeypatch):
     _FakeGlobal(_FakeGraph())._probe_connection({'mode': 'manual', 'host': ''})
 
     assert messages == ['host is required']
+
+
+# ---------------------------------------------------------------------------
+# #2155: a read-only node silently fell back to querying the unrelated
+# default graph "agent" instead of the one actually configured, surfacing a
+# cryptic "ERR Invalid graph operation on empty key" only on the first
+# query. _open_driver now fails fast, and _probe_connection warns at save
+# time, when the configured graph does not exist -- unless a write path is
+# enabled, since FalkorDB creates a graph lazily on its first write.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_graph_name_falls_back_on_absent_empty_or_blank():
+    assert _glb_mod._resolve_graph_name({}) == 'agent'
+    assert _glb_mod._resolve_graph_name({'graph': ''}) == 'agent'
+    assert _glb_mod._resolve_graph_name({'graph': '   '}) == 'agent'
+    assert _glb_mod._resolve_graph_name({'graph': 'changeimpact'}) == 'changeimpact'
+
+
+def test_open_driver_raises_when_the_configured_graph_is_missing(graph_listing_client):
+    graph_listing_client.graphs_to_list = ['other-graph']
+    glb = _FakeGlobal(_FakeGraph())
+
+    with pytest.raises(Exception, match='FalkorDB graph "agent" does not exist.*other-graph'):
+        glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'agent'})
+
+
+def test_open_driver_succeeds_when_the_configured_graph_exists(graph_listing_client):
+    graph_listing_client.graphs_to_list = ['changeimpact', 'other']
+    glb = _FakeGlobal(_FakeGraph())
+
+    glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'changeimpact'})
+
+    assert glb.graph_name == 'changeimpact'
+
+
+@pytest.mark.parametrize('flag', ['allow_writes', 'allow_execute'])
+def test_open_driver_skips_the_graph_check_when_a_write_path_is_enabled(graph_listing_client, flag):
+    """FalkorDB creates a graph lazily on its first write, so a write-capable
+    node may legitimately target one that does not exist yet.
+    """
+    graph_listing_client.graphs_to_list = []  # nothing exists yet
+    glb = _FakeGlobal(_FakeGraph())
+
+    glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'brand-new', flag: True})
+
+    assert glb.graph_name == 'brand-new'  # did not raise
+
+
+def test_probe_warns_when_the_configured_graph_is_missing(monkeypatch, graph_listing_client):
+    graph_listing_client.graphs_to_list = ['changeimpact']
+    messages = []
+    monkeypatch.setattr(_glb_mod, 'warning', messages.append)
+
+    _FakeGlobal(_FakeGraph())._probe_connection({'mode': 'manual', 'host': 'localhost', 'graph': 'agent'})
+
+    assert len(messages) == 1
+    assert 'FalkorDB graph "agent" was not found' in messages[0]
+    assert 'changeimpact' in messages[0]
+
+
+def test_probe_is_silent_about_the_graph_when_it_already_exists(monkeypatch, graph_listing_client):
+    graph_listing_client.graphs_to_list = ['agent']
+    messages = []
+    monkeypatch.setattr(_glb_mod, 'warning', messages.append)
+
+    _FakeGlobal(_FakeGraph())._probe_connection({'mode': 'manual', 'host': 'localhost', 'graph': 'agent'})
+
+    assert messages == []
+
+
+@pytest.mark.parametrize('flag', ['allow_writes', 'allow_execute'])
+def test_probe_does_not_warn_about_a_missing_graph_when_a_write_path_is_enabled(
+    monkeypatch, graph_listing_client, flag
+):
+    graph_listing_client.graphs_to_list = []
+    messages = []
+    monkeypatch.setattr(_glb_mod, 'warning', messages.append)
+
+    _FakeGlobal(_FakeGraph())._probe_connection(
+        {'mode': 'manual', 'host': 'localhost', 'graph': 'brand-new', flag: True}
+    )
+
+    assert messages == []
+
+
+def test_probe_still_reports_a_connection_failure_when_a_write_path_is_enabled(monkeypatch, graph_listing_client):
+    """The write-capable early-out skips only the graph-existence check --
+    a real connection failure must still be reported either way.
+    """
+    graph_listing_client.raise_on_list = _StubRedisError('connection refused')
+    messages = []
+    monkeypatch.setattr(_glb_mod, 'warning', messages.append)
+
+    _FakeGlobal(_FakeGraph())._probe_connection({'mode': 'manual', 'host': 'localhost', 'allow_writes': True})
+
+    assert any('Could not connect to FalkorDB' in m for m in messages)
 
 
 def test_reflect_schema_failure_does_not_break_begin(monkeypatch):
