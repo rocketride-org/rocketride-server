@@ -292,7 +292,11 @@ run_privileged() {
             echo "If it is credentials: the build captures output, so sudo has no"
             echo "terminal to prompt for a password. Run the setup once directly in"
             echo "your terminal, then re-run the build:"
-            echo "    ./scripts/compiler-unix.sh --autoinstall"
+            # --system-compiler is not optional in this hint: this message can
+            # only ever print from force_system_clang, which runs solely when
+            # CLANG_ALT_VERSION is set, which only --system-compiler sets. Drop
+            # the flag and the rerun cannot reach the step that just failed.
+            echo "    ./scripts/compiler-unix.sh --autoinstall${SYSTEM_COMPILER:+ --system-compiler}"
             echo ""
             echo "Granting passwordless sudo for this command also works. Note that"
             echo "'sudo -v' in your terminal may not carry over — sudo's credential"
