@@ -1618,8 +1618,8 @@ void IServices::resolveDescriptions(json::Value &node) noexcept {
 ///		reach it too; a non-local lambda cannot carry a capture-default, and
 ///		needs none — it recurses through its own name, which has static storage.
 //-------------------------------------------------------------------------
-static const std::function<Error(const Path &, const Text &)> loadServices =
-        [](const Path &path, const Text &mask) -> Error {
+static const std::function<Error(const Path &, const Text &, bool)> loadServices =
+        [](const Path &path, const Text &mask, bool skipKnown) -> Error {
         // Get the scanner
         file::FileScanner scanner(path / mask);
 
@@ -1635,7 +1635,8 @@ static const std::function<Error(const Path &, const Text &)> loadServices =
             // If this is a directory, walk into it
             if (entry->second.isDir) {
                 auto newPath = path / entry->first;
-                if (auto ccode = loadServices(newPath, (Text) "services.*json"))
+                if (auto ccode =
+                        loadServices(newPath, (Text) "services.*json", skipKnown))
                     return ccode;
                 continue;
             }
@@ -1933,6 +1934,14 @@ static const std::function<Error(const Path &, const Text &)> loadServices =
             // Get the logical type
             auto logicalType = def.logicalType;
 
+            // A rescan only adds. Overwriting an entry would change a
+            // definition a running pipeline holds a pointer to, and would
+            // register this node's factories a second time.
+            if (skipKnown && m_services.find(logicalType) != m_services.end()) {
+                LOG(Services, "    Already loaded, skipped");
+                continue;
+            }
+
             // Save it
             m_services[logicalType] = _mv(def);
 
@@ -2000,7 +2009,7 @@ Error IServices::rescan(const Path &directory) noexcept {
     // The same three steps init() performs, over one directory instead of the
     // startup roots. Definitions are added, never cleared: a live pipeline
     // holds pointers into m_services.
-    if (auto ccode = loadServices(directory, (Text) "*")) return ccode;
+    if (auto ccode = loadServices(directory, (Text) "*", true)) return ccode;
     if (auto ccode = updateDefinitions()) return ccode;
     return declareDefaultUrlMappers();
 }
@@ -2020,7 +2029,7 @@ Error IServices::init() noexcept {
     // url mappers rather than about nodes.
     if (!file::exists(rootPath) || !file::isDir(rootPath))
         LOG(Services, "Loading skipped: the nodes directory not found");
-    else if (auto ccode = loadServices(rootPath, (Text) "*"))
+    else if (auto ccode = loadServices(rootPath, (Text) "*", false))
         return ccode;
 
     // Also scan a `local_nodes` folder under --node_path=<dir>, if given. The
@@ -2030,7 +2039,8 @@ Error IServices::init() noexcept {
         auto localRoot = _cast<file::Path>(*NodePath) / "local_nodes";
         if (file::exists(localRoot) && file::isDir(localRoot)) {
             LOG(Services, "Loading workspace-local nodes from", localRoot);
-            if (auto ccode = loadServices(localRoot, (Text) "*")) return ccode;
+            if (auto ccode = loadServices(localRoot, (Text) "*", false))
+                return ccode;
         } else {
             LOG(Services, "No local_nodes directory under --node_path:",
                 _cast<file::Path>(*NodePath));
