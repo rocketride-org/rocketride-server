@@ -11,8 +11,9 @@ tools in three groups — **execution** (run commands and code), **filesystem** 
 create and delete under `/home/tenki`) and **git** (clone, check out, diff, log).
 
 One session is created **lazily** on the first tool call, so a pipeline that never invokes the tool
-never provisions (or pays for) a VM, and it is closed when the pipeline shuts down. Files written
-and packages installed by one call are visible to the next.
+never provisions (or pays for) a VM. Files written and packages installed by one call are visible to
+the next. The session ends on its idle pause and hard lifetime; see [Cost safety](#cost-safety) for
+what actually shuts a VM down, which is not always the pipeline.
 
 ## Tenancy: read this before deploying
 
@@ -47,8 +48,8 @@ The key stays on the engine and is never placed inside the sandbox.
 | `cpu_cores` | integer | Default 2 (1–16). |
 | `memory_mb` | integer | Default 4096 (512–65536). Rounded down to an even number, which Tenki requires. |
 | `disk_size_gb` | integer | Default 5 (5–100). |
-| `idle_timeout_minutes` | integer | Default 5 (1–120). Tenki **pauses** an idle session; it does not delete it. |
-| `max_duration_minutes` | integer | Default 60 (1–1440). Hard lifetime for **each** session, and the backstop if a crashed engine never shuts one down. It does not cap total spend: once a session ends, the next call starts a new one. |
+| `idle_timeout_minutes` | integer | Default 5 (1–120). Tenki **pauses** an idle session; it does not delete it. This is the first thing that stops compute on a VM the pipeline walked away from, so keep it low. |
+| `max_duration_minutes` | integer | Default 60 (1–1440). Hard lifetime for **each** session, enforced by Tenki. This is the **only guaranteed** end for a VM: the engine does not always run node teardown (see [Cost safety](#cost-safety)). It does not cap total spend: once a session ends, the next call starts a new one. |
 | `exec_timeout_secs` | integer | Default 120 (1–1200). Longest a single `run_command` / `run_code` may take. Also the floor for the API call deadline, which is never below 60s. |
 | `max_output_chars` | integer | Default 50000 (1000–1000000). Longer output is truncated before it reaches the agent, protecting its context window. |
 | `image` | string | Default empty. A Tenki image reference to start sessions from, instead of the base image. |
@@ -111,20 +112,35 @@ a terminated one is replaced, and anything else is surfaced to the agent unchang
 
 ## Cost safety
 
-A running session bills by the minute, so the node bounds the exposure:
+A running session bills by the minute, so the node bounds the exposure three ways.
+
+**Enforced by Tenki**, and therefore guaranteed whatever the engine or the node does:
+
+- **Idle pause** — Tenki pauses the session after `idle_timeout_minutes`, which stops compute billing.
+- **Hard lifetime** — `max_duration_minutes` ends the session, whether or not anything closed it.
+
+**In the node, on every run:**
 
 - **Lazy creation** — a VM is provisioned only when a tool is actually called.
-- **Idle pause** — Tenki pauses the session after `idle_timeout_minutes`, which stops compute.
-- **Per-session lifetime** — `max_duration_minutes` ends any session a crashed engine never closed.
-- **Explicit teardown** — the session is closed in `endGlobal`.
-- **Tagged sweep** — every session carries a tag unique to the pipeline run, and teardown closes any
-  still running under it. This catches a session whose close did not take, and a create that raced
-  its deadline and left a VM the node never received a handle for.
 - **Bounded calls** — every control-plane call has a deadline and every command has a local wait
   limit, so a stalled connection cannot hang a call while the VM keeps billing.
 
+**Best-effort, only when the engine runs node teardown:**
+
+- **Explicit teardown** — `endGlobal` closes the session immediately.
+- **Tagged sweep** — every session carries a tag unique to the pipeline run, and `endGlobal` closes
+  any still running under it. This catches a session whose close did not take, and a create that
+  raced its deadline and left a VM the node never received a handle for.
+
+> **`endGlobal` does not always run.** A pipeline whose source is `chat` or `webhook` is force-killed
+> when it is terminated or when its idle TTL expires: the source never observes the cancel, so the
+> engine kills the task before node teardown. Measured on engine 3.3.0 with a probe node, both paths
+> recorded `beginGlobal` and never `endGlobal`. For those pipelines the VM is **not** closed when the
+> pipeline stops; it runs until `idle_timeout_minutes` pauses it and `max_duration_minutes` ends it.
+> Size those two fields as if they were the only cleanup, because for a chat agent they are.
+
 Sessions are named `rocketride-tool-tenki-<suffix>` and tagged `rocketride`, so anything orphaned is
-recognisable in the Tenki console.
+recognisable in the Tenki console and can be closed there.
 
 **`max_duration_minutes` caps each session, not total spend.** A long-running deployed pipeline that
 keeps working will start a new session whenever one ends. To bound spend overall, give the pipeline

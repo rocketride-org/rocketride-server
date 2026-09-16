@@ -29,15 +29,19 @@ Tenki Sandbox tool node - global (shared) state.
 Reads the Tenki workspace API key, the sandbox sizing and the published tool
 groups from config and creates a Tenki client. The session itself is created
 lazily on the first tool call (creating one costs money and time, and a
-pipeline may never invoke the tool) and is closed in ``endGlobal``. Tool logic
+pipeline may never invoke the tool) and is closed in ``endGlobal`` when the
+engine runs node teardown at all (see the note below). Tool logic
 lives on IInstance via @tool_function, and every tool reaches the session
 through ``call_with_session``, which owns recovery.
 
 Three things differ from tool_daytona and shape this file:
 
 * An idle Tenki session is paused, not deleted, and there is no ephemeral
-  flag. ``endGlobal`` is what stops a session, and ``max_duration`` is the
-  server-side backstop for a pipeline that never gets there.
+  flag. ``endGlobal`` closes a session promptly, but the engine force-kills a
+  chat- or webhook-sourced task on terminate and on idle-TTL expiry without
+  running node teardown (measured on engine 3.3.0), so ``max_duration`` is the
+  only guaranteed end for a session and ``idle_timeout_minutes`` the only
+  guaranteed stop to compute billing.
 * A create whose readiness wait fails can leave a live, billing sandbox that
   nothing references, so the create path closes it explicitly.
 * Recovery follows the session's actual state, not the exception alone: a
