@@ -735,6 +735,20 @@ def test_report_tree_without_data_ignores_the_thread():
     assert result['error'] == 'No profiling data available. Run a session first.'
 
 
+def test_captures_share_one_string_per_path():
+    """The flat and per-thread copies of a function hold one path string.
+
+    _relativize_path is cached, so a path is computed once under _lock and the
+    copies do not each keep their own string.
+    """
+    _run_session('owner-1', 'session-1')
+
+    flat = [e['key'][0] for e in profiler._last_stats_data if e['key'][2] == 'report_marker']
+    per_thread = [e['key'][0] for t in profiler._last_thread_data for e in t['stats'] if e['key'][2] == 'report_marker']
+    assert len(flat) == 1 and len(per_thread) == 1, (flat, per_thread)
+    assert flat[0] is per_thread[0]
+
+
 def test_thread_capture_happens_under_lock_before_clear(monkeypatch):
     """Per-thread capture reads yappi under _lock and before clear_stats().
 

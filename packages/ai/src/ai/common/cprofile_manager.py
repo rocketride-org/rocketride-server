@@ -45,6 +45,7 @@ Usage:
     report = profiler.report()
 """
 
+import functools
 import os
 import sys
 import threading
@@ -72,6 +73,10 @@ _SOURCE_MARKERS = [
 ]
 
 
+# Cached: stop() calls this for every entry and callee of every capture, under
+# _lock, over a few hundred distinct paths. The answer depends only on the path,
+# and a cached one is also a single string object shared by all those entries
+@functools.lru_cache(maxsize=4096)
 def _relativize_path(path: str) -> str:
     """
     Strip absolute prefixes from a module path, returning a relative './...' path.
