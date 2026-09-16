@@ -11,9 +11,10 @@ SQLAlchemy with the PyMySQL driver to connect and reflect MySQL table schemas.
 
 ## What it does
 
-On the `questions` lane, the node gives a connected LLM its startup-reflected
-schema and optional database description, validates generated `SELECT` queries
-with `EXPLAIN`, and emits results as a table, text, or answer. On the `answers`
+On the `questions` lane, the node gives a connected LLM its cached schema
+snapshot (the start-up reflection until `refresh_schema` replaces it) and
+optional database description, validates generated `SELECT` queries with
+`EXPLAIN`, and emits results as a table, text, or answer. On the `answers`
 lane, it inserts structured rows into the configured table, creating that table
 from the first incoming data shape when necessary. It is also an agent tool
 node, making it a better fit than a pipeline-only SQL destination when an agent
@@ -42,7 +43,8 @@ configurable server-name prefix.
 | Function | Description |
 | --- | --- |
 | `get_data` | Generate a safe `SELECT` from a question and execute it. |
-| `get_schema` | Return the schema reflected when the node started. |
+| `get_schema` | Return the schema snapshot the node currently holds. |
+| `refresh_schema` | Re-read the schema, replace the cache, and return it. |
 | `get_sql` | Generate a safe `SELECT` without executing it. |
 | `execute` | Run raw SQL, bypassing LLM translation and the safety check. |
 | `begin` | Open a transaction and return its session ID. |
@@ -53,20 +55,38 @@ configurable server-name prefix.
 `get_data` and `get_sql` require a non-empty `question`; `get_data` accepts an
 optional `limit`, defaulting to 250 and clamped to 1–25,000. `get_schema`
 accepts an optional `table`; an unknown table returns an `error` field, while
-omitting it returns all reflected tables. `get_data` returns `{valid, rows,
-sql, row_limit}` on success; a non-database question returns `{valid: false,
-answer}`, and a query execution failure returns `{valid: false, error, sql,
-rows: []}`.
+omitting it returns all reflected tables. `get_schema` serves the snapshot the
+node currently holds — the reflection taken at start-up, replaced by each
+`refresh_schema` call — so DDL run since the last reflection is invisible to
+it until the next one. `refresh_schema` takes no arguments, re-reflects the
+database, replaces that database-wide cache, and returns the `get_schema`
+shape plus a `refreshed_at` UTC timestamp. It also invalidates the configured
+table's cached column map rather than rebuilding it there: the map is
+reflected afresh on the next `answers`-lane insert, which is how that insert
+picks up added or dropped columns instead of continuing against the start-up
+shape. `get_data` returns
+`{valid, rows, sql, row_limit}` on success; a non-database question returns
+`{valid: false, answer}`, and a query execution failure returns
+`{valid: false, error, sql, rows: []}`.
 
 `execute` requires non-empty `sql` and optionally accepts a transaction
 `session_id`, positional values for `$1`, `$2`, and so on, and a `row_mode`:
 `object` (default) keys rows by column name, while `array` returns positional
 arrays that preserve column order and keep duplicate column names — the shape
-ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`.
-`begin` takes no arguments and returns `{session_id}`;
-`commit` and `rollback` require that ID and return `{ok: true}`. These four
-write-capable operations fail when **Allow direct query execution** is off;
-unknown or expired session IDs also fail. Invalid tool input raises an error.
+ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`. A
+failed statement raises `SQL execution failed:` followed by the database's own
+primary message, identically with and without a `session_id`. What is removed
+is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo. The primary
+sentence itself is passed through as MySQL wrote it, so a syntax error quotes
+the fragment it stopped on (the driver interpolates bound values client-side,
+so that fragment can contain one) and a constraint error names the value that
+collided. That is deliberate: reaching this tool at all requires **Allow
+direct query execution**, and a caller who has it can read the same data with
+a `SELECT`. The full text stays in the server log. `begin` takes no arguments
+and returns `{session_id}`; `commit` and `rollback` require that ID and return
+`{ok: true}`. These four write-capable operations fail when **Allow direct
+query execution** is off; unknown or expired session IDs also fail. Invalid
+tool input raises an error.
 
 A failed statement does **not** roll the session back. The session stays open
 and MySQL leaves its transaction usable, so a later `commit` persists the work
@@ -139,8 +159,14 @@ answer is emitted instead of executing SQL.
 
 ### Inserting answers
 
-Incoming JSON rows are matched to the target schema case-insensitively; missing
-schema columns become `NULL`, and unknown incoming keys are ignored. Lists and
+Incoming JSON rows are matched to the target schema case-insensitively; unknown
+incoming keys are ignored. A schema column a row does not carry becomes `NULL`,
+unless the database fills it in itself: an `AUTO_INCREMENT` primary key or a
+column with a `DEFAULT` is left out of the statement so the server supplies
+the value rather than receiving an explicit `NULL`, which would override the
+default. A generated primary key supplied as `null` counts as not carried --
+on this lane the sender is an upstream node that may emit every schema key --
+while a `null` on any other column is inserted as `NULL` as given. Lists and
 dictionaries are serialized as JSON strings and booleans as `0` or `1`. For a
 new table, the node adds an auto-increment `id` primary key and infers integer,
 float, datetime, or text columns; short text becomes `VARCHAR(255)` and longer
@@ -167,7 +193,7 @@ and rolls all open sessions back when the pipeline closes.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `mysql.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
+| `mysql.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
 | `mysql.database` | `string` | **Database name**<br/>Name of database | `"database"` |
 | `mysql.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. | `""` |
 | `mysql.host` | `string` | **MySQL host**<br/>Host name or IP address of the MySQL server | `"localhost"` |

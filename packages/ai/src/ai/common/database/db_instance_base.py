@@ -37,9 +37,11 @@ using SQLAlchemy abstractions that work across dialects.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 import json
+import threading
 
 from rocketlib import IInstanceBase, debug, error, warning, tool_function
 from sqlalchemy import MetaData, Table as SQLTable, insert, text
@@ -52,6 +54,83 @@ from rocketlib.types import IInvokeLLM
 
 from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
 from .sql_safety import is_sql_safe
+
+# Serialises schema re-reflection. Reflection walks every table, so two
+# concurrent refresh_schema calls would do the same expensive work twice and
+# race to publish `IGlobal.db_schema`; readers would briefly see whichever
+# finished first. Module-level rather than per-node: refreshes are rare and a
+# process-wide lock costs nothing, while a per-instance one would need state
+# that db_global_base owns.
+_REFLECT_LOCK = threading.Lock()
+
+
+def _generated_primary_keys(table: SQLTable) -> set:
+    """Return the lowercased primary-key columns the DATABASE fills in itself.
+
+    Only reflected metadata is trusted, because binding the wrong answer is
+    destructive in both directions: binding NULL into a generated key is a
+    not-null violation on Postgres (``id SERIAL NOT NULL``), while omitting a
+    key the database does NOT generate silently writes a row with no identity
+    or fails deep inside the driver.
+
+    * ``table.autoincrement_column`` is SQLAlchemy's own resolution. It honours
+      an ``autoincrement=True`` reflected from MySQL or PostgreSQL, and applies
+      the ``'auto'`` rule -- a lone Integer primary key that is not a foreign
+      key -- which is how SQLite's rowid alias is recognised.
+    * A primary-key column with a ``server_default``, an ``Identity``, or an
+      explicit ``autoincrement=True`` is generated whatever its type, which
+      covers ``code TEXT PRIMARY KEY DEFAULT ...`` and ``GENERATED AS IDENTITY``.
+
+    Everything else -- a composite key, a TEXT key with no default -- is the
+    caller's to supply. The set this returns also decides how an explicit null
+    reads: on one of these columns ``{'id': None}`` means "no value" and is
+    left to the database, because the insert lane's caller is an upstream node
+    emitting every schema key rather than a person choosing NULL. Anywhere else
+    a supplied null is bound as given. (``_insertData`` separately leaves out
+    any column -- key or not -- that carries a server default or an identity
+    and that the row omits.)
+
+    The ``'auto'`` half of that rule is an approximation, and on SQLite it is
+    measurably imperfect: ``id INT PRIMARY KEY``, ``id BIGINT PRIMARY KEY`` and
+    ``id INTEGER PRIMARY KEY DESC`` all reflect as a lone Integer-affinity key
+    and are treated as generated here, yet SQLite aliases none of them to the
+    rowid, so an omitted key lands as NULL; conversely
+    ``id INTEGER PRIMARY KEY REFERENCES parent(id)`` IS a rowid alias but the
+    foreign key excludes it from ``'auto'``, so a row omitting it is rejected.
+    Both are SQLite-only: PostgreSQL and MySQL reflection set ``autoincrement``
+    explicitly (from ``nextval``/Identity and from ``auto_increment``), so the
+    resolution is exact for the engines the production nodes connect to, and no
+    node in this repo runs on SQLite.
+    """
+    generated = set()
+    autoincrement_column = table.autoincrement_column
+    if autoincrement_column is not None:
+        generated.add(autoincrement_column.name.lower())
+    for column in table.primary_key.columns:
+        if column.server_default is not None or column.identity is not None or column.autoincrement is True:
+            generated.add(column.name.lower())
+    return generated
+
+
+def _format_table(table_info: dict) -> dict:
+    """Render one reflected table into the per-table shape both schema tools return.
+
+    ``get_schema`` and ``refresh_schema`` both promise callers "the same shape",
+    and the tool descriptions an LLM chooses between say so, so the rendering
+    lives in one place: a key added for one tool is a key both tools emit.
+
+    Takes an entry of ``IGlobal.db_schema`` (``columns`` as ``(name, type)``
+    pairs, plus ``primary_key`` and ``foreign_keys`` lists) and returns
+    ``{'columns': [{'column': ..., 'type': ...}, ...]}``. ``primary_key`` and
+    ``foreign_keys`` are added only when non-empty, so a table without either
+    does not carry an empty list into the tool response.
+    """
+    result = {'columns': [{'column': name, 'type': col_type} for name, col_type in table_info['columns']]}
+    if table_info.get('primary_key'):
+        result['primary_key'] = table_info['primary_key']
+    if table_info.get('foreign_keys'):
+        result['foreign_keys'] = table_info['foreign_keys']
+    return result
 
 
 class DatabaseInstanceBase(IInstanceBase, ABC):
@@ -178,21 +257,19 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         ),
     )
     def get_schema(self, args):
-        """Return the reflected database schema."""
+        """Return the reflected database schema.
+
+        Serves ``IGlobal.db_schema``, reflected in ``beginGlobal`` and replaced
+        by each ``refresh_schema`` call. DDL run since the last reflection
+        (through ``execute``) is NOT visible here — use ``refresh_schema``
+        after changing the schema.
+        """
         if args is not None and not isinstance(args, dict):
             raise ValueError('Tool input must be a JSON object or empty')
         if not args:
             args = {}
 
         table_filter = args.get('table')
-
-        def _format_table(table_info):
-            result = {'columns': [{'column': name, 'type': col_type} for name, col_type in table_info['columns']]}
-            if table_info.get('primary_key'):
-                result['primary_key'] = table_info['primary_key']
-            if table_info.get('foreign_keys'):
-                result['foreign_keys'] = table_info['foreign_keys']
-            return result
 
         if table_filter:
             table_info = self.IGlobal.db_schema.get(table_filter)
@@ -293,6 +370,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         session_id = args.get('session_id')
         params = args.get('params')
+        self._validateExecuteParams(params)
         row_mode = args.get('row_mode', 'object')
         if row_mode not in ('object', 'array'):
             raise ValueError("\"row_mode\" must be 'object' or 'array'")
@@ -301,19 +379,67 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 result = self.IGlobal.tx_registry.execute(session_id, sql.strip(), params, row_mode)
             except KeyError:
                 raise ValueError(f'unknown or expired transaction session: {session_id}')
-            # A failed statement leaves the session OPEN: Postgres marks the
-            # transaction aborted, MySQL leaves it usable. The client owns
-            # recovery — `rollback`, or `rollback to savepoint` for nested
-            # transactions — and the idle reaper is the backstop for abandoned
-            # sessions. Committing an aborted transaction would degrade to a
-            # silent ROLLBACK, so the registry refuses it and raises instead.
+            except SQLAlchemyError as e:
+                # The statement itself failed. `tx_registry` has no IGlobal and
+                # is shared with other callers, so the formatting the sessionless
+                # branch gets from `_executeRawQuery` has to be applied here:
+                # otherwise the same tool, behind the same allow_execute gate,
+                # returns the raw exception -- `[SQL: ...]` / `[parameters: ...]`
+                # tail included -- purely because a session_id was passed.
+                #
+                # A failed statement leaves the session OPEN: Postgres marks the
+                # transaction aborted, MySQL leaves it usable. The client owns
+                # recovery — `rollback`, or `rollback to savepoint` for nested
+                # transactions — and the idle reaper is the backstop for abandoned
+                # sessions. Committing an aborted transaction would degrade to a
+                # silent ROLLBACK, so the registry refuses it and raises instead.
+                error(f'Error executing raw SQL in session {session_id}: {e}')
+                # `from None` keeps the driver traceback out of the tool response.
+                raise RuntimeError(f'SQL execution failed: {self.IGlobal._format_db_error(e)}') from None
+            except Exception as e:
+                # Everything else that can come back from the registry.
+                if getattr(e, 'orig', None) is not None:
+                    # A driver error the dialect did not wrap in a SQLAlchemy
+                    # exception (clickhouse-sqlalchemy's `DatabaseException`;
+                    # see `_executeRawQuery`). Same contract as the arm above,
+                    # so the session half cannot report a ClickHouse failure
+                    # differently from the sessionless half.
+                    error(f'Error executing raw SQL in session {session_id}: {e}')
+                    raise RuntimeError(f'SQL execution failed: {self.IGlobal._format_db_error(e)}') from None
+                # The max_rows RuntimeError above all, which is not a
+                # SQLAlchemyError (so the arm above cannot swallow it) and whose
+                # wording callers and tests depend on.
+                raise
         else:
             result = self._executeRawQuery(sql.strip(), params, row_mode)
-            if result is None:
-                raise RuntimeError('SQL execution failed (check server logs for details)')
 
         rows = [self._sanitize_row(row) for row in result['rows']]
         return {'rows': rows, 'affected_rows': result['affected_rows']}
+
+    @staticmethod
+    def _validateExecuteParams(params: Any) -> None:
+        """Reject a ``params`` argument that is not an array before anything is dispatched.
+
+        ``to_sqlalchemy_text`` rewrites ``$n`` into a bind by indexing
+        ``params[n - 1]``, so a JSON object raised ``KeyError: 0`` from inside
+        the rewriter -- which told the caller nothing, and on the session path
+        was indistinguishable from an unknown session id: ``execute`` reported
+        "unknown or expired transaction session" for a session that was still
+        open and still usable.
+
+        The placeholder range check is ``to_sqlalchemy_text``'s own and applies
+        when ``params`` is non-empty. It is quote-aware -- a ``$n`` inside a
+        string literal, a quoted identifier, a dollar-quoted body or a comment
+        is not a placeholder -- and an index past ``len(params)`` raises
+        ``ValueError('placeholder $n out of range for k param(s)')``. ``None``
+        and an empty list mean "no binds": the rewrite is skipped entirely, so a
+        literal ``$1`` reaches the driver unchanged and the driver's own
+        complaint is what the caller gets back.
+        """
+        if params is None:
+            return
+        if not isinstance(params, list):
+            raise ValueError('"params" must be an array of positional bind values')
 
     @tool_function(
         input_schema={'type': 'object', 'properties': {}},
@@ -382,6 +508,88 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     def dialect(self, args):
         """Return the database engine dialect."""
         return {'dialect': self._db_dialect()}
+
+    @tool_function(
+        input_schema={'type': 'object', 'properties': {}},
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'database': {'type': 'string'},
+                'tables': {'type': 'object', 'description': 'Map of table name to table definition.'},
+                'refreshed_at': {'type': 'string', 'description': 'UTC ISO-8601 time the reflection completed.'},
+            },
+        },
+        description=lambda self: (
+            f'Re-reads the {self._db_display_name()} schema from the database and returns it, in the same '
+            f'shape as get_schema plus a refreshed_at timestamp. get_schema serves the snapshot the node '
+            f'currently holds -- the start-up reflection until a refresh_schema call replaces it -- so '
+            f'tables and columns created or altered since the last reflection are invisible to it. '
+            f'Call this after running DDL.'
+        ),
+    )
+    def refresh_schema(self, args):
+        """Re-reflect the database schema, replace the cache, and return it.
+
+        ``IGlobal.db_schema`` is the same dict the natural-language path
+        describes to the LLM (``_buildSQLQueryOnce`` -> ``describe_schema``),
+        so refreshing it also stops ``get_data`` / ``get_sql`` writing queries
+        against a table shape that no longer exists. ``IGlobal.schema`` -- the
+        configured table's column map that the answers lane inserts against --
+        is invalidated at the same time so the node is current on both paths,
+        not just the one this tool returns.
+
+        Reflection and publication run under a process-wide lock so concurrent
+        callers neither repeat the full table walk nor race on the cache.
+        Declares no input; anything passed is ignored.
+        """
+        with _REFLECT_LOCK:
+            self.IGlobal.db_schema = self.IGlobal._getDatabaseSchema()
+            # `db_schema` is not the only start-up snapshot: `IGlobal.schema`
+            # holds the configured table's column map, and `_insertData`
+            # iterates it to build every answers-lane INSERT. Leaving it alone
+            # would make "refreshed" true for the LLM path and false for the
+            # insert path -- a column added by the DDL that prompted this call
+            # would still be skipped. Emptying it re-arms the lazy rebuild at
+            # the top of `_insertData`, which reflects the table through the
+            # same `_getTableSchema` call `beginGlobal` uses, so the next
+            # insert sees exactly what a freshly started node would.
+            #
+            # Emptying rather than re-reflecting here keeps this cheap for the
+            # (common) node with no answers lane wired. The rebind itself is
+            # atomic, but the rebuild it re-arms is not, so `_insertData` takes
+            # `_REFLECT_LOCK` across its check, its rebuild and the snapshot it
+            # builds the batch from: that, not this assignment, is what stops a
+            # concurrent insert reading a half-built map.
+            #
+            # The rebuilt map is a plain reflection, so it carries columns the
+            # map `_createTableFromData` curates for an auto-created table
+            # deliberately does not: the primary key, and anything DDL has
+            # added since. Changing what the INSERT carries is the POINT of the
+            # invalidation -- a column added by the DDL that prompted this call
+            # is exactly what the next insert should start populating.
+            #
+            # The guarantee that does hold is narrower: the database still
+            # fills in what it owns either way. `_insertData` leaves out any
+            # generated primary-key, server-default or identity column the rows
+            # do NOT supply (and rejects an omitted key the database cannot
+            # generate), so a column present only in the reflected map is
+            # either left to the database or bound the NULL it would have
+            # stored anyway, whichever of the two maps a given call is holding.
+            #
+            # For a column a row DOES supply, the two maps differ and the
+            # refresh is what changes the INSERT: on an auto-created table the
+            # curated map has no `id`, so a row carrying one has it silently
+            # dropped and the database generates a different value; after a
+            # refresh the reflected map binds it and the row's own `id` is kept.
+            # The post-refresh behaviour is the better of the two, but it is a
+            # change, and honouring a supplied key on an auto-created table
+            # before any refresh would mean curating the PK into that map --
+            # a separate decision, not this one.
+            self.IGlobal.schema = {}
+            refreshed_at = datetime.now(timezone.utc).isoformat()
+            tables = {name: _format_table(info) for name, info in self.IGlobal.db_schema.items()}
+
+        return {'database': self.IGlobal.database, 'tables': tables, 'refreshed_at': refreshed_at}
 
     # ------------------------------------------------------------------
     # Sanitization helpers
@@ -582,12 +790,17 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             error(f'Error executing SQL query: {e}')
             return None
 
-    def _executeRawQuery(self, query: str, params: list | None = None, row_mode: str = 'object') -> dict | None:
+    def _executeRawQuery(self, query: str, params: list | None = None, row_mode: str = 'object') -> dict:
         """Execute a raw SQL statement (read or write) without LLM or safety gating.
 
         Uses ``engine.begin()`` so writes auto-commit. Returns
-        ``{'rows': [...], 'affected_rows': N}`` on success, or ``None`` on a
-        SQLAlchemy error (logged via ``error()``). A ``max_execute_rows``
+        ``{'rows': [...], 'affected_rows': N}``; there is no failure return
+        value, every failure raises. A SQLAlchemy error
+        is logged via ``error()`` and re-raised as ``RuntimeError`` carrying
+        the DRIVER's own message: the caller wrote the statement, so the caller
+        is who needs to read "no such column: foo" — collapsing every failure
+        into one opaque string made a typo, a missing table, and a permission
+        error indistinguishable. A ``max_execute_rows``
         overflow raises ``RuntimeError`` from *inside* the transaction so
         ``engine.begin()`` rolls back — otherwise a write (e.g. ``INSERT ...
         RETURNING``) would commit even though ``execute()`` reports failure.
@@ -611,7 +824,30 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         except SQLAlchemyError as e:
             error(f'Error executing raw SQL query: {e}')
-            return None
+            # `from None` keeps the driver traceback out of the tool response;
+            # the formatted message already carries what the caller needs.
+            raise RuntimeError(f'SQL execution failed: {self.IGlobal._format_db_error(e)}') from None
+
+        except Exception as e:
+            # Not every dialect raises a SQLAlchemy exception. The known case is
+            # clickhouse-sqlalchemy's native connector -- what
+            # `clickhouse+native://` selects -- which raises its own
+            # `DatabaseException`, a plain `Exception` subclass carrying the
+            # driver's error in `.orig`; SQLAlchemy does not wrap a non-DBAPI
+            # exception, so the arm above never fires for that node and the raw
+            # text (server stack trace and the statement fragment at the error
+            # position included) went straight to the caller.
+            #
+            # Duck-typed on `.orig` rather than imported: this shared base must
+            # not depend on any one node's driver, and `.orig` IS the shape being
+            # handled -- a driver error carrying its original. Anything without
+            # it is not a database failure and is re-raised untouched: the
+            # max_execute_rows `RuntimeError` raised above most of all, whose
+            # wording and rollback callers depend on.
+            if getattr(e, 'orig', None) is None:
+                raise
+            error(f'Error executing raw SQL query: {e}')
+            raise RuntimeError(f'SQL execution failed: {self.IGlobal._format_db_error(e)}') from None
 
     def _formatResultAsMarkdown(self, result: Any) -> str:
         """Convert a query result to a markdown table string."""
@@ -769,16 +1005,29 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             debug(f'Successfully created table "{self.IGlobal.table}" from data structure.')
 
         # Fetch the schema if it wasn't populated at startup (e.g. the table
-        # was just created above, or beginGlobal found no table).
-        if not self.IGlobal.schema:
-            table_schema = self.IGlobal._getTableSchema(self.IGlobal.table)
-            if table_schema:
-                self.IGlobal.schema = {name: (col_type, '') for name, col_type in table_schema}
-            else:
-                error(f'Unable to retrieve schema for table "{self.IGlobal.table}"')
-                raise RuntimeError(f'Table "{self.IGlobal.table}" schema could not be retrieved.')
+        # was just created above, or beginGlobal found no table), then take a
+        # private snapshot to build this batch from.
+        #
+        # The check, the rebuild and the snapshot are one critical section.
+        # `refresh_schema` empties `IGlobal.schema` to re-arm this rebuild, so
+        # at runtime a second insert can arrive while the first is reflecting,
+        # and the intermediate states it would observe are wrong: a half-built
+        # map silently drops the columns not yet added, and the map it holds
+        # must not change size while the per-row loop iterates it.
+        #
+        # The lock is released before the Table reflection and before the
+        # INSERT. Neither reads `IGlobal.schema`, both are slow, and holding a
+        # process-wide lock across a write would serialise every node's inserts.
+        with _REFLECT_LOCK:
+            if not self.IGlobal.schema:
+                table_schema = self.IGlobal._getTableSchema(self.IGlobal.table)
+                if table_schema:
+                    self.IGlobal.schema = {name: (col_type, '') for name, col_type in table_schema}
+                else:
+                    error(f'Unable to retrieve schema for table "{self.IGlobal.table}"')
+                    raise RuntimeError(f'Table "{self.IGlobal.table}" schema could not be retrieved.')
+            schema = dict(self.IGlobal.schema)
 
-        schema = self.IGlobal.schema
         metadata = MetaData()
         engine = self.IGlobal.engine
 
@@ -791,6 +1040,37 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 f'Table "{self.IGlobal.table}" does not exist in database "{self.IGlobal.database}". Please create it manually before running the pipeline.'
             )
             raise
+
+        # Columns the database fills in itself must not be bound. The loop below
+        # binds NULL for any schema column the incoming rows do not provide, and
+        # an explicit NULL is not "please supply the value" to any database --
+        # it overrides a server default and violates NOT NULL. Postgres renders
+        # `Column('id', Integer, primary_key=True, autoincrement=True)` as
+        # `id SERIAL NOT NULL`; a `created_at timestamptz NOT NULL DEFAULT now()`
+        # behaves the same way.
+        #
+        # `_createTableFromData` curates `IGlobal.schema` down to the data
+        # columns for exactly this reason, but any map built by reflection --
+        # `beginGlobal` for a table that already existed, or the lazy rebuild
+        # above once `refresh_schema` has invalidated the cache -- carries every
+        # column the table has. That difference is meant to reach the INSERT: a
+        # column added by DDL is one the next insert should populate. What must
+        # NOT reach it is a NULL bound into a column the database owns, so both
+        # kinds are read off the reflected table and skipped when the row omits
+        # them: generated primary keys, and anything carrying a server default
+        # or an identity.
+        #
+        # The decision is per ROW. Taking it once for the batch, from the union
+        # of the rows' keys, meant one row carrying `id` put `id` into every
+        # mapping, so the rows that omitted it bound NULL into a key the
+        # database was supposed to generate.
+        generated_pk_columns = _generated_primary_keys(table)
+        generated_defaults = {
+            column.name.lower()
+            for column in table.columns
+            if column.server_default is not None or column.identity is not None
+        }
+        pk_names = {column.name.lower() for column in table.primary_key.columns}
 
         def prepare_value(value: Any) -> Any:
             """Convert complex Python types to SQL-compatible values."""
@@ -806,35 +1086,91 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 return value
 
         # Build the list of row dicts, mapping incoming keys to schema column
-        # names with case-insensitive matching.
+        # names with case-insensitive matching. Every rejection happens here,
+        # before the transaction opens, so a batch this node refuses leaves
+        # nothing behind.
         insert_values = []
-        for item in items:
+        for position, item in enumerate(items):
             if not isinstance(item, dict):
                 continue
 
+            # `schema` is never empty here: the locked block above either left
+            # `IGlobal.schema` populated or raised.
             values: Dict[str, Any] = {}
-            if schema:
-                for colname in schema.keys():
-                    # Case-insensitive key lookup so 'UserName' maps to 'username'.
-                    item_lower_keys = {k.lower(): k for k in item.keys()}
-                    if colname.lower() in item_lower_keys:
-                        original_key = item_lower_keys[colname.lower()]
-                        values[colname] = prepare_value(item[original_key])
-                    else:
-                        # Column in schema but not in data — insert NULL.
-                        values[colname] = None
-            else:
-                # No schema cached — insert whatever keys the item provides.
-                for key, raw_value in item.items():
-                    values[key] = prepare_value(raw_value)
+            # Case-insensitive key lookup so 'UserName' maps to 'username'.
+            item_lower_keys = {k.lower(): k for k in item.keys()}
+            missing_keys = []
+            for colname in schema.keys():
+                lowered = colname.lower()
+                original_key = item_lower_keys.get(lowered)
+                if original_key is not None:
+                    supplied = item[original_key]
+                    if supplied is None and lowered in generated_pk_columns:
+                        # An explicit null on a key the database generates means
+                        # the same thing as omitting it. The caller on this lane
+                        # is an upstream node, not a person: an LLM node or a
+                        # JSON mapper emits every schema key, writing null for
+                        # the ones it has no value for. Binding that NULL is a
+                        # not-null violation on Postgres and a silent one, since
+                        # `writeAnswers` only logs. (The `execute` tool is a
+                        # different contract and is not affected: a person wrote
+                        # that statement and their NULL is theirs.)
+                        continue
+                    # Supplied, including an explicit None on any other column:
+                    # the caller asked for NULL and gets NULL.
+                    values[colname] = prepare_value(supplied)
+                elif lowered in generated_pk_columns or lowered in generated_defaults:
+                    # The database owns this column's value when the row omits
+                    # it -- a generated key, or a server default / identity.
+                    continue
+                elif lowered in pk_names:
+                    # A key the database will NOT generate and the row does not
+                    # carry. Binding NULL would write a row with no identity (or
+                    # fail deep in the driver), so say so.
+                    missing_keys.append(colname)
+                else:
+                    # Column in schema, no value in the row, no default behind
+                    # it — insert NULL.
+                    values[colname] = None
+            if missing_keys:
+                raise ValueError(
+                    f'Row {position} of the batch for table "{self.IGlobal.table}" does not supply '
+                    f'primary-key column(s) {", ".join(missing_keys)}, which the database does not generate'
+                )
 
             insert_values.append(values)
 
         if insert_values:
+            # Rows whose mappings differ are not one executemany any more, so
+            # group CONTIGUOUS rows that share a key set. Contiguous rather than
+            # gathered: a generated id follows insertion order, and reordering
+            # the batch would hand the caller ids in an order their rows never
+            # had. Every run shares one engine.begin(), so the batch stays
+            # all-or-nothing exactly as a single executemany was.
+            runs: List[List[Dict[str, Any]]] = []
+            previous_keys = None
+            for values in insert_values:
+                keys = tuple(values)
+                if keys != previous_keys:
+                    runs.append([])
+                    previous_keys = keys
+                runs[-1].append(values)
+
             try:
                 with self.IGlobal.engine.begin() as conn:
-                    conn.execute(insert(table), insert_values)
-                debug(f"Inserted {len(insert_values)} records into '{self.IGlobal.table}'.")
+                    for run in runs:
+                        if run[0]:
+                            conn.execute(insert(table), run)
+                            continue
+                        # Nothing left to bind: every column of these rows is
+                        # database-generated. Handing the statement no values at
+                        # all lets SQLAlchemy render the dialect's own form
+                        # (`DEFAULT VALUES` on PostgreSQL and SQLite,
+                        # `() VALUES ()` on MySQL) instead of binding NULL into
+                        # a key the database was about to generate.
+                        for _ in run:
+                            conn.execute(insert(table))
+                debug(f"Inserted {len(insert_values)} records into '{self.IGlobal.table}' in {len(runs)} run(s).")
             except Exception as e:
                 # The context manager has already rolled back; re-raise so the
                 # caller can decide how to surface the failure.
