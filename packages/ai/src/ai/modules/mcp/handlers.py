@@ -54,6 +54,7 @@ def build_mcp_server(
     registry: Optional[ToolRegistry] = None,
     apps_dir: Optional[Path] = None,
     engine_origin: Optional[str] = None,
+    local_engine: bool = False,
 ) -> Server:
     """Build and return a low-level MCP Server wired with tools and resources.
 
@@ -89,12 +90,16 @@ def build_mcp_server(
             `engine_factory().base_url` -- avoids building (and, on the
             per-caller path above, leaking into the request's close bucket) a
             whole EngineClient just to read a string.
+        local_engine: True when the engine is bound to loopback (decided once
+            in ``__init__.initModule``). Only then are ``local_engine_only``
+            tools such as ``send_files`` listed and dispatched; the default is
+            the deployed surface. Ignored when ``registry`` is passed.
 
     Returns:
         A configured mcp.server.lowlevel.Server ready to run.
     """
     if registry is None:
-        registry = ToolRegistry()
+        registry = ToolRegistry(local_engine=local_engine)
         tools_pkg.register_all(registry)
     task_registry = task_registry if task_registry is not None else TaskRegistry()
 

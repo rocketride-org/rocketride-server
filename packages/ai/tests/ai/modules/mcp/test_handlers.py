@@ -150,7 +150,7 @@ async def test_list_tools_reflects_real_register_all(fake_engine):
     """
     import ai.modules.mcp.handlers as handlers_mod
 
-    server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    server = handlers_mod.build_mcp_server(lambda: fake_engine, local_engine=True)
     async with Client(server) as client:
         result = await client.list_tools()
 

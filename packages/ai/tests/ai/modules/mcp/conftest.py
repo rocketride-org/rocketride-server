@@ -10,6 +10,8 @@ import pytest
 # introspection, execution, capability, visibility, logs, integrations).
 # Single source of truth for the suite — assert against this instead of
 # copying the list or hard-coding its count in individual test files.
+# This is the LOCAL-engine (loopback-bound) surface; a deployed engine omits
+# LOCAL_ENGINE_ONLY_TOOL_NAMES (see test_local_engine.py).
 # The MCP protocol revision this surface pins its tests against.
 PINNED_PROTOCOL_VERSION = '2026-07-28'
 
@@ -51,6 +53,9 @@ EXPECTED_TOOL_NAMES = (
     # integrations
     'list_integrations',
 )
+
+# Tools that act on the engine host itself, offered only by local engines.
+LOCAL_ENGINE_ONLY_TOOL_NAMES = ('send_files',)
 
 
 class FakeEngineClient:

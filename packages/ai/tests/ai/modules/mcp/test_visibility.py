@@ -46,7 +46,7 @@ def test_visibility_register_binds_handler_directly():
 
 
 def test_register_all_yields_the_expected_tool_surface():
-    registry = ToolRegistry()
+    registry = ToolRegistry(local_engine=True)
 
     register_all(registry)
 

@@ -63,7 +63,7 @@ async def test_build_mcp_server_lists_tools_from_real_registry(fake_engine):
     from mcp.client import Client
     from ai.modules.mcp.handlers import build_mcp_server
 
-    server = build_mcp_server(lambda: fake_engine)
+    server = build_mcp_server(lambda: fake_engine, local_engine=True)
     async with Client(server) as client:
         # v2 auto-mode does a `server/discover` probe on entry.
         from .conftest import PINNED_PROTOCOL_VERSION

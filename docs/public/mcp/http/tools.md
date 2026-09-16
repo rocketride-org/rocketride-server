@@ -5,7 +5,8 @@ sidebar_position: 2
 
 # Tools
 
-The server exposes **29 tools**. This page is the full reference; the
+The server exposes **29 tools** — 28 on a deployed engine, where `send_files`
+is not offered (see its entry). This page is the full reference; the
 [overview](/connect/mcp/http/) has the one-table summary.
 
 ## How every tool behaves
@@ -18,7 +19,8 @@ The server exposes **29 tools**. This page is the full reference; the
   `{ok: false, error_type, message, hint}` with the MCP `isError` flag set:
   `BadRequest` (bad or missing arguments), `Timeout` (one engine call ran past
   its budget — the hint says how to recover), `NotFound`/`TraceExpired` (log
-  tools), `UnknownTool`. Hard failures (lost engine connection, auth) surface
+  tools), `Unavailable` (a local-engine-only tool called on a deployed engine),
+  `UnknownTool`. Hard failures (lost engine connection, auth) surface
   as MCP protocol errors with the original message preserved.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
@@ -195,16 +197,19 @@ Send data to a running task and return its result.
 
 ### send_files
 
-Upload files to a running task by token.
+Upload files from the engine host's local filesystem to a running task by
+token.
 
-- **Parameters:** `task_token` (string, required); `files` (array of strings,
-  at least one, required).
+- **Availability:** local engines only — the engine binds a loopback host
+  (`localhost`, `127.0.0.1`, `::1`), so the engine host is your own machine.
+  Any other bind neither lists the tool nor runs it: a call by name returns
+  `Unavailable` without looking at the paths. To get files into a pipeline on
+  a deployed engine (including RocketRide Cloud), use `run_dropper_pipe` and
+  its `upload_url`.
+- **Parameters:** `task_token` (string, required); `files` (array of paths on
+  the engine host's filesystem, at least one, required).
 - **Returns:** `{ok, result}` — per-file upload results (status, timing,
   processing results).
-- **Caution:** paths are resolved on the machine the engine runs on — **not**
-  through your account file store. Against RocketRide Cloud this tool is only
-  useful for files the engine host can already see; to get local files into a
-  pipeline, use `run_dropper_pipe` and its `upload_url` instead.
 
 ### terminate
 

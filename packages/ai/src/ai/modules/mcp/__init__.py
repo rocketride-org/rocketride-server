@@ -244,6 +244,9 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # a fresh client instead of the shared singleton — see _make_engine_factory.
     # ------------------------------------------------------------------
     bind_host = _bind_host(server, config)
+    # Local engine: loopback-only bind, so the engine host is the caller's own
+    # machine. Decided once here; gates the host-filesystem tools below.
+    local_engine = auth.is_loopback_bind(bind_host)
     engine_uri, engine_uri_rule = _resolve_engine_uri(config, bind_host, _bind_port(server, config))
     logger.info('MCP engine URI: %s (%s)', _redacted_uri(engine_uri), engine_uri_rule)
     config = {**config, 'rocketride_uri': engine_uri}
@@ -257,7 +260,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # EngineClient just to read a string. See handlers.py's docstring.
     # ------------------------------------------------------------------
     engine_origin = _base_url_from_uri(engine_uri)
-    mcp_server = build_mcp_server(engine_factory, task_registry, engine_origin=engine_origin)
+    mcp_server = build_mcp_server(engine_factory, task_registry, engine_origin=engine_origin, local_engine=local_engine)
 
     session_manager = StreamableHTTPSessionManager(
         app=mcp_server,

@@ -57,10 +57,10 @@ accordingly.)
 - **Inline-only pipelines** — no tool accepts a server-local pipeline path, so
   an authenticated caller cannot make the engine read pipeline definitions off
   its host filesystem.
-- **`send_files` reads the engine host's disk.** Unlike the `store_*` tools
-  (which are scoped to the caller's account file store), `send_files` resolves
-  its paths on the machine the engine runs on. Treat access to this tool as
-  read access to files the engine process can open — see its
+- **`send_files` is local-engine only.** Unlike the `store_*` tools (which are
+  scoped to the caller's account file store), `send_files` reads its paths on
+  the machine the engine runs on, so it is offered only on a loopback bind.
+  On any other bind it is not listed and calls to it are refused — see its
   [reference entry](/connect/mcp/http/tools#send_files).
 - **Credential names, never values** — integration-readiness tools report
   which environment variables are configured; the values never transit MCP.
