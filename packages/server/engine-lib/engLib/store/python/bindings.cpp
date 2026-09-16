@@ -490,6 +490,24 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		to python strings. This is for nodes to output
     ///		under the DebugOut level
     ///------------------------------------------------------------
+    //-------------------------------------------------------------
+    /// @details
+    ///		Scans a directory for nodes and rebuilds the schemas, so a node
+    ///		that lands after startup is seen without a restart. Returns True;
+    ///		raises with the engine's own error otherwise.
+    ///
+    ///		Nothing calls it yet, and it must NOT be called while pipelines are
+    ///		running: the registries it writes are read without a lock. See the
+    ///		contract on IServices::rescan.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(rescanNodes, [](const std::string &directory) -> bool {
+        // Take the directory as given: --node_path is fixed at process start
+        // and a cloud worker has none.
+        if (auto ccode = IServices::rescan(file::Path(directory))) throw ccode;
+
+        return true;
+    });
+
     engLib.PYBIND_FUNCTION(getServiceDefinitions, []() -> py::object {
         // Get the service type
         const auto result = IServices::getServiceSchemas();

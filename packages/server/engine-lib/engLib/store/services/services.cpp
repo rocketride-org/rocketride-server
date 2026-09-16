@@ -1613,12 +1613,13 @@ void IServices::resolveDescriptions(json::Value &node) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Loads all the service definitions
+///		Walks a directory tree and loads every services.*json it finds into
+///		m_services. At file scope rather than inside init() so a rescan can
+///		reach it too; a non-local lambda cannot carry a capture-default, and
+///		needs none — it recurses through its own name, which has static storage.
 //-------------------------------------------------------------------------
-Error IServices::init() noexcept {
-    // Lambda to walk the paths
-    const std::function<Error(const Path &, const Text &)> loadServices =
-        localfcn(const Path &path, const Text &mask)->Error {
+static const std::function<Error(const Path &, const Text &, bool)> loadServices =
+        [](const Path &path, const Text &mask, bool skipKnown) -> Error {
         // Get the scanner
         file::FileScanner scanner(path / mask);
 
@@ -1634,7 +1635,8 @@ Error IServices::init() noexcept {
             // If this is a directory, walk into it
             if (entry->second.isDir) {
                 auto newPath = path / entry->first;
-                if (auto ccode = loadServices(newPath, (Text) "services.*json"))
+                if (auto ccode =
+                        loadServices(newPath, (Text) "services.*json", skipKnown))
                     return ccode;
                 continue;
             }
@@ -1932,6 +1934,14 @@ Error IServices::init() noexcept {
             // Get the logical type
             auto logicalType = def.logicalType;
 
+            // A rescan only adds. Overwriting an entry would change a
+            // definition a running pipeline holds a pointer to, and would
+            // register this node's factories a second time.
+            if (skipKnown && m_services.find(logicalType) != m_services.end()) {
+                LOG(Services, "    Already loaded, skipped");
+                continue;
+            }
+
             // Save it
             m_services[logicalType] = _mv(def);
 
@@ -1984,20 +1994,55 @@ Error IServices::init() noexcept {
         }
 
         return {};
-    };
+};
 
+//-------------------------------------------------------------------------
+/// @details
+///		Loads the nodes in a directory and rebuilds the schemas
+//-------------------------------------------------------------------------
+Error IServices::rescan(const Path &directory) noexcept {
+    // NOT SAFE while pipelines are running. m_services, m_fields, the dynamic
+    // factories and the url mappers are written here with no lock, and every
+    // reader takes them without one. Nothing calls this yet; a caller has to
+    // arrive with a synchronisation answer, not before one.
+    //
+    // A combo field that is already resolved is not rebuilt either, so a node
+    // added here does not appear in an existing provider list until restart.
+    // It is instantiable — which is what a run needs — but not offerable.
+    if (!file::exists(directory) || !file::isDir(directory))
+        return APERR(Ec::NotFound, "Node directory not found:", directory);
+
+    LOG(Services, "Rescanning nodes in", directory);
+
+    // The same three steps init() performs, over one directory instead of the
+    // startup roots. Definitions are added, never cleared: a live pipeline
+    // holds pointers into m_services.
+    //
+    // A scan that fails partway leaves what it already added. Additive-only
+    // makes that survivable — nothing that worked stops working — but it is
+    // not atomic, and the caller is told so it can refuse to run.
+    if (auto ccode = loadServices(directory, (Text) "*", true)) return ccode;
+    if (auto ccode = updateDefinitions()) return ccode;
+    return declareDefaultUrlMappers();
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Loads all the service definitions
+//-------------------------------------------------------------------------
+Error IServices::init() noexcept {
     // The sources path if the engine/engtest is running in the dev mode
     auto rootPath = application::projectDir() ? application::projectDir() / "nodes/src/nodes" : "";
     if (!rootPath || !file::exists(rootPath) || !file::isDir(rootPath))
         // The exec path if the engine is running in the prod mode
         rootPath = application::execDir() / "nodes";
-    if (!file::exists(rootPath) || !file::isDir(rootPath)) {
+    // A missing directory is not an error: an engine that ships no nodes still
+    // has to finish init(), because the two steps below are about fields and
+    // url mappers rather than about nodes.
+    if (!file::exists(rootPath) || !file::isDir(rootPath))
         LOG(Services, "Loading skipped: the nodes directory not found");
-        return {};
-    }
-
-    // Start at the root
-    if (auto ccode = loadServices(rootPath, (Text) "*")) return ccode;
+    else if (auto ccode = loadServices(rootPath, (Text) "*", false))
+        return ccode;
 
     // Also scan a `local_nodes` folder under --node_path=<dir>, if given. The
     // fixed name keeps these imported as local_nodes.<node>, never clashing
@@ -2006,7 +2051,8 @@ Error IServices::init() noexcept {
         auto localRoot = _cast<file::Path>(*NodePath) / "local_nodes";
         if (file::exists(localRoot) && file::isDir(localRoot)) {
             LOG(Services, "Loading workspace-local nodes from", localRoot);
-            if (auto ccode = loadServices(localRoot, (Text) "*")) return ccode;
+            if (auto ccode = loadServices(localRoot, (Text) "*", false))
+                return ccode;
         } else {
             LOG(Services, "No local_nodes directory under --node_path:",
                 _cast<file::Path>(*NodePath));
