@@ -126,7 +126,7 @@ nothing itself.
   defaults to `lane_in`); `class_type` (string, optional, defaults to
   `lane_in`).
 - **Returns:** `{ok, name, provider, files, next_steps}` — `files` maps
-  `local_nodes/<name>/...` paths to file contents.
+  `nodes/<name>/...` paths to file contents.
 - **Notable:** lanes and `class_type` are validated against the connected
   engine's live catalog, so the allowed sets never drift from what is actually
   in service.
