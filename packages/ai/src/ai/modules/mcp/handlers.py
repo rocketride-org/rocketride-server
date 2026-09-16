@@ -83,7 +83,7 @@ def build_mcp_server(
             callers never pass this, and `apps.py` falls back to the built
             `apps/dist` directory when omitted.
         engine_origin: The engine's HTTP(S) origin, precomputed by the caller
-            from its configured `rocketride_uri` (see `__init__._base_url_from_uri`),
+            from its resolved engine URI (see `__init__._resolve_engine_uri`),
             for widget CSP stamping in `_on_list_resources`. Reading the
             configured URI directly here -- rather than calling
             `engine_factory().base_url` -- avoids building (and, on the

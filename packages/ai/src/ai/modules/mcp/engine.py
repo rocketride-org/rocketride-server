@@ -363,6 +363,11 @@ def make_engine_client(config: Dict[str, Any]) -> EngineClient:
     """Build the seam client. ``config`` keys (``rocketride_uri``,
     ``rocketride_auth``) take precedence; the environment variables are the
     fallback so existing deployments keep working unchanged.
+
+    The MCP module always passes a resolved ``rocketride_uri`` (explicit,
+    loopback default or public default -- see
+    ``ai.modules.mcp._resolve_engine_uri``), so ``ROCKETRIDE_URI`` is optional
+    there; only a direct caller with neither set hits the URI error below.
     """
     config = config or {}
     uri = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI') or ''

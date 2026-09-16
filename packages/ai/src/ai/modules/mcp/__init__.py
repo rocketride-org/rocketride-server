@@ -5,12 +5,13 @@ import contextlib
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+from urllib.parse import urlsplit
 
 from starlette.routing import Mount, Route
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-from ai.constants import CONST_DEFAULT_WEB_HOST
+from ai.constants import CONST_DEFAULT_WEB_HOST, CONST_DEFAULT_WEB_PORT
 from ai.web import oauth_resource
 
 from . import auth
@@ -145,6 +146,64 @@ def _bind_host(server: 'Any', config: Dict[str, Any]) -> str:
     return str(host) if host is not None else ''
 
 
+def _bind_port(server: 'Any', config: Dict[str, Any]) -> int:
+    """Return the server's configured port, with the same fallback as WebServer.
+
+    Args:
+        server: The WebServer (or test double) that may carry a ``config``.
+        config: Module configuration dict, used as a fallback.
+
+    Returns:
+        int: The configured port (``CONST_DEFAULT_WEB_PORT`` when unset).
+    """
+    server_config = getattr(server, 'config', None) or {}
+    return int(server_config.get('port', config.get('port', CONST_DEFAULT_WEB_PORT)))
+
+
+def _redacted_uri(uri: str) -> str:
+    """Drop userinfo, query and fragment from a URI so it is safe to log."""
+    parts = urlsplit(uri if '://' in uri else '//' + uri)
+    scheme = f'{parts.scheme}://' if parts.scheme else ''
+    return f'{scheme}{parts.netloc.rpartition("@")[2]}{parts.path}'
+
+
+def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) -> Tuple[str, str]:
+    """Resolve the engine URI the MCP tools connect back to.
+
+    The single source for this value: the shared and per-caller engine
+    clients, the widget CSP origin and the user-facing upload/dropper links
+    all derive from what this returns. Rules, first match wins:
+
+    1. ``explicit`` -- ``config['rocketride_uri']`` or env ``ROCKETRIDE_URI``,
+       used as-is.
+    2. ``loopback default`` -- a loopback-only bind talks to this engine
+       itself, ``ws://<host>:<port>``, so an unconfigured laptop engine never
+       silently drives RocketRide's cloud. ``localhost`` maps to
+       ``127.0.0.1`` (uvicorn binds a non-literal host as IPv4); ``::1`` is
+       bracketed.
+    3. ``public default`` -- any other bind (including bind-all / unset) uses
+       the public origin of the MCP resource identifier: path dropped,
+       ``https`` -> ``wss``, ``http`` -> ``ws``.
+
+    Args:
+        config: Module configuration dict.
+        bind_host: The configured bind host (see ``_bind_host``).
+        bind_port: The configured bind port (see ``_bind_port``).
+
+    Returns:
+        Tuple[str, str]: The URI and the name of the rule that chose it.
+    """
+    explicit = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI')
+    if explicit:
+        return explicit, 'explicit'
+    if auth.is_loopback_bind(bind_host):
+        host = '[::1]' if bind_host == '::1' else '127.0.0.1'
+        return f'ws://{host}:{bind_port}', 'loopback default'
+    parts = urlsplit(oauth_resource.resource_identifier())
+    scheme = {'https': 'wss', 'http': 'ws'}.get(parts.scheme, parts.scheme)
+    return f'{scheme}://{parts.netloc.rpartition("@")[2]}', 'public default'
+
+
 def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     """Mount the Streamable-HTTP MCP endpoint on the engine web server.
 
@@ -175,23 +234,29 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     task_registry = TaskRegistry()
 
     # ------------------------------------------------------------------
-    # 2. Engine client factory
-    # Deferring make_engine_client means missing ROCKETRIDE_URI/AUTH env
-    # vars don't raise ValueError at engine boot — only on first request.
+    # 2. Engine URI + client factory
+    # The URI is resolved ONCE, here, where the bind host/port are known,
+    # and injected into a copy of config so every client the factory builds
+    # (shared or per-caller) uses exactly this value.
+    # Deferring make_engine_client means a missing ROCKETRIDE_AUTH/APIKEY
+    # doesn't raise ValueError at engine boot — only on first request.
     # Per-caller requests (identity.CALLER_AUTH set by handle_mcp below) get
     # a fresh client instead of the shared singleton — see _make_engine_factory.
     # ------------------------------------------------------------------
+    bind_host = _bind_host(server, config)
+    engine_uri, engine_uri_rule = _resolve_engine_uri(config, bind_host, _bind_port(server, config))
+    logger.info('MCP engine URI: %s (%s)', _redacted_uri(engine_uri), engine_uri_rule)
+    config = {**config, 'rocketride_uri': engine_uri}
     engine_factory = _make_engine_factory(config)
 
     # ------------------------------------------------------------------
     # 3. Build MCP server + stateless StreamableHTTP session manager
-    # engine_origin is read straight from the configured URI (not built via
+    # engine_origin is derived from the resolved URI string (not built via
     # engine_factory()) so widget CSP stamping never has to construct --
     # and, on the per-caller path, bucket for later close -- a whole
     # EngineClient just to read a string. See handlers.py's docstring.
     # ------------------------------------------------------------------
-    _configured_uri = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI') or ''
-    engine_origin = _base_url_from_uri(_configured_uri) if _configured_uri else None
+    engine_origin = _base_url_from_uri(engine_uri)
     mcp_server = build_mcp_server(engine_factory, task_registry, engine_origin=engine_origin)
 
     session_manager = StreamableHTTPSessionManager(
@@ -215,7 +280,6 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # MCP project, or it does not reach the session manager. Static API keys
     # and credential-less dev requests pass straight through — see auth.py.
     # ------------------------------------------------------------------
-    bind_host = _bind_host(server, config)
 
     async def _reject(send: Any, message: str) -> None:
         """Send a 401 carrying the discovery challenge, in raw ASGI."""

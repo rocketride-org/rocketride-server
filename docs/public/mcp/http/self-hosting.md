@@ -25,6 +25,7 @@ do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below); API-key auth
 | `MCP_AUTHORIZATION_SERVER` | `https://auth.rocketride.ai` | OAuth authorization server advertised in discovery metadata. |
 | `MCP_EXPECTED_AUDIENCE` | _(unset)_ | Audience OAuth tokens must carry — for the default Zitadel setup this is a **project id**, not a URL. When unset, OAuth tokens are accepted only on loopback binds. |
 | `MCP_JWKS_URL` | `<issuer>/oauth/v2/keys` | Where token signing keys are fetched from. |
+| `ROCKETRIDE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of widget CSP and upload/dropper links. When unset: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise the origin of `MCP_RESOURCE_IDENTIFIER` with `https`→`wss` / `http`→`ws` (default `wss://api.rocketride.ai`). The engine logs the resolved value at startup. |
 
 Two related guards to know about:
 
