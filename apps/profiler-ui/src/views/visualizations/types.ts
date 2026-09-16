@@ -72,6 +72,39 @@ export interface ProfileTreeResponse {
 }
 
 // =============================================================================
+// THREADS
+// =============================================================================
+
+/**
+ * One profiled thread from rrext_cprofile_threads.
+ * Matches the CProfileThreadInfo shape from the client SDK.
+ */
+export interface ProfileThreadInfo {
+	/** Thread id within the session — the `thread` argument of rrext_cprofile_report_tree. */
+	id: number;
+	/** Thread name, or null if never resolved. Not unique. */
+	name: string | null;
+	/** System thread id (Python's threading.get_ident()) — tells apart threads that share a name. */
+	tid: number;
+	/** Time attributed to this thread, in seconds. */
+	ttot: number;
+	/** Number of times the thread was scheduled while profiled. */
+	sched_count: number;
+	/** Number of distinct functions recorded on this thread. */
+	functions: number;
+	/** Total number of calls recorded on this thread. */
+	calls: number;
+}
+
+/** Full response from rrext_cprofile_threads. */
+export interface ProfileThreadsResponse {
+	/** Threads of the last completed session, busiest first. */
+	threads: ProfileThreadInfo[];
+	/** Error message if no data is available. */
+	error?: string;
+}
+
+// =============================================================================
 // UI STATE
 // =============================================================================
 
