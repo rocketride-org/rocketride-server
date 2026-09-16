@@ -940,14 +940,36 @@ Typed wrapper for subscriptions, Stripe checkout, credit wallets, and usage.
 
 Direct SQL/Cypher execution against a database pipeline node, bypassing the LLM translation layer that `chat()` uses (and its safety checks — you own the statements you send).
 
-- `query(options): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>` — execute a raw SQL or Cypher statement. Options: `token` and `sql` (required, non-empty); `nodeId?` (empty broadcasts to all tool-lane nodes — the first database node handles it); `sessionId?` (run within a transaction session); `params?: unknown[]` (positional parameters, e.g. `[1, 'foo']` for `$1`, `$2` placeholders)
+- `query(options): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>` — execute a raw SQL or Cypher statement. Options: `token` and `sql` (required, non-empty); `nodeId?` (empty broadcasts to all tool-lane nodes — the first database node handles it); `sessionId?` (run within a transaction session); `params?: unknown[]` (positional parameters, e.g. `[1, 'foo']` for `$1`, `$2` placeholders); `rowMode?: 'object' | 'array'` (`'array'` returns positional `unknown[][]` rows, which is what ORM drivers need — duplicate column names in joins survive)
 - `beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>` — begin a transaction; thread the returned `session_id` through subsequent `query`/`commit`/`rollback` calls
 - `commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>` / `rollback(...)` — same shape
 - `dialect(options: { token: string; nodeId?: string }): Promise<DatabaseDialect>` — discover the underlying engine (`DatabaseDialect.POSTGRES | MYSQL | NEO4J`); branch on SQL syntax differences or detect a graph DB
 
-##### `sequelize(options): Sequelize`
+##### `drizzle(options): PgDatabase` (from `rocketride/drizzle`)
 
-Build a Sequelize ORM instance that transports its SQL over the RocketRide pipe instead of a TCP socket. `sequelize` is an optional **peer dependency** — import the class yourself and pass it in:
+**The ORM to use.** Build a [Drizzle ORM](https://orm.drizzle.team/) instance whose Postgres driver transports SQL over the RocketRide pipe instead of a TCP socket — every query rides the node's `execute` tool function, and `db.transaction()` (with isolation config and nested savepoints) rides `begin`/`commit`/`rollback`. It lives in its own package export so apps that never use it pay nothing, and `drizzle-orm` (`0.45.x`) is an optional peer dependency with no Node built-ins, so it is browser-bundle safe. Options: `client` (pass `client.database`), `token`, `nodeId?` (pin to one database node), plus Drizzle's own `schema?`, `logger?`, `casing?`, `cache?`.
+
+```typescript
+import { drizzle } from 'rocketride/drizzle';
+import { eq } from 'drizzle-orm';
+import { integer, pgTable, text } from 'drizzle-orm/pg-core';
+
+const users = pgTable('users', { id: integer('id').primaryKey(), name: text('name') });
+
+const db = drizzle({ client: client.database, token, nodeId: 'db_postgres_1' });
+const rows = await db.select().from(users).where(eq(users.id, 1));
+
+await db.transaction(async (tx) => {
+	await tx.update(users).set({ name: 'Ada' }).where(eq(users.id, 1));
+	// throwing here rolls the whole transaction back
+});
+```
+
+Rules: the target node needs `allow_execute: true` (the same flag gates transactions); tables must already exist (drizzle-kit `push`/`studio` are not part of this integration — run migrations via `client.database.query()` from a trusted context); binary (`Buffer`/`bytea`) parameters are rejected because queries transport as JSON; failed statements throw `DrizzleQueryError` whose `cause` holds the pipeline's error; an engine too old to honor `rowMode: 'array'` makes the driver throw rather than return empty records. Full guide: `docs/public/typescript/database-drizzle.md` (site: `/clients/typescript/database-drizzle`).
+
+##### `sequelize(options): Sequelize` — deprecated
+
+**Deprecated — prefer `rocketride/drizzle` above.** Kept because it is part of the frozen SDK contract; it will only be removed in a coordinated major release. Builds a Sequelize v6 instance that transports its SQL over the RocketRide pipe instead of a TCP socket. `sequelize` is an optional **peer dependency** that pulls in Node built-ins (`util`, `debug`), so browser bundles need polyfills — import the class yourself and pass it in:
 
 ```typescript
 import { Sequelize } from 'sequelize';

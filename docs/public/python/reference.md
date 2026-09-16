@@ -97,8 +97,8 @@ Paths are **relative** to the store root; absolute-like paths are rejected. See
 ### Database
 
 Raw SQL through a pipeline database node (requires `allow_execute: true` on the
-node). The TypeScript SDK additionally offers a Sequelize ORM binding over this
-surface.
+node). The TypeScript SDK additionally offers a Drizzle ORM driver over this
+surface (`rocketride/drizzle`), plus a deprecated Sequelize binding.
 
 | Method | Signature | Description |
 | --- | --- | --- |

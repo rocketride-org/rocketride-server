@@ -113,12 +113,13 @@ node).
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `database.query({ token, sql, nodeId?, sessionId?, params? }): Promise<{ rows, affected_rows }>` | Execute raw SQL through the pipeline's `execute` tool function. |
+| `database.query` | `database.query({ token, sql, nodeId?, sessionId?, params?, rowMode? }): Promise<{ rows, affected_rows }>` | Execute raw SQL through the pipeline's `execute` tool function. `rowMode: 'array'` returns positional rows. |
 | `database.beginTransaction` | `database.beginTransaction({ token, nodeId? }): Promise<{ session_id }>` | Open a transaction (`begin` tool function). |
 | `database.commit` | `database.commit({ token, sessionId, nodeId? }): Promise<{ ok }>` | Commit the open transaction. |
 | `database.rollback` | `database.rollback({ token, sessionId, nodeId? }): Promise<{ ok }>` | Roll back the open transaction. |
 | `database.dialect` | `database.dialect({ token, nodeId? }): Promise<DatabaseDialect>` | The target node's SQL dialect. |
-| `database.sequelize` | `database.sequelize({ Sequelize, token, nodeId?, sequelizeOptions? }): Sequelize` | Build a Sequelize v6 instance whose Postgres dialect transports SQL over the pipeline. See [Sequelize over Pipelines](/clients/typescript/database-sequelize). <!-- language-specific --> |
+| `drizzle` | `drizzle({ client, token, nodeId?, ...DrizzleConfig }): PgDatabase` (from `rocketride/drizzle`) | Build a Drizzle ORM instance whose Postgres driver transports SQL and transactions over the pipeline. See [Drizzle over Pipelines](/clients/typescript/database-drizzle). <!-- language-specific --> |
+| `database.sequelize` | `database.sequelize({ Sequelize, token, nodeId?, sequelizeOptions? }): Sequelize` | **Deprecated** — prefer `rocketride/drizzle`. Build a Sequelize v6 instance whose Postgres dialect transports SQL over the pipeline. See [Sequelize over Pipelines](/clients/typescript/database-sequelize). <!-- language-specific --> |
 
 ### Deploy (`client.deploy`)
 
@@ -299,7 +300,8 @@ constructor(expectJson?: boolean)  // default false
 - **ConnectResult**: Identity payload returned by `connect()`/`login()` — user, organizations, apps, teams.
 - **QuestionHistory**: `{ role: string, content: string }` · **QuestionExample**: `{ given: string, result: string }` · **QuestionType**/**QuestionText**.
 - **Deploy types**: `DeployArtifact`, `Deployment`, `DeploymentSchedule`, `DeployActor`, `DeployHistoryEntry`, `PublishResult`, `DeployListEnvelope<T>` (the generic list/versions/history envelope), `DeployListParams`, `SchedulePreview` (from `rocketride`).
-- **Sequelize types**: `CreateSequelizeOptions`, `SequelizeConstructor` (see [Sequelize over Pipelines](/clients/typescript/database-sequelize)). <!-- language-specific -->
+- **Drizzle types** (from `rocketride/drizzle`): `DrizzleOverPipesOptions`, `RocketRideDrizzle<TSchema>`; transport interface `DrizzleDatabaseLike` from `rocketride` (see [Drizzle over Pipelines](/clients/typescript/database-drizzle)). <!-- language-specific -->
+- **Sequelize types** (deprecated): `CreateSequelizeOptions`, `SequelizeConstructor` (see [Sequelize over Pipelines](/clients/typescript/database-sequelize)). <!-- language-specific -->
 
 ## Advanced: low-level DAP
 

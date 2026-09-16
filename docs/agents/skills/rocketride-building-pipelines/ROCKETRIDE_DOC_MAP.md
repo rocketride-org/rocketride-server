@@ -71,6 +71,7 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 - [Configuration](/clients/typescript/configuration.md)
 - [Connection](/clients/typescript/connection.md)
 - [Sending Data](/clients/typescript/data.md)
+- [Drizzle over Pipelines](/clients/typescript/database-drizzle.md)
 - [Sequelize over Pipelines](/clients/typescript/database-sequelize.md)
 - [Deployments](/clients/typescript/deploy.md)
 - [Error Handling](/clients/typescript/errors.md)
