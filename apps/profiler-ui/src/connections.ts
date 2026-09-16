@@ -32,6 +32,7 @@
 // =============================================================================
 
 import { useSyncExternalStore } from 'react';
+import type { SettingValue } from 'shell';
 
 // =============================================================================
 // TYPES
@@ -112,7 +113,7 @@ function _generateId(): string {
 export function initConnectionStore(
 	appState: Record<string, unknown>,
 	updateAppState: (key: string, value: unknown) => void,
-	settings: Record<string, string>,
+	settings: Record<string, SettingValue>,
 ): void {
 	_updateAppState = updateAppState;
 
@@ -121,9 +122,10 @@ export function initConnectionStore(
 	if (saved && Array.isArray(saved) && saved.length > 0) {
 		_connections = saved;
 	} else {
-		// Seed a default connection from shell settings
-		const host = settings.PROFILER_SERVER_HOST || 'localhost';
-		const port = settings.PROFILER_SERVER_PORT || '5565';
+		// Seed a default connection from shell settings; a setting may be a
+		// number (a port usually is), while a connection holds strings
+		const host = String(settings.PROFILER_SERVER_HOST || 'localhost');
+		const port = String(settings.PROFILER_SERVER_PORT || '5565');
 		_connections = [{ id: _generateId(), name: 'Local Server', host, port }];
 		_schedulePersist();
 	}

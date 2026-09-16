@@ -202,8 +202,9 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 			.padRadius(SVG_RADIUS / 2);
 
 		// Filter visible nodes (depth > 0, min arc angle)
-		const nodes = root.descendants()
-			.filter((d) => d.depth > 0 && (d.x1 - d.x0) > MIN_ARC_ANGLE) as HierarchyRectangularNode<ProfileTreeNode>[];
+		// partition() laid them out in place, but typed root stays a plain HierarchyNode
+		const nodes = (root.descendants() as HierarchyRectangularNode<ProfileTreeNode>[])
+			.filter((d) => d.depth > 0 && (d.x1 - d.x0) > MIN_ARC_ANGLE);
 
 		// Draw arcs
 		const paths = svgSel.selectAll<SVGPathElement, HierarchyRectangularNode<ProfileTreeNode>>('path.arc')
