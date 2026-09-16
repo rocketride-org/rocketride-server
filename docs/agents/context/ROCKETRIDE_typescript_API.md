@@ -1126,11 +1126,15 @@ const tree = await client.cprofileReportTree(token);    // call tree
 - `cprofileStatus(target?)` — active/inactive, owner, runtime.
 - `cprofileReport(target?)` — the full pstats text report of the last
   completed session.
-- `cprofileReportTree(target?, maxDepth?, minPct?, includeSystem?)` — the
-  call tree (defaults: depth 50, 0.1% cumtime threshold) with `total_time`
-  and `total_calls`; raise `minPct` or lower `maxDepth` to shrink it. Read
-  it top-down: the widest cumulative-time branch under the run loop is the
-  slow pipeline component.
+- `cprofileReportTree(target?, maxDepth?, minPct?, includeSystem?, thread?)` —
+  the call tree (defaults: depth 50, 0.1% cumtime threshold) with
+  `total_time` and `total_calls`; raise `minPct` or lower `maxDepth` to
+  shrink it. Read it top-down: the widest cumulative-time branch under the
+  run loop is the slow pipeline component. Pass `thread` to get one thread's
+  tree instead of all threads merged.
+- `cprofileThreads(target?)` — the threads of the last session, busiest
+  first: `id` (the `thread` to pass above), `name`, system thread id `tid`, `ttot`,
+  `functions` and `calls`. Names are not unique; `tid` is.
 
 ## 18. Exceptions
 

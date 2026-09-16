@@ -17,9 +17,9 @@ So these tests deliberately go through the public client methods rather than
 the same gap.  Argument forwarding is asserted on echoed values, not just on
 "did not raise" — dropping the arguments silently would otherwise still pass.
 
-All but one case work against a server with no session running, so they have
-no effect on anything else using the shared test server.  The one that must
-start a session scopes it to its own task, never the server process.
+Most cases work against a server with no session running, so they have no
+effect on anything else using the shared test server.  The ones that must
+start a session scope it to their own task, never the server process.
 """
 
 from __future__ import annotations
@@ -84,6 +84,12 @@ class TestCProfileClientContract:
         assert result.get('error') == NO_DATA, result
 
     @pytest.mark.asyncio
+    async def test_threads_without_a_session_returns_the_placeholder(self, client):
+        result = await client.cprofile_threads()
+
+        assert result == {'threads': [], 'error': NO_DATA}, result
+
+    @pytest.mark.asyncio
     async def test_start_and_stop_carry_target_and_session(self, client):
         """Round trip on a task of our own, echoing back what we sent.
 
@@ -108,11 +114,48 @@ class TestCProfileClientContract:
             report = await client.cprofile_report(target=token)
             assert report['report'].startswith('Session: contract-session'), report['report'][:200]
         finally:
-            try:
-                await client.cprofile_stop(target=token)
-            except Exception:
-                pass
-            try:
-                await client.terminate(token)
-            except Exception:
-                pass
+            await _cleanup(client, token)
+
+    @pytest.mark.asyncio
+    async def test_threads_and_thread_carry_their_arguments(self, client):
+        """A task session lists its threads, and thread selects one of them.
+
+        Data goes through the pipeline so engine worker threads run while
+        profiled, not only the one answering these commands.
+        """
+        token = (await client.use(pipeline=get_echo_pipeline(f'cprofile_{uuid.uuid4().hex[:8]}')))['token']
+        try:
+            assert (await client.cprofile_start(target=token)).get('status') == 'started'
+            await client.send(token, 'profile me', {}, 'text/plain')
+            assert (await client.cprofile_stop(target=token)).get('status') == 'completed'
+
+            threads = (await client.cprofile_threads(target=token))['threads']
+            assert threads, 'a session that ran the pipeline recorded no thread'
+            # yappi's default names threads by class; these are those names
+            class_named = [t for t in threads if t['name'] in ('_MainThread', '_DummyThread')]
+            assert not class_named, threads
+
+            busiest = threads[0]
+            tree = await client.cprofile_report_tree(target=token, min_pct=0, thread=busiest['id'])
+            assert tree.get('tree') is not None, tree
+            # Only that thread's calls, so the total is the one listed for it
+            assert tree['total_calls'] == busiest['calls'], (tree['total_calls'], busiest)
+
+            # An id the session lacks is refused, which proves thread got there
+            missing = max(t['id'] for t in threads) + 1000
+            result = await client.cprofile_report_tree(target=token, thread=missing)
+            assert result.get('error') == f'Thread {missing} not found in the last session', result
+        finally:
+            await _cleanup(client, token)
+
+
+async def _cleanup(client: RocketRideClient, token: str) -> None:
+    """Stop any session left on the task and terminate it, ignoring failures."""
+    try:
+        await client.cprofile_stop(target=token)
+    except Exception:
+        pass
+    try:
+        await client.terminate(token)
+    except Exception:
+        pass

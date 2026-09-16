@@ -225,7 +225,7 @@ Further public methods, present in both SDKs, in brief:
 | Template storage | `saveTemplate`, `getTemplate`, `deleteTemplate`, `getAllTemplates` |
 | Log storage | `saveLog`, `getLog`, `deleteLog`, `listLogs` |
 | Dashboard | `getDashboard`, `listConnections`, `listTasks` |
-| Profiling | `cprofileStart`, `cprofileStop`, `cprofileStatus`, `cprofileReport`, `cprofileReportTree` |
+| Profiling | `cprofileStart`, `cprofileStop`, `cprofileStatus`, `cprofileReport`, `cprofileReportTree`, `cprofileThreads` |
 | Namespaces | `client.account`, `client.billing` (account and billing APIs) |
 
 ## DataPipe

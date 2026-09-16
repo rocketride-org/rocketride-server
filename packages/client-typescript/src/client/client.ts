@@ -26,7 +26,7 @@ import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -3109,15 +3109,32 @@ export class RocketRideClient extends DAPClient {
 	 * @param target   - Task token if querying a pipeline, or undefined for server.
 	 * @param maxDepth - Maximum tree depth (default 50).
 	 * @param minPct   - Minimum cumtime percentage threshold (default 0.1).
+	 * @param includeSystem - Keep stdlib/system functions in the tree (server default true).
+	 * @param thread   - Thread id from cprofileThreads() for that thread alone;
+	 *                   all threads merged when omitted.
 	 * @returns Object containing the tree root, total_time, and total_calls.
 	 */
-	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean): Promise<CProfileReportTreeResponse> {
+	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean, thread?: number | null): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};
 		if (target) args.target = target;
 		if (maxDepth !== undefined) args.max_depth = maxDepth;
 		if (minPct !== undefined) args.min_pct = minPct;
 		if (includeSystem !== undefined) args.include_system = includeSystem;
+		// 0 is a real thread id, so test for absence rather than truthiness
+		if (thread !== undefined && thread !== null) args.thread = thread;
 		return this.call<CProfileReportTreeResponse>('rrext_cprofile_report_tree', args);
+	}
+
+	/**
+	 * List the threads profiled in the last completed session.
+	 *
+	 * @param target - Task token if querying a pipeline, or undefined for server.
+	 * @returns Object containing the threads, busiest first.
+	 */
+	async cprofileThreads(target?: string | null): Promise<CProfileThreadsResponse> {
+		const args: Record<string, unknown> = {};
+		if (target) args.target = target;
+		return this.call<CProfileThreadsResponse>('rrext_cprofile_threads', args);
 	}
 
 	// ============================================================================
