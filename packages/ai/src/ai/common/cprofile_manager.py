@@ -527,8 +527,9 @@ class CProfileManager:
         # back silently: the caller would get all threads, labelled as one
         if thread is not None:
             try:
-                # bool is an int, and True must not quietly select thread 1
-                if isinstance(thread, bool):
+                # bool is an int, and True must not quietly select thread 1;
+                # nor may int() truncate 1.9 into thread 1.  A JSON 2.0 is fine
+                if isinstance(thread, bool) or (isinstance(thread, float) and not thread.is_integer()):
                     raise TypeError
                 thread = int(thread)
             except (TypeError, ValueError):

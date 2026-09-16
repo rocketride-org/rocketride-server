@@ -658,6 +658,9 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 				setError(result.message || 'Failed to start profiling');
 			} else {
 				setError('');
+				// Drop any report fetch still in flight, or it would restore
+				// the previous session's data cleared below
+				fetchIdRef.current++;
 				// Clear stale data
 				setReport('');
 				setTreeData(null);

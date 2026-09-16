@@ -701,13 +701,14 @@ def test_report_tree_of_one_thread():
     merged = profiler.report_tree(min_pct=0)
     assert merged['total_calls'] == sum(t['calls'] for t in listed)
 
-    # A DAP client may send the id as a string
+    # A DAP client may send the id as a string, or as a whole float
     assert profiler.report_tree(min_pct=0, thread=str(ours[0]['id'])) == tree
+    assert profiler.report_tree(min_pct=0, thread=float(ours[0]['id'])) == tree
 
 
-@pytest.mark.parametrize('thread', ['abc', True, 1.5j, [0]])
+@pytest.mark.parametrize('thread', ['abc', True, 1.5j, [0], 1.5, float('inf'), float('nan')])
 def test_report_tree_rejects_an_invalid_thread(thread):
-    """A bad id is reported, never silently widened to all threads."""
+    """A bad id is reported, never silently narrowed to another thread or widened to all."""
     _run_session('owner-1', 'session-1')
 
     result = profiler.report_tree(thread=thread)
