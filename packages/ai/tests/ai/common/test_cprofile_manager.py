@@ -89,6 +89,7 @@ def _reset_profiler():
         profiler._start_time = None
         profiler._last_report = None
         profiler._last_stats_data = None
+        profiler._last_thread_data = None
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +202,87 @@ t = threading.Thread(target=worker)
 t.start()
 t.join()
 print('survived')
+"""
+
+
+# Three threads, each calling its own marker, two of them also a shared one:
+# the main thread, a threading.Thread, and a cold engine-style worker that
+# names itself and then registers — the order setupDebug()/setupProfiler() use.
+_THREADS_CHILD = r"""
+import json, sys, _thread, threading
+sys.path.insert(0, sys.argv[1])
+from ai.common import cprofile_manager as cm
+from ai.common.cprofile_manager import profiler as p
+
+if len(sys._current_frames()) != 1:
+    print(json.dumps({'error': 'not_alone', 'frames': len(sys._current_frames())}))
+    sys.exit(3)
+
+MARKERS = ('main_marker', 'thread_marker', 'engine_marker', 'shared_marker')
+
+def main_marker():
+    return 1
+
+def thread_marker():
+    return 1
+
+def engine_marker():
+    return 1
+
+def shared_marker():
+    return 1
+
+def plain_worker():
+    for _ in range(20):
+        thread_marker()
+    for _ in range(3):
+        shared_marker()
+
+done = threading.Event()
+
+def engine_worker():
+    threading.current_thread().name = 'engine-worker-7'
+    p.register_current_thread()
+    for _ in range(30):
+        engine_marker()
+    for _ in range(4):
+        shared_marker()
+    done.set()
+
+threading.current_thread().name = 'main-thread'
+p.start('child', session='threads')
+for _ in range(10):
+    main_marker()
+t = threading.Thread(target=plain_worker, name='plain-worker')
+t.start()
+t.join()
+_thread.start_new_thread(engine_worker, ())
+if not done.wait(30):
+    print(json.dumps({'error': 'worker_timeout'}))
+    sys.exit(4)
+p.stop('child')
+
+def tree_names(node, out):
+    out.add(node['name'])
+    for child in node['children']:
+        tree_names(child, out)
+    return out
+
+def marker_counts(entries):
+    return {m: sum(e['ncall'] for e in entries if e['key'][2] == m) for m in MARKERS}
+
+per_thread = {}
+for t in p._last_thread_data:
+    tree = p.report_tree(max_depth=500, min_pct=0, thread=t['id'])['tree']
+    per_thread[t['name']] = {
+        'id': t['id'],
+        'counts': marker_counts(t['stats']),
+        'tree_markers': sorted(tree_names(tree, set()) & set(MARKERS)),
+        'functions': len(t['stats']),
+        'calls': sum(e['ncall'] for e in t['stats']),
+    }
+print(json.dumps({'threads': p.threads()['threads'], 'per_thread': per_thread,
+                  'flat': marker_counts(p._last_stats_data), 'src': cm.__file__}))
 """
 
 
@@ -531,3 +613,169 @@ def test_empty_stats_data_builds_a_valid_report():
     assert 'FUNCTIONS BY CUMULATIVE TIME:' in text
     assert 'TOP 30 BY TOTAL TIME:' in text
     assert _section_rows(text, 'FUNCTIONS BY CUMULATIVE TIME') == []
+
+
+# ---------------------------------------------------------------------------
+# Thread breakdown — threads() and report_tree(thread=...)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope='module')
+def threads_child() -> dict:
+    """One run of the three-thread child, shared by the tests that read it.
+
+    An owned child: the cold worker makes it a cold-thread session.
+    """
+    return _child_json(_run_child(_THREADS_CHILD, _SRC_ROOT))
+
+
+def test_thread_breakdown_keeps_each_threads_calls_apart(threads_child):
+    """Each thread's stats and tree hold its own calls, under its own name."""
+    result = threads_child
+    per_thread = result['per_thread']
+
+    # Named from Thread.name; yappi's default would call two of these 'Thread'
+    # and '_DummyThread', and the dict above would collapse them
+    assert set(per_thread) == {'main-thread', 'plain-worker', 'engine-worker-7'}, per_thread
+
+    # Exact counts per thread: the shared function is split, not duplicated
+    no_calls = dict.fromkeys(('main_marker', 'thread_marker', 'engine_marker', 'shared_marker'), 0)
+    assert per_thread['main-thread']['counts'] == {**no_calls, 'main_marker': 10}
+    assert per_thread['plain-worker']['counts'] == {**no_calls, 'thread_marker': 20, 'shared_marker': 3}
+    assert per_thread['engine-worker-7']['counts'] == {**no_calls, 'engine_marker': 30, 'shared_marker': 4}
+    assert result['flat']['shared_marker'] == 7
+
+    # Thread 0 is real, and the exact counts above then prove it was not handed
+    # every thread's functions — what get_func_stats(ctx_id=0) does
+    assert [name for name, t in per_thread.items() if t['id'] == 0], per_thread
+
+    # Each tree is built from that thread's stats alone
+    assert per_thread['main-thread']['tree_markers'] == ['main_marker']
+    assert per_thread['plain-worker']['tree_markers'] == ['shared_marker', 'thread_marker']
+    assert per_thread['engine-worker-7']['tree_markers'] == ['engine_marker', 'shared_marker']
+
+
+def test_threads_listing_matches_the_captured_data(threads_child):
+    """threads() summarises exactly what was captured, busiest first."""
+    per_thread = threads_child['per_thread']
+    listed = threads_child['threads']
+
+    assert {t['name'] for t in listed} == set(per_thread)
+    for thread in listed:
+        captured = per_thread[thread['name']]
+        assert thread['id'] == captured['id']
+        assert thread['functions'] == captured['functions']
+        assert thread['calls'] == captured['calls']
+        # Names are not unique in general; the tid is what tells threads apart
+        assert isinstance(thread['tid'], int) and thread['tid'] > 0, thread
+
+    ttots = [t['ttot'] for t in listed]
+    assert ttots == sorted(ttots, reverse=True), listed
+
+
+def test_threads_before_any_session_is_empty():
+    """No session has completed: an empty list and the usual placeholder."""
+    result = profiler.threads()
+
+    assert result['threads'] == []
+    assert result['error'] == 'No profiling data available. Run a session first.'
+
+
+def test_report_tree_of_one_thread():
+    """The id threads() lists selects that thread's tree; None keeps them all.
+
+    In-process, so other pytest threads may be in the session too — the test
+    only relies on the thread it ran report_marker on.
+    """
+    _run_session('owner-1', 'session-1', calls=50)
+
+    # Our thread, found by its system thread id rather than by name
+    listed = profiler.threads()['threads']
+    ours = [t for t in listed if t['tid'] == threading.get_ident()]
+    assert len(ours) == 1, listed
+
+    tree = profiler.report_tree(min_pct=0, thread=ours[0]['id'])
+    assert 'error' not in tree, tree
+    assert tree['total_calls'] == ours[0]['calls']
+
+    merged = profiler.report_tree(min_pct=0)
+    assert merged['total_calls'] == sum(t['calls'] for t in listed)
+
+    # A DAP client may send the id as a string
+    assert profiler.report_tree(min_pct=0, thread=str(ours[0]['id'])) == tree
+
+
+@pytest.mark.parametrize('thread', ['abc', True, 1.5j, [0]])
+def test_report_tree_rejects_an_invalid_thread(thread):
+    """A bad id is reported, never silently widened to all threads."""
+    _run_session('owner-1', 'session-1')
+
+    result = profiler.report_tree(thread=thread)
+
+    assert result['tree'] is None
+    assert result['error'].startswith('Invalid thread id'), result
+
+
+def test_report_tree_reports_an_unknown_thread():
+    """A well-formed id that is not in the session is an error, not all threads."""
+    _run_session('owner-1', 'session-1')
+    missing = max(t['id'] for t in profiler.threads()['threads']) + 1000
+
+    result = profiler.report_tree(thread=missing)
+
+    assert result['tree'] is None
+    assert result['error'] == f'Thread {missing} not found in the last session'
+
+
+def test_report_tree_without_data_ignores_the_thread():
+    """No session yet: the placeholder wins over the thread lookup."""
+    result = profiler.report_tree(thread=0)
+
+    assert result['tree'] is None
+    assert result['error'] == 'No profiling data available. Run a session first.'
+
+
+def test_thread_capture_happens_under_lock_before_clear(monkeypatch):
+    """Per-thread capture reads yappi under _lock and before clear_stats().
+
+    After clear_stats() the per-thread data is gone, and outside the lock a
+    concurrent start() could clear it — either way the capture comes back empty.
+    """
+    profiler.start('owner')
+
+    # Recorded only from here, so start()'s own clear_stats() is not counted
+    seen: list[tuple[str, bool]] = []
+    real_thread_stats = yappi.get_thread_stats
+    real_func_stats = yappi.get_func_stats
+    real_clear = yappi.clear_stats
+
+    def rec_thread_stats():
+        seen.append(('thread_stats', profiler._lock._is_owned()))
+        return real_thread_stats()
+
+    def rec_func_stats(*args, **kwargs):
+        # The per-thread reads are the ones filtered by context
+        if 'ctx_id' in (kwargs.get('filter') or {}):
+            seen.append(('func_stats_ctx', profiler._lock._is_owned()))
+        return real_func_stats(*args, **kwargs)
+
+    def rec_clear():
+        seen.append(('clear_stats', profiler._lock._is_owned()))
+        real_clear()
+
+    monkeypatch.setattr(yappi, 'get_thread_stats', rec_thread_stats)
+    monkeypatch.setattr(yappi, 'get_func_stats', rec_func_stats)
+    monkeypatch.setattr(yappi, 'clear_stats', rec_clear)
+
+    for _ in range(10):
+        report_marker()
+    profiler.stop('owner')
+
+    ops = [op for op, _ in seen]
+    assert 'func_stats_ctx' in ops, f'no per-thread capture was observed: {ops}'
+    # Cleared exactly once, and only after every read
+    assert ops.count('clear_stats') == 1 and ops[-1] == 'clear_stats', f'stats cleared mid-capture: {ops}'
+    unlocked = [op for op, owned in seen if not owned]
+    assert not unlocked, f'yappi read without holding _lock: {unlocked}'
+    # ... and the capture did find this thread
+    assert profiler._last_thread_data, 'nothing was captured per thread'

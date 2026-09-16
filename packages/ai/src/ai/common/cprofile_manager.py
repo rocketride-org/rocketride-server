@@ -123,6 +123,30 @@ def _is_project_code(path: str) -> bool:
     return path.startswith(_PROJECT_PREFIXES)
 
 
+def _thread_name() -> Optional[str]:
+    """
+    Name the current thread for yappi's per-thread stats.
+
+    yappi's default names a context after its thread's class, so every worker
+    reads 'Thread' (or '_DummyThread' for an engine worker).  Reads
+    threading._active directly, as that default does: current_thread() would
+    deadlock when the profiled call is _active_limbo_lock.acquire() (yappi
+    issue #48).
+
+    Returns None while the thread is not registered yet, and yappi asks again.
+    Once it has a name it keeps it, so a thread renamed later keeps its old one.
+    """
+    try:
+        return threading._active[threading.get_ident()].name
+    except KeyError:
+        return None
+
+
+def _no_tree(message: str) -> Dict[str, Any]:
+    """Build the report_tree() result that carries no tree, only an error."""
+    return {'tree': None, 'total_time': 0, 'total_calls': 0, 'error': message}
+
+
 # Text report column layout.  Numeric widths and the two-space gap are yappi's
 # print_all() defaults (yappi.py:1015-1025); the name column is deliberately
 # wider than its 36, which truncated almost every row to an unidentifiable tail
@@ -194,6 +218,7 @@ class CProfileManager:
         _start_time: Unix timestamp when profiling started.
         _last_report: Cached report text, built on demand by report().
         _last_stats_data: Structured stats from the last session for report_tree().
+        _last_thread_data: The same stats split by thread, for threads().
         _last_session_name: Session name of the last completed session.
         _last_owner_id: Owner of the last completed session.
         _last_runtime: Duration of the last completed session.
@@ -239,6 +264,16 @@ class CProfileManager:
         #   builtin: bool (affects how the text report names it)
         #   children: list of (child_key, ncall, ttot, tsub)
         self._last_stats_data: Optional[List[Dict]] = None
+
+        # Per-thread stats from the last completed session, captured next to
+        # _last_stats_data. A list of dicts, one per thread, each with:
+        #   id: int (yappi context id — what report_tree(thread=...) takes)
+        #   name: str or None
+        #   tid: int (threading.get_ident() — tells apart threads sharing a name)
+        #   ttot: float (time yappi attributed to the thread)
+        #   sched_count: int
+        #   stats: list shaped like _last_stats_data, for this thread only
+        self._last_thread_data: Optional[List[Dict]] = None
 
         # Guards all mutable state. Reentrant because register_current_thread()
         # is reachable from the engine's GIL-attach path on every thread.
@@ -293,6 +328,9 @@ class CProfileManager:
                 }
             yappi.set_clock_type(clock_type)
 
+            # Name threads by Thread.name, not by class, so workers differ
+            yappi.set_context_name_callback(_thread_name)
+
             # Start profiling all threads (including builtins)
             yappi.start(builtins=True)
             self._active = True
@@ -344,6 +382,9 @@ class CProfileManager:
 
             # Build structured stats data for report_tree()
             self._last_stats_data = self._capture_stats_data(func_stats)
+
+            # Same again per thread, while yappi still holds the data
+            self._last_thread_data = self._capture_thread_data()
 
             # Clear yappi's internal data to free memory
             yappi.clear_stats()
@@ -453,6 +494,7 @@ class CProfileManager:
         max_depth: int = 50,
         min_pct: float = 0.1,
         include_system: bool = True,
+        thread: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Build a hierarchical call-tree from the last completed profiling session.
@@ -468,11 +510,25 @@ class CProfileManager:
                             only return project code (./ai/, ./nodes/, etc.).
                             System nodes are collapsed — their project-code
                             children are promoted to the nearest project ancestor.
+            thread: Thread id from threads() to build the tree of that thread
+                    alone, or None (default) for all threads merged.
 
         Returns:
             Dict with 'tree' (root node), 'total_time', and 'total_calls',
-            or an error message if no stats data is available.
+            or an error message if no stats data is available or the thread
+            is unknown.
         """
+        # Validate thread — unlike the knobs below, a bad one must not fall
+        # back silently: the caller would get all threads, labelled as one
+        if thread is not None:
+            try:
+                # bool is an int, and True must not quietly select thread 1
+                if isinstance(thread, bool):
+                    raise TypeError
+                thread = int(thread)
+            except (TypeError, ValueError):
+                return _no_tree(f'Invalid thread id: {thread!r}')
+
         # Validate and clamp max_depth
         try:
             max_depth = int(max_depth)
@@ -489,15 +545,16 @@ class CProfileManager:
 
         with self._lock:
             if self._last_stats_data is None:
-                return {
-                    'tree': None,
-                    'total_time': 0,
-                    'total_calls': 0,
-                    'error': 'No profiling data available. Run a session first.',
-                }
+                return _no_tree('No profiling data available. Run a session first.')
 
             # Copy data under lock, process outside
-            stats_data = list(self._last_stats_data)
+            if thread is None:
+                stats_data = list(self._last_stats_data)
+            else:
+                found = next((t for t in self._last_thread_data or () if t['id'] == thread), None)
+                if found is None:
+                    return _no_tree(f'Thread {thread} not found in the last session')
+                stats_data = list(found['stats'])
 
         # Build the tree outside the lock (read-only on stats_data)
         result = self._build_tree(stats_data, max_depth, min_pct)
@@ -507,6 +564,42 @@ class CProfileManager:
             result['tree'] = self._filter_system_calls(result['tree'])
 
         return result
+
+    def threads(self) -> Dict[str, Any]:
+        """
+        List the threads profiled in the last completed session.
+
+        Anyone can call this — no ownership check.
+
+        Returns:
+            Dict with 'threads', busiest first.  Each has id (pass it to
+            report_tree() as thread), name, tid, ttot, sched_count, and the
+            number of functions and calls recorded on it.  When no session has
+            completed, the list is empty and 'error' says so.
+        """
+        with self._lock:
+            if self._last_thread_data is None:
+                return {'threads': [], 'error': 'No profiling data available. Run a session first.'}
+
+            # Copy data under lock, process outside
+            thread_data = list(self._last_thread_data)
+
+        threads = [
+            {
+                'id': thread['id'],
+                'name': thread['name'],
+                'tid': thread['tid'],
+                'ttot': round(thread['ttot'], 6),
+                'sched_count': thread['sched_count'],
+                'functions': len(thread['stats']),
+                'calls': sum(entry['ncall'] for entry in thread['stats']),
+            }
+            for thread in thread_data
+        ]
+        # Id breaks ties so idle threads keep a stable order
+        threads.sort(key=lambda t: (-t['ttot'], t['id']))
+
+        return {'threads': threads}
 
     @staticmethod
     def _filter_system_calls(node: Dict[str, Any]) -> Dict[str, Any]:
@@ -710,6 +803,36 @@ class CProfileManager:
             )
 
         return stats_list
+
+    @classmethod
+    def _capture_thread_data(cls) -> List[Dict]:
+        """
+        Capture every profiled thread together with its own function stats.
+
+        Like _capture_stats_data(), must run before yappi.clear_stats().
+
+        Returns:
+            List of dicts, each with id, name, tid, ttot, sched_count, and
+            stats — this thread's entries, shaped as _capture_stats_data()
+            returns them.
+        """
+        threads = []
+        for thread in yappi.get_thread_stats():
+            # A filter dict, not get_func_stats(ctx_id=...): that drops a falsy
+            # id, so thread 0 would get every thread's functions
+            func_stats = yappi.get_func_stats(filter={'ctx_id': thread.id})
+            threads.append(
+                {
+                    'id': thread.id,
+                    'name': thread.name,
+                    'tid': thread.tid,
+                    'ttot': thread.ttot,
+                    'sched_count': thread.sched_count,
+                    'stats': cls._capture_stats_data(func_stats),
+                }
+            )
+
+        return threads
 
     @staticmethod
     def _build_tree(
