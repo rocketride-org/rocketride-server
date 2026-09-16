@@ -33,15 +33,31 @@ import type { ProfileTreeNode } from './types';
 /**
  * Apply cutoff pruning to a tree node.
  * Returns a new node with children filtered by the cutoff threshold.
- * Children whose cumtime is less than cutoff * parent.cumtime are removed.
+ * A child is removed when nothing in its subtree reaches cutoff * the
+ * parent's weight, where a node's weight is the largest cumtime in its
+ * subtree. Its own cumtime is not enough: frames still running when
+ * profiling stopped read ~0, and a coroutine is booked its whole lifetime
+ * while the loop step that resumes it is not. Apply before limitDepth, so
+ * weights see the whole subtree.
  */
 export function pruneTree(node: ProfileTreeNode, cutoff: number): ProfileTreeNode {
 	if (cutoff <= 0 || !node.children.length) return node;
-	const threshold = cutoff * node.cumtime;
-	const prunedChildren = node.children
-		.filter((c) => c.cumtime >= threshold)
-		.map((c) => pruneTree(c, cutoff));
-	return { ...node, children: prunedChildren };
+
+	const weights = new Map<ProfileTreeNode, number>();
+	const weightOf = (n: ProfileTreeNode): number => {
+		let weight = weights.get(n);
+		if (weight === undefined) {
+			weight = n.children.reduce((max, c) => Math.max(max, weightOf(c)), n.cumtime);
+			weights.set(n, weight);
+		}
+		return weight;
+	};
+
+	const prune = (n: ProfileTreeNode): ProfileTreeNode => {
+		const threshold = cutoff * weightOf(n);
+		return { ...n, children: n.children.filter((c) => weightOf(c) >= threshold).map(prune) };
+	};
+	return prune(node);
 }
 
 /**

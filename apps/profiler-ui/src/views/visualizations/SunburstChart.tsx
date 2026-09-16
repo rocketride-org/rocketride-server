@@ -155,8 +155,9 @@ const SunburstChart: React.FC<SunburstChartProps> = ({
 		const svg = svgRef.current;
 		if (!svg || !vizRoot) return;
 
-		// Apply client-side depth limiting and cutoff pruning
-		const processedRoot = pruneTree(limitDepth(vizRoot, maxDepth), cutoff);
+		// Apply client-side cutoff pruning, then depth limiting — pruning
+		// weighs whole subtrees, so it must see the levels the limit drops
+		const processedRoot = limitDepth(pruneTree(vizRoot, cutoff), maxDepth);
 
 		// Resolve theme colours
 		const cs = getComputedStyle(svg);
