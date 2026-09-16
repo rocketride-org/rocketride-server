@@ -99,7 +99,7 @@ export interface CProfileTreeNode {
 export interface CProfileReportTreeResponse {
 	/** Root node of the call tree (synthetic '<root>' wrapper). */
 	tree: CProfileTreeNode | null;
-	/** Total cumulative time across all profiled functions. */
+	/** How long the profiled threads ran — the selected thread, or all of them summed. */
 	total_time: number;
 	/** Total number of function calls recorded. */
 	total_calls: number;

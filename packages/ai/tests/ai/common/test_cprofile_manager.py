@@ -793,3 +793,147 @@ def test_thread_capture_happens_under_lock_before_clear(monkeypatch):
     assert not unlocked, f'yappi read without holding _lock: {unlocked}'
     # ... and the capture did find this thread
     assert profiler._last_thread_data, 'nothing was captured per thread'
+
+
+# ---------------------------------------------------------------------------
+# Call-tree pruning, on hand-built stats
+# ---------------------------------------------------------------------------
+#
+# The shapes below are the ones a real parse pipeline produced (see the
+# session numbers in each docstring).  They are built by hand rather than
+# profiled: which frames are still running at stop() is exactly what a live
+# session cannot pin down.
+
+
+def _stats(calls: dict[str, dict[str, float]], ttot: dict[str, float] | None = None, tsub=None) -> list[dict]:
+    """Stats entries for a call graph given as {caller: {callee: edge ttot}}."""
+    names = set(calls) | {callee for callees in calls.values() for callee in callees}
+    ttot = ttot or {}
+    tsub = tsub or {}
+    return [
+        {
+            'key': ('./ai/fake.py', 1, name),
+            'ncall': 1,
+            'ttot': ttot.get(name, 0.0),
+            'tsub': tsub.get(name, 0.0),
+            'builtin': False,
+            'children': [
+                {'key': ('./ai/fake.py', 1, callee), 'ncall': 1, 'ttot': edge, 'tsub': 0.0}
+                for callee, edge in calls.get(name, {}).items()
+            ],
+        }
+        for name in sorted(names)
+    ]
+
+
+def _paths(node: dict, prefix: tuple = ()) -> list[tuple]:
+    """Every root-to-node path of a built tree, by function name."""
+    path = prefix + (node['name'],)
+    return [path] + [p for child in node['children'] for p in _paths(child, path)]
+
+
+def test_tree_keeps_work_under_frames_still_running_at_stop():
+    """A thread started mid-session: its entry frames never returned, so read 0.
+
+    Measured: asyncio_2 lost close_sync (5.3 s) because Thread.run, at depth 2
+    with 0 s, fell under the threshold and took its whole subtree with it.
+    """
+    data = _stats(
+        {
+            '_bootstrap': {'_bootstrap_inner': 0.0},
+            '_bootstrap_inner': {'run': 0.0},
+            'run': {'_worker': 0.0},
+            '_worker': {'_WorkItem.run': 5.4},
+            '_WorkItem.run': {'close_sync': 5.3},
+        }
+    )
+
+    tree = CProfileManager._build_tree(data, max_depth=50, min_pct=0.1, total_time=10.0)['tree']
+
+    expected = ('<root>', '_bootstrap', '_bootstrap_inner', 'run', '_worker', '_WorkItem.run', 'close_sync')
+    assert expected in _paths(tree), _paths(tree)
+
+
+def test_tree_keeps_a_coroutine_under_a_short_loop_step():
+    """A coroutine is booked its whole lifetime, the loop step resuming it is not.
+
+    Measured: on_receive (48.7 s) sat under Context.run (0.53 s), which the
+    threshold dropped.  Here the step is below the threshold on its own.
+    """
+    data = _stats(
+        {
+            '_run_once': {'Handle._run': 0.01},
+            'Handle._run': {'Context.run': 0.01},
+            'Context.run': {'on_receive': 48.7},
+        },
+        ttot={'_run_once': 27.5},
+    )
+
+    tree = CProfileManager._build_tree(data, max_depth=50, min_pct=0.1, total_time=27.5)['tree']
+
+    assert ('<root>', '_run_once', 'Handle._run', 'Context.run', 'on_receive') in _paths(tree), _paths(tree)
+
+
+def test_tree_still_prunes_what_leads_nowhere():
+    """Light nodes survive only when real work hangs below them."""
+    data = _stats(
+        {
+            'main': {'busy': 5.0, 'idle': 0.0001},
+            'idle': {'idler': 0.0001},
+            'idler': {'idlest': 0.00005},
+        },
+    )
+
+    paths = _paths(CProfileManager._build_tree(data, max_depth=50, min_pct=0.1, total_time=10.0)['tree'])
+
+    assert ('<root>', 'main', 'busy') in paths
+    # Depth 1 is never pruned; below it, nothing here reaches 0.01 s
+    assert ('<root>', 'main', 'idle') in paths
+    assert not [p for p in paths if 'idler' in p], paths
+
+
+def test_tree_weighs_through_cycles():
+    """Weights propagate around a cycle and the propagation terminates."""
+    data = _stats(
+        {
+            'entry': {'a': 0.0},
+            'a': {'b': 0.0},
+            'b': {'a': 0.0, 'heavy': 3.0},
+        },
+    )
+
+    paths = _paths(CProfileManager._build_tree(data, max_depth=50, min_pct=0.1, total_time=10.0)['tree'])
+
+    assert ('<root>', 'entry', 'a', 'b', 'heavy') in paths, paths
+
+
+def test_tree_total_defaults_to_self_time():
+    """Without a thread total, self times are summed — ttot would count nesting again.
+
+    main 10 s > work 9 s > sleep 8 s ran for 10 s; the ttot sum says 27.
+    """
+    data = _stats(
+        {'main': {'work': 9.0}, 'work': {'sleep': 8.0}},
+        ttot={'main': 10.0, 'work': 9.0, 'sleep': 8.0},
+        tsub={'main': 1.0, 'work': 1.0, 'sleep': 8.0},
+    )
+
+    result = CProfileManager._build_tree(data, max_depth=50, min_pct=0.1)
+
+    assert result['total_time'] == 10.0
+    assert result['tree']['cumtime'] == 10.0
+
+
+def test_report_tree_total_is_thread_time():
+    """The tree's total is how long the threads ran: one, or all summed."""
+    one = _stats({'main': {'work': 1.0}}, tsub={'main': 0.5, 'work': 1.0})
+    two = _stats({'loop': {'step': 2.0}}, tsub={'loop': 7.0, 'step': 2.0})
+    profiler._last_stats_data = one + two
+    profiler._last_thread_data = [
+        {'id': 0, 'name': 'first', 'tid': 1, 'ttot': 5.0, 'sched_count': 1, 'stats': one},
+        {'id': 1, 'name': 'second', 'tid': 2, 'ttot': 3.0, 'sched_count': 1, 'stats': two},
+    ]
+
+    assert profiler.report_tree()['total_time'] == 8.0
+    assert profiler.report_tree(thread=0)['total_time'] == 5.0
+    assert profiler.report_tree(thread=1)['total_time'] == 3.0

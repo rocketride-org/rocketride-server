@@ -519,9 +519,9 @@ class CProfileManager:
                     alone, or None (default) for all threads merged.
 
         Returns:
-            Dict with 'tree' (root node), 'total_time', and 'total_calls',
-            or an error message if no stats data is available or the thread
-            is unknown.
+            Dict with 'tree' (root node), 'total_time' (how long the selected
+            thread ran, or all threads summed), and 'total_calls', or an error
+            message if no stats data is available or the thread is unknown.
         """
         # Validate thread — unlike the knobs below, a bad one must not fall
         # back silently: the caller would get all threads, labelled as one
@@ -552,17 +552,22 @@ class CProfileManager:
             if self._last_stats_data is None:
                 return _no_tree('No profiling data available. Run a session first.')
 
-            # Copy data under lock, process outside
+            # Copy data under lock, process outside.  The total is the time
+            # the threads ran: yappi measures it per thread, and the function
+            # stats cannot give it without counting nested calls again
             if thread is None:
                 stats_data = list(self._last_stats_data)
+                total_time = sum(t['ttot'] for t in self._last_thread_data or ())
             else:
                 found = next((t for t in self._last_thread_data or () if t['id'] == thread), None)
                 if found is None:
                     return _no_tree(f'Thread {thread} not found in the last session')
                 stats_data = list(found['stats'])
+                total_time = found['ttot']
 
-        # Build the tree outside the lock (read-only on stats_data)
-        result = self._build_tree(stats_data, max_depth, min_pct)
+        # Build the tree outside the lock (read-only on stats_data); a zero
+        # total means no thread data, so fall back to the self times
+        result = self._build_tree(stats_data, max_depth, min_pct, total_time or None)
 
         # Filter out system calls if requested
         if not include_system and result.get('tree'):
@@ -844,6 +849,7 @@ class CProfileManager:
         stats_data: List[Dict],
         max_depth: int,
         min_pct: float,
+        total_time: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Transform captured yappi stats into a JSON-serializable call tree.
@@ -855,6 +861,8 @@ class CProfileManager:
             stats_data: List of stat dicts from _capture_stats_data().
             max_depth: Maximum recursion depth for tree building.
             min_pct: Minimum cumtime percentage threshold for inclusion.
+            total_time: Time the profiled threads ran — the base for min_pct
+                        and the root's cumtime.  None sums the self times.
 
         Returns:
             Dict with 'tree', 'total_time', and 'total_calls'.
@@ -864,16 +872,33 @@ class CProfileManager:
         for entry in stats_data:
             lookup[entry['key']] = entry
 
-        # Step 2: Compute totals for threshold calculation
-        # (sum, not max — max would skew to one hotspot)
-        total_time = 0.0
-        total_calls = 0
-        for entry in stats_data:
-            total_time += entry['ttot']
-            total_calls += entry['ncall']
+        # Step 2: Compute totals for threshold calculation.  Not a sum of
+        # ttot: that counts every nested call again (a 5 s session summed to
+        # 412 s), which inflates the threshold until real work is pruned
+        if total_time is None:
+            total_time = sum(entry['tsub'] for entry in stats_data)
+        total_calls = sum(entry['ncall'] for entry in stats_data)
 
         # Minimum absolute time threshold
         min_time = total_time * (min_pct / 100.0) if total_time > 0 else 0
+
+        # Heaviest callee time reachable below each function.  A node's own
+        # time says little about its subtree: yappi books time on return, so
+        # frames still running at stop() (thread entry points, worker loops)
+        # read ~0, and a coroutine is booked its whole lifetime while the loop
+        # step resuming it is not.  Pruning on this keeps a light node that
+        # leads to real work.  Iterated to a fixpoint — the graph has cycles
+        reach: Dict[Tuple[str, int, str], float] = {
+            key: max((child['ttot'] for child in entry['children']), default=0.0) for key, entry in lookup.items()
+        }
+        changed = True
+        while changed:
+            changed = False
+            for key, entry in lookup.items():
+                best = max((reach.get(child['key'], 0.0) for child in entry['children']), default=0.0)
+                if best > reach[key]:
+                    reach[key] = best
+                    changed = True
 
         # Step 3: Identify root nodes — functions not appearing as anyone's child
         all_child_keys: set = set()
@@ -925,8 +950,8 @@ class CProfileManager:
             Returns:
                 A dict representing the node, or None if pruned.
             """
-            # Prune below minimum time threshold
-            if ttot < min_time and depth > 1:
+            # Prune below minimum time threshold — unless real work hangs below
+            if depth > 1 and max(ttot, reach.get(func_key, 0.0)) < min_time:
                 return None
 
             module, lineno, name = func_key
