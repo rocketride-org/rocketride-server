@@ -36,6 +36,7 @@ import binascii
 import json
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qsl
 
 from ai.web import oauth_resource
 
@@ -207,11 +208,30 @@ def authorize(scope: Dict[str, Any], *, bind_host: str) -> Optional[str]:
         Optional[str]: An error message when the request must be rejected, or
             None to let it proceed.
     """
+    # The MCP authorization spec requires the Authorization header and forbids
+    # access tokens in the URI query string. The auth middleware's ``?auth=``
+    # fallback exists for browser/WebSocket routes; here it would authenticate
+    # a credential this function never sees, skipping every check below and
+    # running tools as the server's shared engine client. Refuse the parameter
+    # outright, whatever its value. Parsed exactly as Starlette's
+    # ``request.query_params`` does, so the two layers agree on what ``auth`` is.
+    query = scope.get('query_string') or b''
+    if any(name == 'auth' for name, _ in parse_qsl(query.decode('latin-1'), keep_blank_values=True)):
+        logger.warning('rejected /mcp request: credential passed in the query string')
+        return 'credentials must be sent in the Authorization header, not the query string'
+
     credential = bearer_credential(scope)
 
     # No credential at all: whether one is required is the auth middleware's
-    # call, not ours. Under the dev bypass there legitimately isn't one.
+    # call, not ours. Under the dev bypass there legitimately isn't one. But if
+    # the middleware DID authenticate this request (``request.state.account``
+    # is backed by ``scope['state']``), its credential came from somewhere other
+    # than the header — never fall back to the shared engine client for it.
     if not credential:
+        state = scope.get('state')
+        if isinstance(state, dict) and state.get('account') is not None:
+            logger.warning('rejected /mcp request: authenticated upstream but no Authorization header credential')
+            return 'credentials must be sent in the Authorization header'
         return None
 
     scope.setdefault('state', {})['mcp_credential'] = credential
