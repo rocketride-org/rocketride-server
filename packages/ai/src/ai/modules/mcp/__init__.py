@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from starlette.routing import Mount
+from starlette.routing import Mount, Route
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from ai.constants import CONST_DEFAULT_WEB_HOST
@@ -22,6 +22,53 @@ from .registry import TaskRegistry
 logger = logging.getLogger(__name__)
 
 _MOUNT_PATH = '/mcp'
+
+# The request paths an MCP client may address: the advertised resource
+# identifier (bare, no slash -- what spec clients POST to) and its slash form.
+_ENDPOINT_PATHS = (_MOUNT_PATH, _MOUNT_PATH + '/')
+
+
+class _AsgiEndpoint:
+    """Hand a raw ASGI callable to a Starlette ``Route``.
+
+    ``Route`` wraps a plain function as a ``request -> response`` endpoint;
+    any other callable is served as an ASGI app, method-agnostic.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        await self._app(scope, receive, send)
+
+
+def _claims_mcp_path(path: Optional[str]) -> bool:
+    """Report whether a registered route path lies in the MCP namespace."""
+    return bool(path) and (path == _MOUNT_PATH or path.startswith(_MOUNT_PATH + '/'))
+
+
+def _refuse_existing_claimants(server: Any) -> None:
+    """Fail engine boot if anything already owns or opens the MCP paths.
+
+    ``WebServer.add_route`` rejects duplicate ``(method, path)`` pairs, but
+    the endpoint below is registered straight onto the router, so that check
+    never sees a clash. A route at ``/mcp`` would shadow the bare endpoint
+    (a GET-only page answers ``POST /mcp`` with 405), and a public pattern
+    matching it would make AuthMiddleware skip every MCP request -- leaving
+    credential-less callers on the shared engine client.
+
+    Raises:
+        RuntimeError: naming the claimant(s).
+    """
+    claimants = sorted({p for p in (getattr(r, 'path', None) for r in server.app.router.routes) if _claims_mcp_path(p)})
+    is_public = getattr(server, 'is_public_route', None)
+    if is_public is not None:
+        claimants += [f'public:{p}' for p in _ENDPOINT_PATHS if is_public(p)]
+    if claimants:
+        raise RuntimeError(
+            f'{_MOUNT_PATH} and {_MOUNT_PATH}/* are reserved for the MCP API, but already claimed by: '
+            + ', '.join(claimants)
+        )
 
 
 def _base_url_from_uri(uri: str) -> str:
@@ -112,13 +159,19 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             and optional public-path registration hooks.
         config: Module configuration dict. Recognised keys:
 
-            - ``mcp_dev_no_auth`` (bool): skip auth for ``/mcp`` in dev.
+            - ``mcp_dev_no_auth`` (bool): skip auth for ``/mcp`` and
+              ``/mcp/`` in dev (loopback binds only).
+
+    Raises:
+        RuntimeError: If a route already claims ``/mcp`` or ``/mcp/*``, or
+            a public path already matches the endpoint.
     """
     # ------------------------------------------------------------------
     # 1. Hoisted TaskRegistry
     # Created before the engine factory so the same registry instance is
     # handed to build_mcp_server below.
     # ------------------------------------------------------------------
+    _refuse_existing_claimants(server)
     task_registry = TaskRegistry()
 
     # ------------------------------------------------------------------
@@ -149,9 +202,14 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     )
 
     # ------------------------------------------------------------------
-    # 4. Mount the raw ASGI handler at /mcp
+    # 4. Route the raw ASGI handler at /mcp and /mcp/
     # app.add_api_route / add_route expect FastAPI callables with Request
-    # signatures; a raw ASGI app must be mounted via starlette.routing.Mount.
+    # signatures, so the handler goes straight onto the router. A Mount only
+    # matches /mcp/..., and bare /mcp -- the advertised resource identifier
+    # spec clients POST to -- would otherwise get a 307 to /mcp/ (or be
+    # shadowed by any route at /mcp), so an exact, method-agnostic Route
+    # serves the bare path too. The session manager is path-agnostic, so
+    # both forms behave identically.
     #
     # The audience guard runs first: a Zitadel token must be stamped for the
     # MCP project, or it does not reach the session manager. Static API keys
@@ -237,6 +295,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
                 raise pending
 
     server.app.router.routes.append(Mount(_MOUNT_PATH, app=handle_mcp))
+    server.app.router.routes.append(Route(_MOUNT_PATH, endpoint=_AsgiEndpoint(handle_mcp), include_in_schema=False))
 
     # ------------------------------------------------------------------
     # 5. Session-manager lifespan + engine-client teardown
@@ -350,11 +409,13 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             )
             dev_no_auth = False
     if dev_no_auth:
+        # Exactly the two endpoint paths -- never a /mcp/{path} pattern, and
+        # never outside this loopback-only branch.
         if hasattr(server, '_public_paths'):
-            server._public_paths.append(_MOUNT_PATH)
+            server._public_paths.extend(_ENDPOINT_PATHS)
             # Invalidate the compiled-regex cache so the next is_public_route()
             # call re-builds from the updated list.
             if hasattr(server, '_compiled_public_paths'):
                 server._compiled_public_paths = None
         if hasattr(server, 'public'):
-            server.public.add(_MOUNT_PATH)
+            server.public.update(_ENDPOINT_PATHS)
