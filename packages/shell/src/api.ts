@@ -70,6 +70,12 @@ import { useConnectionStatus } from './hooks/useConnectionStatus';
 import { useShellApiConfig } from './connection/ShellApiConfigContext';
 import { useIframeBridge } from './hooks/useIframeBridge';
 import { useAppComponent } from './hooks/useAppComponent';
+// Marketing consent — the decision plus the attribution relay, so a consent
+// surface can live in a remote (util/marketingConsent and util/adAttribution
+// stay shell-internal: they run in bootstrap, before any remote exists).
+import { useMarketingConsent } from './hooks/useMarketingConsent';
+export type { MarketingConsentState } from './hooks/useMarketingConsent';
+export type { MarketingConsent } from './util/marketingConsent';
 
 // Shared hooks re-exported through shell for app convenience
 import { useClickOutside } from './hooks/useClickOutside';
@@ -468,6 +474,7 @@ export const shellApi = {
 	get useConnectionStatus() { return useConnectionStatus; },
 	get useShellApiConfig() { return useShellApiConfig; },
 	get useAppComponent() { return useAppComponent; },
+	get useMarketingConsent() { return useMarketingConsent; },
 	get useClickOutside() { return useClickOutside; },
 	get useFixedPopupPosition() { return useFixedPopupPosition; },
 	get usePrefs() { return usePrefs; },
@@ -537,6 +544,7 @@ export {
 	useShellConnection, useAuthUser, useLogout, useWorkspace, useClient,
 	useShellEvent, useIframeBridge, useSubscriptions, usePolling,
 	useDashboardData, useConnectionStatus, useShellApiConfig, useAppComponent,
+	useMarketingConsent,
 	useClickOutside, useFixedPopupPosition, usePrefs,
 	// Client access + connection manager + connection state
 	getClient, ConnectionManager, ConnectionState,

@@ -49,8 +49,8 @@ export const CONSENT_AVAILABLE_VALUE = 'available';
 
 /**
  * DOM event (dispatched on window) that reopens the consent banner. Remotes
- * fire it from a "Privacy choices" link; the shell's MarketingConsent owns the
- * response.
+ * fire it from a "Privacy choices" link; `useMarketingConsent` owns the
+ * response, wherever the consent surface itself lives.
  */
 export const PRIVACY_CHOICES_EVENT = 'rr:privacy-choices';
 
