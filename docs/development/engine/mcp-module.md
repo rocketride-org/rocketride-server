@@ -38,6 +38,13 @@ integration-readiness tools. Two builder actions maintain it:
   fields fails this gate until the catalog covers them**; a `review: true` stub
   still awaiting curation only warns.
 
+A field may declare `required_for_profiles` (a list of profile keys) when the
+node needs that credential only on some profiles — `llm_nemotron` needs
+`ROCKETRIDE_NVIDIA_KEY` for its NVIDIA-cloud profiles but not for the keyless
+self-hosted `custom` profile. When only such variables are missing the node
+reports `partial` instead of "not configured", and the `conditional` block in
+the tool result names the profiles each variable gates.
+
 Variable *names* are all the catalog and the tools ever handle — values never
 transit MCP.
 

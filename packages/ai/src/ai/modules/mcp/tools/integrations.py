@@ -39,6 +39,8 @@ async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
                     'kind': f.kind,
                     'required': f.required,
                     'suggests': f.suggests,
+                    # Only when declared: existing entries keep their exact shape.
+                    **({'required_for_profiles': list(f.required_for_profiles)} if f.required_for_profiles else {}),
                 }
                 for f in spec.fields
             ],
@@ -83,7 +85,8 @@ def register(registry: ToolRegistry) -> None:
         'List credentialed integrations and their setup status. '
         'Entries include setup instructions you can relay to the user; unconfirmed entries '
         "list the caller's variable names so you can propose a binding and confirm with the "
-        'user before using it. Pass a name for full field detail.',
+        'user before using it. Partial entries are usable on some profiles now and name the '
+        'profiles that still need a variable. Pass a name for full field detail.',
         {
             'type': 'object',
             'properties': {
