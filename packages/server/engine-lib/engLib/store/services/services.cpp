@@ -2001,6 +2001,14 @@ static const std::function<Error(const Path &, const Text &, bool)> loadServices
 ///		Loads the nodes in a directory and rebuilds the schemas
 //-------------------------------------------------------------------------
 Error IServices::rescan(const Path &directory) noexcept {
+    // NOT SAFE while pipelines are running. m_services, m_fields, the dynamic
+    // factories and the url mappers are written here with no lock, and every
+    // reader takes them without one. Nothing calls this yet; a caller has to
+    // arrive with a synchronisation answer, not before one.
+    //
+    // A combo field that is already resolved is not rebuilt either, so a node
+    // added here does not appear in an existing provider list until restart.
+    // It is instantiable — which is what a run needs — but not offerable.
     if (!file::exists(directory) || !file::isDir(directory))
         return APERR(Ec::NotFound, "Node directory not found:", directory);
 
@@ -2009,6 +2017,10 @@ Error IServices::rescan(const Path &directory) noexcept {
     // The same three steps init() performs, over one directory instead of the
     // startup roots. Definitions are added, never cleared: a live pipeline
     // holds pointers into m_services.
+    //
+    // A scan that fails partway leaves what it already added. Additive-only
+    // makes that survivable — nothing that worked stops working — but it is
+    // not atomic, and the caller is told so it can refuse to run.
     if (auto ccode = loadServices(directory, (Text) "*", true)) return ccode;
     if (auto ccode = updateDefinitions()) return ccode;
     return declareDefaultUrlMappers();
