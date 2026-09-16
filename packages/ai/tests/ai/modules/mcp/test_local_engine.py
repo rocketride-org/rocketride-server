@@ -7,6 +7,9 @@ engine: its host is our server, not the caller's machine.
 
 - ``send_files`` reads caller-supplied paths off the engine host, so a
   deployed engine neither lists nor runs it.
+- The SDK forwards its process env (``ROCKETRIDE_*`` from ``os.environ`` and
+  ``./.env``) on ``use()``, and the engine applies that env over the caller's
+  own org/team/user secrets, so a deployed engine sends none.
 """
 
 import json
@@ -160,3 +163,78 @@ def test_run_pipeline_description_is_inline_only():
 
     assert 'filepath' not in tool.description.lower()
     assert 'inline' in tool.description.lower()
+
+
+# ---------------------------------------------------------------------------
+# SDK env: deployed engines send none
+# ---------------------------------------------------------------------------
+
+
+def _shared_and_per_caller(factory):
+    from ai.modules.mcp import identity
+
+    shared = factory()
+    token = identity.CALLER_AUTH.set('rr_caller')
+    try:
+        per_caller = factory()
+    finally:
+        identity.CALLER_AUTH.reset(token)
+    return shared, per_caller
+
+
+async def _execute_arguments(engine_client):
+    """Drive the real SDK ``use()`` through the seam; capture its ``execute`` arguments."""
+    calls = []
+
+    async def _call(command, **arguments):
+        calls.append((command, arguments))
+        return {'token': 'tok-1'}
+
+    engine_client._client.call = _call
+    engine_client._connected = True  # skip the socket; use() itself is the real SDK
+    await engine_client.use(pipeline={'source': 'a', 'components': []})
+    assert [c for c, _ in calls] == ['execute']
+    return calls[0][1]
+
+
+@pytest.fixture
+def _server_env(monkeypatch, tmp_path):
+    """ROCKETRIDE_* vars the engine process itself carries, via env and ./.env."""
+    monkeypatch.setenv('ROCKETRIDE_FOO', 'server-secret')
+    (tmp_path / '.env').write_text('ROCKETRIDE_DOTENV=server-dotenv\n')
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('host', ['0.0.0.0', '10.0.0.5', ''])
+async def test_deployed_engine_clients_send_no_env(monkeypatch, fake_web_server, _server_env, host):
+    captured = _init(monkeypatch, fake_web_server, host)
+
+    for engine_client in _shared_and_per_caller(captured['factory']):
+        assert engine_client._client._env == {}
+        arguments = await _execute_arguments(engine_client)
+        assert 'env' not in arguments
+
+
+def test_deployed_engine_clients_keep_explicit_uri_and_auth(monkeypatch, fake_web_server, _server_env):
+    captured = _init(monkeypatch, fake_web_server, '0.0.0.0', config={'rocketride_uri': 'wss://engine.example'})
+
+    shared, per_caller = _shared_and_per_caller(captured['factory'])
+
+    for engine_client in (shared, per_caller):
+        assert engine_client._client._env == {}
+        assert engine_client.base_url == 'https://engine.example'
+        assert engine_client._client._uri.startswith('wss://engine.example')
+    assert shared._client._apikey == 'svc-key'
+    assert per_caller._client._apikey == 'rr_caller'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('host', ['127.0.0.1', 'localhost', '::1'])
+async def test_local_engine_clients_keep_sdk_default_env(monkeypatch, fake_web_server, _server_env, host):
+    captured = _init(monkeypatch, fake_web_server, host)
+
+    for engine_client in _shared_and_per_caller(captured['factory']):
+        arguments = await _execute_arguments(engine_client)
+        assert arguments['env']['ROCKETRIDE_FOO'] == 'server-secret'
+        assert arguments['env']['ROCKETRIDE_DOTENV'] == 'server-dotenv'

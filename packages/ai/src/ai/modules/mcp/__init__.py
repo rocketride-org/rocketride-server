@@ -235,9 +235,9 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
 
     # ------------------------------------------------------------------
     # 2. Engine URI + client factory
-    # The URI is resolved ONCE, here, where the bind host/port are known,
-    # and injected into a copy of config so every client the factory builds
-    # (shared or per-caller) uses exactly this value.
+    # The URI and local_engine are resolved ONCE, here, where the bind
+    # host/port are known, and injected into a copy of config so every client
+    # the factory builds (shared or per-caller) uses exactly these values.
     # Deferring make_engine_client means a missing ROCKETRIDE_AUTH/APIKEY
     # doesn't raise ValueError at engine boot — only on first request.
     # Per-caller requests (identity.CALLER_AUTH set by handle_mcp below) get
@@ -245,11 +245,12 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # ------------------------------------------------------------------
     bind_host = _bind_host(server, config)
     # Local engine: loopback-only bind, so the engine host is the caller's own
-    # machine. Decided once here; gates the host-filesystem tools below.
+    # machine. Decided once here; gates the host-filesystem tools and whether
+    # engine clients forward this process's SDK env (see make_engine_client).
     local_engine = auth.is_loopback_bind(bind_host)
     engine_uri, engine_uri_rule = _resolve_engine_uri(config, bind_host, _bind_port(server, config))
     logger.info('MCP engine URI: %s (%s)', _redacted_uri(engine_uri), engine_uri_rule)
-    config = {**config, 'rocketride_uri': engine_uri}
+    config = {**config, 'rocketride_uri': engine_uri, 'local_engine': local_engine}
     engine_factory = _make_engine_factory(config)
 
     # ------------------------------------------------------------------

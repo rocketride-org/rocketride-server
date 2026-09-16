@@ -99,10 +99,20 @@ class WsEngineClient:
     to open the socket twice.
     """
 
-    def __init__(self, uri: str, auth: str) -> None:
+    def __init__(self, uri: str, auth: str, *, env: Optional[Dict[str, str]] = None) -> None:
+        """Build the SDK client (no connection yet).
+
+        Args:
+            uri: Engine address.
+            auth: Credential the SDK connects with.
+            env: Passed to the SDK as-is. ``None`` keeps the SDK default --
+                ``os.environ`` plus ``./.env``, whose ``ROCKETRIDE_*`` vars
+                ``use()`` forwards to the engine as the run's env; ``{}``
+                forwards none.
+        """
         from rocketride import RocketRideClient  # deferred import; SDK on the engine env
 
-        self._client = RocketRideClient(uri=uri, auth=auth)
+        self._client = RocketRideClient(uri=uri, auth=auth, env=env)
         self._uri = uri
         self._connected = False
         self._connect_lock = asyncio.Lock()
@@ -368,6 +378,13 @@ def make_engine_client(config: Dict[str, Any]) -> EngineClient:
     loopback default or public default -- see
     ``ai.modules.mcp._resolve_engine_uri``), so ``ROCKETRIDE_URI`` is optional
     there; only a direct caller with neither set hits the URI error below.
+
+    ``local_engine`` (injected by ``ai.modules.mcp.initModule``, true only on a
+    loopback bind) keeps the SDK's default env. Otherwise the client is built
+    with ``env={}``: the SDK would forward this process's ``ROCKETRIDE_*`` vars
+    on every ``use()``, and the engine applies a caller's env over the org,
+    team and user secrets -- so on a deployed engine the server's own vars
+    would override a customer's same-named secrets.
     """
     config = config or {}
     uri = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI') or ''
@@ -378,4 +395,4 @@ def make_engine_client(config: Dict[str, Any]) -> EngineClient:
         raise ValueError('Missing engine URI: set config rocketride_uri or env ROCKETRIDE_URI')
     if not auth:
         raise ValueError('Missing engine auth: set config rocketride_auth or env ROCKETRIDE_AUTH/ROCKETRIDE_APIKEY')
-    return WsEngineClient(uri=uri, auth=auth)
+    return WsEngineClient(uri=uri, auth=auth, env=None if config.get('local_engine') else {})
