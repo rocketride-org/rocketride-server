@@ -25,3 +25,9 @@ safetensors
 # Needed for dependencies compilations
 Cython
 versioneer
+
+# Installed by the engine's startup sweep (depends.py REQUIREMENTS_GLOBS), not
+# by an __init__.py: `nodes` is a namespace package so a workspace node can sit
+# beside the ones the engine ships. When the per-pipeline install replaces that
+# sweep, this baseline moves out of nodes/ — it belongs to the backend, not to
+# any node.
