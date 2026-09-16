@@ -128,6 +128,15 @@ export default defineConfig(({ command }) => {
 				// Without this proxy, the dev server's SPA html fallback would answer
 				// them with index.html. Prod has a single origin, so no proxy needed.
 				proxy: {
+					// Remote app bundles. publicDir serves build/apps/<id>/remoteEntry.js
+					// (the flat OSS layout), but a SaaS probe answers with a registry
+					// VERSION, so the shell asks for /apps/<id>/v<N>/remoteEntry.js —
+					// a path that exists only in the engine's deployment store. Without
+					// this the dev server answers those with its SPA index.html and the
+					// federation runtime dies on "expected expression, got '<'".
+					// Globbed, NOT '/apps': a bare prefix would swallow /apps.json,
+					// which the engine serves behind auth (401) while publicDir has it.
+					'/apps/**': { target: 'http://localhost:5565' },
 					'/task': { target: 'http://localhost:5565', ws: true },
 					'/auth': { target: 'http://localhost:5565' },
 					'/api': { target: 'http://localhost:5565', ws: true },
@@ -294,7 +303,16 @@ export default defineConfig(({ command }) => {
 			// all app bundles live under a single top-level build/ directory.
 			// The dev flavor builds beside it; the stitch step merges its hashed
 			// assets into shell/ and generates the flavor-picking index.html.
-			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', isDevFlavor ? 'shell-dev' : 'shell') },
+			//
+			// The DEV SERVER gets its own dir. It runs with `writeToDisk: true`
+			// and `cleanDistPath: true`, so sharing build/shell/ meant starting
+			// `shell:dev` WIPED the production bundle and replaced it with the
+			// dev server's unhashed output. The next `shell:copy` then mirrored
+			// that over dist/server/static/shell/, deleting the index.html the
+			// engine serves — and `shell:bundle`'s source-hash cache skipped the
+			// rebuild that would have restored it, so the engine answered
+			// "Shell UI not built" until someone ran shell:build --force.
+			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', isDev ? 'shell-devserver' : isDevFlavor ? 'shell-dev' : 'shell') },
 
 			// Prefix all asset URLs with /shell/ so they route through the shell
 			// module's public endpoints. Without this, assets load from /static/
