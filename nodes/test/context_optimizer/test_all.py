@@ -1149,6 +1149,22 @@ class TestIGlobalLifecycle:
         assert iglobal.config is None
 
 
+def _write_questions(inst, question) -> None:
+    """Call writeQuestions and require it to end in preventDefault().
+
+    The node forwards the question itself, so it must stop the engine's default
+    forward; the real preventDefault() raises APERR(Ec.PreventDefault). A normal
+    return would mean downstream also receives the untrimmed original.
+
+    Args:
+        inst: The IInstance under test.
+        question: The Question to write.
+    """
+    with pytest.raises(rocketlib.APERR) as raised:
+        inst.writeQuestions(question)
+    assert raised.value.ec == rocketlib.Ec.PreventDefault, f'writeQuestions failed: {raised.value}'
+
+
 class TestIInstanceLifecycle:
     """Test the IInstance class with mocked IGlobal/optimizer."""
 
@@ -1167,7 +1183,7 @@ class TestIInstanceLifecycle:
         q = Question()
         q.addQuestion('Hello?')
 
-        inst.writeQuestions(q)
+        _write_questions(inst, q)
 
         inst.instance.writeQuestions.assert_called_once()
 
@@ -1195,7 +1211,7 @@ class TestIInstanceLifecycle:
         q.addQuestion('Original question')
         original_text = q.questions[0].text
 
-        inst.writeQuestions(q)
+        _write_questions(inst, q)
 
         # Original should be unchanged
         assert q.questions[0].text == original_text
@@ -1222,7 +1238,7 @@ class TestIInstanceLifecycle:
         q = Question(role='You are helpful.')
         q.addQuestion('What is AI?')
 
-        inst.writeQuestions(q)
+        _write_questions(inst, q)
 
         mock_opt.optimize.assert_called_once()
         call_kwargs = mock_opt.optimize.call_args.kwargs
@@ -1252,7 +1268,7 @@ class TestIInstanceLifecycle:
         q.questions = []  # explicitly empty
 
         with patch('context_optimizer.IInstance.debug') as mock_debug:
-            inst.writeQuestions(q)
+            _write_questions(inst, q)
 
         # A debug log about discarding the orphaned question text should have
         # fired. Assert on the salient signal -- the word "discarding" plus the
@@ -1614,7 +1630,7 @@ class TestMultiEntryQuestions:
 
     def test_all_entries_survive_when_nothing_is_truncated(self, optimizer):
         inst = self._instance(optimizer)
-        inst.writeQuestions(self._question('First question?', 'Second question?', 'Third question?'))
+        _write_questions(inst, self._question('First question?', 'Second question?', 'Third question?'))
 
         forwarded = inst.instance.writeQuestions.call_args.args[0]
         assert [e.text for e in forwarded.questions] == ['First question?', 'Second question?', 'Third question?']
@@ -1625,7 +1641,7 @@ class TestMultiEntryQuestions:
         opt = ContextOptimizer({**small_budget_config, 'max_context_tokens': 40})
         inst = self._instance(opt)
         texts = ('alpha ' * 200, 'beta ' * 200, 'gamma ' * 200)
-        inst.writeQuestions(self._question(*texts))
+        _write_questions(inst, self._question(*texts))
 
         forwarded = inst.instance.writeQuestions.call_args.args[0]
         assert len(forwarded.questions) == 3, 'no entry may be dropped'
@@ -1642,7 +1658,7 @@ class TestMultiEntryQuestions:
         opt = ContextOptimizer({**small_budget_config, 'max_context_tokens': 40})
         inst = self._instance(opt)
         text = 'alpha ' * 200
-        inst.writeQuestions(self._question(text))
+        _write_questions(inst, self._question(text))
 
         forwarded = inst.instance.writeQuestions.call_args.args[0]
         assert len(forwarded.questions) == 1
@@ -1653,7 +1669,7 @@ class TestMultiEntryQuestions:
     def test_multi_entry_input_is_no_longer_warned_about(self, optimizer):
         inst = self._instance(optimizer)
         with patch('context_optimizer.IInstance.warning') as mock_warning:
-            inst.writeQuestions(self._question('One?', 'Two?'))
+            _write_questions(inst, self._question('One?', 'Two?'))
         assert mock_warning.call_args_list == []
 
 
@@ -1919,7 +1935,7 @@ class TestUnbudgetedPromptOverhead:
         assert untracked['metadata']['components_truncated'] == []
 
         inst = _make_iinstance(opt)
-        inst.writeQuestions(q)
+        _write_questions(inst, q)
 
         out = _forwarded(inst)
         assert out.questions[0].text != 'QUESTIONBODY'
@@ -1933,7 +1949,7 @@ class TestUnbudgetedPromptOverhead:
 
         q = Question(role='You are helpful.')
         q.addQuestion('What is AI?')
-        inst.writeQuestions(q)
+        _write_questions(inst, q)
 
         # 77 measured tokens plus the two-token margin for the role line break
         assert mock_opt.optimize.call_args.kwargs['overhead_tokens'] == 79
