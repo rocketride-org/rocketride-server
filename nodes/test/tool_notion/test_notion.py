@@ -540,6 +540,17 @@ class TestNotionSearch:
             'start_cursor': cursor,
         }
 
+    @pytest.mark.parametrize('cursor', ['', None])
+    def test_omits_empty_start_cursor(self, monkeypatch, cursor):
+        mock_request = Mock(return_value={'results': [], 'has_more': False, 'next_cursor': None})
+        monkeypatch.setattr(_ii.notion_client, 'request', mock_request)
+        inst = _instance()
+
+        out = inst.notion_search({'query': 'roadmap', 'start_cursor': cursor})
+
+        assert out['success'] is True
+        assert mock_request.call_args.kwargs['json_body'] == {'query': 'roadmap'}
+
     def test_error_is_wrapped_in_the_standard_envelope(self, monkeypatch):
         monkeypatch.setattr(
             _ii.notion_client, 'request', Mock(side_effect=_nc.NotionAPIError(401, 'unauthorized', 'bad key'))
