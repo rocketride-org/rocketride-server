@@ -13,8 +13,7 @@ Focus areas:
 - ``_file_checksum`` — SHA-256 of a real temp file
 - ``_is_debugging`` / ``_get_attach_subprocesses`` — sys.modules probes
 - ``is_task_complete`` / ``is_attached`` / ``has_attached_debugger`` /
-  ``get_connection_count`` / ``is_debug_available`` / ``get_status`` —
-  accessors
+  ``get_connection_count`` / ``get_status`` — accessors
 - ``reset_idle_timer`` / ``send_scheduled_updates`` — state setters
 
 Two methods are already exercised by separate, security-focused tests:
@@ -78,7 +77,6 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._owner_kind = 'user'
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
-    t._debug_port = None
     t._idle_time = 5
     t._status_updated = False
     t.public_auth = 'pk_test'
@@ -400,14 +398,6 @@ def test_get_connection_count_is_zero_or_one():
     assert Task.get_connection_count(t) == 0
     t._debugger = MagicMock()
     assert Task.get_connection_count(t) == 1
-
-
-def test_is_debug_available_requires_debug_port():
-    """is_debug_available is True iff ``_debug_port`` is non-None."""
-    t = _task()
-    assert Task.is_debug_available(t) is False
-    t._debug_port = 5566
-    assert Task.is_debug_available(t) is True
 
 
 def test_get_status_returns_the_status_object():
@@ -1281,3 +1271,91 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'message': 'Malformed exit message'}})
 
     assert t._status.exitCode == 1
+
+
+# ---------------------------------------------------------------------------
+# on_event / apaevt_trace — the trace level that means "no traces"
+# ---------------------------------------------------------------------------
+
+
+def _trace_task(level):
+    """A task ready to take one apaevt_trace, with the fan-out captured."""
+    from unittest.mock import AsyncMock
+
+    from rocketride import TASK_STATUS
+
+    t = _task(status=TASK_STATUS())
+    t._last_event_time = 0.0
+    t._status_updated = False
+    t._pipelineTraceLevel = level
+    t.build_event = MagicMock(
+        side_effect=lambda name, body=None, event_time=None: {
+            'event': name,
+            'body': dict(body or {}, eventTime=event_time),
+        }
+    )
+    t._accumulate_analytics = MagicMock()
+    t._forward_task_event = AsyncMock()
+    return t
+
+
+_TRACE_MESSAGE = {
+    'event': 'apaevt_trace',
+    'body': {
+        'op': 'enter',
+        'id': 0,
+        'pipe_id': 'parse',
+        'total_pipes': 1,
+        'trace': {'text': 'hello'},
+        'eventTime': 1_000.0,
+    },
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('level', ['metadata', 'summary', 'full'])
+async def test_a_real_trace_level_still_derives_a_flow_event(level):
+    """The levels that ask for tracing keep every part of the fan-out."""
+    t = _trace_task(level)
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_awaited_once()
+    t._accumulate_analytics.assert_called_once()
+    assert t.build_event.call_args.kwargs['body']['trace'] == {'text': 'hello'}
+
+
+@pytest.mark.asyncio
+async def test_the_none_level_emits_no_flow_at_all():
+    """
+    `'none'` IS A LEVEL, NOT AN ABSENCE — and a non-empty string is truthy.
+    Read as "tracing on with the payload suppressed", every enter/leave was
+    still derived, seq-stamped, broadcast and written to the run log: a flow
+    event carrying `trace: {}`, roughly 379 bytes of envelope for no signal,
+    one pair per component per request. A settings stream kept deliberately out
+    of the Runs timeline had accumulated 325 MB that way.
+
+    Nothing else about the event changes: the pipe stack is still tracked and
+    the status is still marked for update.
+    """
+    t = _trace_task('none')
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_not_awaited()
+    t._accumulate_analytics.assert_not_called()
+    t.build_event.assert_not_called()
+    # The parts that are NOT gated on the trace level.
+    assert t._status_updated is True
+    assert t._status.pipeflow.totalPipes == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('level', ['', None])
+async def test_an_absent_trace_level_still_emits_nothing(level):
+    """The original behaviour, unchanged: no level means no flow."""
+    t = _trace_task(level)
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_not_awaited()

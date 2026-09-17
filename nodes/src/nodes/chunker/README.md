@@ -1,61 +1,61 @@
 # chunker
 
-A RocketRide preprocessor node ("Text Chunker") that splits documents into smaller, overlapping chunks for downstream embedding, retrieval, and LLM-based generation.
+A RocketRide preprocessor node ("Text Chunker") that splits documents into smaller, overlapping chunks for downstream embedding, retrieval, and LLM generation. Pick it when you need sentence-boundary splitting with no extra dependencies, or token-accurate splitting sized with the real `tiktoken` BPE tokenizer.
 
 ## What it does
 
-Receives documents on the `documents` lane and emits one document per chunk, each carrying metadata that ties it back to the source. Two strategies are available, selected by the `profile` field:
+The node receives documents on its `documents` lane, splits each one's text with the configured strategy, and emits one document per chunk on the same lane. Every emitted chunk copies the source document and gets its own metadata — `chunkId`, `parentId` (the source `objectId`), `chunk_index`, `start_char`, `end_char`, and `total_chunks` — so downstream nodes can trace a chunk back to its origin or reassemble the original. The incoming documents themselves are never forwarded; only chunks continue down the pipeline, and documents whose text is empty or whitespace-only are consumed and produce nothing.
 
-- **Sentence boundary** (default) — groups whole sentences up to `chunk_size`. Sentence boundaries take priority over the size limit, so a single sentence longer than `chunk_size` is emitted whole rather than cut mid-sentence. Pure Python (stdlib `re` only): unlike the NLTK and Spacy profiles of the General Text node, it pulls in no third-party package and downloads no language model.
-- **Token-based** — splits by token count using the real `tiktoken` BPE tokenizer, sized for model context windows. The encoder is imported lazily and the `tiktoken` dependency is probed only when this strategy is selected.
+It deliberately covers only the two strategies the engine does not otherwise have: sentence-boundary grouping and real token counting. For recursive character splitting use the **General Text** (`preprocessor_langchain`) node, which already exposes LangChain's `RecursiveCharacterTextSplitter`; configuring `recursive` here fails at startup with a pointer to that node rather than falling back silently.
 
-### Which node do I want?
+## Lanes
 
-For **recursive character splitting**, use the **General Text** (`preprocessor_langchain`) node — it already exposes LangChain's `RecursiveCharacterTextSplitter` through its `default` and `recursive` profiles. This node does not reimplement it.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | `documents` | Split each incoming document and emit one document per chunk. |
 
-Reach for Text Chunker when you need something General Text does not provide:
+## Profiles
 
-| Need | Text Chunker | General Text (`preprocessor_langchain`) |
-|---|---|---|
-| Recursive character splitting | not provided | yes (`default` / `recursive` profiles) |
-| Token sizing | real `tiktoken` BPE counts | byte-length estimate (`bytes/3`), UI-labelled "Estimated tokens" |
-| Chunk overlap | configurable (`chunk_overlap`) | not available — fixed at `0` |
-| Per-chunk character offsets | `start_char` / `end_char` on every chunk | not emitted; returns text only |
-| Sentence splitting | stdlib regex, no extra deps | NLTK / Spacy profiles (extra deps + model download) |
-| Dependency footprint | `tiktoken` only, and only for the token strategy | `langchain`, `langchain-core`, `langchain-text-splitters`, `transformers`, `accelerate`, `tokenizers`, `huggingface-hub` |
+Default: **Sentence Boundary - Splits at sentence endings for coherent chunks** (`sentence`).
 
-`chunk_overlap` characters (or tokens) are shared between consecutive chunks to preserve context across boundaries. The overlap is reserved inside `chunk_size`, so an emitted chunk never exceeds `chunk_size`, and it is honored even when a chunk fills that budget (including the hard-split path).
+| Profile | Strategy | Chunk size | Overlap | Best for |
+| --- | --- | --- | --- | --- |
+| `sentence` **(default)** | `sentence` | 1000 characters | 200 | Ordinary punctuated prose that should never be cut mid-sentence. |
+| `token` | `token` | 512 tokens | 50 | Chunks that must fit a model's context or an embedding input limit. |
 
-Each emitted chunk copies the source document (metadata is copied per chunk, never shared) and sets `chunkId`, `parentId` (the source `objectId`), `chunk_index`, `start_char`, `end_char`, and `total_chunks`. `chunkId` resets to `0` for every incoming object. Documents whose text is empty or whitespace-only are consumed and not forwarded downstream.
+The `sentence` strategy splits on sentence-ending punctuation (`.`, `!`, `?`) followed by whitespace, using only the Python standard library — no third-party package and no language-model download. It treats a sentence as indivisible, so `chunk_size` is a grouping target rather than a hard cap: a single sentence longer than `chunk_size` is emitted whole.
 
----
+The `token` strategy encodes the text with `tiktoken` and slices it by token count, so every chunk is capped at `chunk_size` tokens unconditionally. Its dependency is probed and its encoder imported only when this strategy is selected. Choose it for input with no sentence-ending punctuation — log lines, CSV rows, OCR dumps, minified text — where the sentence strategy finds no boundaries to group on and emits one oversized chunk.
 
 ## Configuration
 
-### Lanes
+Pick the profile first: it sets the strategy along with chunk size, overlap, and (for `token`) the encoding, and the defaults are sensible for each. The configuration panel then shows only the fields that apply to the chosen strategy, so there is nothing else most pipelines need to touch. All three values are validated at startup — a non-positive chunk size, a negative overlap, or an overlap that is not smaller than the chunk size stops the node rather than degrading quietly.
 
-| Lane in     | Lane out    | Description                                              |
-|-------------|-------------|---------------------------------------------------------|
-| `documents` | `documents` | Split each incoming document into one document per chunk |
+### Chunk size
 
-### Strategies
+The maximum size of a chunk, measured in **characters** for the `sentence` strategy and in **tokens** for the `token` strategy — the same field means different units depending on the profile. Larger values preserve more context per chunk but retrieve less precisely; smaller values sharpen retrieval and cost more chunks. The profile defaults (1000 characters, 512 tokens) suit general documents; when the chunks feed an embedding model or an LLM prompt, size them against that model's input limit using the `token` strategy so the count is exact rather than estimated.
 
-| Profile                       | Strategy   | Chunk size  | Overlap | Best for                                                      |
-|-------------------------------|------------|-------------|---------|---------------------------------------------------------------|
-| Sentence Boundary *(default)* | `sentence` | 1000 chars  | 200     | Coherent chunks that never split mid-sentence                 |
-| Token-based                   | `token`    | 512 tokens  | 50      | Fitting LLM/embedding context windows (`cl100k_base` default) |
+### Chunk overlap
 
-`chunk_size` is measured in characters for the sentence strategy and in tokens for the token strategy. `chunk_overlap` must be less than `chunk_size`. `encoding_name` applies only to the token strategy.
+How much of each chunk is repeated at the start of the next one, in the same units as chunk size, so a sentence or idea straddling a boundary still appears whole in at least one chunk. It must be less than the chunk size. With the `token` strategy the window advances by `chunk_size - chunk_overlap` tokens; with the `sentence` strategy the trailing sentences of the finished chunk are carried forward as long as their combined span fits within the overlap, so the effective overlap lands on a sentence boundary and can be smaller than the configured value. Set it to `0` to disable overlap entirely; the profile defaults of 200 characters and 50 tokens are roughly a fifth and a tenth of their chunk sizes.
 
-Configuring `strategy: recursive` raises at startup with a pointer to the General Text node rather than silently falling back.
+### Token encoding
 
-### Picking a strategy for your input
+The `tiktoken` encoding used to count and slice tokens. It applies only to the `token` strategy and is ignored by `sentence`. Match it to the model the chunks are destined for, since token boundaries differ between encodings: `cl100k_base` (the default) for GPT-4, GPT-3.5-turbo and `text-embedding-ada-002`, `o200k_base` for GPT-4o and newer models, `p50k_base` for Codex models, and `r50k_base` for GPT-3 models. The wrong encoding still produces chunks, but their token counts will not match what the consuming model measures.
 
-The sentence strategy treats a sentence as indivisible, so `chunk_size` is a grouping target rather than a hard cap. Input with no sentence-ending punctuation — log lines, CSV rows, minified text, OCR dumps, prose in scripts that do not use `.`/`!`/`?` — contains no boundaries to group on and is emitted as a single oversized chunk.
+## Notes
 
-For those inputs use the **token** strategy, which caps every chunk at `chunk_size` tokens unconditionally, or the **General Text** node's recursive splitter. The sentence strategy is the right default for ordinary punctuated prose, which is what most document pipelines carry.
+### Chunk metadata
 
----
+`chunkId` is a running counter across everything emitted for one incoming object and resets to `0` when the next object opens; `chunk_index` restarts at `0` for each source document, and `total_chunks` is that document's chunk count. `start_char` and `end_char` are character offsets into the source text — exact for the `sentence` strategy, and derived from decoded token spans for the `token` strategy.
+
+### Undecodable tokens
+
+A token window can end mid-character, so the `token` strategy falls back to a per-token byte rebuild when a decode fails, substituting U+FFFD for bytes it cannot recover. A chunk is never dropped because of a malformed multi-byte sequence.
+
+## Upstream docs
+
+- [tiktoken](https://github.com/openai/tiktoken)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

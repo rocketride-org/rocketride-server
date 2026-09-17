@@ -5,7 +5,7 @@
  * The block carries exactly what the docs site renders from it: the node's
  * Dependencies (parsed from requirements.txt) and a Source link to the node's
  * directory on the repo's default branch. The site lifts the Source section
- * into a "View source" breadcrumb action (packages/docs/scripts/lib/gather.js);
+ * into a "View source" breadcrumb action (docs/docusaurus/scripts/lib/gather.js);
  * everything else on a node page is hand-authored prose, so README.md, the
  * rendered page, and the LLM .md surface all carry the same content.
  *

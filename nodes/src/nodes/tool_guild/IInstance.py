@@ -60,6 +60,7 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def beginInstance(self) -> None:
+        """Create the lane input buffers."""
         self._text_parts: list = []
         self._documents: list = []
 
@@ -256,24 +257,41 @@ class IInstance(IInstanceBase):
         self._text_parts = []
         self._documents = []
 
+    # The engine forwards a handler's raw input unless preventDefault() raises, so each handler ends with it.
+
     def writeText(self, text: str):
-        """Accumulate inbound text (overriding suppresses raw passthrough)."""
+        """Accumulate inbound text; the raw text is not passed downstream.
+
+        Args:
+            text: A chunk of text from the text lane.
+        """
         if text:
             self._text_parts.append(text)
+        return self.preventDefault()
 
     def writeQuestions(self, question):
-        """Accumulate inbound question text (best-effort)."""
+        """Accumulate inbound question text (best-effort); the question is not passed downstream.
+
+        Args:
+            question: The question from the questions lane.
+        """
         getter = getattr(question, 'getPrompt', None)
         value = (getter() if callable(getter) else str(question)) or ''
         if value:
             self._text_parts.append(value)
+        return self.preventDefault()
 
     def writeDocuments(self, documents):
-        """Accumulate inbound document text."""
+        """Accumulate inbound document text; the raw documents are not passed downstream.
+
+        Args:
+            documents: The documents from the documents lane.
+        """
         for doc in documents or []:
             content = getattr(doc, 'page_content', '') or ''
             if content:
                 self._documents.append(content)
+        return self.preventDefault()
 
     def _build_input(self) -> str:
         """Flatten accumulated lane input into the agent's input text.

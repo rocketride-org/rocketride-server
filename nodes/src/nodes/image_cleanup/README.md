@@ -1,31 +1,69 @@
 # image_cleanup
 
-A RocketRide image filter node that pre-processes images for OCR, significantly improving recognition accuracy on scanned or low-quality input.
+A RocketRide image filter node that prepares incoming images for OCR by
+normalizing their format, enhancing contrast, correcting skew, and closing small
+gaps in characters. Use it before OCR when scans are noisy, low quality, or
+tilted, rather than where downstream processing needs to retain the original
+image bytes or color.
+
+## About OpenCV
+
+OpenCV supplies the image operations used by this node. Here it decodes the
+normalized PNG, converts it to grayscale, applies blur, contrast enhancement,
+rotation, and morphological closing, then encodes the result as PNG.
 
 ## What it does
 
-Sits between an image source and a downstream OCR node and rewrites every image that flows through the `image` lane. The incoming bytes are buffered until the full image is received, then transformed through four sequential stages before being forwarded:
+Receives a streamed image on the `image` lane, buffers it until the stream ends,
+then emits a cleaned replacement on the same lane. It is a pipeline-only filter:
+there are no agent-callable functions or configuration fields. Pick it for an OCR
+path that benefits from a grayscale, contrast-enhanced and deskewed image; place
+another image node in the path when preserving color or the input representation
+matters.
 
-1. **PNG normalization**: if the input is not already `image/png`, it is converted via **Pillow** (RGBA mode). PNG inputs pass through this stage untouched.
-2. **Grayscale and contrast enhancement**: decodes the PNG with **OpenCV**, converts to grayscale, applies a 5x5 Gaussian blur to suppress noise, then applies CLAHE (clip limit 2.0, 8x8 tile grid) to lift local contrast without blowing out the grayscale range.
-3. **Deskew**: inverts the grayscale image to make text white on black, locates all non-zero pixels, fits a minimum-area bounding rectangle to compute the text angle, then rotates the image back to horizontal using cubic interpolation with replicated borders.
-4. **Morphological cleanup**: applies morphological closing with a 2x2 square kernel to fill small holes inside character shapes (such as the interior of an `o`) and remove speckle noise.
+## Lanes
 
-The output is always `image/png` regardless of the input format. When the incoming image carried a stream descriptor, the forwarded image keeps the source-provenance chain (`source`) and inherited `name` on its `BEGIN`, so downstream consumers still know where the image came from. There are no configuration fields and no agent-callable tools; the cleanup pipeline runs automatically on every image.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `image` | `image` | Receives an image stream and emits its cleaned PNG replacement. |
 
 ## Configuration
 
-### Lanes
+This node has no configuration fields. Add it between the image source and the
+OCR consumer; it applies the same cleanup sequence to every complete image
+stream.
 
-| Lane in | Lane out | Description                                         |
-|---------|----------|-----------------------------------------------------|
-| `image` | `image`  | Receives the raw image, emits the cleaned PNG       |
+## Notes
 
-Images are streamed in chunks using `AVI_ACTION` signals (`BEGIN` / `WRITE` / `END`). The node buffers all `WRITE` chunks, processes the complete image on `END`, then re-emits it as a new `BEGIN` / `WRITE` / `END` sequence. The default pass-through is suppressed so only the cleaned image continues down the pipeline.
+### Processing and output
 
-No configuration fields. Drop the node into the pipeline between an image source and an OCR node and it works as-is with no further setup. The node registers a single empty `default` profile.
+Inputs whose MIME type is not `image/png` are opened with Pillow, converted to
+RGBA, and saved as PNG. The cleanup stages then decode the PNG with OpenCV,
+convert it to grayscale, apply a 5×5 Gaussian blur and CLAHE contrast
+enhancement (clip limit 2.0; 8×8 tile grid), deskew it, and apply morphological
+closing with a 2×2 kernel. The output is therefore a grayscale `image/png`.
+
+Deskewing inverts the grayscale image, finds its non-zero pixels, and uses their
+minimum-area rectangle to choose a rotation angle. If no such pixels are found,
+the angle remains zero. Rotation uses cubic interpolation and replicated image
+borders, so edge pixels are extended rather than filled with a constant border.
+
+### Streaming and failures
+
+The node stores every `WRITE` chunk in memory and performs processing only on
+`END`; it suppresses the original stream instead of forwarding it alongside the
+replacement. It parses the source descriptor received at `BEGIN` and supplies it
+when forwarding the cleaned image.
+
+There is no local fallback to the original input. A non-PNG image that Pillow
+cannot convert raises `ValueError`; the cleanup stages also raise when OpenCV
+cannot decode or encode their PNG data. Use valid, complete image streams and
+account for the full image being buffered before selecting this node for very
+large inputs.
+
+## Upstream docs
+
+- [OpenCV documentation](https://docs.opencv.org/)
 
 ---
 

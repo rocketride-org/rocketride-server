@@ -16,7 +16,7 @@ The `hash/` and `parser/` subdirectories carry the per-service documentation pag
 
 ---
 
-## Services
+### Protocol-bearing services
 
 | Service | File | Protocol | Class type | Lanes |
 |---------|------|----------|------------|-------|
@@ -72,7 +72,21 @@ An internal no-op endpoint registered as both a source shape and a target shape 
 
 ---
 
-## Shared field libraries
+## Lanes
+
+| Lane in | Lane out | Description |
+|---------|----------|-------------|
+| `_source` | `tags` | Local File System emits source tags for downstream processing. |
+| `tags` | `tags` | The Fingerprinter preserves the tags lane while adding its deterministic content fingerprint. |
+| `source` | `tags` | The internal null endpoint forwards a source lane into tags without an external system. |
+
+The parser also accepts `tags` and emits `text`, `table`, `image`, `video`, and `audio`; its protocol-specific documentation is in the `parser/` subdirectory.
+
+## Configuration
+
+This directory supplies several built-in services as well as shared field definitions used by other nodes. Configure the protocol-bearing service selected in a pipeline; the generated schema below is the field reference. The shared field files do not register a selectable service themselves.
+
+### Shared field libraries
 
 These files define common fields that are merged into a service definition as required. Field names below are exact.
 
@@ -133,6 +147,7 @@ These files define common fields that are merged into a service definition as re
 | `vector.host` / `vector.port` | string / number | Vector-store server address and port (with `vector.cloud.*` and `vector.local.*` variants, plus `vector.local.grpc_port`). |
 | `vector.collection` | string, default `ROCKETRIDE` | Collection name. |
 | `vector.score` | number 0-1, default `0.7` | Minimum retrieval score, from `0.0` "All results" to `1.0` "Almost identical". |
+| `vector.top_k` | integer or string 1-1000, optional | Chroma only: overrides the caller's retrieval limit (25 on the data lane) in either direction for semantic and keyword search. Unset keeps the caller's limit. |
 | `vector.apikey` | string, secure | API key. |
 | `vectorizer.embedding` | combo `embedding` | Embedding provider selector. |
 | `vectorizer.store` | combo `store` | Vector-store provider selector. |
@@ -158,7 +173,7 @@ Combines services into single selectable types for pipelines that pick one provi
 
 ---
 
-## Google access helper (`google_access.py`)
+### Google access helper (`google_access.py`)
 
 A single reader that turns a Google tool node's `access` enum and capability toggles into one resolved object: the OAuth scopes to request, plus the write/destructive gates the node's tool functions check at invoke time.
 
@@ -184,11 +199,19 @@ Bundled specs:
 
 ---
 
-## Running the tests
+### Running the tests
 
 ```bash
 pytest nodes/test/core/test_google_access.py -v
 ```
+
+## Limitations
+
+The Local File System service reads local paths and is marked for filesystem access, security-sensitive use, non-remote execution, and non-SaaS deployment. Run pipelines that use it where the intended files are locally accessible; it is not available in hosted RocketRide deployments and cannot be moved to a remote execution host.
+
+## Notes
+
+The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing engine services but are not normal user-selectable nodes. The `core` directory also contains reusable JSON field fragments; those fragments are included in the generated schema but do not themselves register pipeline protocols.
 
 ---
 
@@ -222,6 +245,14 @@ pytest nodes/test/core/test_google_access.py -v
 | `aws.region` | `string` | **Region**<br/>This is defined and provided by the service provider. | `""` |
 | `aws.secretKey` | `string` | **Secret key**<br/>This is a key used to access the AWS services. |  |
 
+### `services.common.gcp.json`
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `gcp.authType` | `string` | **Authentication Type**<br/>Choose how to authenticate to Google Cloud Platform. | `"adc"` |
+| `gcp.projectId` | `string` | **Project ID**<br/>Optional: Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials. |  |
+| `gcp.serviceAccountKey` | `string` | **Service Account Key JSON**<br/>Upload the JSON key file for your Google Cloud service account. |  |
+
 ### `services.common.google.json`
 
 | Field | Type | Description | Default |
@@ -231,7 +262,7 @@ pytest nodes/test/core/test_google_access.py -v
 | `google.customerId` | `string` | **Customer ID**<br/>Enter your Google Workspace Customer ID.<br/><br/>This unique identifier is assigned to your organization by Google. It is used to specify the particular Google Workspace domain you want to manage. |  |
 | `google.oAuthButton` | `string` | **Login with Google** |  |
 | `google.serviceKey` | `string` | **Service Account Key File**<br/>Upload the JSON key file for your Google Workspace service account.<br/><br/>This file contains the credentials necessary to authenticate API requests. |  |
-| `google.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Google API. |  |
+| `google.userToken` | `string` | **Access Token**<br/>It is a long-term token that allows you to get new access tokens to access the Google API. |  |
 
 ### `services.common.json`
 
@@ -280,6 +311,18 @@ pytest nodes/test/core/test_google_access.py -v
 | `llm.cloud.project` | `string` | **Project (Organization)**<br/>LLM project or organization name |  |
 | `llm.local.serverbase` | `string` | **LLM URL**<br/>Base url the model is hosted under. | `"http://localhost:11434/v1"` |
 
+### `services.common.microsoft.json`
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `microsoft.authType` | `string` | **Authentication Type** | `"service"` |
+| `microsoft.clientId` | `string` | **Client ID**<br/>Application (client) ID of your Entra app registration. |  |
+| `microsoft.clientSecret` | `string` | **Client Secret**<br/>Client secret of your Entra app registration. The app needs Microsoft Graph application permissions for this service, with admin consent granted. |  |
+| `microsoft.oAuthButton` | `string` | **Login with Microsoft** |  |
+| `microsoft.tenantId` | `string` | **Tenant ID**<br/>Enter your Microsoft Entra ID tenant (directory) ID.<br/><br/>Found in the Azure portal under Microsoft Entra ID > Overview. |  |
+| `microsoft.userPrincipalName` | `string` | **Acting User (UPN)**<br/>User principal name (e-mail) the app acts as. App-only Graph calls target /users/{upn}; this is required for App authentication. |  |
+| `microsoft.userToken` | `string` | **Access Token**<br/>It is a long-term token that allows you to get new access tokens to access the Microsoft Graph API. |  |
+
 ### `services.common.remote.json`
 
 | Field | Type | Description | Default |
@@ -306,6 +349,7 @@ pytest nodes/test/core/test_google_access.py -v
 | `vector.local.port` | `number` | **Port**<br/>Enter the port number |  |
 | `vector.port` | `number` | **Port**<br/>Enter the port number |  |
 | `vector.score` | `number` | **Retrieval Score**<br/>Minumum retrieval score | `0.7` |
+| `vector.top_k` | `integer,string` | **Top K**<br/>Chroma only: overrides the caller's retrieval limit in either direction (raising or lowering it) for semantic and keyword search; an integer or integer string from 1 to 1000, and when left unset the caller's own limit applies. |  |
 | `vectorizer.embedding` |  | **Embedding** |  |
 | `vectorizer.store` |  | **Vector Store** |  |
 

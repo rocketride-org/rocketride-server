@@ -30,7 +30,7 @@ packages:
   - 'packages/client-typescript'
 
   # Documentation site
-  - 'packages/docs'
+  - 'docs/docusaurus'
 
   # MCP Apps widgets (vite workspace embedded in the ai MCP module)
   - 'packages/ai/src/ai/modules/mcp/apps'

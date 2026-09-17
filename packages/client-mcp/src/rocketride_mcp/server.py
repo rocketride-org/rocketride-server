@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from typing import Any, Dict, List
 
 from mcp.server.lowlevel import Server
@@ -168,6 +169,13 @@ async def run_server() -> None:
 
 def main() -> None:
     """Entry point for the rocketride-mcp server."""
+    # stdout carries the MCP protocol; the deprecation notice goes to stderr.
+    print(
+        'rocketride-mcp is deprecated: the RocketRide engine ships a built-in HTTP MCP server '
+        'at https://api.rocketride.ai/mcp (self-hosted: http://<host>:5565/mcp). '
+        'See https://docs.rocketride.org/connect/mcp/http',
+        file=sys.stderr,
+    )
     try:
         asyncio.run(run_server())
     except KeyboardInterrupt:

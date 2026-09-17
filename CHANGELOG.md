@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ci**: on-demand + monthly multi-OS compile/test matrix (#1537)
 - **ci**: keep Discord forum tags live (re-apply on state/label change via bot) (#1722)
 - **cli**: rocketride validate subcommand (Python + TS) + validate-pipes composite action (#1573)
+- **client-python**: `rocketride otel` — OpenTelemetry bridge over the ingester protocol (#1612)
 - **database**: Sequelize ORM over pipes + server-side DB transactions (#1467)
 - **deploy-2**: teams-as-environments deploy, owner-scoped task identity, push-driven surfaces (#1764)
 - **events-ui**: real-time DAP event monitor micro-frontend (#1484)
@@ -32,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: add authoritative_overlay SEC period-scoped cross-check guard (#1430)
 - **nodes**: add chunker — sentence-boundary and tiktoken-based text chunking with configurable overlap and per-chunk character offsets; recursive character splitting stays with the General Text (`preprocessor_langchain`) node (#897)
 - **nodes**: add cognee node (#1501)
+- **nodes**: add context_optimizer node — fits questions into the model context window by token budget (#1489)
 - **nodes**: add currency_convert_explicit node (#1497)
 - **nodes**: add extract_facts node — document-context + cell-by-cell reader + validator (#1426) (#1545)
 - **nodes**: add n8n workflow-automation node (#1231)
@@ -67,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - media stream descriptors + end-to-end source provenance (#1525)
 
 ### Fixed
+- **nodes**: harden HTTP Request SSRF guardrails for URL credentials and hostname-safe whitelist boundaries; regexes now match canonical URL starts and fail closed on unsupported or ambiguous authority syntax, so unrestricted authority and search-style patterns may require migration (#2060)
 - **agent**: optional require_tool_call runtime fabrication guard (#1490)
 - **ai**: install test deps via depends() so engine constraints apply (#1466) (#1471)
 - **ai**: migrate GPU import guard to find_spec/exec_module (Python 3.12+) (#1460)

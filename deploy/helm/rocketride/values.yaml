@@ -141,9 +141,12 @@ engine:
   # These will be base64-encoded and stored in a Kubernetes Secret
   secrets:
     {}
-    # OPENAI_API_KEY: ""
-    # ANTHROPIC_API_KEY: ""
-    # HUGGINGFACE_TOKEN: ""
+    # Names referenced from node config as ${VAR} must start with ROCKETRIDE_;
+    # the engine resolves only that prefix and replaces any other ${VAR}
+    # with the literal <REDACTED>.
+    # ROCKETRIDE_OPENAI_API_KEY: ""
+    # ROCKETRIDE_ANTHROPIC_API_KEY: ""
+    # ROCKETRIDE_HUGGINGFACE_TOKEN: ""
     #
     # Credentials for the RR_STORE_URL backend (s3:// / azureblob://), as the
     # JSON blob the store provider expects:

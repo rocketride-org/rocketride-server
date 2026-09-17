@@ -17,6 +17,7 @@
 		"(form / fy / fp / end). Abstains (drops) the answer if there is no match."
 	],
 	"icon": "util-guard.svg",
+	"documentation": "https://docs.rocketride.org/nodes/authoritative_overlay",
 	"lanes": {
 		"text": [
 			"answers"

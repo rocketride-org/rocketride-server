@@ -8,7 +8,7 @@
 	"path": "nodes.tool_pipedrive",
 	"prefix": "pipedrive",
 	"icon": "pipedrive.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/tool_pipedrive",
 	"description": ["Exposes the Pipedrive CRM REST API v1 as agent tools.", "Covers deals, persons, organizations, activities, pipelines, stages, notes, leads,", "products, files, users, teams, goals, projects, and every other v1 resource."],
 	"tile": ["Pipedrive${parameters.pipedrive.companyDomain ? ': ' + parameters.pipedrive.companyDomain : ''}"],
 	"lanes": {},

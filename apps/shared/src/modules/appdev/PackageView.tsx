@@ -341,8 +341,8 @@ const MAX_INLINED_README_CHARS = 24 * 1024 * 1024;
  * Inline every document-relative image in the markdown as a data: URI.
  * The webview has no filesystem, so a relative src would resolve against
  * the WEBVIEW origin and 404 — references must resolve against where the
- * README actually lives (e.g. `./assets/x.png` beside `./src/README.md`
- * is `src/assets/x.png` in the app folder).
+ * README actually lives (e.g. `./assets/x.png` beside `./README.md`
+ * is `assets/x.png` in the app folder).
  *
  * @param text - The raw markdown.
  * @param readmeRel - The README's app-relative path (the resolution base).
@@ -668,7 +668,7 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 										<InputField
 											style={styles.assetInput}
 											value={draft?.icon ?? ''}
-											placeholder="./src/icon.svg"
+											placeholder="./icon.svg"
 											onChange={(e) => setDraft((d) => (d ? { ...d, icon: e.target.value } : d))}
 											onBlur={() => void loadIcon(draft?.icon)}
 										/>
@@ -685,7 +685,7 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 										<InputField
 											style={styles.assetInput}
 											value={draft?.readme ?? ''}
-											placeholder="./src/README.md"
+											placeholder="./README.md"
 											onChange={(e) => setDraft((d) => (d ? { ...d, readme: e.target.value } : d))}
 										/>
 									</div>

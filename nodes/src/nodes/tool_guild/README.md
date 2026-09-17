@@ -1,11 +1,106 @@
 # tool_guild
 
-A RocketRide node that runs [Guild.ai](https://www.guild.ai/) agents - as a step inside a
-pipeline, or as a tool an AI agent can invoke.
+A RocketRide node that runs Guild.ai agents as a pipeline step or as a tool another AI agent can invoke.
+
++## About Guild.ai
+
+Guild.ai is a platform for building and operating governed AI agents. Its agents run in
+Guild workspaces, where a trigger API key authorizes an external system to start sessions.
+
+## What it does
+
+Use this node to hand prepared RocketRide data to a configured Guild agent, either as a
+pipeline step or as a tool another agent can call. It is a bridge to a remote agent runtime,
+not a parser, vector store, or search node. The pipeline face always waits for the Guild
+session; the tool face can return a session identifier immediately.
+
+## Lanes
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `text` | Sends text to the configured agent and emits its answer as text. |
+| `text` | `answers` | Sends text to the configured agent and emits its answer as an answer. |
+| `text` | `table` | Sends text to the configured agent and emits session data as a table row. |
+| `questions` | `answers` | Sends the question text and emits the answer. |
+| `questions` | `text` | Sends the question text and emits the answer as text. |
+| `questions` | `table` | Sends the question text and emits session data as a table row. |
+| `documents` | `documents` | Sends document text and emits the answer as a document. |
+| `documents` | `text` | Sends document text and emits the answer as text. |
+| `documents` | `table` | Sends document text and emits session data as a table row. |
+
+Inputs are joined with newlines. Empty input starts no session, and an empty configured
+agent is an error. The pipeline step always waits, regardless of Result mode.
+
+## As a tool
+
+The tool server prefix is `guild` by default. It registers these functions:
+
+| Function | Description |
+| --- | --- |
+| `guild.run_agent` | Starts a Guild agent session, optionally waiting for its answer. |
+| `guild.get_session` | Returns a session's current status. |
+| `guild.get_session_events` | Returns recent session events and extracted output. |
+
+`run_agent` requires `input`; optional `agent` overrides the configured default and
+optional `wait` otherwise follows Result mode. It returns `{success, session_id, status,
+output}`; with `wait: false`, status is `running` and output is null. `get_session`
+requires `session_id` and returns `{success, session_id, status}`.
+`get_session_events` requires `session_id`, accepts `limit` from 1–1000 (default 100),
+and returns `{success, events, output}`, using the tail when needed so the final output is
+not dropped.
+
+Bad input and missing configuration raise `ValueError`; API, transport, and session failures
+raise `RuntimeError`. A waited-session timeout does not cancel the remote session and includes
+its ID in the resulting error. Starting a session is not retried, avoiding duplicate runs.
+
+## Configuration
+
+Configure the connection, workspace identity, and default agent before enabling either face.
+The connection fields can use their matching `ROCKETRIDE_GUILD_*` environment variables
+when the node field is blank; run options are read only from node configuration.
+
+### Agent and Result mode
+
+The configured agent is required by pipeline execution and is the default for `run_agent`.
+Result mode defaults to `wait`; use `start` only when a tool caller should receive a session
+ID for later inspection. The pipeline ignores `start` and waits because downstream lanes need
+the result.
+
+### Session timeout and session budget
+
+Timeout defaults to 300 seconds and is constrained to 5–3600 seconds. Raise it for an agent
+that legitimately needs a longer run; do not mistake a local timeout for cancellation of the
+Guild session. Max sessions defaults to 10 and is a shared per-run reservation, so lower it to
+limit an agent that could repeatedly invoke the tool.
+
+### TLS verification
+
+Leave TLS verification enabled. Disable it only for a self-hosted Guild deployment using a
+self-signed certificate, since it otherwise verifies the server certificate for each request.
+
+## Authentication
+
+Guild uses HTTP Basic authentication with a trigger API key: **API Key ID** is the username
+and **API Key Secret** is the password. Configure both halves, along with the workspace owner
+and workspace; the secret is a secure field.
+
+## Notes
+
+### Session output and identifiers
+
+Agent and session identifiers are restricted to plain path-segment values before requests are
+formed. GET calls may retry transient errors up to twice, whereas session-start POST calls never
+retry. If the session contains no final-answer event, its successful output is an empty string.
+
+## Upstream docs
+
+- [Guild triggers documentation](https://docs.guild.ai/platform/triggers)
+
+<!-- Legacy pre-schema prose retained below only while the generated documentation is preserved. -->
 
 > Not to be confused with `guildai.org`, an unrelated ML experiment-tracking tool.
 
-## What it does
+### What it does
 
 Guild.ai is a control plane for AI agents: agents are authored, versioned, and governed in a
 Guild workspace, and the Guild runtime injects credentials so an agent never sees a raw API key.
@@ -26,7 +121,7 @@ The node has two faces, both backed by the same three REST calls:
 Guild runs agents **asynchronously**: every call starts a session and this node polls it to
 completion (there is no synchronous mode on Guild's side to expose).
 
-## As a pipeline node
+### As a pipeline node
 
 Lane input is flattened into the input for the **configured** agent, a session is started and
 polled to completion, and the agent's answer is emitted downstream.
@@ -44,7 +139,7 @@ configured - the pipeline step raises if it is empty. Empty input starts no sess
 Example: [`examples/guild-agent.pipe`](../../../../examples/guild-agent.pipe) (chat -> Guild.ai ->
 response).
 
-## As a tool
+### As a tool
 
 Exposes three functions to an agent. Tools are namespaced by the node's **id** in the pipeline,
 not by the node's `prefix`: a node with id `tool_guild_1` exposes `tool_guild_1.run_agent`. Use
@@ -96,7 +191,7 @@ correct itself.
 Example: [`examples/guild-delegate-agent.pipe`](../../../../examples/guild-delegate-agent.pipe)
 (a RocketRide agent with Guild.ai bound as a tool).
 
-## Configuration
+### Configuration
 
 | Field | Type | Description |
 |---|---|---|
@@ -118,7 +213,7 @@ timeout, max sessions, verify TLS) are read from the node config only.
 
 Out-of-range or non-numeric timeouts fall back to their defaults rather than failing the run.
 
-## Notes
+### Notes
 
 - **Pipeline step vs tool.** The pipeline step runs the agent exactly once - deterministic, no
   prompt tuning. The tool lets an agent decide *whether* and *how often* to call; an agent that
@@ -130,7 +225,7 @@ Out-of-range or non-numeric timeouts fall back to their defaults rather than fai
 - **Result mode `start`** is only meaningful for the tool face (fire-and-forget). The pipeline
   step always waits, because a bare session id is of no use to downstream nodes.
 
-## Safety limits
+### Safety limits
 
 - **Max sessions per run** caps how many sessions one pipeline run may start. Guild bills per
   automation and the free tier allows only 100 per month, so this bounds a runaway agent loop.
@@ -143,7 +238,7 @@ Out-of-range or non-numeric timeouts fall back to their defaults rather than fai
   tool call cannot smuggle a path or redirect the request off the configured host.
 - **Error messages never echo response bodies**, which can contain the prompt that was sent.
 
-## Authentication
+### Authentication
 
 Guild authenticates machine access with a **trigger API key** over HTTP Basic: the key id is the
 username, the key secret the password. Create one on the trigger's page in the Guild app; the
@@ -156,7 +251,7 @@ scopes trigger API keys per trigger.
 See the [Guild triggers documentation](https://docs.guild.ai/platform/triggers) for how keys and
 API triggers are set up.
 
-## Limits
+### Limits
 
 - Read and run only. The node cannot deploy, roll back, or fork agents, and cannot manage
   credentials or policies - those are governance surfaces that belong to Guild's own UI.
@@ -165,5 +260,32 @@ API triggers are set up.
 - No streaming. Guild streams partial output over WebSocket; this node polls instead.
 - Text only - binary lanes are not forwarded.
 
+-->
+
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `tool_guild.agent` | `string` | **Agent**<br/>Agent to run as the pipeline step, and the default for the run_agent tool. Required for the pipeline step; an agent may override it per call. | `""` |
+| `tool_guild.apiKeyId` | `string` | **API Key ID**<br/>The id half of a Guild trigger API key. Guild authenticates with HTTP Basic — the key id is the username. Create a key on the trigger's page in the Guild app. | `""` |
+| `tool_guild.apiKeySecret` | `string` | **API Key Secret**<br/>The secret half of the Guild trigger API key (the Basic auth password). Shown once when the key is created. | `""` |
+| `tool_guild.baseUrl` | `string` | **Guild Base URL**<br/>Base URL of the Guild API. Leave as the default for Guild Cloud; override only for an enterprise or self-hosted deployment. | `"https://app.guild.ai"` |
+| `tool_guild.maxSessions` | `integer` | **Max sessions per run**<br/>Cap on Guild sessions this node may start in one pipeline run. Guild bills per automation (the free tier allows 100/month), so this bounds a runaway agent loop. | `10` |
+| `tool_guild.owner` | `string` | **Workspace owner**<br/>The owner name that the workspace lives under, as it appears in the Guild app URL (app.guild.ai/<owner>/<workspace>). | `""` |
+| `tool_guild.resultMode` | `string` | **Result mode**<br/>Guild runs agents asynchronously; 'wait' polls the session until it finishes. 'start' returns the session id without waiting — useful for fire-and-forget tool calls, but the pipeline step always waits (a session id is of no use downstream). | `"wait"` |
+| `tool_guild.timeout` | `integer` | **Session timeout (seconds)**<br/>Max seconds to wait for a session to finish before raising. Guild's own turn timeout is 3600s; a timeout here does NOT cancel the session on Guild's side — the session id is reported so the run stays traceable. | `300` |
+| `tool_guild.verifyTls` | `boolean` | **Verify TLS certificate**<br/>Leave ON. Disable only for a self-hosted Guild served with a self-signed certificate. | `true` |
+| `tool_guild.workspace` | `string` | **Workspace**<br/>The Guild workspace holding the agent to run, as it appears in the app URL. | `""` |
+
+## Dependencies
+
+- `requests` `>=2.34.2`
+- `idna` `>=3.10`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_guild)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

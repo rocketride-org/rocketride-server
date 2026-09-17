@@ -17,6 +17,7 @@ import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from '../contract/versions/v0';
 import type { ShellApiV1 } from '../contract/versions/v1';
 import type { ShellApiV2 } from '../contract/versions/v2';
+import type { ShellApiV3 } from '../contract/versions/v3';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -601,10 +602,8 @@ import type { AppVerifyReport as Frozen_AppVerifyReport } from '../contract/vers
 import type { AppVerifyReport as Current_AppVerifyReport } from './api';
 import type { CreatedApp as Frozen_CreatedApp } from '../contract/versions/v1';
 import type { CreatedApp as Current_CreatedApp } from './api';
-import type { MarketingConsent as Frozen_MarketingConsent } from '../contract/versions/v2';
-import type { MarketingConsent as Current_MarketingConsent } from './api';
-import type { MarketingConsentState as Frozen_MarketingConsentState } from '../contract/versions/v2';
-import type { MarketingConsentState as Current_MarketingConsentState } from './api';
+import type { DrizzleDatabaseLike as Frozen_DrizzleDatabaseLike } from '../contract/versions/v3';
+import type { DrizzleDatabaseLike as Current_DrizzleDatabaseLike } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -613,6 +612,8 @@ const _floor_v1: ShellApiV1 = {} as ShellApiShape;
 void _floor_v1;
 const _floor_v2: ShellApiV2 = {} as ShellApiShape;
 void _floor_v2;
+const _floor_v3: ShellApiV3 = {} as ShellApiShape;
+void _floor_v3;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1201,7 +1202,5 @@ const _t_AppVerifyReport: Frozen_AppVerifyReport = {} as Current_AppVerifyReport
 void _t_AppVerifyReport;
 const _t_CreatedApp: Frozen_CreatedApp = {} as Current_CreatedApp;
 void _t_CreatedApp;
-const _t_MarketingConsent: Frozen_MarketingConsent = {} as Current_MarketingConsent;
-void _t_MarketingConsent;
-const _t_MarketingConsentState: Frozen_MarketingConsentState = {} as Current_MarketingConsentState;
-void _t_MarketingConsentState;
+const _t_DrizzleDatabaseLike: Frozen_DrizzleDatabaseLike = {} as Current_DrizzleDatabaseLike;
+void _t_DrizzleDatabaseLike;

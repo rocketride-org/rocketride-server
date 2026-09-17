@@ -44,7 +44,7 @@
 	//		The icon to display in the UI for this node
 	//
 	"icon": "laserdata.svg",
-	"documentation": "https://docs.laserdata.com",
+	"documentation": "https://docs.rocketride.org/nodes/tool_laserdata_memory",
 	//
 	// Optional:
 	//		Description of this node shown in the pipeline builder
@@ -127,7 +127,7 @@
 			"type": "string",
 			"optional": true,
 			"title": "Namespace",
-			"description": "Memory scope every call reads and writes, e.g. <code>customer:42</code>. Can be passed by the agent per call; a namespace is required on the call or here.",
+			"description": "The memory scope every call reads and writes, e.g. <code>customer:42</code>. The agent can pass a namespace per call; a namespace is required on the call or here.",
 			"default": ""
 		},
 		// Toggle: when on, reveals the advanced fields listed in `conditional`.

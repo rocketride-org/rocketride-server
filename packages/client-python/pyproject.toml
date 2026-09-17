@@ -48,12 +48,19 @@ requires-python = ">=3.10"
 license = "MIT"
 
 [project.optional-dependencies]
+# 'rocketride[otel]' is pulled into both test-facing extras on purpose:
+# tests/test_otel_mapper.py and tests/test_otel_setup.py import opentelemetry
+# unconditionally, so an environment that can run the suite must carry it.
+# (CI installs neither extra — it runs pytest on the engine interpreter, which
+# gets these from tests/requirements.txt via the client-python:setup-test-deps
+# build step.)
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "ruff>=0.8.0",
     "build>=0.10.0",
     "twine>=4.0.0",
+    "rocketride[otel]",
 ]
 
 test = [
@@ -61,6 +68,12 @@ test = [
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "python-dotenv>=1.0.0",
+    "rocketride[otel]",
+]
+
+otel = [
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
 ]
 
 [project.urls]

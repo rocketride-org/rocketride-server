@@ -125,14 +125,14 @@ export default defineConfig(() => {
 					new rspack.CopyRspackPlugin({
 						patterns: [
 							{
-								from: path.resolve(__dirname, 'src/assets'),
+								from: path.resolve(__dirname, 'assets'),
 								to: 'assets',
 								globOptions: {
 									ignore: ['**/*.d.ts'],
 								},
 							},
 							{
-								from: path.resolve(__dirname, 'src/README.md'),
+								from: path.resolve(__dirname, 'README.md'),
 								to: 'README.md',
 							},
 						],

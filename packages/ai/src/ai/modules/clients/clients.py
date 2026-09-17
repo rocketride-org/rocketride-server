@@ -136,7 +136,7 @@ async def client_docs(request: Request):
     """
     Serve the agent documentation bundle (docs.zip).
 
-    The server build packs docs/agents/ROCKETRIDE_*.md and docs/stubs/*
+    The server build packs docs/agents/context/ROCKETRIDE_*.md and docs/agents/context/stubs/*
     into a stable-named docs.zip under static/clients/docs/, together with
     a manifest.json carrying the bundle's content hash. The CLI's
     `rocketride init` and the VS Code extension download the bundle from

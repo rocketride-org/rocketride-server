@@ -34,8 +34,7 @@
 //   link   — not handled here; video/audio viewers call fsGetUrl directly
 // =============================================================================
 
-import type { RocketRideClient } from 'rocketride';
-import type { IVirtualFileSystem } from 'shell';
+import type { IVirtualFileSystem, RocketRideClient } from 'shell';
 import { getMediaInfo } from './mediaTypes';
 
 // =============================================================================

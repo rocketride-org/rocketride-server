@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV2 — never edit by hand
 // =============================================================================
-// Generated:     2026-09-15T20:50:25.677Z
-// Source commit: 522b9c9b63f88adc1671c876c279b9addbf9f6d4
+// Generated:     2026-09-10T23:12:21.417Z
+// Source commit: 3626e6591618f7a42dbbd66daff8d413b3ff6b69
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1950,16 +1950,6 @@ export interface ServerInfoResult {
      */
     stripePublishableKey?: string;
     /**
-     * Ad-attribution provider this server reports conversions to (`'gravity'`).
-     *
-     * The NAME only — never a credential. Present when the server holds the
-     * provider's API key, which is what lets the browser shell capture
-     * ad-click parameters and ask for marketing consent; absent everywhere
-     * else (staging, OSS), where the shell does nothing. No third-party ad
-     * script is ever loaded: conversions are reported server-side.
-     */
-    attributionProvider?: string;
-    /**
      * The server's public addresses, RESOLVED to absolute URLs.
      *
      * `getServerInfo` substitutes the server's `'origin'` sentinel ("the
@@ -3462,23 +3452,6 @@ declare class AccountApi {
      * @param orgId - The org ID to switch to.
      */
     setDefaultOrg(orgId: string): Promise<void>;
-    /**
-     * Records (or clears) the user's ad-attribution context for a provider.
-     *
-     * Sent by the browser shell only after the user has granted marketing
-     * consent: `data` is the ad-click reference the shell read from the
-     * landing URL (for Gravity, `grclid` and its siblings), which the server
-     * attaches to server-side conversion events. It may be empty — the stored
-     * record is itself the consent that permits reporting. Pass `null` when
-     * consent is withdrawn: the server deletes the stored context and stops
-     * reporting conversions for this user.
-     *
-     * No ad pixel is involved, and nothing is read from the device.
-     *
-     * @param provider - Attribution provider id (currently `'gravity'`).
-     * @param data - The ad-click reference, or `null` to clear it.
-     */
-    setAttribution(provider: string, data: Record<string, unknown> | null): Promise<void>;
     /**
      * Permanently deletes the current user's account.
      */
@@ -6116,6 +6089,23 @@ export interface AppDescriptor {
      */
     app: React$1.ComponentType<ShellAppProps>;
     /**
+     * How this app would like the shell's sidebar to open.
+     *
+     * `'collapsed'` opens the rail collapsed each time the app becomes active;
+     * the person can still expand it, and expanding it lasts until they leave
+     * and come back. Absent means the app has no opinion and the sidebar is
+     * left exactly as it is — an app that says nothing can never disturb the
+     * state another app or the person chose.
+     *
+     * For an app whose own content is the reason to open the sidebar rather
+     * than the shell's navigation: a chat list is worth a column when you want
+     * it and a stolen quarter of the window when you do not.
+     *
+     * Ignored below the compact breakpoint, where the sidebar is a drawer and
+     * "collapsed" has no meaning.
+     */
+    sidebar?: "expanded" | "collapsed";
+    /**
      * Optional cross-app component catalog. Never mounted by the shell —
      * entries are loadable by other apps via `useAppComponent()`.
      */
@@ -6133,10 +6123,26 @@ export interface AppDescriptor {
 export interface ShellBrandingConfig {
     /** App display name used in the sidebar header and tab bar. */
     appName: string;
-    /** Logo rendered in the expanded sidebar header. */
+    /**
+     * Logo rendered in the expanded sidebar header.
+     *
+     * An app that supplies one owns the whole header — the shell draws this
+     * INSTEAD of its own wordmark and the app-name label beneath it, not above
+     * them. For an app carrying its own brand rather than sitting under the
+     * platform's.
+     */
     logo?: React$1.ReactNode;
     /** Compact logo rendered in the collapsed sidebar header. */
     logoCollapsed?: React$1.ReactNode;
+    /**
+     * Whether to keep the announcements ticker out of this app's sidebar.
+     *
+     * The ticker is the platform's channel, not the app's, and it reads as the
+     * host talking over a product that carries its own brand. Opt-in to hiding
+     * rather than opt-out of showing: an app that says nothing keeps it, so
+     * this cannot quietly turn the channel off for everyone.
+     */
+    hideAnnouncements?: boolean;
     /**
      * Theme-aware icon for the sidebar header.
      * The shell picks iconDark on dark palettes, iconLight on light palettes.
@@ -6707,6 +6713,22 @@ interface ShellConnectionEventMap {
     /** Sidebar is starting to collapse — dependent UI can prepare. */
     "shell:sidebarCollapsing": Record<string, never>;
     /**
+     * An app asking for the rail collapsed or expanded.
+     *
+     * The counterpart to `shell:sidebarCollapsing`, which only ever ran the
+     * other way: the shell announced, and nothing an app could reach answered.
+     * `AppDescriptor.sidebar` states the same preference declaratively and is
+     * the better place for it — this exists because a descriptor is read only
+     * once the app's bundle has loaded, and an app that wants the rail closed
+     * wants it closed on the first frame, not after its own code arrives.
+     *
+     * The shell remembers the answer per app, so every later load of that app
+     * renders closed rather than collapsing on the way in.
+     */
+    "shell:setSidebarCollapsed": {
+        collapsed: boolean;
+    };
+    /**
      * Theme tokens changed.
      *
      * Contains the full set of CSS custom property key/value pairs
@@ -6986,6 +7008,14 @@ on(event: 'shell:sidebarCollapsing', handler: (payload: ShellConnectionEventMap[
  * @param handler - Callback invoked when the event fires.
  * @returns An unsubscribe function — call it to remove the handler.
  */
+on(event: 'shell:setSidebarCollapsed', handler: (payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
 on(event: 'shell:themeChange', handler: (payload: ShellConnectionEventMap['shell:themeChange']) => void): () => void;
 /**
  * Registers a handler for a typed shell event.
@@ -7237,6 +7267,16 @@ emit(event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:s
  * @param event   - The event name from `ShellConnectionEventMap`.
  * @param payload - The payload matching the event's type.
  */
+emit(event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
 emit(event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']): void;
 /**
  * Emits a typed shell event, dispatching to all registered handlers.
@@ -7368,7 +7408,7 @@ export interface IWorkspaceContext {
     }) => void;
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
-emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
+emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
     /** Subscribe to a named event. Returns an unsubscribe function. */
     /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
@@ -7410,6 +7450,8 @@ on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myAp
 on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:sidebarCollapsing', handler: (payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:setSidebarCollapsed', handler: (payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:themeChange', handler: (payload: ShellConnectionEventMap['shell:themeChange']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
@@ -7698,45 +7740,6 @@ export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameE
  * ```
  */
 export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
-export type MarketingConsent = "granted" | "denied" | "unset";
-/** What a consent surface needs to render itself and record a decision. */
-export interface MarketingConsentState {
-    /** True where this environment runs ad attribution (the probe named a provider). */
-    configured: boolean;
-    /** The stored decision ('unset' until the visitor chooses). */
-    consent: MarketingConsent;
-    /**
-     * Whether a consent surface should be on screen: no decision yet, or a
-     * "Privacy choices" control reopened it. False whenever `configured` is.
-     */
-    visible: boolean;
-    /** Record consent and close. */
-    allow: () => void;
-    /** Refuse, close, and clear the server copy so reporting stops. */
-    reject: () => void;
-}
-/**
- * The marketing-consent decision plus the attribution relay behind server-side
- * conversion reporting.
- *
- * The decision itself, the ad-click capture, and the opt-out checks all live in
- * the shell (they run in bootstrap, before any remote exists, and the OAuth
- * redirect reads the decision). This hook is the surface a consent UI needs —
- * including one owned by a remote, which cannot reach `util/marketingConsent`
- * or `util/adAttribution` directly.
- *
- * Renders nothing anywhere unless this environment runs ad attribution: staging
- * and OSS never do, nor do automated browsers or visitors sending Global
- * Privacy Control (see util/adAttribution.ts).
- *
- * - Relay: once consent is granted AND the user is signed in, the captured
- *   ad-click reference goes to the server (account.setAttribution), which
- *   reports conversions itself. An empty reference still relays: it records the
- *   consent that lets the server match a conversion by hashed email.
- * - Reject: clears the server copy, which stops all conversion reporting for
- *   this user. Nothing needs unloading — no third-party script ever ran.
- */
-export declare function useMarketingConsent(): MarketingConsentState;
 export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
 export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
     top: number;
@@ -8106,6 +8109,14 @@ emit(event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:s
  * @param event   - The event name from ShellConnectionEventMap.
  * @param payload - The payload matching the event's type.
  */
+emit(event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
 emit(event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']): void;
 /**
  * Emit a typed shell event, dispatching to all registered handlers.
@@ -8306,6 +8317,14 @@ on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell
  * @returns An unsubscribe function.
  */
 on(event: 'shell:sidebarCollapsing', handler: (payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:setSidebarCollapsed', handler: (payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void): () => void;
 /**
  * Register a typed handler for a shell event.
  *
@@ -9128,6 +9147,10 @@ export declare const BxRefresh: IconComponent;
 export declare const BxChevronRight: IconComponent;
 export declare const BxChevronDown: IconComponent;
 export declare const BxChevronLeft: IconComponent;
+/** A hamburger, for the compact chrome bar that opens the navigation drawer. */
+export declare const BxMenu: IconComponent;
+/** A cross, for dismissing the navigation drawer. */
+export declare const BxX: IconComponent;
 export declare const BxCheck: IconComponent;
 export declare const BxCog: IconComponent;
 export declare const BxUser: IconComponent;
@@ -11998,7 +12021,6 @@ export declare const shellApi: {
     readonly useConnectionStatus: typeof useConnectionStatus;
     readonly useShellApiConfig: typeof useShellApiConfig;
     readonly useAppComponent: typeof useAppComponent;
-    readonly useMarketingConsent: typeof useMarketingConsent;
     readonly useClickOutside: typeof useClickOutside;
     readonly useFixedPopupPosition: typeof useFixedPopupPosition;
     readonly usePrefs: typeof usePrefs;
@@ -12074,6 +12096,8 @@ export declare const shellApi: {
     readonly BxRefresh: IconComponent;
     readonly BxChevronDown: IconComponent;
     readonly BxChevronLeft: IconComponent;
+    readonly BxMenu: IconComponent;
+    readonly BxX: IconComponent;
     readonly BxCheck: IconComponent;
     readonly BxCloudUpload: IconComponent;
     readonly BxBookOpen: IconComponent;

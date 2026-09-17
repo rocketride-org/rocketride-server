@@ -1,107 +1,128 @@
 # accessibility_describe
 
-A RocketRide image-filter node that turns an image into a structured scene description optimized for blind and visually impaired users.
+A RocketRide image node that converts an image into a safety-oriented scene
+description for blind and visually impaired users. Choose it when the next step
+needs accessible text, including hazards, spatial references, visible text, and
+navigation guidance.
+
+## About Google Gemini
+
+Google Gemini is the vision-model provider used by this node through the
+`google-genai` Python package. The node sends image bytes and its analysis
+prompt to the configured Gemini model in one content-generation request.
 
 ## What it does
 
-Receives an image on its input lane, sends it to **Google Gemini Vision** (via the
-`google-genai` SDK), and emits a text description designed for assistive use, for
-example real-time narration on smart glasses. The description covers environment type,
-hazards with positions, key objects, visible text read verbatim (OCR), people, and
-navigation guidance, kept under 150 words by the default prompt.
+The node buffers an incoming image stream until it finishes, then passes the
+image and configured analysis prompt to Gemini and writes Gemini's response to
+the `text` lane. Its built-in instructions emphasize hazards, spatial
+orientation, readable text, concision, and environmental context; the default
+analysis prompt requests environment, hazards, objects, text, people, and
+navigation in fewer than 150 words.
 
-The node buffers the incoming image stream, base64-encodes it as a data URL, and sends
-it together with the analysis prompt in a single `generate_content` call. Requests run
-with `temperature: 0.3` and `max_output_tokens: 1024`. Transient failures (timeouts,
-connection errors, 5xx responses) are retried up to 3 times with exponential backoff.
-API errors are translated into user-friendly messages covering authentication, rate
-limiting, safety blocks, model unavailability, and timeouts.
-
-The default model is `gemini-2.5-flash`. A Google AI API key is required: the node
-fails at startup without one, and rejects keys starting with `sk-` (OpenAI keys) with a
-clear error.
+It is a pipeline filter, not an agent tool. Use it for a complete
+accessibility-focused narration instead of an image operation whose downstream
+consumer needs another kind of result. An empty image stream produces no text.
 
 ---
 
-## Configuration
+## Lanes
 
-### Lanes
-
-| Lane | Direction | Description |
-|------|-----------|-------------|
-| `image` | input | The image to describe (streamed; any image MIME type) |
-| `text` | output | The accessibility-optimized scene description |
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | Google Gemini vision model |
-| `modelTotalTokens` | number | Maximum context length in tokens |
-| `systemPrompt` | string | Default "You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions.". Define the accessibility description behavior and priorities |
-| `prompt` | string | Default "Describe this image for a blind person. Include: environment type, hazards with positions, key objects with clock positions, visible text, people, and navigation guidance. Keep under 150 words.". Prompt template for generating accessibility descriptions from images |
-| `prioritizeHazards` | string | Default "high". How aggressively to prioritize hazard detection |
-| `spatialFormat` | string | Default "clock". How to describe spatial positions |
-| `profile` | string | Default "gemini-2.5-flash". Select the Gemini vision model for accessibility descriptions |
-
-If `accessibility.systemPrompt` or `accessibility.prompt` is left empty, the node falls
-back to a generic `systemPrompt` / `prompt` config value, then to its built-in defaults.
-
-### Hazard priority
-
-| Value | Effect |
-|-------|--------|
-| `high` (default) | The model must lead with hazards; if none exist it explicitly states the area appears safe |
-| `medium` | Hazards are included in their spatial context when present |
-| `low` | Standard description order, no extra hazard emphasis |
-
-### Spatial format
-
-| Value | Effect |
-|-------|--------|
-| `clock` (default) | Clock positions (12 o'clock = straight ahead) |
-| `relative` | Relative directions (left, right, ahead, behind) |
-| `both` | Both clock positions and relative directions |
-
-Both settings are applied as modifiers appended to the system prompt at runtime.
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `image` | `text` | Analyze the completed image stream and emit the generated description. |
 
 ## Profiles
 
-| Profile | Model | Notes |
-|---------|-------|-------|
-| `gemini-2.5-flash` (default) | `gemini-2.5-flash` | Fast and efficient, suitable for real-time use |
-| `gemini-2.5-pro` | `gemini-2.5-pro` | Highest quality |
-| `gemini-2.0-flash` | `gemini-2.0-flash` | Balanced |
+Default: **Gemini 2.5 Flash - Fast & Efficient (1M tokens)** (`gemini-2.5-flash`).
 
-All profiles use a 1M (1,048,576) token context window.
+| Profile | Model | Context limit |
+| --- | --- | --- |
+| Gemini 2.5 Flash - Fast & Efficient (1M tokens) **(default)** | `gemini-2.5-flash` | `1048576` tokens |
+| Gemini 2.5 Pro - High Quality (1M tokens) | `gemini-2.5-pro` | `1048576` tokens |
+| Gemini 2.0 Flash - Balanced (1M tokens) | `gemini-2.0-flash` | `1048576` tokens |
 
----
+## Configuration
 
-## Default output structure
+Start with the default Flash profile, provide its API key, and keep the built-in
+instructions and prompt if their safety-first structure fits the task. Adjust
+the text fields when the user needs a different description policy, then use
+the two formatting controls to make the output easier to act on. The model and
+context-limit values are supplied by the selected profile.
 
-```text
-1. ENVIRONMENT  - type of place
-2. HAZARDS      - obstacles, stairs, vehicles (with positions)
-3. KEY OBJECTS  - notable items with clock positions and distances
-4. TEXT         - any visible text read verbatim
-5. PEOPLE       - count, positions, and actions
-6. NAVIGATION   - clear path forward, turns, or barriers
-```
+### System Instructions
 
-Customize the **Analysis Prompt** (`accessibility.prompt`) field to change this structure.
+This text is the model's system instruction. By default it directs the model to
+lead with hazards, use clock positions and relative distances, read visible text
+exactly, favor actionable information, and identify the environment and
+landmarks. Change it for a durable policy that should apply to every image—for
+example, to add a site-specific safety rule—rather than to ask about one image.
+
+An empty value falls back first to the generic `systemPrompt` runtime setting,
+then to the built-in instruction. The selected hazard priority and spatial
+format are appended to this instruction, so keep it compatible with those
+controls instead of duplicating contradictory spatial or ordering rules.
+
+### Analysis Prompt
+
+The analysis prompt is the per-image request. Its default requests six
+sections—environment, hazards, key objects, text, people, and navigation—and
+asks Gemini to keep the description under 150 words. Change it when the output
+has to match a particular consumer or structure; for example, ask for a brief
+navigation-only description when a downstream voice interface must respond
+quickly.
+
+Leaving it empty falls back to the generic `prompt` runtime setting and then to
+the built-in prompt. The implementation sends this text with the image, while
+the system instructions remain a separate model setting.
+
+### Hazard Priority
+
+This control appends a safety-ordering instruction to the system prompt. The
+default `high` tells the model to lead with hazards and to state that the area
+appears safe when it finds none. Choose `medium` to include hazards in their
+spatial context without requiring them first, or `low` for no extra hazard
+emphasis. Keep `high` for navigation-oriented descriptions; lower it only when
+another description order is more useful.
+
+### Spatial Format
+
+This control appends the requested spatial-language style to the system prompt.
+`clock`, the default, asks for clock positions with 12 o'clock straight ahead;
+`relative` asks for left, right, ahead, and behind; `both` asks for both forms.
+Use `relative` for readers unfamiliar with clock positions, or `both` when
+redundant orientation is valuable. It works alongside Hazard Priority because
+hazards can use whichever spatial convention is selected.
 
 ---
 
 ## Authentication
 
-Requires a **Google AI API key**: get one at
-[aistudio.google.com/apikey](https://aistudio.google.com/apikey) and set it in the
-node's API key field. The node validates the key at startup: a missing key raises an
-error immediately, and a key with the `sk-` prefix is rejected as an OpenAI key.
+Set the selected profile's Google AI API key in the node configuration. The
+node will not start without a key, and it rejects a value beginning with `sk-`
+as an OpenAI key rather than sending it to Gemini. Create the required key in
+[Google AI Studio](https://aistudio.google.com/apikey).
 
----
+## Notes
+
+### Request and failure behavior
+
+At the end of the image stream, the node base64-encodes the received bytes into
+a data URL and sends the decoded bytes to Gemini with temperature `0.3` and a
+maximum of `1024` output tokens. It makes one initial request plus up to three
+retries for errors whose messages indicate a timeout, connection failure, HTTP
+`500`, `502`, `503`, or `504`, or an internal server error; retry waits are 1,
+2, and 4 seconds.
+
+If all attempts fail, it raises an accessibility-vision error. Authentication,
+rate-limit, invalid-input, unavailable-model, timeout, and safety-block
+messages are translated to user-facing error text; other failures retain the
+Google AI error message. A missing image or malformed image data URL raises a
+value error before the model request.
+
+## Upstream docs
+
+- [Google Gemini API documentation](https://ai.google.dev/gemini-api/docs)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

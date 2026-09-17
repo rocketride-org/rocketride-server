@@ -327,11 +327,14 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     persists with the caller metadata for the build worker.
 
     Governance: any authenticated org member may deploy (org-open rail).
-    The app deployment is born state='private' — internally publishable (an
-    @me/@team binding may serve it); the developer submits it for review, and
-    admin approval to 'ready' gates the public store track. Deploying also
-    WITHDRAWS every prior version still in 'submit' (→ 'private', history
-    'withdrawn') — the review queue only ever holds current work.
+    On a review-ladder server the app deployment is born state='private' —
+    internally publishable (an @me/@team binding may serve it); the developer
+    submits it for review, and admin approval to 'ready' gates the public
+    store track. Without the ladder (OSS — the deployer IS the approver) the
+    deployment is born 'ready', the same pre-approved state seeded platform
+    apps get. Deploying also WITHDRAWS every prior version still in 'submit'
+    (→ 'private', history 'withdrawn') — the review queue only ever holds
+    current work.
     """
     from ai.account import account
 
@@ -421,7 +424,15 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         'build': {'status': 'queued', 'queuedAt': time.time(), 'attempt': 0},
     }
     entry = await account.deployments_publish(
-        org_id, app_id, artifact, _actor_of(conn), comment=comment, metadata=metadata
+        org_id,
+        app_id,
+        artifact,
+        _actor_of(conn),
+        comment=comment,
+        metadata=metadata,
+        # No review ladder -> no reviewer: the deployment is born 'ready'
+        # (the docstring's OSS case) instead of the ladder's 'private'.
+        state=None if account.review_ladder else 'ready',
     )
     version = int(entry.get('version', 0))
 
@@ -774,13 +785,15 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
             return conn.build_error(request, f'Registry version {version} of {app_id} is not an app artifact')
         # DEPLOYMENT-state gate — the review state lives on the deployment, not
-        # the binding. A PUBLIC binding may only point at an approved ('ready')
-        # version (submit -> admin approve -> ready first). Internal (@me/@team)
-        # bindings accept any internal-eligible version (anything but 'failed';
-        # 'submit' is still in review but the developer can already run it on
-        # their own team). The binding created here is a pure pointer.
+        # the binding. On a review-ladder server (SaaS) a PUBLIC binding may
+        # only point at an approved ('ready') version (submit -> admin approve
+        # -> ready first); without the ladder (OSS — the developer IS the
+        # admin) @public accepts the same internal-eligible set as @me/@team.
+        # Internal bindings accept any internal-eligible version (anything but
+        # 'failed'; 'submit' is still in review but the developer can already
+        # run it on their own team). The binding created here is a pure pointer.
         deploy_state = str(entry.get('state') or DEFAULT_REVIEW_STATE)
-        if audience['type'] == 'public':
+        if audience['type'] == 'public' and account.review_ladder:
             if deploy_state != 'ready':
                 return conn.build_error(
                     request,
@@ -1081,6 +1094,27 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     }
 
 
+def _icon_url_of(app_id: str, version: int, icon_path: str) -> str:
+    """One snapshot's icon resolved to the URL the desktop can load.
+
+    Snapshots store appManifest.icon verbatim. Seeded entries carry an
+    absolute static path ('/apps/<id>/icon.svg') — served as-is. A deployed
+    app declares its icon APP-RELATIVE ('./icon.svg'); the build harvest
+    copies it into the version's dist/ tree, so it serves at the constructed
+    versioned URL (the same scheme as remoteEntry.js). Empty or unsafe
+    (traversal) paths resolve to '' — the shell falls back to its monogram.
+    """
+    rel = str(icon_path or '').strip().replace('\\', '/')
+    if not rel:
+        return ''
+    if rel.startswith('/'):
+        return rel
+    parts = [p for p in rel.split('/') if p not in ('', '.')]
+    if not parts or '..' in parts:
+        return ''
+    return f'/apps/{app_id}/v{version}/' + '/'.join(parts)
+
+
 def _audience_handle(conn: Any, audience: Dict[str, str]) -> str:
     """The display handle of one audience ('@me' | '@team/<name>' | '@public').
 
@@ -1103,14 +1137,15 @@ async def _where_of(
 ) -> List[Dict[str, Any]]:
     """
     The caller-visible reverse index for one app: their own user binding,
-    bindings of teams they belong to, and the public binding. A public
-    binding is only shown to OTHER orgs once its deployment is 'ready' — the
-    in-review states are the publisher's business. The pin's ``state`` is the
+    bindings of teams they belong to, and the public binding. On a
+    review-ladder server a public binding is only shown to OTHER orgs once
+    its deployment is 'ready' — the in-review states are the publisher's
+    business. The pin's ``state`` is the
     bound DEPLOYMENT's review state ('private'/'submit'/'ready'/'rejected'),
     which is what the version selector renders. appVersion joins from the artifact.
     """
     rows = [r for r in await _visible_rows_of(conn, account, org_id, app_id) if r.get('orgId') == home]
-    if not developer:
+    if not developer and account.review_ladder:
         rows = [
             r for r in rows if (r.get('audience') or {}).get('type') != 'public' or r.get('artifactState') == 'ready'
         ]
@@ -1141,7 +1176,8 @@ async def _caller_entitled_to_version(
 
     Entitled when a caller-visible binding of the HOME org serves that
     version (their user binding, a team they belong to, or the public
-    binding whose deployment is 'ready' — cross-org store apps resolve
+    binding whose deployment is 'ready' on a review-ladder server, any
+    public binding without the ladder — cross-org store apps resolve
     exactly here), or when the caller deployed that registry version (the
     developer flow — a fresh version is published nowhere yet).
     """
@@ -1159,8 +1195,9 @@ async def _caller_entitled_to_version(
         if audience.get('type') in ('user', 'team'):
             # Visibility is inherent: only own-user and member-team rows match
             return True
-        # Public bundles are reachable only once the deployment is approved.
-        if audience.get('type') == 'public' and row.get('artifactState') == 'ready':
+        # Public bundles are reachable only once the deployment is approved
+        # (any servable deployment without the review ladder).
+        if audience.get('type') == 'public' and (row.get('artifactState') == 'ready' or not account.review_ladder):
             return True
     # Deployer — the caller copied this version to the server
     entry = await _registry_entry_of(account, home, app_id, version)
@@ -1218,12 +1255,14 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
     for row in rows:
         # Binding must be live (publish_list already drops 'removed'; guard
         # 'disabled' too), and the DEPLOYMENT must be serveable for the rung:
-        # public needs 'ready', internal needs anything but 'failed'.
+        # public needs 'ready' on a review-ladder server (without the ladder
+        # it serves like an internal rung), internal needs anything but
+        # 'failed'.
         if row.get('state') != 'enabled':
             continue
         audience_type = (row.get('audience') or {}).get('type', '')
         deploy_state = row.get('artifactState') or ''
-        if audience_type == 'public':
+        if audience_type == 'public' and account.review_ladder:
             if deploy_state != 'ready':
                 continue
         elif deploy_state == 'failed':
@@ -1268,7 +1307,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'moduleId': artifact.get('moduleId') or app_id.replace('.', '_'),
             'name': snapshot.get('name') or artifact.get('name') or app_id,
             'description': snapshot.get('description') or '',
-            'icon': snapshot.get('iconPath') or '',
+            'icon': _icon_url_of(app_id, version, snapshot.get('iconPath')),
             'readme': snapshot.get('readmePath') or '',
             'categories': snapshot.get('categories') or [],
             # NO entry URL — the wire carries the version NUMBER and clients
@@ -1316,7 +1355,8 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
 
     - An ENABLED caller-visible binding entitles its version — the
       caller's own user row, rows of teams they belong to, and public
-      rows (public only when the deployment is 'ready').
+      rows (public only when the deployment is 'ready' on a review-ladder
+      server; without the ladder every public row entitles).
     - The caller ORG's own rail entitles its built versions (the developer
       flow — the version picker lists the rail published or not, and any
       org member who can browse the DEPLOY rail can fetch its bytes; rail
@@ -1354,7 +1394,11 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
     for row in rows:
         if row.get('appId') != app_id or row.get('state') != 'enabled':
             continue
-        if (row.get('audience') or {}).get('type') == 'public' and row.get('artifactState') != 'ready':
+        if (
+            account.review_ladder
+            and (row.get('audience') or {}).get('type') == 'public'
+            and row.get('artifactState') != 'ready'
+        ):
             continue
         if row.get('artifactBuild') != 'ok':
             continue

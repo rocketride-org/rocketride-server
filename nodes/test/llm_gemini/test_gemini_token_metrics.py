@@ -84,10 +84,30 @@ class _Usage:
         self.thoughts_token_count = thoughts
 
 
+class _Candidate:
+    """The one field of a candidate this node reads when there is no text."""
+
+    def __init__(self, finish_reason: Any = None) -> None:
+        self.finish_reason = finish_reason
+
+
+class _Feedback:
+    def __init__(self, block_reason: Any = None) -> None:
+        self.block_reason = block_reason
+
+
 class _Response:
-    def __init__(self, usage: Any = None, text: str = 'hi') -> None:
+    def __init__(
+        self,
+        usage: Any = None,
+        text: Optional[str] = 'hi',
+        candidates: Any = None,
+        prompt_feedback: Any = None,
+    ) -> None:
         self.usage_metadata = usage
         self.text = text
+        self.candidates = candidates
+        self.prompt_feedback = prompt_feedback
 
 
 def _make_chat(response: _Response):
@@ -162,3 +182,106 @@ def test_a_corrupt_usage_count_never_costs_the_answer():
 
     assert chat._chat('q') == 'hi'
     assert _counters() == {}
+
+
+# ---------------------------------------------------------------------------
+# A response that carried no text
+# ---------------------------------------------------------------------------
+
+
+def test_a_text_free_response_raises_with_the_reason_named():
+    """
+    `.text` is None — not '' — when the candidate carried no text parts:
+    safety-blocked, the budget spent mid-thought, or non-text parts only.
+    Returned as-is the None surfaces downstream as a token-counting crash that
+    says nothing about why. The node names the API's own reasons instead.
+    """
+    chat = _make_chat(
+        _Response(
+            _Usage(prompt=30, candidates=0),
+            text=None,
+            candidates=[_Candidate(finish_reason='SAFETY')],
+            prompt_feedback=_Feedback(block_reason='SAFETY'),
+        )
+    )
+
+    with pytest.raises(Exception) as caught:
+        chat._chat('q')
+
+    assert 'no text' in str(caught.value)
+    assert 'finish_reason=SAFETY' in str(caught.value)
+    assert 'block_reason=SAFETY' in str(caught.value)
+
+
+def test_a_text_free_response_is_still_billed():
+    """
+    THE REASON THE USAGE REPORT COMES FIRST. A blocked response still burned
+    tokens, and a safety block is exactly the run somebody will be asking about
+    when they look at the bill. Raising before the report would lose it.
+    """
+    chat = _make_chat(_Response(_Usage(prompt=30, candidates=0, thoughts=500), text=None))
+
+    with pytest.raises(Exception):
+        chat._chat('q')
+
+    assert _counters()['llm_input_tokens'] == 30
+    assert _counters()['llm_output_tokens'] == 500
+
+
+def test_a_text_free_response_is_asked_once_not_retried():
+    """
+    A SAFETY BLOCK IS AN ANSWER, NOT AN OUTAGE.
+
+    ChatBase retries anything it does not recognise, so a refusal would be
+    re-sent — and re-billed — for the same verdict. The retry loop must see it
+    as terminal and stop after the first call.
+    """
+    calls = []
+    blocked = _Response(_Usage(prompt=30, candidates=0), text=None, candidates=[_Candidate(finish_reason='SAFETY')])
+
+    class _Models:
+        def generate_content(self, model: str, contents: str) -> _Response:
+            calls.append(contents)
+            return blocked
+
+    chat = _make_chat(blocked)
+    chat._client = type('_Client', (), {'models': _Models()})()
+
+    with pytest.raises(_node.GeminiNoTextError):
+        chat._chat_with_retries('q')
+
+    assert len(calls) == 1
+    assert chat.is_retryable_error(_node.GeminiNoTextError('x')) is False
+    # Everything else still goes through ChatBase's classification.
+    assert chat.is_retryable_error(TimeoutError('timed out')) is True
+
+
+def test_no_candidates_at_all_still_says_something():
+    """The reason is unavailable, so the message says that rather than nothing."""
+    chat = _make_chat(_Response(_Usage(prompt=5, candidates=0), text=None, candidates=[]))
+
+    with pytest.raises(Exception) as caught:
+        chat._chat('q')
+
+    assert 'no candidates' in str(caught.value)
+
+
+def test_an_empty_string_answer_is_an_answer_not_a_failure():
+    """
+    Only None means "no text parts". An empty string is a model that chose to
+    say nothing, and counting it is not the same as failing the turn.
+    """
+    chat = _make_chat(_Response(_Usage(prompt=5, candidates=0), text=''))
+
+    assert chat._chat('q') == ''
+
+
+def test_getTokens_counts_nothing_as_zero():
+    """
+    Token accounting must not be the place that discovers a text-free response:
+    `len(None.split())` is an AttributeError several frames from the cause.
+    """
+    chat = _make_chat(_Response())
+
+    assert chat.getTokens('') == 0
+    assert chat.getTokens(None) == 0

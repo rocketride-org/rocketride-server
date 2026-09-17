@@ -23,6 +23,7 @@
 	//		Description to of this driver
 	//
 	"description": ["An internal null endpoint that serves as a no-op source and target, forwarding content into the pipeline without reading from or writing to an external system."],
+	"documentation": "https://docs.rocketride.org/nodes/core",
 	//
 	// Optional:
 	//		Supported actions - if not specified, no actions are supported

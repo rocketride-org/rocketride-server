@@ -175,6 +175,7 @@ export interface IFlowProjectContext {
 
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
+	cloudConnectionConfigured?: boolean;
 
 	/** Whether the user has an active subscription. When false, run buttons show a lock icon. */
 	isSubscribed?: boolean;
@@ -190,6 +191,7 @@ export interface IFlowProjectContext {
 
 	/** Called when the user requests a save from within the canvas. */
 	onSave?: () => void;
+	onOpenCloudSetup?: () => void;
 	onExport?: () => void;
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
@@ -255,6 +257,7 @@ export interface IFlowProjectProviderProps {
 	onOpenStatus?: (source: string) => void;
 	serverHost?: string;
 	isConnected?: boolean;
+	cloudConnectionConfigured?: boolean;
 	isSubscribed?: boolean;
 	initialViewport?: { x: number; y: number; zoom: number };
 	/** Whether the document has unsaved changes. Controls the save button's active state. */
@@ -263,6 +266,7 @@ export interface IFlowProjectProviderProps {
 	isNew?: boolean;
 	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
+	onOpenCloudSetup?: () => void;
 	onExport?: () => void;
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
@@ -280,7 +284,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -349,10 +353,21 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 	}, []);
 
 	// Type-narrow the raw servicesJson into our IServiceCatalog, folding in
-	// fetched full definitions. A full definition extends its summary, so it
-	// simply replaces the summary entry — the config panel, the red-gear
-	// validation, and add-node defaults all see the schema transparently.
-	const servicesJson = useMemo(() => ({ ...(rawServicesJson ?? {}), ...fullServices }) as IServiceCatalog, [rawServicesJson, fullServices]);
+	// fetched full definitions. A full definition is merged over its summary
+	// entry per provider rather than replacing it: the server deliberately
+	// strips summary-only display fields (notably `icon`, whose id is only
+	// meaningful within the bulk response's icon table) from the full view,
+	// so replacing wholesale would blank the node header icon. The config
+	// panel, the red-gear validation, and add-node defaults still see the
+	// schema transparently.
+	const servicesJson = useMemo(() => {
+		const raw = (rawServicesJson ?? {}) as Record<string, Record<string, unknown>>;
+		const merged: Record<string, unknown> = { ...raw };
+		for (const [provider, definition] of Object.entries(fullServices)) {
+			merged[provider] = { ...(raw[provider] ?? {}), ...definition };
+		}
+		return merged as IServiceCatalog;
+	}, [rawServicesJson, fullServices]);
 
 	// --- Context value (memoized to prevent consumer re-renders on unchanged props) ---
 
@@ -389,11 +404,13 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		onOpenStatus,
 		serverHost,
 		isConnected,
+		cloudConnectionConfigured,
 		isSubscribed,
 		initialViewport,
 		isDirty,
 		isNew,
 		onSave,
+		onOpenCloudSetup,
 		onExport,
 		envKeys,
 	}), [
@@ -404,7 +421,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens,
 		onOpenLink, googlePickerDeveloperKey, googlePickerClientId,
 		onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected,
-		isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys,
+		cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys,
 	]);
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;

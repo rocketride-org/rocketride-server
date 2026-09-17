@@ -49,10 +49,10 @@ export * from './client.js';
 // Export the database API namespace (DatabaseApi class, DatabaseDialect enum)
 export * from './database.js';
 
-// Export the Sequelize factory and related types for advanced / standalone use
+// Sequelize factory and related types (frozen SDK contract surface — deprecated
+// in favor of `rocketride/drizzle`, retained until a coordinated major release)
 export { createSequelize } from './database/sequelize/create-sequelize.js';
 export type { CreateSequelizeOptions, SequelizeConstructor } from './database/sequelize/create-sequelize.js';
-// DatabaseLike is already re-exported via `export * from './database.js'` above.
 
 // Export the run-log DVR session class (the codec stays internal — only the
 // session and its user-facing types are public surface)

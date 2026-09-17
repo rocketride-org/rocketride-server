@@ -1,98 +1,105 @@
 # currency_convert_explicit
 
-A RocketRide filter node that converts monetary facts from one currency to another
-at an **explicitly stated rate and date** — the opt-in conversion step of the
-audit-grade financial extraction node suite.
+A RocketRide filter node that converts structured monetary facts at a rate and
+date you explicitly supply. Pick it when a financial pipeline needs a
+reproducible, auditable conversion step rather than a live exchange-rate lookup
+or a node that only labels currencies.
 
 ## What it does
 
-Reads structured facts on the `answers` lane and, for every fact tagged with the
-configured **source currency**, computes the value in the **target currency** using
-a rate you supply in the configuration. Conversion is **never implicit**: nothing is
-fetched from a live foreign-exchange service, and no network access or credentials
-are involved. This is the counterpart to `normalize_facts`, which only *tags*
-currency and never converts.
+The node reads and re-emits the `answers` lane. For a fact whose configured
+currency field matches the source currency, it preserves the original fact,
+adds a `converted` amount and currency, and appends a provenance entry with the
+rate, date, and source/target currencies. It never fetches rates or contacts a
+network service, so the result depends only on the stated configuration.
 
-The conversion is **non-destructive and audit-friendly**:
+Input may be one JSON fact object or a list of fact objects. Plain text, scalar
+JSON, non-fact objects, invalid amounts, and facts in another currency pass
+through unchanged, making this a safe opt-in step after structured extraction
+or normalization.
 
-- the original `amount` and `currency` are left untouched;
-- a `converted` block (`amount` + `currency`) is added;
-- a `provenance` entry records the rate, rate date, and source/target currencies.
+## Lanes
 
-All arithmetic uses `decimal.Decimal` with half-up rounding, so results are exact and
-reproducible. The node depends only on the Python standard library.
-
-Records that are not fact objects (plain text, bare numbers), facts missing the
-amount/currency fields, or facts whose currency does not match the configured source
-are **passed through unchanged** — the node never drops a record.
-
-## Fact-record convention
-
-A "fact" is a JSON object with a numeric amount under `amount_field` (default
-`amount`) and a currency code under `currency_field` (default `currency`). An answer
-payload may be a single fact object or a list of fact objects; other shapes pass
-through untouched.
-
-Input:
-
-```json
-{ "amount": 100, "currency": "EUR" }
-```
-
-Output (source `EUR` → target `USD` at rate `1.1`, date `2026-06-30`):
-
-```json
-{
-  "amount": 100,
-  "currency": "EUR",
-  "converted": { "amount": 110.0, "currency": "USD" },
-  "provenance": [
-    {
-      "op": "currency_convert_explicit",
-      "rate": 1.1,
-      "rate_date": "2026-06-30",
-      "source_currency": "EUR",
-      "target_currency": "USD"
-    }
-  ]
-}
-```
-
-If the fact already carries a `provenance` list, the conversion entry is appended so
-upstream provenance is preserved.
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `answers` | `answers` | Convert matching JSON fact records and forward every input record once. |
 
 ## Configuration
 
-### Lanes
+Set the source and target codes, state the conversion rate deliberately, then
+align the amount and currency field names with the fact schema produced
+upstream. The default profile supplies EUR-to-USD field names and a neutral
+rate, but there is only one profile and these individual fields are what tailor
+the conversion.
 
-| Lane      | In → Out            | Behaviour                                                                                                   |
-|-----------|---------------------|-------------------------------------------------------------------------------------------------------------|
-| `answers` | `answers` → `answers` | Converts facts whose currency matches `source_currency`; all other records pass through unchanged. |
+### Source and target currency
 
-### Fields
+**Source currency** selects which facts are eligible; matching is
+case-insensitive. **Target currency** is written exactly as configured into the
+new `converted.currency` value. Keep both codes non-empty: if either is empty,
+the node logs a warning and all answers pass through unchanged. Change the
+field names below if an upstream extractor uses names other than `amount` and
+`currency`.
 
-| Field             | Type    | Default    | Description                                                                                   |
-|-------------------|---------|------------|-----------------------------------------------------------------------------------------------|
-| `source_currency` | string  | `EUR`      | Currency code to convert FROM. Only facts tagged with this currency are converted (case-insensitive). |
-| `target_currency` | string  | `USD`      | Currency code to convert TO.                                                                   |
-| `rate`            | number  | `1.0`      | The stated multiplier applied to the source amount (`target = source × rate`).                |
-| `rate_date`       | string  | `""`       | The date the rate applies to (ISO 8601). Recorded in the provenance entry.                     |
-| `amount_field`    | string  | `amount`   | The fact field holding the numeric amount to convert.                                          |
-| `currency_field`  | string  | `currency` | The fact field holding the currency code.                                                      |
-| `decimals`        | integer | `2`        | Fractional digits for the converted amount (rounded half-up).                                  |
+### Conversion rate and rate date
 
-If `source_currency`, `target_currency`, or `rate` is missing or invalid, the node
-logs a warning and passes all answers through unchanged rather than failing the run.
+**Conversion rate** is the multiplier in `target = source × rate`; it is not
+retrieved or inferred. Supply the rate used by the relevant reporting policy
+and record its applicable ISO-8601 date in **Rate date** so it is retained in
+the provenance entry. A rate that cannot be interpreted as a finite number
+causes a warning and leaves all answers unchanged rather than failing the run.
 
-## Pipeline position
+### Amount and currency fields
 
-```
-datalab_parse → extract_facts → normalize_facts → currency_convert_explicit → schema_validate → …
-```
+**Amount field** and **Currency field** name the keys to read from each fact.
+The amount may be an integer, float, decimal-compatible string, or `Decimal`;
+booleans and non-finite values are not monetary amounts and are left
+unchanged. A missing field, non-string currency, or non-matching source
+currency also leaves that fact untouched.
 
-This node is marked **experimental**.
+### Rounding decimals
+
+**Rounding decimals** controls the fractional digits in `converted.amount` and
+defaults to 2. Results use decimal arithmetic and round half-up, which avoids
+binary floating-point conversion effects before the final JSON number is
+written. Use 0 for whole-unit results or increase it, up to 10 in the
+configuration schema, when the downstream fact contract needs more precision.
+
+## Notes
+
+### Output and provenance
+
+The original amount and currency are never modified. The node creates a new
+top-level `converted` object and adds a provenance object whose `op` is
+`currency_convert_explicit`. An existing provenance list is copied and
+appended to; a non-list existing value is preserved as the first item of a new
+list. A later conversion therefore replaces the `converted` block but retains
+earlier provenance entries.
+
+### Answer forwarding
+
+The node suppresses the engine's default immediate forward, collects converted
+payloads for the input object, then writes each one at closing. This prevents
+duplicates while preserving the distinction between a JSON answer and plain
+text that merely looks like JSON. The node is experimental.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
-<!-- Run `./builder nodes:docs-generate` to populate the schema table from services.json. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `currency_convert_explicit.amount_field` | `string` | **Amount field**<br/>The fact field holding the numeric amount to convert. | `"amount"` |
+| `currency_convert_explicit.currency_field` | `string` | **Currency field**<br/>The fact field holding the currency code. | `"currency"` |
+| `currency_convert_explicit.decimals` | `integer` | **Rounding decimals**<br/>Number of fractional digits for the converted amount (rounded half-up). | `2` |
+| `currency_convert_explicit.profile` | `string` | **Conversion**<br/>Explicit currency conversion configuration | `"default"` |
+| `currency_convert_explicit.rate` | `number` | **Conversion rate**<br/>The stated multiplier applied to the source amount (target = source × rate). Supply the rate deliberately; nothing is fetched. | `1` |
+| `currency_convert_explicit.rate_date` | `string` | **Rate date**<br/>The date the rate applies to (ISO 8601, e.g. 2026-06-30). Recorded in the conversion provenance. | `""` |
+| `currency_convert_explicit.source_currency` | `string` | **Source currency**<br/>Currency code to convert FROM (e.g. EUR). Only facts tagged with this currency are converted; case-insensitive. | `"EUR"` |
+| `currency_convert_explicit.target_currency` | `string` | **Target currency**<br/>Currency code to convert TO (e.g. USD). | `"USD"` |
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/currency_convert_explicit)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

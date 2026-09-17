@@ -1,0 +1,104 @@
+---
+title: Best Practices
+sidebar_position: 10
+---
+
+# Best Practices
+
+Practical guidance for building reliable, maintainable RocketRide pipelines.
+
+## Credential management
+
+**Store API keys in environment variables, never in `.pipe` files.**
+
+A `.pipe` file is plain JSON. If you hard-code an API key, it will end up in
+version control. Use `${ENV_VAR}` substitution in the config instead:
+
+```json
+{
+  "provider": "llm_openai",
+  "config": {
+    "profile": "openai-4o",
+    "openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+  }
+}
+```
+
+`${...}` references are expanded server-side when the run is submitted: the SDK
+sends `ROCKETRIDE_`-prefixed variables from the client environment, the server
+merges them over its stored secrets, and only `ROCKETRIDE_`-prefixed references
+are substituted. References to any other variable (such as `${OPENAI_API_KEY}`)
+are replaced with `<REDACTED>`, not passed through.
+
+Credentials are **per-node**: each node holds only its own key, and nodes do not
+share credential state. A compromised node config does not expose keys belonging
+to other nodes in the pipeline.
+
+For production deployments, inject keys via a secrets manager (AWS Secrets
+Manager, HashiCorp Vault, Doppler) rather than a `.env` file.
+
+## Choosing a preprocessor
+
+The preprocessor splits documents into chunks before embedding. The right choice
+depends on your content and latency budget:
+
+| Preprocessor | Best for | Notes |
+| --- | --- | --- |
+| [`preprocessor_langchain`](/nodes/preprocessor_langchain) | Most text content | Fast, deterministic chunking by character or token count. Good default. |
+| [`preprocessor_llm`](/nodes/preprocessor_llm) | Semantic coherence matters | Uses an LLM to split at meaningful boundaries. Slower and costs tokens; best for long-form prose where chunk boundaries affect retrieval quality. |
+| [`preprocessor_code`](/nodes/preprocessor_code) | Source code | Splits at function and class boundaries. Do not use for prose. |
+
+Start with `preprocessor_langchain` and a chunk size of 512–1024 tokens.
+Only switch to `preprocessor_llm` if retrieval quality is measurably poor.
+
+Chunk size affects both retrieval precision and embedding cost. Smaller chunks
+retrieve more precisely but increase the number of embeddings to store and query.
+
+## Selecting a memory node
+
+Memory nodes give an agent conversational context across turns. Choose based on
+whether that context needs to survive pipeline restarts — the full strategy
+table lives in [Advanced Agents](/guides/advanced-agents#memory-strategies).
+If you don't need cross-session memory, `memory_internal` is the right
+default — it has no external dependencies and no latency overhead.
+
+## Agents vs. direct LLM calls
+
+Use a **direct LLM node** (`llm_openai`, `llm_anthropic`, etc.) when:
+
+- The task is a single-step transformation: summarise this text, classify this
+  input, translate this sentence.
+- The output schema is predictable.
+- Latency is a concern — agents add at least one extra LLM round-trip.
+
+Use an **agent node** (`agent_rocketride`, `agent_langchain`, etc.) when:
+
+- The task requires deciding *which* tool to call based on the input.
+- The task involves multiple steps that depend on intermediate results.
+- You want the model to search, retrieve, compute, or call external APIs as part
+  of answering a question.
+
+A common mistake is wrapping a simple Q&A task in an agent "for flexibility."
+Start with a direct LLM node; promote to an agent only when the task genuinely
+requires tool use.
+
+## Lane typing
+
+Data in RocketRide flows through typed lanes. Wiring the wrong lane type is the
+most common configuration error — the canonical lane table (what each lane
+carries and which nodes accept it) lives on the
+[Execution Model](/concepts/execution-model#lane-types) page.
+
+**Common mistake:** wiring `text` to a node that expects `questions`. Text
+arrives but the node waits for a question signal and never processes it. Check
+the node's reference page (the **Lanes** table) when a node appears to receive
+data but produces no output.
+
+The VS Code extension highlights lane type mismatches in the canvas before you
+run the pipeline.
+
+## Related
+
+- [Concepts: Execution Model](/concepts/execution-model): how lanes carry data.
+- [Concepts: Agents & Tools](/concepts/agents-tools-skills): when agents are the right abstraction.
+- [Concepts: Error Handling](/guides/error-handling): what happens when things go wrong.

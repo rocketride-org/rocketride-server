@@ -27,15 +27,14 @@
  * RocketRide extension for Visual Studio Code.
  */
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir, formatSyncStats, stat } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, writeFileEnsure, syncDir, formatSyncStats, stat, absolutizeImageLinks } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'shared', 'src');
-const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
-const README_SRC = path.join(DOCS_DIR, 'README-vscode.md');
 const README_DEST = path.join(APP_ROOT, 'README.md');
 
 // State keys for source fingerprints (webview bundles shared via Canvas)
@@ -242,9 +241,11 @@ function makeStageFilesAction() {
 				await copyFile(onpremSvg, path.join(BUILD_DIR, 'onprem.svg'));
 			}
 			await copyFile(path.join(PROJECT_ROOT, 'LICENSE'), path.join(BUILD_DIR, 'LICENSE'));
-			if (await exists(README_DEST)) {
-				await copyFile(README_DEST, path.join(BUILD_DIR, 'README.md'));
+			if (!(await exists(README_DEST))) {
+				throw new Error(`README.md missing at ${README_DEST} — the marketplace README is tracked source in apps/vscode/`);
 			}
+			// Relative image links become raw-GitHub URLs on main: the marketplace renders the README with no repo behind it.
+			await writeFileEnsure(path.join(BUILD_DIR, 'README.md'), absolutizeImageLinks(await readFile(README_DEST, 'utf8'), 'apps/vscode'));
 
 			// A stale docs/ staging from a pre-/client/docs build must not
 			// ride into future packs — agent docs are served by the engine
@@ -287,21 +288,6 @@ function makePackageVsixAction() {
 	};
 }
 
-function makeCopyReadmeAction() {
-	return {
-		run: async (ctx, task) => {
-			// The marketplace README is authored in the monorepo's docs/;
-			// standalone repos carry the app README directly, so nothing to sync.
-			if (!(await exists(README_SRC))) {
-				task.output = 'docs/README-vscode.md not present - keeping the app README';
-				return;
-			}
-			await copyFile(README_SRC, README_DEST);
-			task.output = 'Copied README from docs/';
-		},
-	};
-}
-
 function makeCleanStagingAction() {
 	return {
 		run: async (ctx, task) => {
@@ -309,6 +295,32 @@ function makeCleanStagingAction() {
 				await rm(BUILD_DIR);
 			}
 			task.output = 'Build directory cleaned (build/vscode)';
+		},
+	};
+}
+
+function makeTestAction() {
+	return {
+		description: 'Testing vscode',
+		run: async (ctx, task) => {
+			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true }))
+				// extension.test.ts requires the real extension-host-only `vscode` module.
+				// Compare basenames: glob yields backslash-separated paths on Windows.
+				.filter((file) => path.basename(file) !== 'extension.test.ts')
+				.sort();
+
+			// Fail rather than pass silently: this target exists because these tests
+			// previously ran nowhere, so a glob that matches nothing must not read as green.
+			if (testFiles.length === 0) {
+				throw new Error('No vscode test files found under src/test/ — expected at least one *.test.ts');
+			}
+
+			// The VS Code package has no package scripts or test dependencies of its own;
+			// resolve the same workspace-installed tsx loader used by shared:test.
+			// `--import` takes a URL: a bare Windows path (D:\...) is rejected by the ESM
+			// loader as an unsupported 'd:' protocol, so pass a file:// URL on every platform.
+			const tsxLoader = pathToFileURL(require.resolve('tsx', { paths: [path.join(PROJECT_ROOT, 'apps', 'shared')] })).href;
+			await execCommand('node', ['--import', tsxLoader, '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
 		},
 	};
 }
@@ -321,18 +333,15 @@ module.exports = {
 	name: 'vscode',
 	description: 'RocketRide VSCode Extension',
 
-	// Co-located docs gathered by docs:gather.
-	docs: [{ source: 'docs', mount: 'ide-extensions/vscode' }],
-
 	actions: [
 		// Internal actions
-		{ name: 'vscode:copy-readme', action: makeCopyReadmeAction },
 		{ name: 'vscode:build-webview', action: makeBuildWebviewAction },
 		{ name: 'vscode:compile-typescript', action: makeCompileTypescriptAction },
 		{ name: 'vscode:bundle-extension', action: makeBundleExtensionAction },
 		{ name: 'vscode:stage-files', action: makeStageFilesAction },
 		{ name: 'vscode:package-vsix', action: makePackageVsixAction },
 		{ name: 'vscode:clean-staging', action: makeCleanStagingAction },
+		{ name: 'vscode:test', action: makeTestAction },
 
 		// Public actions (have descriptions)
 		{
@@ -354,7 +363,7 @@ module.exports = {
 				// Builds gate on drift CHECKS only (silent unless they fail);
 				// unit tests (shared:test) run under test targets, never as
 				// build steps — a normal build must not stream test output.
-				steps: ['shell:build', 'client-docs:agent', 'shared:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['shell:build', 'client-docs:agent', 'shared:check-gallery-tokens', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{

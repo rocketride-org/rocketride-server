@@ -10,7 +10,13 @@ The engine forwards a lane handler's incoming argument after the handler returns
 unless it raised Ec.PreventDefault (__checkCallParent, engLib/python/call.hpp).
 Seven handlers across five nodes forwarded explicitly and returned normally, so the
 payload they forwarded reached downstream twice. For the nodes that forward an enriched or converted
-copy, the second delivery was the unmodified original.
+copy, the second delivery was the unmodified original. context_optimizer, added later, had the
+same shape: the trimmed question and the untrimmed original both went downstream. So did
+memory_persistent (#1638), on all six exits of its questions and answers handlers.
+
+A second shape leaks the same way: summarization, tool_guild and tool_n8n only buffer
+their input in the lane handlers and emit their own result from closing(), so the raw
+input also reached downstream next to that result.
 
 _simulate_engine_dispatch stands in for that rule, so these assert delivery counts
 rather than "the node forwarded once", which was true throughout the bug.
@@ -20,10 +26,14 @@ stub for the node's own IGlobal module, so no API key, model or SDK is involved.
 """
 
 import contextlib
+import copy
 import importlib.util
 import os
+import re
 import sys
 import types
+
+import pytest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _NODES_DIR = os.path.join(_HERE, '..', 'src', 'nodes')
@@ -45,8 +55,23 @@ def _simulate_engine_dispatch(write_override, default_forward):
 class FakeMetadata:
     """Stand-in for DocMetadata: attribute assignment plus model_dump()."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, pInstance=None, **kwargs):
+        """Build metadata, taking identity fields from the instance when one is given.
+
+        Args:
+            pInstance: The node instance, or None.
+            **kwargs: Metadata fields.
+        """
         self.chunkId = 0
+        if pInstance is not None:
+            # Mirror DocMetadata's instance-aware constructor: identity comes from the
+            # object being processed, not from the document.
+            current = pInstance.instance.currentObject
+            self.objectId = current.objectId
+            self.nodeId = pInstance.IEndpoint.endpoint.jobConfig['nodeId']
+            self.parent = current.path
+            self.permissionId = current.permissionId
+            self.signature = current.componentId
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -59,6 +84,13 @@ class FakeDoc:
     """Stand-in for ai.common.schema.Doc, carrying the fields these nodes touch."""
 
     def __init__(self, type='Document', page_content='', metadata=None):
+        """Keep the document fields.
+
+        Args:
+            type: The document type.
+            page_content: The document text.
+            metadata: The document metadata.
+        """
         self.type = type
         self.page_content = page_content
         self.metadata = metadata
@@ -75,6 +107,7 @@ class FakeQuestion:
     """Stand-in for ai.common.schema.Question."""
 
     def __init__(self):
+        """Create an empty question."""
         self.context = []
         self.questions = []
 
@@ -96,8 +129,18 @@ class FakeInstance:
     """
 
     def __init__(self, listeners=None):
+        """Set up the engine side.
+
+        Args:
+            listeners: Lanes hasListener() reports; None means every lane is connected.
+        """
         self.listeners = set(listeners) if listeners is not None else None
         self.delivered = {}
+        # The engine exposes the object currently being processed; DocMetadata(pInstance)
+        # reads its identity fields when a node builds metadata from scratch.
+        self.currentObject = types.SimpleNamespace(
+            objectId='obj-1', path='/src/doc.txt', permissionId=7, componentId='sig-1'
+        )
 
     def hasListener(self, lane):
         """Report whether the given lane has a downstream listener."""
@@ -135,6 +178,7 @@ class _FakeIInstanceBase:
     instance = None
 
     def __init__(self):
+        """Take no arguments, like the real base."""
         pass
 
     def preventDefault(self):
@@ -157,11 +201,24 @@ def _make_stubs():
         WRITE = 1
         END = 2
 
+    class FakeAnswer:
+        """Stand-in for ai.common.schema.Answer."""
+
+        def setAnswer(self, value):
+            """Store the answer text.
+
+            Args:
+                value: The answer text.
+            """
+            self.answer = value
+
     stubs = {
         'rocketlib': types.ModuleType('rocketlib'),
+        'rocketlib.types': types.ModuleType('rocketlib.types'),
         'ai': types.ModuleType('ai'),
         'ai.common': types.ModuleType('ai.common'),
         'ai.common.schema': types.ModuleType('ai.common.schema'),
+        'ai.common.utils': types.ModuleType('ai.common.utils'),
         'ai.common.llm_base': types.ModuleType('ai.common.llm_base'),
         'ai.common.avi': types.ModuleType('ai.common.avi'),
         'ai.common.avi.descriptor': types.ModuleType('ai.common.avi.descriptor'),
@@ -171,8 +228,19 @@ def _make_stubs():
     stubs['rocketlib'].AVI_ACTION = FakeAviAction
     stubs['rocketlib'].debug = lambda *a, **kw: None
     stubs['rocketlib'].warning = lambda *a, **kw: None
+    stubs['rocketlib'].tool_function = lambda **kw: lambda f: f
+    stubs['rocketlib.types'].IInvokeLLM = type('FakeIInvokeLLM', (), {})
     stubs['ai.common.schema'].Doc = FakeDoc
+    stubs['ai.common.schema'].DocMetadata = FakeMetadata
     stubs['ai.common.schema'].Question = FakeQuestion
+    stubs['ai.common.schema'].QuestionType = types.SimpleNamespace(QUESTION='question')
+    stubs['ai.common.schema'].QuestionHistory = types.SimpleNamespace
+    stubs['ai.common.schema'].QuestionText = types.SimpleNamespace
+    stubs['ai.common.schema'].Answer = FakeAnswer
+    # Only the tool faces of tool_guild / tool_n8n call these; the lane handlers never do.
+    stubs['ai.common.utils'].normalize_tool_input = lambda args, **kw: args
+    stubs['ai.common.utils'].optional_int = lambda args, key, default=None, **kw: default
+    stubs['ai.common.utils'].require_str = lambda args, key, **kw: str(args[key])
     stubs['ai.common.llm_base'].LLMBase = _FakeIInstanceBase
     stubs['ai.common.avi.descriptor'].rename_ext = lambda metadata, ext: metadata
     return stubs
@@ -258,6 +326,7 @@ def _build(pkg, iglobal, listeners=None):
     inst = _load_iinstance(pkg)()
     inst.IGlobal = iglobal
     inst.instance = FakeInstance(listeners)
+    inst.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(jobConfig={'nodeId': 'node-1'}))
     return inst, inst.instance
 
 
@@ -369,8 +438,9 @@ def test_ner_documents_delivered_once():
     """
     Only the enriched copy arrives.
 
-    Docs carry no metadata here: that is the path that works today. Assigning into
-    DocMetadata by subscript raises TypeError, tracked separately.
+    Docs carry no metadata here, so the node builds a DocMetadata from the instance and
+    writes entity fields onto it as attributes. Both metadata paths now produce a
+    DocMetadata, so entity fields are read by attribute rather than by subscript.
     """
     inst, fake = _ner()
     docs = [FakeDoc(page_content='Obama')]
@@ -384,7 +454,9 @@ def test_ner_documents_delivered_once():
         f'enriched copies downstream, but the engine default forward also delivers the originals'
     )
     assert delivered[0] is not docs[0]
-    assert delivered[0].metadata['entities_per'] == ['Obama']
+    assert delivered[0].metadata.entities_per == ['Obama']
+    # Identity is inherited from the object being processed, not a placeholder.
+    assert delivered[0].metadata.objectId == 'obj-1'
 
 
 # ============================================================================
@@ -556,3 +628,442 @@ def test_mistral_mixed_batch_delivers_each_document_once():
 
     assert len(delivered) == 1, f'expected only the converted document, got {len(delivered)}'
     assert [d.type for d in delivered] == ['Text']
+
+
+# ============================================================================
+# context_optimizer: forwards a trimmed copy, so the untrimmed original must not follow
+# ============================================================================
+
+
+class _BudgetQuestion:
+    """The Question fields context_optimizer budgets, plus the two methods it calls."""
+
+    def __init__(self, text):
+        """Build a question with one entry and no documents or history.
+
+        Args:
+            text: The question entry's text.
+        """
+        self.role = 'You are helpful.'
+        self.questions = [types.SimpleNamespace(text=text)]
+        self.documents = []
+        self.history = []
+
+    def model_copy(self, update=None):
+        """Return a shallow copy with *update* applied, as pydantic does.
+
+        Args:
+            update: Attribute values to set on the copy.
+
+        Returns:
+            The copy.
+        """
+        clone = copy.copy(self)
+        clone.__dict__.update(update or {})
+        return clone
+
+    def getPrompt(self):
+        """Render the question text; enough for the overhead measurement."""
+        return ' '.join(q.text for q in self.questions)
+
+
+class _StubOptimizer:
+    """Trims every question to a fixed marker, as a tiny token budget would."""
+
+    def count_tokens(self, text, encoding=None):
+        """Count whitespace-separated words.
+
+        Args:
+            text: The text to measure.
+            encoding: Ignored tokenizer name.
+
+        Returns:
+            The word count.
+        """
+        return len(text.split())
+
+    def optimize(self, question, system_prompt, documents, history, overhead_tokens):
+        """Return an optimizer result whose question was truncated.
+
+        Args:
+            question: The merged question text.
+            system_prompt: The role text, returned unchanged.
+            documents: The documents, returned unchanged.
+            history: The history messages, returned unchanged.
+            overhead_tokens: The measured prompt overhead, echoed in the metadata.
+
+        Returns:
+            A result dict in ContextOptimizer.optimize's shape.
+        """
+        return {
+            'system_prompt': system_prompt,
+            'question': 'TRIMMED',
+            'documents': documents,
+            'history': history,
+            'metadata': {
+                'tokens_used': 1,
+                'tokens_saved': 2,
+                'overhead_tokens': overhead_tokens,
+                'components_truncated': ['query'],
+                'model': 'stub',
+                'total_limit': 3,
+            },
+        }
+
+
+def _context_optimizer(optimizer):
+    """Build a context_optimizer instance with the given optimizer.
+
+    Args:
+        optimizer: The optimizer IGlobal exposes, or None for config mode.
+
+    Returns:
+        (inst, fake_instance).
+    """
+    return _build('context_optimizer', types.SimpleNamespace(optimizer=optimizer))
+
+
+def test_context_optimizer_delivers_only_the_trimmed_question():
+    """The trimmed copy is delivered, and the untrimmed original is not."""
+    inst, fake = _context_optimizer(_StubOptimizer())
+    question = _BudgetQuestion('a question far longer than the budget allows')
+
+    delivered = []
+    _simulate_engine_dispatch(lambda: inst.writeQuestions(question), lambda: delivered.append(question))
+    delivered.extend(fake.delivered.get('questions', []))
+
+    assert len(delivered) == 1, (
+        f'questions lane delivered {len(delivered)} questions. The trimmed copy and the '
+        f'untrimmed original both arrive unless writeQuestions suppresses the default forward'
+    )
+    assert delivered[0] is not question
+    assert delivered[0].questions[0].text == 'TRIMMED'
+    assert question.questions[0].text == 'a question far longer than the budget allows'
+
+
+def test_context_optimizer_question_delivered_once_without_optimizer():
+    """The optimizer-is-None branch forwards too, so it needs its own suppression."""
+    inst, fake = _context_optimizer(None)
+    question = _BudgetQuestion('hello?')
+
+    delivered = []
+    _simulate_engine_dispatch(lambda: inst.writeQuestions(question), lambda: delivered.append(question))
+    delivered.extend(fake.delivered.get('questions', []))
+
+    assert len(delivered) == 1, f'questions lane delivered {len(delivered)} questions, expected 1'
+    assert delivered[0].questions[0].text == 'hello?'
+
+
+# ============================================================================
+# summarization, tool_guild, tool_n8n: handlers only buffer, closing() emits
+# ============================================================================
+
+
+class _PromptQuestion:
+    """A question exposing getPrompt(), which tool_guild and tool_n8n read."""
+
+    def getPrompt(self):
+        """Return the prompt text."""
+        return 'raw question'
+
+
+# (node, handler, args, buffer attribute, expected buffer after the call)
+_BUFFERING_HANDLERS = [
+    ('summarization', 'writeText', ('raw text',), 'text', 'raw text'),
+    ('summarization', 'writeTable', ('| raw |',), 'text', '| raw |'),
+    ('tool_guild', 'writeText', ('raw text',), '_text_parts', ['raw text']),
+    ('tool_guild', 'writeQuestions', (_PromptQuestion(),), '_text_parts', ['raw question']),
+    ('tool_guild', 'writeDocuments', ([FakeDoc(page_content='raw doc')],), '_documents', ['raw doc']),
+    ('tool_n8n', 'writeText', ('raw text',), '_text_parts', ['raw text']),
+    ('tool_n8n', 'writeQuestions', (_PromptQuestion(),), '_text_parts', ['raw question']),
+    (
+        'tool_n8n',
+        'writeDocuments',
+        ([FakeDoc(page_content='raw doc')],),
+        '_documents',
+        [{'content': 'raw doc', 'metadata': {}}],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    'pkg, handler, args, buffer, expected',
+    _BUFFERING_HANDLERS,
+    ids=[f'{pkg}.{handler}' for pkg, handler, *_ in _BUFFERING_HANDLERS],
+)
+def test_buffering_handler_delivers_nothing(pkg, handler, args, buffer, expected):
+    """The input is buffered for closing(), and the raw input is not delivered.
+
+    Args:
+        pkg: Node package name.
+        handler: Name of the lane handler under test.
+        args: Arguments for the handler.
+        buffer: Instance attribute the handler appends to.
+        expected: That attribute's value after the call.
+    """
+    inst, fake = _build(pkg, types.SimpleNamespace())
+    inst.open(None)
+
+    delivered = []
+    _simulate_engine_dispatch(lambda: getattr(inst, handler)(*args), lambda: delivered.append(args))
+    for payloads in fake.delivered.values():
+        delivered.extend(payloads)
+
+    assert delivered == [], (
+        f'{pkg}.{handler} let {delivered} through. Its result is emitted from closing(), so '
+        f'the handler must suppress the engine forwarding the raw input'
+    )
+    assert getattr(inst, buffer) == expected
+
+
+@pytest.mark.parametrize('lane', ['image', 'audio', 'video'])
+def test_tool_n8n_media_stream_delivers_no_chunk(lane):
+    """Every BEGIN/WRITE/END chunk is buffered; none is passed downstream.
+
+    Args:
+        lane: The media lane under test.
+    """
+    inst, fake = _build('tool_n8n', types.SimpleNamespace())
+    inst.open(None)
+    writer = getattr(inst, 'write' + lane.capitalize())
+    mime = f'{lane}/x-test'
+
+    begin, write, end = 0, 1, 2  # FakeAviAction values
+    delivered = []
+    for chunk in ((begin, mime), (write, mime, b'ab'), (end, mime)):
+        _simulate_engine_dispatch(lambda c=chunk: writer(*c), lambda c=chunk: delivered.append(c))
+
+    assert delivered == [], f'{lane} lane passed {len(delivered)} raw chunks through'
+    assert inst._binary == [{'kind': lane, 'mime': mime, 'data': b'ab'}]
+
+
+# ============================================================================
+# memory_persistent: every exit forwards (a copy, when a store is set), so every exit must suppress
+# ============================================================================
+
+
+class _StubMemoryStore:
+    """The session store calls memory_persistent makes, with PersistentMemoryStore's id rule."""
+
+    def __init__(self, sessions=None):
+        """Create the store.
+
+        Args:
+            sessions: Initial {session_id: {key: value}} contents.
+        """
+        self.sessions = {sid: dict(values) for sid, values in (sessions or {}).items()}
+
+    @staticmethod
+    def _check(session_id):
+        """Raise ValueError for an id _validate_session_id would reject.
+
+        Args:
+            session_id: The id to check.
+        """
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', session_id):
+            raise ValueError(f'Invalid session_id: {session_id!r}')
+
+    def resume_session(self, session_id):
+        """Report whether the session exists.
+
+        Args:
+            session_id: The session to resume.
+
+        Returns:
+            {'ok': bool}.
+        """
+        self._check(session_id)
+        return {'ok': session_id in self.sessions}
+
+    def create_session(self, session_id):
+        """Create an empty session.
+
+        Args:
+            session_id: The session to create.
+        """
+        self._check(session_id)
+        self.sessions[session_id] = {}
+
+    def list_keys(self, session_id):
+        """List the session's keys.
+
+        Args:
+            session_id: The session to read.
+
+        Returns:
+            {'ok': True, 'keys': [...]}.
+        """
+        self._check(session_id)
+        return {'ok': True, 'keys': list(self.sessions[session_id])}
+
+    def get(self, session_id, key):
+        """Read one value.
+
+        Args:
+            session_id: The session to read.
+            key: The key to read.
+
+        Returns:
+            {'ok': True, 'value': ...}.
+        """
+        self._check(session_id)
+        return {'ok': True, 'value': self.sessions[session_id][key]}
+
+    def put(self, session_id, key, value):
+        """Store one value.
+
+        Args:
+            session_id: The session to write.
+            key: The key to write.
+            value: The value to store.
+        """
+        self._check(session_id)
+        self.sessions[session_id][key] = value
+
+    def increment(self, session_id, key):
+        """Add one to a counter, starting from zero.
+
+        Args:
+            session_id: The session to write.
+            key: The counter's key.
+        """
+        self._check(session_id)
+        self.sessions[session_id][key] = self.sessions[session_id].get(key, 0) + 1
+
+
+class _SessionQuestion(FakeQuestion):
+    """A question carrying metadata, as the real schema does."""
+
+    def __init__(self, metadata):
+        """Build the question.
+
+        Args:
+            metadata: The question's metadata dict.
+        """
+        super().__init__()
+        self.metadata = metadata
+
+
+class _SessionAnswer:
+    """An answer carrying metadata and text."""
+
+    def __init__(self, metadata, text='the answer'):
+        """Build the answer.
+
+        Args:
+            metadata: The answer's metadata dict.
+            text: The answer text.
+        """
+        self.metadata = metadata
+        self.text = text
+
+    def getText(self):
+        """Return the answer text."""
+        return self.text
+
+
+def _memory(store):
+    """Build a memory_persistent instance with the given store.
+
+    Args:
+        store: The session store IGlobal exposes, or None when the node is unconfigured.
+
+    Returns:
+        (inst, fake_instance).
+    """
+    inst, fake = _build('memory_persistent', types.SimpleNamespace(store=store))
+    inst.open(None)
+    return inst, fake
+
+
+def _deliveries(fake, lane, write, payload):
+    """Run one handler call under the engine rule and collect what reached downstream.
+
+    Args:
+        fake: The node's FakeInstance.
+        lane: The lane to collect.
+        write: Zero-argument callable that runs the handler.
+        payload: What the engine's default forward would deliver.
+
+    Returns:
+        Every payload delivered on the lane.
+    """
+    delivered = []
+    _simulate_engine_dispatch(write, lambda: delivered.append(payload))
+    delivered.extend(fake.delivered.get(lane, []))
+    return delivered
+
+
+def test_memory_persistent_question_delivered_once_without_store():
+    """With no store the question passes through, once."""
+    inst, fake = _memory(None)
+    question = FakeQuestion()
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(question), question)
+
+    assert delivered == [question], f'questions lane delivered {len(delivered)} questions, expected 1'
+
+
+def test_memory_persistent_question_delivered_once_with_invalid_session():
+    """A rejected session_id is dropped, and the unenriched copy is delivered once."""
+    inst, fake = _memory(_StubMemoryStore())
+    question = _SessionQuestion({'session_id': 'bad id!'})
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(question), question)
+
+    assert len(delivered) == 1, f'questions lane delivered {len(delivered)} questions, expected 1'
+    assert 'memory_context' not in delivered[0].metadata
+    assert inst._current_session_id is None
+
+
+def test_memory_persistent_delivers_only_the_enriched_question():
+    """The copy carrying the session's memory is delivered, and the original is not."""
+    inst, fake = _memory(_StubMemoryStore({'sess-1': {'topic': 'invoices'}}))
+    question = _SessionQuestion({'session_id': 'sess-1'})
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(question), question)
+
+    assert len(delivered) == 1, (
+        f'questions lane delivered {len(delivered)} questions. The enriched copy and the '
+        f'original both arrive unless writeQuestions suppresses the default forward'
+    )
+    assert delivered[0] is not question
+    assert delivered[0].metadata['memory_context'] == {'topic': 'invoices'}
+    assert 'memory_context' not in question.metadata
+
+
+def test_memory_persistent_answer_delivered_once_without_store():
+    """With no store the answer passes through, once."""
+    inst, fake = _memory(None)
+    answer = _SessionAnswer({})
+
+    delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
+
+    assert delivered == [answer], f'answers lane delivered {len(delivered)} answers, expected 1'
+
+
+def test_memory_persistent_answer_delivered_once_with_invalid_session():
+    """A rejected session_id stores nothing, and the answer is delivered once."""
+    store = _StubMemoryStore()
+    inst, fake = _memory(store)
+    answer = _SessionAnswer({'session_id': 'bad id!'})
+
+    delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
+
+    assert len(delivered) == 1, f'answers lane delivered {len(delivered)} answers, expected 1'
+    assert store.sessions == {}
+
+
+def test_memory_persistent_stored_answer_delivered_once():
+    """The answer is stored in its session and delivered once."""
+    store = _StubMemoryStore({'sess-1': {}})
+    inst, fake = _memory(store)
+    answer = _SessionAnswer({'session_id': 'sess-1'}, text='42')
+
+    delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
+
+    assert len(delivered) == 1, (
+        f'answers lane delivered {len(delivered)} answers. The stored copy and the original '
+        f'both arrive unless writeAnswers suppresses the default forward'
+    )
+    assert store.sessions['sess-1'] == {'last_answer': '42', 'answer_count': 1}

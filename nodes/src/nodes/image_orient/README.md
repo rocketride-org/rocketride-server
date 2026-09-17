@@ -24,45 +24,15 @@ costs it nothing in quality.
 | `image` | `image` | The photo, upright if the node was sure, unchanged if it was not |
 | `image` | `text` | JSON decision record — what it chose, how sure it was, and why it declined |
 
-## The decision record
+## Configuration
 
-```json
-{"decoded": true, "rotation": 270, "confident": true,
- "scores": {"0": 0.011, "90": 0.004, "180": 0.0, "270": 0.194},
- "faces": 2, "ratio": 17.6, "reason": null}
-```
+Every setting — display name, type, guidance, and default — is documented in the
+generated [Schema](#schema) table below; the descriptions there are the same ones
+the pipeline builder shows.
 
-`rotation` is **the correction applied, in degrees clockwise** — not the rotation the photo was
-found in. A picture that arrived turned 90° clockwise is corrected with `"rotation": 270`.
-
-`0` means the image was left as it was, and `confident` separates the two ways that happens:
-`true` is "measured, and it was already upright", `false` is "not sure". `reason` names the doubt:
-
-| `reason` | Means |
-| --- | --- |
-| `no_faces` | Nothing that scored as a face at any orientation |
-| `few_faces` | Fewer faces backed the winner than **Faces needed to decide** |
-| `thin_margin` | No orientation led the others by enough. Two orientations disagreeing looks like this too |
-| `mixed_signals` | The two readings of the detections pointed different ways — the rotation holding the most face was not the one the detector was most certain about |
-| `unencodable_format` | Analysed, but not JPEG or PNG, so the node declines to re-save it |
-| `no_model` | The face model could not be loaded; nothing was analysed |
-
-`decoded: false` is different again — the bytes were not a readable image. That needs a different
-fix from "read it and left it alone", which is why they are not merged.
-
-## Configuring it
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| **How sure before rotating** | Balanced (1.1) | How clearly the winning orientation must beat the next best. Trades coverage, not correctness — see below |
-| **Faces needed to decide** | 2 | How many faces must back the winner. Lower to 1 for portraits, where there is only ever one face |
-| **Face clarity vs face size** | Balanced (1) | When one rotation shows a *bigger* face and another a *clearer* one, this decides which wins. See below |
-| **Minimum face score** | 0.6 | How certain the detector must be that something *is* a face before it gets a vote. Raising it ignores doubtful faces but also discards real ones in dim or grainy scans; lowering it admits things that are not faces. Rarely worth changing — it was the least useful dial in testing, and moving it in either direction cost accuracy |
-| **Detection size (px)** | 800 | How big a copy the face search runs on. Your image is never scaled; this only affects the search. Raise it if faces in group photos are missed. Cost grows with the square — 1600 is about 4× the work of 800 |
-| **JPEG quality** | `auto` | Quality to re-save a rotated JPEG at. `auto` matches what the photo already had. Ignored for PNG; photos that are not rotated are never re-saved at all |
-
-The first two are the ones worth touching. Both defaults were **measured** over 98 real album
-photographs, not guessed:
+**How sure before rotating** and **Faces needed to decide** are the ones worth
+touching. Their defaults were **measured** over 98 real album photographs, not
+guessed:
 
 | **How sure before rotating** | Fixed | Turned the wrong way |
 | --- | --- | --- |
@@ -108,7 +78,35 @@ because they are single-face pictures.
 | Faces in group shots are missed | Raise **Detection size**; cost grows with the square, so 1600 is ~4× the work of 800 |
 | Nothing is ever rotated, every record says `no_model` | The model could not be downloaded. Check network access from the engine host |
 
-## Limitations
+## Notes
+
+### The decision record
+
+```json
+{"decoded": true, "rotation": 270, "confident": true,
+ "scores": {"0": 0.011, "90": 0.004, "180": 0.0, "270": 0.194},
+ "faces": 2, "ratio": 17.6, "reason": null}
+```
+
+`rotation` is **the correction applied, in degrees clockwise** — not the rotation the photo was
+found in. A picture that arrived turned 90° clockwise is corrected with `"rotation": 270`.
+
+`0` means the image was left as it was, and `confident` separates the two ways that happens:
+`true` is "measured, and it was already upright", `false` is "not sure". `reason` names the doubt:
+
+| `reason` | Means |
+| --- | --- |
+| `no_faces` | Nothing that scored as a face at any orientation |
+| `few_faces` | Fewer faces backed the winner than **Faces needed to decide** |
+| `thin_margin` | No orientation led the others by enough. Two orientations disagreeing looks like this too |
+| `mixed_signals` | The two readings of the detections pointed different ways — the rotation holding the most face was not the one the detector was most certain about |
+| `unencodable_format` | Analysed, but not JPEG or PNG, so the node declines to re-save it |
+| `no_model` | The face model could not be loaded; nothing was analysed |
+
+`decoded: false` is different again — the bytes were not a readable image. That needs a different
+fix from "read it and left it alone", which is why they are not merged.
+
+### Limitations
 
 - **It needs faces.** Landscapes, documents and photographs of the backs of people's heads give it
   nothing to work with, and it will abstain on them. That is the honest boundary of the approach,
@@ -131,4 +129,20 @@ because they are single-face pictures.
 ---
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `image_orient.confidenceWeight` | `number` | **Face clarity vs face size**<br/>When one rotation shows a bigger face but another shows a clearer one, this decides which wins. 'Balanced' is the safe default: measured over 98 album photographs it corrected 37 and got none wrong. Raising it rescues photos where an upside-down face is detected with a larger box than the upright one - but it acts on thinner evidence, and at the highest setting with 'Faces needed to decide' at 1 it corrected 39 and got 3 wrong. Raise it only if upside-down photos are being missed, and check the results. | `1` |
+| `image_orient.detectSize` | `integer` | **Detection size (px)**<br/>How big a copy of the photo the face search runs on. Your image is never scaled - this only affects the search. Raise it if faces in group photos are being missed; the cost grows with the square, so 1600 is about four times the work of 800. | `800` |
+| `image_orient.margin` | `number` | **How sure before rotating**<br/>How clearly the winning orientation must beat the next best one. Measured over 98 real album photographs, 'Balanced' corrected 37 and got none wrong. Move up if a photo ever comes out the wrong way round; move down only if you would rather fix more and check the results yourself. | `1.1` |
+| `image_orient.minConfidence` | `number` | **Minimum face score**<br/>How certain the detector must be that something is a face before it gets a say. Raising it ignores doubtful faces; lowering it lets more in, including things that are not faces at all. | `0.6` |
+| `image_orient.minFaces` | `integer` | **Faces needed to decide**<br/>How many faces must agree before the photo is turned. One face is thin evidence and was behind most of the mistakes in testing, so two is the default. Lower to 1 for portraits and single-subject photos, where there is only ever one face to find. | `2` |
+| `image_orient.quality` | `string` | **JPEG quality**<br/>Type 'auto' to save at the same quality the photo already had, or a number from 1 to 100. Leave it on 'auto': the image has been through JPEG once already, so saving higher only makes the file bigger without recovering anything. Ignored for PNG, which is lossless. Photos that are not rotated are never re-saved at all. | `"auto"` |
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/image_orient)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

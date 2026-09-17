@@ -1,14 +1,9 @@
-import os
 from typing import Dict, Any
 from ai.web import WebServer
 from .task_server import TaskServer
 from .task_scheduler import TaskScheduler
 from .run_log import sweep_spool_root
 from .fetch import handle_fetch, handle_fetch_dir
-from depends import depends
-
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):

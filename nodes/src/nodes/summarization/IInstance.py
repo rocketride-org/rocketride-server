@@ -28,6 +28,8 @@ from ai.common.schema import Question, QuestionType, Answer, Doc, DocMetadata
 
 
 class IInstance(IInstanceBase):
+    """Pipeline instance that buffers a document's text and emits an LLM summary on close."""
+
     # Reference to a global instance providing shared functionality.
     IGlobal: IGlobal
     maxTokens: int = 0
@@ -168,6 +170,9 @@ class IInstance(IInstanceBase):
         # Accumulate the text so we can see the whole document
         self.text += text
 
+        # Only the summary from closing() goes downstream, not the raw text; preventDefault() raises, so it stays last.
+        return self.preventDefault()
+
     def writeTable(self, text: str):
         """
         Add the table to the accumulator so we can summarize a document.
@@ -177,6 +182,7 @@ class IInstance(IInstanceBase):
         """
         # Accumulate the text so we can see the whole document
         self.text += text
+        return self.preventDefault()
 
     def closing(self):
         """

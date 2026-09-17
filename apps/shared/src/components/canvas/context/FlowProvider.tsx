@@ -109,6 +109,7 @@ export interface IFlowProviderProps {
 
 	/** Whether the host is connected to the server. */
 	isConnected?: boolean;
+	cloudConnectionConfigured?: boolean;
 
 	/** Whether the user has an active subscription. */
 	isSubscribed?: boolean;
@@ -119,6 +120,7 @@ export interface IFlowProviderProps {
 	isDirty?: boolean;
 	isNew?: boolean;
 	onSave?: () => void;
+	onOpenCloudSetup?: () => void;
 	onExport?: () => void;
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
@@ -141,7 +143,7 @@ export interface IFlowProviderProps {
  * </ReactFlowProvider>
  * ```
  */
-export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProviderProps): ReactElement {
+export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProviderProps): ReactElement {
 	return (
 		<FlowPreferencesProvider projectId={projectId} isReadonly={isReadonly}>
 			<FlowProjectProvider
@@ -173,11 +175,13 @@ export function FlowProvider({ children, project, projectId, isReadonly, taskSta
 				onOpenStatus={onOpenStatus}
 				serverHost={serverHost}
 				isConnected={isConnected}
+				cloudConnectionConfigured={cloudConnectionConfigured}
 				isSubscribed={isSubscribed}
 				initialViewport={initialViewport}
 				isDirty={isDirty}
 				isNew={isNew}
 				onSave={onSave}
+				onOpenCloudSetup={onOpenCloudSetup}
 				onExport={onExport}
 				envKeys={envKeys}
 			>

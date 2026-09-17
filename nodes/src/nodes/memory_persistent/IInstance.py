@@ -21,13 +21,21 @@ from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
-    """Pipeline instance for the memory_persistent node."""
+    """Pipeline instance for the memory_persistent node.
+
+    preventDefault() raises immediately, so no code may follow it — anything
+    added after a preventDefault() call is unreachable at runtime.
+    """
 
     IGlobal: IGlobal
     _current_session_id: str | None = None
 
     def open(self, _obj: Entry) -> None:
-        """Reset per-object state for the current pipeline item."""
+        """Reset per-object state for the current pipeline item.
+
+        Args:
+            _obj: The object being opened (unused).
+        """
         self._current_session_id = None
 
     def writeQuestions(self, question: Question) -> None:
@@ -36,11 +44,14 @@ class IInstance(IInstanceBase):
         If a ``session_id`` is present in the question metadata, retrieves all
         stored keys for that session and injects them as context so downstream
         nodes (e.g. LLMs) can use prior conversation state.
+
+        Args:
+            question: The question from the questions lane; it is copied, never mutated.
         """
         store = self.IGlobal.store
         if store is None:
             self.instance.writeQuestions(question)
-            return
+            return self.preventDefault()
 
         # Deep copy to prevent mutation of the original question
         question = copy.deepcopy(question)
@@ -63,7 +74,7 @@ class IInstance(IInstanceBase):
                 self._current_session_id = None
                 debug(f'Ignoring invalid session_id in question metadata: {session_id!r}')
                 self.instance.writeQuestions(question)
-                return
+                return self.preventDefault()
 
             # Load all keys from the session
             keys_result = store.list_keys(session_id)
@@ -81,19 +92,25 @@ class IInstance(IInstanceBase):
                     question.metadata['memory_context'] = memory_context
                     debug(f'Attached {len(memory_context)} memory keys to question for session {session_id}')
 
-        # Forward the (possibly enriched) question downstream
+        # Forward the (possibly enriched) question downstream. preventDefault()
+        # suppresses the engine's automatic default forward, which would
+        # otherwise deliver the question a second time (the unenriched original).
         self.instance.writeQuestions(question)
+        return self.preventDefault()
 
     def writeAnswers(self, answer: Answer) -> None:
         """Store answer text in session memory for future retrieval, then forward.
 
         If the answer carries a ``session_id`` in its metadata, persists the
         answer text under the key ``last_answer`` (and increments a counter).
+
+        Args:
+            answer: The answer from the answers lane; it is copied, never mutated.
         """
         store = self.IGlobal.store
         if store is None:
             self.instance.writeAnswers(answer)
-            return
+            return self.preventDefault()
 
         # Deep copy to prevent mutation
         answer = copy.deepcopy(answer)
@@ -116,7 +133,7 @@ class IInstance(IInstanceBase):
             except ValueError:
                 debug(f'Ignoring invalid session_id in answer metadata: {session_id!r}')
                 self.instance.writeAnswers(answer)
-                return
+                return self.preventDefault()
 
             # Store the answer text
             answer_text = answer.getText() if hasattr(answer, 'getText') else str(answer)
@@ -127,5 +144,8 @@ class IInstance(IInstanceBase):
 
             debug(f'Stored answer in session {session_id}')
 
-        # Forward the answer downstream
+        # Forward the answer downstream. preventDefault() suppresses the
+        # engine's automatic default forward, which would otherwise deliver
+        # the answer a second time (a separate deep-copied object).
         self.instance.writeAnswers(answer)
+        return self.preventDefault()
