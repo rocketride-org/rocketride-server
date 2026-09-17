@@ -30,7 +30,8 @@ import re
 import json
 import math
 
-_PERIOD_FILTER_KEYS = ('form', 'fy', 'fp', 'end', 'unit', 'frame')
+_PERIOD_FILTER_KEYS = ('form', 'fy', 'fp', 'start', 'end', 'unit', 'frame')
+_PERIOD_SCOPE_KEYS = ('form', 'fy', 'fp', 'start', 'end', 'frame')
 
 
 def _normalize_number(value_str: str) -> float | None:
@@ -163,9 +164,9 @@ class IInstance(IInstanceBase):
             self.preventDefault()
             return
 
-        if not filters:
+        if not any(key in filters for key in _PERIOD_SCOPE_KEYS):
             warning(
-                'Abstaining: no filing period specified; provide form, fy, fp, or end '
+                'Abstaining: no filing period specified; provide form, fy, fp, start, end, or frame '
                 'so the match is scoped to a single report.'
             )
             self.preventDefault()
