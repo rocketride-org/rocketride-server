@@ -1,168 +1,184 @@
 # tool_tenki
 
-A RocketRide tool node that gives an AI agent a disposable Linux VM for running code and shell
-commands, editing files, and working in git repositories.
+A RocketRide tool node that gives an agent a disposable Linux virtual machine to run commands and
+code in, edit files, and work in a git repository. Pick it when an agent needs a real operating
+system — installing packages, building, running a test suite — rather than an interpreter sandboxed
+inside the engine's own process.
+
+## About Tenki
+
+Tenki Cloud runs Sandbox, a service that starts isolated Linux microVMs on demand and drives them
+over an API. Each sandbox is a full virtual machine with its own kernel rather than a shared
+container, so it behaves like an ordinary Linux host. An idle machine is paused rather than
+destroyed, and resumes later with its files and memory intact.
 
 ## What it does
 
-Gives an agent a [Tenki Cloud Sandbox](https://tenki.cloud) session: a full Linux microVM, not a
-container. Code runs on Tenki's infrastructure, never on the engine host. The node publishes 11
-tools in three groups — **execution** (run commands and code), **filesystem** (write, read, list,
-create and delete under `/home/tenki`) and **git** (clone, check out, diff, log).
+Gives the pipeline one sandbox session, created on the first tool call and shared by every call
+after it, so files written and packages installed by one call are visible to the next. The agent
+gets 11 functions in three groups: running commands and code, editing files under `/home/tenki`, and
+working in a git repository. Pick it over `tool_python` when the work needs a real operating system
+instead of a restricted interpreter, and over `tool_daytona` when you want a machine whose idle
+state is paused rather than deleted. The node holds no credentials and places none inside the VM, so
+`git_clone` reaches public repositories only.
 
-One session is created **lazily** on the first tool call, so a pipeline that never invokes the tool
-never provisions (or pays for) a VM. Files written and packages installed by one call are visible to
-the next. The session ends on its idle pause and hard lifetime; see [Cost safety](#cost-safety) for
-what actually shuts a VM down, which is not always the pipeline.
+## Example pipelines
 
-## Tenancy: read this before deploying
+**Write a script and run it in a sandbox**
 
-**The session belongs to the pipeline, not to a user.** A team-deployed pipeline is a single
-instance that serves every caller, so everyone sharing that pipeline shares one VM, its files and
-its installed packages. Anything one conversation leaves behind — including a modified shell
-startup file, which a login shell runs before every later command — is visible to the next caller
-until the session ends.
+`chat → agent_rocketride (+ tool_tenki) → response_answers`
 
-Run **one pipeline per user or per trust boundary**. The engine gives a tool call no caller
-identity, so the node cannot separate callers itself.
+<div align="center">
 
-For the same reason this node holds **no git credentials**. The sandbox user has passwordless
-`sudo`, so any secret placed in the VM could be read by any command the agent runs and sent out
-over the VM's open network. `git_clone` therefore works on **public repositories only**.
+![The tool_tenki node wired to the RocketRide Wave agent on the canvas, alongside an Anthropic LLM and internal memory](example.png)
 
-## Setup
+[![Download example.pipe](https://img.shields.io/badge/example.pipe-Download-41b6e6?style=for-the-badge)](example.pipe)
 
-1. In the Tenki console, open **API Keys** and create a workspace API key (it starts with `tk_`).
-2. Set it as `tenki.apikey` on the node, or via `ROCKETRIDE_TENKI_APIKEY`.
+</div>
 
-The key stays on the engine and is never placed inside the sandbox.
+A question arrives over chat. The agent writes a script into the sandbox, runs it, reads the real
+output back, and answers from what actually happened rather than from what the code looks like it
+would print. The sandbox is created on the agent's first tool call, so a conversation that never
+needs one never starts a VM.
 
----
+## As a tool
+
+An agent addresses these as `<node id>.<function>`, for example `tool_tenki_1.run_command`. Which
+functions are published depends on the **Tool groups** field; by default all three groups are.
+
+| Function | Description |
+|---|---|
+| `run_command` | Run a shell command through a login shell, returning its exit code and output. |
+| `run_code` | Write a snippet to a temporary file and run it with `python` or `javascript`. |
+| `write_file` | Write a UTF-8 text file, creating parent directories as needed. |
+| `read_file` | Read a UTF-8 text file back. |
+| `list_files` | List a directory, optionally including hidden entries. |
+| `make_directory` | Create a directory and its parents. |
+| `delete_path` | Delete a file or directory recursively. |
+| `git_clone` | Clone a public git repository into the sandbox. |
+| `git_checkout` | Check out a branch, tag or commit, optionally creating the branch. |
+| `git_diff` | Show a diff, optionally between two revisions or limited to one path. |
+| `git_log` | Show commit history, bounded by a maximum count. |
+
+Every path argument is resolved under `/home/tenki` and confined to it, so the file functions cannot
+read or write elsewhere in the VM. Execution functions return `exit_code`, `stdout`, `stderr`,
+`timed_out` and `truncated`; a command stopped at its timeout comes back as an ordinary result with
+`timed_out` set, not as an error. Output longer than the configured cap is truncated before it
+reaches the agent, with `truncated` set so the agent knows it did not see everything.
+
+A call that had to recover the session first also carries a `session` field: `"resumed"` when the VM
+had been paused and its files survived, or `"replaced"` when the old session had ended and this call
+ran on a fresh, empty one. An agent that ignores that field can wrongly assume its earlier files are
+still there.
 
 ## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `apikey` | string | **Required.** Tenki workspace API key, starting with `tk_`. |
-| `base_url` | string | Default `https://api.tenki.cloud`. Passed explicitly so a key in the engine host's environment cannot decide which workspace is billed. |
-| `cpu_cores` | integer | Default 2 (1–16). |
-| `memory_mb` | integer | Default 4096 (512–65536). Rounded down to an even number, which Tenki requires. |
-| `disk_size_gb` | integer | Default 5 (5–100). |
-| `idle_timeout_minutes` | integer | Default 5 (1–120). Tenki **pauses** an idle session; it does not delete it. This is the first thing that stops compute on a VM the pipeline walked away from, so keep it low. |
-| `max_duration_minutes` | integer | Default 60 (1–1440). Hard lifetime for **each** session, enforced by Tenki. This is the **only guaranteed** end for a VM: the engine does not always run node teardown (see [Cost safety](#cost-safety)). It does not cap total spend: once a session ends, the next call starts a new one. |
-| `exec_timeout_secs` | integer | Default 120 (1–1200). Longest a single `run_command` / `run_code` may take. Also the floor for the API call deadline, which is never below 60s. |
-| `max_output_chars` | integer | Default 50000 (1000–1000000). Longer output is truncated before it reaches the agent, protecting its context window. |
-| `image` | string | Default empty. A Tenki image reference to start sessions from, instead of the base image. |
-| `toolGroups` | array | Default empty, which publishes all three groups. Name groups to publish only those. |
+Only the API key is required; every other field has a working default, and most pipelines never need
+to change them. The ones worth understanding are the two that bound cost, the one that bounds a
+single command, and the one that decides how much of the tool surface an agent sees.
 
 ### Tool groups
 
-Every tool is tagged with a group, and only the published groups are visible to the agent: a tool
-that is not published is invisible to `tool.query` and refused by `tool.invoke`. Leave the field
-empty for all three, or narrow it — `["filesystem", "git"]` gives an agent a repository to read and
-edit without letting it run commands. A value naming only unknown groups stops the pipeline at
-startup rather than silently widening back to the default.
+Which groups of functions the node publishes. Leave it empty to publish all three (`execution`,
+`filesystem`, `git`). Naming groups publishes only those, which is how you hand an agent a narrower
+surface: `["filesystem", "git"]` lets it read and edit a repository without letting it run commands.
+A function that is not published is invisible to the agent and refused if it is called anyway. A
+value naming only unknown groups stops the pipeline at startup rather than quietly falling back to
+the default, so a typo surfaces immediately instead of widening access.
 
----
+### Idle Timeout (minutes) and Max Duration (minutes)
 
-## Available tools
+These two bound cost, and Tenki enforces both, so they hold regardless of what the pipeline or the
+engine does. The idle timeout **pauses** the session, which stops compute billing while preserving
+files and memory; the next tool call resumes it. Max duration is a hard lifetime: when it elapses
+the session ends for good, and the next call starts a fresh, empty one.
 
-| Tool | Group | Description |
-|---|---|---|
-| `run_command` | execution | Run a shell command through a login shell. |
-| `run_code` | execution | Write a snippet to a temporary file and run it (`python` or `javascript`). |
-| `write_file` | filesystem | Write a UTF-8 text file, creating parent directories. |
-| `read_file` | filesystem | Read a UTF-8 text file back, truncated at the output cap. |
-| `list_files` | filesystem | List a directory. |
-| `make_directory` | filesystem | Create a directory and its parents. |
-| `delete_path` | filesystem | Delete a file or directory recursively. |
-| `git_clone` | git | Clone a **public** repository into the sandbox. |
-| `git_checkout` | git | Check out a branch, tag or commit. |
-| `git_diff` | git | Show a diff. |
-| `git_log` | git | Show commit history, bounded by `max_count`. |
+Size them as though they were the only cleanup, because in a chat-driven pipeline they effectively
+are — see [Teardown](#teardown). A short idle timeout costs little, since a paused session resumes
+in seconds, so keep it low unless an agent routinely pauses mid-task. Max duration bounds a single
+session rather than total spend: a long-running pipeline that keeps working simply starts another
+session once one ends.
 
-Every file path is resolved under `/home/tenki` and confined to it. `run_code` supports `python`
-(python3) and `javascript` (node). TypeScript is deliberately absent: `ts-node` is not in Tenki's
-base image, and running a `.ts` file through it returned exit 0 with no output — a silent failure an
-agent would read as success.
+### Execution Timeout (seconds)
 
-Execution tools return `exit_code`, `stdout`, `stderr`, `timed_out` and `truncated`. A command
-stopped at its timeout comes back as a normal result with `timed_out: true`, not as an error.
+The longest a single `run_command` or `run_code` may take. Tenki stops the command at that point and
+reports it as a normal result with `timed_out` set. It also acts as the floor for the deadline on
+calls to the Tenki API, which is never below 60 seconds, so raising it for a genuinely long build
+also gives operations like `git_clone` more room.
 
----
+## Authentication
 
-## Session lifecycle
+The node needs a Tenki **workspace API key**, which begins with `tk_`. Create one in the Tenki
+console under API Keys, then set it as the node's API Key field or reference it from the environment
+as `${ROCKETRIDE_TENKI_APIKEY}` rather than writing the literal into a pipeline file.
 
-Tenki **pauses** an idle session rather than deleting it, and the node is built around that:
+The key authenticates the engine to Tenki and stays on the engine host. It is never placed inside the
+sandbox, so nothing the agent runs can read it.
+
+## Notes
+
+### Tenancy
+
+The session belongs to the pipeline, not to a user. A team-deployed pipeline is a single instance
+serving every caller, so everyone using it shares one VM, its files and its installed packages.
+Anything one conversation leaves behind is visible to the next, including a modified shell startup
+file, which a login shell runs before every later command.
+
+Run **one pipeline per user or per trust boundary**. The node cannot enforce that itself: a tool call
+carries no caller identity, so it has no way to tell two callers apart.
+
+### No git credentials
+
+`git_clone` reaches public repositories only, by design. Tenki can inject a GitHub token into a
+sandbox, but it arrives as an ordinary environment variable and the sandbox user has passwordless
+`sudo`, so any command the agent runs could read it — and outbound networking is open, because
+package installs need it. Rather than ship a secret that cannot be protected inside the machine it
+is handed to, the node holds no git credentials at all.
+
+### Session lifecycle
+
+Tenki pauses an idle session rather than deleting it, and the node is built around that:
 
 - **Paused** — memory and files under `/home/tenki` survive, but `/tmp` is cleared and open network
   connections drop. The next tool call resumes the session and retries automatically.
-- **Ended** (past `max_duration_minutes`, or terminated) — the next call starts a fresh, empty
-  session. Earlier files and installed packages are gone.
+- **Ended** — past its max duration, or terminated. The next call starts a fresh, empty session, and
+  earlier files and installed packages are gone.
 
-Because a silent retry would let an agent assume its earlier work is still there, any call that had
-to recover the session reports it in a **`session`** field on the result: `"resumed"` (memory and
-`/home/tenki` survived, `/tmp` was cleared) or `"replaced"` (fresh, empty session). A replacement is
-also logged as a warning, because it costs a new VM.
+Recovery follows the session's real state rather than the error that surfaced: a paused session is
+resumed, an ended one is replaced, and anything else is reported to the agent unchanged. Because a
+silent retry would let an agent assume its earlier work survived, a recovered call says what happened
+in its `session` field, and a replacement is also logged as a warning, since it costs a new VM.
 
-Recovery follows the session's real state rather than the error alone: a paused session is resumed,
-a terminated one is replaced, and anything else is surfaced to the agent unchanged.
+### Teardown
 
----
-
-## Cost safety
-
-A running session bills by the minute, so the node bounds the exposure three ways.
-
-**Enforced by Tenki**, and therefore guaranteed whatever the engine or the node does:
-
-- **Idle pause** — Tenki pauses the session after `idle_timeout_minutes`, which stops compute billing.
-- **Hard lifetime** — `max_duration_minutes` ends the session, whether or not anything closed it.
-
-**In the node, on every run:**
-
-- **Lazy creation** — a VM is provisioned only when a tool is actually called.
-- **Bounded calls** — every control-plane call has a deadline and every command has a local wait
-  limit, so a stalled connection cannot hang a call while the VM keeps billing.
-
-**Best-effort, only when the engine runs node teardown:**
-
-- **Explicit teardown** — `endGlobal` closes the session immediately.
-- **Tagged sweep** — every session carries a tag unique to the pipeline run, and `endGlobal` closes
-  any still running under it. This catches a session whose close did not take, and a create that
-  raced its deadline and left a VM the node never received a handle for.
-
-> **`endGlobal` does not always run.** A pipeline whose source is `chat` or `webhook` is force-killed
-> when it is terminated or when its idle TTL expires: the source never observes the cancel, so the
-> engine kills the task before node teardown. Measured on engine 3.3.0 with a probe node, both paths
-> recorded `beginGlobal` and never `endGlobal`. For those pipelines the VM is **not** closed when the
-> pipeline stops; it runs until `idle_timeout_minutes` pauses it and `max_duration_minutes` ends it.
-> Size those two fields as if they were the only cleanup, because for a chat agent they are.
+`endGlobal` closes the session and sweeps any session still carrying the run's unique tag — but the
+engine does not always run node teardown. A pipeline sourced from `chat` or `webhook` is force-killed
+when it is terminated and when its idle TTL expires; measured on engine 3.3.0 with a probe node, both
+paths recorded `beginGlobal` and never `endGlobal`. For those pipelines the VM is not closed when the
+pipeline stops: it runs until the idle timeout pauses it and max duration ends it. That is why those
+two fields, rather than teardown, are the cleanup that counts.
 
 Sessions are named `rocketride-tool-tenki-<suffix>` and tagged `rocketride`, so anything orphaned is
 recognisable in the Tenki console and can be closed there.
 
-**`max_duration_minutes` caps each session, not total spend.** A long-running deployed pipeline that
-keeps working will start a new session whenever one ends. To bound spend overall, give the pipeline
-a dedicated Tenki workspace and key, and use that workspace's own quotas.
-
----
-
-## Running the tests
+### Running the tests
 
 ```bash
-# Unit tests (the Tenki SDK is stubbed — no API key and no network needed)
+# Unit tests: the Tenki SDK is stubbed, so no API key and no network are needed
 pytest nodes/test/test_tool_tenki.py -v
 
-# Contract tests against the real SDK (skipped automatically when tenki is not installed)
+# Contract tests against the real SDK; skipped automatically when tenki is absent
 pytest nodes/test/test_tool_tenki_sdk.py -v
 ```
 
-The unit tests never call Tenki: a real session costs real money. `test_tool_tenki_sdk.py` checks
-the SDK names, signatures and defaults this node depends on, so a `tenki` release that renamed one
-fails there instead of in production.
+The unit tests never call Tenki, because a real session costs real money. The contract tests check
+the SDK names, signatures and defaults this node depends on, so a `tenki` release that renames one of
+them fails there rather than in production.
 
----
+## Upstream docs
+
+- [Tenki Sandbox documentation](https://tenki.cloud/docs)
+- [Tenki Cloud](https://tenki.cloud)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
