@@ -133,37 +133,42 @@ class HybridSearchEngine:
         if k < 0:
             raise ValueError('k must be non-negative')
 
-        rrf_scores: dict[str, float] = {}
-        doc_map: dict[str, dict[str, Any]] = {}
+        rrf_scores: dict[tuple[str, str], float] = {}
+        doc_map: dict[tuple[str, str], dict[str, Any]] = {}
 
         for list_idx, result_list in enumerate(result_lists):
             weight = weights[list_idx] if weights is not None else 1.0
             for rank, doc in enumerate(result_list):
-                doc_id = str(doc.get(id_key, ''))
-                if not doc_id:
+                raw_id = doc.get(id_key)
+                if raw_id is not None and raw_id != '':
+                    # Keep explicit identifiers in their own namespace so an
+                    # id cannot collide with an unrelated document's fallback
+                    # text. Numeric zero is a valid identifier, not absence.
+                    identity = ('id', str(raw_id))
+                else:
                     # Fall back to text content as identifier. If text is also
                     # missing, synthesise a globally unique id so anonymous
                     # documents from different source lists cannot collide and
                     # accidentally accumulate each other's RRF scores.
                     text_id = doc.get('text')
-                    if text_id:
-                        doc_id = str(text_id)
+                    if text_id is not None and text_id != '':
+                        identity = ('text', str(text_id))
                     else:
-                        doc_id = f'__unnamed_{list_idx}_{rank}_{uuid4().hex}'
+                        identity = ('anonymous', f'{list_idx}_{rank}_{uuid4().hex}')
 
                 rrf_score = weight * (1.0 / (k + rank + 1))  # rank is 0-indexed, RRF uses 1-indexed
-                rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + rrf_score
+                rrf_scores[identity] = rrf_scores.get(identity, 0.0) + rrf_score
 
                 # Keep the first occurrence of each document. Deep-copy so any
                 # nested mutable state (metadata dicts, embeddings list) cannot
                 # be mutated through the result we return.
-                if doc_id not in doc_map:
-                    doc_map[doc_id] = copy.deepcopy(doc)
+                if identity not in doc_map:
+                    doc_map[identity] = copy.deepcopy(doc)
 
         # Attach RRF scores and sort
         results = []
-        for doc_id, rrf_score in rrf_scores.items():
-            doc = copy.deepcopy(doc_map[doc_id])
+        for identity, rrf_score in rrf_scores.items():
+            doc = copy.deepcopy(doc_map[identity])
             doc['rrf_score'] = rrf_score
             results.append(doc)
 
