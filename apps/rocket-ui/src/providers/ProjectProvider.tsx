@@ -558,7 +558,15 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 		const c = getClient();
 		if (!c) return { errors: [], warnings: [] };
 		try {
-			return await c.validate({ pipeline: pipelineToValidate });
+			// The canvas validates one component at a time on save and hands us
+			// IComponentValidatePayload — {version, component}. The engine
+			// validates pipelines and requires `components`, answering
+			// "'pipeline.components' must be an array" without it, so a single
+			// component travels as a one-item list.
+			const { component, ...rest } = pipelineToValidate ?? {};
+			const pipeline = component ? { ...rest, components: [component] } : pipelineToValidate;
+
+			return await c.validate({ pipeline });
 		} catch {
 			return { errors: [], warnings: [] };
 		}
