@@ -263,6 +263,17 @@ class MiscCommands(DAPConn):
             # Resolve ${ROCKETRIDE_*} variables before validation
             pipeline = resolve_pipeline_env(pipeline, merged_env)
 
+            # The node config panel validates one component at a time and sends
+            # {version, component} — the IComponentValidatePayload shape the
+            # shell contract declares this endpoint accepts (shell/src/types/
+            # project.ts). The engine validates pipelines, so the component
+            # travels as a one-item list; without this it answers
+            # "'pipeline.components' must be an array".
+            if 'components' not in pipeline and isinstance(pipeline.get('component'), dict):
+                component = pipeline['component']
+                pipeline = {k: v for k, v in pipeline.items() if k != 'component'}
+                pipeline['components'] = [component]
+
             # Resolve source: explicit arg > pipeline field > implied from components
             source = args.get('source', None) or pipeline.get('source', None)
             if not source:
