@@ -27,7 +27,7 @@ The server-name prefix is `notion`, producing these registered functions.
 | `notion_update_page` | Update a page's property values and/or move it to or from trash. |
 | `notion_append_content` | Append text to the end of a page's or block's body, one paragraph per line. |
 
-Every function returns `success`, plus its own fields on success (`results`/`has_more`/`next_cursor` for the two listing calls, `text` for page content, `page_id` and `url` for creation, `appended` for the append) and `error` on failure. Notion API failures are returned in that envelope rather than raised.
+Every function returns `success`, plus its own fields on success (`results`/`has_more`/`next_cursor` for the two listing calls, `text` for page content, `page_id` and `url` for creation, `appended` for the append) and `error` on failure. Database queries also return Notion's `request_status` when the API supplies it. Notion API failures are returned in that envelope rather than raised.
 
 `notion_search` accepts `query`, an optional `filter_type` of `page` or `data_source`, and `page_size`. `notion_query_database` requires `database_id` and accepts `data_source_id`, `filter`, `sorts`, `page_size`, and `start_cursor`; page sizes are clamped to 1–100. `notion_get_page_content` requires `page_id` and accepts `max_depth` (default 4). `notion_create_page` requires `parent_id` and a `parent_type` of `page` or `data_source`, and accepts `title`, `properties`, and `content`. `notion_update_page` requires `page_id` and at least one of `properties` or `in_trash`. `notion_append_content` requires `block_id` and non-empty `text`.
 
@@ -56,6 +56,10 @@ The node is marked `experimental`. Its request and response shapes are read from
 ### Reading page content
 
 A page's body is a block tree, not text. `notion_get_page_content` walks that tree and emits one line per block, indenting nested content (a toggle's children, a nested bullet) up to `max_depth` levels. Blocks with no text of their own — dividers, images, tables — contribute nothing rather than being guessed at. Raise `max_depth` for deeply nested pages; the default of 4 covers ordinary documents.
+
+### Database query completeness
+
+Notion can cap a database query after 10,000 matching results. Check `request_status` on every response page: an `incomplete` status with `incomplete_reason: query_result_limit_reached` means the query did not expose every match, even if `has_more` is false. Narrow the filter to retrieve the remaining records.
 
 ### Titles on new database rows
 

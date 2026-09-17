@@ -194,6 +194,14 @@ class IInstance(IInstanceBase):
                 'results': {'type': 'array', 'items': {'type': 'object'}},
                 'has_more': {'type': 'boolean'},
                 'next_cursor': {'type': ['string', 'null']},
+                'request_status': {
+                    'type': 'object',
+                    'description': 'Notion query completeness metadata, when returned by the API.',
+                    'properties': {
+                        'type': {'type': 'string'},
+                        'incomplete_reason': {'type': 'string'},
+                    },
+                },
                 **_ERROR_SCHEMA,
             },
         },
@@ -227,11 +235,14 @@ class IInstance(IInstanceBase):
             resp = notion_client.request(
                 'POST', f'/data_sources/{data_source_id}/query', api_key=self.IGlobal.apikey, json_body=body
             )
-            return {
+            result = {
                 'results': resp.get('results', []),
                 'has_more': resp.get('has_more', False),
                 'next_cursor': resp.get('next_cursor'),
             }
+            if 'request_status' in resp:
+                result['request_status'] = resp['request_status']
+            return result
 
         return _run(op)
 
