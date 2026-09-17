@@ -364,6 +364,13 @@ class TestReciprocalRankFusion:
         assert len(results) == 1
         assert results[0]['rrf_score'] == 2 / 61
 
+    def test_empty_and_null_ids_with_same_text_deduplicate(self):
+        empty_id = [{'id': '', 'text': 'same'}]
+        null_id = [{'id': None, 'text': 'same'}]
+        results = HybridSearchEngine.reciprocal_rank_fusion(empty_id, null_id, k=60)
+        assert len(results) == 1
+        assert results[0]['rrf_score'] == 2 / 61
+
     def test_null_anonymous_docs_remain_distinct(self):
         list1 = [{'id': None, 'text': None, 'source': 'one'}]
         list2 = [{'id': None, 'text': None, 'source': 'two'}]
