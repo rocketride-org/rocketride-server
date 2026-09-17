@@ -45,25 +45,39 @@ from ai.common.utils.hardware import (
 GIB = 1024**3
 
 
-def _install_fake_nvml(monkeypatch, gpus, driver=12080, init_error=False):
-    """gpus: list of (name, uuid, total_gb, free_gb, [(pid, used_bytes_or_None)])."""
+def _install_fake_nvml(monkeypatch, gpus, driver=12080, init_error=False, mig=None):
+    """gpus: list of (name, uuid, total_gb, free_gb, [(pid, used_bytes_or_None)]).
+
+    mig: {uuid: same 5-tuple} for instances resolvable by UUID only.
+    """
+    mig = mig or {}
     nvml = types.ModuleType('pynvml')
 
     def init():
         if init_error:
             raise RuntimeError('NVML Shared Library Not Found')
 
+    def by_uuid(uuid):
+        key = uuid.decode() if isinstance(uuid, bytes) else uuid
+        if key not in mig:
+            raise RuntimeError('NVML_ERROR_NOT_FOUND')
+        return ('mig', key)
+
+    def rec(handle):
+        return mig[handle[1]] if isinstance(handle, tuple) else gpus[handle]
+
     nvml.nvmlInit = init
     nvml.nvmlShutdown = lambda: None
     nvml.nvmlSystemGetCudaDriverVersion = lambda: driver
     nvml.nvmlDeviceGetCount = lambda: len(gpus)
     nvml.nvmlDeviceGetHandleByIndex = lambda i: i
-    nvml.nvmlDeviceGetName = lambda h: gpus[h][0].encode()
-    nvml.nvmlDeviceGetUUID = lambda h: gpus[h][1]
+    nvml.nvmlDeviceGetHandleByUUID = by_uuid
+    nvml.nvmlDeviceGetName = lambda h: rec(h)[0].encode()
+    nvml.nvmlDeviceGetUUID = lambda h: rec(h)[1]
     nvml.nvmlDeviceGetMemoryInfo = lambda h: types.SimpleNamespace(
-        total=int(gpus[h][2] * GIB), free=int(gpus[h][3] * GIB), used=int((gpus[h][2] - gpus[h][3]) * GIB)
+        total=int(rec(h)[2] * GIB), free=int(rec(h)[3] * GIB), used=int((rec(h)[2] - rec(h)[3]) * GIB)
     )
-    procs = lambda h: [types.SimpleNamespace(pid=pid, usedGpuMemory=used) for pid, used in gpus[h][4]]  # noqa: E731
+    procs = lambda h: [types.SimpleNamespace(pid=pid, usedGpuMemory=used) for pid, used in rec(h)[4]]  # noqa: E731
     nvml.nvmlDeviceGetComputeRunningProcesses = procs
     nvml.nvmlDeviceGetGraphicsRunningProcesses = lambda h: []
     monkeypatch.setitem(sys.modules, 'pynvml', nvml)
@@ -132,6 +146,29 @@ def test_uuid_prefix_selects_device(monkeypatch):
     monkeypatch.setenv('CUDA_VISIBLE_DEVICES', 'GPU-22,GPU-111')
     mem = probe_cuda_memory()
     assert (mem.name, mem.total_gb, mem.free_gb) == ('Big', 80.0, 70.0)
+
+
+def test_mig_selector_reports_the_instance_not_its_parent(monkeypatch):
+    _install_fake_nvml(
+        monkeypatch,
+        [('H100', 'GPU-h', 80.0, 79.0, [])],
+        mig={'MIG-abc': ('H100 MIG 1g.10gb', 'MIG-abc', 10.0, 9.5, [])},
+    )
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', 'MIG-abc')
+    mem = probe_cuda_memory()
+    assert (mem.name, mem.total_gb, mem.free_gb) == ('H100 MIG 1g.10gb', 10.0, 9.5)
+
+
+def test_unresolvable_mig_selector_reports_unknown_vram(monkeypatch):
+    _install_fake_nvml(monkeypatch, [('H100', 'GPU-h', 80.0, 79.0, [])])
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', 'MIG-gone')
+    mem = probe_cuda_memory()
+    assert (mem.name, mem.total_gb, mem.free_gb) == ('MIG-gone', None, None)
+    # Still cuda, so a cuda requirement is rejected as unknown instead of measured
+    # against the parent GPU's 80 GB.
+    snap = probe_hardware()
+    assert (snap.device, snap.vram_total_gb) == ('cuda', None)
+    assert 'VRAM unknown' in check_hardware(REQ, snap).reason
 
 
 def test_index_is_exact_with_pci_order(monkeypatch):
@@ -211,6 +248,9 @@ def test_parse_true_and_empty_allow_without_minimum():
         ({'cuda': {'vramGb': 0}}, 'positive number'),
         ({'cuda': {'vramGb': '12'}}, 'positive number'),
         ({'cuda': {'vramGb': True}}, 'positive number'),
+        # json.loads reads these; NaN compares False against every minimum.
+        ({'cuda': {'vramGb': float('nan')}}, 'positive number'),
+        ({'cuda': {'vramGb': float('inf')}}, 'positive number'),
         ({'cpu': {'timeout': 1.5}}, 'whole seconds'),
         ({'cuda': 12}, 'expected an object, true or false'),
         ({'cuda': False, 'cpu': False}, 'no machine class is allowed'),

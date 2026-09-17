@@ -40,6 +40,7 @@ cuda:0; ``ramGb`` is total system memory (unified memory on Apple Silicon).
 
 from __future__ import annotations
 
+import math
 import os
 import platform
 import sys
@@ -66,14 +67,14 @@ class CudaMemory:
 
     Attributes:
         name: GPU model name, or ``'one of A, B'`` when ambiguous.
-        total_gb: Total VRAM in GiB.
-        free_gb: Free VRAM in GiB.
+        total_gb: Total VRAM in GiB, or None when it could not be read.
+        free_gb: Free VRAM in GiB, or None when it could not be read.
         residents: Processes holding VRAM, largest first (``'name[pid] N GB'``).
     """
 
     name: str
-    total_gb: float
-    free_gb: float
+    total_gb: Optional[float]
+    free_gb: Optional[float]
     residents: List[str] = field(default_factory=list)
 
 
@@ -268,8 +269,8 @@ def _positive(spec: Dict[str, Any], key: str, device: str, kind: type) -> Any:
     if key not in spec:
         return None
     value = spec[key]
-    # bool is an int subclass
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+    # bool is an int subclass; json.loads reads NaN and Infinity, which no comparison rejects.
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
         raise ValueError(f'{device}.{key}: expected a positive number, got {value!r}')
     if kind is int and value != int(value):
         raise ValueError(f'{device}.{key}: expected whole seconds, got {value!r}')
@@ -356,7 +357,9 @@ def probe_cuda_memory() -> Optional[CudaMemory]:
 
     Returns:
         The GPU's memory, or None when torch would not use CUDA (no NVML, no
-        visible GPU, or a driver older than CUDA 12).
+        visible GPU, or a driver older than CUDA 12). ``total_gb`` and
+        ``free_gb`` are None when the GPU is visible but its memory is not
+        readable, e.g. a MIG instance NVML cannot resolve.
     """
     try:
         import pynvml
@@ -368,7 +371,9 @@ def probe_cuda_memory() -> Optional[CudaMemory]:
     try:
         if pynvml.nvmlSystemGetCudaDriverVersion() < _MIN_CUDA_DRIVER:
             return None
-        handles = _cuda0_candidates(pynvml)
+        handles, unresolved = _cuda0_candidates(pynvml)
+        if unresolved:
+            return CudaMemory(name=unresolved, total_gb=None, free_gb=None)
         if not handles:
             return None
         infos = []
@@ -394,7 +399,7 @@ def probe_cuda_memory() -> Optional[CudaMemory]:
             pass
 
 
-def _cuda0_candidates(nvml: Any) -> List[Any]:
+def _cuda0_candidates(nvml: Any) -> Tuple[List[Any], Optional[str]]:
     """Find the NVML devices that may be cuda:0.
 
     NVML enumerates in PCI order while CUDA defaults to fastest-first, so an index
@@ -406,33 +411,47 @@ def _cuda0_candidates(nvml: Any) -> List[Any]:
         nvml: The initialised ``pynvml`` module.
 
     Returns:
-        Candidate device handles; empty when ``CUDA_VISIBLE_DEVICES`` hides all GPUs.
+        ``(handles, unresolved)``. ``handles`` are the candidate devices, empty
+        when ``CUDA_VISIBLE_DEVICES`` hides all GPUs. ``unresolved`` names a
+        selector that points at a GPU NVML could not resolve, and the caller then
+        reports unknown memory rather than another device's.
     """
     count = nvml.nvmlDeviceGetCount()
     handles = [nvml.nvmlDeviceGetHandleByIndex(i) for i in range(count)]
     if not handles:
-        return []
+        return [], None
     pci_order = os.environ.get('CUDA_DEVICE_ORDER', '').upper() == 'PCI_BUS_ID'
 
     visible = os.environ.get('CUDA_VISIBLE_DEVICES')
     if visible is None:
-        return handles[:1] if pci_order or count == 1 else handles
+        return (handles[:1] if pci_order or count == 1 else handles), None
 
     selector = visible.split(',')[0].strip()
     if not selector:
-        return []
+        return [], None
     if selector.lstrip('-').isdigit():
         index = int(selector)
         if index < 0 or index >= count:
-            return []
-        return [handles[index]] if pci_order or count == 1 else handles
+            return [], None
+        return ([handles[index]] if pci_order or count == 1 else handles), None
+    if selector.startswith('MIG-'):
+        # A MIG instance holds a fraction of its parent's memory, so the parent's
+        # figures would overstate it. Read the instance itself or nothing.
+        for uuid in (selector.encode(), selector):
+            try:
+                handle = nvml.nvmlDeviceGetHandleByUUID(uuid)
+                nvml.nvmlDeviceGetMemoryInfo(handle)
+                return [handle], None
+            except Exception:
+                continue
+        return [], selector
     if selector.startswith('GPU-'):
         for handle in handles:
             if _text(nvml.nvmlDeviceGetUUID(handle)).startswith(selector):
-                return [handle]
-        return []
-    # MIG or other selectors: cannot map, stay conservative.
-    return handles
+                return [handle], None
+        return [], None
+    # Other selectors: cannot map, stay conservative.
+    return handles, None
 
 
 def _residents(nvml: Any, handles: List[Any]) -> List[str]:
