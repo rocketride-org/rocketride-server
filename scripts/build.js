@@ -77,6 +77,10 @@ function parseArgs(args) {
 			options.listDeps = true;
 		} else if (arg === '--list-modules') {
 			options.listModules = true;
+		} else if (arg === '--list-skipped' || arg.startsWith('--list-skipped=')) {
+			options.listSkipped = arg.includes('=') ? arg.substring('--list-skipped='.length) : 'all';
+		} else if (arg.startsWith('--warmup=')) {
+			options.warmup = arg.substring('--warmup='.length);
 		} else if (arg.startsWith('--models=')) {
 			options.models = options.models || [];
 			options.models.push(arg.substring('--models='.length));
@@ -259,6 +263,7 @@ Options:
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
   --list-modules      List all registered modules
+  --list-skipped[=CAT] Node test tasks: list the tests that will be skipped (CAT: hardware|remote|env|libs|marker) and run nothing
   --log=FILE          Write output to FILE (grouped by module)
   --models="args"     Pass arguments to sync_models (can be repeated)
   --modelserver[=ADDR] Enable model server mode; bare = start local, =port or =host:port = use existing
@@ -280,6 +285,7 @@ Options:
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
   --verbose, -v       Show detailed output
   --version=VERSION   Set full build version x.x.x.x
+  --warmup=plan|off   Full node tests: only list the models to download (plan), or skip the download pass (off)
 
 Examples:
   builder server:build             # Build server

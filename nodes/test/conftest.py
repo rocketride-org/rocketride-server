@@ -16,6 +16,10 @@ Configuration via environment variables:
     ROCKETRIDE_APIKEY        - API key for authentication (default: MYAPIKEY)
     ROCKETRIDE_INCLUDE_SKIP  - Comma-separated node names to opt into (e.g. embedding_image,ocr).
                                Use to run skip_nodes when explicitly requested.
+    ROCKETRIDE_TEST_DEVICE, ROCKETRIDE_TEST_VRAM_GB, ROCKETRIDE_TEST_RAM_GB
+                             - Describe the test server's hardware instead of probing this machine.
+    ROCKETRIDE_TEST_HARDWARE_STRICT - Fail (instead of skip) tests whose requiresHardware is not met.
+    ROCKETRIDE_TEST_HW_LANES - Heavy tests allowed to run at once under xdist: 1 (default), N, or auto.
 
 Running tests:
     # Run all tests (requires server)
@@ -30,6 +34,7 @@ Running tests:
 
 import os
 import asyncio
+import contextlib
 import pytest
 import pytest_asyncio
 from pathlib import Path
@@ -162,20 +167,47 @@ def test_config():
 
 
 def pytest_configure(config):
-    """Register custom markers."""
+    """Register custom markers, resolve the hardware snapshot, enable collect-only modes."""
     config.addinivalue_line('markers', 'requires_server: mark test as requiring a running server')
     config.addinivalue_line('markers', 'node(name): mark test as testing a specific node')
     config.addinivalue_line(
         'markers',
         'skip_node: test for a node in skip_nodes (excluded from default run; run with -m skip_node or -k <node_name>)',
     )
+    config.addinivalue_line('markers', 'requires_hardware(device, need_gb): heavy test gated by requiresHardware')
+    config.addinivalue_line(
+        'markers', 'hardware_unmet(reason, strict): requiresHardware invalid, or not met in strict mode'
+    )
+
+    workerinput = getattr(config, 'workerinput', None)
+    if workerinput and gate.WORKER_KEY in workerinput:
+        snapshot = HardwareSnapshot.from_dict(workerinput[gate.WORKER_KEY])
+    else:
+        try:
+            gate.parse_lanes(os.environ.get(gate.ENV_LANES))
+            snapshot = gate.resolve_snapshot(os.environ, TEST_CONFIG.uri)
+        except ValueError as exc:
+            raise pytest.UsageError(str(exc)) from exc
+    config.stash[_SNAPSHOT] = snapshot
+
+    warmup_mode = config.getoption('warmup_models', None)
+    list_mode = config.getoption('list_skipped', None)
+    if warmup_mode and list_mode:
+        raise pytest.UsageError('--warmup-models and --list-skipped cannot be combined')
+    if warmup_mode or list_mode:
+        if _worker_count(config) > 1:
+            raise pytest.UsageError('--warmup-models / --list-skipped run in a single process; drop -n')
+        mode = _WarmupMode(config) if warmup_mode else _SkipReportMode(config)
+        config.pluginmanager.register(mode, 'rocketride-collect-mode')
 
 
 # =============================================================================
 # Dynamic Node Test Framework
 # =============================================================================
 
-from .framework import discover_testable_nodes, NodeTestConfig, NodeTestRunner
+from ai.common.utils.hardware import HardwareSnapshot  # noqa: E402
+
+from .framework import discover_testable_nodes, gate, warmup, NodeTestConfig, NodeTestRunner  # noqa: E402
 
 
 @pytest.fixture(scope='session')
@@ -210,131 +242,347 @@ async def node_test_runner(client):
         await runner.teardown()
 
 
-def _missing_libs_skip_mark(config):
-    """Return a pytest.mark.skip (naming the missing lib + install hint) if the
-    node's `requiresLibs` aren't loadable here, else None — turning a hard engine
-    abort into a clean, explained skip.
-    """
-    missing = config.get_missing_shared_libs()
-    if not missing:
-        return None
-    plural = 'y' if len(missing) == 1 else 'ies'
-    return pytest.mark.skip(
-        reason=(
-            f'{config.node_name}: required shared librar{plural} not available: '
-            f'{", ".join(missing)}. Install the providing system package '
-            f"(e.g. 'apt-get install -y libgles2' provides libGLESv2.so.2)."
-        )
+# =============================================================================
+# Gating: environment, native libraries, hardware
+# =============================================================================
+
+# Excluded from the default dynamic run (test_dynamic.py): they pull large libraries,
+# use heavy models, or depend on local services, which would cause CI timeouts or OOM.
+# Opt in via ROCKETRIDE_INCLUDE_SKIP:
+#   ROCKETRIDE_INCLUDE_SKIP=embedding_image pytest nodes/test/test_dynamic.py -v -k embedding_image
+SKIP_NODES = {
+    'anonymize',
+    'ocr',
+    'ner',
+    'embedding_image',
+    # Download model weights from huggingface.co at test time, so they turn the
+    # required CI check red whenever the HF hub is unreachable/rate-limited — on
+    # PRs unrelated to embeddings (RR-1120). Same class as embedding_image above.
+    'embedding_transformer',  # sentence-transformers (miniLM)
+    'embedding_video',  # CLIP (openai-patch16)
+    'image_cleanup',
+    'frame_grabber',
+    'audio_transcribe',  # it downloads faster-whisper model (1.5GB)
+    'audio_tts',
+    # Heavy vision models (model download); opt in via ROCKETRIDE_INCLUDE_SKIP.
+    'depth_estimate',
+    'detect',
+    'detect_segment',
+    'caption',
+    'background_removal',
+    'pose_estimation',
+    'face_detection',
+    # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
+    'store_elasticsearch',
+    # Require live third-party API credentials (no live calls in default CI):
+    'tool_xtrace_memory',
+    'tool_mem0',
+    # Hits data.sec.gov from the services.json test block; opt in via
+    # ROCKETRIDE_INCLUDE_SKIP=authoritative_overlay.
+    'authoritative_overlay',
+}
+
+_SNAPSHOT = pytest.StashKey[HardwareSnapshot]()
+_PLAN = pytest.StashKey[gate.Plan]()
+
+
+def pytest_addoption(parser):
+    """Register the collect-only modes."""
+    group = parser.getgroup('rocketride', 'RocketRide node tests')
+    group.addoption(
+        '--warmup-models',
+        nargs='?',
+        const='download',
+        choices=('download', 'plan'),
+        default=None,
+        help='Download the models of the selected heavy tests instead of running them; "plan" only lists them.',
+    )
+    group.addoption(
+        '--list-skipped',
+        nargs='?',
+        const='all',
+        choices=('all',) + gate.CATEGORIES,
+        default=None,
+        help='List the selected tests that will be skipped, grouped by reason, instead of running them.',
+    )
+    group.addoption(
+        '--rocketride-report',
+        metavar='PATH',
+        default=None,
+        help='Also write the --warmup-models / --list-skipped report to PATH (the builder prints it at the end).',
     )
 
 
-# Nodes that load a heavy model in-process but carry no 'gpu' capability tag
-# (CPU model-download nodes). Supplements the capability signal — keep small.
-_HEAVY_TEST_NODES = {'audio_transcribe', 'audio_tts'}
+def _worker_count(config) -> int:
+    """Number of xdist workers in this session (1 without xdist)."""
+    workerinput = getattr(config, 'workerinput', None)
+    if workerinput:
+        return int(workerinput.get('workercount', 1))
+    if getattr(config.option, 'dist', 'no') == 'no':
+        return 1
+    return max(1, len(getattr(config.option, 'tx', None) or []))
 
 
-def _is_heavy_node(config) -> bool:
-    """Whether a node loads a heavy model in-process.
+def _suite_timeout(config):
+    """The pytest-timeout limit in effect (CLI over ini), or None."""
+    try:
+        value = config.getoption('timeout', None)
+        if value is None:
+            value = config.getini('timeout')
+        return float(value) if value not in (None, '') else None
+    except (ValueError, TypeError):
+        return None
 
-    True for the 'gpu' capability (mirrors the existing `'debug' in capabilities`
-    check) or a known CPU heavy-model node. Such tests are pinned to one xdist
-    worker so their model loads run serially instead of exhausting RAM/VRAM.
+
+def _plan(config) -> gate.Plan:
+    """Gating decisions for every dynamic test parameter, computed once per process."""
+    if _PLAN not in config.stash:
+        snapshot = config.stash[_SNAPSHOT]
+        strict = gate.truthy(os.environ.get(gate.ENV_STRICT))
+        include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
+        specs = gate.build_specs(discover_testable_nodes(), 'test', snapshot, strict, SKIP_NODES, include_skip)
+        # fulltest runs explicitly (nodes:test-full), so no skip_nodes filter.
+        specs += gate.build_specs(discover_testable_nodes(test_key='fulltest'), 'fulltest', snapshot, strict)
+        lanes, count = gate.assign_lanes(
+            specs, snapshot, _worker_count(config), gate.parse_lanes(os.environ.get(gate.ENV_LANES))
+        )
+        config.stash[_PLAN] = gate.Plan(snapshot, strict, specs, lanes, count)
+    return config.stash[_PLAN]
+
+
+def _params(config, test_key: str):
+    """pytest.param entries for one test key.
+
+    Marks are applied here, not in `pytest_collection_modifyitems`, because xdist
+    reads `xdist_group` during its own collection pass. Heavy tests share lanes
+    (`hwN` groups) so that, under `--dist loadgroup`, each lane runs serially.
     """
-    return 'gpu' in config.capabilities or config.node_name in _HEAVY_TEST_NODES
-
-
-def _build_parametrize_list(configs, skip_nodes=None, include_skip=None):
-    """Build pytest.param entries for (config, profile) pairs, applying skip_nodes.
-
-    A config with missing `requiresLibs` is still emitted, but marked skip.
-    Heavy (model-loading) configs also get an `xdist_group('gpu')` mark so that,
-    under `--dist loadgroup`, all their tests run on one worker (serially) and don't
-    OOM-crash workers. The mark is applied here at parametrize time — not in
-    `pytest_collection_modifyitems` — because xdist reads the group during its own
-    collection pass and would miss a marker added by a later hook.
-    """
+    plan = _plan(config)
+    suite_timeout = _suite_timeout(config)
     params = []
-    for config in configs:
-        # Release engines don't register "debug" nodes; running one only errors.
-        if 'debug' in config.capabilities:
-            continue
-        if skip_nodes and config.node_name in skip_nodes:
-            if include_skip is None or config.node_name not in include_skip:
-                continue
-        if not config.has_required_env_vars():
-            continue
-
+    for spec in plan.for_key(test_key):
         marks = []
-        skip_mark = _missing_libs_skip_mark(config)
-        if skip_mark:
-            marks.append(skip_mark)
-        if _is_heavy_node(config):
-            marks.append(pytest.mark.xdist_group('gpu'))
-        marks = tuple(marks)
-
-        if not config.profiles:
-            params.append(pytest.param((config, None), id=config.get_test_id(), marks=marks))
-        else:
-            for profile in config.profiles:
-                params.append(pytest.param((config, profile), id=f'{config.get_test_id()}:{profile}', marks=marks))
+        if spec.skip:
+            marks.append(pytest.mark.skip(reason=spec.skip))
+        if spec.fail:
+            marks.append(pytest.mark.hardware_unmet(reason=spec.fail, strict=spec.fail_strict))
+        if spec.heavy:
+            marks.append(pytest.mark.xdist_group(f'hw{plan.lanes.get(spec.key, 0)}'))
+            if spec.runnable:
+                marks.append(pytest.mark.requires_hardware(device=spec.device, need_gb=spec.need_gb))
+        # Group timeouts only extend the suite limit; they never shorten it.
+        if suite_timeout and spec.timeout and spec.timeout > suite_timeout:
+            marks.append(pytest.mark.timeout(spec.timeout))
+        params.append(pytest.param((spec.config, spec.profile), id=spec.id, marks=marks))
     return params
 
 
 def pytest_generate_tests(metafunc):
-    """
-    Generate dynamic tests for nodes with test configurations.
-
-    This function is called by pytest to generate test cases dynamically.
-    It finds all nodes with 'test' (or 'fulltest') configurations and creates
-    test cases for each profile and test case defined.
-    """
+    """Parametrize the dynamic tests from the 'test' and 'fulltest' keys of service*.json."""
     if 'node_test_config' in metafunc.fixturenames:
-        configs = discover_testable_nodes()
-
-        # Skip in dynamic node tests only (contract/other tests unchanged). These nodes are
-        # excluded because they pull large libraries, use heavy models, or depend on local
-        # services, which would cause CI timeouts or OOM. Opt-in via ROCKETRIDE_INCLUDE_SKIP:
-        #   ROCKETRIDE_INCLUDE_SKIP=embedding_image pytest nodes/test/test_dynamic.py -v -k embedding_image
-        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image, embedding_transformer, embedding_video); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama); audio/TTS (audio_tts).
-        skip_nodes = {
-            'anonymize',
-            'ocr',
-            'ner',
-            'embedding_image',
-            # Download model weights from huggingface.co at test time, so they turn the
-            # required CI check red whenever the HF hub is unreachable/rate-limited — on
-            # PRs unrelated to embeddings (RR-1120). Same class as embedding_image above.
-            'embedding_transformer',  # sentence-transformers (miniLM)
-            'embedding_video',  # CLIP (openai-patch16)
-            'image_cleanup',
-            'frame_grabber',
-            'audio_transcribe',  # it downloads faster-whisper model (1.5GB)
-            'audio_tts',
-            # Heavy vision models (model download); opt in via ROCKETRIDE_INCLUDE_SKIP.
-            'depth_estimate',
-            'detect',
-            'detect_segment',
-            'caption',
-            'background_removal',
-            'pose_estimation',
-            'face_detection',
-            # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
-            'store_elasticsearch',
-            # Require live third-party API credentials (no live calls in default CI):
-            'tool_xtrace_memory',
-            'tool_mem0',
-            # Hits data.sec.gov from the services.json test block; opt in via
-            # ROCKETRIDE_INCLUDE_SKIP=authoritative_overlay.
-            'authoritative_overlay',
-        }
-        include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
-
-        params = _build_parametrize_list(configs, skip_nodes, include_skip)
-        metafunc.parametrize('node_test_config', params)
-
+        metafunc.parametrize('node_test_config', _params(metafunc.config, 'test'))
     if 'node_fulltest_config' in metafunc.fixturenames:
-        # Fulltest: discovers 'fulltest' key in service*.json — no skip_nodes filter,
-        # these are run explicitly via nodes:test-full
-        configs = discover_testable_nodes(test_key='fulltest')
-        params = _build_parametrize_list(configs)
-        metafunc.parametrize('node_fulltest_config', params)
+        metafunc.parametrize('node_fulltest_config', _params(metafunc.config, 'fulltest'))
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node):
+    """Hand the controller's hardware snapshot to each xdist worker."""
+    node.workerinput[gate.WORKER_KEY] = node.config.stash[_SNAPSHOT].to_dict()
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_node_collection_finished(node, ids):
+    """Abort before any test runs when heavy tests would run side by side."""
+    config = node.config
+    dist = config.getoption('dist', 'no')
+    workers = _worker_count(config)
+    if dist == 'loadgroup' or workers <= 1:
+        return
+    hits = gate.heavy_nodeids(ids, _plan(config).runnable_heavy_keys())
+    if hits:
+        pytest.exit(
+            f'{len(hits)} heavy test(s) selected (e.g. {hits[0]}) with {workers} xdist workers and '
+            f'--dist {dist}; heavy tests need --dist loadgroup to run in their lanes.',
+            returncode=pytest.ExitCode.USAGE_ERROR,
+        )
+
+
+def pytest_report_header(config):
+    """Show what the hardware gate sees."""
+    bits = [f'strict {"on" if gate.truthy(os.environ.get(gate.ENV_STRICT)) else "off"}']
+    if _worker_count(config) > 1:
+        lanes = os.environ.get(gate.ENV_LANES) or '1'
+        bits.append(f'{_plan(config).lane_count} heavy lane(s) ({gate.ENV_LANES}={lanes})')
+    return f'hardware: {config.stash[_SNAPSHOT].describe()}; {", ".join(bits)}'
+
+
+def pytest_runtest_setup(item):
+    """Fail strict-mode hardware misses; wait for a heavy CUDA test's VRAM to be free."""
+    unmet = item.get_closest_marker('hardware_unmet')
+    if unmet:
+        reason = unmet.kwargs['reason']
+        if unmet.kwargs.get('strict'):
+            reason += f' (strict mode: {gate.ENV_STRICT} is set)'
+        pytest.fail(reason, pytrace=False)
+
+    hw = item.get_closest_marker('requires_hardware')
+    if not hw or hw.kwargs.get('device') != 'cuda' or not hw.kwargs.get('need_gb'):
+        return
+    if item.config.stash[_SNAPSHOT].source != 'probe':
+        return
+    need = hw.kwargs['need_gb']
+    ok, mem = gate.wait_for_free_vram(need)
+    if not ok:
+        held = f' (held by: {", ".join(mem.residents)})' if mem.residents else ''
+        pytest.fail(
+            f'[hardware] needs {need:g} GB free VRAM but only {mem.free_gb:.1f} GB of {mem.total_gb:.1f} GB '
+            f'is free after {gate.PREFLIGHT_WAIT_S:.0f}s{held}. An earlier test kept its memory, or another '
+            f'process is using the GPU.',
+            pytrace=False,
+        )
+
+
+# =============================================================================
+# Collect-only modes: --warmup-models, --list-skipped
+# =============================================================================
+
+
+def _static_skip_reason(item):
+    """Reason a skip/skipif mark would skip ``item`` with, or None."""
+    try:
+        from _pytest.skipping import evaluate_skip_marks
+    except ImportError:
+        mark = item.get_closest_marker('skip')
+        if mark is None:
+            return None
+        return mark.kwargs.get('reason') or (mark.args[0] if mark.args else 'unconditional skip')
+    try:
+        skipped = evaluate_skip_marks(item)
+    except Exception:
+        return None
+    return skipped.reason if skipped else None
+
+
+class _CollectMode:
+    """Plugin base: collect, act on the selected items, run none of them.
+
+    Registered from `pytest_configure` as a separate plugin object so its hooks
+    don't clash with the conftest's own (e.g. the sys.modules guard's).
+    """
+
+    title = ''
+
+    def __init__(self, config):
+        """Remember the config; report lines accumulate in `lines`."""
+        self.config = config
+        self.lines: List[str] = []
+
+    def handle(self, items) -> None:
+        """Act on the selected items (subclass hook)."""
+        raise NotImplementedError
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_modifyitems(self, session, config, items):
+        """Hand the final selection (after -k/-m) to `handle`, then deselect everything."""
+        selected = list(items)
+        self.handle(selected)
+        config.hook.pytest_deselected(items=selected)
+        items[:] = []
+
+    def pytest_sessionfinish(self, session, exitstatus):  # noqa: F811 - plugin-object hook, not the conftest one
+        """Report success (running no tests is the point) and write the report file, if asked."""
+        if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED:
+            session.exitstatus = pytest.ExitCode.OK
+        report = self.config.getoption('rocketride_report', None)
+        if report and self.lines:
+            heading = self.title[:1].upper() + self.title[1:]
+            Path(report).write_text('\n'.join([heading, *self.lines]) + '\n', encoding='utf-8')
+
+    def pytest_terminal_summary(self, terminalreporter):  # noqa: F811 - plugin-object hook, not the conftest one
+        """Print the accumulated report as its own section."""
+        if self.lines:
+            terminalreporter.section(self.title)
+            for line in self.lines:
+                terminalreporter.write_line(line)
+
+
+class _SkipReportMode(_CollectMode):
+    """--list-skipped: report the selected tests that will be skipped, by reason."""
+
+    title = 'tests that will be skipped'
+
+    def __init__(self, config):
+        """Also track module-level skips, which never become items."""
+        super().__init__(config)
+        self.collect_skips = []
+
+    def pytest_collectreport(self, report):  # noqa: F811 - plugin-object hook, not the conftest one
+        """Record a module skipped at collection (``pytest.skip(allow_module_level=True)``)."""
+        if report.skipped and isinstance(report.longrepr, tuple):
+            category, text = gate.split_reason(str(report.longrepr[2]))
+            self.collect_skips.append((report.nodeid, category, text, None))
+
+    def handle(self, items) -> None:
+        """Categorise each item's skip (or strict-mode failure) reason."""
+        entries = list(self.collect_skips)
+        for item in items:
+            unmet = item.get_closest_marker('hardware_unmet')
+            reason = unmet.kwargs['reason'] if unmet else _static_skip_reason(item)
+            if reason is not None:
+                category, text = gate.split_reason(reason)
+                note = None
+                if unmet:
+                    note = 'fails in strict mode' if unmet.kwargs.get('strict') else 'fails: invalid declaration'
+                entries.append((item.nodeid, category, text, note))
+        only = self.config.getoption('list_skipped')
+        selected = len(items) + len(self.collect_skips)
+        self.lines = gate.format_skip_report(entries, selected, _plan(self.config), only)
+
+
+class _WarmupMode(_CollectMode):
+    """--warmup-models: fetch (or, with =plan, list) the models of the selected heavy tests."""
+
+    title = 'model warmup'
+
+    def handle(self, items) -> None:
+        """Resolve the runnable heavy items to snapshots and fetch what is missing.
+
+        A failed download is reported, not fatal: the affected test fails on its
+        own with the real error.
+        """
+        pairs = []
+        for item in items:
+            callspec = getattr(item, 'callspec', None)
+            if callspec is None or not item.get_closest_marker('requires_hardware'):
+                continue
+            pair = callspec.params.get('node_test_config') or callspec.params.get('node_fulltest_config')
+            if pair:
+                pairs.append(pair)
+        refs = warmup.collect_refs(pairs)
+        download = self.config.getoption('warmup_models') == 'download'
+        tr = self.config.pluginmanager.get_plugin('terminalreporter')
+        capman = self.config.pluginmanager.get_plugin('capturemanager')
+        write = tr.write_line if tr else print
+
+        pending = not_ready = 0
+        for ref in refs:
+            status = warmup.inspect(ref)
+            line = warmup.describe(status)
+            error = status.error
+            if download and status.missing and not error:
+                write(f'warmup: downloading {line}')
+                with capman.global_and_fixture_disabled() if capman else contextlib.nullcontext():
+                    error = warmup.download(status)
+                line = f'{ref.label}: download failed ({error})' if error else f'{ref.label}: downloaded'
+            elif not error:
+                pending += status.missing_bytes
+            not_ready += bool(error)
+            self.lines.append(line)
+
+        summary = f'{len(refs)} model(s) for {len(pairs)} selected heavy test(s)'
+        if not download:
+            summary += f'; {warmup.format_size(pending)} to download'
+        self.lines.append(summary)
+        if not_ready:
+            self.lines.append(f'{not_ready} model(s) not ready; their tests will fail when they load them.')
