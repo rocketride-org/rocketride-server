@@ -2,7 +2,7 @@
 Smoke tester — validates that a newly discovered model is actually usable
 before it is added to services.json.
 
-Each provider type (chat vs embed) has its own minimal call.  The test
+Each provider type (chat, vision, embed) has its own minimal call.  The test
 uses the raw provider SDK (openai, anthropic, google-genai, mistralai) —
 NOT langchain — so the sync script has minimal runtime dependencies.
 
@@ -19,9 +19,12 @@ Smoke-test outcomes
 
 from __future__ import annotations
 
+import base64
+import struct
 import time
+import zlib
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Dict, List, Literal
 
 from core.util import is_retryable_error
 
@@ -44,8 +47,65 @@ _MAX_RETRIES = 3
 _BASE_DELAY = 2.0
 _MAX_DELAY = 30.0
 
-_SMOKE_PROMPT = [{'role': 'user', 'content': 'Reply with the word OK only.'}]
+_SMOKE_TEXT = 'Reply with the word OK only.'
+_SMOKE_PROMPT = [{'role': 'user', 'content': _SMOKE_TEXT}]
 _SMOKE_EMBED_INPUT = 'smoke test'
+
+
+def _solid_png(size: int = 64) -> bytes:
+    """
+    Build a small, valid, solid-white RGB PNG without an imaging library.
+
+    Args:
+        size: Width and height in pixels
+
+    Returns:
+        PNG file bytes
+    """
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        """
+        Frame one PNG chunk.
+
+        Args:
+            kind: Four-byte chunk type (e.g. b'IHDR')
+            data: Chunk payload
+
+        Returns:
+            Length + type + payload + CRC
+        """
+        body = kind + data
+        return struct.pack('>I', len(data)) + body + struct.pack('>I', zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)  # 8-bit RGB, no interlace
+    rows = (b'\x00' + b'\xff' * (size * 3)) * size  # filter byte 0 + white pixels, per row
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', header) + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'')
+
+
+# Vision nodes are checked with an image attached, so a model that rejects image
+# input fails here instead of in a user's pipeline.
+_SMOKE_IMAGE_PNG = _solid_png()
+_SMOKE_VISION_PROMPT: List[Dict[str, Any]] = [
+    {
+        'role': 'user',
+        'content': [
+            {'type': 'text', 'text': _SMOKE_TEXT},
+            {
+                'type': 'image_url',
+                'image_url': {'url': 'data:image/png;base64,' + base64.b64encode(_SMOKE_IMAGE_PNG).decode('ascii')},
+            },
+        ],
+    }
+]
+_SMOKE_VISION_CONTENTS: List[Dict[str, Any]] = [
+    {
+        'role': 'user',
+        'parts': [
+            {'inline_data': {'mime_type': 'image/png', 'data': _SMOKE_IMAGE_PNG}},
+            {'text': _SMOKE_TEXT},
+        ],
+    }
+]
 
 
 @dataclass
@@ -62,6 +122,7 @@ class SmokeResult:
     reason: str = ''
 
     def passed(self) -> bool:
+        """True when the call succeeded."""
         return self.outcome == 'pass'
 
     def retired(self) -> bool:
@@ -114,7 +175,9 @@ def classify_failure(error: Exception) -> SmokeResult:
     return SmokeResult('skip', str(error))
 
 
-def _smoke_chat_openai_compat(client: object, model_id: str) -> SmokeResult:
+def _smoke_chat_openai_compat(
+    client: object, model_id: str, messages: List[Dict[str, Any]] | None = None
+) -> SmokeResult:
     """
     Smoke test for OpenAI-compatible chat endpoints (OpenAI, DeepSeek, xAI,
     Perplexity, Mistral, Qwen).
@@ -126,10 +189,13 @@ def _smoke_chat_openai_compat(client: object, model_id: str) -> SmokeResult:
     Args:
         client: An openai.OpenAI (or compatible) client instance
         model_id: Model ID to test
+        messages: Chat messages to send; defaults to the text-only prompt
 
     Returns:
         SmokeResult
     """
+    if messages is None:
+        messages = _SMOKE_PROMPT
     # Parameters to try in order. Newer OpenAI models reject max_tokens and
     # require max_completion_tokens; older / other-provider models do not
     # recognise max_completion_tokens.
@@ -145,7 +211,7 @@ def _smoke_chat_openai_compat(client: object, model_id: str) -> SmokeResult:
             try:
                 client.chat.completions.create(  # type: ignore[attr-defined]
                     model=model_id,
-                    messages=_SMOKE_PROMPT,
+                    messages=messages,
                     **token_params,
                 )
                 return SmokeResult('pass')
@@ -209,13 +275,14 @@ def _smoke_chat_anthropic(client: object, model_id: str) -> SmokeResult:
     return SmokeResult('error', 'Unexpected exit from retry loop')
 
 
-def _smoke_chat_gemini(client: object, model_id: str) -> SmokeResult:
+def _smoke_chat_gemini(client: object, model_id: str, contents: Any = _SMOKE_TEXT) -> SmokeResult:
     """
     Smoke test for Google Gemini generateContent API.
 
     Args:
         client: A google.genai.Client instance
         model_id: Model ID to test (may have "models/" prefix)
+        contents: Request contents; defaults to the text-only prompt
 
     Returns:
         SmokeResult
@@ -224,7 +291,7 @@ def _smoke_chat_gemini(client: object, model_id: str) -> SmokeResult:
         try:
             client.models.generate_content(  # type: ignore[attr-defined]
                 model=model_id,
-                contents='Reply with the word OK only.',
+                contents=contents,
             )
             return SmokeResult('pass')
         except Exception as e:
@@ -272,12 +339,42 @@ def _smoke_embed_openai(client: object, model_id: str) -> SmokeResult:
     return SmokeResult('error', 'Unexpected exit from retry loop')
 
 
+def _smoke_vision_openai_compat(client: object, model_id: str) -> SmokeResult:
+    """
+    Smoke test for OpenAI-compatible vision models: the chat call carries an image.
+
+    Args:
+        client: An openai.OpenAI (or compatible) client instance
+        model_id: Model ID to test
+
+    Returns:
+        SmokeResult
+    """
+    return _smoke_chat_openai_compat(client, model_id, messages=_SMOKE_VISION_PROMPT)
+
+
+def _smoke_vision_gemini(client: object, model_id: str) -> SmokeResult:
+    """
+    Smoke test for Gemini vision use: the generateContent call carries an image.
+
+    Args:
+        client: A google.genai.Client instance
+        model_id: Model ID to test (with or without the "models/" prefix)
+
+    Returns:
+        SmokeResult
+    """
+    return _smoke_chat_gemini(client, model_id, contents=_SMOKE_VISION_CONTENTS)
+
+
 # Registry: smoke_type → callable(client, model_id) -> SmokeResult
 _SMOKE_FUNCTIONS = {
     'chat_openai_compat': _smoke_chat_openai_compat,
     'chat_anthropic': _smoke_chat_anthropic,
     'chat_gemini': _smoke_chat_gemini,
     'embed_openai': _smoke_embed_openai,
+    'vision_openai_compat': _smoke_vision_openai_compat,
+    'vision_gemini': _smoke_vision_gemini,
 }
 
 
@@ -287,7 +384,8 @@ def run(smoke_type: str, client: object, model_id: str) -> SmokeResult:
 
     Args:
         smoke_type: One of the keys in the internal registry
-                    ('chat_openai_compat', 'chat_anthropic', 'chat_gemini', 'embed_openai')
+                    ('chat_openai_compat', 'chat_anthropic', 'chat_gemini', 'embed_openai',
+                    'vision_openai_compat', 'vision_gemini')
         client: Provider SDK client instance
         model_id: Model ID to test
 

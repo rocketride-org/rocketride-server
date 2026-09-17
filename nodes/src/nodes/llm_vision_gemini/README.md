@@ -74,6 +74,12 @@ API errors are mapped to user-friendly messages: authentication failures, rate l
 
 Retry behavior: one retry for transient errors (timeout, connection, `500`/`502`/`503`/`504`, service unavailable) with exponential backoff starting at 1 second. Repeated timeouts are not retried beyond the second attempt, so a hung request costs at most two 30-second waits before the error is surfaced.
 
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_vision_gemini` provider, `ROCKETRIDE_GEMINI_KEY`). The Gemini API does not say which models accept images, so the sync asks OpenRouter and LiteLLM, and adds a model only when one of them reports vision support. Each new model is then verified with a real image; TTS, audio and embedding variants are filtered out before that.
+
+The sync runs **only** with that key, and is skipped without it, leaving this file untouched — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
 ## Upstream docs
 
 - [Gemini API documentation](https://ai.google.dev/gemini-api/docs)
