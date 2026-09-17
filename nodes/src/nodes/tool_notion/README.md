@@ -65,6 +65,8 @@ A database's title property is not always called "Name". When `notion_create_pag
 
 Reads time out after 30 seconds and retry up to three times with exponential backoff on connection errors, rate limits (honoring `Retry-After` when it is longer than the computed delay), and 5xx responses. The three write functions are never retried, because Notion offers no idempotency key and a retried mutation could duplicate a page or its content — an agent that sees a connection error on a write should check the target before trying again.
 
+Malformed non-empty success responses are returned through the standard error envelope and are not retried. For a write, the remote mutation may still have completed even when its response could not be decoded, so check the target before trying again.
+
 ### Request limits
 
 `notion_append_content` sends at most 100 blocks per request, batching longer input. A line over 2000 characters is rejected outright rather than truncated, matching Notion's rich-text limit; shorten the line and retry.
