@@ -162,6 +162,7 @@
 	//
 	"test": {
 		"profiles": ["miniLM"],
+		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 		"outputs": ["documents", "questions"],
 		"cases": [
 			{
@@ -197,6 +198,7 @@
 	"fulltest": [
 		{
 			"profiles": ["miniLM", "miniAll", "mpnet"],
+			"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 			"outputs": ["documents", "questions"],
 			"cases": [
 				{
