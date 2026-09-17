@@ -25,6 +25,7 @@ import sys
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -258,6 +259,129 @@ class TestSearchValidation:
         inst = _instance()
         out = inst.company_search({'filters': 'not-a-list'})
         assert out['success'] is False
+
+    @pytest.mark.parametrize(
+        'fields',
+        [None, 'name', {}, [], ['name', 42], ['name', '   ']],
+    )
+    @pytest.mark.parametrize('method_name', ['company_search', 'person_search'])
+    def test_invalid_fields_are_rejected_before_any_request(self, fields, method_name):
+        inst = _instance()
+
+        with patch.object(requests, 'post') as mock_post:
+            out = getattr(inst, method_name)({'filters': [_A_CONDITION], 'fields': fields})
+
+        assert out['success'] is False
+        assert 'fields' in out['error']
+        mock_post.assert_not_called()
+
+
+class TestToolSchemas:
+    def test_operator_sets_are_endpoint_specific(self):
+        company_filters = IInstance.company_search.__tool_meta__['input_schema']['properties']['filters']
+        person_filters = IInstance.person_search.__tool_meta__['input_schema']['properties']['filters']
+
+        company_operators = company_filters['items']['properties']['type']['enum']
+        person_condition = person_filters['items']['oneOf'][0]
+        person_operators = person_condition['properties']['type']['enum']
+
+        assert 'has_all' not in company_operators
+        assert '(!)' not in company_operators
+        assert 'has_all' in person_operators
+        assert '(!)' in person_operators
+
+    def test_person_schema_advertises_bounded_all_of_groups(self):
+        person_filters = IInstance.person_search.__tool_meta__['input_schema']['properties']['filters']
+        all_of = person_filters['items']['oneOf'][1]
+
+        assert all_of['properties']['op']['enum'] == ['all_of']
+        children = all_of['properties']['conditions']
+        assert children['minItems'] == 1
+
+        direct_condition, subgroup = children['items']['oneOf']
+        direct_operators = direct_condition['properties']['type']['enum']
+        assert subgroup['properties']['op']['enum'] == ['and', 'or']
+        assert subgroup['properties']['conditions']['items'] == direct_condition
+        for unsupported in ('!=', 'not_in', 'is_null', 'geo_exclude', 'has_all', '(!)'):
+            assert unsupported not in direct_operators
+
+    @pytest.mark.parametrize('method_name', ['company_search', 'person_search'])
+    def test_fields_are_advertised_as_nonempty_strings(self, method_name):
+        schema = getattr(IInstance, method_name).__tool_meta__['input_schema']
+        fields = schema['properties']['fields']
+
+        assert fields['type'] == 'array'
+        assert fields['minItems'] == 1
+        assert fields['items']['type'] == 'string'
+        assert fields['items']['pattern'] == r'.*\S.*'
+
+
+class TestSearchFields:
+    @pytest.mark.parametrize(
+        ('method_name', 'response_key'),
+        [('company_search', 'companies'), ('person_search', 'profiles')],
+    )
+    def test_fields_are_forwarded_unchanged(self, method_name, response_key):
+        fields = ['basic_info.name', 'basic_info.primary_domain', 'basic_info.name']
+        expected_fields = fields.copy()
+        inst = _instance()
+
+        with patch.object(requests, 'post') as mock_post:
+            mock_post.return_value = _resp(200, json_data={response_key: []})
+            out = getattr(inst, method_name)({'filters': [_A_CONDITION], 'fields': fields})
+
+        assert out['success'] is True
+        assert mock_post.call_args.kwargs['json']['fields'] == expected_fields
+
+    @pytest.mark.parametrize(
+        ('method_name', 'response_key'),
+        [('company_search', 'companies'), ('person_search', 'profiles')],
+    )
+    def test_fields_are_omitted_when_not_supplied(self, method_name, response_key):
+        inst = _instance()
+
+        with patch.object(requests, 'post') as mock_post:
+            mock_post.return_value = _resp(200, json_data={response_key: []})
+            out = getattr(inst, method_name)({'filters': [_A_CONDITION]})
+
+        assert out['success'] is True
+        assert 'fields' not in mock_post.call_args.kwargs['json']
+
+    def test_person_all_of_group_is_forwarded_unchanged(self):
+        nested_group = {
+            'op': 'all_of',
+            'conditions': [
+                {
+                    'op': 'and',
+                    'conditions': [
+                        {
+                            'field': 'experience.employment_details.current.title',
+                            'type': '=',
+                            'value': 'Engineer',
+                        },
+                        {
+                            'field': 'experience.employment_details.current.company_name',
+                            'type': '=',
+                            'value': 'Acme',
+                        },
+                    ],
+                }
+            ],
+        }
+        filters = [_A_CONDITION, nested_group]
+        expected_filters = deepcopy(filters)
+        inst = _instance()
+
+        with patch.object(requests, 'post') as mock_post:
+            mock_post.return_value = _resp(200, json_data={'profiles': []})
+            out = inst.person_search({'filters': filters})
+
+        assert out['success'] is True
+        assert out['filters'] == expected_filters
+        assert mock_post.call_args.kwargs['json']['filters'] == {
+            'op': 'and',
+            'conditions': expected_filters,
+        }
 
 
 class TestSearchRequests:

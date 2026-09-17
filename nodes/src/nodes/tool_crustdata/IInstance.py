@@ -72,54 +72,137 @@ _MAX_LIMIT = 1000
 _COMPANY_RECORDS_KEY = 'companies'
 _PERSON_RECORDS_KEY = 'profiles'
 
-_CONDITION_SCHEMA = {
+_BASE_OPERATORS = [
+    '=',
+    '!=',
+    '<',
+    '=<',
+    '>',
+    '=>',
+    'in',
+    'not_in',
+    'is_null',
+    'is_not_null',
+    '(.)',
+    '[.]',
+    'geo_distance',
+    'geo_exclude',
+]
+_PERSON_OPERATORS = [*_BASE_OPERATORS, 'has_all', '(!)']
+_PERSON_ALL_OF_OPERATORS = [
+    '=',
+    '<',
+    '=<',
+    '>',
+    '=>',
+    'in',
+    'is_not_null',
+    '(.)',
+    '[.]',
+    'geo_distance',
+]
+
+
+def _condition_schema(operators: List[str], *, entity: str, description: str) -> Dict[str, Any]:
+    return {
+        'type': 'object',
+        'required': ['field', 'type', 'value'],
+        'properties': {
+            'field': {
+                'type': 'string',
+                'description': (
+                    f'The dotted {entity} field path to filter on. '
+                    "See Crustdata's field reference for the full searchable list."
+                ),
+            },
+            'type': {
+                'type': 'string',
+                'enum': operators,
+                'description': description,
+            },
+            'value': {
+                'description': 'The value to match: a scalar, array, or (for geo_distance) an object.',
+            },
+        },
+    }
+
+
+_COMPANY_CONDITION_SCHEMA = _condition_schema(
+    _BASE_OPERATORS,
+    entity='company',
+    description=(
+        "Company filter operator. '(.)' is fuzzy all-words matching with typo tolerance, "
+        "'[.]' is exact phrase matching, and "
+        "'geo_distance'/'geo_exclude' take a {location, distance, unit} value. "
+        "Use '=<'/'=>' rather than '<='/'>='."
+    ),
+)
+_PERSON_CONDITION_SCHEMA = _condition_schema(
+    _PERSON_OPERATORS,
+    entity='person',
+    description=(
+        "Person filter operator. In addition to comparisons, '(.)' is contains matching without typo tolerance, "
+        "'[.]' is exact phrase matching, 'has_all' matches required array values, and '(!)' negates a match."
+    ),
+)
+_PERSON_ALL_OF_CONDITION_SCHEMA = _condition_schema(
+    _PERSON_ALL_OF_OPERATORS,
+    entity='nested person',
+    description=(
+        'Positive predicate inside an all_of group. Negation, has_all, and another all_of are not supported here.'
+    ),
+)
+_PERSON_ALL_OF_SUBGROUP_SCHEMA = {
     'type': 'object',
-    'required': ['field', 'type', 'value'],
+    'required': ['op', 'conditions'],
     'properties': {
-        'field': {
-            'type': 'string',
-            'description': (
-                "The dotted field path to filter on, e.g. 'basic_info.primary_domain' (company), "
-                "'experience.employment_details.current.title' (person), 'locations.country'. "
-                "See Crustdata's field reference for the full searchable list per entity."
-            ),
-        },
-        'type': {
-            'type': 'string',
-            'enum': [
-                '=',
-                '!=',
-                '<',
-                '=<',
-                '>',
-                '=>',
-                'in',
-                'not_in',
-                'is_null',
-                'is_not_null',
-                '(.)',
-                '[.]',
-                'geo_distance',
-                'geo_exclude',
-            ],
-            'description': (
-                "The filter operator. '(.)' is fuzzy/contains match, '[.]' is exact list membership, "
-                "'geo_distance'/'geo_exclude' take a {location, distance, unit} object as value. "
-                "Use '=<'/'=>' rather than '<='/'>='."
-            ),
-        },
-        'value': {
-            'description': 'The value to match: a scalar, array, or (for geo_distance) an object.',
+        'op': {'type': 'string', 'enum': ['and', 'or']},
+        'conditions': {
+            'type': 'array',
+            'minItems': 1,
+            'items': _PERSON_ALL_OF_CONDITION_SCHEMA,
         },
     },
 }
+_PERSON_ALL_OF_SCHEMA = {
+    'type': 'object',
+    'required': ['op', 'conditions'],
+    'properties': {
+        'op': {'type': 'string', 'enum': ['all_of']},
+        'conditions': {
+            'type': 'array',
+            'minItems': 1,
+            'items': {
+                'oneOf': [
+                    _PERSON_ALL_OF_CONDITION_SCHEMA,
+                    _PERSON_ALL_OF_SUBGROUP_SCHEMA,
+                ]
+            },
+        },
+    },
+    'description': (
+        'Require every child to match some element of a nested person array. Direct children may match different '
+        'elements; use one level of and/or subgroup when its predicates must match the same element.'
+    ),
+}
 
-_FILTERS_SCHEMA = {
+_COMPANY_FILTERS_SCHEMA = {
     'type': 'array',
     'minItems': 1,
-    'items': _CONDITION_SCHEMA,
+    'items': _COMPANY_CONDITION_SCHEMA,
+    'description': 'Company filter conditions combined per "match" (default: all must hold).',
+}
+_PERSON_FILTERS_SCHEMA = {
+    'type': 'array',
+    'minItems': 1,
+    'items': {
+        'oneOf': [
+            _PERSON_CONDITION_SCHEMA,
+            _PERSON_ALL_OF_SCHEMA,
+        ]
+    },
     'description': (
-        'One or more filter conditions. Multiple conditions are combined per "match" (default: all must hold).'
+        'Person filter conditions or bounded all_of groups, combined per "match" (default: all must hold).'
     ),
 }
 
@@ -153,28 +236,52 @@ _OUTPUT_SCHEMA = {
 }
 
 
-def _input_schema() -> Dict[str, Any]:
+def _input_schema(*, person: bool) -> Dict[str, Any]:
+    if person:
+        filters_schema = _PERSON_FILTERS_SCHEMA
+        fields_description = (
+            'Optional person sections or dotted field paths to return. '
+            'When omitted, Crustdata returns its default person sections.'
+        )
+        cursor_description = (
+            "Pagination cursor from a previous call's next_cursor. Omit for the first page. "
+            'Keep filters/sorts identical across pages; fields and limit may change.'
+        )
+    else:
+        filters_schema = _COMPANY_FILTERS_SCHEMA
+        fields_description = (
+            'Optional company sections or dotted field paths to return. '
+            'When omitted, Crustdata returns the full company record.'
+        )
+        cursor_description = (
+            "Pagination cursor from a previous call's next_cursor. Omit for the first page. "
+            'Keep filters/sorts/fields identical across pages or the cursor is invalidated.'
+        )
+
     return {
         'type': 'object',
         'required': ['filters'],
         'properties': {
-            'filters': _FILTERS_SCHEMA,
+            'filters': filters_schema,
             'match': {
                 'type': 'string',
                 'enum': ['and', 'or'],
                 'description': "How multiple filter conditions combine. Defaults to 'and'.",
             },
             'sorts': _SORTS_SCHEMA,
+            'fields': {
+                'type': 'array',
+                'minItems': 1,
+                'items': {'type': 'string', 'pattern': r'.*\S.*'},
+                'description': fields_description,
+            },
             'limit': {
                 'type': 'integer',
                 'description': f'Maximum number of results to return (1-{_MAX_LIMIT}). Defaults to the node config value.',
             },
             'cursor': {
                 'type': 'string',
-                'description': (
-                    "Pagination cursor from a previous call's next_cursor. Omit for the first page. "
-                    'Keep filters/sorts identical across pages or the cursor is invalidated.'
-                ),
+                'description': cursor_description,
             },
         },
     }
@@ -186,7 +293,7 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     @tool_function(
-        input_schema=_input_schema(),
+        input_schema=_input_schema(person=False),
         output_schema=_OUTPUT_SCHEMA,
         description=(
             'Search Crustdata for companies matching one or more filters (industry, region, headcount, '
@@ -200,7 +307,7 @@ class IInstance(IInstanceBase):
         return self._search(args, url=COMPANY_SEARCH_URL, records_key=_COMPANY_RECORDS_KEY, tool_name='company_search')
 
     @tool_function(
-        input_schema=_input_schema(),
+        input_schema=_input_schema(person=True),
         output_schema=_OUTPUT_SCHEMA,
         description=(
             'Search Crustdata for people matching one or more filters (current company, current title, '
@@ -229,6 +336,21 @@ class IInstance(IInstanceBase):
                 'error': f'{tool_name}: "filters" is required and must be a non-empty array',
             }
 
+        fields_supplied = 'fields' in args
+        fields = args.get('fields')
+        if fields_supplied and (
+            not isinstance(fields, list)
+            or not fields
+            or any(not isinstance(field, str) or not field.strip() for field in fields)
+        ):
+            return {
+                'success': False,
+                'filters': conditions,
+                'count': 0,
+                'results': [],
+                'error': f'{tool_name}: "fields" must be a non-empty array of non-blank strings',
+            }
+
         cfg = self.IGlobal
         raw_limit = args.get('limit')
         limit = cfg.default_limit if raw_limit is None else _coerce_limit(raw_limit, default=cfg.default_limit)
@@ -248,6 +370,8 @@ class IInstance(IInstanceBase):
             'filters': {'op': match, 'conditions': conditions},
             'limit': limit,
         }
+        if fields_supplied:
+            payload['fields'] = fields
 
         sorts = args.get('sorts')
         if isinstance(sorts, list) and sorts:
