@@ -135,6 +135,10 @@ class IGlobal(IGlobalBase):
     # How the most recent recovery went, 'resumed' or 'replaced'. A call that retries after a
     # concurrent call did the recovering reports this, since it did not see the recovery itself.
     last_recovery: str = ''
+    # The epoch at which a session was last dropped. A call that captured an earlier epoch had its
+    # own session replaced, so its files are gone no matter what a later recovery wrote to
+    # last_recovery; comparing epochs keeps 'resumed' from reassuring it about a session it never ran on.
+    last_replacement_epoch: int = -1
     # Set as endGlobal starts. No session may be created after that: nothing would close it.
     _ending: bool = False
     # A tag unique to this pipeline run, set in beginGlobal. Every session created here carries it,
@@ -311,9 +315,13 @@ class IGlobal(IGlobalBase):
         with self._session_lock:
             if self.session is not session or self.session_epoch != epoch:
                 # A concurrent call already dealt with this session. If it dropped it, retrying
-                # would create a fresh session, which a caller passing replace=False cannot use.
-                if self.session is None and not replace:
-                    raise SessionEndedError()
+                # would create a fresh session, which a caller passing replace=False cannot use —
+                # and which the replacement may already have been created for, so the test is the
+                # epoch rather than self.session still being None.
+                if self.session is None or self.last_replacement_epoch > epoch:
+                    if not replace:
+                        raise SessionEndedError()
+                    return 'replaced'
                 return self.last_recovery or None
             try:
                 state = session.refresh().state
@@ -329,6 +337,7 @@ class IGlobal(IGlobalBase):
                     debug(f'tool_tenki: could not close dropped session {session.id}: {e}')
                 self.session = None
                 self.session_epoch += 1
+                self.last_replacement_epoch = self.session_epoch
                 self.last_recovery = 'replaced'
                 # A warning rather than debug output: the next call pays for a new VM and starts empty.
                 warning(

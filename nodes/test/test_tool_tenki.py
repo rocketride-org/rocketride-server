@@ -1084,7 +1084,7 @@ def test_run_command_runs_bash_as_a_login_shell_with_the_configured_timeout(monk
     ('cwd', 'script'),
     [
         ('app', 'cd /home/tenki/app && make test'),
-        ('/opt/my project', "cd '/opt/my project' && make test"),
+        ('my project', "cd '/home/tenki/my project' && make test"),
         ('   ', 'make test'),
     ],
 )
@@ -1097,6 +1097,18 @@ def test_run_command_changes_directory_inside_the_shell(monkeypatch, logs, cwd, 
     [(argv, kwargs)] = _execs(session)
     assert argv == ('bash', '-lc', script)
     assert kwargs['cwd'] is None
+
+
+@pytest.mark.parametrize('cwd', ['../../tmp', '/tmp', '..', '/home/tenki/../etc'])
+def test_run_command_refuses_a_working_directory_outside_the_home(monkeypatch, logs, cwd):
+    # cwd is the one path argument that used to skip _normalize_path, so '../../tmp' resolved
+    # outside the documented boundary. run_command can still reach the whole VM through the
+    # command itself; this keeps cwd's contract the same as every other path argument.
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    with pytest.raises(ValueError, match='/home/tenki'):
+        inst.run_command({'command': 'make test', 'cwd': cwd})
+    assert _execs(session) == []
 
 
 def test_run_command_reports_a_command_stopped_at_the_timeout(monkeypatch, logs):
@@ -1560,6 +1572,48 @@ def test_a_concurrently_dropped_session_is_not_replaced_for_a_call_that_cannot_u
     assert len(client.create_calls) == 1
 
 
+def test_a_call_that_cannot_use_a_fresh_session_is_refused_after_a_concurrent_replacement(monkeypatch, logs):
+    # Unlike the test above, the concurrent call has already created the replacement, so
+    # self.session is not None by the time this caller looks. Its own session's files are gone
+    # either way, so a read must still be refused rather than answered from an empty VM.
+    dead = _FakeSession('sb-dead', state='TERMINATED')
+    glb, client = _started(monkeypatch, dead, _FakeSession('sb-fresh'))
+
+    def call(session):
+        # A concurrent call hits the same ended session first, drops it, and retries on a new one.
+        glb.recover_session(session, glb.session_epoch, replace=True)
+        glb.get_session()
+        raise mod.SessionTerminatedError('session_terminated')
+
+    with pytest.raises(mod.SessionEndedError):
+        glb.call_with_session(call, replace=False)
+    assert len(client.create_calls) == 2
+    assert glb.session is not None
+
+
+def test_a_replaced_session_is_never_reported_to_the_agent_as_merely_resumed(monkeypatch, logs):
+    # 'resumed' tells the agent its files survived. A later resume must not overwrite the
+    # replacement this caller actually suffered, or the agent trusts files that are gone.
+    dead = _FakeSession('sb-dead', state='TERMINATED')
+    glb, _ = _started(monkeypatch, dead, _FakeSession('sb-fresh'))
+    seen = []
+
+    def call(session):
+        seen.append(session)
+        if len(seen) > 1:
+            return 'ok'
+        glb.recover_session(session, glb.session_epoch, replace=True)
+        replacement = glb.get_session()
+        # A third call then finds that replacement paused and resumes it.
+        replacement.state = 'PAUSED'
+        glb.recover_session(replacement, glb.session_epoch, replace=True)
+        raise mod.SessionTerminatedError('session_terminated')
+
+    recoveries = []
+    assert glb.call_with_session(call, on_recovery=recoveries.append) == 'ok'
+    assert recoveries == ['replaced'], recoveries
+
+
 # ---------------------------------------------------------------------------
 # No secret enters the VM: its user has passwordless sudo, so nothing placed there
 # could be kept from the commands an agent runs
@@ -1650,8 +1704,7 @@ def test_git_clone_passes_its_arguments_through(monkeypatch, logs):
         'https://github.com/octocat/Hello-World.git',
         'https://github.com/octocat/Hello-World',
         'https://github.com/octocat/Hello-World/',
-        'git@github.com:octocat/Hello-World.git',
-        'git@example.com:Hello-World.git',
+        'https://github.com:443/octocat/Hello-World.git',
     ],
 )
 def test_git_clone_defaults_to_a_folder_named_after_the_repository(monkeypatch, logs, repo):
@@ -1667,6 +1720,29 @@ def test_git_clone_asks_for_a_directory_when_the_repository_names_no_folder(monk
     with pytest.raises(ValueError, match='"directory"'):
         inst.git_clone({'repo': 'https://example.com/.git'})
     assert client.create_calls == []
+
+
+@pytest.mark.parametrize(
+    'repo',
+    [
+        'https://token@github.com/org/private.git',
+        'https://user:pass@github.com/org/private.git',
+        'git@github.com:org/private.git',
+        'ssh://git@github.com/org/private.git',
+        'file:///home/tenki/secret',
+        'git://github.com/org/repo.git',
+        '/home/tenki/local-repo',
+    ],
+)
+def test_git_clone_refuses_a_repository_that_is_not_a_public_http_url(monkeypatch, logs, repo):
+    # The node's whole premise is that no credential reaches the VM. A URL carrying userinfo
+    # would write that credential into .git/config inside a VM whose user has passwordless sudo,
+    # and which every caller of a shared pipeline can read.
+    session = _FakeSession('sb-1')
+    inst, _ = _instance(monkeypatch, session)
+    with pytest.raises(ValueError):
+        inst.git_clone({'repo': repo})
+    assert _git_calls(session, 'clone') == []
 
 
 def test_git_clone_returns_git_failures_to_the_agent(monkeypatch, logs):

@@ -135,6 +135,12 @@ sandbox, but it arrives as an ordinary environment variable and the sandbox user
 package installs need it. Rather than ship a secret that cannot be protected inside the machine it
 is handed to, the node holds no git credentials at all.
 
+`git_clone` enforces that rather than trusting the agent to respect it: it accepts public `http(s)`
+URLs only, and refuses one carrying credentials in the URL (`https://token@host/org/repo.git`) along
+with the `ssh`, `git`, `file` and `git@host:path` forms, none of which it could authenticate anyway.
+Git records the URL it cloned from in `.git/config`, so a credential passed that way would be left
+inside the VM for every later command, and every later caller, to read.
+
 ### Session lifecycle
 
 Tenki pauses an idle session rather than deleting it, and the node is built around that:

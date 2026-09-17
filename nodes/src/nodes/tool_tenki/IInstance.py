@@ -39,6 +39,7 @@ import json
 import posixpath
 import re
 import shlex
+import urllib.parse
 import uuid
 from typing import Callable
 
@@ -224,9 +225,41 @@ def _git_directory(args: dict) -> str | None:
     return _normalize_path(directory)
 
 
+def _public_repo_url(repo: str) -> str:
+    """Return ``repo`` unchanged if it is a public http(s) URL, and raise otherwise.
+
+    ``repo`` is agent-controlled, and git records the remote it cloned from in .git/config. A URL
+    carrying userinfo (``https://token@host/org/private.git``) would therefore write that credential
+    into the sandbox, whose user has passwordless sudo and whose network is open, and which every
+    caller of a shared pipeline reaches. The node holds no git credentials by design, so the only
+    thing to do with a credential-bearing URL is refuse it before it reaches Tenki.
+
+    ssh, git, file and scp-style (``git@host:org/repo``) forms are refused for the same reason: each
+    names a repository this node has no way to authenticate to, so git would fail inside the VM with
+    a far less obvious error.
+
+    Raises:
+        ValueError: If ``repo`` is not a public http(s) URL, or carries credentials.
+    """
+    parsed = urllib.parse.urlsplit(repo)
+    if parsed.scheme.lower() not in ('http', 'https'):
+        raise ValueError(
+            f'"repo" must be a public http(s) URL, but {repo!r} is not. This node holds no git '
+            'credentials, so ssh, git, file and local repositories cannot be cloned.'
+        )
+    if parsed.username or parsed.password or '@' in parsed.netloc:
+        raise ValueError(
+            '"repo" must not carry credentials in the URL: they would be written into the '
+            'sandbox, which this node never places a secret in. Public repositories only.'
+        )
+    if not parsed.hostname:
+        raise ValueError(f'"repo" must be a public http(s) URL with a host, but {repo!r} has none')
+    return repo
+
+
 def _clone_folder(repo: str) -> str | None:
     """The folder name git itself clones ``repo`` into: its last path segment, without ``.git``."""
-    name = repo.rstrip('/').rsplit('/', 1)[-1].rsplit(':', 1)[-1]
+    name = repo.rstrip('/').rsplit('/', 1)[-1]
     if name.endswith('.git'):
         name = name[: -len('.git')]
     return None if name in ('', '.', '..') else name
@@ -347,7 +380,7 @@ class IInstance(IInstanceBase):
                 },
                 'cwd': {
                     'type': 'string',
-                    'description': 'Directory to run in (optional); a relative path resolves against /home/tenki.',
+                    'description': 'Directory to run in (optional); must be under /home/tenki, where a relative path resolves.',
                 },
             },
         },
@@ -376,7 +409,7 @@ class IInstance(IInstanceBase):
         if cwd and cwd.strip():
             # Changed inside the script rather than passed as exec's cwd: a login shell runs the
             # guest's startup files first, and a cd in them would win over exec's cwd.
-            command = f'cd {shlex.quote(posixpath.join(_HOME, cwd.strip()))} && {command}'
+            command = f'cd {shlex.quote(_normalize_path(cwd))} && {command}'
 
         recoveries = []
         try:
@@ -722,7 +755,7 @@ class IInstance(IInstanceBase):
     def git_clone(self, args):
         """Clone a git repository into the shared Tenki session."""
         args = normalize_tool_input(args, tool_name='tenki')
-        repo = _git_arg(args, 'repo', required=True)
+        repo = _public_repo_url(_git_arg(args, 'repo', required=True))
         branch = _git_arg(args, 'branch')
         depth = optional_int(args, 'depth', lo=1, tool_name='tenki')
         directory = _git_directory(args)
