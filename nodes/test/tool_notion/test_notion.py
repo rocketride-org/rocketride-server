@@ -179,6 +179,19 @@ class TestRequest:
         out = _nc.request('PATCH', '/pages/x', api_key='k')
         assert out == {}
 
+    def test_non_json_success_raises_notion_api_error(self, mock_requests):
+        resp = _resp(200, text='<html>upstream error</html>')
+        resp.content = b'<html>upstream error</html>'
+        mock_requests.request.return_value = resp
+
+        with pytest.raises(_nc.NotionAPIError) as exc_info:
+            _nc.request('GET', '/pages/p1', api_key='k')
+
+        assert exc_info.value.status_code == 200
+        assert exc_info.value.code == 'invalid_json_response'
+        assert isinstance(exc_info.value.__cause__, ValueError)
+        mock_requests.request.assert_called_once()
+
     def test_json_body_and_params_are_forwarded(self, mock_requests):
         mock_requests.request.return_value = _resp(200, json_data={})
         _nc.request('POST', '/search', api_key='k', json_body={'query': 'x'}, params={'a': 1})
@@ -671,6 +684,18 @@ class TestNotionGetPage:
         out = inst.notion_get_page({'page_id': 'p1'})
 
         assert out['in_trash'] is False
+
+    def test_non_json_success_is_wrapped_in_the_standard_envelope(self, mock_requests):
+        resp = _resp(200, text='<html>upstream error</html>')
+        resp.content = b'<html>upstream error</html>'
+        mock_requests.request.return_value = resp
+        inst = _instance()
+
+        out = inst.notion_get_page({'page_id': 'p1'})
+
+        assert out['success'] is False
+        assert 'invalid_json_response' in out['error']
+        mock_requests.request.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

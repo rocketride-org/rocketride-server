@@ -106,7 +106,16 @@ def request(
             continue
 
         if resp.ok:
-            return resp.json() if resp.content else {}
+            if not resp.content:
+                return {}
+            try:
+                return resp.json()
+            except ValueError as exc:
+                raise NotionAPIError(
+                    resp.status_code,
+                    'invalid_json_response',
+                    'Expected JSON in successful response',
+                ) from exc
 
         _raise_for_error(resp)
 
