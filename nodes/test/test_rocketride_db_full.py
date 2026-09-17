@@ -61,6 +61,7 @@ _REPO = Path(__file__).resolve().parents[2]
 _AI_SRC = _REPO / 'packages' / 'ai' / 'src'
 _RRDB_PATH = _AI_SRC / 'ai' / 'common' / 'rocketride_db.py'
 _DB_BASE_DIR = _AI_SRC / 'ai' / 'common' / 'database'
+_UTILS_DIR = _AI_SRC / 'ai' / 'common' / 'utils'
 _SQL_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_sql'
 _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 
@@ -102,12 +103,13 @@ if _DB_TESTS_REQUIRED and not _db_reachable():
 pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide test database not reachable at {TEST_DSN}')
 
 
-def _load_from_path(name: str, path: Path, *, is_package: bool = False):
+def _load_from_path(name: str, path: Path, *, is_package: bool = False, register: bool = True):
     search = [str(path.parent)] if is_package else None
     spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=search)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    if register:
+        sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -231,6 +233,15 @@ def rr_env(monkeypatch):
     monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
     monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
 
+    config_utils = _load_from_path(
+        'ai.common.config_utils',
+        _UTILS_DIR / 'config_utils.py',
+        register=False,
+    )
+    utils = types.ModuleType('ai.common.utils')
+    utils.parse_bool = config_utils.parse_bool
+    monkeypatch.setitem(sys.modules, 'ai.common.utils', utils)
+
     rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
 
@@ -254,6 +265,10 @@ def raw_conn():
     conn = psycopg2.connect(TEST_DSN)
     yield conn
     conn.close()
+
+
+def test_rr_env_does_not_register_config_utils_alias(rr_env):  # noqa: ARG001 - fixture is the behavior under test
+    assert 'ai.common.config_utils' not in sys.modules
 
 
 # ---------------------------------------------------------------------------
