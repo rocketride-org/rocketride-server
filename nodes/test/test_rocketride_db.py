@@ -202,6 +202,7 @@ class TestResolveRocketrideDsn:
             rrdb.resolve_rocketride_dsn()
 
     def test_rejects_running_event_loop_before_creating_coroutine(self, monkeypatch):
+        """Reject running-loop callers before creating the resolver coroutine."""
         created = []
 
         def fake(client_id):
@@ -223,8 +224,7 @@ class TestResolveRocketrideDsn:
                 asyncio.run(call_from_loop())
             assert created == []
         finally:
-            # Keep the RED run warning-free: production currently creates this
-            # coroutine before rejecting the unsupported caller.
+            # Close any coroutine created if the regression returns.
             for coro in created:
                 coro.close()
 
