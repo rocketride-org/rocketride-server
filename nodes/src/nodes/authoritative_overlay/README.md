@@ -32,7 +32,7 @@ Currently supported regulators:
 
 ### Period-scoped matching
 
-A match is **not** "this number appears somewhere in the company's filing history." The answer payload must include at least one filing-period selector: `form`, `fy`, `fp`, `start`, `end`, or `frame`. An optional `unit` filter narrows measurements but does not count as a period. All provided filters are applied together. When a filing contains multiple durations ending on the same report date, such as quarter-only and year-to-date totals, provide `start` or `frame`; otherwise the node abstains rather than accepting either value. Typical payload:
+A match is **not** "this number appears somewhere in the company's filing history." The answer payload must include at least one filing-period selector: `form`, `fy`, `fp`, `start`, `end`, or `frame`. An optional `unit` filter narrows measurements but does not count as a period. All provided filters are applied together. When a filing contains multiple durations ending on the same report date, such as quarter-only and year-to-date totals, provide `start` or `frame`; otherwise the node abstains rather than accepting either value. It also abstains when multiple filings publish conflicting values for the selected period, because the payload does not identify a filing version. Typical payload:
 
 ```json
 {

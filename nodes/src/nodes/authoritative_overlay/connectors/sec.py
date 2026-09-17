@@ -191,6 +191,11 @@ def select_official_values(
             values.append(float(val))
         except (TypeError, ValueError):
             continue
+    # Different filings can publish conflicting values for the same period
+    # after a restatement. Without an explicit filing-version selector there
+    # is no authoritative way to choose one, so fail closed.
+    if len(set(values)) > 1:
+        return []
     return values
 
 
