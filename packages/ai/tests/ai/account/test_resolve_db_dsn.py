@@ -33,8 +33,11 @@ is exercised.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -143,6 +146,27 @@ def test_bad_token_raises_runtime_error(broker, monkeypatch):
     monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'wrong')
     with pytest.raises(RuntimeError, match='rejected provision.*401'):
         _resolve('tenant-1')
+
+
+def test_broker_http_error_response_is_closed(monkeypatch):
+    response_body = io.BytesIO(b'broker error')
+    error = urllib.error.HTTPError(
+        'https://broker.example/provision',
+        503,
+        'Service Unavailable',
+        hdrs=None,
+        fp=response_body,
+    )
+
+    def raise_http_error(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(urllib.request, 'urlopen', raise_http_error)
+
+    with pytest.raises(RuntimeError, match='rejected provision.*503'):
+        AccountBase._call_db_broker('https://broker.example/provision', TEST_TOKEN, 'tenant-1')
+
+    assert response_body.closed
 
 
 def test_missing_dsn_in_response_raises(broker):
