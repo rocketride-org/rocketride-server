@@ -30,6 +30,14 @@ upload/dropper links): explicit `rocketride_uri` / `ROCKETRIDE_URI` wins;
 otherwise a loopback bind uses this engine's own `ws://127.0.0.1:<port>`, and
 any other bind uses the `MCP_RESOURCE_IDENTIFIER` origin as `wss://`/`ws://`.
 
+On a non-loopback bind that URI must be encrypted **when it addresses a remote
+engine**: the caller's own credential rides the first DAP `auth` frame, so a
+`ws://`/`http://` URI pointing at a non-loopback host fails boot with a message
+naming the value and the variable it came from. The rule keys on the TARGET
+host, not the bind — `ws://127.0.0.1:5565` or `http://localhost:5565` is kept,
+because that credential never reaches a wire anyone can tap (and the shipped
+`dist/server/.env` carries exactly such a value into the engine image).
+
 ## The credentials catalog and its builder gates
 
 `credentials.json` (sibling to the module code) maps credential-shaped node

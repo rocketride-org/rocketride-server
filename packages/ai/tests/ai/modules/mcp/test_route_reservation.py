@@ -237,7 +237,22 @@ def test_mcp_refuses_to_mount_over_a_route_claiming_its_paths(monkeypatch, tmp_p
         server.use('mcp', {})
 
 
-@pytest.mark.parametrize('pattern', ['/mcp/{rest:path}', '/mcp/{name}', '/mcp/probe', '/mcp', '/mcp/'])
+@pytest.mark.parametrize(
+    'pattern',
+    [
+        '/mcp/{rest:path}',
+        '/mcp/{name}',
+        '/mcp/probe',
+        '/mcp',
+        '/mcp/',
+        # Converter-typed patterns match no probe LITERAL the guard can guess:
+        # `/mcp/{id:int}` compiles to a digits-only regex, so probing alone
+        # never sees it. It is caught by reading the registered patterns.
+        '/mcp/{id:int}',
+        '/mcp/{when:uuid}',
+        '  /mcp/{id:int}  ',
+    ],
+)
 def test_mcp_refuses_to_mount_under_a_public_pattern_matching_it(monkeypatch, tmp_path, pattern):
     """A public pattern needs no route of its own to disarm authentication.
 
@@ -246,6 +261,11 @@ def test_mcp_refuses_to_mount_under_a_public_pattern_matching_it(monkeypatch, tm
     `/mcp/{path}` entry therefore makes the middleware skip requests the Mount
     still forwards to `handle_mcp` -- while never matching `/mcp` or `/mcp/`
     themselves, which is all the guard used to probe.
+
+    Probing cannot be made exhaustive: a converter (`{id:int}`, `{x:uuid}`)
+    narrows the compiled regex to values no fixed probe string satisfies. So
+    the registered PATTERN STRINGS are inspected too, and anything rooted at
+    the MCP mount is refused whatever it would match.
     """
     server = _web_server(monkeypatch, tmp_path, [])
     server._public_paths.append(pattern)
@@ -253,6 +273,22 @@ def test_mcp_refuses_to_mount_under_a_public_pattern_matching_it(monkeypatch, tm
 
     with pytest.raises(RuntimeError, match='/mcp'):
         server.use('mcp', {})
+
+
+@pytest.mark.parametrize('pattern', ['/mcp-server', '/mcpx', '/mcp-server/{page}', '/mcpx/{rest:path}', '/'])
+def test_public_patterns_that_merely_start_with_mcp_do_not_trip_the_guard(monkeypatch, tmp_path, pattern):
+    """The namespace is `/mcp` and `/mcp/...` -- not every path spelled `mcp*`.
+
+    `/mcp-server` (the marketing page) and `/mcpx` are unrelated routes that
+    the Mount never forwards, so refusing them would be a false positive that
+    stops the engine booting for no reason.
+    """
+    server = _web_server(monkeypatch, tmp_path, [])
+    server._public_paths.append(pattern)
+    server._compiled_public_paths = None
+
+    server.use('mcp', {})  # must not raise
+    assert server.is_public_route('/mcp') is False
 
 
 def test_the_discovery_document_stays_public_and_does_not_trip_the_guard(monkeypatch, tmp_path):

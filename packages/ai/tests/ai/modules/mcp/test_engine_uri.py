@@ -297,6 +297,64 @@ def test_loopback_default_keeps_its_cleartext_local_uri(monkeypatch, fake_web_se
     _assert_wiring(captured, 'ws://127.0.0.1:5565', 'http://127.0.0.1:5565')
 
 
+@pytest.mark.parametrize('host', ['0.0.0.0', 'engine.internal', '', None])
+@pytest.mark.parametrize(
+    ('uri', 'origin'),
+    [
+        ('ws://127.0.0.1:5565', 'http://127.0.0.1:5565'),
+        ('http://localhost:5565', 'http://localhost:5565'),
+        ('ws://localhost:5565', 'http://localhost:5565'),
+        ('ws://127.0.0.53:5565', 'http://127.0.0.53:5565'),  # anywhere in 127.0.0.0/8
+        ('ws://[::1]:5565', 'http://[::1]:5565'),
+        ('http://LOCALHOST:5565', 'http://LOCALHOST:5565'),
+    ],
+)
+def test_cleartext_to_a_loopback_target_is_kept_whatever_the_bind(monkeypatch, fake_web_server, host, uri, origin):
+    """The rule keys on the TARGET, not the bind.
+
+    A credential sent to `ws://127.0.0.1:5565` never reaches a wire anyone can
+    tap, so there is nothing to protect. Refusing it would break every
+    deployment whose image carries the shipped `dist/server/.env`
+    (`ROCKETRIDE_URI=http://localhost:5565`, copied in by
+    `docker/Dockerfile.engine`) -- the pod would fail to boot over a credential
+    that never leaves it.
+    """
+    monkeypatch.setenv('ROCKETRIDE_URI', uri)
+    captured = _init(monkeypatch, fake_web_server, host=host, port=5565)
+    _assert_wiring(captured, uri, origin)
+
+
+def test_cleartext_loopback_resource_identifier_is_kept_on_a_public_bind(monkeypatch, fake_web_server):
+    """The derived case follows the same rule: the target decides."""
+    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', 'http://localhost:8080/mcp')
+    captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    assert captured['factory']()._uri == 'ws://localhost:8080'
+
+
+def test_a_non_loopback_target_is_still_refused_on_a_public_bind(monkeypatch, fake_web_server):
+    """Narrowing the rule must not reopen the hole it was written to close."""
+    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://engine.internal:5565')
+    with pytest.raises(RuntimeError) as excinfo:
+        _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    assert 'engine.internal' in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    'uri',
+    [
+        'ws://127.0.0.1.evil.test:5565',  # loopback literal as a LABEL, not the host
+        'ws://localhost.evil.test:5565',
+        'ws://notlocalhost:5565',
+        'ws://user:secret@engine.internal:5565',  # userinfo must not be read as the host
+    ],
+)
+def test_hosts_that_only_look_loopback_are_still_refused(monkeypatch, fake_web_server, uri):
+    monkeypatch.setenv('ROCKETRIDE_URI', uri)
+    with pytest.raises(RuntimeError) as excinfo:
+        _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    assert 'secret' not in str(excinfo.value), 'the refusal must stay redacted'
+
+
 @pytest.mark.parametrize(
     ('resource', 'uri'),
     [

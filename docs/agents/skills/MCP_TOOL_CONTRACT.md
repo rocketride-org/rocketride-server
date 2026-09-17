@@ -82,7 +82,7 @@ chapters/console but **empty traces**.
 
 | Tool | Input | Result |
 |---|---|---|
-| `scaffold_node` | `{name, lane_in?, lane_out?, class_type?}` (`lane_in` defaults to `text`, `lane_out` to `lane_in`, `class_type` to `lane_in`) | `{ok, name, provider, files, next_steps}`. `files` maps `local_nodes/<name>/...` paths to contents — it **writes nothing itself**; you write them under the engine's `--node_path`. `lane_in`/`lane_out`/`class_type` are validated against the live catalog, so an unknown value comes back as `ok: false` listing what is in service. The engine reads node manifests once at startup: restart it after writing. |
+| `scaffold_node` | `{name, lane_in?, lane_out?, class_type?}` (`lane_in` defaults to `text`, `lane_out` to `lane_in`, `class_type` to `lane_in`) | `{ok, name, provider, files, next_steps}`. `files` maps `local_nodes/__init__.py` (the parent package marker) and `local_nodes/<name>/...` paths to contents — it **writes nothing itself**; you write **every** returned path under the engine's `--node_path`. Skipping the marker leaves `local_nodes` a non-package, and the engine cannot import `local_nodes.<name>`. `lane_in`/`lane_out`/`class_type` are validated against the live catalog, so an unknown value comes back as `ok: false` listing what is in service. The engine reads node manifests once at startup: restart it after writing. |
 
 ## Integrations / credentials
 

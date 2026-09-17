@@ -2,6 +2,7 @@
 """In-process Streamable-HTTP MCP server module."""
 
 import contextlib
+import ipaddress
 import json
 import logging
 import os
@@ -34,10 +35,21 @@ _ENDPOINT_PATHS = (_MOUNT_PATH, _MOUNT_PATH + '/')
 # would make AuthMiddleware skip requests the Mount still forwards to
 # ``handle_mcp`` -- without ever matching ``/mcp`` or ``/mcp/`` themselves.
 # One single-segment and one multi-segment descendant catch both shapes.
+#
+# Probing can never be exhaustive, though: a CONVERTER narrows the compiled
+# regex to values no fixed probe string satisfies (``/mcp/{id:int}`` matches
+# only digits, ``{x:uuid}`` only UUIDs), so the registered pattern STRINGS are
+# read as well -- see ``_registered_public_patterns``.
 _PUBLIC_PROBE_PATHS = _ENDPOINT_PATHS + (
     _MOUNT_PATH + '/probe',
     _MOUNT_PATH + '/probe/nested',
 )
+
+# Where a server keeps its registered public route PATTERNS. The real
+# ``WebServer`` uses ``_public_paths`` (a list ``is_public_route`` compiles);
+# test doubles keep a plain ``public`` set. ``initModule``'s dev bypass already
+# writes to whichever is present, so the guard reads both the same way.
+_PUBLIC_PATTERN_ATTRS = ('_public_paths', 'public')
 
 # Engine URI schemes that put the caller's credential on the wire in the clear:
 # ``handle_mcp`` hands that credential to ``WsEngineClient``, which sends it in
@@ -64,6 +76,56 @@ def _claims_mcp_path(path: Optional[str]) -> bool:
     return bool(path) and (path == _MOUNT_PATH or path.startswith(_MOUNT_PATH + '/'))
 
 
+def _claims_mcp_pattern(pattern: Any) -> bool:
+    """Report whether a route PATTERN is rooted at the MCP mount.
+
+    Textual, not a match test: ``/mcp/{id:int}`` matches no probe literal the
+    guard could guess, but it is unmistakably inside the namespace the Mount
+    forwards. Normalised first so the spelling does not decide -- surrounding
+    whitespace is stripped and one or more trailing slashes are dropped, which
+    is what makes ``/mcp/`` equal to ``/mcp``.
+
+    The prefix must be a whole segment: ``/mcpx`` and ``/mcp-server`` are
+    different routes the Mount never sees, and refusing them would stop the
+    engine booting over nothing.
+
+    Args:
+        pattern: A registered public path pattern (any stringable value).
+
+    Returns:
+        bool: True when the pattern is ``/mcp`` or a descendant of it.
+    """
+    text = str(pattern or '').strip()
+    if len(text) > 1:
+        text = text.rstrip('/') or '/'
+    return _claims_mcp_path(text)
+
+
+def _registered_public_patterns(server: Any) -> Tuple[str, ...]:
+    """Collect the public route patterns a server has registered, if any.
+
+    Both shapes in ``_PUBLIC_PATTERN_ATTRS`` are optional and a server may
+    expose neither -- reading them must never be what stops an engine booting,
+    so an absent (or non-iterable) registry simply contributes nothing.
+
+    Args:
+        server: The WebServer (or test double) being mounted onto.
+
+    Returns:
+        Tuple[str, ...]: Every registered pattern found, as strings.
+    """
+    patterns: list = []
+    for attr in _PUBLIC_PATTERN_ATTRS:
+        registered = getattr(server, attr, None)
+        if not registered:
+            continue
+        try:
+            patterns.extend(str(pattern) for pattern in registered)
+        except TypeError:  # not iterable -- nothing to inspect here
+            continue
+    return tuple(patterns)
+
+
 def _refuse_existing_claimants(server: Any) -> None:
     """Fail engine boot if anything already owns or opens the MCP paths.
 
@@ -76,15 +138,23 @@ def _refuse_existing_claimants(server: Any) -> None:
     AuthMiddleware skip those MCP requests.
 
     Public entries are patterns, not literals, so the endpoint paths are
-    probed alongside representative descendants (``_PUBLIC_PROBE_PATHS``).
+    probed alongside representative descendants (``_PUBLIC_PROBE_PATHS``) AND
+    the registered pattern strings are read directly
+    (``_registered_public_patterns``). Probing alone is not enough: a
+    converter-typed pattern such as ``/mcp/{id:int}`` compiles to a regex no
+    fixed probe satisfies, yet still disarms auth for every ``/mcp/<digits>``
+    the Mount forwards.
 
     Raises:
         RuntimeError: naming the claimant(s).
     """
     claimants = sorted({p for p in (getattr(r, 'path', None) for r in server.app.router.routes) if _claims_mcp_path(p)})
+    public: set = set()
     is_public = getattr(server, 'is_public_route', None)
     if is_public is not None:
-        claimants += [f'public:{p}' for p in _PUBLIC_PROBE_PATHS if is_public(p)]
+        public.update(p for p in _PUBLIC_PROBE_PATHS if is_public(p))
+    public.update(p for p in _registered_public_patterns(server) if _claims_mcp_pattern(p))
+    claimants += [f'public:{p}' for p in sorted(public)]
     if claimants:
         raise RuntimeError(
             f'{_MOUNT_PATH} and {_MOUNT_PATH}/* are reserved for the MCP API, but already claimed by: '
@@ -207,15 +277,49 @@ def _redacted_uri(uri: str) -> str:
     return f'{scheme}{parts.netloc.rpartition("@")[2]}{parts.path}'
 
 
+def _targets_loopback_host(uri: str) -> bool:
+    """Report whether a URI addresses an engine on this machine.
+
+    Deliberately NOT ``auth.is_loopback_bind``: that judges a configured BIND
+    string against exact literals, while this reads the TARGET out of a URI
+    netloc -- userinfo and port removed, IPv6 brackets unwrapped -- and has to
+    accept the whole ``127.0.0.0/8`` range a bind never names. ``ipaddress``
+    settles the literals; ``auth.LOOPBACK_HOSTS`` stays the one place the
+    by-name allowlist (``localhost``) is written down.
+
+    Args:
+        uri: The resolved engine URI (a bare ``host:port`` is tolerated).
+
+    Returns:
+        bool: True only when the target is a loopback name or literal.
+    """
+    host = (urlsplit(uri if '://' in uri else '//' + uri).hostname or '').strip()
+    if not host:
+        return False
+    if host in auth.LOOPBACK_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:  # a hostname, not an IP literal -- names decide above
+        return False
+
+
 def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) -> None:
-    """Fail boot when a non-loopback engine URI would travel in the clear.
+    """Fail boot when an engine URI would put the credential on a real wire.
 
     ``handle_mcp`` binds the CALLER's credential to the per-request engine
     client, and ``WsEngineClient`` sends it in the first DAP ``auth`` frame. On
-    ``ws://`` that frame is plaintext on the wire, so every MCP caller's API key
-    or OAuth token is exposed to anything on the path. A loopback engine never
-    leaves the host, so cleartext stays allowed there -- this is only ever
-    called for a non-loopback bind.
+    ``ws://`` that frame is plaintext, so every MCP caller's API key or OAuth
+    token is exposed to anything on the path.
+
+    The rule keys on the TARGET HOST, not on the bind. A credential sent to
+    ``ws://127.0.0.1:5565`` never reaches a wire anyone can tap, so there is
+    nothing to protect -- and refusing it would be a real deployment hazard:
+    ``WebServer.__init__`` loads ``dist/server/.env``, ``.env.template`` ships
+    ``ROCKETRIDE_URI=http://localhost:5565``, and ``docker/Dockerfile.engine``
+    copies all of ``dist/server/`` into the image, so a pod carrying that file
+    would fail to boot over a credential that never leaves it. Only a
+    non-loopback target is refused.
 
     Args:
         uri: The resolved engine URI.
@@ -228,8 +332,10 @@ def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) 
     """
     if not uri.startswith(_CLEARTEXT_SCHEMES):
         return
+    if _targets_loopback_host(uri):
+        return
     raise RuntimeError(
-        f'MCP refuses a cleartext engine transport on a non-loopback bind: {source_name}='
+        f'MCP refuses a cleartext engine transport to a non-loopback engine host: {source_name}='
         f'{_redacted_uri(source_value)} resolves to {_redacted_uri(uri)}. The caller credential is sent to '
         'the engine in the first DAP auth message, so it must not ride an unencrypted connection -- use '
         'wss:// (or an https:// resource identifier).'
@@ -254,9 +360,12 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
        the public origin of the MCP resource identifier: path dropped,
        ``https`` -> ``wss``, ``http`` -> ``ws``.
 
-    A non-loopback bind additionally requires ENCRYPTED transport: the caller's
-    own credential is handed to the engine client, so a ``ws://``/``http://``
-    value -- explicit or derived -- is refused rather than quietly used. See
+    On a non-loopback bind the resolved URI additionally requires ENCRYPTED
+    transport whenever it addresses a REMOTE engine: the caller's own
+    credential is handed to the engine client, so a ``ws://``/``http://``
+    value -- explicit or derived -- pointed at a non-loopback host is refused
+    rather than quietly used. Cleartext to a loopback target stays allowed,
+    since that credential never reaches a wire. See
     ``_refuse_cleartext_engine_uri``.
 
     Args:
@@ -268,7 +377,8 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
         Tuple[str, str]: The URI and the name of the rule that chose it.
 
     Raises:
-        RuntimeError: on a non-loopback bind with a cleartext engine URI.
+        RuntimeError: on a non-loopback bind with a cleartext engine URI
+            addressing a non-loopback host.
     """
     loopback = auth.is_loopback_bind(bind_host)
     explicit = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI')
@@ -349,9 +459,9 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
 
     Raises:
         RuntimeError: If a route already claims ``/mcp`` or ``/mcp/*``, if a
-            public pattern already matches the endpoint or any of its
+            public pattern is rooted at (or matches) the endpoint or any of its
             descendants, or if a non-loopback bind resolves a cleartext
-            (``ws://``/``http://``) engine URI.
+            (``ws://``/``http://``) engine URI addressing a non-loopback host.
     """
     # ------------------------------------------------------------------
     # 1. Hoisted TaskRegistry
