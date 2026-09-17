@@ -79,6 +79,10 @@ class IInstance(IInstanceBase):
                     'description': 'Restrict results to only pages or only databases (data sources).',
                 },
                 'page_size': {'type': 'integer', 'description': 'Max results (default 10, max 100).'},
+                'start_cursor': {
+                    'type': 'string',
+                    'description': "Pagination cursor from a previous call's next_cursor.",
+                },
             },
         },
         output_schema={
@@ -111,6 +115,8 @@ class IInstance(IInstanceBase):
                 body['filter'] = {'property': 'object', 'value': filter_type}
             if isinstance(page_size, int) and not isinstance(page_size, bool):
                 body['page_size'] = max(1, min(100, page_size))
+            if args.get('start_cursor'):
+                body['start_cursor'] = args['start_cursor']
             resp = notion_client.request('POST', '/search', api_key=self.IGlobal.apikey, json_body=body)
             return {
                 'results': resp.get('results', []),

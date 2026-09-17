@@ -493,6 +493,12 @@ class TestAppendBlockChildren:
 
 
 class TestNotionSearch:
+    def test_schema_advertises_optional_start_cursor(self):
+        schema = _ii.IInstance.notion_search.__tool_meta__['input_schema']
+
+        assert schema['properties']['start_cursor']['type'] == 'string'
+        assert 'start_cursor' not in schema.get('required', [])
+
     def test_builds_query_filter_and_page_size(self, monkeypatch):
         mock_request = Mock(return_value={'results': [{'id': 'p1'}], 'has_more': True, 'next_cursor': 'c1'})
         monkeypatch.setattr(_ii.notion_client, 'request', mock_request)
@@ -517,6 +523,22 @@ class TestNotionSearch:
         inst.notion_search({'page_size': 500})
 
         assert mock_request.call_args.kwargs['json_body']['page_size'] == 100
+
+    def test_forwards_start_cursor(self, monkeypatch):
+        cursor = '3c90c3cc-0d44-4b50-8888-8dd25736052a'
+        mock_request = Mock(return_value={'results': [], 'has_more': False, 'next_cursor': None})
+        monkeypatch.setattr(_ii.notion_client, 'request', mock_request)
+        inst = _instance()
+
+        out = inst.notion_search({'query': 'roadmap', 'page_size': 5, 'start_cursor': cursor})
+
+        assert out['success'] is True
+        assert mock_request.call_args.args == ('POST', '/search')
+        assert mock_request.call_args.kwargs['json_body'] == {
+            'query': 'roadmap',
+            'page_size': 5,
+            'start_cursor': cursor,
+        }
 
     def test_error_is_wrapped_in_the_standard_envelope(self, monkeypatch):
         monkeypatch.setattr(
