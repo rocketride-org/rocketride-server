@@ -307,6 +307,33 @@ def test_yappi_internal_symbols_present():
     assert hasattr(yappi, 'is_running')
 
 
+def test_session_end_hands_yappis_name_callback_back(monkeypatch):
+    """Both ends of a session restore yappi's own context-name callback.
+
+    Ours is process-global: left installed, it would name the contexts of
+    whatever starts yappi next in this process, which need not be a session
+    of ours at all.
+    """
+    installed: list = []
+    real_set_callback = yappi.set_context_name_callback
+
+    def rec_set_callback(callback):
+        installed.append(callback)
+        real_set_callback(callback)
+
+    monkeypatch.setattr(yappi, 'set_context_name_callback', rec_set_callback)
+
+    profiler.start('owner-1')
+    profiler.stop('owner-1')
+    assert installed[0] is not None, 'start() installed no callback'
+    assert installed[-1] is None, f'stop() left ours installed: {installed}'
+
+    installed.clear()
+    profiler.start('owner-2')
+    profiler.release('owner-2')
+    assert installed[-1] is None, f'release() left ours installed: {installed}'
+
+
 def test_yappi_mutations_happen_under_lock(monkeypatch):
     """Register + both stop paths must touch yappi only while _lock is held.
 

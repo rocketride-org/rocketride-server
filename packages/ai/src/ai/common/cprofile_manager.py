@@ -394,6 +394,9 @@ class CProfileManager:
             # Clear yappi's internal data to free memory
             yappi.clear_stats()
 
+            # Ours is process-global; hand yappi its own default back
+            yappi.set_context_name_callback(None)
+
             # Capture session info before clearing ownership
             session_name = self._session_name
 
@@ -661,6 +664,7 @@ class CProfileManager:
                 # Stop yappi and clear without generating a report
                 yappi.stop()
                 yappi.clear_stats()
+                yappi.set_context_name_callback(None)
                 self._active = False
                 self._owner_id = None
                 self._session_name = None
