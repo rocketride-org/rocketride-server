@@ -802,6 +802,13 @@ class TestIInstanceLifecycle:
         inst.IGlobal = MagicMock()
         inst.IGlobal.store = store
         inst.instance = MagicMock()
+        # The real IInstanceBase.preventDefault() raises APERR by design (it's
+        # meant to be caught by the C++ engine); stub it so unit tests can call
+        # writeQuestions/writeAnswers without a running engine. Note: unlike the
+        # real one, this stub does not raise, so code placed after a
+        # preventDefault() call will appear to run here but never runs in the
+        # engine.
+        inst.preventDefault = MagicMock()
         return inst
 
     def test_write_questions_forwards_without_store(self):
@@ -809,12 +816,14 @@ class TestIInstanceLifecycle:
         question = MagicMock()
         inst.writeQuestions(question)
         inst.instance.writeQuestions.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
 
     def test_write_answers_forwards_without_store(self):
         inst = self._make_instance(store=None)
         answer = MagicMock()
         inst.writeAnswers(answer)
         inst.instance.writeAnswers.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
 
     def test_write_questions_enriches_with_memory(self):
         store = PersistentMemoryStore(backend='memory')
@@ -827,6 +836,7 @@ class TestIInstanceLifecycle:
 
         inst.writeQuestions(question)
         inst.instance.writeQuestions.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
 
         # The forwarded question should have memory_context
         forwarded = inst.instance.writeQuestions.call_args[0][0]
@@ -854,6 +864,7 @@ class TestIInstanceLifecycle:
 
         inst.writeAnswers(answer)
         inst.instance.writeAnswers.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
 
         # Check that answer was stored
         result = store.get('test-sess', 'last_answer')
@@ -879,6 +890,7 @@ class TestIInstanceLifecycle:
         assert result['ok'] is True
         assert result['value'] == 'Follow-up answer'
         assert store.get('test-sess', 'answer_count')['value'] == 1
+        assert inst.preventDefault.call_count == 2
 
     def test_write_answers_increments_count(self):
         store = PersistentMemoryStore(backend='memory')
@@ -916,6 +928,7 @@ class TestIInstanceLifecycle:
 
         inst.writeQuestions(question)
         inst.instance.writeQuestions.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
 
     def test_write_answers_no_session_id(self):
         store = PersistentMemoryStore(backend='memory')
@@ -925,6 +938,35 @@ class TestIInstanceLifecycle:
 
         inst.writeAnswers(answer)
         inst.instance.writeAnswers.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
+
+    def test_write_questions_invalid_session_id_forwards_once(self):
+        """A session_id the store rejects is dropped; the question is forwarded once, unenriched."""
+        store = PersistentMemoryStore(backend='memory')
+        inst = self._make_instance(store=store)
+        question = MagicMock()
+        question.metadata = {'session_id': 'bad id!'}
+
+        inst.writeQuestions(question)
+
+        inst.instance.writeQuestions.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
+        assert inst._current_session_id is None
+        forwarded = inst.instance.writeQuestions.call_args[0][0]
+        assert 'memory_context' not in forwarded.metadata
+
+    def test_write_answers_invalid_session_id_forwards_once(self):
+        """A session_id the store rejects stops before storing; the answer is forwarded once."""
+        store = PersistentMemoryStore(backend='memory')
+        inst = self._make_instance(store=store)
+        answer = MagicMock()
+        answer.metadata = {'session_id': 'bad id!'}
+        answer.getText.return_value = 'not stored'
+
+        inst.writeAnswers(answer)
+
+        inst.instance.writeAnswers.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
 
     def test_deep_copy_prevents_question_mutation(self):
         store = PersistentMemoryStore(backend='memory')

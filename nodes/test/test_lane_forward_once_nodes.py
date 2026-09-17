@@ -11,7 +11,8 @@ unless it raised Ec.PreventDefault (__checkCallParent, engLib/python/call.hpp).
 Seven handlers across five nodes forwarded explicitly and returned normally, so the
 payload they forwarded reached downstream twice. For the nodes that forward an enriched or converted
 copy, the second delivery was the unmodified original. context_optimizer, added later, had the
-same shape: the trimmed question and the untrimmed original both went downstream.
+same shape: the trimmed question and the untrimmed original both went downstream. So did
+memory_persistent (#1638), on all six exits of its questions and answers handlers.
 
 A second shape leaks the same way: summarization, tool_guild and tool_n8n only buffer
 their input in the lane handlers and emit their own result from closing(), so the raw
@@ -28,6 +29,7 @@ import contextlib
 import copy
 import importlib.util
 import os
+import re
 import sys
 import types
 
@@ -833,3 +835,235 @@ def test_tool_n8n_media_stream_delivers_no_chunk(lane):
 
     assert delivered == [], f'{lane} lane passed {len(delivered)} raw chunks through'
     assert inst._binary == [{'kind': lane, 'mime': mime, 'data': b'ab'}]
+
+
+# ============================================================================
+# memory_persistent: every exit forwards (a copy, when a store is set), so every exit must suppress
+# ============================================================================
+
+
+class _StubMemoryStore:
+    """The session store calls memory_persistent makes, with PersistentMemoryStore's id rule."""
+
+    def __init__(self, sessions=None):
+        """Create the store.
+
+        Args:
+            sessions: Initial {session_id: {key: value}} contents.
+        """
+        self.sessions = {sid: dict(values) for sid, values in (sessions or {}).items()}
+
+    @staticmethod
+    def _check(session_id):
+        """Raise ValueError for an id _validate_session_id would reject.
+
+        Args:
+            session_id: The id to check.
+        """
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', session_id):
+            raise ValueError(f'Invalid session_id: {session_id!r}')
+
+    def resume_session(self, session_id):
+        """Report whether the session exists.
+
+        Args:
+            session_id: The session to resume.
+
+        Returns:
+            {'ok': bool}.
+        """
+        self._check(session_id)
+        return {'ok': session_id in self.sessions}
+
+    def create_session(self, session_id):
+        """Create an empty session.
+
+        Args:
+            session_id: The session to create.
+        """
+        self._check(session_id)
+        self.sessions[session_id] = {}
+
+    def list_keys(self, session_id):
+        """List the session's keys.
+
+        Args:
+            session_id: The session to read.
+
+        Returns:
+            {'ok': True, 'keys': [...]}.
+        """
+        self._check(session_id)
+        return {'ok': True, 'keys': list(self.sessions[session_id])}
+
+    def get(self, session_id, key):
+        """Read one value.
+
+        Args:
+            session_id: The session to read.
+            key: The key to read.
+
+        Returns:
+            {'ok': True, 'value': ...}.
+        """
+        self._check(session_id)
+        return {'ok': True, 'value': self.sessions[session_id][key]}
+
+    def put(self, session_id, key, value):
+        """Store one value.
+
+        Args:
+            session_id: The session to write.
+            key: The key to write.
+            value: The value to store.
+        """
+        self._check(session_id)
+        self.sessions[session_id][key] = value
+
+    def increment(self, session_id, key):
+        """Add one to a counter, starting from zero.
+
+        Args:
+            session_id: The session to write.
+            key: The counter's key.
+        """
+        self._check(session_id)
+        self.sessions[session_id][key] = self.sessions[session_id].get(key, 0) + 1
+
+
+class _SessionQuestion(FakeQuestion):
+    """A question carrying metadata, as the real schema does."""
+
+    def __init__(self, metadata):
+        """Build the question.
+
+        Args:
+            metadata: The question's metadata dict.
+        """
+        super().__init__()
+        self.metadata = metadata
+
+
+class _SessionAnswer:
+    """An answer carrying metadata and text."""
+
+    def __init__(self, metadata, text='the answer'):
+        """Build the answer.
+
+        Args:
+            metadata: The answer's metadata dict.
+            text: The answer text.
+        """
+        self.metadata = metadata
+        self.text = text
+
+    def getText(self):
+        """Return the answer text."""
+        return self.text
+
+
+def _memory(store):
+    """Build a memory_persistent instance with the given store.
+
+    Args:
+        store: The session store IGlobal exposes, or None when the node is unconfigured.
+
+    Returns:
+        (inst, fake_instance).
+    """
+    inst, fake = _build('memory_persistent', types.SimpleNamespace(store=store))
+    inst.open(None)
+    return inst, fake
+
+
+def _deliveries(fake, lane, write, payload):
+    """Run one handler call under the engine rule and collect what reached downstream.
+
+    Args:
+        fake: The node's FakeInstance.
+        lane: The lane to collect.
+        write: Zero-argument callable that runs the handler.
+        payload: What the engine's default forward would deliver.
+
+    Returns:
+        Every payload delivered on the lane.
+    """
+    delivered = []
+    _simulate_engine_dispatch(write, lambda: delivered.append(payload))
+    delivered.extend(fake.delivered.get(lane, []))
+    return delivered
+
+
+def test_memory_persistent_question_delivered_once_without_store():
+    """With no store the question passes through, once."""
+    inst, fake = _memory(None)
+    question = FakeQuestion()
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(question), question)
+
+    assert delivered == [question], f'questions lane delivered {len(delivered)} questions, expected 1'
+
+
+def test_memory_persistent_question_delivered_once_with_invalid_session():
+    """A rejected session_id is dropped, and the unenriched copy is delivered once."""
+    inst, fake = _memory(_StubMemoryStore())
+    question = _SessionQuestion({'session_id': 'bad id!'})
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(question), question)
+
+    assert len(delivered) == 1, f'questions lane delivered {len(delivered)} questions, expected 1'
+    assert 'memory_context' not in delivered[0].metadata
+    assert inst._current_session_id is None
+
+
+def test_memory_persistent_delivers_only_the_enriched_question():
+    """The copy carrying the session's memory is delivered, and the original is not."""
+    inst, fake = _memory(_StubMemoryStore({'sess-1': {'topic': 'invoices'}}))
+    question = _SessionQuestion({'session_id': 'sess-1'})
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(question), question)
+
+    assert len(delivered) == 1, (
+        f'questions lane delivered {len(delivered)} questions. The enriched copy and the '
+        f'original both arrive unless writeQuestions suppresses the default forward'
+    )
+    assert delivered[0] is not question
+    assert delivered[0].metadata['memory_context'] == {'topic': 'invoices'}
+    assert 'memory_context' not in question.metadata
+
+
+def test_memory_persistent_answer_delivered_once_without_store():
+    """With no store the answer passes through, once."""
+    inst, fake = _memory(None)
+    answer = _SessionAnswer({})
+
+    delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
+
+    assert delivered == [answer], f'answers lane delivered {len(delivered)} answers, expected 1'
+
+
+def test_memory_persistent_answer_delivered_once_with_invalid_session():
+    """A rejected session_id stores nothing, and the answer is delivered once."""
+    store = _StubMemoryStore()
+    inst, fake = _memory(store)
+    answer = _SessionAnswer({'session_id': 'bad id!'})
+
+    delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
+
+    assert len(delivered) == 1, f'answers lane delivered {len(delivered)} answers, expected 1'
+    assert store.sessions == {}
+
+
+def test_memory_persistent_stored_answer_delivered_once():
+    """The answer is stored in its session and delivered once."""
+    store = _StubMemoryStore({'sess-1': {}})
+    inst, fake = _memory(store)
+    answer = _SessionAnswer({'session_id': 'sess-1'}, text='42')
+
+    delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
+
+    assert len(delivered) == 1, (
+        f'answers lane delivered {len(delivered)} answers. The stored copy and the original '
+        f'both arrive unless writeAnswers suppresses the default forward'
+    )
+    assert store.sessions['sess-1'] == {'last_answer': '42', 'answer_count': 1}
