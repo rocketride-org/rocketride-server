@@ -8,7 +8,7 @@ Crustdata is a B2B data provider that maintains an indexed database of companies
 
 ## What it does
 
-The node has no data lanes and exposes two search functions to an agent: one over Crustdata's company index, one over its people index. Each takes a flat list of `{field, type, value}` conditions, wraps them into the `{op, conditions}` group form Crustdata's API expects, and returns the records the service sends back. Results are cursor-paginated, so an agent can walk a large result set across several calls. Prefer this node over a generic HTTP tool when an agent needs Crustdata's filter grammar, limits and pagination already handled; reach for a web-search or scraping node instead when the target is open-web content rather than an indexed B2B record.
+The node has no data lanes and exposes two search functions to an agent: one over Crustdata's company index, one over its people index. Each takes filter conditions, wraps them into the `{op, conditions}` group form Crustdata's API expects, and returns the records the service sends back. Person search also supports bounded `all_of` groups over nested arrays such as employment history. Results are cursor-paginated, and callers can project the returned record with `fields`. Prefer this node over a generic HTTP tool when an agent needs Crustdata's filter grammar, limits and pagination already handled; reach for a web-search or scraping node instead when the target is open-web content rather than an indexed B2B record.
 
 The node is marked `experimental`. Its request and response shapes are read from Crustdata's published API reference, but no live account has exercised it end to end — see `## Notes`.
 
@@ -21,9 +21,11 @@ The server-name prefix is `crustdata`, producing these registered functions.
 | `crustdata.company_search` | Search Crustdata for companies matching one or more filters (industry, region, headcount, funding, current company, and more). Returns structured company records: firmographics, funding history, headcount, and hiring signals. Use it to find prospects or research accounts by criteria, not to look up one already-known company by name. |
 | `crustdata.person_search` | Search Crustdata for people matching one or more filters (current company, current title, region, and more). Returns structured profiles: name, title, work history, education, and verified contact info where available. Use it to find or enrich people by criteria. |
 
-Both functions take the same arguments. `filters` is required and must be a non-empty array of `{field, type, value}` conditions. `field` is a dotted path such as `basic_info.primary_domain` (company) or `experience.employment_details.current.title` (person). `type` is one of `=`, `!=`, `<`, `=<`, `>`, `=>`, `in`, `not_in`, `is_null`, `is_not_null`, `(.)` (fuzzy/contains), `[.]` (exact list membership), `geo_distance`, or `geo_exclude` — note `=<` and `=>` rather than `<=` and `>=`, and that the two geo operators take a `{location, distance, unit}` object as their `value`.
+Both functions require `filters`, a non-empty array whose ordinary conditions have `{field, type, value}`. `field` is a dotted path such as `basic_info.primary_domain` (company) or `experience.employment_details.current.title` (person). Company operators are `=`, `!=`, `<`, `=<`, `>`, `=>`, `in`, `not_in`, `is_null`, `is_not_null`, `(.)` (fuzzy all-words with typo tolerance), `[.]` (exact phrase), `geo_distance`, and `geo_exclude`. Person search additionally exposes `has_all` and `(!)`; its `(.)` match is all-words without typo tolerance. Note `=<` and `=>` rather than `<=` and `>=`, and that the geo operators take a `{location, distance, unit}` object as their `value`.
 
-The optional arguments are `match` (`and` or `or`, defaulting to `and`), `sorts` (an array of `{field, order}` objects, `order` being `asc` or `desc`), `limit` (1–1000, defaulting to the node's configured Default Result Limit), and `cursor` (a `next_cursor` from an earlier call; omit it for the first page).
+Person `filters` may also contain an `{"op": "all_of", "conditions": [...]}` group. Each direct child may match a different element of the nested array. To require several predicates on the same element, wrap them in one `and` or `or` subgroup inside `all_of`; for example, put title and company-name conditions in an `and` subgroup to bind both to one employment entry. Nested `all_of`, `has_all`, and negated predicates are not supported inside it.
+
+The optional arguments are `match` (`and` or `or`, defaulting to `and`), `sorts` (an array of `{field, order}` objects, `order` being `asc` or `desc`), `fields` (a non-empty array of sections or dotted paths to return), `limit` (1–1000, defaulting to the node's configured Default Result Limit), and `cursor` (a `next_cursor` from an earlier call; omit it for the first page). Omitting `fields` returns the full company record for company search and Crustdata's default sections for person search. Returned fields and searchable fields are separate vendor-defined sets, so unsupported projections are left for the API to reject.
 
 Every call returns an object carrying `success`, `filters` (the conditions echoed back), `count`, and `results` — the Crustdata records passed through as received, with no per-record remapping. `next_cursor` and `total_count` are added when Crustdata's response includes them. Missing or empty `filters`, a failed request, and a non-JSON response body all come back as `success: false` with an `error` string; the agent sees a failure as data rather than as a raised exception.
 
@@ -53,11 +55,11 @@ The endpoints, condition schema and cursor pagination implemented here come from
 
 ### Pagination
 
-Pass a response's `next_cursor` back as the next call's `cursor`. Keep `filters` and `sorts` identical across pages — changing either invalidates the cursor — which is why an explicit `sorts` is worth passing whenever an agent intends to paginate.
+Pass a response's `next_cursor` back as the next call's `cursor`. For company search, keep `filters`, `sorts`, and `fields` identical across pages. For person search, keep `filters` and `sorts` identical; Crustdata permits `fields` and `limit` to change between pages. An explicit `sorts` is worth passing whenever an agent intends to paginate.
 
 ### Why `match` has only two values
 
-`match` accepts `and` or `or`, and anything else is treated as `and`. Person search's third operator, `all_of`, is not a general combinator: it constrains its conditions to a single nested-array path such as employment or education, so it does not fit a flat "combine these conditions" parameter and is not exposed.
+`match` accepts `and` or `or`, and anything else is treated as `and`. Person search's `all_of` is not a top-level general combinator: it constrains its children to predicates on a nested-array path such as employment or education. It is therefore exposed only as a bounded group inside `filters`, never as a `match` value.
 
 ### Request handling
 
