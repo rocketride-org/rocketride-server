@@ -185,6 +185,96 @@ def test_select_unit_filter():
     assert select_official_values(mixed, {'end': '2025-12-31', 'unit': 'USD'}) == [10.0]
 
 
+@pytest.mark.parametrize(
+    ('measurements', 'filters'),
+    [
+        (
+            [
+                {'end': '2025-12-31', 'val': 100, 'accn': 'original'},
+                {'end': '2025-12-31', 'val': 120, 'accn': 'restated'},
+            ],
+            {'end': '2025-12-31'},
+        ),
+        (
+            [
+                {
+                    'start': '2025-01-01',
+                    'end': '2025-03-31',
+                    'frame': 'CY2025Q1',
+                    'val': 100,
+                    'accn': 'original',
+                },
+                {
+                    'start': '2025-01-01',
+                    'end': '2025-03-31',
+                    'frame': 'CY2025Q1',
+                    'val': 120,
+                    'accn': 'restated',
+                },
+            ],
+            {'frame': 'CY2025Q1'},
+        ),
+    ],
+)
+def test_select_abstains_from_conflicting_values_for_same_period(measurements, filters):
+    """Never choose between conflicting original and restated filing values."""
+    assert select_official_values({'USD': measurements}, filters) == []
+
+
+def test_select_implicit_period_abstains_from_conflicting_values():
+    measurements = [
+        {
+            'start': '2025-01-01',
+            'end': '2025-12-31',
+            'val': 100,
+            'accn': 'original',
+            'fy': 2025,
+            'fp': 'FY',
+            'form': '10-K',
+        },
+        {
+            'start': '2025-01-01',
+            'end': '2025-12-31',
+            'val': 120,
+            'accn': 'restated',
+            'fy': 2025,
+            'fp': 'FY',
+            'form': '10-K',
+        },
+    ]
+    report_dates = {'original': '2025-12-31', 'restated': '2025-12-31'}
+
+    assert (
+        select_official_values(
+            {'USD': measurements},
+            {'form': '10-K', 'fy': 2025, 'fp': 'FY'},
+            report_dates,
+        )
+        == []
+    )
+
+
+def test_select_allows_equal_duplicate_values_for_same_period():
+    measurements = [
+        {'end': '2025-12-31', 'val': 100, 'accn': 'first'},
+        {'end': '2025-12-31', 'val': 100.0, 'accn': 'second'},
+    ]
+
+    assert select_official_values({'USD': measurements}, {'end': '2025-12-31'}) == [100.0, 100.0]
+
+
+def test_select_explicit_filter_can_exclude_conflicting_filing():
+    measurements = [
+        {'end': '2025-12-31', 'val': 100, 'accn': 'annual', 'form': '10-K'},
+        {'end': '2025-12-31', 'val': 120, 'accn': 'quarterly', 'form': '10-Q'},
+    ]
+
+    assert select_official_values(
+        {'USD': measurements},
+        {'end': '2025-12-31', 'form': '10-K'},
+    ) == [100.0]
+
+
 # --- query_sec ---------------------------------------------------------------
 
 
