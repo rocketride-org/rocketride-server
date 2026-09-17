@@ -940,6 +940,34 @@ class TestIInstanceLifecycle:
         inst.instance.writeAnswers.assert_called_once()
         inst.preventDefault.assert_called_once_with()
 
+    def test_write_questions_invalid_session_id_forwards_once(self):
+        """A session_id the store rejects is dropped; the question is forwarded once, unenriched."""
+        store = PersistentMemoryStore(backend='memory')
+        inst = self._make_instance(store=store)
+        question = MagicMock()
+        question.metadata = {'session_id': 'bad id!'}
+
+        inst.writeQuestions(question)
+
+        inst.instance.writeQuestions.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
+        assert inst._current_session_id is None
+        forwarded = inst.instance.writeQuestions.call_args[0][0]
+        assert 'memory_context' not in forwarded.metadata
+
+    def test_write_answers_invalid_session_id_forwards_once(self):
+        """A session_id the store rejects stops before storing; the answer is forwarded once."""
+        store = PersistentMemoryStore(backend='memory')
+        inst = self._make_instance(store=store)
+        answer = MagicMock()
+        answer.metadata = {'session_id': 'bad id!'}
+        answer.getText.return_value = 'not stored'
+
+        inst.writeAnswers(answer)
+
+        inst.instance.writeAnswers.assert_called_once()
+        inst.preventDefault.assert_called_once_with()
+
     def test_deep_copy_prevents_question_mutation(self):
         store = PersistentMemoryStore(backend='memory')
         inst = self._make_instance(store=store)
