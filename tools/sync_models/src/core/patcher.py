@@ -280,6 +280,48 @@ def _detect_namespace(fields: Dict[str, Any]) -> str:
 
 _EXTENDED_THINKING = 'extendedThinking'
 
+# Form properties the patcher places itself; everything else in a field object is the node's own.
+_MANAGED_PROPERTIES = ('llm.cloud.apikey', _EXTENDED_THINKING, 'llm.cloud.modelSource')
+
+
+def _shared_properties(
+    fields: Dict[str, Any],
+    namespace: str,
+    protected: set,
+    profiles: Dict[str, Any] | None = None,
+) -> list:
+    """
+    Return the node's own form properties that every existing model form shows.
+
+    A vision node's forms carry ``vision.systemPrompt`` and ``vision.prompt``
+    next to the API key, so a new model needs them too. Only properties present
+    on every model form count: one that only some models show (``temperature``
+    on OpenAI's non-reasoning models) is a per-model choice, not the node's form.
+
+    Args:
+        fields: The ``"fields"`` dict
+        namespace: Field namespace prefix (e.g. ``'image_vision_mistral'``)
+        protected: Profile keys whose forms are not models (e.g. ``{'custom'}``)
+        profiles: The profiles dict; when given, forms of profiles without a
+            ``model`` (placeholders) are ignored too
+
+    Returns:
+        The shared properties, in the order the first model form lists them
+    """
+    shared: list | None = None
+    for key, value in fields.items():
+        if not key.startswith(f'{namespace}.') or key == f'{namespace}.profile' or not isinstance(value, dict):
+            continue
+        obj = value.get('object')
+        props = value.get('properties')
+        if not isinstance(obj, str) or not isinstance(props, list) or obj in protected:
+            continue
+        if profiles is not None and not (profiles.get(obj) or {}).get('model'):
+            continue
+        own = [p for p in props if p not in _MANAGED_PROPERTIES and not str(p).endswith('.apikey')]
+        shared = own if shared is None else [p for p in shared if p in own]
+    return shared or []
+
 
 def _repair_field_objects(fields: Dict[str, Any], profiles: Dict[str, Any] | None = None) -> bool:
     """
@@ -361,6 +403,7 @@ def _update_fields_for_added(
     profile_key: str,
     profile: Dict[str, Any],
     protected: set,
+    profiles: Dict[str, Any] | None = None,
 ) -> None:
     """
     Add the three field entries required for a newly added profile:
@@ -376,18 +419,21 @@ def _update_fields_for_added(
         profile_key: Profile key being added (e.g. ``'devstral-medium'``)
         profile: The new profile dict (used for the title)
         protected: Profile keys that should never be touched (e.g. ``{'custom'}``)
+        profiles: The full profiles dict, used to tell model forms from placeholders
     """
     if not namespace or profile_key in protected:
         return
 
     field_key = f'{namespace}.{profile_key}'
 
-    # 1. Field object — reasoning models get the extendedThinking toggle (before modelSource).
+    # 1. Field object — the node's shared properties, then (for reasoning models) the
+    # extendedThinking toggle, then modelSource last.
     if field_key not in fields:
-        props = ['llm.cloud.apikey', 'llm.cloud.modelSource']
+        props = ['llm.cloud.apikey', *_shared_properties(fields, namespace, protected, profiles)]
         # Only nodes that define the extendedThinking field get the toggle (today: anthropic).
         if _EXTENDED_THINKING in fields and bool((profile.get('capabilities') or {}).get('reasoning')):
-            props.insert(1, _EXTENDED_THINKING)
+            props.append(_EXTENDED_THINKING)
+        props.append('llm.cloud.modelSource')
         fields[field_key] = {'object': profile_key, 'properties': props}
 
     # 2 & 3. enum + conditional live inside the profile selector field
@@ -549,7 +595,7 @@ def patch(
 
         for key in sorted(_added):
             profile = updated_profiles.get(key, {})
-            _update_fields_for_added(fields, ns, key, profile, _protected)
+            _update_fields_for_added(fields, ns, key, profile, _protected, updated_profiles)
 
         for key in sorted(_deprecated):
             _update_fields_for_deprecated(fields, ns, key, _protected)

@@ -120,6 +120,23 @@ When the node configuration is saved, it is validated against the live API:
   and is treated as valid. Other API errors surface as warnings with the HTTP status,
   provider error type, and message.
 
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_gmi_cloud` provider,
+`ROCKETRIDE_GMI_CLOUD_KEY`), which reads GMI Cloud's own model list.
+
+Token limits come from GMI Cloud itself, with one exception: for the models GMI
+resells rather than hosts (`openai/…`, `anthropic/…`, `google/…`), the vendor's
+published limits apply, so those profiles track `llm_openai`, `llm_anthropic` and
+`llm_gemini`. For a model GMI runs on its own hardware, the context window is
+GMI's choice, and no third-party database can state it: OpenRouter and LiteLLM
+list the same open-weight model with different windows per host.
+
+For the same reason the sync runs **only** with that key. GMI's IDs
+(`Qwen/Qwen3-32B-FP8`) appear in no other catalogue, so a keyless run would mark
+every profile here deprecated. Without the key the provider is skipped and
+nothing changes — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
 ## Upstream docs
 
 - [GMI Cloud model catalogue](https://www.gmicloud.ai/models)

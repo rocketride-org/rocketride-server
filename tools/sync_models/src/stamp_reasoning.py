@@ -1,8 +1,8 @@
 """Stamp `capabilities.reasoning` in services.json files outside the sync registry.
 
-For providers without an API handler (Ollama local, GMI Cloud aggregator) the
-weekly `sync_models.py` cron skips them. This script applies the same OpenRouter
-+ family-fallback heuristic used by the merger to keep them in sync.
+For providers without an API handler (Ollama local) the weekly `sync_models.py`
+cron skips them. This script applies the same OpenRouter + family-fallback
+heuristic used by the merger to keep them in sync.
 """
 
 from __future__ import annotations
@@ -16,12 +16,17 @@ from core.merger import _is_reasoning_model, _load_openrouter_cache  # noqa: E40
 from core.patcher import get_profiles, patch  # noqa: E402
 
 _PATHS = [
-    'nodes/src/nodes/llm_gmi_cloud/services.json',
     'nodes/src/nodes/llm_ollama/services.json',
 ]
 
 
 def main() -> int:
+    """
+    Stamp ``capabilities.reasoning`` on every reasoning model in the files listed in ``_PATHS``.
+
+    Returns:
+        Exit code (always 0)
+    """
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     _load_openrouter_cache()

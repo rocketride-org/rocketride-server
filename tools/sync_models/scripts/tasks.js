@@ -23,6 +23,16 @@ const SERVICES_JSON_PATHS = {
 	llm_xai: 'nodes/src/nodes/llm_xai/services.json',
 	llm_perplexity: 'nodes/src/nodes/llm_perplexity/services.json',
 	llm_qwen: 'nodes/src/nodes/llm_qwen/services.json',
+	llm_minimax: 'nodes/src/nodes/llm_minimax/services.json',
+	llm_kimi: 'nodes/src/nodes/llm_kimi/services.json',
+	llm_baidu_qianfan: 'nodes/src/nodes/llm_baidu_qianfan/services.json',
+	llm_glm: 'nodes/src/nodes/llm_glm/services.json',
+	llm_gmi_cloud: 'nodes/src/nodes/llm_gmi_cloud/services.json',
+	llm_nebius: 'nodes/src/nodes/llm_openai_api/services.nebius.json',
+	llm_vision_openai: 'nodes/src/nodes/llm_vision_openai/services.json',
+	llm_vision_gemini: 'nodes/src/nodes/llm_vision_gemini/services.json',
+	llm_vision_mistral: 'nodes/src/nodes/llm_vision_mistral/services.json',
+	accessibility_describe: 'nodes/src/nodes/accessibility_describe/services.json',
 };
 
 // Engine (built by server:build; execCommand resolves extension on Windows)

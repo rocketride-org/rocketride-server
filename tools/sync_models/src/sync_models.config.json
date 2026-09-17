@@ -575,6 +575,187 @@
 				"glm-4.5": 131072,
 				"glm-4.5-air": 131072
 			}
+		},
+		// ----------------------------------------------------------------------
+		// GMI Cloud — open-weight and proxied chat models through an
+		// OpenAI-compatible API (api.gmi-serving.com). IDs are org-prefixed
+		// ("Qwen/Qwen3-32B-FP8") and exist in no fallback source, so the
+		// provider runs only with its own key (require_api_key).
+		// ----------------------------------------------------------------------
+		"llm_gmi_cloud": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_GMI_CLOUD_KEY",
+			"module": "gmi_cloud",
+			"models_endpoint": "https://api.gmi-serving.com/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"require_api_key": true,
+			// LiteLLM files these IDs under other hosts and answers with those hosts'
+			// limits (or the output limit in the context field), so it is left out.
+			// OpenRouter stays for the proxied vendor models below.
+			"allowed_sources": ["provider", "openrouter"],
+			// Models GMI resells rather than hosts: the vendor's own limits apply, and
+			// OpenRouter files them under the bare vendor ID ("openai/gpt-5.2" -> "gpt-5.2").
+			// Open-weight models keep their GMI ID and match nothing, on purpose: what
+			// another host serves says nothing about this one. So "openai/gpt-oss-*" — an
+			// open-weight family, not the API models — is deliberately not listed here.
+			"vendor_proxy_prefixes": ["openai/gpt-3", "openai/gpt-4", "openai/gpt-5", "openai/o1", "openai/o3", "openai/o4", "anthropic/claude-", "google/gemini-"],
+			"model_filter": {
+				"include_prefixes": ["meta-llama/", "Qwen/", "deepseek-ai/", "moonshotai/", "zai-org/", "MiniMaxAI/", "openai/", "anthropic/", "google/"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embed", "rerank", "guard", "tts", "whisper", "audio", "image", "video", "flux", "diffusion", "ocr"]
+			},
+			// The seeded set predates any run against GMI's own model list; protect it
+			// until that list has been reviewed once, so a first run cannot retire it.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["llama-4-scout", "2027-03-17"],
+				["llama-4-maverick", "2027-03-17"],
+				["qwen3-235b", "2027-03-17"],
+				["qwen3-32b", "2027-03-17"],
+				["qwen3-30b", "2027-03-17"],
+				["qwen3-coder-480b", "2027-03-17"],
+				["deepseek-v3-2", "2027-03-17"],
+				["deepseek-v3", "2027-03-17"],
+				["deepseek-r1", "2027-03-17"],
+				["deepseek-r1-distill-32b", "2027-03-17"],
+				["deepseek-r1-distill-1-5b", "2027-03-17"],
+				["deepseek-prover-v2", "2027-03-17"],
+				["gpt-5-2", "2027-03-17"],
+				["gpt-5-1", "2027-03-17"],
+				["gpt-5", "2027-03-17"],
+				["gpt-4o", "2027-03-17"],
+				["claude-opus-4-5", "2027-03-17"],
+				["claude-sonnet-4-5", "2027-03-17"],
+				["gemini-3-pro", "2027-03-17"],
+				["gemini-3-flash", "2027-03-17"],
+				["gemini-3-1-flash-lite", "2027-03-17"]
+			],
+			"default_context_window": 131072
+		},
+		// ----------------------------------------------------------------------
+		// Nebius Token Factory — the Nebius service of llm_openai_api
+		// (services.nebius.json). OpenAI-compatible, org-prefixed IDs, so it
+		// runs only with its own key. New profiles carry the service's base URL
+		// and the same env-var key reference as the seeded ones.
+		// ----------------------------------------------------------------------
+		"llm_nebius": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_NEBIUS_KEY",
+			"module": "nebius",
+			"models_endpoint": "https://api.tokenfactory.nebius.com/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"require_api_key": true,
+			// Nebius runs open-weight models itself and resells no vendor API, so no
+			// third-party database describes its deployments (see llm_gmi_cloud).
+			"allowed_sources": ["provider"],
+			"extra_profile_fields": {
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			},
+			"model_filter": {
+				"include_prefixes": ["meta-llama/", "Qwen/", "deepseek-ai/", "moonshotai/", "zai-org/", "MiniMaxAI/", "openai/", "google/", "mistralai/", "nvidia/", "NousResearch/"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embed", "rerank", "guard", "tts", "whisper", "audio", "image", "video", "flux", "diffusion", "ocr"]
+			},
+			// See llm_gmi_cloud: protected until the first run's list has been reviewed.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["llama-3-3-70b", "2027-03-17"],
+				["qwen3-235b", "2027-03-17"],
+				["deepseek-v3", "2027-03-17"]
+			],
+			"default_context_window": 131072
+		},
+		// ----------------------------------------------------------------------
+		// Vision nodes — same APIs and keys as their text siblings, but a new
+		// model is added only when a source reports it accepts images
+		// (model_filter.require_capabilities), and it is checked with an image.
+		// Profiles use native versioned IDs that fallback sources do not list,
+		// so these providers run only with their own key (require_api_key).
+		// ----------------------------------------------------------------------
+		"llm_vision_openai": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_OPENAI_KEY",
+			"module": "vision_openai",
+			"models_endpoint": "https://api.openai.com/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "vision",
+			"require_api_key": true,
+			// Same completion cap as llm_openai.
+			"output_limit_below_context": true,
+			"model_filter": {
+				"include_prefixes": ["gpt-", "o1", "o3", "o4", "chatgpt-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embedding", "tts", "whisper", "dall-e", "audio", "realtime", "davinci", "babbage", "curie", "ada", "instruct", "search", "transcribe", "codex", "image"],
+				// Responses-API-only, see llm_openai.
+				"exclude_exact": ["o1-pro", "gpt-5-pro", "gpt-5.2-pro", "gpt-5.5-pro"],
+				"require_capabilities": ["vision"]
+			},
+			"exclude_dated_snapshots": true,
+			"default_context_window": 128000,
+			// See llm_openai: the chat-latest windows were once hand-filled with the output limit.
+			"token_limit_overrides": {
+				"gpt-5-chat-latest": 128000,
+				"gpt-5.1-chat-latest": 128000,
+				"gpt-5.2-chat-latest": 128000,
+				"gpt-5.3-chat-latest": 128000
+			}
+		},
+		"llm_vision_gemini": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_GEMINI_KEY",
+			"module": "vision_gemini",
+			"models_endpoint": "https://generativelanguage.googleapis.com/v1beta/models",
+			"auth_in_url": true,
+			"smoke_test": "vision",
+			"require_api_key": true,
+			"model_filter": {
+				"include_prefixes": ["gemini-", "models/gemini-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embedding", "aqa", "attribution", "tts", "audio", "live", "computer-use", "robotics"],
+				"require_capabilities": ["vision"]
+			}
+		},
+		// accessibility_describe describes camera images for blind users with Gemini.
+		// Its profiles store bare IDs ("gemini-2.5-flash") rather than "models/...".
+		"accessibility_describe": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_GEMINI_KEY",
+			"module": "vision_gemini",
+			"models_endpoint": "https://generativelanguage.googleapis.com/v1beta/models",
+			"auth_in_url": true,
+			"smoke_test": "vision",
+			"require_api_key": true,
+			"model_filter": {
+				"include_prefixes": ["gemini-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embedding", "aqa", "attribution", "tts", "audio", "live", "computer-use", "robotics", "image"],
+				"require_capabilities": ["vision"]
+			}
+		},
+		"llm_vision_mistral": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_MISTRAL_KEY",
+			"module": "vision_mistral",
+			"models_endpoint": "https://api.mistral.ai/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "vision",
+			"require_api_key": true,
+			"model_filter": {
+				// Mistral reports capabilities.vision itself; the prefixes only keep
+				// the chat families, and "latest" drops the moving aliases of the
+				// versioned IDs this node stores.
+				"include_prefixes": ["mistral-", "ministral-", "pixtral-", "magistral-", "devstral-", "codestral-"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["latest", "embed", "moderation", "ocr", "voxtral", "realtime", "transcribe", "tts"],
+				"require_capabilities": ["vision"]
+			}
 		}
 	},
 	// --------------------------------------------------------------------------
@@ -609,6 +790,11 @@
 		"claude-": "Claude ",
 		"gemini-": "Gemini ",
 		"mistral-": "Mistral ",
+		"ministral-": "Ministral ",
+		"magistral-": "Magistral ",
+		"codestral-": "Codestral ",
+		"devstral-": "Devstral ",
+		"pixtral-": "Pixtral ",
 		"deepseek-": "DeepSeek ",
 		"grok-": "Grok ",
 		"sonar": "Sonar",

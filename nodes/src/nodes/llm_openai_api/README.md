@@ -94,6 +94,22 @@ Anything else falls through to the shared LLM base's default retry and mapping l
 test server with a mocked `langchain_openai`, so no real API key is required.
 `ROCKETRIDE_MOCK` must point to `nodes/test/mocks`.
 
+### Model sync (Nebius service only)
+
+The profiles in `services.nebius.json` are maintained by the `sync_models` tooling
+(`llm_nebius` provider, `ROCKETRIDE_NEBIUS_KEY`), which reads Nebius Token Factory's
+own model list. New profiles are written with the Nebius base URL and the same
+`${ROCKETRIDE_NEBIUS_KEY}` reference the existing ones use.
+
+Token limits come only from Nebius: it runs open-weight models on its own hardware,
+so the context window is its choice, and the same model is served with a different
+window by every other host. The sync runs **only** with that key, because Nebius IDs
+(`Qwen/Qwen3-235B-A22B`) appear in no other catalogue and a keyless run would mark
+these profiles deprecated — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
+The generic `services.json` profiles are **not** synced: the model is whatever the
+user types for their own OpenAI-compatible endpoint.
+
 ---
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->

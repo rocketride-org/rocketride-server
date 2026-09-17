@@ -12,7 +12,7 @@ the standard chat_openai_compat smoke test works without any adaptation.
 
 from __future__ import annotations
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from providers.base import CloudProvider
 
@@ -50,11 +50,44 @@ class MistralProvider(CloudProvider):
         """
         Fetch available models from Mistral via its OpenAI-compatible endpoint.
 
+        Mistral's model card carries a ``capabilities`` object (``vision``,
+        ``completion_chat``, ...). The openai SDK keeps it as an extra field; it is
+        copied onto the entry so capability filters can use the provider's answer.
+
         Args:
             client: openai.OpenAI instance pointing at the Mistral API
 
         Returns:
-            List of model dicts with {"id": str}
+            List of model dicts with {"id": str} and, when reported, {"capabilities": dict}
         """
         response = client.models.list()  # type: ignore[attr-defined]
-        return [{'id': m.id} for m in response.data]
+        result = []
+        for m in response.data:
+            entry: Dict[str, Any] = {'id': m.id}
+            capabilities = _as_dict(getattr(m, 'capabilities', None))
+            if capabilities is not None:
+                entry['capabilities'] = capabilities
+            result.append(entry)
+        return result
+
+
+def _as_dict(value: Any) -> Optional[Dict[str, Any]]:
+    """
+    Return an SDK extra field as a plain dict.
+
+    Args:
+        value: A dict, a pydantic model, or anything else
+
+    Returns:
+        The dict, or None when the value is not dict-shaped
+    """
+    if isinstance(value, dict):
+        return value
+    dump = getattr(value, 'model_dump', None)
+    if callable(dump):
+        try:
+            dumped = dump()
+        except Exception:
+            return None
+        return dumped if isinstance(dumped, dict) else None
+    return None
