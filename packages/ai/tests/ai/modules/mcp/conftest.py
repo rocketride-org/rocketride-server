@@ -1,4 +1,5 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
+import copy
 import pathlib
 import sys
 
@@ -38,8 +39,12 @@ EXPECTED_TOOL_NAMES = (
     'deploy_add',
     'deploy_list',
     'deploy_status',
+    'deploy_versions',
+    'deploy_to_team',
+    'deploy_set_schedule',
+    'deploy_enable',
+    'deploy_disable',
     'deploy_remove',
-    'deploy_update',
     # visibility
     'monitor',
     'list_running_pipelines',
@@ -56,6 +61,10 @@ EXPECTED_TOOL_NAMES = (
 
 # Tools that act on the engine host itself, offered only by local engines.
 LOCAL_ENGINE_ONLY_TOOL_NAMES = ('send_files',)
+
+# Deploy records in the shapes rocketride.types.deploy declares.
+FAKE_ARTIFACT = {'version': 3, 'pipelineName': 'demo', 'sha256': 'abc'}
+FAKE_DEPLOYMENT = {'projectId': 'proj-1', 'teamId': 'team-1', 'version': 3, 'state': 'enabled', 'schedules': {}}
 
 
 class FakeEngineClient:
@@ -74,7 +83,6 @@ class FakeEngineClient:
         base_url='http://localhost:5565',
         fs_stat_result=None,
         fs_get_url_result='https://signed.example/f?sig=abc',
-        deploy_status_result=None,
         env_keys=None,
         auth=None,
     ):
@@ -96,23 +104,32 @@ class FakeEngineClient:
         self.sent_files = []
         self.saved_templates = []
         self._template_store = {}
-        self.deploys_added = []
         self.list_tasks_calls = 0
-        self.deploy_list_calls = 0
+        # -- deployments --
+        # Every deploy seam call is recorded as {'op': <SDK method>, **args},
+        # and answered from deploy_results[<SDK method>] (an exception
+        # instance there is raised instead). Default shapes mirror
+        # rocketride.types.deploy: list/versions are list envelopes.
+        self.deploy_calls = []
+        self.deploy_results = {
+            'add': {'artifact': dict(FAKE_ARTIFACT)},
+            'list': {'rows': [dict(FAKE_DEPLOYMENT)], 'total': 1, 'page': 1, 'pageSize': 50},
+            'get': dict(FAKE_DEPLOYMENT),
+            'versions': {'rows': [dict(FAKE_ARTIFACT), {'version': 2}], 'total': 2, 'page': 1, 'pageSize': 50},
+            'deploy': dict(FAKE_DEPLOYMENT),
+            'set_schedule': dict(FAKE_DEPLOYMENT),
+            'enable': dict(FAKE_DEPLOYMENT),
+            'disable': {**FAKE_DEPLOYMENT, 'state': 'disabled'},
+            'remove': {**FAKE_DEPLOYMENT, 'state': 'removed'},
+        }
         self._fs_stat_result = (
             fs_stat_result
             if fs_stat_result is not None
             else {'exists': True, 'type': 'file', 'size': 12, 'modified': 1700000000}
         )
         self._fs_get_url_result = fs_get_url_result
-        self._deploy_status_result = (
-            deploy_status_result if deploy_status_result is not None else {'project_id': 'dep-1', 'state': 'active'}
-        )
         self.fs_stat_calls = []
         self.fs_get_url_calls = []
-        self.deploy_status_calls = []
-        self.deploy_removed = []
-        self.deploy_updated = []
         self.add_monitor_calls = []
         self.log_chapters_result = {'chapters': [], 'horizonSeq': 0}
         self.log_read_result = {'events': [], 'nextSeq': None}
@@ -232,13 +249,49 @@ class FakeEngineClient:
         # pipeline dict saved above -- a symmetric, unwrapped round-trip.
         return self._template_store.get(template_id)
 
-    async def deploy_add(self, pipeline, schedule=None):
-        self.deploys_added.append({'pipeline': pipeline, 'schedule': schedule})
-        return {'project_id': 'dep-1'}
+    # Signatures match the WsEngineClient seam exactly (pinned by
+    # test_deploy_sdk_contract.py), so this fake cannot drift from the seam.
+    def _deploy(self, op, **kwargs):
+        self.deploy_calls.append({'op': op, **kwargs})
+        result = self.deploy_results[op]
+        if isinstance(result, BaseException):
+            raise result
+        return copy.deepcopy(result)
 
-    async def deploy_list(self):
-        self.deploy_list_calls += 1
-        return [{'project_id': 'dep-1'}]
+    @property
+    def deploy_list_calls(self):
+        return sum(1 for call in self.deploy_calls if call['op'] == 'list')
+
+    async def deploy_add(self, pipeline, *, comment=None, deploy_to=None):
+        return self._deploy('add', pipeline=pipeline, comment=comment, deploy_to=deploy_to)
+
+    async def deploy_list(self, *, team_id=None, page=None, page_size=None, search=None, filters=None, sort=None):
+        return self._deploy(
+            'list', team_id=team_id, page=page, page_size=page_size, search=search, filters=filters, sort=sort
+        )
+
+    async def deploy_get(self, project_id, team_id):
+        return self._deploy('get', project_id=project_id, team_id=team_id)
+
+    async def deploy_versions(self, project_id, *, page=None, page_size=None):
+        return self._deploy('versions', project_id=project_id, page=page, page_size=page_size)
+
+    async def deploy_deploy(self, project_id, version, team_id):
+        return self._deploy('deploy', project_id=project_id, version=version, team_id=team_id)
+
+    async def deploy_set_schedule(self, project_id, source_id, schedule, team_id, *, ttl=None):
+        return self._deploy(
+            'set_schedule', project_id=project_id, source_id=source_id, schedule=schedule, team_id=team_id, ttl=ttl
+        )
+
+    async def deploy_enable(self, project_id, team_id):
+        return self._deploy('enable', project_id=project_id, team_id=team_id)
+
+    async def deploy_disable(self, project_id, team_id):
+        return self._deploy('disable', project_id=project_id, team_id=team_id)
+
+    async def deploy_remove(self, project_id, team_id):
+        return self._deploy('remove', project_id=project_id, team_id=team_id)
 
     async def get_task_status(self, token):
         self.get_task_status_calls.append(token)
@@ -257,16 +310,6 @@ class FakeEngineClient:
     async def fs_get_url(self, path, expires_in=3600, download_name=None):
         self.fs_get_url_calls.append({'path': path, 'expires_in': expires_in, 'download_name': download_name})
         return self._fs_get_url_result
-
-    async def deploy_status(self, project_id):
-        self.deploy_status_calls.append(project_id)
-        return dict(self._deploy_status_result)
-
-    async def deploy_remove(self, project_id):
-        self.deploy_removed.append(project_id)
-
-    async def deploy_update(self, project_id, pipeline=None, schedule=None):
-        self.deploy_updated.append({'project_id': project_id, 'pipeline': pipeline, 'schedule': schedule})
 
     async def add_monitor(self, key, types):
         self.add_monitor_calls.append((key, types))

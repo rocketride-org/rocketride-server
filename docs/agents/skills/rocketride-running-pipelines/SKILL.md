@@ -76,7 +76,8 @@ equivalents. Secrets stay in `${ROCKETRIDE_*}` env vars (loaded from `.env`), ne
 ## Gate D — after a successful run (optional, menu)
 > Run succeeded. Result: <summary>. What next? (save to cloud / publish as an app / nothing / debug)
 Only act on an explicit choice. Mapping: save to cloud → `save_template`; publish →
-`deploy_add` (manage later with `deploy_list`/`deploy_status`/`deploy_update`/`deploy_remove`).
+`deploy_add` then `deploy_to_team` (manage later with `deploy_list`/`deploy_status`/`deploy_set_schedule`/
+`deploy_disable`/`deploy_remove`).
 Saving / publishing is billable / public — treat like an irreversible action (Waiting = STOP).
 
 ## Red flags

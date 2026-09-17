@@ -1,5 +1,6 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 import asyncio
+import inspect
 
 import pytest
 
@@ -24,32 +25,26 @@ def test_make_engine_client_requires_auth(monkeypatch):
 
 
 class _FakeDeployApi:
-    """Stand-in for RocketRideClient.deploy (cached_property sub-API)."""
+    """Stand-in for RocketRideClient.deploy (cached_property sub-API).
+
+    Accepts ANY method name and records each call as ``(method, args,
+    kwargs)`` without judging it -- the drift guard below checks every
+    recorded call against the real ``rocketride.deploy.DeployApi``, so a
+    fake with hand-written signatures cannot mask a seam/SDK mismatch.
+    """
 
     def __init__(self) -> None:
-        self.add_calls = []
-        self.list_calls = 0
-        self.status_calls = []
-        self.remove_calls = []
-        self.update_calls = []
+        self.calls = []
 
-    async def add(self, pipeline, *, schedule=None) -> dict:
-        self.add_calls.append({'pipeline': pipeline, 'schedule': schedule})
-        return {'project_id': 'dep-1'}
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(name)
 
-    async def list(self) -> list:
-        self.list_calls += 1
-        return [{'project_id': 'dep-1'}]
+        async def _call(*args, **kwargs):
+            self.calls.append((name, args, kwargs))
+            return {'sdk': name}
 
-    async def status(self, project_id) -> dict:
-        self.status_calls.append(project_id)
-        return {'project_id': project_id, 'state': 'active'}
-
-    async def remove(self, project_id) -> None:
-        self.remove_calls.append(project_id)
-
-    async def update(self, project_id, *, pipeline=None, schedule=None) -> None:
-        self.update_calls.append({'project_id': project_id, 'pipeline': pipeline, 'schedule': schedule})
+        return _call
 
 
 class _FakeEventSession:
@@ -459,35 +454,6 @@ async def test_get_template_calls_sdk_with_id():
     assert result == {'template_id': 'tpl-1'}
 
 
-async def test_deploy_add_passes_schedule_as_keyword():
-    """Footgun: client.deploy.add(pipeline, schedule=schedule) — schedule is keyword-only."""
-    client, fake = _make_client_with_fake()
-    pipeline = {'components': []}
-
-    result = await client.deploy_add(pipeline, schedule='0/15 * * * *')
-
-    assert fake.deploy.add_calls == [{'pipeline': pipeline, 'schedule': '0/15 * * * *'}]
-    assert result == {'project_id': 'dep-1'}
-
-
-async def test_deploy_add_defaults_schedule_to_none():
-    client, fake = _make_client_with_fake()
-
-    await client.deploy_add({'components': []})
-
-    assert fake.deploy.add_calls == [{'pipeline': {'components': []}, 'schedule': None}]
-
-
-async def test_deploy_list_calls_sdk():
-    """Footgun: seam calls client.deploy.list() (sub-API), not a top-level method."""
-    client, fake = _make_client_with_fake()
-
-    result = await client.deploy_list()
-
-    assert fake.deploy.list_calls == 1
-    assert result == [{'project_id': 'dep-1'}]
-
-
 async def test_get_task_status_calls_sdk_with_token():
     client, fake = _make_client_with_fake()
 
@@ -523,43 +489,189 @@ async def test_fs_get_url_defaults_expires_in_and_download_name():
     assert fake.fs_get_url_calls == [{'path': 'a/b.txt', 'expires_in': 3600, 'download_name': None}]
 
 
-async def test_deploy_status_calls_sdk_namespace():
-    """Footgun: seam calls client.deploy.status(project_id) (sub-API), not a top-level method."""
+# --- deployments: seam -> SDK ---------------------------------------------------
+
+_PIPE = {'name': 'demo', 'project_id': 'proj-1', 'components': []}
+
+
+@pytest.mark.parametrize(
+    ('call', 'expected'),
+    [
+        (
+            lambda c: c.deploy_add(_PIPE, comment='note', deploy_to='team-1'),
+            ('add', (), {'pipeline': _PIPE, 'comment': 'note', 'deploy_to': 'team-1'}),
+        ),
+        (
+            lambda c: c.deploy_add(_PIPE),
+            ('add', (), {'pipeline': _PIPE, 'comment': None, 'deploy_to': None}),
+        ),
+        (
+            lambda c: c.deploy_list(team_id='team-1', page=2, page_size=10, search='demo', filters={'a': 1}, sort=[]),
+            (
+                'list',
+                (),
+                {'team_id': 'team-1', 'page': 2, 'page_size': 10, 'search': 'demo', 'filters': {'a': 1}, 'sort': []},
+            ),
+        ),
+        (
+            lambda c: c.deploy_list(),
+            (
+                'list',
+                (),
+                {'team_id': None, 'page': None, 'page_size': None, 'search': None, 'filters': None, 'sort': None},
+            ),
+        ),
+        (
+            lambda c: c.deploy_get('proj-1', 'team-1'),
+            ('get', (), {'project_id': 'proj-1', 'team_id': 'team-1'}),
+        ),
+        (
+            lambda c: c.deploy_versions('proj-1', page=1, page_size=5),
+            ('versions', (), {'project_id': 'proj-1', 'page': 1, 'page_size': 5}),
+        ),
+        (
+            lambda c: c.deploy_deploy('proj-1', 3, 'team-1'),
+            ('deploy', (), {'project_id': 'proj-1', 'version': 3, 'team_id': 'team-1'}),
+        ),
+        (
+            lambda c: c.deploy_set_schedule('proj-1', 'webhook_1', '0 * * * *', 'team-1', ttl=60),
+            (
+                'set_schedule',
+                (),
+                {
+                    'project_id': 'proj-1',
+                    'source_id': 'webhook_1',
+                    'schedule': '0 * * * *',
+                    'team_id': 'team-1',
+                    'ttl': 60,
+                },
+            ),
+        ),
+        (
+            lambda c: c.deploy_enable('proj-1', 'team-1'),
+            ('enable', (), {'project_id': 'proj-1', 'team_id': 'team-1'}),
+        ),
+        (
+            lambda c: c.deploy_disable('proj-1', 'team-1'),
+            ('disable', (), {'project_id': 'proj-1', 'team_id': 'team-1'}),
+        ),
+        (
+            lambda c: c.deploy_remove('proj-1', 'team-1'),
+            ('remove', (), {'project_id': 'proj-1', 'team_id': 'team-1'}),
+        ),
+    ],
+)
+async def test_deploy_seam_forwards_to_the_sdk_namespace(call, expected):
+    """Each seam method is one ``client.deploy.<method>`` call, arguments by
+    keyword (a reordered SDK signature then fails loudly instead of swapping
+    ids), result returned verbatim.
+    """
     client, fake = _make_client_with_fake()
 
-    result = await client.deploy_status('dep-1')
+    result = await call(client)
 
-    assert fake.deploy.status_calls == ['dep-1']
-    assert result == {'project_id': 'dep-1', 'state': 'active'}
+    assert fake.deploy.calls == [expected]
+    assert result == {'sdk': expected[0]}
 
 
-async def test_deploy_remove_calls_sdk_namespace():
-    """Footgun: seam calls client.deploy.remove(project_id) (sub-API), not a top-level method."""
+# --- deployments: SDK drift guard -------------------------------------------------
+#
+# The MCP deploy tools were once written against a deploy API that deploy-2
+# (#1764) had already removed: every call raised TypeError/AttributeError in
+# production while the suite passed against fakes shaped like the old API.
+# These guards pin the seam to the REAL SDK and the conftest fake to the seam.
+
+# One sample per seam parameter name; seam parameters share the SDK's names.
+_DEPLOY_SEAM_SAMPLES = {
+    'pipeline': _PIPE,
+    'comment': 'note',
+    'deploy_to': 'team-1',
+    'project_id': 'proj-1',
+    'team_id': 'team-1',
+    'version': 3,
+    'source_id': 'webhook_1',
+    'schedule': '*/15 * * * *',
+    'ttl': 600,
+    'page': 2,
+    'page_size': 10,
+    'search': 'demo',
+    'filters': {'state': 'enabled'},
+    'sort': [{'field': 'updatedAt', 'dir': 'desc'}],
+}
+
+
+def _deploy_seam_methods():
+    from ai.modules.mcp.engine import WsEngineClient
+
+    return sorted(
+        name for name, fn in inspect.getmembers(WsEngineClient, inspect.isfunction) if name.startswith('deploy_')
+    )
+
+
+def _param_shape(fn):
+    """Parameter names, kinds and defaults, ignoring annotations."""
+    return [(p.name, p.kind, p.default) for p in inspect.signature(fn).parameters.values() if p.name != 'self']
+
+
+def test_deploy_seam_methods_are_discovered():
+    assert len(_deploy_seam_methods()) >= 9
+
+
+@pytest.mark.parametrize('seam_method', _deploy_seam_methods())
+async def test_deploy_seam_calls_exist_on_the_real_sdk(seam_method):
+    """Drift guard: every SDK call a deploy seam method makes must name a real
+    ``rocketride.deploy.DeployApi`` method and bind to its signature, with
+    every seam argument arriving under the same parameter name.
+    """
+    from ai.modules.mcp.engine import WsEngineClient
+    from rocketride.deploy import DeployApi
+
+    params = [name for name, _, _ in _param_shape(getattr(WsEngineClient, seam_method))]
+    unknown = [name for name in params if name not in _DEPLOY_SEAM_SAMPLES]
+    assert not unknown, f'add sample values for new {seam_method} parameters: {unknown}'
     client, fake = _make_client_with_fake()
 
-    result = await client.deploy_remove('dep-1')
+    await getattr(client, seam_method)(**{name: _DEPLOY_SEAM_SAMPLES[name] for name in params})
 
-    assert fake.deploy.remove_calls == ['dep-1']
-    assert result is None
+    assert len(fake.deploy.calls) == 1, f'{seam_method} must make exactly one SDK deploy call'
+    method, args, kwargs = fake.deploy.calls[0]
+    sdk_fn = getattr(DeployApi, method, None)
+    assert not method.startswith('_') and inspect.iscoroutinefunction(sdk_fn), (
+        f'{seam_method} calls client.deploy.{method}(), which rocketride.deploy.DeployApi does not have'
+    )
+    try:
+        bound = inspect.signature(sdk_fn).bind(None, *args, **kwargs)
+    except TypeError as exc:
+        pytest.fail(
+            f'{seam_method} calls client.deploy.{method}(*{args!r}, **{kwargs!r}), which does not bind to '
+            f'DeployApi.{method}{inspect.signature(sdk_fn)}: {exc}'
+        )
+    for name in params:
+        assert bound.arguments.get(name) == _DEPLOY_SEAM_SAMPLES[name], (
+            f'{seam_method} does not pass {name!r} through to DeployApi.{method}'
+        )
 
 
-async def test_deploy_update_passes_pipeline_and_schedule_as_keywords():
-    """Footgun: client.deploy.update(project_id, pipeline=..., schedule=...) — keyword-only kwargs."""
-    client, fake = _make_client_with_fake()
-    pipeline = {'components': []}
+def test_deploy_seam_protocol_and_fake_match_the_implementation():
+    """The ``EngineClient`` protocol and the conftest ``FakeEngineClient`` must
+    declare exactly the deploy methods ``WsEngineClient`` implements, with the
+    same parameters -- tool tests run against the fake, so a stale fake is how
+    the old API survived.
+    """
+    from ai.modules.mcp.engine import EngineClient, WsEngineClient
 
-    result = await client.deploy_update('dep-1', pipeline=pipeline, schedule='0 * * * *')
+    from .conftest import FakeEngineClient
 
-    assert fake.deploy.update_calls == [{'project_id': 'dep-1', 'pipeline': pipeline, 'schedule': '0 * * * *'}]
-    assert result is None
-
-
-async def test_deploy_update_defaults_pipeline_and_schedule_to_none():
-    client, fake = _make_client_with_fake()
-
-    await client.deploy_update('dep-1')
-
-    assert fake.deploy.update_calls == [{'project_id': 'dep-1', 'pipeline': None, 'schedule': None}]
+    seam = _deploy_seam_methods()
+    for other in (EngineClient, FakeEngineClient):
+        declared = sorted(
+            name for name, fn in inspect.getmembers(other, inspect.isfunction) if name.startswith('deploy_')
+        )
+        assert declared == seam, other.__name__
+        for name in seam:
+            assert _param_shape(getattr(other, name)) == _param_shape(getattr(WsEngineClient, name)), (
+                f'{other.__name__}.{name}'
+            )
 
 
 def test_base_url_normalizes_scheme_and_strips_trailing_slash():

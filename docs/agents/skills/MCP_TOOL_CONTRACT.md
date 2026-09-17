@@ -2,7 +2,7 @@
 
 The tool-name/result-shape contract between these skills and the RocketRide HTTP MCP server.
 Frozen against `rocketride-server` `origin/develop @ eb67ddea` (module
-`packages/ai/src/ai/modules/mcp/`, 27 tools). The skills reference **only** names and shapes in
+`packages/ai/src/ai/modules/mcp/`; deploy tools updated to the deploy-2 SDK API, 33 tools). The skills reference **only** names and shapes in
 this file; anything not listed here does not exist — never invent a tool.
 
 ## Result envelope (every tool)
@@ -58,7 +58,10 @@ chapters/console but **empty traces**.
 | `store_read` / `store_list` / `store_stat` | Object store access (read is inline and uncapped — prefer `stat` + URL for big objects). |
 | `store_get_url` | Signed URL — artifact-by-reference for large results. |
 | `save_template` / `load_template` | Gate D "save to cloud". |
-| `deploy_add` / `deploy_list` / `deploy_status` / `deploy_remove` / `deploy_update` | Gate D "publish" + deployment lifecycle. |
+| `deploy_add` | Gate D "publish": registers the pipeline (needs `name` + `project_id`) as the next immutable version → `artifact.version`. Runs nothing by itself. |
+| `deploy_to_team` | Point a team (`team_id`, or `"@me"`) at a `version` — first deploy, promotion and rollback. `deploy_add`'s `deploy_to` does this in the same call. |
+| `deploy_list` / `deploy_status` / `deploy_versions` | Read deployments (paged `{deployments, count, total, page, pageSize}`), one team's deployment, a project's versions. |
+| `deploy_set_schedule` / `deploy_enable` / `deploy_disable` / `deploy_remove` | Per-team lifecycle, addressed by `project_id` + `team_id`: cron per source (`"manual"` clears), kill switch, soft remove. |
 
 ## Integrations / credentials
 

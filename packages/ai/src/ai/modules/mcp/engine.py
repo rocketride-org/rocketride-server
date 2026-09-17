@@ -48,16 +48,35 @@ class EngineClient(Protocol):
     async def fs_list_dir(self, path: str = '') -> Dict[str, Any]: ...
     async def save_template(self, template_id: str, pipeline: dict) -> None: ...
     async def get_template(self, template_id: str) -> Dict[str, Any]: ...
-    async def deploy_add(self, pipeline: dict, schedule: Optional[str] = None) -> Dict[str, Any]: ...
-    async def deploy_list(self) -> List[Dict[str, Any]]: ...
     async def get_task_status(self, token: str) -> Dict[str, Any]: ...
     async def fs_stat(self, path: str) -> Dict[str, Any]: ...
     async def fs_get_url(self, path: str, expires_in: int = 3600, download_name: Optional[str] = None) -> str: ...
-    async def deploy_status(self, project_id: str) -> Dict[str, Any]: ...
-    async def deploy_remove(self, project_id: str) -> None: ...
-    async def deploy_update(
-        self, project_id: str, pipeline: Optional[dict] = None, schedule: Optional[str] = None
-    ) -> None: ...
+    # Deployments: one method per ``rocketride.deploy.DeployApi`` call, same
+    # parameter names (pinned against the real SDK by test_engine.py).
+    async def deploy_add(
+        self, pipeline: dict, *, comment: Optional[str] = None, deploy_to: Optional[str] = None
+    ) -> Dict[str, Any]: ...
+    async def deploy_list(
+        self,
+        *,
+        team_id: Optional[str] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        search: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        sort: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]: ...
+    async def deploy_get(self, project_id: str, team_id: str) -> Dict[str, Any]: ...
+    async def deploy_versions(
+        self, project_id: str, *, page: Optional[int] = None, page_size: Optional[int] = None
+    ) -> Dict[str, Any]: ...
+    async def deploy_deploy(self, project_id: str, version: int, team_id: str) -> Dict[str, Any]: ...
+    async def deploy_set_schedule(
+        self, project_id: str, source_id: str, schedule: Optional[str], team_id: str, *, ttl: Optional[int] = None
+    ) -> Dict[str, Any]: ...
+    async def deploy_enable(self, project_id: str, team_id: str) -> Dict[str, Any]: ...
+    async def deploy_disable(self, project_id: str, team_id: str) -> Dict[str, Any]: ...
+    async def deploy_remove(self, project_id: str, team_id: str) -> Dict[str, Any]: ...
     async def log_chapters(self, project_id: str, source: str, team_id: str = '') -> Dict[str, Any]: ...
     async def log_read(
         self,
@@ -236,12 +255,6 @@ class WsEngineClient:
     async def get_template(self, template_id: str) -> Dict[str, Any]:
         return await self._guarded(lambda: self._client.get_template(template_id))
 
-    async def deploy_add(self, pipeline: dict, schedule: Optional[str] = None) -> Dict[str, Any]:
-        return await self._guarded(lambda: self._client.deploy.add(pipeline, schedule=schedule))
-
-    async def deploy_list(self) -> List[Dict[str, Any]]:
-        return await self._guarded(lambda: self._client.deploy.list())
-
     async def get_task_status(self, token: str) -> Dict[str, Any]:
         return await self._guarded(lambda: self._client.get_task_status(token))
 
@@ -253,16 +266,67 @@ class WsEngineClient:
             lambda: self._client.fs_get_url(path, expires_in=expires_in, download_name=download_name)
         )
 
-    async def deploy_status(self, project_id: str) -> Dict[str, Any]:
-        return await self._guarded(lambda: self._client.deploy.status(project_id))
+    # -- deployments ----------------------------------------------------------
+    # Thin passthroughs to ``client.deploy`` (rocketride.deploy.DeployApi).
+    # Arguments go by keyword under the SDK's own parameter names, so a
+    # renamed or reordered SDK parameter fails loudly instead of silently
+    # swapping ids; test_engine.py binds every call to the real signatures.
 
-    async def deploy_remove(self, project_id: str) -> None:
-        await self._guarded(lambda: self._client.deploy.remove(project_id))
+    async def deploy_add(
+        self, pipeline: dict, *, comment: Optional[str] = None, deploy_to: Optional[str] = None
+    ) -> Dict[str, Any]:
+        return await self._guarded(
+            lambda: self._client.deploy.add(pipeline=pipeline, comment=comment, deploy_to=deploy_to)
+        )
 
-    async def deploy_update(
-        self, project_id: str, pipeline: Optional[dict] = None, schedule: Optional[str] = None
-    ) -> None:
-        await self._guarded(lambda: self._client.deploy.update(project_id, pipeline=pipeline, schedule=schedule))
+    async def deploy_list(
+        self,
+        *,
+        team_id: Optional[str] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+        search: Optional[str] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        sort: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        return await self._guarded(
+            lambda: self._client.deploy.list(
+                team_id=team_id, page=page, page_size=page_size, search=search, filters=filters, sort=sort
+            )
+        )
+
+    async def deploy_get(self, project_id: str, team_id: str) -> Dict[str, Any]:
+        return await self._guarded(lambda: self._client.deploy.get(project_id=project_id, team_id=team_id))
+
+    async def deploy_versions(
+        self, project_id: str, *, page: Optional[int] = None, page_size: Optional[int] = None
+    ) -> Dict[str, Any]:
+        return await self._guarded(
+            lambda: self._client.deploy.versions(project_id=project_id, page=page, page_size=page_size)
+        )
+
+    async def deploy_deploy(self, project_id: str, version: int, team_id: str) -> Dict[str, Any]:
+        return await self._guarded(
+            lambda: self._client.deploy.deploy(project_id=project_id, version=version, team_id=team_id)
+        )
+
+    async def deploy_set_schedule(
+        self, project_id: str, source_id: str, schedule: Optional[str], team_id: str, *, ttl: Optional[int] = None
+    ) -> Dict[str, Any]:
+        return await self._guarded(
+            lambda: self._client.deploy.set_schedule(
+                project_id=project_id, source_id=source_id, schedule=schedule, team_id=team_id, ttl=ttl
+            )
+        )
+
+    async def deploy_enable(self, project_id: str, team_id: str) -> Dict[str, Any]:
+        return await self._guarded(lambda: self._client.deploy.enable(project_id=project_id, team_id=team_id))
+
+    async def deploy_disable(self, project_id: str, team_id: str) -> Dict[str, Any]:
+        return await self._guarded(lambda: self._client.deploy.disable(project_id=project_id, team_id=team_id))
+
+    async def deploy_remove(self, project_id: str, team_id: str) -> Dict[str, Any]:
+        return await self._guarded(lambda: self._client.deploy.remove(project_id=project_id, team_id=team_id))
 
     async def log_chapters(self, project_id: str, source: str, team_id: str = '') -> Dict[str, Any]:
         return await self._guarded(lambda: self._client.log.chapters(project_id, source, team_id=team_id))

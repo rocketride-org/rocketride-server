@@ -26,7 +26,9 @@ def register_all(registry: ToolRegistry) -> None:
     `send_files`), the capability
     tools (`store_read`, `store_list`, `store_stat`, `store_get_url`,
     `save_template`, `load_template`, `deploy_add`, `deploy_list`,
-    `deploy_status`, `deploy_remove`, `deploy_update`), the visibility tools
+    `deploy_status`, `deploy_versions`, `deploy_to_team`,
+    `deploy_set_schedule`, `deploy_enable`, `deploy_disable`,
+    `deploy_remove`), the visibility tools
     (`monitor`, `list_running_pipelines`), the DVR run-log tools
     (`log_chapters`, `log_read`, `log_traces`, `log_trace`), the node
     scaffolding tool (`scaffold_node`), and the
