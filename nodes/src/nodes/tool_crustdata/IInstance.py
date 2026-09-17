@@ -141,7 +141,7 @@ _PERSON_CONDITION_SCHEMA = _condition_schema(
     _PERSON_OPERATORS,
     entity='person',
     description=(
-        "Person filter operator. In addition to comparisons, '(.)' is contains matching without typo tolerance, "
+        "Person filter operator. In addition to comparisons, '(.)' is all-words matching without typo tolerance, "
         "'[.]' is exact phrase matching, 'has_all' matches required array values, and '(!)' negates a match."
     ),
 )
