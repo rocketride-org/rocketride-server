@@ -14,7 +14,7 @@
 	"description": [
 		"Cross-checks extracted financial numbers against the US SEC EDGAR ",
 		"company-concept API for a configured CIK, scoped to a filing period ",
-		"(form / fy / fp / end). Abstains (drops) the answer if there is no match."
+		"(form / fy / fp / start / end / frame). Abstains (drops) the answer if there is no match."
 	],
 	"icon": "util-guard.svg",
 	"documentation": "https://docs.rocketride.org/nodes/authoritative_overlay",
