@@ -54,15 +54,6 @@ const {
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
 const BUILD_DIR = path.join(BUILD_ROOT, 'shell');
-// Sibling outputs that are NOT the production bundle: the dev-flavor build
-// (RR_SHELL_FLAVOR=dev, stitched into BUILD_DIR by shell:bundle) and the dev
-// server's own output (rsbuild dev writes to disk and cleans its dist path, so
-// it gets a dir of its own — sharing BUILD_DIR let `shell:dev` delete the
-// bundle that shell:copy serves). Neither is mirrored; both are cleaned.
-const BUILD_SIDE_DIRS = [
-	path.join(BUILD_ROOT, 'shell-dev'),
-	path.join(BUILD_ROOT, 'shell-devserver'),
-];
 const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell');
 // The installable shell package (pack-shell, run by shell:bundle) lands in
 // static/clients/shell/shell.tgz — beside the python/typescript SDK
@@ -136,13 +127,7 @@ function makeBundleAction() {
 			const rootShell = path.join(path.dirname(DIST_ROOT), '.rocketride', 'shell');
 			const fs = require('fs');
 			const localShellReal = fs.existsSync(path.join(rootShell, 'shell.tgz')) && !fs.existsSync(path.join(rootShell, 'shell.tgz.stub'));
-			// The bundle's own artifact, not just its directory: a bare
-			// `exists(BUILD_DIR)` treats an emptied output dir as a cache hit,
-			// so a skipped rebuild hands shell:copy nothing to mirror and the
-			// served shell is deleted rather than refreshed. index.html is the
-			// file the engine boots from, so it is the one worth checking.
-			const bundledIndex = await exists(path.join(BUILD_DIR, 'index.html'));
-			if (!ctx.options.force && !changed && bundledIndex && localShellReal) {
+			if (!ctx.options.force && !changed && (await exists(BUILD_DIR)) && localShellReal) {
 				task.output = 'No changes detected';
 				return;
 			}
@@ -183,17 +168,6 @@ function makeBundleAction() {
 function makeCopyAction() {
 	return {
 		run: async (ctx, task) => {
-			// This is a MIRROR: whatever is missing from the source is deleted
-			// at the destination. An empty or half-written BUILD_DIR therefore
-			// does not copy "nothing" — it wipes the shell the engine serves,
-			// and the failure only surfaces later as a 503 from a running
-			// server. Refuse the sync instead, and say which step to run.
-			if (!(await exists(path.join(BUILD_DIR, 'index.html')))) {
-				throw new Error(
-					`shell:copy refused — no index.html in ${BUILD_DIR}. Mirroring it would delete the served shell in ${SERVER_STATIC_DIR}. Run: builder shell:build --force`,
-				);
-			}
-
 			// Exclude apps/ from mirror — app bundles are copied by their own
 			// tasks and must not be deleted when the shell syncs its build
 			// output. shell.tgz lives in static/clients/shell (packed there
@@ -294,7 +268,6 @@ const shellModule = {
 				description: 'Cleaning shell',
 				run: async (_ctx, task) => {
 					await removeDir(BUILD_DIR);
-					for (const dir of BUILD_SIDE_DIRS) await removeDir(dir);
 					await removeDir(SERVER_STATIC_DIR);
 					await removeDir(SERVER_CLIENTS_DIR);
 					await removeDir(path.join(APP_ROOT, 'dist'));
