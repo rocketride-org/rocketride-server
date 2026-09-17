@@ -33,6 +33,8 @@ from markers import (
     requires_minimax,
     requires_baidu_qianfan,
     requires_glm,
+    requires_gmi_cloud,
+    requires_nebius,
 )
 from core.patcher import get_profiles
 
@@ -43,9 +45,18 @@ from core.patcher import get_profiles
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent
 
 
-def _load_profiles(node_name: str) -> Dict[str, Any]:
-    """Load all non-deprecated profiles from a node's services.json."""
-    path = _REPO_ROOT / 'nodes' / 'src' / 'nodes' / node_name / 'services.json'
+def _load_profiles(node_name: str, file_name: str = 'services.json') -> Dict[str, Any]:
+    """
+    Load all non-deprecated profiles from one of a node's services files.
+
+    Args:
+        node_name: Node directory name
+        file_name: Services file inside it (a node may define several services)
+
+    Returns:
+        Profile key → profile dict
+    """
+    path = _REPO_ROOT / 'nodes' / 'src' / 'nodes' / node_name / file_name
     all_profiles = get_profiles(str(path))
     return {key: p for key, p in all_profiles.items() if isinstance(p, dict) and not p.get('deprecated')}
 
@@ -91,6 +102,16 @@ def _check_missing_models(
 
 
 def _fetch_openai_model_ids(api_key: str, base_url: str | None = None) -> Set[str]:
+    """
+    List model IDs from an OpenAI-compatible API.
+
+    Args:
+        api_key: API key for that endpoint
+        base_url: Endpoint base URL; None for OpenAI itself
+
+    Returns:
+        Set of model IDs
+    """
     import openai
 
     kwargs = {'api_key': api_key}
@@ -101,6 +122,15 @@ def _fetch_openai_model_ids(api_key: str, base_url: str | None = None) -> Set[st
 
 
 def _fetch_anthropic_model_ids(api_key: str) -> Set[str]:
+    """
+    List model IDs from the Anthropic API.
+
+    Args:
+        api_key: Anthropic API key
+
+    Returns:
+        Set of model IDs
+    """
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -108,6 +138,15 @@ def _fetch_anthropic_model_ids(api_key: str) -> Set[str]:
 
 
 def _fetch_gemini_model_ids(api_key: str) -> Set[str]:
+    """
+    List model names from the Gemini API.
+
+    Args:
+        api_key: Google AI Studio API key
+
+    Returns:
+        Set of model names (with the ``"models/"`` prefix)
+    """
     from google import genai  # type: ignore[import]
 
     client = genai.Client(api_key=api_key)
@@ -115,6 +154,15 @@ def _fetch_gemini_model_ids(api_key: str) -> Set[str]:
 
 
 def _fetch_mistral_model_ids(api_key: str) -> Set[str]:
+    """
+    List model IDs from the Mistral API.
+
+    Args:
+        api_key: Mistral API key
+
+    Returns:
+        Set of model IDs
+    """
     import openai
 
     client = openai.OpenAI(api_key=api_key, base_url='https://api.mistral.ai/v1')
@@ -142,6 +190,15 @@ def test_embedding_openai_profiles_exist_in_api():
     profiles = _load_profiles('embedding_openai')
     live_ids = _fetch_openai_model_ids(api_key)
     _check_missing_models(profiles, live_ids, 'embedding_openai')
+
+
+@requires_openai
+def test_vision_openai_profiles_exist_in_api():
+    """Every non-deprecated llm_vision_openai profile model ID must be in the live API."""
+    api_key = os.environ['ROCKETRIDE_OPENAI_KEY']
+    profiles = _load_profiles('llm_vision_openai')
+    live_ids = _fetch_openai_model_ids(api_key)
+    _check_missing_models(profiles, live_ids, 'llm_vision_openai')
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +259,24 @@ def test_gemini_profiles_can_actually_be_called():
     assert not retired, 'llm_gemini profiles the API says are retired:\n' + '\n'.join(retired)
 
 
+@requires_gemini
+def test_vision_gemini_profiles_exist_in_api():
+    """Every non-deprecated llm_vision_gemini profile model ID must be in the live API."""
+    api_key = os.environ['ROCKETRIDE_GEMINI_KEY']
+    profiles = _load_profiles('llm_vision_gemini')
+    live_ids = _fetch_gemini_model_ids(api_key)
+    _check_missing_models(profiles, live_ids, 'llm_vision_gemini')
+
+
+@requires_gemini
+def test_accessibility_describe_profiles_exist_in_api():
+    """Every non-deprecated accessibility_describe profile (bare IDs) must be in the live API."""
+    api_key = os.environ['ROCKETRIDE_GEMINI_KEY']
+    profiles = _load_profiles('accessibility_describe')
+    live_ids = {model_id.removeprefix('models/') for model_id in _fetch_gemini_model_ids(api_key)}
+    _check_missing_models(profiles, live_ids, 'accessibility_describe')
+
+
 # ---------------------------------------------------------------------------
 # Mistral
 # ---------------------------------------------------------------------------
@@ -214,6 +289,26 @@ def test_mistral_profiles_exist_in_api():
     profiles = _load_profiles('llm_mistral')
     live_ids = _fetch_mistral_model_ids(api_key)
     _check_missing_models(profiles, live_ids, 'llm_mistral')
+
+
+@requires_mistral
+def test_vision_mistral_profiles_exist_and_accept_images():
+    """Every non-deprecated llm_vision_mistral profile must be listed, and Mistral must report vision for it."""
+    import openai
+
+    from providers.mistral import MistralProvider
+
+    client = openai.OpenAI(api_key=os.environ['ROCKETRIDE_MISTRAL_KEY'], base_url='https://api.mistral.ai/v1')
+    cards = {entry['id']: entry for entry in MistralProvider({}).fetch_models(client)}
+    profiles = _load_profiles('llm_vision_mistral')
+    _check_missing_models(profiles, set(cards), 'llm_vision_mistral')
+
+    blind = sorted(
+        p['model']
+        for p in profiles.values()
+        if p.get('model') in cards and (cards[p['model']].get('capabilities') or {}).get('vision') is False
+    )
+    assert not blind, f'llm_vision_mistral profiles Mistral reports as not vision-capable: {blind}'
 
 
 # ---------------------------------------------------------------------------
@@ -325,3 +420,26 @@ def test_glm_profiles_exist_in_api():
         base_url='https://api.z.ai/api/paas/v4',
     )
     _check_missing_models(profiles, live_ids, 'llm_glm')
+
+
+# ---------------------------------------------------------------------------
+# Model hosts (GMI Cloud, Nebius)
+# ---------------------------------------------------------------------------
+
+
+@requires_gmi_cloud
+def test_gmi_cloud_profiles_exist_in_api():
+    """Every non-deprecated llm_gmi_cloud profile model ID must be in the live API."""
+    api_key = os.environ['ROCKETRIDE_GMI_CLOUD_KEY']
+    profiles = _load_profiles('llm_gmi_cloud')
+    live_ids = _fetch_openai_model_ids(api_key, base_url='https://api.gmi-serving.com/v1')
+    _check_missing_models(profiles, live_ids, 'llm_gmi_cloud')
+
+
+@requires_nebius
+def test_nebius_profiles_exist_in_api():
+    """Every non-deprecated Nebius profile (llm_openai_api/services.nebius.json) must be in the live API."""
+    api_key = os.environ['ROCKETRIDE_NEBIUS_KEY']
+    profiles = _load_profiles('llm_openai_api', 'services.nebius.json')
+    live_ids = _fetch_openai_model_ids(api_key, base_url='https://api.tokenfactory.nebius.com/v1/')
+    _check_missing_models(profiles, live_ids, 'llm_nebius')

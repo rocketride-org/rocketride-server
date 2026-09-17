@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
+from core.capabilities import lookup_capability
 from core.merger import (
     CALL_VERIFIED,
     _derive_title,
@@ -133,11 +134,18 @@ class CloudProvider(ABC):
 
     @property
     def token_overrides(self) -> Dict[str, int]:
+        """Model ID → ``modelTotalTokens`` overrides (``token_limit_overrides``)."""
         return self._config.get('token_limit_overrides', {})
 
     @property
     def model_filter(self) -> Dict[str, Any]:
+        """The provider's ``model_filter`` config block."""
         return self._config.get('model_filter', {})
+
+    @property
+    def required_capabilities(self) -> List[str]:
+        """Capabilities a newly discovered model must have (``model_filter.require_capabilities``)."""
+        return list(self.model_filter.get('require_capabilities', []))
 
     def get_api_key(self) -> Optional[str]:
         """Return the API key from the environment, or None if not set."""
@@ -233,6 +241,22 @@ class CloudProvider(ABC):
         """
         return model_id
 
+    def token_lookup_id(self, model_id: str) -> str:
+        """
+        Return the ID under which OpenRouter and LiteLLM file this model.
+
+        The default returns the ID unchanged. Override where the provider's ID is
+        not the one the databases use — a host serving another vendor's model
+        (``"openai/gpt-5.2"`` on GMI Cloud) maps it to the vendor's own ID.
+
+        Args:
+            model_id: Model ID as stored in services.json
+
+        Returns:
+            ID to look up in the third-party model databases
+        """
+        return model_id
+
     def litellm_to_native_model_id(self, litellm_bare_id: str) -> str:
         """
         Convert a bare LiteLLM model ID (provider prefix stripped) to the
@@ -290,6 +314,41 @@ class CloudProvider(ABC):
 
         return True
 
+    def model_capability(self, entry: Dict[str, Any], capability: str, model_sources: List[str]) -> Optional[bool]:
+        """
+        Tell whether a model has a capability.
+
+        The provider's own answer wins: a handler whose API reports capabilities
+        copies them onto the entry as ``entry["capabilities"]``. Otherwise
+        OpenRouter and LiteLLM are asked, keyed by the bare model ID.
+
+        Args:
+            entry: Model entry from the fetch step (``{"id": ..., ...}``)
+            capability: Capability name (e.g. ``"vision"``)
+            model_sources: Ordered source keys from the sync run
+
+        Returns:
+            True, False, or None when no source knows
+        """
+        reported = entry.get('capabilities')
+        if isinstance(reported, dict) and capability in reported:
+            return bool(reported[capability])
+        return lookup_capability(self.normalize_profile_model_id(entry['id']), capability, model_sources)
+
+    def has_capabilities(self, entry: Dict[str, Any], capabilities: List[str], model_sources: List[str]) -> bool:
+        """
+        Return True only when every capability is known to be present.
+
+        Args:
+            entry: Model entry from the fetch step
+            capabilities: Required capability names
+            model_sources: Ordered source keys from the sync run
+
+        Returns:
+            bool — an unknown answer counts as no
+        """
+        return all(self.model_capability(entry, cap, model_sources) is True for cap in capabilities)
+
     def sync(
         self,
         current_profiles: Dict[str, Any],
@@ -346,14 +405,27 @@ class CloudProvider(ABC):
         # where OpenRouter has no coverage and would wrongly deprecate all models).
         if self._config.get('use_openrouter') is False:
             model_sources = [s for s in model_sources if s != 'openrouter']
+        # A provider can also name the only sources it trusts: a host's org-prefixed IDs
+        # match other hosts' entries in LiteLLM, whose numbers are not this host's limits.
+        allowed_sources = self._config.get('allowed_sources')
+        if allowed_sources is not None:
+            model_sources = [s for s in model_sources if s in allowed_sources]
 
         api_key = self.get_api_key()
+
+        # Some nodes store IDs that no fallback source uses (org-prefixed host IDs,
+        # versioned vision IDs). Without the native API their profiles would be
+        # matched against the wrong catalogue, so such a provider is not synced at all.
+        if self._config.get('require_api_key') and not api_key:
+            report.warning = f'API key not set ({self.env_var}) — this provider is synced only through its own API.'
+            return report
 
         # --- Compute per-source availability for this provider ---
         # Enrichment availability: can the source contribute token data at all.
         # Discovery availability: can the source ADD new profiles (stricter — gated
         # by --allow-fallback-discovery for non-provider sources).
         def _enrichment_available(src: str) -> bool:
+            """True when the source can contribute token data for this provider."""
             if src == 'provider':
                 return bool(api_key)
             if src == 'openrouter':
@@ -365,6 +437,7 @@ class CloudProvider(ABC):
             return False
 
         def _discovery_available(src: str) -> bool:
+            """True when the source may add new profiles for this provider."""
             if not _enrichment_available(src):
                 return False
             if src == 'provider':
@@ -442,6 +515,19 @@ class CloudProvider(ABC):
         elif discovery_source is None:
             api_models = [m for m in api_models if m['id'] in existing_model_ids]
             discovery_skipped_due_to_strict_mode = True
+
+        # --- Capability gate ---
+        # A node that serves one kind of model (e.g. vision) takes a new model only
+        # when a source says it has that capability. Unknown counts as no, so a model
+        # too new for the databases is added by a later run. Existing profiles are
+        # never dropped here: absence from api_models would deprecate them.
+        required = self.required_capabilities
+        if required:
+            api_models = [
+                m
+                for m in api_models
+                if m['id'] in existing_model_ids or self.has_capabilities(m, required, model_sources)
+            ]
 
         # --- Smoke gate ---
         # Smoke tests run only when (a) discovery is enabled, (b) discovery_source
@@ -701,6 +787,7 @@ class CloudProvider(ABC):
             deprecation_source_key=deprecation_source_key,
             derive_title_fn=self.derive_title,
             output_limit_below_context=bool(self._config.get('output_limit_below_context', False)),
+            token_lookup_id_fn=self.token_lookup_id,
             retired_models=retired_models or {},
             revived_models=revived_models or set(),
         )
