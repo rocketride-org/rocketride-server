@@ -150,7 +150,7 @@ class TestSentenceChunker:
 
 
 class _CharTokenEncoder:
-    """Mock tiktoken encoder: 1 token per character, decode echoes 'x'*N.
+    """Mock tiktoken encoder with one UTF-8-safe token per character.
 
     Used purely to exercise TokenChunker without requiring tiktoken at
     test-collection time. This stubs the *external* SDK boundary, not a
@@ -158,13 +158,13 @@ class _CharTokenEncoder:
     """
 
     def encode(self, text):
-        return list(range(len(text)))
+        return [ord(character) for character in text]
 
     def decode(self, tokens, **kwargs):
-        return 'x' * len(tokens)
+        return ''.join(chr(token) for token in tokens)
 
     def decode_single_token_bytes(self, tid):
-        return b'x'
+        return chr(tid).encode('utf-8')
 
 
 class TestTokenChunker:
@@ -213,38 +213,130 @@ class TestTokenChunker:
         chunker = TokenChunker(chunk_size=10, chunk_overlap=0, encoding_name='cl100k_base')
         assert chunker._encoder is None
 
-    def test_start_char_incremental_tracking(self):
-        """Decode work must stay bounded: linear call count AND per-call size.
+    @pytest.mark.parametrize(
+        'text',
+        [
+            ' a' * 511 + '😀 café 中文',
+            'a ' * 460 + 'x😀' + ' b' * 100,
+        ],
+    )
+    def test_real_tokenizer_default_window_preserves_unicode_and_offsets(self, text):
+        """A default-size token boundary must never split one Unicode scalar."""
+        chunker = TokenChunker()
 
-        Two guards against the O(n^2) prefix-decode regression:
-          1. Call count scales linearly with the number of chunks.
-          2. Every decode operates on at most ``chunk_size`` tokens. A regression
-             that decodes growing ``tokens[:start]`` prefixes would inflate the
-             largest decode input past ``chunk_size`` even if the call count
-             stayed linear, so the call-count check alone is insufficient.
+        chunks = chunker.chunk(text)
+
+        assert len(chunks) >= 2
+        assert chunks[0]['metadata']['end_char'] < len(text)
+        assert chunks[-1]['metadata']['end_char'] == len(text)
+        for chunk in chunks:
+            metadata = chunk['metadata']
+            assert chunk['text'] == text[metadata['start_char'] : metadata['end_char']]
+            assert '\ufffd' not in chunk['text']
+            assert len(chunker._encoder.encode(chunk['text'])) <= chunker.chunk_size
+        for previous, current in zip(chunks, chunks[1:]):
+            assert current['metadata']['start_char'] <= previous['metadata']['end_char']
+
+    def test_real_tokenizer_rejects_chunk_size_too_small_for_unicode_scalar(self):
+        chunker = TokenChunker(chunk_size=1, chunk_overlap=0)
+
+        with pytest.raises(ValueError, match='complete Unicode character'):
+            chunker.chunk('😀')
+
+    @pytest.mark.parametrize(
+        ('encoding_name', 'split_character'),
+        [
+            ('cl100k_base', '😀'),
+            ('o200k_base', '🫠'),
+            ('p50k_base', '文'),
+            ('r50k_base', '文'),
+        ],
+    )
+    def test_real_tokenizer_zero_overlap_reconstructs_all_encodings(self, encoding_name, split_character):
+        sizing_chunker = TokenChunker(encoding_name=encoding_name)
+        encoder = sizing_chunker._get_encoder()
+        chunk_size = len(encoder.encode(split_character))
+        chunker = TokenChunker(chunk_size=chunk_size, chunk_overlap=0, encoding_name=encoding_name)
+        text = f'{split_character}a{split_character}b{split_character}'
+
+        chunks = chunker.chunk(text)
+
+        assert ''.join(chunk['text'] for chunk in chunks) == text
+        assert all(len(encoder.encode(chunk['text'])) <= chunk_size for chunk in chunks)
+
+    @pytest.mark.parametrize(
+        ('encoding_name', 'chunk_size', 'text'),
+        [
+            ('cl100k_base', 2, ' 好'),
+            ('o200k_base', 2, ' 騌'),
+            ('p50k_base', 3, '羶憄'),
+            ('r50k_base', 3, '鄶森'),
+        ],
+    )
+    def test_real_tokenizer_handles_merges_crossing_character_boundaries(self, encoding_name, chunk_size, text):
+        chunker = TokenChunker(chunk_size=chunk_size, chunk_overlap=0, encoding_name=encoding_name)
+
+        chunks = chunker.chunk(text)
+
+        assert ''.join(chunk['text'] for chunk in chunks) == text
+        assert all(len(chunker._encoder.encode(chunk['text'])) <= chunk_size for chunk in chunks)
+
+    @pytest.mark.parametrize('encoding_name', ['p50k_base', 'r50k_base'])
+    def test_real_tokenizer_default_size_handles_long_unsafe_token_span(self, encoding_name):
+        chunker = TokenChunker(encoding_name=encoding_name)
+        text = '怶' * 600
+
+        chunks = chunker.chunk(text)
+
+        assert chunks[0]['metadata']['start_char'] == 0
+        assert chunks[-1]['metadata']['end_char'] == len(text)
+        for chunk in chunks:
+            metadata = chunk['metadata']
+            assert chunk['text'] == text[metadata['start_char'] : metadata['end_char']]
+            assert len(chunker._encoder.encode(chunk['text'])) <= chunker.chunk_size
+        for previous, current in zip(chunks, chunks[1:]):
+            assert current['metadata']['start_char'] <= previous['metadata']['end_char']
+
+    def test_real_tokenizer_preserves_literal_replacement_character(self):
+        chunker = TokenChunker(chunk_size=4, chunk_overlap=1)
+        text = 'A\ufffdB A\ufffdB A\ufffdB'
+
+        chunks = chunker.chunk(text)
+
+        assert chunks[0]['metadata']['start_char'] == 0
+        assert chunks[-1]['metadata']['end_char'] == len(text)
+        assert any('\ufffd' in chunk['text'] for chunk in chunks)
+        for chunk in chunks:
+            metadata = chunk['metadata']
+            assert chunk['text'] == text[metadata['start_char'] : metadata['end_char']]
+
+    def test_start_char_incremental_tracking(self):
+        """Tokenizer work must stay linear and avoid growing-prefix encoding.
+
+        Source token bytes are read once, then only candidate chunks are encoded
+        to enforce the external token cap.
         """
         chunker = TokenChunker(chunk_size=10, chunk_overlap=0)
 
-        call_counts = {'decode': 0}
-        decoded_lengths: list[int] = []
+        call_counts = {'encode': 0, 'token_bytes': 0}
+        encoded_lengths: list[int] = []
 
         class TrackingEncoder(_CharTokenEncoder):
-            def decode(self, tokens, **kwargs):
-                call_counts['decode'] += 1
-                decoded_lengths.append(len(tokens))
-                return 'x' * len(tokens)
+            def encode(self, text):
+                call_counts['encode'] += 1
+                encoded_lengths.append(len(text))
+                return super().encode(text)
+
+            def decode_single_token_bytes(self, tid):
+                call_counts['token_bytes'] += 1
+                return super().decode_single_token_bytes(tid)
 
         chunker._encoder = TrackingEncoder()
         chunks = chunker.chunk('A' * 50)
         assert len(chunks) == 5
-        # At most 2 * num_chunks (one chunk decode + one step decode each).
-        assert call_counts['decode'] <= 2 * len(chunks)
-        # No decode call may exceed chunk_size tokens; growing-prefix decoding
-        # (the O(n^2) regression) would push this above chunk_size.
-        assert decoded_lengths, 'expected at least one decode call'
-        assert max(decoded_lengths) <= chunker.chunk_size, (
-            f'largest decode input {max(decoded_lengths)} exceeds chunk_size {chunker.chunk_size}'
-        )
+        assert call_counts['token_bytes'] == 50
+        assert call_counts['encode'] == len(chunks) + 1
+        assert max(encoded_lengths[1:]) <= chunker.chunk_size
 
     def test_start_char_correctness_with_overlap(self):
         chunker = TokenChunker(chunk_size=10, chunk_overlap=3)
@@ -255,22 +347,17 @@ class TestTokenChunker:
             assert chunks[i]['metadata']['start_char'] > chunks[i - 1]['metadata']['start_char']
         assert chunks[0]['metadata']['start_char'] == 0
 
-    def test_safe_decode_handles_decode_failure(self):
-        """If Encoding.decode raises, _safe_decode falls back to per-token bytes."""
+    def test_rejects_token_bytes_that_do_not_match_source(self):
+        """Never emit invented text when a tokenizer violates its byte contract."""
 
-        class FailingEncoder(_CharTokenEncoder):
-            def decode(self, tokens, **kwargs):  # noqa: ARG002 - tiktoken signature
-                raise RuntimeError('simulated decode failure')
-
+        class MismatchedEncoder(_CharTokenEncoder):
             def decode_single_token_bytes(self, tid):  # noqa: ARG002 - api shape
                 return b'y'
 
         chunker = TokenChunker(chunk_size=4, chunk_overlap=0)
-        chunker._encoder = FailingEncoder()
-        chunks = chunker.chunk('AAAA')
-        # 4 fallback bytes -> 'yyyy'; must not raise.
-        assert len(chunks) == 1
-        assert chunks[0]['text'] == 'yyyy'
+        chunker._encoder = MismatchedEncoder()
+        with pytest.raises(ValueError, match='does not match the source text'):
+            chunker.chunk('AAAA')
 
 
 # ===========================================================================
@@ -314,6 +401,32 @@ class TestIGlobalLifecycle:
         assert isinstance(iglobal.strategy, SentenceChunker)
         assert iglobal.strategy.chunk_size == 500
         assert iglobal.strategy.chunk_overlap == 50
+
+    def test_iglobal_creates_token_strategy(self):
+        IGlobal, _ = _import_node_classes()
+        iglobal = IGlobal.__new__(IGlobal)
+        iglobal.strategy = None
+
+        endpoint = MagicMock()
+        endpoint.openMode = 'run'
+        iglobal.IEndpoint = MagicMock()
+        iglobal.IEndpoint.endpoint = endpoint
+
+        glb = MagicMock()
+        glb.logicalType = 'chunker'
+        glb.connConfig = {
+            'strategy': 'token',
+            'chunk_size': '512',
+            'chunk_overlap': '50',
+            'encoding_name': 'o200k_base',
+        }
+        iglobal.glb = glb
+
+        iglobal.beginGlobal()
+        assert isinstance(iglobal.strategy, TokenChunker)
+        assert iglobal.strategy.chunk_size == 512
+        assert iglobal.strategy.chunk_overlap == 50
+        assert iglobal.strategy.encoding_name == 'o200k_base'
 
     def test_iglobal_rejects_unknown_strategy(self):
         IGlobal, _ = _import_node_classes()

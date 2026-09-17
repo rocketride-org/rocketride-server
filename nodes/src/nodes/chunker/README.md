@@ -37,7 +37,7 @@ The maximum size of a chunk, measured in **characters** for the `sentence` strat
 
 ### Chunk overlap
 
-How much of each chunk is repeated at the start of the next one, in the same units as chunk size, so a sentence or idea straddling a boundary still appears whole in at least one chunk. It must be less than the chunk size. With the `token` strategy the window advances by `chunk_size - chunk_overlap` tokens; with the `sentence` strategy the trailing sentences of the finished chunk are carried forward as long as their combined span fits within the overlap, so the effective overlap lands on a sentence boundary and can be smaller than the configured value. Set it to `0` to disable overlap entirely; the profile defaults of 200 characters and 50 tokens are roughly a fifth and a tenth of their chunk sizes.
+How much of each chunk is repeated at the start of the next one, in the same units as chunk size, so a sentence or idea straddling a boundary still appears whole in at least one chunk. It must be less than the chunk size. With the `token` strategy the next window starts at a progressing character boundary whose exact source suffix fits within the token overlap, so the effective overlap can be smaller than configured but never larger. With the `sentence` strategy the trailing sentences of the finished chunk are carried forward as long as their combined span fits within the overlap, so the effective overlap likewise lands on a sentence boundary. Set it to `0` to disable overlap entirely; the profile defaults of 200 characters and 50 tokens are roughly a fifth and a tenth of their chunk sizes.
 
 ### Token encoding
 
@@ -47,11 +47,11 @@ The `tiktoken` encoding used to count and slice tokens. It applies only to the `
 
 ### Chunk metadata
 
-`chunkId` is a running counter across everything emitted for one incoming object and resets to `0` when the next object opens; `chunk_index` restarts at `0` for each source document, and `total_chunks` is that document's chunk count. `start_char` and `end_char` are character offsets into the source text — exact for the `sentence` strategy, and derived from decoded token spans for the `token` strategy.
+`chunkId` is a running counter across everything emitted for one incoming object and resets to `0` when the next object opens; `chunk_index` restarts at `0` for each source document, and `total_chunks` is that document's chunk count. `start_char` and `end_char` are exact character offsets into the source text for both strategies.
 
-### Undecodable tokens
+### Unicode boundaries
 
-A token window can end mid-character, so the `token` strategy falls back to a per-token byte rebuild when a decode fails, substituting U+FFFD for bytes it cannot recover. A chunk is never dropped because of a malformed multi-byte sequence.
+A token boundary can fall in the middle of a multi-byte Unicode character, and BPE merges can change when a substring is encoded on its own. The `token` strategy uses the original token stream only to estimate each window, then chooses a character boundary and independently tokenizes the exact source slice before emitting it. This prevents replacement characters, corrupted provenance offsets, and oversized chunks. If `chunk_size` is too small to contain even one complete character (for example, a one-token limit for a character represented by two tokens), chunking stops with a clear configuration error.
 
 ## Upstream docs
 

@@ -36,6 +36,8 @@ grouping (``SentenceChunker``).
 from __future__ import annotations
 
 import re
+from array import array
+from bisect import bisect_right
 
 
 class ChunkingStrategy:
@@ -192,26 +194,71 @@ class TokenChunker(ChunkingStrategy):
         return self._encoder
 
     @staticmethod
-    def _safe_decode(encoder, token_ids: list[int]) -> str:
-        """Decode a list of token ids, surviving invalid UTF-8 sequences.
+    def _token_byte_offsets(encoder, tokens: list[int], source_bytes: bytes) -> array:
+        """Return compact cumulative byte offsets after verifying tokenizer bytes."""
+        offsets = array('Q', [0])
+        byte_offset = 0
+        for token_id in tokens:
+            try:
+                token_bytes = encoder.decode_single_token_bytes(token_id)
+            except Exception as exc:  # noqa: BLE001 - tokenizer implementations vary
+                raise ValueError(f'Unable to recover bytes for token {token_id}.') from exc
 
-        ``tiktoken``'s ``Encoding.decode`` does not support an ``errors=`` kwarg
-        (passing one raises ``TypeError``). When the default decode fails we
-        rebuild the byte stream via ``decode_single_token_bytes`` and decode
-        with ``errors='replace'`` so malformed multi-byte sequences become
-        U+FFFD instead of aborting the whole chunk.
-        """
-        try:
-            return encoder.decode(token_ids)
-        except Exception:  # noqa: BLE001 - tiktoken raises various error types
-            # Per-token fallback: gather bytes and decode tolerantly.
-            buf = bytearray()
-            for tid in token_ids:
-                try:
-                    buf.extend(encoder.decode_single_token_bytes(tid))
-                except Exception:  # noqa: BLE001
-                    buf.extend(b'\xef\xbf\xbd')  # U+FFFD replacement character
-            return buf.decode('utf-8', errors='replace')
+            next_offset = byte_offset + len(token_bytes)
+            if source_bytes[byte_offset:next_offset] != token_bytes:
+                raise ValueError('Tokenizer byte stream does not match the source text.')
+            byte_offset = next_offset
+            offsets.append(byte_offset)
+
+        if byte_offset != len(source_bytes):
+            raise ValueError('Tokenizer byte stream does not match the source text.')
+        return offsets
+
+    def _fit_chunk_end(self, encoder, text: str, start: int, estimated_end: int) -> int:
+        """Find a non-empty source prefix that respects the independent token cap."""
+        estimated_end = max(start + 1, estimated_end)
+        if len(encoder.encode(text[start:estimated_end])) <= self.chunk_size:
+            return estimated_end
+
+        first_end = start + 1
+        if len(encoder.encode(text[start:first_end])) > self.chunk_size:
+            raise ValueError(
+                'chunk_size is too small to contain a complete Unicode character '
+                f'at character offset {start}; increase chunk_size.'
+            )
+
+        # Token counts are normally monotonic for prefixes but need not be
+        # strictly so across every BPE merge. The first character is known to
+        # fit, which makes this search conservative: it may choose a shorter
+        # valid prefix, but it never emits an oversized or empty chunk.
+        best = first_end
+        low = first_end + 1
+        high = estimated_end - 1
+        while low <= high:
+            candidate = (low + high) // 2
+            if len(encoder.encode(text[start:candidate])) <= self.chunk_size:
+                best = candidate
+                low = candidate + 1
+            else:
+                high = candidate - 1
+        return best
+
+    def _next_start(self, encoder, text: str, start: int, end: int) -> int:
+        """Choose a progressing start whose independently encoded overlap fits."""
+        if self.chunk_overlap == 0:
+            return end
+
+        best = end
+        low = start + 1
+        high = end
+        while low <= high:
+            candidate = (low + high) // 2
+            if len(encoder.encode(text[candidate:end])) <= self.chunk_overlap:
+                best = candidate
+                high = candidate - 1
+            else:
+                low = candidate + 1
+        return best
 
     def chunk(self, text: str) -> list[dict]:
         """Split text by token count with overlap, decoding back to text."""
@@ -224,36 +271,27 @@ class TokenChunker(ChunkingStrategy):
         if not tokens:
             return []
 
+        source_bytes = text.encode('utf-8')
+        token_byte_offsets = self._token_byte_offsets(encoder, tokens, source_bytes)
+        del tokens
+
         result = []
         chunk_index = 0
-        start = 0
-        step = self.chunk_size - self.chunk_overlap
+        start_char = 0
+        start_byte = 0
 
-        # Ensure we advance at least 1 token per iteration
-        if step <= 0:
-            step = 1
-
-        # Pre-compute cumulative character lengths for each token position to avoid
-        # O(n^2) prefix decoding. We decode each step-sized segment once and track
-        # the running character offset.
-        # Cache: token start index -> cumulative character position
-        char_pos_cache: dict[int, int] = {0: 0}
-
-        while start < len(tokens):
-            end = min(start + self.chunk_size, len(tokens))
-            chunk_tokens = tokens[start:end]
-
-            # Decode tokens back to text, handling errors gracefully
-            chunk_text = self._safe_decode(encoder, chunk_tokens)
-
-            # Use cached character position for start_char (O(1) lookup)
-            start_char = char_pos_cache.get(start)
-            if start_char is None:
-                # Fallback: decode prefix (should not happen with correct step caching)
-                prefix_text = self._safe_decode(encoder, tokens[:start])
-                start_char = len(prefix_text)
-                char_pos_cache[start] = start_char
-            end_char = start_char + len(chunk_text)
+        while start_char < len(text):
+            # Use the original token byte stream only to estimate a full-size
+            # window. The final cut is always a source character boundary and
+            # is independently re-tokenized, because BPE merges can cross
+            # character boundaries and change when a substring is isolated.
+            start_token = bisect_right(token_byte_offsets, start_byte) - 1
+            target_token = min(start_token + self.chunk_size, len(token_byte_offsets) - 1)
+            target_byte = token_byte_offsets[target_token]
+            estimated_text = source_bytes[start_byte:target_byte].decode('utf-8', errors='ignore')
+            estimated_end = start_char + len(estimated_text)
+            end_char = self._fit_chunk_end(encoder, text, start_char, estimated_end)
+            chunk_text = text[start_char:end_char]
 
             result.append(
                 {
@@ -267,19 +305,11 @@ class TokenChunker(ChunkingStrategy):
             )
             chunk_index += 1
 
-            # Pre-compute the character position for the next step start
-            next_start = start + step
-            if next_start not in char_pos_cache and next_start < len(tokens):
-                # Decode only the step-sized segment to get its character length
-                step_tokens = tokens[start:next_start]
-                step_text = self._safe_decode(encoder, step_tokens)
-                char_pos_cache[next_start] = start_char + len(step_text)
-
-            # Advance by step (chunk_size - overlap)
-            start += step
-
-            # If we've reached the end, stop
-            if end >= len(tokens):
+            if end_char >= len(text):
                 break
+
+            next_start = self._next_start(encoder, text, start_char, end_char)
+            start_byte += len(text[start_char:next_start].encode('utf-8'))
+            start_char = next_start
 
         return result
