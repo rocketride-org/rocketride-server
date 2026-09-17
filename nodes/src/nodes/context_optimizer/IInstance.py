@@ -81,9 +81,16 @@ def prompt_overhead_tokens(optimizer, question: Question) -> int:
 
 
 class IInstance(IInstanceBase):
+    """Pipeline instance that fits each question into the model's token budget."""
+
     IGlobal: IGlobal  # Reference to global context providing the optimizer
 
     def open(self, entry: Entry):
+        """Start a new object; the node keeps no per-object state.
+
+        Args:
+            entry: The object being opened.
+        """
         pass
 
     def writeQuestions(self, question: Question):
@@ -93,7 +100,12 @@ class IInstance(IInstanceBase):
         conversation history from the Question object.  Runs the optimizer to
         fit everything within the model's token budget, then rebuilds the
         question with optimized content and attaches metadata.
+
+        Args:
+            question: The question from the questions lane; it is copied, never mutated.
         """
+        # Every exit forwards, so every exit must preventDefault() (it raises) or the untrimmed original follows.
+
         # Deep copy so we never mutate the upstream question
         question = copy.deepcopy(question)
 
@@ -102,7 +114,7 @@ class IInstance(IInstanceBase):
             # No optimizer available (e.g. config mode) -- pass through
             warning('context_optimizer: optimizer not initialized, passing question through unchanged')
             self.instance.writeQuestions(question)
-            return
+            return self.preventDefault()
 
         # ---- Extract components from the Question ----
         system_prompt = question.role or ''
@@ -196,3 +208,4 @@ class IInstance(IInstanceBase):
 
         # Forward the optimized question
         self.instance.writeQuestions(question)
+        return self.preventDefault()

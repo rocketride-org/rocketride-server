@@ -79,6 +79,7 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def beginInstance(self) -> None:
+        """Reset the preflight flag and create the lane input buffers."""
         self._preflight_done = False
         self._text_parts: list = []
         self._documents: list = []
@@ -96,6 +97,7 @@ class IInstance(IInstanceBase):
             self._preflight_done = True
 
     def _require_write(self) -> None:
+        """Raise ValueError when the node is configured read-only."""
         if self.IGlobal.read_only:
             raise ValueError('This operation is blocked: the node is in read-only mode.')
 
@@ -386,6 +388,16 @@ class IInstance(IInstanceBase):
         return self._set_active(args, active=False, tool_name='deactivate_workflow')
 
     def _set_active(self, args, *, active: bool, tool_name: str) -> Dict[str, Any]:
+        """Activate or deactivate a workflow through the n8n public API.
+
+        Args:
+            args: Tool input carrying the workflow ``id``.
+            active: True to activate, False to deactivate.
+            tool_name: Name of the calling tool, used in validation errors.
+
+        Returns:
+            ``{'success': True, 'id', 'active'}``, or ``{'success': False, 'error'}``.
+        """
         args = normalize_tool_input(args, tool_name='tool_n8n')
         g = self.IGlobal
         verb = 'activate' if active else 'deactivate'
@@ -408,34 +420,72 @@ class IInstance(IInstanceBase):
         self._binary = []
         self._avi_buffers = {}
 
+    # The engine forwards a handler's raw input unless preventDefault() raises, so each handler ends with it.
+
     def writeText(self, text: str):
-        """Accumulate inbound text (overriding suppresses raw passthrough)."""
+        """Accumulate inbound text; the raw text is not passed downstream.
+
+        Args:
+            text: A chunk of text from the text lane.
+        """
         if text:
             self._text_parts.append(text)
+        return self.preventDefault()
 
     def writeDocuments(self, documents):
-        """Accumulate inbound documents as structured items (content + metadata)."""
+        """Accumulate inbound documents as {content, metadata} items; the raw documents are not passed downstream.
+
+        Args:
+            documents: The documents from the documents lane.
+        """
         for doc in documents or []:
             self._documents.append({'content': getattr(doc, 'page_content', '') or '', 'metadata': _doc_metadata(doc)})
+        return self.preventDefault()
 
     def writeQuestions(self, question):
-        """Accumulate inbound question text (best-effort)."""
+        """Accumulate inbound question text (best-effort); the question is not passed downstream.
+
+        Args:
+            question: The question from the questions lane.
+        """
         getter = getattr(question, 'getPrompt', None)
         value = (getter() if callable(getter) else str(question)) or ''
         if value:
             self._text_parts.append(value)
+        return self.preventDefault()
 
     def writeImage(self, action, mimeType, buffer=b''):
-        """Reassemble an inbound image stream (AVI BEGIN/WRITE/END)."""
+        """Reassemble an inbound image stream; no chunk is passed downstream.
+
+        Args:
+            action: AVI_ACTION.BEGIN, WRITE or END.
+            mimeType: MIME type of the stream.
+            buffer: The chunk's bytes (WRITE only).
+        """
         self._avi('image', action, mimeType, buffer)
+        return self.preventDefault()
 
     def writeAudio(self, action, mimeType, buffer=b''):
-        """Reassemble an inbound audio stream (AVI BEGIN/WRITE/END)."""
+        """Reassemble an inbound audio stream; no chunk is passed downstream.
+
+        Args:
+            action: AVI_ACTION.BEGIN, WRITE or END.
+            mimeType: MIME type of the stream.
+            buffer: The chunk's bytes (WRITE only).
+        """
         self._avi('audio', action, mimeType, buffer)
+        return self.preventDefault()
 
     def writeVideo(self, action, mimeType, buffer=b''):
-        """Reassemble an inbound video stream (AVI BEGIN/WRITE/END)."""
+        """Reassemble an inbound video stream; no chunk is passed downstream.
+
+        Args:
+            action: AVI_ACTION.BEGIN, WRITE or END.
+            mimeType: MIME type of the stream.
+            buffer: The chunk's bytes (WRITE only).
+        """
         self._avi('video', action, mimeType, buffer)
+        return self.preventDefault()
 
     def _avi(self, kind: str, action, mimeType: str, buffer: bytes) -> None:
         """Reassemble a chunked binary lane into one complete (mime, bytes) item."""

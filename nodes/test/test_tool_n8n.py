@@ -101,10 +101,22 @@ def test_services_schema_only_shows_relevant_n8n_fields():
     assert all(fields[field].get('optional') is not True for field in conditional_fields)
 
 
+class _PreventDefault(Exception):
+    """Raised by the stub preventDefault(); the real one raises APERR(Ec.PreventDefault)."""
+
+
+class _FakeIInstanceBase:
+    """Real class for inheritance, with a preventDefault() that raises like rocketlib's."""
+
+    def preventDefault(self):
+        """Raise, as the real implementation does."""
+        raise _PreventDefault()
+
+
 def _build_import_stubs():
     """Return {module_name: stub} for the deps needed only to import the modules."""
     rocketlib = MagicMock()
-    rocketlib.IInstanceBase = object  # must be a real class for inheritance
+    rocketlib.IInstanceBase = _FakeIInstanceBase
     rocketlib.IGlobalBase = object
     rocketlib.Entry = object
     rocketlib.tool_function = lambda **kwargs: lambda f: f  # pass-through decorator
@@ -153,6 +165,9 @@ for _name, _stub in _build_import_stubs().items():
 client = importlib.import_module('nodes.tool_n8n.n8n_client')
 global_mod = importlib.import_module('nodes.tool_n8n.IGlobal')
 instance_mod = importlib.import_module('nodes.tool_n8n.IInstance')
+
+# The rocketlib the node imported: the engine's own under the engine interpreter, else the stub above.
+_rocketlib = sys.modules['rocketlib']
 
 # Drop the stubs we injected so they never leak into the shared pytest session.
 for _name in _added_stubs:
@@ -717,11 +732,29 @@ def test_build_payload_structured_preserves_docs():
     assert inst._build_payload() == {'text': 'q', 'documents': [{'content': 'd', 'metadata': {'src': 'a.txt'}}]}
 
 
+def _collect(handler, *args):
+    """Call a lane handler that only buffers input; it must end in preventDefault().
+
+    The workflow's result is emitted from closing(), so a normal return would let
+    the engine forward the raw input downstream as well.
+
+    Args:
+        handler: The bound lane handler, e.g. inst.writeText.
+        *args: Arguments for the handler.
+    """
+    real_aperr = getattr(_rocketlib, 'APERR', None)
+    expected = (_PreventDefault, real_aperr) if isinstance(real_aperr, type) else (_PreventDefault,)
+    with pytest.raises(expected) as raised:
+        handler(*args)
+    if not isinstance(raised.value, _PreventDefault):
+        assert raised.value.ec == _rocketlib.Ec.PreventDefault, f'handler failed: {raised.value}'
+
+
 def test_writedocuments_captures_content_and_metadata():
     inst = _make_instance(payload_mode='structured')
     inst._text_parts = []
     inst._documents = []
-    inst.writeDocuments([_FakeDoc('body', {'src': 'a.txt', 'page': 2})])
+    _collect(inst.writeDocuments, [_FakeDoc('body', {'src': 'a.txt', 'page': 2})])
     assert inst._documents == [{'content': 'body', 'metadata': {'src': 'a.txt', 'page': 2}}]
 
 
@@ -790,17 +823,50 @@ def _bin_inst(**over):
 
 def test_avi_reassembles_image_chunks():
     inst = _bin_inst()
-    inst.writeImage(A.BEGIN, 'image/png')
-    inst.writeImage(A.WRITE, 'image/png', b'ab')
-    inst.writeImage(A.WRITE, 'image/png', b'cd')
-    inst.writeImage(A.END, 'image/png')
+    _collect(inst.writeImage, A.BEGIN, 'image/png')
+    _collect(inst.writeImage, A.WRITE, 'image/png', b'ab')
+    _collect(inst.writeImage, A.WRITE, 'image/png', b'cd')
+    _collect(inst.writeImage, A.END, 'image/png')
     assert inst._binary == [{'kind': 'image', 'mime': 'image/png', 'data': b'abcd'}]
+
+
+@pytest.mark.parametrize('kind', ['audio', 'video'])
+def test_avi_reassembles_audio_and_video_chunks(kind):
+    """Audio and video streams are reassembled like images.
+
+    Args:
+        kind: The media lane under test.
+    """
+    inst = _bin_inst()
+    writer = getattr(inst, 'write' + kind.capitalize())
+    mime = f'{kind}/mp4'
+    _collect(writer, A.BEGIN, mime)
+    _collect(writer, A.WRITE, mime, b'ab')
+    _collect(writer, A.END, mime)
+    assert inst._binary == [{'kind': kind, 'mime': mime, 'data': b'ab'}]
+
+
+def test_writetext_and_writequestions_buffer_the_input():
+    """Text and question prompts are buffered in order; empty text is skipped."""
+
+    class _Question:
+        """A question exposing getPrompt()."""
+
+        def getPrompt(self):
+            """Return the prompt text."""
+            return 'what is due?'
+
+    inst = _bin_inst()
+    _collect(inst.writeText, 'hello ')
+    _collect(inst.writeText, '')
+    _collect(inst.writeQuestions, _Question())
+    assert inst._text_parts == ['hello ', 'what is due?']
 
 
 def test_avi_size_guard(monkeypatch):
     monkeypatch.setattr(instance_mod, '_MAX_BINARY_BYTES', 4)
     inst = _bin_inst()
-    inst.writeImage(A.BEGIN, 'image/png')
+    _collect(inst.writeImage, A.BEGIN, 'image/png')
     with pytest.raises(ValueError, match='exceeds'):
         inst.writeImage(A.WRITE, 'image/png', b'12345')
 
