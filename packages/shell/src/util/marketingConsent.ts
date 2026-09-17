@@ -24,9 +24,8 @@
 // Marketing-consent store — the one switch the ad pixel waits on.
 //
 // Default DENY: until the visitor explicitly allows marketing measurement,
-// the state is `null` and nothing third-party loads. The decision lives in
-// localStorage under the shell's `rr:` namespace as the string 'true' or
-// 'false' (no key at all means undecided) so it survives reloads, and
+// the state is 'unset' and nothing third-party loads. The decision lives in
+// localStorage under the shell's `rr:` namespace so it survives reloads, and
 // the 'storage' event carries it to other open tabs. Storage that throws
 // (privacy modes, blocked cookies) degrades to an in-memory decision for the
 // current page — never an exception.
@@ -34,35 +33,22 @@
 // Framework-free on purpose: bootstrap (pre-React) subscribes to load the
 // pixel, and React reads it through useSyncExternalStore.
 
-/**
- * The decision: `true` allowed, `false` refused, `null` not decided yet.
- *
- * Three states, not two — "not decided" is what puts a consent surface on
- * screen, so it cannot collapse into `false`. It is the ABSENCE of a stored
- * value, which is why nothing is ever written for it.
- */
-export type MarketingConsent = boolean | null;
+export type MarketingConsent = 'granted' | 'denied' | 'unset';
 
 export const CONSENT_STORAGE_KEY = 'rr:consent:marketing';
 
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
-// `undefined` is the "not read from storage yet" sentinel, NOT a decision —
-// `null` is a real value here (undecided), so it cannot do double duty.
-let current: MarketingConsent | undefined;
+let current: MarketingConsent | null = null;
 let storageHooked = false;
 
 function readStored(): MarketingConsent {
 	try {
 		const raw = window.localStorage.getItem(CONSENT_STORAGE_KEY);
-		// Anything other than the two values we write is "no decision" —
-		// including the retired 'granted'/'denied' strings. Reading those as a
-		// decision is deliberately NOT supported: a stale writer or a hand-set
-		// value must never resolve to consent.
-		return raw === 'true' ? true : raw === 'false' ? false : null;
+		return raw === 'granted' || raw === 'denied' ? raw : 'unset';
 	} catch {
-		return null;
+		return 'unset';
 	}
 }
 
@@ -92,17 +78,17 @@ function hookStorageEvent(): void {
 	}
 }
 
-/** The current marketing-consent decision (`null` until the visitor chooses). */
+/** The current marketing-consent decision ('unset' until the visitor chooses). */
 export function getMarketingConsent(): MarketingConsent {
-	if (current === undefined) current = typeof window === 'undefined' ? null : readStored();
+	if (current === null) current = typeof window === 'undefined' ? 'unset' : readStored();
 	return current;
 }
 
 /** Record the visitor's decision, persist it, and notify subscribers. */
-export function setMarketingConsent(value: boolean): void {
+export function setMarketingConsent(value: 'granted' | 'denied'): void {
 	current = value;
 	try {
-		window.localStorage.setItem(CONSENT_STORAGE_KEY, String(value));
+		window.localStorage.setItem(CONSENT_STORAGE_KEY, value);
 	} catch {
 		// Cannot persist — the decision still holds for this page.
 	}
@@ -121,6 +107,6 @@ export function subscribeMarketingConsent(fn: Listener): () => void {
 /** Test hook: drop cached state, listeners, and the storage-event registration. */
 export function resetMarketingConsentForTests(): void {
 	listeners.clear();
-	current = undefined;
+	current = null;
 	storageHooked = false;
 }

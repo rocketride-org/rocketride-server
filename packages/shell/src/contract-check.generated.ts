@@ -15,6 +15,8 @@
 
 import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from '../contract/versions/v0';
+import type { ShellApiV1 } from '../contract/versions/v1';
+import type { ShellApiV2 } from '../contract/versions/v2';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -263,12 +265,6 @@ import type { DatabaseLike as Frozen_DatabaseLike } from '../contract/versions/v
 import type { DatabaseLike as Current_DatabaseLike } from './api';
 import type { DatabaseApi as Frozen_DatabaseApi } from '../contract/versions/v0';
 import type { DatabaseApi as Current_DatabaseApi } from './api';
-import type { AppVerifyCheck as Frozen_AppVerifyCheck } from '../contract/versions/v0';
-import type { AppVerifyCheck as Current_AppVerifyCheck } from './api';
-import type { AppVerifyReport as Frozen_AppVerifyReport } from '../contract/versions/v0';
-import type { AppVerifyReport as Current_AppVerifyReport } from './api';
-import type { CreatedApp as Frozen_CreatedApp } from '../contract/versions/v0';
-import type { CreatedApp as Current_CreatedApp } from './api';
 import type { LogEventStream as Frozen_LogEventStream } from '../contract/versions/v0';
 import type { LogEventStream as Current_LogEventStream } from './api';
 import type { DataPipe as Frozen_DataPipe } from '../contract/versions/v0';
@@ -325,10 +321,6 @@ import type { ActivityEvent as Frozen_ActivityEvent } from '../contract/versions
 import type { ActivityEvent as Current_ActivityEvent } from './api';
 import type { DashboardData as Frozen_DashboardData } from '../contract/versions/v0';
 import type { DashboardData as Current_DashboardData } from './api';
-import type { MarketingConsent as Frozen_MarketingConsent } from '../contract/versions/v0';
-import type { MarketingConsent as Current_MarketingConsent } from './api';
-import type { MarketingConsentState as Frozen_MarketingConsentState } from '../contract/versions/v0';
-import type { MarketingConsentState as Current_MarketingConsentState } from './api';
 import type { InitOptions as Frozen_InitOptions } from '../contract/versions/v0';
 import type { InitOptions as Current_InitOptions } from './api';
 import type { DebugLogEntry as Frozen_DebugLogEntry } from '../contract/versions/v0';
@@ -603,10 +595,24 @@ import type { ITaskStatus as Frozen_ITaskStatus } from '../contract/versions/v0'
 import type { ITaskStatus as Current_ITaskStatus } from './api';
 import type { IFlowData as Frozen_IFlowData } from '../contract/versions/v0';
 import type { IFlowData as Current_IFlowData } from './api';
+import type { AppVerifyCheck as Frozen_AppVerifyCheck } from '../contract/versions/v1';
+import type { AppVerifyCheck as Current_AppVerifyCheck } from './api';
+import type { AppVerifyReport as Frozen_AppVerifyReport } from '../contract/versions/v1';
+import type { AppVerifyReport as Current_AppVerifyReport } from './api';
+import type { CreatedApp as Frozen_CreatedApp } from '../contract/versions/v1';
+import type { CreatedApp as Current_CreatedApp } from './api';
+import type { MarketingConsent as Frozen_MarketingConsent } from '../contract/versions/v2';
+import type { MarketingConsent as Current_MarketingConsent } from './api';
+import type { MarketingConsentState as Frozen_MarketingConsentState } from '../contract/versions/v2';
+import type { MarketingConsentState as Current_MarketingConsentState } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
 void _floor_v0;
+const _floor_v1: ShellApiV1 = {} as ShellApiShape;
+void _floor_v1;
+const _floor_v2: ShellApiV2 = {} as ShellApiShape;
+void _floor_v2;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -859,12 +865,6 @@ const _t_DatabaseLike: Frozen_DatabaseLike = {} as Current_DatabaseLike;
 void _t_DatabaseLike;
 const _t_DatabaseApi: Frozen_DatabaseApi = {} as Current_DatabaseApi;
 void _t_DatabaseApi;
-const _t_AppVerifyCheck: Frozen_AppVerifyCheck = {} as Current_AppVerifyCheck;
-void _t_AppVerifyCheck;
-const _t_AppVerifyReport: Frozen_AppVerifyReport = {} as Current_AppVerifyReport;
-void _t_AppVerifyReport;
-const _t_CreatedApp: Frozen_CreatedApp = {} as Current_CreatedApp;
-void _t_CreatedApp;
 const _t_LogEventStream: Frozen_LogEventStream = {} as Current_LogEventStream;
 void _t_LogEventStream;
 const _t_DataPipe: Frozen_DataPipe = {} as Current_DataPipe;
@@ -921,10 +921,6 @@ const _t_ActivityEvent: Frozen_ActivityEvent = {} as Current_ActivityEvent;
 void _t_ActivityEvent;
 const _t_DashboardData: Frozen_DashboardData = {} as Current_DashboardData;
 void _t_DashboardData;
-const _t_MarketingConsent: Frozen_MarketingConsent = {} as Current_MarketingConsent;
-void _t_MarketingConsent;
-const _t_MarketingConsentState: Frozen_MarketingConsentState = {} as Current_MarketingConsentState;
-void _t_MarketingConsentState;
 const _t_InitOptions: Frozen_InitOptions = {} as Current_InitOptions;
 void _t_InitOptions;
 const _t_DebugLogEntry: Frozen_DebugLogEntry = {} as Current_DebugLogEntry;
@@ -1199,3 +1195,13 @@ const _t_ITaskStatus: Frozen_ITaskStatus = {} as Current_ITaskStatus;
 void _t_ITaskStatus;
 const _t_IFlowData: Frozen_IFlowData = {} as Current_IFlowData;
 void _t_IFlowData;
+const _t_AppVerifyCheck: Frozen_AppVerifyCheck = {} as Current_AppVerifyCheck;
+void _t_AppVerifyCheck;
+const _t_AppVerifyReport: Frozen_AppVerifyReport = {} as Current_AppVerifyReport;
+void _t_AppVerifyReport;
+const _t_CreatedApp: Frozen_CreatedApp = {} as Current_CreatedApp;
+void _t_CreatedApp;
+const _t_MarketingConsent: Frozen_MarketingConsent = {} as Current_MarketingConsent;
+void _t_MarketingConsent;
+const _t_MarketingConsentState: Frozen_MarketingConsentState = {} as Current_MarketingConsentState;
+void _t_MarketingConsentState;
