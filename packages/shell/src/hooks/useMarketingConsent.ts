@@ -34,7 +34,7 @@ import { PRIVACY_CHOICES_EVENT, getAttributionProvider, getClickParams, isAttrib
 export interface MarketingConsentState {
 	/** True where this environment runs ad attribution (the probe named a provider). */
 	configured: boolean;
-	/** The stored decision ('unset' until the visitor chooses). */
+	/** The stored decision: `true` allowed, `false` refused, `null` undecided. */
 	consent: MarketingConsent;
 	/**
 	 * Whether a consent surface should be on screen: no decision yet, or a
@@ -93,7 +93,7 @@ export function useMarketingConsent(): MarketingConsentState {
 	const userId = identity?.userId ?? null;
 	useEffect(() => {
 		const provider = getAttributionProvider();
-		if (!configured || !provider || consent !== 'granted' || !client || !userId) return;
+		if (!configured || !provider || consent !== true || !client || !userId) return;
 		if (relayedFor.current === userId) return;
 		void (async () => {
 			try {
@@ -108,12 +108,12 @@ export function useMarketingConsent(): MarketingConsentState {
 
 	const allow = useCallback(() => {
 		setReopened(false);
-		setMarketingConsent('granted');
+		setMarketingConsent(true);
 	}, []);
 
 	const reject = useCallback(() => {
 		setReopened(false);
-		setMarketingConsent('denied');
+		setMarketingConsent(false);
 		relayedFor.current = null;
 		const provider = getAttributionProvider();
 		if (client && userId && provider) {
@@ -132,7 +132,7 @@ export function useMarketingConsent(): MarketingConsentState {
 	return {
 		configured,
 		consent,
-		visible: configured && (consent === 'unset' || reopened),
+		visible: configured && (consent === null || reopened),
 		allow,
 		reject,
 	};

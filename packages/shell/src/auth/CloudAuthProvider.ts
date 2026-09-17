@@ -136,7 +136,7 @@ export class CloudAuthProvider implements IAuthProvider {
 			window.location.origin,
 			challenge,
 			register,
-			getMarketingConsent() === 'denied' ? null : encodeAttributionState(),
+			getMarketingConsent() === false ? null : encodeAttributionState(),
 		);
 
 		// assign() (not replace()) so the landing page stays in history — the

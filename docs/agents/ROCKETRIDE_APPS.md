@@ -631,7 +631,7 @@ The client instance is always the shell's — never construct a
 | `usePrefs()` | `{ getPref, setPref }` — the one-key preference accessor. |
 | `useShellEvent(event, handler)` | Subscribe to a typed platform event with automatic cleanup. |
 | `useAppComponent(appId, name)` | Load a UI component from another app (or `null` while loading). |
-| `useMarketingConsent()` | `MarketingConsentState`: `{ configured, consent, visible, allow, reject }` — everything a marketing-consent surface needs. The shell keeps the decision store, the ad-click capture (it runs in bootstrap, before any remote exists) and the server-side relay; an app owns only the disclosure UI. `visible` is false wherever ad attribution is not configured, so the surface renders nothing on staging, on OSS, for automated browsers, and for visitors sending Global Privacy Control. |
+| `useMarketingConsent()` | `MarketingConsentState`: `{ configured, consent, visible, allow, reject }` — everything a marketing-consent surface needs. `consent` is `true` allowed / `false` refused / `null` not decided yet; test it with `=== true`, never for truthiness, or `null` reads as a refusal. The shell keeps the decision store, the ad-click capture (it runs in bootstrap, before any remote exists) and the server-side relay; an app owns only the disclosure UI. `visible` is false wherever ad attribution is not configured, so the surface renders nothing on staging, on OSS, for automated browsers, and for visitors sending Global Privacy Control. |
 
 ### Utilities
 

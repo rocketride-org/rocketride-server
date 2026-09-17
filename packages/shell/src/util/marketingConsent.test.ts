@@ -27,7 +27,7 @@
 
 import assert from 'node:assert/strict';
 import test, { beforeEach } from 'node:test';
-import { CONSENT_STORAGE_KEY, getMarketingConsent, resetMarketingConsentForTests, setMarketingConsent, subscribeMarketingConsent } from './marketingConsent';
+import { CONSENT_STORAGE_KEY, getMarketingConsent, type MarketingConsent, resetMarketingConsentForTests, setMarketingConsent, subscribeMarketingConsent } from './marketingConsent';
 
 // Minimal window stand-in: a Map-backed localStorage plus the 'storage'
 // event hook the store registers for cross-tab sync.
@@ -55,51 +55,71 @@ beforeEach(() => {
 	resetMarketingConsentForTests();
 });
 
-test('defaults to unset when nothing is stored (default deny: nothing loads until granted)', () => {
+test('defaults to undecided when nothing is stored (default deny: nothing loads until allowed)', () => {
 	installWindow();
-	assert.equal(getMarketingConsent(), 'unset');
+	assert.equal(getMarketingConsent(), null);
 });
 
 test('reads a stored decision', () => {
-	installWindow({ [CONSENT_STORAGE_KEY]: 'granted' });
-	assert.equal(getMarketingConsent(), 'granted');
+	installWindow({ [CONSENT_STORAGE_KEY]: 'true' });
+	assert.equal(getMarketingConsent(), true);
 });
 
-test('treats an unrecognised stored value as unset', () => {
+test('reads a stored refusal', () => {
+	installWindow({ [CONSENT_STORAGE_KEY]: 'false' });
+	assert.equal(getMarketingConsent(), false);
+});
+
+test('treats an unrecognised stored value as undecided', () => {
 	installWindow({ [CONSENT_STORAGE_KEY]: 'yes-please' });
-	assert.equal(getMarketingConsent(), 'unset');
+	assert.equal(getMarketingConsent(), null);
+});
+
+test('the retired granted/denied strings do NOT read as a decision', () => {
+	installWindow({ [CONSENT_STORAGE_KEY]: 'granted' });
+	assert.equal(getMarketingConsent(), null);
+	resetMarketingConsentForTests();
+	installWindow({ [CONSENT_STORAGE_KEY]: 'denied' });
+	assert.equal(getMarketingConsent(), null);
 });
 
 test('setMarketingConsent persists and notifies subscribers', () => {
 	const { store } = installWindow();
-	const seen: string[] = [];
+	const seen: MarketingConsent[] = [];
 	const unsubscribe = subscribeMarketingConsent(() => seen.push(getMarketingConsent()));
-	setMarketingConsent('granted');
-	assert.equal(store.get(CONSENT_STORAGE_KEY), 'granted');
-	assert.deepEqual(seen, ['granted']);
+	setMarketingConsent(true);
+	assert.equal(store.get(CONSENT_STORAGE_KEY), 'true');
+	assert.deepEqual(seen, [true]);
 	unsubscribe();
-	setMarketingConsent('denied');
-	assert.deepEqual(seen, ['granted']);
+	setMarketingConsent(false);
+	assert.deepEqual(seen, [true]);
+});
+
+test('a refusal persists as the string false, not an absent key', () => {
+	const { store } = installWindow();
+	setMarketingConsent(false);
+	assert.equal(store.get(CONSENT_STORAGE_KEY), 'false');
+	assert.equal(getMarketingConsent(), false);
 });
 
 test('a decision made in another tab propagates via the storage event', () => {
 	const { store, fireStorage } = installWindow();
-	const seen: string[] = [];
+	const seen: MarketingConsent[] = [];
 	subscribeMarketingConsent(() => seen.push(getMarketingConsent()));
-	store.set(CONSENT_STORAGE_KEY, 'denied');
+	store.set(CONSENT_STORAGE_KEY, 'false');
 	fireStorage(CONSENT_STORAGE_KEY);
-	assert.deepEqual(seen, ['denied']);
+	assert.deepEqual(seen, [false]);
 });
 
-test('storage that throws (privacy mode) reads as unset and never throws', () => {
+test('storage that throws (privacy mode) reads as undecided and never throws', () => {
 	(globalThis as unknown as { window: unknown }).window = {
 		get localStorage(): Storage {
 			throw new Error('SecurityError');
 		},
 		addEventListener: () => undefined,
 	};
-	assert.equal(getMarketingConsent(), 'unset');
-	assert.doesNotThrow(() => setMarketingConsent('granted'));
+	assert.equal(getMarketingConsent(), null);
+	assert.doesNotThrow(() => setMarketingConsent(true));
 	// The in-memory decision still holds for this page even if it cannot persist.
-	assert.equal(getMarketingConsent(), 'granted');
+	assert.equal(getMarketingConsent(), true);
 });

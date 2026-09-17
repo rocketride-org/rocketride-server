@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-18T15:03:58.414Z
-// Source commit: 733316f33fb2590af88ca4e96507548b68a06a43
+// Generated:     2026-09-17T17:01:42.877Z
+// Source commit: d2a9a576fbd6ce96535cd83c06d50d724a992ad8
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -121,6 +121,21 @@ export declare const commonStyles: {
  */
 export declare class DAPException extends Error {
     readonly dapResult: Record<string, unknown>;
+    /**
+     * Machine-readable error code sent by the server, when the failure has one.
+     *
+     * Task failures carry one (`TASK_NOT_REGISTERED`, `TASK_AMBIGUOUS`,
+     * `TASK_COMPLETED`, `TASK_STOPPED`); classify on it rather than on the
+     * message text, which is written for people and may be reworded.
+     */
+    readonly code?: string;
+    /**
+     * Troubleshooting text the SDK attached for a developer, when there is any.
+     *
+     * Kept out of `message` so an application can show the message to an end
+     * user without the developer checklist.
+     */
+    readonly hint?: string;
     constructor(dapResult: Record<string, unknown>);
 }
 /**
@@ -1787,8 +1802,10 @@ export interface ConnectResult {
     /** BCP-47 locale tag (e.g. "en-US") representing the user's preferred locale */
     locale: string;
     /**
-     * ID of the team that should be used by default for operations that do not
-     * explicitly specify a team context.
+     * ID of the user's development team. It carries NO authorization meaning:
+     * it is the billing and environment-layer context for dev runs and for
+     * `@me` publishes. Team-scoped operations always name their team
+     * explicitly — there is no default-team fallback.
      */
     devTeam: string;
     /**
@@ -1907,8 +1924,8 @@ export interface StripePriceEntry {
  * Server metadata returned by the pre-auth info probe.
  *
  * Obtained via {@link RocketRideClient.getServerInfo} which sends an
- * `auth` request with `infoOnly: true`. The server responds without
- * requiring credentials.
+ * `rrext_public_probe` command on a public connection. The server
+ * responds without requiring credentials.
  */
 export interface ServerInfoResult {
     /** Server engine version string. */
@@ -1932,6 +1949,16 @@ export interface ServerInfoResult {
      * Absent on servers without billing (OSS).
      */
     stripePublishableKey?: string;
+    /**
+     * Ad-attribution provider this server reports conversions to (`'gravity'`).
+     *
+     * The NAME only — never a credential. Present when the server holds the
+     * provider's API key, which is what lets the browser shell capture
+     * ad-click parameters and ask for marketing consent; absent everywhere
+     * else (staging, OSS), where the shell does nothing. No third-party ad
+     * script is ever loaded: conversions are reported server-side.
+     */
+    attributionProvider?: string;
     /**
      * The server's public addresses, RESOLVED to absolute URLs.
      *
@@ -2990,9 +3017,9 @@ export interface TASK_STATUS {
     debuggerAttached: boolean;
     /** Current status message describing task activity and progress */
     status: string;
-    /** Warning message history (limited to 50 recent entries) */
+    /** Warning message history (limited to 1000 recent entries) */
     warnings: string[];
-    /** Error message history (limited to 50 recent entries) */
+    /** Error message history (limited to 1000 recent entries) */
     errors: string[];
     /** Name/identifier of the item currently being processed */
     currentObject: string;
@@ -3435,6 +3462,23 @@ declare class AccountApi {
      * @param orgId - The org ID to switch to.
      */
     setDefaultOrg(orgId: string): Promise<void>;
+    /**
+     * Records (or clears) the user's ad-attribution context for a provider.
+     *
+     * Sent by the browser shell only after the user has granted marketing
+     * consent: `data` is the ad-click reference the shell read from the
+     * landing URL (for Gravity, `grclid` and its siblings), which the server
+     * attaches to server-side conversion events. It may be empty — the stored
+     * record is itself the consent that permits reporting. Pass `null` when
+     * consent is withdrawn: the server deletes the stored context and stops
+     * reporting conversions for this user.
+     *
+     * No ad pixel is involved, and nothing is read from the device.
+     *
+     * @param provider - Attribution provider id (currently `'gravity'`).
+     * @param data - The ad-click reference, or `null` to clear it.
+     */
+    setAttribution(provider: string, data: Record<string, unknown> | null): Promise<void>;
     /**
      * Permanently deletes the current user's account.
      */
@@ -4020,6 +4064,42 @@ export declare class DatabaseApi {
         sequelizeOptions?: import("sequelize").Options;
     }): import("sequelize").Sequelize;
 }
+/** One verification check's outcome. */
+export interface AppVerifyCheck {
+    /** Stable check id (e.g. 'manifest', 'id', 'include', 'pack-size'). */
+    id: string;
+    /** Whether the check passed. */
+    ok: boolean;
+    /** Human-readable outcome, actionable on failure. */
+    note: string;
+}
+/** The result of {@link verifyAppSource}. */
+export interface AppVerifyReport {
+    /** True when every check passed. */
+    ok: boolean;
+    /** Every check that ran, in order. */
+    checks: AppVerifyCheck[];
+    /** Files the pack would carry (0 when selection failed). */
+    fileCount: number;
+    /** Uncompressed bytes the pack would carry. */
+    uncompressedBytes: number;
+}
+/** The result of {@link createAppWorkspace}. */
+export interface CreatedApp {
+    /** The full app id (`<developerId>.<slug>`). */
+    appId: string;
+    /** Workspace-relative POSIX path of the created folder. */
+    folder: string;
+    /** Project-relative paths of the files written. */
+    files: string[];
+    /** Which server-matched packages were vendored this pass. */
+    vendored: {
+        shell: boolean;
+        client: boolean;
+    };
+    /** Whether the workspace `pnpm install` ran and succeeded. */
+    installed: boolean;
+}
 declare class DeployApi {
     /** @param client - The parent RocketRideClient that owns this namespace. */
     constructor(client: RocketRideClient);
@@ -4066,6 +4146,86 @@ declare class DeployApi {
         deployTo?: string;
     }): Promise<PublishResult>;
     /**
+     * Packs an app folder's source and deploys it as the next immutable
+     * registry version — the ONE call behind the App Builder's Deploy
+     * button, the CLI's `app deploy`, and CI scripts (Node.js only).
+     *
+     * Verify → pack → send: the pack applies the canonical rules
+     * (workspace-rooted zip layout, `appManifest.include` honored,
+     * hierarchical gitignore filtering with the hard baseline
+     * node_modules/dist/.git, symlink containment, 50MB zipped / 512MB
+     * uncompressed caps) and every step can narrate through `onProgress`.
+     * Deploying never activates anything — bind an audience with
+     * `publishApp` afterwards. Run `verifyApp` first for a no-side-effect
+     * precheck of the same rules.
+     *
+     * @param appRoot - The app folder: absolute, or relative to
+     *   `options.workspaceRoot`.
+     * @param options.workspaceRoot - The workspace the zip is rooted at and
+     *   that `appManifest.include` entries resolve against
+     *   (default: `process.cwd()`).
+     * @param options.comment - "What changed" note kept in the registry.
+     * @param options.metadata - Extra metadata merged over the packed
+     *   defaults (e.g. projectId provenance); `appRoot` is always set from
+     *   the pack.
+     * @param options.onProgress - Receives one line per pack step (include
+     *   checks, per-file adds, totals) for hosts that surface progress.
+     * @returns The artifact entry for the new version.
+     */
+    addApp(appRoot: string, options?: {
+        workspaceRoot?: string;
+        comment?: string;
+        metadata?: Record<string, unknown>;
+        onProgress?: (line: string) => void;
+    }): Promise<PublishResult>;
+    /**
+     * Scaffolds a new app in the workspace — the programmatic twin of the
+     * App Builder's New App wizard, rendering the identical templates
+     * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+     * file and ignore hygiene, vendors the connected server's shell +
+     * client packages, and runs the workspace install. Scaffolding only —
+     * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
+     * `addApp` → `publishApp`) follows.
+     *
+     * @param slug - The app-name slug (lowercase; digits/-/_ after the
+     *   first character). The id becomes `<developerId>.<slug>`.
+     * @param options - Template, display name, developer id (default
+     *   'local'), frame options, install toggle, `onProgress`, and
+     *   `workspaceRoot` (default `process.cwd()`). The server base URL for
+     *   vendoring defaults to this client's own connection.
+     * @returns The created app's identity and a report of what ran.
+     */
+    createApp(slug: string, options?: {
+        workspaceRoot?: string;
+        template?: "Blank" | "Dashboard";
+        displayName?: string;
+        developerId?: string;
+        sidebar?: boolean;
+        statusFooter?: boolean;
+        docTabs?: boolean;
+        install?: boolean;
+        serverBaseUrl?: string;
+        onProgress?: (line: string) => void;
+    }): Promise<CreatedApp>;
+    /**
+     * Pre-checks everything `addApp` needs, WITHOUT deploying (Node.js
+     * only, purely local — no server call). Verifies the manifest shape and
+     * id grammar, declared icon/README assets, `appManifest.include`
+     * entries, and a pack dry run against the size caps. Server-side
+     * concerns (the build, store review) are out of scope — the Package
+     * tab's readiness and the review ladder cover those.
+     *
+     * @param appRoot - The app folder: absolute, or relative to
+     *   `options.workspaceRoot`.
+     * @param options.workspaceRoot - The workspace the pack would be rooted
+     *   at (default: `process.cwd()`).
+     * @returns The structured report — `ok` plus every check with an
+     *   actionable note.
+     */
+    verifyApp(appRoot: string, options?: {
+        workspaceRoot?: string;
+    }): Promise<AppVerifyReport>;
+    /**
      * Points a team at a published version.
      *
      * Promotion (Staging → Production) and rollback (v3 → v2) are both this
@@ -4082,8 +4242,9 @@ declare class DeployApi {
      * Deployments visible to the caller, as the standard list envelope.
      *
      * @param params - Optional team scope + list-API params.
-     * @param params.teamId - Restrict to one team; omitted = every team the
-     *   caller can monitor.
+     * @param params.teamId - Restrict to one team; omitted = the visibility
+     *   model: the caller's member teams plus their own personal space, and
+     *   the whole org for an org admin.
      * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
      */
     list(params?: DeployListParams & {
@@ -4785,10 +4946,13 @@ export declare class RocketRideClient extends DAPClient {
      *   pipeline: { components: [...], project_id: '123' },
      *   source: 'webhook_1'
      * });
-     * if (result.errors?.length) {
+     * if (result.errors.length) {
      *   console.log('Validation errors:', result.errors);
      * }
      * ```
+     *
+     * `errors` and `warnings` are ALWAYS arrays — a clean pipeline returns
+     * them empty, never absent.
      */
     validate(options: {
         pipeline: PipelineConfig | Record<string, unknown>;
@@ -4858,6 +5022,17 @@ export declare class RocketRideClient extends DAPClient {
      * Terminate a running pipeline.
      */
     terminate(token: string): Promise<void>;
+    /**
+     * List the caller's active tasks.
+     *
+     * Returns the tasks visible to the authenticated user (running and
+     * recently completed pipeline executions), as reported by the server.
+     * Each row includes the task token plus display fields such as name,
+     * state, and timing; the exact field set is server-defined.
+     *
+     * Mirrors the Python SDK's `get_tasks`.
+     */
+    getTasks(): Promise<Array<Record<string, unknown>>>;
     /**
      * Restart a running pipeline with a new configuration.
      *
@@ -5280,9 +5455,11 @@ export declare class RocketRideClient extends DAPClient {
      *
      * Answered by role: the developer org sees its FULL rail (published or
      * not); other callers see only the versions serving on rows visible to
-     * them. Each entry carries its deployment `state`, its `buildStatus`
-     * ('ok' = servable bytes exist), and the `rungs` naming the audiences
-     * serving it.
+     * them. Each entry carries its deployment `state`, its build lifecycle
+     * (`buildStatus` — 'ok' = servable bytes exist — plus the `buildPhase`
+     * it reached and `buildEndedAt`), and the `rungs` naming the audiences
+     * serving it. No error text rides the rail: build detail is served on
+     * demand by the build-log verb.
      *
      * @param appId - App id
      * @returns Rail entries, newest first
@@ -5296,6 +5473,8 @@ export declare class RocketRideClient extends DAPClient {
         message: string;
         state: string;
         buildStatus: string;
+        buildPhase: string;
+        buildEndedAt?: number | null;
         rungs: string[];
     }>>;
     /**
@@ -5379,6 +5558,19 @@ export declare class RocketRideClient extends DAPClient {
      * @returns The final binding row (state 'removed')
      */
     removeAppPublish(appId: string, target: string): Promise<{
+        publish: Record<string, unknown>;
+    }>;
+    /**
+     * Disable an audience binding — serving stops, but the row STAYS in the
+     * where-live listing marked disabled (a visible off switch), unlike
+     * remove which hides it. Publishing any version to the rung re-enables
+     * the binding.
+     *
+     * @param appId - App id
+     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @returns The binding row (state 'disabled')
+     */
+    disableAppPublish(appId: string, target: string): Promise<{
         publish: Record<string, unknown>;
     }>;
     /**
@@ -7506,6 +7698,52 @@ export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameE
  * ```
  */
 export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
+/**
+ * The decision: `true` allowed, `false` refused, `null` not decided yet.
+ *
+ * Three states, not two — "not decided" is what puts a consent surface on
+ * screen, so it cannot collapse into `false`. It is the ABSENCE of a stored
+ * value, which is why nothing is ever written for it.
+ */
+export type MarketingConsent = boolean | null;
+/** What a consent surface needs to render itself and record a decision. */
+export interface MarketingConsentState {
+    /** True where this environment runs ad attribution (the probe named a provider). */
+    configured: boolean;
+    /** The stored decision: `true` allowed, `false` refused, `null` undecided. */
+    consent: MarketingConsent;
+    /**
+     * Whether a consent surface should be on screen: no decision yet, or a
+     * "Privacy choices" control reopened it. False whenever `configured` is.
+     */
+    visible: boolean;
+    /** Record consent and close. */
+    allow: () => void;
+    /** Refuse, close, and clear the server copy so reporting stops. */
+    reject: () => void;
+}
+/**
+ * The marketing-consent decision plus the attribution relay behind server-side
+ * conversion reporting.
+ *
+ * The decision itself, the ad-click capture, and the opt-out checks all live in
+ * the shell (they run in bootstrap, before any remote exists, and the OAuth
+ * redirect reads the decision). This hook is the surface a consent UI needs —
+ * including one owned by a remote, which cannot reach `util/marketingConsent`
+ * or `util/adAttribution` directly.
+ *
+ * Renders nothing anywhere unless this environment runs ad attribution: staging
+ * and OSS never do, nor do automated browsers or visitors sending Global
+ * Privacy Control (see util/adAttribution.ts).
+ *
+ * - Relay: once consent is granted AND the user is signed in, the captured
+ *   ad-click reference goes to the server (account.setAttribution), which
+ *   reports conversions itself. An empty reference still relays: it records the
+ *   consent that lets the server match a conversion by hashed email.
+ * - Reject: clears the server copy, which stops all conversion reporting for
+ *   this user. Nothing needs unloading — no third-party script ever ran.
+ */
+export declare function useMarketingConsent(): MarketingConsentState;
 export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
 export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
     top: number;
@@ -7665,11 +7903,11 @@ export declare class ConnectionManager implements IConnectionManager {
     getAccountInfo(): ConnectResult | undefined;
     /** Returns the resolved server HTTP URL. */
     getHttpUrl(): string;
-    /** Persist a user token to localStorage. */
+    /** Persist a user token to this shell's token store (see devGate.tokenStore). */
     saveToken(token: string): void;
-    /** Load token from localStorage. Migrates the old sessionStorage value once. */
+    /** Load the persisted token from this shell's token store. */
     loadToken(): string;
-    /** Clear the persisted token. */
+    /** Clear the persisted token from this shell's token store. */
     clearToken(): void;
     /** Update the hasCredentials flag based on token availability. */
     updateCredentialsStatus(): void;
@@ -11117,6 +11355,10 @@ export declare const DEFAULT_TOOLCHAIN_STATE: IToolchainState;
  * server enforces entitlement on every request, so constructing a URL the
  * caller is not entitled to yields a 404 at load, never a leak.
  *
+ * The id is encoded as ONE path segment: this function is reachable from app
+ * code through shellApi, and an id carrying '/', '..', '?' or '#' would
+ * otherwise re-aim the path at a different same-origin script.
+ *
  * @param appId - The app id.
  * @param version - The registry version number (ints only).
  * @returns The versioned remoteEntry URL.
@@ -11567,6 +11809,38 @@ interface PlanPickerProps {
      * selection, e.g. the upgrade/top-up modals).
      */
     autoSelectDefault?: boolean;
+    /**
+     * Optional decorative image rendered inside each plan card, directly under
+     * the card header and above the feature list. When omitted, no image is
+     * rendered (the default — keeps the checkout modal unchanged). Host apps
+     * (e.g. the pricing page) pass a themed asset URL here.
+     */
+    cardImageSrc?: string;
+    /**
+     * Aspect ratio (width / height) of the ``cardImageSrc`` asset. When set,
+     * the image is treated as a single wide panorama sliced across the visible
+     * cards: card *i* of *n* shows the *i*-th horizontal segment of the strip,
+     * so the artwork reads continuously across the card row. When omitted, the
+     * image renders whole in every card (the original behavior).
+     */
+    cardImageAspect?: number;
+    /**
+     * When true, every card's feature list is padded (with invisible spacer
+     * rows) to the largest description length across ALL passed plans — both
+     * intervals included. Because the grid stretches cards to equal height, this
+     * keeps card height constant when toggling Monthly/Annual, even though the
+     * annual tiers carry extra bonus lines. Default ``false`` (checkout/upgrade
+     * modals render their natural, unpadded height).
+     */
+    uniformCardHeight?: boolean;
+    /**
+     * Overrides the feature-line font size (in px). When set, feature lines are
+     * also forced onto a single line (``white-space: nowrap``) so the larger
+     * size does not wrap inside the card. Default undefined → the base 11px with
+     * wrapping allowed (checkout/upgrade modals). The pricing page passes a
+     * larger value for bigger, single-line bullets.
+     */
+    featureFontSize?: number;
 }
 /**
  * Shared plan card grid with interval toggle.
@@ -11731,6 +12005,7 @@ export declare const shellApi: {
     readonly useConnectionStatus: typeof useConnectionStatus;
     readonly useShellApiConfig: typeof useShellApiConfig;
     readonly useAppComponent: typeof useAppComponent;
+    readonly useMarketingConsent: typeof useMarketingConsent;
     readonly useClickOutside: typeof useClickOutside;
     readonly useFixedPopupPosition: typeof useFixedPopupPosition;
     readonly usePrefs: typeof usePrefs;
