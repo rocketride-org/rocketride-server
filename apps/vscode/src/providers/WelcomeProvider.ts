@@ -250,17 +250,24 @@ export class WelcomeProvider {
 	 * Persist the user's welcome-page settings and kick off the first connection.
 	 *
 	 * Sequence mirrors SettingsProvider.saveAllSettings():
-	 *   1. Atomic config write (listeners suppressed)
-	 *   2. Mark welcome as dismissed so it won't re-open
-	 *   3. Cancel stale debounced handlers that would race with reconcile
-	 *   4. Initialize CMs (validates creds, sets mode)
-	 *   5. Reconcile engines (downloads/starts, CMs auto-connect on 'ready')
-	 *   6. Close the welcome panel
+	 *   1. Check if first run (before dismissal)
+	 *   2. Atomic config write (listeners suppressed)
+	 *   3. Commit staged cloud credentials
+	 *   4. Mark welcome as dismissed so it won't re-open
+	 *   5. Cancel stale debounced handlers that would race with reconcile
+	 *   6. Initialize CMs (validates creds, sets mode)
+	 *   7. Reconcile engines (downloads/starts, CMs auto-connect on 'ready')
+	 *   8. Close the welcome panel
+	 *   9. Auto-launch blank canvas on initial onboarding (first run only)
 	 *
 	 * @param settings - The full settings snapshot from the welcome form.
 	 */
 	private async saveAndConnect(settings: Record<string, unknown>): Promise<void> {
 		try {
+			// Record whether this is the first-run onboarding setup before marking as dismissed.
+			// Re-opening Welcome later to adjust settings should not auto-launch another canvas.
+			const isFirstRun = !this.isDismissed();
+
 			// Step 1: Atomic write — suppresses config-change listeners during the batch
 			await this.configManager.applyAllSettings(settings as any);
 
@@ -286,8 +293,10 @@ export class WelcomeProvider {
 			// Step 6: Close panel — engines are starting, CMs will auto-connect
 			this.panel?.dispose();
 
-			// Auto-launch blank canvas after welcome completes so user lands in the builder
-			void vscode.commands.executeCommand('rocketride.pipeline.new');
+			// Auto-launch blank canvas on initial onboarding (first run only) so user lands in the builder
+			if (isFirstRun) {
+				void vscode.commands.executeCommand('rocketride.pipeline.new');
+			}
 		} catch (error) {
 			console.error('[WelcomeProvider] Failed to save settings:', error);
 			this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Failed to save settings: ${error}` });
