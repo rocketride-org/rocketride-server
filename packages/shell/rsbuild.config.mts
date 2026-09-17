@@ -305,7 +305,16 @@ export default defineConfig(({ command }) => {
 			// all app bundles live under a single top-level build/ directory.
 			// The dev flavor builds beside it; the stitch step merges its hashed
 			// assets into shell/ and generates the flavor-picking index.html.
-			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', isDevFlavor ? 'shell-dev' : 'shell') },
+			//
+			// The DEV SERVER gets its own dir. It runs with `writeToDisk: true`
+			// and `cleanDistPath: true`, so sharing build/shell/ meant starting
+			// `shell:dev` WIPED the production bundle and replaced it with the
+			// dev server's unhashed output. The next `shell:copy` then mirrored
+			// that over dist/server/static/shell/, deleting the index.html the
+			// engine serves — and `shell:bundle`'s source-hash cache skipped the
+			// rebuild that would have restored it, so the engine answered
+			// "Shell UI not built" until someone ran shell:build --force.
+			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', isDev ? 'shell-devserver' : isDevFlavor ? 'shell-dev' : 'shell') },
 
 			// Prefix all asset URLs with /shell/ so they route through the shell
 			// module's public endpoints. Without this, assets load from /static/
