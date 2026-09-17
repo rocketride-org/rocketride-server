@@ -206,7 +206,10 @@ class MiscCommands(DAPConn):
             request (Dict[str, Any]): DAP request containing:
                 - arguments (Dict[str, Any]):
                     - pipeline (Dict[str, Any]): Pipeline configuration to validate,
-                      flat or already enveloped
+                      flat or already enveloped. Also accepts the
+                      single-component form ``{'version', 'component'}`` a node
+                      editor sends on save, expanded here into a one-item
+                      ``components`` list.
                     - source (str, optional): Override source component ID
 
         Returns:
@@ -268,7 +271,9 @@ class MiscCommands(DAPConn):
             # shell contract declares this endpoint accepts (shell/src/types/
             # project.ts). The engine validates pipelines, so the component
             # travels as a one-item list; without this it answers
-            # "'pipeline.components' must be an array".
+            # "'pipeline.components' must be an array". A payload carrying both
+            # keys is not one the union type can produce, so `components` wins
+            # and the stray `component` is dropped rather than merged.
             if 'components' not in pipeline and isinstance(pipeline.get('component'), dict):
                 component = pipeline['component']
                 pipeline = {k: v for k, v in pipeline.items() if k != 'component'}

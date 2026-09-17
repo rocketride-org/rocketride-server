@@ -386,6 +386,8 @@ Return the **unresolved** pipeline configuration for a running task — `${ROCKE
 
 Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). Returns `{ errors, warnings, ... }`: a pipeline will not execute while it has `errors`; `warnings` are non-fatal.
 
+`pipeline` also accepts the single-component form `{ version, component }` — the shape a node editor sends when it validates one component on save. The server expands it into a one-item `components` list before validating, so source inference and the result shape are the same as for a full pipeline.
+
 ```typescript
 const result = await client.validate({ pipeline });
 if (result.errors.length > 0) {

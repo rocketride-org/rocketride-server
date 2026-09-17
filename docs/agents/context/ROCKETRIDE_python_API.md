@@ -402,6 +402,8 @@ Retrieve the unresolved pipeline for a running task. The pipeline is returned ex
 
 Validate a pipeline configuration server-side (structure, required fields, component references) without starting it. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.
 
+`pipeline` also accepts the single-component form `{'version': ..., 'component': {...}}` — the shape a node editor sends when it validates one component on save. The server expands it into a one-item `components` list before validating.
+
 ```python
 result = await client.validate(pipeline, source='webhook_1')
 ```
