@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: add n8n workflow-automation node (#1231)
 - **nodes**: add tool_oura Oura Ring connector (#1625)
 - **nodes**: add tool_slack — Slack agent-tool node (post messages, list channels, read history) (#1575)
-- **nodes**: add tool_tenki — disposable Tenki Sandbox Linux VM for agents: run commands and code, edit files, work in public git repositories
+- **nodes**: add tool_tenki — disposable Tenki Sandbox Linux VM for agents: run commands and code, edit files, work in public git repositories (#2301)
 - **nodes**: tool_filesystem pipeline-sink lanes (#1651)
 - **nodes**: tool_google_workspace — shared Google client + gmail, sheets, docs, calendar, drive services (#1570)
 - **nodes**: add Guild.ai tool node (#1689)
