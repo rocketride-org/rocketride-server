@@ -602,13 +602,6 @@ async def apps_static(request: Request):
       open) through a HARD-expiry verdict cache. There is no unversioned
       bundle serving of any kind — clients construct versioned URLs from
       the version numbers the wire carries.
-
-      LOCAL DEV ESCAPE HATCH: with ``RR_DEV_FLAT_APPS=1`` the ``v<N>``
-      segment is dropped and the request falls through to the static tree,
-      serving whatever ``<app>:build`` last copied to ``static/apps/``.
-      That trades per-version immutability for a working edit-reload loop,
-      so it is opt-in by environment variable alone and must never be set
-      in a deployed environment.
     - ``<appId>`` (bare, no version, no file) — RESOLUTION INFO: a small
       JSON document saying what a bundle fetch would serve this caller
       (see ``_app_entry_info``). The deploy smoke test's probe.
@@ -632,38 +625,7 @@ async def apps_static(request: Request):
     if len(parts) >= 3:
         version_seg = _VERSION_SEG.match(parts[1])
         if version_seg:
-            # LOCAL DEV ONLY (RR_DEV_FLAT_APPS=1): drop the version segment and
-            # let the request fall through to the static tree below, so a local
-            # `<app>:build` is visible without minting a registry version.
-            #
-            # Clients ONLY ever construct versioned URLs, and a version's dist/
-            # is a frozen copy in the store written when the version was minted
-            # — so without this, rebuilding an app locally changes nothing the
-            # browser can see, and the immutable cache header makes a reload
-            # useless too. Reseeding to mint a version per edit is the only
-            # alternative, and it walks the registry counter for every restyle.
-            #
-            # Deliberately NOT inferred from a debug/NODE_ENV-style signal: an
-            # environment that sets this serves unversioned, mutable bytes off
-            # local disk to every caller, which would silently defeat the
-            # per-version immutability the store guarantees. Explicit opt-in
-            # only.
-            #
-            # AUTHORIZATION: the fall-through resolves first and authorizes the
-            # RESOLVED app id, so traversal cannot cross the root and cannot
-            # authorize as one app while serving another. What it DOES change is
-            # which gate guards the bundle: `_authorize_app` (public/permission,
-            # sliding cache) instead of `entitled_version_dirs` (per-version
-            # entitlement, hard expiry). Those are the same bytes the static
-            # tree already serves under /apps/<appId>/..., so nothing is newly
-            # exposed — but per-VERSION entitlement is gone, because with one
-            # flat tree there are no versions to tell apart. Another reason this
-            # is local-only.
-            if os.environ.get('RR_DEV_FLAT_APPS') == '1':
-                raw_path = '/'.join([parts[0], *parts[2:]])
-                parts = [parts[0], *parts[2:]]
-            else:
-                return await _serve_versioned(request, parts[0], int(version_seg.group(1)), parts[2:])
+            return await _serve_versioned(request, parts[0], int(version_seg.group(1)), parts[2:])
 
     # Resolution info — a BARE app id (no version, no file) answers with what
     # a bundle fetch WOULD serve this caller: the deploy smoke test's probe

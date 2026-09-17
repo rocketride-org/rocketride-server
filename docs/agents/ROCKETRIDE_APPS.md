@@ -282,32 +282,6 @@ revives it) and unregisters the dev overlay. The watch status line reports
 where the dev bundle serves from — every error carries a human-readable
 reason telling you what to fix.
 
-### When the dev overlay cannot reach you
-
-The watch above re-points your **personal** dev overlay, which is keyed by
-your authenticated user id. Two cases fall outside it:
-
-- an **anonymous** surface (the landing page and the other public pages), and
-- a **platform app rebuilt through the builder** rather than the App Builder.
-
-In both, the shell falls back to the registry version and loads
-`/apps/<appId>/v<N>/remoteEntry.js`. Those bytes are a frozen copy taken
-when version `N` was minted, served `immutable` for a year — so rebuilding
-the app changes nothing you can see, and reloading does not help either.
-The session version override cannot rescue this: it carries an integer, so
-it can only pick a *different* frozen version.
-
-Two ways out:
-
-| | What it does | Cost |
-|---|---|---|
-| `./builder saas:seed --force` | Mints a new version from the current `static/apps/` tree and repoints the public pin. | A registry version per edit. Plain `saas:seed` will NOT do this — it skips apps already seeded and never re-versions a rebuilt app. |
-| `RR_DEV_FLAT_APPS=1` | The engine drops the `v<N>` segment and serves the flat `static/apps/` tree, so `<app>:build` + reload is the whole loop. | Unversioned, mutable bytes for every caller. **Local only** — never set it in a deployed environment. |
-
-With the flag set, the loop is `./builder <app>:build` and reload.
-Authorization is unchanged: the request still resolves first and authorizes
-the resolved app id, so private bundles stay gated.
-
 ### The Design panes
 
 - **Preview** — the live app inside a device frame. Three layouts (desktop,
