@@ -83,11 +83,11 @@ def test_explicit_env_uri_used_unchanged_even_on_public_bind(monkeypatch, fake_w
     _assert_wiring(captured, 'wss://engine-host:5565', 'https://engine-host:5565')
 
 
-def test_explicit_cleartext_uri_is_used_unchanged_on_a_loopback_bind(monkeypatch, fake_web_server):
+def test_explicit_cleartext_loopback_uri_is_used_unchanged_on_a_loopback_bind(monkeypatch, fake_web_server):
     """A loopback engine never puts the credential on a wire anyone can read."""
-    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://engine-host:5565')
+    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://127.0.0.1:5565')
     captured = _init(monkeypatch, fake_web_server, host='127.0.0.1', port=5565)
-    _assert_wiring(captured, 'ws://engine-host:5565', 'http://engine-host:5565')
+    _assert_wiring(captured, 'ws://127.0.0.1:5565', 'http://127.0.0.1:5565')
 
 
 def test_explicit_config_uri_beats_env_and_loopback_default(monkeypatch, fake_web_server):
@@ -204,7 +204,7 @@ async def test_widget_csp_uses_resolved_public_origin(monkeypatch, fake_web_serv
     [
         ('0.0.0.0', None, 'https://api.rocketride.ai'),
         ('127.0.0.1', None, 'http://127.0.0.1:5565'),
-        ('127.0.0.1', 'ws://engine-host:5565', 'http://engine-host:5565'),
+        ('127.0.0.1', 'wss://engine-host:5565', 'https://engine-host:5565'),
     ],
 )
 async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, fake_engine, host, env_uri, origin):
@@ -297,7 +297,7 @@ def test_loopback_default_keeps_its_cleartext_local_uri(monkeypatch, fake_web_se
     _assert_wiring(captured, 'ws://127.0.0.1:5565', 'http://127.0.0.1:5565')
 
 
-@pytest.mark.parametrize('host', ['0.0.0.0', 'engine.internal', '', None])
+@pytest.mark.parametrize('host', ['0.0.0.0', 'engine.internal', '', None, '127.0.0.1', 'localhost', '::1'])
 @pytest.mark.parametrize(
     ('uri', 'origin'),
     [
@@ -337,6 +337,48 @@ def test_a_non_loopback_target_is_still_refused_on_a_public_bind(monkeypatch, fa
     with pytest.raises(RuntimeError) as excinfo:
         _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     assert 'engine.internal' in str(excinfo.value)
+
+
+@pytest.mark.parametrize('host', ['127.0.0.1', 'localhost', '::1'])
+@pytest.mark.parametrize('uri', ['ws://engine.remote:5565', 'http://engine.remote:5565'])
+def test_explicit_cleartext_remote_uri_is_refused_on_a_loopback_bind(monkeypatch, fake_web_server, host, uri):
+    """The BIND never made the wire safe -- only the TARGET does.
+
+    A loopback-bound MCP server pointed at `ws://engine.remote:5565` still hands
+    the caller's credential to `WsEngineClient`, which puts it on the network in
+    the first DAP `auth` frame. The explicit branch must not skip the check.
+    """
+    monkeypatch.setenv('ROCKETRIDE_URI', uri)
+    with pytest.raises(RuntimeError) as excinfo:
+        _init(monkeypatch, fake_web_server, host=host, port=5565)
+    message = str(excinfo.value)
+    assert 'ROCKETRIDE_URI' in message, message
+    assert 'engine.remote' in message, message
+
+
+def test_explicit_cleartext_remote_uri_from_config_is_refused_on_a_loopback_bind(monkeypatch, fake_web_server):
+    with pytest.raises(RuntimeError, match='rocketride_uri'):
+        _init(
+            monkeypatch,
+            fake_web_server,
+            host='127.0.0.1',
+            port=5565,
+            config={'rocketride_uri': 'ws://engine.remote:5565'},
+        )
+
+
+def test_explicit_cleartext_refusal_on_a_loopback_bind_stays_redacted(monkeypatch, fake_web_server):
+    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://user:secret@engine.remote:5565')
+    with pytest.raises(RuntimeError) as excinfo:
+        _init(monkeypatch, fake_web_server, host='127.0.0.1', port=5565)
+    assert 'secret' not in str(excinfo.value), 'the refusal must stay redacted'
+
+
+@pytest.mark.parametrize('host', ['127.0.0.1', 'localhost', '::1', '0.0.0.0', None])
+def test_explicit_encrypted_remote_uri_is_accepted_on_any_bind(monkeypatch, fake_web_server, host):
+    monkeypatch.setenv('ROCKETRIDE_URI', 'wss://engine.remote:5565')
+    captured = _init(monkeypatch, fake_web_server, host=host, port=5565)
+    _assert_wiring(captured, 'wss://engine.remote:5565', 'https://engine.remote:5565')
 
 
 @pytest.mark.parametrize(

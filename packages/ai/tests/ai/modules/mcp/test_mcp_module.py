@@ -39,9 +39,9 @@ async def test_initmodule_threads_engine_origin_from_configured_uri(monkeypatch,
     monkeypatch.setattr(mcp_module, 'build_mcp_server', _capturing_build_mcp_server)
 
     srv = fake_web_server
-    mcp_module.initModule(srv, {'mcp_dev_no_auth': True, 'rocketride_uri': 'ws://engine-host:5565/'})
+    mcp_module.initModule(srv, {'mcp_dev_no_auth': True, 'rocketride_uri': 'wss://engine-host:5565/'})
 
-    assert captured['engine_origin'] == 'http://engine-host:5565'
+    assert captured['engine_origin'] == 'https://engine-host:5565'
 
 
 @pytest.mark.asyncio

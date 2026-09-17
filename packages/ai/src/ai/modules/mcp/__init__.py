@@ -312,7 +312,10 @@ def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) 
     ``ws://`` that frame is plaintext, so every MCP caller's API key or OAuth
     token is exposed to anything on the path.
 
-    The rule keys on the TARGET HOST, not on the bind. A credential sent to
+    The rule keys on the TARGET HOST, not on the bind, and every resolved URI
+    goes through it -- explicit or derived, on any bind. A loopback-bound MCP
+    server pointed at a remote engine still puts the credential on the network,
+    so the bind can never excuse the check. A credential sent to
     ``ws://127.0.0.1:5565`` never reaches a wire anyone can tap, so there is
     nothing to protect -- and refusing it would be a real deployment hazard:
     ``WebServer.__init__`` loads ``dist/server/.env``, ``.env.template`` ships
@@ -360,13 +363,17 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
        the public origin of the MCP resource identifier: path dropped,
        ``https`` -> ``wss``, ``http`` -> ``ws``.
 
-    On a non-loopback bind the resolved URI additionally requires ENCRYPTED
-    transport whenever it addresses a REMOTE engine: the caller's own
-    credential is handed to the engine client, so a ``ws://``/``http://``
-    value -- explicit or derived -- pointed at a non-loopback host is refused
-    rather than quietly used. Cleartext to a loopback target stays allowed,
-    since that credential never reaches a wire. See
-    ``_refuse_cleartext_engine_uri``.
+    Whatever rule wins, the resolved URI requires ENCRYPTED transport whenever
+    it addresses a REMOTE engine: the caller's own credential is handed to the
+    engine client, so a ``ws://``/``http://`` value -- explicit or derived --
+    pointed at a non-loopback host is refused rather than quietly used. The
+    check keys on the TARGET host, never on the bind: a loopback-bound MCP
+    server still puts the credential on the network when the engine lives
+    somewhere else. Cleartext to a loopback target stays allowed, since that
+    credential never reaches a wire. See ``_refuse_cleartext_engine_uri``.
+
+    ``bind_host`` therefore only selects the DEFAULT URI (rules 2 and 3); it
+    has no say in whether a value is encrypted enough.
 
     Args:
         config: Module configuration dict.
@@ -377,17 +384,15 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
         Tuple[str, str]: The URI and the name of the rule that chose it.
 
     Raises:
-        RuntimeError: on a non-loopback bind with a cleartext engine URI
-            addressing a non-loopback host.
+        RuntimeError: when the resolved engine URI is cleartext and addresses a
+            non-loopback host.
     """
-    loopback = auth.is_loopback_bind(bind_host)
     explicit = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI')
     if explicit:
-        if not loopback:
-            source_name = 'rocketride_uri' if config.get('rocketride_uri') else 'ROCKETRIDE_URI'
-            _refuse_cleartext_engine_uri(explicit, explicit, source_name)
+        source_name = 'rocketride_uri' if config.get('rocketride_uri') else 'ROCKETRIDE_URI'
+        _refuse_cleartext_engine_uri(explicit, explicit, source_name)
         return explicit, 'explicit'
-    if loopback:
+    if auth.is_loopback_bind(bind_host):
         host = '[::1]' if bind_host == '::1' else '127.0.0.1'
         return f'ws://{host}:{bind_port}', 'loopback default'
     resource = oauth_resource.resource_identifier()
@@ -460,8 +465,9 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     Raises:
         RuntimeError: If a route already claims ``/mcp`` or ``/mcp/*``, if a
             public pattern is rooted at (or matches) the endpoint or any of its
-            descendants, or if a non-loopback bind resolves a cleartext
-            (``ws://``/``http://``) engine URI addressing a non-loopback host.
+            descendants, or if the resolved engine URI is cleartext
+            (``ws://``/``http://``) and addresses a non-loopback host. That last
+            check keys on the engine's TARGET host, not on the MCP bind.
     """
     # ------------------------------------------------------------------
     # 1. Hoisted TaskRegistry

@@ -27,8 +27,16 @@ do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below); API-key auth
 | `MCP_JWKS_URL` | `<issuer>/oauth/v2/keys` | Where token signing keys are fetched from. |
 | `ROCKETRIDE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of widget CSP and upload/dropper links. When unset: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise the origin of `MCP_RESOURCE_IDENTIFIER` with `https`→`wss` / `http`→`ws` (default `wss://api.rocketride.ai`). The engine logs the resolved value at startup. |
 
-Two related guards to know about:
+Three related guards to know about:
 
+- `ROCKETRIDE_URI` must be encrypted when it points at a **remote** engine: a
+  cleartext `ws://` / `http://` value addressing a non-loopback host fails boot,
+  because the caller's own credential is sent to the engine in the first DAP
+  `auth` message. The check keys on the engine's target host, not on the bind —
+  a loopback-bound MCP server pointed at a remote engine is refused just the
+  same, while `ws://127.0.0.1:5565` / `http://localhost:5565` stays allowed on
+  any bind. Use `wss://` (or an `https://` `MCP_RESOURCE_IDENTIFIER`) for a
+  remote engine, in practice via a TLS-terminating reverse proxy.
 - On a non-loopback bind with `MCP_EXPECTED_AUDIENCE` unset, **all** OAuth
   tokens are refused with an explicit error — a deploy that forgets the
   audience fails loudly instead of accepting every token.
