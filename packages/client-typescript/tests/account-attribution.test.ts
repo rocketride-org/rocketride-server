@@ -35,14 +35,17 @@ function makeApi() {
 describe('AccountApi.setAttribution', () => {
 	it('sends the provider blob on rrext_account_me set_attribution', async () => {
 		const { api, call } = makeApi();
-		const blob = { user_data: { grclid: 'abc' }, client_context: { ua: 'x' } };
-		await api.setAttribution('gravity', blob);
-		expect(call).toHaveBeenCalledWith('rrext_account_me', { subcommand: 'set_attribution', provider: 'gravity', data: blob });
+		// FLAT, like the ad-click reference a caller actually reads off a
+		// landing URL — not a nested conversions-API envelope, and never
+		// anything derived from the device.
+		const blob = { clickid: 'abc', campaignid: 'camp1' };
+		await api.setAttribution('acme-ads', blob);
+		expect(call).toHaveBeenCalledWith('rrext_account_me', { subcommand: 'set_attribution', provider: 'acme-ads', data: blob });
 	});
 
 	it('sends null data to clear the stored context on consent withdrawal', async () => {
 		const { api, call } = makeApi();
-		await api.setAttribution('gravity', null);
-		expect(call).toHaveBeenCalledWith('rrext_account_me', { subcommand: 'set_attribution', provider: 'gravity', data: null });
+		await api.setAttribution('acme-ads', null);
+		expect(call).toHaveBeenCalledWith('rrext_account_me', { subcommand: 'set_attribution', provider: 'acme-ads', data: null });
 	});
 });

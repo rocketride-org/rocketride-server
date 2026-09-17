@@ -382,9 +382,11 @@ class ServerInfoResult(TypedDict, total=False):
             on this server, so clients initialise Stripe Elements with the key
             matching the server's Stripe account (test vs live) instead of a
             build-time value. Absent on servers without billing (OSS).
-        attributionProvider (str): Ad-attribution provider this server reports
-            conversions to (``'gravity'``) — the NAME only, never a credential.
-            Present when the provider's API key is configured; absent otherwise.
+        attributionProvider (str): Ad-attribution provider id this server
+            reports conversions to — the NAME only, never a credential, and
+            passed through verbatim from the deployment's configuration, so the
+            platform names no vendor of its own. Present where a deployment
+            reports conversions; absent otherwise.
         endpoints (ServerEndpoints): The server's public addresses, RESOLVED
             to absolute URLs by :meth:`RocketRideClient.get_server_info` —
             the server's ``'origin'`` sentinel ("the address you probed me

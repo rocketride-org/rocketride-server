@@ -833,9 +833,6 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			{/* Checkout overlay — renders outside the shell layout */}
 			<CheckoutFlow stripeKey={stripeKey} orgId={orgId} />
 
-			{/* The marketing-consent bar is owned by home-ui (it mounts one at its
-			    root); the shell keeps the decision store, the ad-click capture and
-			    the relay behind useMarketingConsent. */}
 		</ShellIdentityContext.Provider>
 	);
 };

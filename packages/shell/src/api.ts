@@ -70,12 +70,15 @@ import { useConnectionStatus } from './hooks/useConnectionStatus';
 import { useShellApiConfig } from './connection/ShellApiConfigContext';
 import { useIframeBridge } from './hooks/useIframeBridge';
 import { useAppComponent } from './hooks/useAppComponent';
-// Marketing consent — the decision plus the attribution relay, so a consent
-// surface can live in a remote (util/marketingConsent and util/adAttribution
-// stay shell-internal: they run in bootstrap, before any remote exists).
-import { useMarketingConsent } from './hooks/useMarketingConsent';
-export type { MarketingConsentState } from './hooks/useMarketingConsent';
-export type { MarketingConsent } from './util/marketingConsent';
+// The landing URL the visitor arrived with, snapshotted in bootstrap before
+// the shell rewrites it. Only shell code runs that early, so an app that needs
+// a campaign or referral parameter reads it from here.
+import { useLandingUrl } from './hooks/useLandingUrl';
+export type { LandingUrl } from './util/landingUrl';
+// Contribute one opaque value to the OAuth `state` parameter, to carry
+// something across a sign-in redirect without writing to the device.
+import { registerAuthStateProvider } from './auth/authState';
+export type { AuthStateProvider } from './auth/authState';
 
 // Shared hooks re-exported through shell for app convenience
 import { useClickOutside } from './hooks/useClickOutside';
@@ -474,7 +477,8 @@ export const shellApi = {
 	get useConnectionStatus() { return useConnectionStatus; },
 	get useShellApiConfig() { return useShellApiConfig; },
 	get useAppComponent() { return useAppComponent; },
-	get useMarketingConsent() { return useMarketingConsent; },
+	get useLandingUrl() { return useLandingUrl; },
+	get registerAuthStateProvider() { return registerAuthStateProvider; },
 	get useClickOutside() { return useClickOutside; },
 	get useFixedPopupPosition() { return useFixedPopupPosition; },
 	get usePrefs() { return usePrefs; },
@@ -544,8 +548,10 @@ export {
 	useShellConnection, useAuthUser, useLogout, useWorkspace, useClient,
 	useShellEvent, useIframeBridge, useSubscriptions, usePolling,
 	useDashboardData, useConnectionStatus, useShellApiConfig, useAppComponent,
-	useMarketingConsent,
+	useLandingUrl,
 	useClickOutside, useFixedPopupPosition, usePrefs,
+	// Auth-state contributor (opaque OAuth `state` passthrough)
+	registerAuthStateProvider,
 	// Client access + connection manager + connection state
 	getClient, ConnectionManager, ConnectionState,
 	// Auth providers

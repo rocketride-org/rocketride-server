@@ -562,13 +562,14 @@ export interface ServerInfoResult {
 	stripePublishableKey?: string;
 
 	/**
-	 * Ad-attribution provider this server reports conversions to (`'gravity'`).
+	 * Ad-attribution provider id this server reports conversions to.
 	 *
-	 * The NAME only — never a credential. Present when the server holds the
-	 * provider's API key, which is what lets the browser shell capture
-	 * ad-click parameters and ask for marketing consent; absent everywhere
-	 * else (staging, OSS), where the shell does nothing. No third-party ad
-	 * script is ever loaded: conversions are reported server-side.
+	 * The NAME only — never a credential, and passed through verbatim from the
+	 * deployment's configuration, so the platform names no vendor of its own.
+	 * Present where a deployment reports conversions, which is what lets an
+	 * app capture ad-click parameters and ask for marketing consent; absent
+	 * everywhere else (staging, OSS), where apps do nothing with it. No
+	 * third-party ad script is loaded: conversions are reported server-side.
 	 */
 	attributionProvider?: string;
 

@@ -424,6 +424,13 @@ export interface ShellApiConfig {
 	RR_ZITADEL_URL?: string;
 	/** Zitadel application client ID — required for PKCE OAuth login. */
 	RR_ZITADEL_CLIENT_ID?: string;
+	/**
+	 * Attribution provider id the server advertises for this environment, or
+	 * absent where it runs none. A passthrough of the probe's field: the shell
+	 * stores the string and never interprets it — an app that does attribution
+	 * reads it and decides what it means.
+	 */
+	attributionProvider?: string;
 	/** Additional runtime settings loaded from .workspace/settings.json. */
 	[key: string]: string | undefined;
 }

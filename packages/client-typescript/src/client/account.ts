@@ -96,9 +96,9 @@ export class AccountApi {
 	/**
 	 * Records (or clears) the user's ad-attribution context for a provider.
 	 *
-	 * Sent by the browser shell only after the user has granted marketing
-	 * consent: `data` is the ad-click reference the shell read from the
-	 * landing URL (for Gravity, `grclid` and its siblings), which the server
+	 * Sent by the browser only after the user has granted marketing
+	 * consent: `data` is the ad-click reference an app read from the landing
+	 * URL (whatever parameters the provider puts there), which the server
 	 * attaches to server-side conversion events. It may be empty — the stored
 	 * record is itself the consent that permits reporting. Pass `null` when
 	 * consent is withdrawn: the server deletes the stored context and stops
@@ -106,7 +106,8 @@ export class AccountApi {
 	 *
 	 * No ad pixel is involved, and nothing is read from the device.
 	 *
-	 * @param provider - Attribution provider id (currently `'gravity'`).
+	 * @param provider - Attribution provider id, as the deployment configured
+	 *                   it (the server's probe advertises the same value).
 	 * @param data - The ad-click reference, or `null` to clear it.
 	 */
 	async setAttribution(provider: string, data: Record<string, unknown> | null): Promise<void> {

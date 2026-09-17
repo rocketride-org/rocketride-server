@@ -121,14 +121,15 @@ async def test_on_rrext_public_probe_omits_stripe_key_when_unset(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_public_probe_advertises_attribution_when_capi_is_configured(monkeypatch):
+async def test_on_rrext_public_probe_advertises_the_configured_attribution_provider(monkeypatch):
     """
-    A server holding a Gravity Conversions API key can actually report
-    conversions, so it tells the shell to capture ad-click params and ask for
-    marketing consent. The KEY ITSELF is a server secret and never travels.
+    A deployment that can report conversions names its provider, so an app
+    knows to capture ad-click params and ask for marketing consent. The value
+    is passed through verbatim — the platform holds no vendor name of its own.
     """
     monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
-    monkeypatch.setenv('RR_GRAVITY_API_KEY', 'grv_live_secret_value')
+    monkeypatch.setenv('RR_ATTRIBUTION_PROVIDER', 'acme-ads')
+    monkeypatch.setenv('RR_ATTRIBUTION_API_KEY', 'live_secret_value')
 
     account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
     server = MagicMock()
@@ -137,18 +138,21 @@ async def test_on_rrext_public_probe_advertises_attribution_when_capi_is_configu
     conn = _make_conn(server=server)
     result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
 
-    assert result['body']['attributionProvider'] == 'gravity'
-    assert 'grv_live_secret_value' not in str(result['body'])
+    assert result['body']['attributionProvider'] == 'acme-ads'
+    # No credential of any provider's ever travels on the public probe.
+    assert 'live_secret_value' not in str(result['body'])
 
 
 @pytest.mark.asyncio
 async def test_on_rrext_public_probe_omits_attribution_when_unset(monkeypatch):
     """
-    Without a CAPI key (staging, OSS, local) nothing is advertised: the shell
-    then captures nothing and shows no consent banner.
+    With no provider configured (staging, OSS, local) nothing is advertised:
+    an app then captures nothing and shows no consent banner. A provider's API
+    key alone is not enough — the provider must be named explicitly.
     """
     monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
-    monkeypatch.delenv('RR_GRAVITY_API_KEY', raising=False)
+    monkeypatch.delenv('RR_ATTRIBUTION_PROVIDER', raising=False)
+    monkeypatch.setenv('RR_ATTRIBUTION_API_KEY', 'live_secret_value')
 
     account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
     server = MagicMock()

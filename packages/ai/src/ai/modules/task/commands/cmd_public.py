@@ -126,14 +126,16 @@ class PublicCommands(DAPConn):
             info['stripePublishableKey'] = stripe_pk
         elif stripe_pk:
             debug('[public] RR_STRIPE_PUBLISHABLE_KEY is not a pk_ publishable key — omitting it from the public probe')
-        # Ad-attribution provider — the NAME only, never a credential. A
-        # server holding a Gravity Conversions API key can report conversions,
-        # so the shell captures ad-click params and asks for marketing
-        # consent; everywhere else (staging, OSS) the field is absent and the
-        # shell does nothing. No ad script is ever loaded: attribution is
+        # Ad-attribution provider — the NAME only, never a credential. The
+        # value IS the provider id, so the platform holds no vendor name of its
+        # own: a deployment that reports conversions sets it alongside whatever
+        # credential its own provider needs, and everywhere else
+        # (staging, OSS) the field is absent and apps do nothing with it. No ad
+        # script is ever loaded by the platform; an app that acts on this does
         # first-party capture plus server-side events.
-        if os.environ.get('RR_GRAVITY_API_KEY', '').strip():
-            info['attributionProvider'] = 'gravity'
+        attribution_provider = os.environ.get('RR_ATTRIBUTION_PROVIDER', '').strip()
+        if attribution_provider:
+            info['attributionProvider'] = attribution_provider
         return self.build_response(request, body=info)
 
     # ── rrext_public_catalog ────────────────────────────────────────────────

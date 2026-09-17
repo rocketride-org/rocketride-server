@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV4 — never edit by hand
 // =============================================================================
-// Generated:     2026-09-17T18:27:39.087Z
-// Source commit: 73897328be089a3804596237d5db43b0d530e6c5
+// Generated:     2026-09-17T20:28:22.067Z
+// Source commit: 3f1f2412204c386155c140e4b7bdd01636877177
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1950,13 +1950,14 @@ export interface ServerInfoResult {
      */
     stripePublishableKey?: string;
     /**
-     * Ad-attribution provider this server reports conversions to (`'gravity'`).
+     * Ad-attribution provider id this server reports conversions to.
      *
-     * The NAME only — never a credential. Present when the server holds the
-     * provider's API key, which is what lets the browser shell capture
-     * ad-click parameters and ask for marketing consent; absent everywhere
-     * else (staging, OSS), where the shell does nothing. No third-party ad
-     * script is ever loaded: conversions are reported server-side.
+     * The NAME only — never a credential, and passed through verbatim from the
+     * deployment's configuration, so the platform names no vendor of its own.
+     * Present where a deployment reports conversions, which is what lets an
+     * app capture ad-click parameters and ask for marketing consent; absent
+     * everywhere else (staging, OSS), where apps do nothing with it. No
+     * third-party ad script is loaded: conversions are reported server-side.
      */
     attributionProvider?: string;
     /**
@@ -3465,9 +3466,9 @@ declare class AccountApi {
     /**
      * Records (or clears) the user's ad-attribution context for a provider.
      *
-     * Sent by the browser shell only after the user has granted marketing
-     * consent: `data` is the ad-click reference the shell read from the
-     * landing URL (for Gravity, `grclid` and its siblings), which the server
+     * Sent by the browser only after the user has granted marketing
+     * consent: `data` is the ad-click reference an app read from the landing
+     * URL (whatever parameters the provider puts there), which the server
      * attaches to server-side conversion events. It may be empty — the stored
      * record is itself the consent that permits reporting. Pass `null` when
      * consent is withdrawn: the server deletes the stored context and stops
@@ -3475,7 +3476,8 @@ declare class AccountApi {
      *
      * No ad pixel is involved, and nothing is read from the device.
      *
-     * @param provider - Attribution provider id (currently `'gravity'`).
+     * @param provider - Attribution provider id, as the deployment configured
+     *                   it (the server's probe advertises the same value).
      * @param data - The ad-click reference, or `null` to clear it.
      */
     setAttribution(provider: string, data: Record<string, unknown> | null): Promise<void>;
@@ -6339,6 +6341,13 @@ export interface ShellApiConfig {
     RR_ZITADEL_URL?: string;
     /** Zitadel application client ID — required for PKCE OAuth login. */
     RR_ZITADEL_CLIENT_ID?: string;
+    /**
+     * Attribution provider id the server advertises for this environment, or
+     * absent where it runs none. A passthrough of the probe's field: the shell
+     * stores the string and never interprets it — an app that does attribution
+     * reads it and decides what it means.
+     */
+    attributionProvider?: string;
     /** Additional runtime settings loaded from .workspace/settings.json. */
     [key: string]: string | undefined;
 }
@@ -7866,45 +7875,54 @@ export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameE
  * ```
  */
 export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
-export type MarketingConsent = "granted" | "denied" | "unset";
-/** What a consent surface needs to render itself and record a decision. */
-export interface MarketingConsentState {
-    /** True where this environment runs ad attribution (the probe named a provider). */
-    configured: boolean;
-    /** The stored decision ('unset' until the visitor chooses). */
-    consent: MarketingConsent;
-    /**
-     * Whether a consent surface should be on screen: no decision yet, or a
-     * "Privacy choices" control reopened it. False whenever `configured` is.
-     */
-    visible: boolean;
-    /** Record consent and close. */
-    allow: () => void;
-    /** Refuse, close, and clear the server copy so reporting stops. */
-    reject: () => void;
+/** Immutable snapshot of the URL a document was opened with. */
+export interface LandingUrl {
+    /** Path only, no query or fragment (e.g. `/pricing`). */
+    readonly pathname: string;
+    /** Raw query string including the leading `?`, or `''`. */
+    readonly search: string;
+    /** Raw fragment including the leading `#`, or `''`. */
+    readonly hash: string;
+    /** Parsed query parameters. Repeated keys keep the LAST value. */
+    readonly params: Readonly<Record<string, string>>;
 }
 /**
- * The marketing-consent decision plus the attribution relay behind server-side
- * conversion reporting.
+ * The URL this document was opened with, snapshotted in bootstrap before the
+ * shell rewrote it (the OAuth callback and the connect path both strip the
+ * query string).
  *
- * The decision itself, the ad-click capture, and the opt-out checks all live in
- * the shell (they run in bootstrap, before any remote exists, and the OAuth
- * redirect reads the decision). This hook is the surface a consent UI needs —
- * including one owned by a remote, which cannot reach `util/marketingConsent`
- * or `util/adAttribution` directly.
+ * Deliberately NOT stateful: the snapshot is frozen for the life of the
+ * document, so there is nothing to subscribe to and no re-render to trigger.
+ * Read it whenever you need it.
  *
- * Renders nothing anywhere unless this environment runs ad attribution: staging
- * and OSS never do, nor do automated browsers or visitors sending Global
- * Privacy Control (see util/adAttribution.ts).
+ * An app reading a campaign or referral parameter is responsible for its own
+ * privacy posture — the capture is unconditional, so honour Global Privacy
+ * Control (`navigator.globalPrivacyControl`) and skip automated browsers
+ * (`navigator.webdriver`) on this side if that matters for your use.
  *
- * - Relay: once consent is granted AND the user is signed in, the captured
- *   ad-click reference goes to the server (account.setAttribution), which
- *   reports conversions itself. An empty reference still relays: it records the
- *   consent that lets the server match a conversion by hashed email.
- * - Reject: clears the server copy, which stops all conversion reporting for
- *   this user. Nothing needs unloading — no third-party script ever ran.
+ * @returns The landing-URL snapshot; empty when nothing was captured.
+ *
+ * @example
+ * ```tsx
+ * const landing = useLandingUrl();
+ * const ref = landing.params.ref;   // ?ref=... as the visitor arrived
+ * ```
  */
-export declare function useMarketingConsent(): MarketingConsentState;
+export declare function useLandingUrl(): LandingUrl;
+/** Supplies an opaque, url-safe value to ride the OAuth `state` parameter. */
+export type AuthStateProvider = () => string | null;
+/**
+ * Register the contributor asked for a `state` value on every sign-in.
+ *
+ * Registering is safe any time before the visitor signs in — `signIn()` runs
+ * from a user gesture, so an app that registers on mount is always in place.
+ * A second registration REPLACES the first and warns; the slot is single by
+ * design.
+ *
+ * @param fn - Called at sign-in; return null to carry nothing.
+ * @returns An unregister function (only clears if `fn` is still registered).
+ */
+export declare function registerAuthStateProvider(fn: AuthStateProvider): () => void;
 export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
 export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
     top: number;
@@ -12186,7 +12204,8 @@ export declare const shellApi: {
     readonly useConnectionStatus: typeof useConnectionStatus;
     readonly useShellApiConfig: typeof useShellApiConfig;
     readonly useAppComponent: typeof useAppComponent;
-    readonly useMarketingConsent: typeof useMarketingConsent;
+    readonly useLandingUrl: typeof useLandingUrl;
+    readonly registerAuthStateProvider: typeof registerAuthStateProvider;
     readonly useClickOutside: typeof useClickOutside;
     readonly useFixedPopupPosition: typeof useFixedPopupPosition;
     readonly usePrefs: typeof usePrefs;

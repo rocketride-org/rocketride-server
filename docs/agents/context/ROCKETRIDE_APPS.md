@@ -605,7 +605,8 @@ The client instance is always the shell's — never construct a
 | `usePrefs()` | `{ getPref, setPref }` — the one-key preference accessor. |
 | `useShellEvent(event, handler)` | Subscribe to a typed platform event with automatic cleanup. |
 | `useAppComponent(appId, name)` | Load a UI component from another app (or `null` while loading). |
-| `useMarketingConsent()` | `MarketingConsentState`: `{ configured, consent, visible, allow, reject }` — everything a marketing-consent surface needs. The shell keeps the decision store, the ad-click capture (it runs in bootstrap, before any remote exists) and the server-side relay; an app owns only the disclosure UI. `visible` is false wherever ad attribution is not configured, so the surface renders nothing on staging, on OSS, for automated browsers, and for visitors sending Global Privacy Control. |
+| `useLandingUrl()` | `LandingUrl`: `{ pathname, search, hash, params }` — the URL this document was opened with, snapshotted in bootstrap **before** the shell rewrote it (the OAuth callback and the connect path both strip the query string). Only shell code runs that early, so this is the one way to read a campaign, referral or deep-link parameter the visitor arrived with. Frozen for the life of the document, so there is nothing to subscribe to. The capture is unconditional — if you act on it, honour `navigator.globalPrivacyControl` and skip `navigator.webdriver` on your side. |
+| `registerAuthStateProvider(fn)` | `() => void` (unregister). Registers the one contributor asked for a value to ride the OAuth `state` parameter on each sign-in, so you can carry something across the redirect **without writing to the device**. Return `null` to carry nothing. The shell validates shape only — url-safe characters, 2 KB cap — and never interprets the value. One slot: a second registration replaces the first and warns. Register on mount; `signIn()` runs from a user gesture, so you are always in place. |
 
 ### Utilities
 
@@ -1664,7 +1665,7 @@ configs — are also re-exported type-only from `'shell'`, so
 `useShellConnection()`, `useClient()`, `useConnectionStatus()`,
 `useShellApiConfig()`, `useAuthUser()`, `useLogout()`,
 `useSubscriptions()`, `useWorkspace()`, `usePrefs()`, `useShellEvent()`,
-`useAppComponent()`, `useMarketingConsent()`, `usePolling()`,
+`useAppComponent()`, `useLandingUrl()`, `usePolling()`,
 `useDebouncedValue()`, `useAnnouncements()`, `useClickOutside()`,
 `useFixedPopupPosition()`, `useSidebarCollapsed()`,
 `useDashboardData()`, `useIframeBridge()`

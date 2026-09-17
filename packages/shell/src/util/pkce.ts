@@ -163,12 +163,12 @@ export function clearStoredVerifier(): void {
  * @param challenge     - PKCE code_challenge (from generatePkce)
  * @param _register     - Historical sign-up intent flag; both flows now land on
  *                        the login page (with its Register link), see below
- * @param state         - Optional opaque value echoed back on the callback. The
- *                        shell carries the ad-click reference here so it
- *                        survives the redirect without touching device storage
- *                        (see util/adAttribution.ts). CSRF protection comes
- *                        from PKCE, not from this value.
- * @returns The fully formed authorization URL string ready for browser navigation.
+ * @param state - Opaque value to round-trip through the identity provider as
+ *                the OAuth `state` parameter, or null/undefined to omit it.
+ *                Supplied by whatever an app registered via
+ *                `registerAuthStateProvider` (see auth/authState.ts); this
+ *                function never interprets it. CSRF protection comes from
+ *                PKCE, not from this value.
  */
 export function buildAuthUrl(
     zitadelUrl: string,

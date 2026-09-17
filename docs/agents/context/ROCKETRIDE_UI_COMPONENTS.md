@@ -1446,7 +1446,7 @@ hand:
 | `useFixedPopupPosition` | `(triggerRef, isOpen, placement?: 'below' \| 'above') => { top, left } \| null` | Fixed-position anchor from the trigger rect; null while closed. The popup pair with `useClickOutside`. |
 | `useAnnouncements` | `() => Announcement[]` | Platform announcements: fetched JSON, 1h cache, validity-window filtered; empty on failure. `Announcement = { id, title, body, priority: 'info' \| 'warning' \| 'urgent', valid_from?, valid_until?, link?, dismissable? }` (title/body markdown). |
 | `useAppComponent` | `(appId, componentName) => ComponentType \| null` | Loads a component from ANOTHER app's catalog (triggers its lazy descriptor load); null while loading or missing. The sanctioned cross-app surface — never import another app's code. |
-| `useMarketingConsent` | `() => MarketingConsentState` — `{ configured, consent, visible, allow, reject }` | Backs a marketing-consent surface owned by an app. The shell keeps the decision store, the ad-click capture and the server-side relay; render the disclosure only while `visible`, and give reject the same visual weight as allow. Always `visible: false` where ad attribution is not configured (staging, OSS, automated browsers, Global Privacy Control). |
+| `useLandingUrl` | `() => LandingUrl` — `{ pathname, search, hash, params }` | The URL the document was opened with, snapshotted in bootstrap before the shell rewrote it. Use it for a campaign, referral or deep-link parameter; only shell code runs early enough to see it. Frozen, so no subscription. Captured unconditionally — honour Global Privacy Control and skip automated browsers on the read side if you act on it. |
 
 ```tsx
 import { useState, useRef } from 'react';

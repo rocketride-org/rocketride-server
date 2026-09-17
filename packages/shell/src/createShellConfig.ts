@@ -94,7 +94,7 @@ const THEME_OPTIONS = [
  *                               traffic connects. Empty = window.location.origin.
  * @returns A fully populated ShellConfig ready to pass to `<ShellApp>`.
  */
-export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[] = [], stripePublishableKey = '', serverUri = ''): ShellConfig {
+export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[] = [], stripePublishableKey = '', serverUri = '', attributionProvider = ''): ShellConfig {
 	// Determine mode from server capabilities
 	const isSaas = capabilities.includes('saas');
 	const brandName = isSaas ? 'RocketRide Cloud' : 'RocketRide';
@@ -112,7 +112,11 @@ export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[
 
 		// Build-time API endpoints plus the server-supplied Stripe key —
 		// runtime-sourced so the bundle stays environment-neutral
-		apiConfig: { ...API_CONFIG, RR_STRIPE_PUBLISHABLE_KEY: stripePublishableKey || undefined },
+		apiConfig: {
+			...API_CONFIG,
+			RR_STRIPE_PUBLISHABLE_KEY: stripePublishableKey || undefined,
+			attributionProvider: attributionProvider || undefined,
+		},
 
 		// Branding shown on the loading screen before any app is mounted
 		loginBranding: {
