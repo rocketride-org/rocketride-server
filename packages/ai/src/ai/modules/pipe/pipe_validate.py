@@ -20,6 +20,12 @@ async def pipe_Validate(request: Request, pipeline: Dict[str, Any], source: Opti
         ResultBase: A standardized response indicating success or failure.
     """
     try:
+        # Take the flat config out of any {'pipeline': ...} envelope, so the
+        # source walk below reads its components and the engine receives
+        # exactly one envelope.
+        while isinstance(pipeline.get('pipeline'), dict):
+            pipeline = pipeline['pipeline']
+
         # Resolve source: explicit param > pipeline field > implied from components
         resolved_source = source or pipeline.get('source', None)
         if not resolved_source:
