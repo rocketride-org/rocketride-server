@@ -201,9 +201,16 @@ class TestResolveRocketrideDsn:
         with pytest.raises(ValueError, match='empty DSN'):
             rrdb.resolve_rocketride_dsn()
 
-    def test_rejects_running_event_loop(self, monkeypatch):
-        async def fake(client_id):
-            return TEST_DSN
+    def test_rejects_running_event_loop_before_creating_coroutine(self, monkeypatch):
+        created = []
+
+        def fake(client_id):
+            async def resolve():
+                return TEST_DSN
+
+            coro = resolve()
+            created.append(coro)
+            return coro
 
         self._install_fake_account(monkeypatch, fake)
         monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
@@ -211,8 +218,15 @@ class TestResolveRocketrideDsn:
         async def call_from_loop():
             return rrdb.resolve_rocketride_dsn()
 
-        with pytest.raises(RuntimeError, match='running event loop'):
-            asyncio.run(call_from_loop())
+        try:
+            with pytest.raises(RuntimeError, match='running event loop'):
+                asyncio.run(call_from_loop())
+            assert created == []
+        finally:
+            # Keep the RED run warning-free: production currently creates this
+            # coroutine before rejecting the unsupported caller.
+            for coro in created:
+                coro.close()
 
 
 # ---------------------------------------------------------------------------

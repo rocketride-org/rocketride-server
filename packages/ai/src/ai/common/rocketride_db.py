@@ -64,13 +64,14 @@ DB_DSN_ENV = 'ROCKETRIDE_DB_DSN'
 DB_RESOLVE_ERROR_ENV = 'ROCKETRIDE_DB_RESOLVE_ERROR'
 
 
-def _run_async(coro):
-    """Run a coroutine from synchronous node lifecycle code.
+def _run_async(async_fn, *args):
+    """Run an async callable from synchronous node lifecycle code.
 
     Only safe to call from a thread with no running event loop — node
     ``beginGlobal`` / ``Store.__init__`` are invoked synchronously by the
-    engine, which is the supported caller.  Pre-check so a misuse surfaces with
-    a clear message instead of ``asyncio.run``'s generic RuntimeError.
+    engine, which is the supported caller. Pre-check before creating the
+    coroutine so a misuse surfaces with a clear message and cannot leak an
+    unawaited coroutine.
     """
     try:
         asyncio.get_running_loop()
@@ -81,7 +82,7 @@ def _run_async(coro):
             'resolve_rocketride_dsn must not be called from a thread with a running event loop; '
             'RocketRide DB node lifecycle methods are constructed synchronously by the engine.'
         )
-    return asyncio.run(coro)
+    return asyncio.run(async_fn(*args))
 
 
 def current_client_id() -> str:
@@ -151,7 +152,7 @@ def resolve_rocketride_dsn() -> str:
     # OSS/SaaS overlay — importing at module load risks a cycle.
     from ai.account import account
 
-    dsn = _run_async(account.resolve_db_dsn(current_client_id()))
+    dsn = _run_async(account.resolve_db_dsn, current_client_id())
     if not dsn or not isinstance(dsn, str):
         raise ValueError('Account.resolve_db_dsn returned an empty DSN')
     return dsn
