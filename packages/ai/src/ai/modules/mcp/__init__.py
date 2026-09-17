@@ -28,6 +28,22 @@ _MOUNT_PATH = '/mcp'
 # identifier (bare, no slash -- what spec clients POST to) and its slash form.
 _ENDPOINT_PATHS = (_MOUNT_PATH, _MOUNT_PATH + '/')
 
+# Representative paths fed through ``is_public_route`` at startup. The endpoint
+# paths alone are not enough: public entries are PATTERNS (compiled with
+# Starlette's ``compile_path``), so ``/mcp/{path}`` or ``/mcp/{rest:path}``
+# would make AuthMiddleware skip requests the Mount still forwards to
+# ``handle_mcp`` -- without ever matching ``/mcp`` or ``/mcp/`` themselves.
+# One single-segment and one multi-segment descendant catch both shapes.
+_PUBLIC_PROBE_PATHS = _ENDPOINT_PATHS + (
+    _MOUNT_PATH + '/probe',
+    _MOUNT_PATH + '/probe/nested',
+)
+
+# Engine URI schemes that put the caller's credential on the wire in the clear:
+# ``handle_mcp`` hands that credential to ``WsEngineClient``, which sends it in
+# the first DAP ``auth`` message.
+_CLEARTEXT_SCHEMES = ('ws://', 'http://')
+
 
 class _AsgiEndpoint:
     """Hand a raw ASGI callable to a Starlette ``Route``.
@@ -55,8 +71,12 @@ def _refuse_existing_claimants(server: Any) -> None:
     the endpoint below is registered straight onto the router, so that check
     never sees a clash. A route at ``/mcp`` would shadow the bare endpoint
     (a GET-only page answers ``POST /mcp`` with 405), and a public pattern
-    matching it would make AuthMiddleware skip every MCP request -- leaving
-    credential-less callers on the shared engine client.
+    matching it -- or any of its DESCENDANTS, since the Mount forwards
+    ``/mcp/anything`` to ``handle_mcp`` just the same -- would make
+    AuthMiddleware skip those MCP requests.
+
+    Public entries are patterns, not literals, so the endpoint paths are
+    probed alongside representative descendants (``_PUBLIC_PROBE_PATHS``).
 
     Raises:
         RuntimeError: naming the claimant(s).
@@ -64,7 +84,7 @@ def _refuse_existing_claimants(server: Any) -> None:
     claimants = sorted({p for p in (getattr(r, 'path', None) for r in server.app.router.routes) if _claims_mcp_path(p)})
     is_public = getattr(server, 'is_public_route', None)
     if is_public is not None:
-        claimants += [f'public:{p}' for p in _ENDPOINT_PATHS if is_public(p)]
+        claimants += [f'public:{p}' for p in _PUBLIC_PROBE_PATHS if is_public(p)]
     if claimants:
         raise RuntimeError(
             f'{_MOUNT_PATH} and {_MOUNT_PATH}/* are reserved for the MCP API, but already claimed by: '
@@ -146,6 +166,26 @@ def _bind_host(server: 'Any', config: Dict[str, Any]) -> str:
     return str(host) if host is not None else ''
 
 
+def _host_is_configured(server: 'Any', config: Dict[str, Any]) -> bool:
+    """Report whether a bind host was set anywhere, or merely defaulted.
+
+    ``CONST_DEFAULT_WEB_HOST`` is ``'localhost'``, so an engine that never sets
+    a host is judged loopback and quietly behaves as a *local* engine. That is
+    correct on a laptop and a silent misconfiguration in a deployment, and the
+    two are indistinguishable from the resolved host alone -- hence this flag,
+    which is what makes the startup log able to say which one it is looking at.
+
+    Args:
+        server: The WebServer (or test double) that may carry a ``config``.
+        config: Module configuration dict.
+
+    Returns:
+        bool: True when ``host`` is present in either config.
+    """
+    server_config = getattr(server, 'config', None) or {}
+    return 'host' in server_config or 'host' in config
+
+
 def _bind_port(server: 'Any', config: Dict[str, Any]) -> int:
     """Return the server's configured port, with the same fallback as WebServer.
 
@@ -167,6 +207,35 @@ def _redacted_uri(uri: str) -> str:
     return f'{scheme}{parts.netloc.rpartition("@")[2]}{parts.path}'
 
 
+def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) -> None:
+    """Fail boot when a non-loopback engine URI would travel in the clear.
+
+    ``handle_mcp`` binds the CALLER's credential to the per-request engine
+    client, and ``WsEngineClient`` sends it in the first DAP ``auth`` frame. On
+    ``ws://`` that frame is plaintext on the wire, so every MCP caller's API key
+    or OAuth token is exposed to anything on the path. A loopback engine never
+    leaves the host, so cleartext stays allowed there -- this is only ever
+    called for a non-loopback bind.
+
+    Args:
+        uri: The resolved engine URI.
+        source_value: The value the operator actually set (which may be an
+            ``http://`` resource identifier the URI was derived from).
+        source_name: The variable that value came from, for the message.
+
+    Raises:
+        RuntimeError: naming the offending value and where it came from.
+    """
+    if not uri.startswith(_CLEARTEXT_SCHEMES):
+        return
+    raise RuntimeError(
+        f'MCP refuses a cleartext engine transport on a non-loopback bind: {source_name}='
+        f'{_redacted_uri(source_value)} resolves to {_redacted_uri(uri)}. The caller credential is sent to '
+        'the engine in the first DAP auth message, so it must not ride an unencrypted connection -- use '
+        'wss:// (or an https:// resource identifier).'
+    )
+
+
 def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) -> Tuple[str, str]:
     """Resolve the engine URI the MCP tools connect back to.
 
@@ -185,6 +254,11 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
        the public origin of the MCP resource identifier: path dropped,
        ``https`` -> ``wss``, ``http`` -> ``ws``.
 
+    A non-loopback bind additionally requires ENCRYPTED transport: the caller's
+    own credential is handed to the engine client, so a ``ws://``/``http://``
+    value -- explicit or derived -- is refused rather than quietly used. See
+    ``_refuse_cleartext_engine_uri``.
+
     Args:
         config: Module configuration dict.
         bind_host: The configured bind host (see ``_bind_host``).
@@ -192,16 +266,68 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
 
     Returns:
         Tuple[str, str]: The URI and the name of the rule that chose it.
+
+    Raises:
+        RuntimeError: on a non-loopback bind with a cleartext engine URI.
     """
+    loopback = auth.is_loopback_bind(bind_host)
     explicit = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI')
     if explicit:
+        if not loopback:
+            source_name = 'rocketride_uri' if config.get('rocketride_uri') else 'ROCKETRIDE_URI'
+            _refuse_cleartext_engine_uri(explicit, explicit, source_name)
         return explicit, 'explicit'
-    if auth.is_loopback_bind(bind_host):
+    if loopback:
         host = '[::1]' if bind_host == '::1' else '127.0.0.1'
         return f'ws://{host}:{bind_port}', 'loopback default'
-    parts = urlsplit(oauth_resource.resource_identifier())
+    resource = oauth_resource.resource_identifier()
+    parts = urlsplit(resource)
     scheme = {'https': 'wss', 'http': 'ws'}.get(parts.scheme, parts.scheme)
-    return f'{scheme}://{parts.netloc.rpartition("@")[2]}', 'public default'
+    uri = f'{scheme}://{parts.netloc.rpartition("@")[2]}'
+    _refuse_cleartext_engine_uri(uri, resource, oauth_resource.ENV_RESOURCE)
+    return uri, 'public default'
+
+
+def _log_bind_mode(bind_host: str, local_engine: bool, host_configured: bool) -> None:
+    """Log the bind mode MCP resolved, and what that mode grants.
+
+    ``auth.is_loopback_bind`` judges the CONFIGURED host by name, and the
+    fallback that host defaults to is ``CONST_DEFAULT_WEB_HOST`` --
+    ``'localhost'``. A deployment that never sets ``host`` therefore lands in
+    local mode: the dev bypass becomes available, ``send_files`` is listed
+    (host-filesystem access), and engine clients forward this process's SDK
+    env as the caller's env. None of that is visible from behaviour until
+    something goes wrong, so it is stated outright in the first lines of the
+    log instead.
+
+    The loopback-BY-FALLBACK case -- local privileges granted because nobody
+    said otherwise, rather than because someone asked -- is the silent
+    misconfiguration, and is warned about rather than merely noted.
+
+    Args:
+        bind_host: The configured bind host (see ``_bind_host``).
+        local_engine: The resolved mode (see ``auth.is_loopback_bind``).
+        host_configured: Whether a host was set anywhere, or merely defaulted.
+    """
+    shown = bind_host or '<unset/bind-all>'
+    if local_engine:
+        logger.info(
+            'MCP bind mode: local/loopback (host=%s) -- MCP_DEV_NO_AUTH bypass available, send_files listed '
+            '(host filesystem), engine SDK env forwarded as caller env',
+            shown,
+        )
+    else:
+        logger.info(
+            'MCP bind mode: public/deployed (host=%s) -- MCP_DEV_NO_AUTH bypass refused, send_files not listed, '
+            'no engine SDK env forwarded to callers',
+            shown,
+        )
+    if local_engine and not host_configured:
+        logger.warning(
+            'MCP bind mode is local/loopback only because no host is configured (defaulted to %r). If this is a '
+            'deployed engine, set host explicitly: it is currently granting local-engine privileges.',
+            CONST_DEFAULT_WEB_HOST,
+        )
 
 
 def initModule(server: 'Any', config: Dict[str, Any]) -> None:
@@ -222,8 +348,10 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
               ``/mcp/`` in dev (loopback binds only).
 
     Raises:
-        RuntimeError: If a route already claims ``/mcp`` or ``/mcp/*``, or
-            a public path already matches the endpoint.
+        RuntimeError: If a route already claims ``/mcp`` or ``/mcp/*``, if a
+            public pattern already matches the endpoint or any of its
+            descendants, or if a non-loopback bind resolves a cleartext
+            (``ws://``/``http://``) engine URI.
     """
     # ------------------------------------------------------------------
     # 1. Hoisted TaskRegistry
@@ -248,6 +376,10 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # machine. Decided once here; gates the host-filesystem tools and whether
     # engine clients forward this process's SDK env (see make_engine_client).
     local_engine = auth.is_loopback_bind(bind_host)
+    # The bypass decision is made ONCE, here, and reused by both the public-path
+    # registration below and auth.authorize -- see auth.dev_bypass_active.
+    dev_no_auth = auth.dev_bypass_active(config, bind_host)
+    _log_bind_mode(bind_host, local_engine, _host_is_configured(server, config))
     engine_uri, engine_uri_rule = _resolve_engine_uri(config, bind_host, _bind_port(server, config))
     logger.info('MCP engine URI: %s (%s)', _redacted_uri(engine_uri), engine_uri_rule)
     config = {**config, 'rocketride_uri': engine_uri, 'local_engine': local_engine}
@@ -316,7 +448,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
                 await send({'type': 'websocket.close', 'code': 1008})
             return
 
-        denial = auth.authorize(scope, bind_host=bind_host)
+        denial = auth.authorize(scope, bind_host=bind_host, dev_bypass=dev_no_auth)
         if denial is not None:
             await _reject(send, denial)
             return
@@ -464,18 +596,15 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     if hasattr(server, 'add_route'):
         oauth_resource.register_routes(server)
 
-    dev_no_auth = bool(config.get('mcp_dev_no_auth')) or os.environ.get('MCP_DEV_NO_AUTH') == '1'
-    if dev_no_auth:
-        # Loopback-only: an unauthenticated /mcp on a public bind hands the
-        # whole tool surface (pipeline execution, store access) to anyone who
-        # can reach it. Refuse the bypass (auth stays on) rather than fail
-        # engine boot.
-        if not auth.is_loopback_bind(bind_host):
-            logger.warning(
-                'MCP_DEV_NO_AUTH ignored: server binds %s (non-loopback); /mcp stays authenticated',
-                bind_host or '<unset/bind-all>',
-            )
-            dev_no_auth = False
+    # dev_no_auth was decided once in section 2 via auth.dev_bypass_active --
+    # the same answer handle_mcp passes to auth.authorize. Asking for the
+    # bypass on a public bind is refused (auth stays on) rather than failing
+    # engine boot, so say so instead of leaving the setting looking effective.
+    if auth.dev_bypass_requested(config) and not dev_no_auth:
+        logger.warning(
+            'MCP_DEV_NO_AUTH ignored: server binds %s (non-loopback); /mcp stays authenticated',
+            bind_host or '<unset/bind-all>',
+        )
     if dev_no_auth:
         # Exactly the two endpoint paths -- never a /mcp/{path} pattern, and
         # never outside this loopback-only branch.

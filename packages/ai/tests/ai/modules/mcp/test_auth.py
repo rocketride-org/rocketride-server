@@ -126,11 +126,43 @@ def test_opaque_credential_passes_when_not_enforcing(monkeypatch):
     assert auth.authorize(scope_with('plain-api-key'), bind_host='localhost') is None
 
 
-def test_no_credential_defers_to_the_auth_middleware(monkeypatch):
-    """Deciding whether a credential is required is the middleware's job."""
+# --- a credential-less request is only ever a genuine dev bypass ----------
+
+
+@pytest.mark.parametrize('bind_host', ['0.0.0.0', 'engine.internal', '', 'localhost', '127.0.0.1', '::1'])
+def test_no_credential_is_refused_without_a_dev_bypass(monkeypatch, bind_host):
+    """This used to defer to the auth middleware, which is only safe while the
+    middleware is guaranteed to have run. A public route pattern matching an
+    MCP descendant makes AuthMiddleware skip the request while the Mount still
+    forwards it here, and the tools would then run on the shared,
+    server-identity engine client. Refused on every bind, loopback included —
+    a loopback bind without MCP_DEV_NO_AUTH is still an authenticated engine.
+    """
     monkeypatch.setenv(auth.ENV_EXPECTED_AUDIENCE, MCP_PROJECT)
 
-    assert auth.authorize(scope_with(None), bind_host='0.0.0.0') is None
+    error = auth.authorize(scope_with(None), bind_host=bind_host)
+
+    assert error is not None, bind_host
+    assert 'Authorization header' in error
+
+
+@pytest.mark.parametrize('bind_host', ['localhost', '127.0.0.1', '::1'])
+def test_no_credential_is_allowed_under_a_genuine_dev_bypass(bind_host):
+    """The bypass initModule actually sanctioned (loopback + MCP_DEV_NO_AUTH)."""
+    assert auth.authorize(scope_with(None), bind_host=bind_host, dev_bypass=True) is None
+
+
+def test_dev_bypass_is_active_only_on_loopback_with_the_flag(monkeypatch):
+    """One source of truth for the rule, shared by initModule and authorize."""
+    monkeypatch.delenv(auth.ENV_DEV_NO_AUTH, raising=False)
+
+    assert auth.dev_bypass_active({'mcp_dev_no_auth': True}, 'localhost') is True
+    assert auth.dev_bypass_active({'mcp_dev_no_auth': True}, '0.0.0.0') is False
+    assert auth.dev_bypass_active({}, 'localhost') is False
+
+    monkeypatch.setenv(auth.ENV_DEV_NO_AUTH, '1')
+    assert auth.dev_bypass_active({}, '127.0.0.1') is True
+    assert auth.dev_bypass_active({}, '0.0.0.0') is False
 
 
 # --- the audience gate ----------------------------------------------------
@@ -267,7 +299,7 @@ def test_no_credential_does_not_stash(monkeypatch):
     monkeypatch.setenv(auth.ENV_EXPECTED_AUDIENCE, MCP_PROJECT)
     scope = scope_with(None)
 
-    assert auth.authorize(scope, bind_host='0.0.0.0') is None
+    assert auth.authorize(scope, bind_host='localhost', dev_bypass=True) is None
     assert 'mcp_credential' not in scope['state']
 
 

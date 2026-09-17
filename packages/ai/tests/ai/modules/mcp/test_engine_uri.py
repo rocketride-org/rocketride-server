@@ -78,8 +78,15 @@ def _assert_wiring(captured, uri, origin):
 
 
 def test_explicit_env_uri_used_unchanged_even_on_public_bind(monkeypatch, fake_web_server):
-    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://engine-host:5565')
+    monkeypatch.setenv('ROCKETRIDE_URI', 'wss://engine-host:5565')
     captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    _assert_wiring(captured, 'wss://engine-host:5565', 'https://engine-host:5565')
+
+
+def test_explicit_cleartext_uri_is_used_unchanged_on_a_loopback_bind(monkeypatch, fake_web_server):
+    """A loopback engine never puts the credential on a wire anyone can read."""
+    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://engine-host:5565')
+    captured = _init(monkeypatch, fake_web_server, host='127.0.0.1', port=5565)
     _assert_wiring(captured, 'ws://engine-host:5565', 'http://engine-host:5565')
 
 
@@ -148,7 +155,6 @@ def test_public_bind_defaults_to_public_resource_origin(monkeypatch, fake_web_se
             'wss://api-staging.rocketride.ai',
             'https://api-staging.rocketride.ai',
         ),
-        ('http://example.test:8080/mcp', 'ws://example.test:8080', 'http://example.test:8080'),
     ],
 )
 def test_public_bind_follows_configured_resource_identifier(monkeypatch, fake_web_server, resource, uri, origin):
@@ -198,7 +204,7 @@ async def test_widget_csp_uses_resolved_public_origin(monkeypatch, fake_web_serv
     [
         ('0.0.0.0', None, 'https://api.rocketride.ai'),
         ('127.0.0.1', None, 'http://127.0.0.1:5565'),
-        ('0.0.0.0', 'ws://engine-host:5565', 'http://engine-host:5565'),
+        ('127.0.0.1', 'ws://engine-host:5565', 'http://engine-host:5565'),
     ],
 )
 async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, fake_engine, host, env_uri, origin):
@@ -247,3 +253,116 @@ def test_logs_one_startup_line_without_credentials(monkeypatch, fake_web_server,
     assert shown in lines[0]
     assert rule in lines[0]
     assert 'secret' not in lines[0] and 'hunter2' not in lines[0] and 'user' not in lines[0]
+
+
+# ---------------------------------------------------------------------------
+# Encrypted transport: a non-loopback bind must not put the caller credential
+# on the wire in the clear.
+#
+# handle_mcp binds the CALLER's credential to the per-request engine client,
+# and WsEngineClient sends it in the first DAP `auth` message. On ws:// that
+# frame is plaintext, so every MCP caller's key is exposed to the path.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('host', ['0.0.0.0', 'engine.internal', '', None])
+@pytest.mark.parametrize('uri', ['ws://engine-host:5565', 'http://engine-host:5565'])
+def test_explicit_cleartext_uri_is_refused_on_a_non_loopback_bind(monkeypatch, fake_web_server, host, uri):
+    monkeypatch.setenv('ROCKETRIDE_URI', uri)
+    with pytest.raises(RuntimeError) as excinfo:
+        _init(monkeypatch, fake_web_server, host=host, port=5565)
+    message = str(excinfo.value)
+    assert 'ROCKETRIDE_URI' in message, message  # names the variable it came from
+    assert 'engine-host' in message, message  # names the offending value
+
+
+def test_explicit_cleartext_uri_from_config_names_the_config_key(monkeypatch, fake_web_server):
+    with pytest.raises(RuntimeError, match='rocketride_uri'):
+        _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565, config={'rocketride_uri': 'ws://engine:1'})
+
+
+def test_cleartext_resource_identifier_is_refused_on_a_non_loopback_bind(monkeypatch, fake_web_server):
+    """The derived case: http:// resource identifier -> ws:// engine URI."""
+    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', 'http://example.test:8080/mcp')
+    with pytest.raises(RuntimeError) as excinfo:
+        _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    message = str(excinfo.value)
+    assert 'MCP_RESOURCE_IDENTIFIER' in message, message
+    assert 'example.test:8080' in message, message
+
+
+def test_loopback_default_keeps_its_cleartext_local_uri(monkeypatch, fake_web_server):
+    """Rule 2 resolves ws://127.0.0.1 by design; the guard must not break it."""
+    captured = _init(monkeypatch, fake_web_server, host='localhost', port=5565)
+    _assert_wiring(captured, 'ws://127.0.0.1:5565', 'http://127.0.0.1:5565')
+
+
+@pytest.mark.parametrize(
+    ('resource', 'uri'),
+    [
+        ('https://api-staging.rocketride.ai/mcp', 'wss://api-staging.rocketride.ai'),
+        ('https://api.rocketride.ai/mcp', 'wss://api.rocketride.ai'),
+    ],
+)
+def test_https_staging_and_prod_defaults_still_resolve(monkeypatch, fake_web_server, resource, uri):
+    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', resource)
+    captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    assert captured['factory']()._uri == uri
+
+
+# ---------------------------------------------------------------------------
+# Startup bind-mode log
+#
+# is_loopback_bind() judges the CONFIGURED host by name and the default host is
+# 'localhost', so a deployment that never sets `host` silently runs as a local
+# engine. The log has to say so in the first lines, or the misconfiguration is
+# invisible until something leaks.
+# ---------------------------------------------------------------------------
+
+
+def _mode_lines(caplog):
+    return [r for r in caplog.records if 'bind mode' in r.getMessage()]
+
+
+def test_public_bind_logs_the_deployed_mode(monkeypatch, fake_web_server, caplog):
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+
+    info = [r.getMessage() for r in _mode_lines(caplog) if r.levelno == logging.INFO]
+    assert len(info) == 1, info
+    assert 'public/deployed' in info[0]
+    assert 'host=0.0.0.0' in info[0]
+    assert 'MCP_DEV_NO_AUTH' in info[0] and 'send_files' in info[0] and 'env' in info[0]
+    assert not [r for r in _mode_lines(caplog) if r.levelno >= logging.WARNING]
+
+
+def test_explicit_loopback_host_logs_local_mode_without_warning(monkeypatch, fake_web_server, caplog):
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        _init(monkeypatch, fake_web_server, host='127.0.0.1', port=5565)
+
+    info = [r.getMessage() for r in _mode_lines(caplog) if r.levelno == logging.INFO]
+    assert len(info) == 1, info
+    assert 'local/loopback' in info[0]
+    assert 'host=127.0.0.1' in info[0]
+    assert not [r for r in _mode_lines(caplog) if r.levelno >= logging.WARNING]
+
+
+def test_loopback_by_fallback_warns_that_nobody_configured_a_host(monkeypatch, fake_web_server, caplog):
+    """The silent-misconfiguration case: local privileges nobody asked for."""
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        _init(monkeypatch, fake_web_server)  # no host anywhere
+
+    assert 'local/loopback' in [r.getMessage() for r in _mode_lines(caplog) if r.levelno == logging.INFO][0]
+    warnings = [r.getMessage() for r in _mode_lines(caplog) if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, warnings
+    assert 'no host is configured' in warnings[0]
+
+
+def test_bind_mode_is_logged_before_a_failing_engine_uri(monkeypatch, fake_web_server, caplog):
+    """A refused engine URI must not swallow the line that explains the bind."""
+    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://engine-host:5565')
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        with pytest.raises(RuntimeError):
+            _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+
+    assert [r.getMessage() for r in _mode_lines(caplog)], 'bind mode must be logged before the URI is resolved'

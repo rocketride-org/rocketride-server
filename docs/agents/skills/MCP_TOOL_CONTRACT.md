@@ -1,9 +1,15 @@
 # MCP Tool Contract (frozen)
 
 The tool-name/result-shape contract between these skills and the RocketRide HTTP MCP server.
-Frozen against `rocketride-server` `origin/develop @ eb67ddea` (module
-`packages/ai/src/ai/modules/mcp/`; deploy tools updated to the deploy-2 SDK API, 33 tools). The skills reference **only** names and shapes in
-this file; anything not listed here does not exist — never invent a tool.
+Derived from the registrations in `rocketride-server`'s `packages/ai/src/ai/modules/mcp/tools/*.py`
+on branch `fix/mcp-auth` (PR #2315, not yet merged), where `register_all` wires **33 tools** — every
+one of them listed below. Deploy tools are on the deploy-2 SDK API.
+**Maintainer note:** this file is regenerated from the registrations, not pinned to a commit. The
+previous `origin/develop @ eb67ddea` pin predated this branch and was already inaccurate; once
+PR #2315 lands on `develop`, replace the branch reference above with the merge commit if a pin is
+wanted. The check that actually matters is `register_all` still registering exactly these 33 names.
+The skills reference **only** names and shapes in this file; anything not listed here does not
+exist — never invent a tool.
 
 ## Result envelope (every tool)
 
@@ -17,6 +23,7 @@ the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JS
 |---|---|---|
 | `list_components` | — | `{ok, components: [{name, category, summary, wiring?}], note?}`. **No `lanes`/`invoke`** — wire from the bundled L1 index. Components whose integration isn't configured are **hidden**, with `note` pointing at `list_integrations`. |
 | `describe_component` | `{name}` | Full service definition (the L2 schema). |
+| `resolve_config` | `{provider, config?}` | `{ok, ...engine resolution, hint?}` — what a component config actually becomes at load, after profile and default merging; omit `config` for defaults. Discarded keys come back as `dropped` plus a `hint` naming the profile they belong inside. |
 | `validate_pipeline` | `{pipeline}` (inline object) | `{ok, errors, warnings}` — the compiler. Zero errors before any run. |
 | `describe_pipeline` | `{pipeline}` | Static per-node summary (preflight aid, not a gate). |
 
@@ -55,13 +62,27 @@ chapters/console but **empty traces**.
 
 | Tool | Purpose |
 |---|---|
-| `store_read` / `store_list` / `store_stat` | Object store access (read is inline and uncapped — prefer `stat` + URL for big objects). |
-| `store_get_url` | Signed URL — artifact-by-reference for large results. |
-| `save_template` / `load_template` | Gate D "save to cloud". |
-| `deploy_add` | Gate D "publish": registers the pipeline (needs `name` + `project_id`) as the next immutable version → `artifact.version`. Runs nothing by itself. |
-| `deploy_to_team` | Point a team (`team_id`, or `"@me"`) at a `version` — first deploy, promotion and rollback. `deploy_add`'s `deploy_to` does this in the same call. |
-| `deploy_list` / `deploy_status` / `deploy_versions` | Read deployments (paged `{deployments, count, total, page, pageSize}`), one team's deployment, a project's versions. |
-| `deploy_set_schedule` / `deploy_enable` / `deploy_disable` / `deploy_remove` | Per-team lifecycle, addressed by `project_id` + `team_id`: cron per source (`"manual"` clears), kill switch, soft remove. |
+| `store_read` | `{path}` → `{ok, path, content}`. Text only, inline and uncapped — prefer `store_stat` + `store_get_url` for big objects. |
+| `store_list` | `{path?}` (default `''` = root) → `{ok, path, listing}`. |
+| `store_stat` | `{path}` → `{ok, path, stat}` — exists, type (`file\|dir`), size, modified. |
+| `store_get_url` | `{path, expires_in?, download_name?}` → `{ok, path, url, expires_in}`. Signed URL — artifact-by-reference for large results. |
+| `save_template` | `{template_id, pipeline}` → `{ok, template_id}`. Gate D "save to cloud". |
+| `load_template` | `{template_id}` → `{ok, template_id, pipeline}`. |
+| `deploy_add` | `{pipeline, comment?, deploy_to?}` → `{ok, artifact, deployment?}`. Gate D "publish": registers the pipeline (needs `name` + `project_id`) as the next immutable version → `artifact.version`. Runs nothing by itself; a failed call may still have registered a version — check `deploy_versions` before retrying. |
+| `deploy_to_team` | `{project_id, version, team_id}` → `{ok, deployment}`. Point a team (`team_id`, or `"@me"`) at a `version` — first deploy, promotion and rollback; revives a removed deployment. `deploy_add`'s `deploy_to` does this in the same call. |
+| `deploy_list` | `{team_id?, page?, page_size?, search?, filters?, sort?}` → `{ok, deployments, count, total, page, pageSize}`. One row per (projectId, teamId); `count` is rows returned, `total` every match. |
+| `deploy_status` | `{project_id, team_id}` → `{ok, deployment}` — version, state, per-source schedules, who deployed it when. |
+| `deploy_versions` | `{project_id, page?, page_size?}` → `{ok, project_id, versions, count, total, page, pageSize}`. Newest first: `version`, `pipelineName`, `comment`, `publishedAt`. |
+| `deploy_set_schedule` | `{project_id, source_id, schedule, team_id, ttl?}` → `{ok, deployment}`. Cron per source (`"manual"` clears); `source_id` must be a source component of the deployed version; schedules fire only while enabled. |
+| `deploy_enable` | `{project_id, team_id}` → `{ok, deployment}`. Re-arms a disabled deployment's schedules. |
+| `deploy_disable` | `{project_id, team_id}` → `{ok, deployment}`. The kill switch: schedules stop, manual runs refused. |
+| `deploy_remove` | `{project_id, team_id}` → `{ok, deployment}`. Soft remove: leaves listings and stops running; versions and audit history are kept. |
+
+## Node authoring
+
+| Tool | Input | Result |
+|---|---|---|
+| `scaffold_node` | `{name, lane_in?, lane_out?, class_type?}` (`lane_in` defaults to `text`, `lane_out` to `lane_in`, `class_type` to `lane_in`) | `{ok, name, provider, files, next_steps}`. `files` maps `local_nodes/<name>/...` paths to contents — it **writes nothing itself**; you write them under the engine's `--node_path`. `lane_in`/`lane_out`/`class_type` are validated against the live catalog, so an unknown value comes back as `ok: false` listing what is in service. The engine reads node manifests once at startup: restart it after writing. |
 
 ## Integrations / credentials
 

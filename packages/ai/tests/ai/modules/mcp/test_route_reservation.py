@@ -73,6 +73,13 @@ def _web_server(monkeypatch, tmp_path, built):
     monkeypatch.delenv('MCP_DEV_NO_AUTH', raising=False)
 
     server = WebServer()
+    # WebServer.__init__ loads `dist/server/.env`, so a developer's local
+    # engine settings (ROCKETRIDE_URI=http://localhost:5565, a resource
+    # identifier) would otherwise decide what these tests resolve. Clear them
+    # AFTER construction: these tests are about routing and auth, and the
+    # engine URI rules have their own suite (test_engine_uri.py).
+    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER'):
+        monkeypatch.delenv(name, raising=False)
 
     async def _accept_any(authorization):
         return SimpleNamespace(auth=authorization)
@@ -228,3 +235,49 @@ def test_mcp_refuses_to_mount_over_a_route_claiming_its_paths(monkeypatch, tmp_p
 
     with pytest.raises(RuntimeError, match='/mcp'):
         server.use('mcp', {})
+
+
+@pytest.mark.parametrize('pattern', ['/mcp/{rest:path}', '/mcp/{name}', '/mcp/probe', '/mcp', '/mcp/'])
+def test_mcp_refuses_to_mount_under_a_public_pattern_matching_it(monkeypatch, tmp_path, pattern):
+    """A public pattern needs no route of its own to disarm authentication.
+
+    `_public_paths` entries are PATTERNS compiled with Starlette's
+    `compile_path`, and AuthMiddleware consults them before routing. A
+    `/mcp/{path}` entry therefore makes the middleware skip requests the Mount
+    still forwards to `handle_mcp` -- while never matching `/mcp` or `/mcp/`
+    themselves, which is all the guard used to probe.
+    """
+    server = _web_server(monkeypatch, tmp_path, [])
+    server._public_paths.append(pattern)
+    server._compiled_public_paths = None
+
+    with pytest.raises(RuntimeError, match='/mcp'):
+        server.use('mcp', {})
+
+
+def test_the_discovery_document_stays_public_and_does_not_trip_the_guard(monkeypatch, tmp_path):
+    """The RFC 9728 metadata document is public by necessity; it lives outside
+    the MCP namespace, so widening the probe must not catch it.
+    """
+    server = _web_server(monkeypatch, tmp_path, [])
+    _eaas_order(server)
+
+    assert server.is_public_route('/.well-known/oauth-protected-resource/mcp') is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('path', ['/mcp', '/mcp/'])
+async def test_dev_bypass_still_needs_loopback_to_serve_anonymously(monkeypatch, tmp_path, path):
+    """Both halves agree: the public list AND auth.authorize read the same
+    dev-bypass answer, so a non-loopback bind serves nobody anonymously.
+    """
+    built = []
+    server = _web_server(monkeypatch, tmp_path, built)
+    server.config['host'] = '0.0.0.0'
+    _eaas_order(server, {'mcp_dev_no_auth': True})
+
+    async with _serve(server) as app:
+        resp = await app.post(path, json=_TOOLS_CALL, headers=_HEADERS)
+
+    assert resp.status_code == 401, f'{path}: {resp.status_code} {resp.text[:200]}'
+    assert built == [], 'a credential-less request must never reach an engine client'

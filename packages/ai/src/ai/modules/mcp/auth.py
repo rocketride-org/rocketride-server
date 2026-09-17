@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 ENV_EXPECTED_AUDIENCE = 'MCP_EXPECTED_AUDIENCE'
 ENV_JWKS_URL = 'MCP_JWKS_URL'
+ENV_DEV_NO_AUTH = 'MCP_DEV_NO_AUTH'
 
 # Static credentials the account layer resolves without OAuth: persistent user
 # API keys (``rr_``), task-scoped keys (``tk_``/``pk_``), and PKCE code
@@ -120,6 +121,43 @@ def is_loopback_bind(bind_host: str) -> bool:
     return bind_host in LOOPBACK_HOSTS
 
 
+def dev_bypass_requested(config: Dict[str, Any]) -> bool:
+    """Report whether the operator asked for the unauthenticated dev bypass.
+
+    Args:
+        config: The MCP module configuration dict.
+
+    Returns:
+        bool: True when ``mcp_dev_no_auth`` or ``MCP_DEV_NO_AUTH=1`` is set.
+            Asking for it is not the same as getting it — see
+            :func:`dev_bypass_active`.
+    """
+    import os
+
+    return bool(config.get('mcp_dev_no_auth')) or os.environ.get(ENV_DEV_NO_AUTH) == '1'
+
+
+def dev_bypass_active(config: Dict[str, Any], bind_host: str) -> bool:
+    """Report whether the unauthenticated dev bypass genuinely applies.
+
+    THE single source of truth for that question. ``initModule`` uses it to
+    decide whether to put ``/mcp`` on the auth middleware's public list, and
+    :func:`authorize` uses the same answer to decide whether a request with no
+    credential at all may proceed. Two copies of this rule that disagree is
+    exactly the fail-open this function exists to prevent.
+
+    Args:
+        config: The MCP module configuration dict.
+        bind_host: The configured bind host (not the resolved address).
+
+    Returns:
+        bool: True only when the bypass was requested AND the server binds
+            loopback. An unauthenticated ``/mcp`` on a public bind hands the
+            whole tool surface to anyone who can reach it.
+    """
+    return dev_bypass_requested(config) and is_loopback_bind(bind_host)
+
+
 def looks_like_jwt(credential: str) -> bool:
     """Report whether a credential is a JWT rather than an opaque API key.
 
@@ -193,7 +231,7 @@ def _audience_values(claims: Dict[str, Any]) -> List[str]:
     return [raw] if isinstance(raw, str) else [str(value) for value in raw]
 
 
-def authorize(scope: Dict[str, Any], *, bind_host: str) -> Optional[str]:
+def authorize(scope: Dict[str, Any], *, bind_host: str, dev_bypass: bool = False) -> Optional[str]:
     """Decide whether a request may reach the MCP session manager.
 
     On success the verified claims are stored at ``scope['state']['mcp_claims']``
@@ -203,6 +241,10 @@ def authorize(scope: Dict[str, Any], *, bind_host: str) -> Optional[str]:
         scope: The ASGI connection scope.
         bind_host: The server's configured bind host, used to decide whether an
             unconfigured audience is tolerable.
+        dev_bypass: The answer :func:`dev_bypass_active` gave at module init.
+            Only a genuine bypass makes a credential-less request legitimate;
+            the default (False) fails closed for any caller that forgets to
+            pass it.
 
     Returns:
         Optional[str]: An error message when the request must be rejected, or
@@ -222,16 +264,26 @@ def authorize(scope: Dict[str, Any], *, bind_host: str) -> Optional[str]:
 
     credential = bearer_credential(scope)
 
-    # No credential at all: whether one is required is the auth middleware's
-    # call, not ours. Under the dev bypass there legitimately isn't one. But if
-    # the middleware DID authenticate this request (``request.state.account``
-    # is backed by ``scope['state']``), its credential came from somewhere other
-    # than the header — never fall back to the shared engine client for it.
+    # No credential at all. This used to defer to the auth middleware, but that
+    # deferral is only safe while the middleware is guaranteed to have run: a
+    # public route pattern matching an MCP descendant (say ``/mcp/{path}``)
+    # makes AuthMiddleware skip the request entirely, while the Mount still
+    # forwards it here — and the tools would then run on the shared,
+    # server-identity engine client. ``initModule`` refuses such a pattern at
+    # startup; this is the second half of that fix, so a bypass we did not
+    # sanction can never turn into an anonymous tool call.
     if not credential:
         state = scope.get('state')
+        # If the middleware DID authenticate this request
+        # (``request.state.account`` is backed by ``scope['state']``), its
+        # credential came from somewhere other than the header — never fall
+        # back to the shared engine client for it.
         if isinstance(state, dict) and state.get('account') is not None:
             logger.warning('rejected /mcp request: authenticated upstream but no Authorization header credential')
             return 'credentials must be sent in the Authorization header'
+        if not dev_bypass:
+            logger.warning('rejected /mcp request: no credential and the loopback dev bypass is not active')
+            return 'authentication required: send an rr_ API key or an OAuth token in the Authorization header'
         return None
 
     scope.setdefault('state', {})['mcp_credential'] = credential
