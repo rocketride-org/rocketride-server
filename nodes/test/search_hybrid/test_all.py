@@ -351,6 +351,39 @@ class TestReciprocalRankFusion:
         got = {tuple(sorted((k, v) for k, v in r.items() if k != 'rrf_score')) for r in results}
         assert got == seen
 
+    def test_null_ids_fall_back_to_distinct_text(self):
+        docs = [{'id': None, 'text': 'alpha'}, {'id': None, 'text': 'beta'}]
+        results = HybridSearchEngine.reciprocal_rank_fusion(docs, k=60)
+        assert {result['text'] for result in results} == {'alpha', 'beta'}
+        assert sorted(result['rrf_score'] for result in results) == [1 / 62, 1 / 61]
+
+    def test_null_and_missing_ids_with_same_text_deduplicate(self):
+        null_id = [{'id': None, 'text': 'same'}]
+        missing_id = [{'text': 'same'}]
+        results = HybridSearchEngine.reciprocal_rank_fusion(null_id, missing_id, k=60)
+        assert len(results) == 1
+        assert results[0]['rrf_score'] == 2 / 61
+
+    def test_null_anonymous_docs_remain_distinct(self):
+        list1 = [{'id': None, 'text': None, 'source': 'one'}]
+        list2 = [{'id': None, 'text': None, 'source': 'two'}]
+        results = HybridSearchEngine.reciprocal_rank_fusion(list1, list2, k=60)
+        assert len(results) == 2
+        assert {result['source'] for result in results} == {'one', 'two'}
+
+    def test_numeric_zero_is_a_valid_deduplication_id(self):
+        list1 = [{'id': 0, 'text': 'first'}]
+        list2 = [{'id': 0, 'text': 'updated'}]
+        results = HybridSearchEngine.reciprocal_rank_fusion(list1, list2, k=60)
+        assert len(results) == 1
+        assert results[0]['rrf_score'] == 2 / 61
+
+    def test_explicit_id_cannot_collide_with_text_fallback(self):
+        explicit = [{'id': 'alpha', 'text': 'first'}]
+        fallback = [{'text': 'alpha'}]
+        results = HybridSearchEngine.reciprocal_rank_fusion(explicit, fallback, k=60)
+        assert len(results) == 2
+
 
 # ===========================================================================
 # Full hybrid search
