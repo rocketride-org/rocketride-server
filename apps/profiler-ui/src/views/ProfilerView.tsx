@@ -37,7 +37,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { useShellConnection, getClient } from 'shell';
 import { commonStyles } from 'shell';
-import type { ProfileTreeNode, ProfileTreeResponse, VizStyle } from './visualizations/types';
+import type { ProfileThreadInfo, ProfileThreadsResponse, ProfileTreeNode, ProfileTreeResponse, VizStyle } from './visualizations/types';
 import ReportText from './visualizations/ReportText';
 import FlameGraph from './visualizations/FlameGraph';
 import SunburstChart from './visualizations/SunburstChart';
@@ -376,6 +376,11 @@ function findNodePath(
 	return null;
 }
 
+/** Dropdown label for a thread; the tid tells apart threads that share a name. */
+function threadLabel(thread: ProfileThreadInfo): string {
+	return `${thread.name ?? 'unnamed'} · tid ${thread.tid} · ${thread.ttot.toFixed(3)}s`;
+}
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -407,6 +412,10 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	const [vizDepth, setVizDepth] = useState<number>(10);
 	const [vizCutoff, setVizCutoff] = useState<number>(0.001);
 	const [showSystemCalls, setShowSystemCalls] = useState<boolean>(false);
+
+	// Thread breakdown — a null selection shows all threads merged
+	const [threads, setThreads] = useState<ProfileThreadInfo[]>([]);
+	const [selectedThread, setSelectedThread] = useState<number | null>(null);
 
 	// Root tracking — distinct from tree root
 	const [vizRoot, setVizRoot] = useState<ProfileTreeNode | null>(null);
@@ -528,10 +537,32 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 			setReport('');
 		}
 
+		// Fetch the thread list. A server without the command only hides the
+		// selector; everything else keeps working on all threads
+		let thread = selectedThread;
+		try {
+			const threadsResult = await client.call<ProfileThreadsResponse>('rrext_cprofile_threads', args);
+			if (fetchIdRef.current !== id) return; // stale response
+			const threadList = threadsResult.threads || [];
+			setThreads(threadList);
+			// The selection may name a thread of an earlier session
+			if (thread !== null && !threadList.some((t) => t.id === thread)) {
+				thread = null;
+				setSelectedThread(null);
+			}
+		} catch (err) {
+			console.log('[ProfilerView] Thread list fetch failed:', err);
+			if (fetchIdRef.current !== id) return;
+			setThreads([]);
+			thread = null;
+			setSelectedThread(null);
+		}
+
 		// Fetch tree data — pass include_system flag to server
 		const treeArgs: Record<string, unknown> = { ...args };
 		const includeSystem = systemCalls ?? showSystemCalls;
 		treeArgs.include_system = includeSystem;
+		if (thread !== null) treeArgs.thread = thread;
 		try {
 			const treeResult = await client.call<ProfileTreeResponse>('rrext_cprofile_report_tree', treeArgs);
 			if (fetchIdRef.current !== id) return; // stale response
@@ -555,15 +586,17 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 			setVizRoot(null);
 			setCallStack([]);
 		}
-	}, [target, showSystemCalls]);
+	}, [target, showSystemCalls, selectedThread]);
 
-	// Re-fetch tree when system calls toggle changes (if we have data)
+	// Re-fetch tree when the system calls toggle or the thread changes (if we
+	// have data). The thread list counts as data: a thread whose tree failed
+	// to load must still be switchable back to all threads
 	useEffect(() => {
-		if (treeData?.tree) {
+		if (treeData?.tree || threads.length > 0) {
 			fetchReport();
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [showSystemCalls]);
+	}, [showSystemCalls, selectedThread]);
 
 	// Rehydrate an existing report when this view mounts (or re-mounts) without
 	// local data — e.g. after the tab is split, which mounts fresh ProfilerView
@@ -625,12 +658,18 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 				setError(result.message || 'Failed to start profiling');
 			} else {
 				setError('');
+				// Drop any report fetch still in flight, or it would restore
+				// the previous session's data cleared below
+				fetchIdRef.current++;
 				// Clear stale data
 				setReport('');
 				setTreeData(null);
 				setOriginalRoot(null);
 				setVizRoot(null);
 				setCallStack([]);
+				// Thread ids are per session
+				setThreads([]);
+				setSelectedThread(null);
 			}
 			await fetchStatus();
 		} catch (err: unknown) {
@@ -752,8 +791,25 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 			)}
 
 			{/* Viz controls row — only shown when data is available */}
-			{hasData && (
+			{(hasData || threads.length > 0) && (
 				<div style={styles.vizControls}>
+					{/* Thread dropdown — all threads merged, or one alone */}
+					{threads.length > 0 && (
+						<span style={styles.vizLabel}>
+							Thread:
+							<select
+								style={styles.smallSelect}
+								value={selectedThread ?? ''}
+								onChange={(e) => setSelectedThread(e.target.value === '' ? null : Number(e.target.value))}
+							>
+								<option value="">All threads ({threads.length})</option>
+								{threads.map((t) => (
+									<option key={t.id} value={t.id}>{threadLabel(t)}</option>
+								))}
+							</select>
+						</span>
+					)}
+
 					{/* Style dropdown */}
 					<span style={styles.vizLabel}>
 						Style:

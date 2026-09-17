@@ -605,10 +605,10 @@ import type { CreatedApp as Frozen_CreatedApp } from '../contract/versions/v1';
 import type { CreatedApp as Current_CreatedApp } from './api';
 import type { DrizzleDatabaseLike as Frozen_DrizzleDatabaseLike } from '../contract/versions/v3';
 import type { DrizzleDatabaseLike as Current_DrizzleDatabaseLike } from './api';
-import type { LandingUrl as Frozen_LandingUrl } from '../contract/versions/v4';
-import type { LandingUrl as Current_LandingUrl } from './api';
-import type { AuthStateProvider as Frozen_AuthStateProvider } from '../contract/versions/v4';
-import type { AuthStateProvider as Current_AuthStateProvider } from './api';
+import type { CProfileThreadInfo as Frozen_CProfileThreadInfo } from '../contract/versions/v4';
+import type { CProfileThreadInfo as Current_CProfileThreadInfo } from './api';
+import type { CProfileThreadsResponse as Frozen_CProfileThreadsResponse } from '../contract/versions/v4';
+import type { CProfileThreadsResponse as Current_CProfileThreadsResponse } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1211,7 +1211,7 @@ const _t_CreatedApp: Frozen_CreatedApp = {} as Current_CreatedApp;
 void _t_CreatedApp;
 const _t_DrizzleDatabaseLike: Frozen_DrizzleDatabaseLike = {} as Current_DrizzleDatabaseLike;
 void _t_DrizzleDatabaseLike;
-const _t_LandingUrl: Frozen_LandingUrl = {} as Current_LandingUrl;
-void _t_LandingUrl;
-const _t_AuthStateProvider: Frozen_AuthStateProvider = {} as Current_AuthStateProvider;
-void _t_AuthStateProvider;
+const _t_CProfileThreadInfo: Frozen_CProfileThreadInfo = {} as Current_CProfileThreadInfo;
+void _t_CProfileThreadInfo;
+const _t_CProfileThreadsResponse: Frozen_CProfileThreadsResponse = {} as Current_CProfileThreadsResponse;
+void _t_CProfileThreadsResponse;

@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV4 — never edit by hand
 // =============================================================================
-// Generated:     2026-09-17T20:28:22.067Z
-// Source commit: 3f1f2412204c386155c140e4b7bdd01636877177
+// Generated:     2026-09-16T14:10:40.256Z
+// Source commit: 4ccbbf1c4242550c038995c22d283352fd1c28c8
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1950,17 +1950,6 @@ export interface ServerInfoResult {
      */
     stripePublishableKey?: string;
     /**
-     * Ad-attribution provider id this server reports conversions to.
-     *
-     * The NAME only — never a credential, and passed through verbatim from the
-     * deployment's configuration, so the platform names no vendor of its own.
-     * Present where a deployment reports conversions, which is what lets an
-     * app capture ad-click parameters and ask for marketing consent; absent
-     * everywhere else (staging, OSS), where apps do nothing with it. No
-     * third-party ad script is loaded: conversions are reported server-side.
-     */
-    attributionProvider?: string;
-    /**
      * The server's public addresses, RESOLVED to absolute URLs.
      *
      * `getServerInfo` substitutes the server's `'origin'` sentinel ("the
@@ -2065,10 +2054,34 @@ export interface CProfileTreeNode {
 export interface CProfileReportTreeResponse {
     /** Root node of the call tree (synthetic '<root>' wrapper). */
     tree: CProfileTreeNode | null;
-    /** Total cumulative time across all profiled functions. */
+    /** How long the profiled threads ran — the selected thread, or all of them summed. */
     total_time: number;
     /** Total number of function calls recorded. */
     total_calls: number;
+    /** Error message if no data is available. */
+    error?: string;
+}
+/** One profiled thread, as listed by rrext_cprofile_threads. */
+export interface CProfileThreadInfo {
+    /** Thread id within the session; pass it to rrext_cprofile_report_tree as `thread`. */
+    id: number;
+    /** Thread name, or null if the profiler never resolved one. Not unique. */
+    name: string | null;
+    /** System thread id (Python's threading.get_ident()) — tells apart threads that share a name. */
+    tid: number;
+    /** Time the profiler attributed to this thread, in seconds. */
+    ttot: number;
+    /** Number of times the thread was scheduled while profiled. */
+    sched_count: number;
+    /** Number of distinct functions recorded on this thread. */
+    functions: number;
+    /** Total number of calls recorded on this thread. */
+    calls: number;
+}
+/** Response from rrext_cprofile_threads. */
+export interface CProfileThreadsResponse {
+    /** Threads of the last completed session, busiest first. */
+    threads: CProfileThreadInfo[];
     /** Error message if no data is available. */
     error?: string;
 }
@@ -3463,24 +3476,6 @@ declare class AccountApi {
      * @param orgId - The org ID to switch to.
      */
     setDefaultOrg(orgId: string): Promise<void>;
-    /**
-     * Records (or clears) the user's ad-attribution context for a provider.
-     *
-     * Sent by the browser only after the user has granted marketing
-     * consent: `data` is the ad-click reference an app read from the landing
-     * URL (whatever parameters the provider puts there), which the server
-     * attaches to server-side conversion events. It may be empty — the stored
-     * record is itself the consent that permits reporting. Pass `null` when
-     * consent is withdrawn: the server deletes the stored context and stops
-     * reporting conversions for this user.
-     *
-     * No ad pixel is involved, and nothing is read from the device.
-     *
-     * @param provider - Attribution provider id, as the deployment configured
-     *                   it (the server's probe advertises the same value).
-     * @param data - The ad-click reference, or `null` to clear it.
-     */
-    setAttribution(provider: string, data: Record<string, unknown> | null): Promise<void>;
     /**
      * Permanently deletes the current user's account.
      */
@@ -5766,9 +5761,19 @@ export declare class RocketRideClient extends DAPClient {
      * @param target   - Task token if querying a pipeline, or undefined for server.
      * @param maxDepth - Maximum tree depth (default 50).
      * @param minPct   - Minimum cumtime percentage threshold (default 0.1).
+     * @param includeSystem - Keep stdlib/system functions in the tree (server default true).
+     * @param thread   - Thread id from cprofileThreads() for that thread alone;
+     *                   all threads merged when omitted.
      * @returns Object containing the tree root, total_time, and total_calls.
      */
-    cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean): Promise<CProfileReportTreeResponse>;
+    cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean, thread?: number | null): Promise<CProfileReportTreeResponse>;
+    /**
+     * List the threads profiled in the last completed session.
+     *
+     * @param target - Task token if querying a pipeline, or undefined for server.
+     * @returns Object containing the threads, busiest first.
+     */
+    cprofileThreads(target?: string | null): Promise<CProfileThreadsResponse>;
     /**
      * Async disposal support for 'await using' pattern.
      * Equivalent to Python's __aexit__
@@ -6341,13 +6346,6 @@ export interface ShellApiConfig {
     RR_ZITADEL_URL?: string;
     /** Zitadel application client ID — required for PKCE OAuth login. */
     RR_ZITADEL_CLIENT_ID?: string;
-    /**
-     * Attribution provider id the server advertises for this environment, or
-     * absent where it runs none. A passthrough of the probe's field: the shell
-     * stores the string and never interprets it — an app that does attribution
-     * reads it and decides what it means.
-     */
-    attributionProvider?: string;
     /** Additional runtime settings loaded from .workspace/settings.json. */
     [key: string]: string | undefined;
 }
@@ -7875,54 +7873,6 @@ export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameE
  * ```
  */
 export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
-/** Immutable snapshot of the URL a document was opened with. */
-export interface LandingUrl {
-    /** Path only, no query or fragment (e.g. `/pricing`). */
-    readonly pathname: string;
-    /** Raw query string including the leading `?`, or `''`. */
-    readonly search: string;
-    /** Raw fragment including the leading `#`, or `''`. */
-    readonly hash: string;
-    /** Parsed query parameters. Repeated keys keep the LAST value. */
-    readonly params: Readonly<Record<string, string>>;
-}
-/**
- * The URL this document was opened with, snapshotted in bootstrap before the
- * shell rewrote it (the OAuth callback and the connect path both strip the
- * query string).
- *
- * Deliberately NOT stateful: the snapshot is frozen for the life of the
- * document, so there is nothing to subscribe to and no re-render to trigger.
- * Read it whenever you need it.
- *
- * An app reading a campaign or referral parameter is responsible for its own
- * privacy posture — the capture is unconditional, so honour Global Privacy
- * Control (`navigator.globalPrivacyControl`) and skip automated browsers
- * (`navigator.webdriver`) on this side if that matters for your use.
- *
- * @returns The landing-URL snapshot; empty when nothing was captured.
- *
- * @example
- * ```tsx
- * const landing = useLandingUrl();
- * const ref = landing.params.ref;   // ?ref=... as the visitor arrived
- * ```
- */
-export declare function useLandingUrl(): LandingUrl;
-/** Supplies an opaque, url-safe value to ride the OAuth `state` parameter. */
-export type AuthStateProvider = () => string | null;
-/**
- * Register the contributor asked for a `state` value on every sign-in.
- *
- * Registering is safe any time before the visitor signs in — `signIn()` runs
- * from a user gesture, so an app that registers on mount is always in place.
- * A second registration REPLACES the first and warns; the slot is single by
- * design.
- *
- * @param fn - Called at sign-in; return null to carry nothing.
- * @returns An unregister function (only clears if `fn` is still registered).
- */
-export declare function registerAuthStateProvider(fn: AuthStateProvider): () => void;
 export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
 export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
     top: number;
@@ -12204,8 +12154,6 @@ export declare const shellApi: {
     readonly useConnectionStatus: typeof useConnectionStatus;
     readonly useShellApiConfig: typeof useShellApiConfig;
     readonly useAppComponent: typeof useAppComponent;
-    readonly useLandingUrl: typeof useLandingUrl;
-    readonly registerAuthStateProvider: typeof registerAuthStateProvider;
     readonly useClickOutside: typeof useClickOutside;
     readonly useFixedPopupPosition: typeof useFixedPopupPosition;
     readonly usePrefs: typeof usePrefs;

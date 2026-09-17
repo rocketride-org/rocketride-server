@@ -281,7 +281,7 @@ Further public methods, present in both SDKs, in brief:
 | Template storage | `save_template`, `get_template`, `delete_template`, `get_all_templates` |
 | Log storage | `save_log`, `get_log`, `delete_log`, `list_logs` |
 | Dashboard | `get_dashboard`, `list_connections`, `list_tasks` |
-| Profiling | `cprofile_start`, `cprofile_stop`, `cprofile_status`, `cprofile_report`, `cprofile_report_tree` |
+| Profiling | `cprofile_start`, `cprofile_stop`, `cprofile_status`, `cprofile_report`, `cprofile_report_tree`, `cprofile_threads` |
 | Namespaces | `client.account`, `client.billing` (account and billing APIs) |
 
 ## Advanced: low-level DAP

@@ -52,7 +52,8 @@ class CProfileMixin(DAPClient):
     Provides cProfile process profiling for the RocketRide client.
 
     This mixin adds cprofile_start(), cprofile_stop(), cprofile_status(),
-    and cprofile_report() methods that send rrext_cprofile_* DAP commands.
+    cprofile_report(), cprofile_report_tree() and cprofile_threads() methods
+    that send rrext_cprofile_* DAP commands.
     Each method accepts an optional ``target`` parameter: when None, the
     server process itself is profiled; when a task token, the corresponding
     pipeline's engine subprocess is profiled via the server's proxy.
@@ -158,6 +159,7 @@ class CProfileMixin(DAPClient):
         max_depth: int = 50,
         min_pct: float = 0.1,
         include_system: bool = True,
+        thread: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Get a structured call tree from the last completed profiling session.
@@ -173,6 +175,8 @@ class CProfileMixin(DAPClient):
             include_system: Include stdlib/system functions in the tree (default True).
                 When False, the server filters out system nodes and promotes
                 project-code children.
+            thread: Thread id from cprofile_threads() to get that thread's
+                tree alone, or None (default) for all threads merged.
 
         Returns:
             Dict with 'tree' (root node), 'total_time', and 'total_calls'.
@@ -190,4 +194,29 @@ class CProfileMixin(DAPClient):
         }
         if target:
             args['target'] = target
+        # 0 is a real thread id, so test for None rather than truthiness
+        if thread is not None:
+            args['thread'] = thread
         return await self.call('rrext_cprofile_report_tree', **args)
+
+    async def cprofile_threads(self, target: Optional[str] = None) -> Dict[str, Any]:
+        """
+        List the threads profiled in the last completed session.
+
+        Args:
+            target: Task token if querying a pipeline, or None for server.
+
+        Returns:
+            Dict with 'threads', busiest first.  Each has 'id' (pass it to
+            cprofile_report_tree() as thread), 'name', 'tid' (system thread id),
+            'ttot', 'sched_count', 'functions' and 'calls'.
+
+        Example:
+            result = await client.cprofile_threads()
+            for thread in result['threads']:
+                print(f"{thread['name']} (tid {thread['tid']}): {thread['ttot']:.3f}s")
+        """
+        args: Dict[str, Any] = {}
+        if target:
+            args['target'] = target
+        return await self.call('rrext_cprofile_threads', **args)

@@ -41,6 +41,8 @@ Primary Responsibilities:
 2. Handles DAP 'rrext_cprofile_stop' — stop and generate report
 3. Handles DAP 'rrext_cprofile_status' — query active/inactive state
 4. Handles DAP 'rrext_cprofile_report' — retrieve the pstats report text
+5. Handles DAP 'rrext_cprofile_report_tree' — retrieve the call tree
+6. Handles DAP 'rrext_cprofile_threads' — list the profiled threads
 
 Architecture:
 -------------
@@ -273,6 +275,8 @@ class CProfileCommands(DAPConn):
                 - arguments.target (str, optional): Task token, or None for local
                 - arguments.max_depth (int, optional): Max tree depth (default 50)
                 - arguments.min_pct (float, optional): Min cumtime % threshold (default 0.1)
+                - arguments.thread (int, optional): Thread id from rrext_cprofile_threads;
+                  all threads when omitted
 
         Returns:
             Dict[str, Any]: DAP response with tree, total_time, total_calls
@@ -296,7 +300,38 @@ class CProfileCommands(DAPConn):
             max_depth=max_depth,
             min_pct=min_pct,
             include_system=include_system,
+            thread=args.get('thread'),
         )
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_threads(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_cprofile_threads' command to list the profiled threads.
+
+        Returns each thread of the last completed session with its time and
+        call counts; pass a thread's id to rrext_cprofile_report_tree to see
+        that thread alone.  Any connection can call this regardless of ownership.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments.target (str, optional): Task token, or None for local
+
+        Returns:
+            Dict[str, Any]: DAP response with threads
+
+        Usage Example:
+        { "command": "rrext_cprofile_threads" }
+        """
+        self.verify_permission('task.control')
+        args = request.get('arguments', {})
+        target = args.get('target', None)
+
+        # Proxy mode
+        if target:
+            return await self._proxy_to_task(request, target)
+
+        # Direct mode
+        result = profiler.threads()
         return self.build_response(request, body=result)
 
     def release_profiler(self) -> None:
