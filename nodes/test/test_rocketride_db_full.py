@@ -233,6 +233,7 @@ def rr_env(monkeypatch):
     monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
     monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
 
+    monkeypatch.delitem(sys.modules, 'ai.common.config_utils', raising=False)
     config_utils = _load_from_path(
         'ai.common.config_utils',
         _UTILS_DIR / 'config_utils.py',
@@ -268,6 +269,16 @@ def raw_conn():
 
 
 def test_rr_env_does_not_register_config_utils_alias(rr_env):  # noqa: ARG001 - fixture is the behavior under test
+    assert 'ai.common.config_utils' not in sys.modules
+
+
+def test_rr_env_temporarily_removes_existing_config_utils_alias(monkeypatch, request):
+    """Isolate the fixture from aliases registered by previously collected suites."""
+    existing = types.ModuleType('ai.common.config_utils')
+    monkeypatch.setitem(sys.modules, 'ai.common.config_utils', existing)
+
+    request.getfixturevalue('rr_env')
+
     assert 'ai.common.config_utils' not in sys.modules
 
 
