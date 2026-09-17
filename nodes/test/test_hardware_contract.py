@@ -66,3 +66,9 @@ def test_heavy_groups_declare_hardware(data, group):
             assert cuda.vram_gb is not None and cuda.vram_gb >= memory_gb, (
                 f'profile {name}: cuda.vramGb must be at least its memory_gb ({memory_gb})'
             )
+        for device in ('mps', 'cpu'):
+            spec = requirement.devices.get(device)
+            if spec is not None:
+                assert spec.ram_gb is not None and spec.ram_gb >= memory_gb, (
+                    f'profile {name}: {device}.ramGb must be at least its memory_gb ({memory_gb})'
+                )

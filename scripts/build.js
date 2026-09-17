@@ -78,9 +78,19 @@ function parseArgs(args) {
 		} else if (arg === '--list-modules') {
 			options.listModules = true;
 		} else if (arg === '--list-skipped' || arg.startsWith('--list-skipped=')) {
-			options.listSkipped = arg.includes('=') ? arg.substring('--list-skipped='.length) : 'all';
+			const category = arg.includes('=') ? arg.substring('--list-skipped='.length) : 'all';
+			if (!category) {
+				console.error("Error: --list-skipped= needs a category, or drop the '=' for all of them");
+				process.exit(1);
+			}
+			options.listSkipped = category;
 		} else if (arg.startsWith('--warmup=')) {
-			options.warmup = arg.substring('--warmup='.length);
+			const warmup = arg.substring('--warmup='.length);
+			if (!warmup) {
+				console.error("Error: --warmup= needs a value: 'plan' or 'off'");
+				process.exit(1);
+			}
+			options.warmup = warmup;
 		} else if (arg.startsWith('--models=')) {
 			options.models = options.models || [];
 			options.models.push(arg.substring('--models='.length));

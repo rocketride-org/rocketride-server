@@ -266,7 +266,10 @@ def build_specs(
         check = None
         missing_env = config.get_missing_env_vars()
         missing_libs = [] if missing_env else config.get_missing_shared_libs()
-        if missing_env:
+        if invalid:
+            # Before the skips: a malformed declaration is a repo bug, not a property of this machine.
+            fail = ('hardware', invalid)
+        elif missing_env:
             skip = ('env', f'required environment variable(s) not set: {", ".join(missing_env)}')
         elif missing_libs:
             plural = 'y' if len(missing_libs) == 1 else 'ies'
@@ -275,8 +278,6 @@ def build_specs(
                 f'required shared librar{plural} not available: {", ".join(missing_libs)}. Install the '
                 f"providing system package (e.g. 'apt-get install -y libgles2' provides libGLESv2.so.2).",
             )
-        elif invalid:
-            fail = ('hardware', invalid)
         elif requirement is not None:
             check = check_hardware(requirement, snapshot)
             if not check.ok:
@@ -425,12 +426,15 @@ def wait_for_free_vram(
         sleep: Sleep function (injectable for tests).
 
     Returns:
-        ``(ok, memory)``; ``ok`` is also True when the probe is unavailable.
+        ``(ok, memory)``. ``ok`` is False when the probe keeps failing or keeps
+        reporting unknown memory: the snapshot came from a working probe, so
+        losing it now is an anomaly, and starting the test would only move the
+        failure into the CUDA allocation.
     """
     deadline = clock() + timeout_s
     while True:
         mem = probe()
-        if mem is None or mem.free_gb >= need_gb:
+        if mem is not None and mem.free_gb is not None and mem.free_gb >= need_gb:
             return True, mem
         if clock() >= deadline:
             return False, mem

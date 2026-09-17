@@ -78,6 +78,15 @@ def test_invalid_requirement_fails_even_when_not_strict():
     assert spec.heavy and not spec.fail_strict
 
 
+def test_invalid_requirement_beats_a_prerequisite_skip(monkeypatch):
+    # A malformed declaration is a repo bug: it must not hide behind a machine-local skip.
+    monkeypatch.delenv('RR_TEST_NOT_SET', raising=False)
+    config = _config(requires=['RR_TEST_NOT_SET'], hardware={'cuda': {'vramGB': 1}})
+    [spec] = gate.build_specs([config], 'fulltest', CUDA_80, strict=False)
+    assert spec.skip is None
+    assert spec.fail.startswith('[hardware] node:p: invalid requiresHardware')
+
+
 def test_missing_env_is_a_visible_skip(monkeypatch):
     monkeypatch.delenv('RR_TEST_NOT_SET', raising=False)
     [spec] = gate.build_specs([_config(requires=['RR_TEST_NOT_SET'], hardware=HEAVY)], 'test', CUDA_8, False)
@@ -229,8 +238,13 @@ def test_wait_for_free_vram_times_out():
     assert not ok and mem.residents == ['engine.exe[9] 20.0 GB']
 
 
-def test_wait_for_free_vram_without_nvml():
-    assert gate.wait_for_free_vram(11, probe=lambda: None) == (True, None)
+def test_wait_for_free_vram_fails_closed_without_a_reading():
+    # The snapshot came from a working probe, so losing it now is an anomaly: don't
+    # start a heavy test on an unverified GPU.
+    clock, sleep = _clock()
+    for probe in (lambda: None, lambda: CudaMemory('MIG-abc', None, None)):
+        ok, _ = gate.wait_for_free_vram(11, timeout_s=5, poll_s=2, probe=probe, clock=clock, sleep=sleep)
+        assert not ok
 
 
 # --- reporting ---------------------------------------------------------------
@@ -397,6 +411,13 @@ def test_setup_fails_when_vram_stays_busy(monkeypatch):
     message = str(excinfo.value)
     assert 'needs 6 GB free VRAM but only 2.0 GB of 8.0 GB is free' in message
     assert '(held by: python.exe[42] 5.5 GB)' in message
+
+
+def test_setup_fails_when_the_gpu_reading_is_lost(monkeypatch):
+    monkeypatch.setattr(gate, 'wait_for_free_vram', lambda need: (False, None))
+    item = _FakeItem(CUDA_8, pytest.mark.requires_hardware(device='cuda', need_gb=6.0))
+    with pytest.raises(pytest.fail.Exception, match='NVML stopped answering'):
+        conftest.pytest_runtest_setup(item)
 
 
 def test_setup_passes_when_vram_is_free(monkeypatch):

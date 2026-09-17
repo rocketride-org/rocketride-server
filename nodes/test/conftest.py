@@ -433,6 +433,12 @@ def pytest_runtest_setup(item):
         return
     need = hw.kwargs['need_gb']
     ok, mem = gate.wait_for_free_vram(need)
+    if not ok and (mem is None or mem.free_gb is None):
+        pytest.fail(
+            f'[hardware] needs {need:g} GB free VRAM, but the GPU reported none for '
+            f'{gate.PREFLIGHT_WAIT_S:.0f}s: NVML stopped answering since the session started.',
+            pytrace=False,
+        )
     if not ok:
         held = f' (held by: {", ".join(mem.residents)})' if mem.residents else ''
         pytest.fail(

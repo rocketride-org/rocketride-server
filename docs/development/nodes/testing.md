@@ -106,7 +106,8 @@ memory or crawling:
   `caption` or `background_removal`).
 - `test_hardware_contract.py` (runs in `nodes:test`) requires a declaration on
   every group of a node with the `gpu` capability and on every group listing a
-  profile with `memory_gb`, and `cuda.vramGb` must be at least that `memory_gb`.
+  profile with `memory_gb`. Each declared class must cover that `memory_gb`:
+  `cuda.vramGb`, and `ramGb` for `mps` and `cpu`.
   Nodes that load models without the `gpu` capability (`audio_transcribe`,
   `audio_tts`) must be annotated by hand.
 - Declared groups are *heavy*: under xdist they run in dedicated lanes (see
@@ -123,11 +124,17 @@ Silicon, and psutil for memory. The pytest header shows the result:
 hardware: cuda NVIDIA RTX 2000 Ada Generation Laptop GPU, 8.0 GB VRAM (6.5 GB free), 95.6 GB RAM [probe]; strict off
 ```
 
+When `CUDA_VISIBLE_DEVICES` names a MIG instance (`MIG-…`), the probe reads that
+instance, not its parent GPU. If NVML cannot resolve it, VRAM counts as unknown
+and every test with a `cuda.vramGb` minimum is skipped, rather than being measured
+against the parent's much larger memory.
+
 A test is skipped (reason `[hardware]`) when the class is not allowed, when a
 total is below its minimum, or when less than `vramGb` is free at session start;
 the reason names the processes holding VRAM. Before each gated CUDA test the
 harness waits up to 60 s for `vramGb` to be free and **fails** if it is not: an
-earlier test kept its memory, or another process took the GPU.
+earlier test kept its memory, another process took the GPU, or NVML stopped
+answering.
 
 | Variable | Effect |
 | -------- | ------ |
