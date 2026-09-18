@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+#  Pipeline diff — runs the bundled pipe-diff composite action on this
+#  repository's own .pipe files.
+#
+#  Two jobs' worth of value from one: on a pull request that edits a pipeline
+#  it posts the semantic diff reviewers actually want, and on a pull request
+#  that edits the action, the diff engine or the CLI subcommand it is the only
+#  thing that executes any of that code as a GitHub Action at all. The action
+#  shipped with no workflow referencing it, so nothing exercised the install
+#  step, the merge-base resolution or the comment step until a consumer
+#  adopted it.
+#
+#  Deliberately `pull_request`, never `pull_request_target`: the action's
+#  README explains why (a pull_request_target job checks out the base branch,
+#  so there is nothing to diff, and this workflow installs the CLI from the
+#  checkout — which must never be PR-controlled code holding a writable
+#  token). A fork PR therefore gets a read-only token and the report lands in
+#  the job summary instead of a comment; that is the documented behaviour.
+# ---------------------------------------------------------------------------
+name: Pipeline diff
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      # Pipelines: the real payload.
+      - '**/*.pipe'
+      # The machinery itself: keep a change to the action, the diff engine or
+      # the CLI subcommand from merging without the action having run once.
+      - '.github/actions/pipe-diff/**'
+      - '.github/workflows/pipe-diff.yml'
+      - 'packages/client-python/src/rocketride/pipediff/**'
+      - 'packages/client-python/src/rocketride/cli/commands/diff.py'
+      - 'packages/client-python/pyproject.toml'
+
+concurrency:
+  group: pipe-diff-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pipe-diff:
+    name: Semantic .pipe diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # The action can deepen a shallow checkout itself, but the history is
+          # needed either way to resolve the merge base — fetching it up front
+          # is cheaper than an unshallow mid-run.
+          fetch-depth: 0
+
+      - uses: ./.github/actions/pipe-diff
+        with:
+          # `rocketride diff` ships in a release after 1.3.0, so PyPI cannot
+          # serve it yet; install the CLI from this checkout. Safe here and only
+          # here: this is the `pull_request` event, so a fork's code runs with a
+          # read-only token and no repository secrets. Switch to `cli-version`
+          # once a release carrying `diff` is published.
+          install-from: ./packages/client-python
