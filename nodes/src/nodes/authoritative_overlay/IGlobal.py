@@ -30,6 +30,7 @@ class IGlobal(IGlobalBase):
         super().__init__()
         self.regulator_type = 'sec'
         self.cik = ''
+        self.sec_submission_cache = {}
 
     def beginGlobal(self):
         """Initialize the global authoritative overlay configuration."""
@@ -39,4 +40,6 @@ class IGlobal(IGlobalBase):
         # Zero-pad only after the emptiness check so a blank CIK stays falsy
         # (zfill(10) on '' would become '0000000000' and skip query_sec's guard).
         self.cik = cik_raw.zfill(10) if cik_raw else ''
+        # Reuse mutable SEC submission metadata only within this task run.
+        self.sec_submission_cache = {}
         debug(f'Initialized Authoritative Overlay with regulator: {self.regulator_type}, CIK: {self.cik}')

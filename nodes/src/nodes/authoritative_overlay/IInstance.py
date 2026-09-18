@@ -24,14 +24,11 @@
 from rocketlib import IInstanceBase, warning, debug
 from ai.common.schema import Answer
 from .IGlobal import IGlobal
-from .connectors.sec import query_sec
+from .connectors.sec import PERIOD_FILTER_KEYS, has_period_scope, query_sec
 
 import re
 import json
 import math
-
-_PERIOD_FILTER_KEYS = ('form', 'fy', 'fp', 'start', 'end', 'unit', 'frame')
-_PERIOD_SCOPE_KEYS = ('form', 'fy', 'fp', 'start', 'end', 'frame')
 
 
 def _normalize_number(value_str: str) -> float | None:
@@ -81,7 +78,7 @@ def _normalize_number(value_str: str) -> float | None:
 def _period_filters(payload: dict) -> dict:
     """Pull optional SEC period/unit filters from the answer payload."""
     filters = {}
-    for key in _PERIOD_FILTER_KEYS:
+    for key in PERIOD_FILTER_KEYS:
         if key not in payload:
             continue
         value = payload[key]
@@ -164,7 +161,7 @@ class IInstance(IInstanceBase):
             self.preventDefault()
             return
 
-        if not any(key in filters for key in _PERIOD_SCOPE_KEYS):
+        if not has_period_scope(filters):
             warning(
                 'Abstaining: no filing period specified; provide form, fy, fp, start, end, or frame '
                 'so the match is scoped to a single report.'
@@ -184,7 +181,12 @@ class IInstance(IInstanceBase):
             return
 
         try:
-            official_data = query_sec(concept, cik=self.IGlobal.cik, filters=filters)
+            official_data = query_sec(
+                concept,
+                cik=self.IGlobal.cik,
+                filters=filters,
+                submission_cache=self.IGlobal.sec_submission_cache,
+            )
         except Exception as e:
             warning(f'Failed to query {regulator_type} connector: {str(e)}')
             self.preventDefault()

@@ -21,6 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
+from collections.abc import Callable
+from typing import cast
+
 import requests
 from rocketlib import debug, warning
 
@@ -28,12 +31,14 @@ from rocketlib import debug, warning
 _SEC_USER_AGENT = 'RocketRide Authoritative Overlay support@rocketride.org'
 _SUBMISSIONS_URL = 'https://data.sec.gov/submissions'
 
-_PERIOD_KEYS = ('form', 'fy', 'fp', 'start', 'end', 'frame')
+PERIOD_SCOPE_KEYS = ('form', 'fy', 'fp', 'start', 'end', 'frame')
+PERIOD_FILTER_KEYS = (*PERIOD_SCOPE_KEYS, 'unit')
+_MAX_HISTORICAL_FILES = 4
 
 
-def _has_period_scope(filters: dict) -> bool:
+def has_period_scope(filters: dict) -> bool:
     """Return whether filters identify at least part of a filing period."""
-    return any(key in filters for key in _PERIOD_KEYS)
+    return any(key in filters for key in PERIOD_SCOPE_KEYS)
 
 
 def _coerce_filter_value(key: str, value):
@@ -50,7 +55,7 @@ def _measurement_matches(measurement: dict, unit: str, filters: dict) -> bool:
     """Return True when a company-concept measurement satisfies every provided filter."""
     if 'unit' in filters and str(unit) != str(filters['unit']):
         return False
-    for key in _PERIOD_KEYS:
+    for key in PERIOD_SCOPE_KEYS:
         if key not in filters:
             continue
         expected = _coerce_filter_value(key, filters[key])
@@ -89,8 +94,15 @@ def _report_dates(payload: dict) -> dict[str, str]:
     }
 
 
-def _load_submission_index(cik: str) -> tuple[dict[str, str], tuple[str, ...]]:
-    """Load the mutable recent-filing index and historical shard names."""
+def _load_submission_index(
+    cik: str,
+    cache: dict[tuple[str, str], object] | None = None,
+) -> tuple[dict[str, str], tuple[dict[str, str], ...]]:
+    """Load the mutable recent-filing index and historical shard metadata."""
+    cache_key = ('index', cik)
+    if cache is not None and cache_key in cache:
+        return cast(tuple[dict[str, str], tuple[dict[str, str], ...]], cache[cache_key])
+
     response = requests.get(
         f'{_SUBMISSIONS_URL}/CIK{cik}.json',
         headers={'User-Agent': _SEC_USER_AGENT},
@@ -99,38 +111,81 @@ def _load_submission_index(cik: str) -> tuple[dict[str, str], tuple[str, ...]]:
     response.raise_for_status()
     payload = response.json()
     files = payload.get('filings', {}).get('files', []) if isinstance(payload, dict) else []
-    names = tuple(
-        str(item['name'])
+    files = tuple(
+        {key: str(item[key]) for key in ('name', 'filingFrom', 'filingTo') if item.get(key) not in (None, '')}
         for item in files
         if isinstance(item, dict) and isinstance(item.get('name'), str) and item['name'].endswith('.json')
     )
-    return _report_dates(payload), names
+    result = (_report_dates(payload), files)
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
-def _load_submission_file(name: str) -> dict[str, str]:
+def _load_submission_file(name: str, cache: dict[tuple[str, str], object] | None = None) -> dict[str, str]:
     """Load current report dates from one SEC historical-submissions shard.
 
     The SEC can update a same-named shard as filings roll out of the recent
-    index, so this response must not be cached for the process lifetime.
+    index, so this response is cached only when the caller provides a task-local
+    cache, never for the process lifetime.
     """
+    cache_key = ('file', name)
+    if cache is not None and cache_key in cache:
+        return cast(dict[str, str], cache[cache_key])
+
     response = requests.get(
         f'{_SUBMISSIONS_URL}/{name}',
         headers={'User-Agent': _SEC_USER_AGENT},
         timeout=10,
     )
     response.raise_for_status()
-    return _report_dates(response.json())
+    result = _report_dates(response.json())
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
-def _resolve_report_dates(cik: str, accessions: set[str]) -> dict[str, str]:
+def _accession_year(accession: str) -> int | None:
+    """Extract the four-digit filing year encoded in an SEC accession number."""
+    parts = accession.split('-')
+    if len(parts) < 2 or len(parts[0]) != 10 or len(parts[1]) != 2 or not parts[1].isdigit():
+        return None
+    short_year = int(parts[1])
+    return 1900 + short_year if short_year >= 90 else 2000 + short_year
+
+
+def _candidate_submission_files(files: tuple[dict[str, str], ...], accessions: set[str]) -> tuple[str, ...]:
+    """Choose a bounded set of historical shards that can contain accessions."""
+    years = {year for accession in accessions if (year := _accession_year(accession)) is not None}
+    ranged: list[str] = []
+    unranged: list[str] = []
+    for item in files:
+        name = item['name']
+        start = item.get('filingFrom', '')
+        end = item.get('filingTo', '')
+        if len(start) >= 4 and len(end) >= 4 and start[:4].isdigit() and end[:4].isdigit():
+            if any(int(start[:4]) <= year <= int(end[:4]) for year in years):
+                ranged.append(name)
+        else:
+            unranged.append(name)
+
+    candidates = (ranged or unranged) if years else [item['name'] for item in files]
+    return tuple(candidates[:_MAX_HISTORICAL_FILES])
+
+
+def _resolve_report_dates(
+    cik: str,
+    accessions: set[str],
+    cache: dict[tuple[str, str], object] | None = None,
+) -> dict[str, str]:
     """Resolve only the filing accessions needed to scope the selected facts."""
-    recent, files = _load_submission_index(cik)
+    recent, files = _load_submission_index(cik, cache)
     resolved = {accession: recent[accession] for accession in accessions if accession in recent}
     missing = accessions - resolved.keys()
-    for name in files:
+    for name in _candidate_submission_files(files, set(missing)):
         if not missing:
             break
-        older = _load_submission_file(name)
+        older = _load_submission_file(name, cache)
         for accession in tuple(missing):
             if accession in older:
                 resolved[accession] = older[accession]
@@ -142,6 +197,8 @@ def select_official_values(
     units: dict,
     filters: dict | None,
     report_dates: dict[str, str] | None = None,
+    *,
+    report_date_resolver: Callable[[set[str]], dict[str, str]] | None = None,
 ) -> list[float]:
     """Pick numeric values from a company-concept `units` map, scoped by period filters.
 
@@ -150,14 +207,13 @@ def select_official_values(
     narrow a scoped lookup but does not establish a period by itself.
     """
     active = {k: v for k, v in (filters or {}).items() if v not in (None, '')}
-    if not _has_period_scope(active):
+    if not has_period_scope(active):
         return []
 
     needs_report_date = 'end' not in active and 'frame' not in active
-    if needs_report_date and report_dates is None:
-        return []
-
     matches = list(_matching_measurements(units, active))
+    if not matches:
+        return []
 
     # SEC fy/fp describe the filing, not each fact's own reporting period. A
     # 10-K therefore gives its comparative prior-year facts the current filing's
@@ -167,6 +223,10 @@ def select_official_values(
         if any(item.get('accn') in (None, '') for item in matches):
             return []
         accessions = {str(item['accn']) for item in matches}
+        if report_dates is None:
+            if report_date_resolver is None:
+                return []
+            report_dates = report_date_resolver(accessions)
         if not accessions or any(accession not in report_dates for accession in accessions):
             return []
         filing_dates = {report_dates[accession] for accession in accessions}
@@ -199,7 +259,12 @@ def select_official_values(
     return values
 
 
-def query_sec(concept: str, cik: str, filters: dict | None = None):
+def query_sec(
+    concept: str,
+    cik: str,
+    filters: dict | None = None,
+    submission_cache: dict[tuple[str, str], object] | None = None,
+):
     """Query the US SEC EDGAR company-concept API for a us-gaap concept.
 
     Returns the list of values that match `filters`, or None if the query fails.
@@ -210,7 +275,7 @@ def query_sec(concept: str, cik: str, filters: dict | None = None):
         return None
 
     active = {k: v for k, v in (filters or {}).items() if v not in (None, '')}
-    if not _has_period_scope(active):
+    if not has_period_scope(active):
         return []
 
     url = f'https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/us-gaap/{concept}.json'
@@ -230,12 +295,11 @@ def query_sec(concept: str, cik: str, filters: dict | None = None):
         if 'end' in active or 'frame' in active:
             return select_official_values(units, active)
 
-        matches = list(_matching_measurements(units, active))
-        if not matches or any(item.get('accn') in (None, '') for item in matches):
-            return []
-        accessions = {str(item['accn']) for item in matches}
-        report_dates = _resolve_report_dates(cik, accessions)
-        return select_official_values(units, active, report_dates)
+        return select_official_values(
+            units,
+            active,
+            report_date_resolver=lambda accessions: _resolve_report_dates(cik, accessions, submission_cache),
+        )
     except requests.exceptions.RequestException as e:
         warning(f'US SEC API query failed: {str(e)}')
         return None
