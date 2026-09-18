@@ -242,7 +242,7 @@ def _build_rr_env(monkeypatch):
     utils.parse_bool = config_utils.parse_bool
     monkeypatch.setitem(sys.modules, 'ai.common.utils', utils)
 
-    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
+    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH, register=False)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
 
     # The injectable fake resolver: same seam a SaaS build fills in.
@@ -272,20 +272,34 @@ def raw_conn():
     conn.close()
 
 
-def test_rr_env_does_not_register_config_utils_alias(rr_env):  # noqa: ARG001 - fixture is the behavior under test
-    assert 'ai.common.config_utils' not in sys.modules
-
-
-def test_rr_env_temporarily_removes_existing_config_utils_alias(monkeypatch):
-    """Isolate the fixture from aliases registered by previously collected suites."""
-    existing = types.ModuleType('ai.common.config_utils')
-    monkeypatch.setitem(sys.modules, 'ai.common.config_utils', existing)
+def test_rr_env_does_not_leak_module_aliases(monkeypatch):
+    """Remove temporary module aliases when fixture setup has no prior state."""
+    aliases = ('ai.common.config_utils', 'ai.common.rocketride_db')
+    for alias in aliases:
+        monkeypatch.delitem(sys.modules, alias, raising=False)
 
     with monkeypatch.context() as fixture_patch:
         _build_rr_env(fixture_patch)
         assert 'ai.common.config_utils' not in sys.modules
+        assert 'ai.common.rocketride_db' in sys.modules
 
-    assert sys.modules['ai.common.config_utils'] is existing
+    assert all(alias not in sys.modules for alias in aliases)
+
+
+def test_rr_env_restores_existing_module_aliases(monkeypatch):
+    """Restore aliases registered by previously collected suites."""
+    existing_config_utils = types.ModuleType('ai.common.config_utils')
+    existing_rocketride_db = types.ModuleType('ai.common.rocketride_db')
+    monkeypatch.setitem(sys.modules, 'ai.common.config_utils', existing_config_utils)
+    monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', existing_rocketride_db)
+
+    with monkeypatch.context() as fixture_patch:
+        _build_rr_env(fixture_patch)
+        assert 'ai.common.config_utils' not in sys.modules
+        assert sys.modules['ai.common.rocketride_db'] is not existing_rocketride_db
+
+    assert sys.modules['ai.common.config_utils'] is existing_config_utils
+    assert sys.modules['ai.common.rocketride_db'] is existing_rocketride_db
 
 
 # ---------------------------------------------------------------------------
