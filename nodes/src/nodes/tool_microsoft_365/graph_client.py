@@ -248,8 +248,10 @@ class AppOnlyAuth(GraphAuth):
         except urllib.error.HTTPError as exc:
             # HTTPError subclasses URLError: catch it first so a broker
             # rejection (401/500/...) is not misreported as unreachable.
+            status = exc.code
+            exc.close()
             raise ValueError(
-                f'{self._svc.product} token acquisition was rejected by Microsoft (HTTP {exc.code}). '
+                f'{self._svc.product} token acquisition was rejected by Microsoft (HTTP {status}). '
                 'Check the Entra app credentials.'
             ) from exc
         except urllib.error.URLError as exc:
@@ -324,8 +326,10 @@ class BrokerUserAuth(GraphAuth):
         except urllib.error.HTTPError as exc:
             # HTTPError subclasses URLError: catch it first so a broker
             # rejection (401/500/...) is not misreported as unreachable.
+            status = exc.code
+            exc.close()
             raise ValueError(
-                f'{self._svc.product} token refresh was rejected by the broker (HTTP {exc.code}). '
+                f'{self._svc.product} token refresh was rejected by the broker (HTTP {status}). '
                 'Please reconnect your Microsoft account.'
             ) from exc
         except urllib.error.URLError as exc:
@@ -525,24 +529,30 @@ def request(
         except urllib.error.HTTPError as exc:
             status = exc.code
             if status in _RETRY_STATUSES and attempt < 3 and (status == 429 or retry_5xx):
-                retry_after = exc.headers.get('Retry-After') if exc.headers else None
-                delay = base_delay * (2**attempt)
-                if retry_after:
-                    try:
-                        delay = min(max(float(retry_after), 0.0), _MAX_RETRY_AFTER)
-                    except ValueError:
-                        # Graph may send an HTTP-date instead of a delta-seconds
-                        # value; fall back to the exponential backoff delay
-                        # rather than raising out of the retry loop.
-                        pass
+                try:
+                    retry_after = exc.headers.get('Retry-After') if exc.headers else None
+                    delay = base_delay * (2**attempt)
+                    if retry_after:
+                        try:
+                            delay = min(max(float(retry_after), 0.0), _MAX_RETRY_AFTER)
+                        except ValueError:
+                            # Graph may send an HTTP-date instead of a delta-seconds
+                            # value; fall back to the exponential backoff delay
+                            # rather than raising out of the retry loop.
+                            pass
+                finally:
+                    exc.close()
                 _time.sleep(delay)
                 continue
             detail = ''
             try:
-                err = (json.loads(exc.read().decode()).get('error')) or {}
-                detail = f'{err.get("code", "")}: {err.get("message", "")}'
-            except Exception:
-                detail = str(exc)
+                try:
+                    err = (json.loads(exc.read().decode()).get('error')) or {}
+                    detail = f'{err.get("code", "")}: {err.get("message", "")}'
+                except Exception:
+                    detail = str(exc)
+            finally:
+                exc.close()
             if status in (401, 403):
                 raise GraphError(
                     f'{svc.product}: access denied ({detail}). Check that the granted scopes/'

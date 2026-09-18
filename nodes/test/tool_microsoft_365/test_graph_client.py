@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import sys
 import time
@@ -131,6 +132,15 @@ class TestAppOnlyAuth:
         with pytest.raises(ValueError, match='tenantId'):
             gc.build_auth(SVC, 'service', {'clientId': 'c', 'clientSecret': 's'}, [])
 
+    def test_token_http_error_response_is_closed(self):
+        auth = gc.build_auth(SVC, 'service', self.CFG, [])
+        body = io.BytesIO(b'rejected')
+        err = urllib.error.HTTPError('u', 401, 'nope', {}, body)
+        with mock.patch.object(gc, '_urlopen', side_effect=err):
+            with pytest.raises(ValueError, match='rejected by Microsoft'):
+                auth.token()
+        assert body.closed
+
 
 class TestBrokerUserAuth:
     def _payload(self, **over):
@@ -163,10 +173,12 @@ class TestBrokerUserAuth:
 
     def test_refresh_http_error_is_rejection(self):
         auth = gc.build_auth(SVC, 'user', self._payload(), [])
-        err = urllib.error.HTTPError('u', 401, 'nope', {}, None)
+        body = io.BytesIO(b'rejected')
+        err = urllib.error.HTTPError('u', 401, 'nope', {}, body)
         with mock.patch.object(gc, '_urlopen', side_effect=err):
             with pytest.raises(ValueError, match='rejected by the broker'):
                 auth.token()
+        assert body.closed
 
     def test_expired_without_refresh_path_fails_now(self):
         cfg = self._payload(oauth_server_url=None, refresh_token=None)
@@ -258,10 +270,12 @@ class TestRequest:
             assert req.get_header('Authorization') == 'Bearer TOK'
 
     def test_retries_429_with_retry_after(self):
-        err = urllib.error.HTTPError('u', 429, 'throttle', {'Retry-After': '0'}, None)
+        body = io.BytesIO(b'throttled')
+        err = urllib.error.HTTPError('u', 429, 'throttle', {'Retry-After': '0'}, body)
         with mock.patch.object(gc, '_urlopen', side_effect=[err, _resp({'ok': 1})]) as u:
             assert gc.request(SVC, self._auth(), 'GET', '/me') == {'ok': 1}
             assert u.call_count == 2
+        assert body.closed
 
     def test_network_error_on_get_is_retried_then_succeeds(self):
         errs = [urllib.error.URLError('reset'), TimeoutError('timed out'), ConnectionResetError()]
@@ -312,6 +326,7 @@ class TestRequest:
         with mock.patch.object(gc, '_urlopen', side_effect=err):
             with pytest.raises(gc.GraphError, match='Excel.*denied'):
                 gc.request(SVC, self._auth(), 'GET', '/me')
+        assert body.closed
 
     def test_extra_headers_merge_into_request(self):
         # extra_headers (e.g. If-Match for docx round-trip) ride on the

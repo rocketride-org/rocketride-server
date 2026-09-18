@@ -122,16 +122,22 @@ def upload_chunk(auth, session_url: str, chunk: bytes, start: int, end: int, tot
                 raw = resp.read()
             return json.loads(raw.decode()) if raw.strip() else {}
         except urllib.error.HTTPError as exc:
-            if exc.code in graph_client._RETRY_STATUSES and attempt < 3:
-                graph_client._time.sleep(_retry_delay(exc, attempt))
+            status = exc.code
+            if status in graph_client._RETRY_STATUSES and attempt < 3:
+                try:
+                    delay = _retry_delay(exc, attempt)
+                finally:
+                    exc.close()
+                graph_client._time.sleep(delay)
                 continue
             try:
-                detail = exc.read().decode(errors='replace')
-            except Exception:
-                detail = str(exc)
-            raise graph_client.GraphError(
-                f'OneDrive: chunked upload failed (HTTP {exc.code}; {detail[:200]}).'
-            ) from exc
+                try:
+                    detail = exc.read().decode(errors='replace')
+                except Exception:
+                    detail = str(exc)
+            finally:
+                exc.close()
+            raise graph_client.GraphError(f'OneDrive: chunked upload failed (HTTP {status}; {detail[:200]}).') from exc
         except OSError as exc:
             # URLError (connect failures) and bare socket errors such as
             # TimeoutError/ConnectionResetError raised by urlopen or resp.read()
