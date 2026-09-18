@@ -169,6 +169,17 @@ def pytest_configure(config):
         'markers',
         'skip_node: test for a node in skip_nodes (excluded from default run; run with -m skip_node or -k <node_name>)',
     )
+    config.addinivalue_line(
+        'markers',
+        'cobalt: mark tests as exercising Cobalt-backed evaluation paths',
+    )
+    # pytest-xdist defines xdist_group itself, so this line only matters when
+    # the plugin is disabled (-p no:xdist): --strict-markers then turns the
+    # marker into a collection error for the whole module.
+    config.addinivalue_line(
+        'markers',
+        'xdist_group(name): run every test in the group on a single xdist worker',
+    )
 
 
 # =============================================================================
