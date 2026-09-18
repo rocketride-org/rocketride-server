@@ -31,6 +31,35 @@ import { useCallback, useMemo } from 'react';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 
 // =============================================================================
+// Scopes
+// =============================================================================
+
+/**
+ * Graph scopes per access tier, keyed by the node's provider — its protocol
+ * name without '://' (e.g. 'tool_excel'), as passed in formContext.provider —
+ * the broker
+ * grants identity plus exactly the requested scopes (least privilege), or its
+ * legacy default consent when no scope param is sent. Maps mirror the
+ * per-service AccessSpecs in core/microsoft_access.py. An unknown provider or
+ * tier sends no scope param rather than guessing another service's scopes.
+ * offline_access + identity scopes are appended by the broker, matching the
+ * Google flow.
+ */
+export const SERVICE_TIER_SCOPES: Record<string, Record<string, string[]>> = {
+	// Graph's workbook API accepts only delegated Files.ReadWrite, reads
+	// included; the excel readonly tier is a node-side write gate.
+	tool_excel: { readonly: ['Files.ReadWrite'], write: ['Files.ReadWrite'] },
+	tool_word: { readonly: ['Files.Read'], write: ['Files.ReadWrite'] },
+	tool_onedrive: { readonly: ['Files.Read'], write: ['Files.ReadWrite', 'User.ReadBasic.All'] },
+	tool_outlook_mail: {
+		readonly: ['Mail.Read'],
+		send: ['Mail.Read', 'Mail.Send'],
+		modify: ['Mail.ReadWrite', 'Mail.Send'],
+	},
+	tool_outlook_calendar: { readonly: ['Calendars.Read'], write: ['Calendars.ReadWrite'] },
+};
+
+// =============================================================================
 // Icon
 // =============================================================================
 
@@ -106,26 +135,7 @@ IconButtonProps<T, S, F> & { formContext?: Record<string, any> }) {
 		const returnUrl = (oauthReturnUrl || window.location.href).replace('/auth/vscode/google', '/auth/vscode/microsoft');
 		url.searchParams.set('baseURL', returnUrl);
 
-		// Pass the selected tier's scopes explicitly, keyed by the node's
-		// provider — the broker grants identity plus exactly the requested
-		// scopes (least privilege), or its legacy default consent when no
-		// scope param is sent. Maps mirror the per-service AccessSpecs in
-		// core/microsoft_access.py. An unknown provider or tier sends no scope
-		// param rather than guessing another service's scopes.
-		// offline_access + identity scopes are appended by the broker, matching the Google flow.
-		const SERVICE_TIER_SCOPES: Record<string, Record<string, string[]>> = {
-			// Graph's workbook API accepts only delegated Files.ReadWrite, reads
-			// included; the excel readonly tier is a node-side write gate.
-			excel: { readonly: ['Files.ReadWrite'], write: ['Files.ReadWrite'] },
-			word: { readonly: ['Files.Read'], write: ['Files.ReadWrite'] },
-			onedrive: { readonly: ['Files.Read'], write: ['Files.ReadWrite', 'User.ReadBasic.All'] },
-			outlook_mail: {
-				readonly: ['Mail.Read'],
-				send: ['Mail.Read', 'Mail.Send'],
-				modify: ['Mail.ReadWrite', 'Mail.Send'],
-			},
-			outlook_calendar: { readonly: ['Calendars.Read'], write: ['Calendars.ReadWrite'] },
-		};
+		// Pass the selected tier's scopes explicitly (see SERVICE_TIER_SCOPES).
 		const provider = formContext?.provider as string | undefined;
 		const accessTier = (formValues.access ?? formValues.parameters?.access) as string | undefined;
 		const tierScopes = provider && accessTier ? SERVICE_TIER_SCOPES[provider]?.[accessTier] : undefined;
