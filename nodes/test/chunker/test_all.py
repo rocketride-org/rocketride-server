@@ -236,6 +236,8 @@ class TestTokenChunker:
             assert len(chunker._encoder.encode(chunk['text'])) <= chunker.chunk_size
         for previous, current in zip(chunks, chunks[1:]):
             assert current['metadata']['start_char'] <= previous['metadata']['end_char']
+            overlap = text[current['metadata']['start_char'] : previous['metadata']['end_char']]
+            assert len(chunker._encoder.encode(overlap)) <= chunker.chunk_overlap
 
     def test_real_tokenizer_rejects_chunk_size_too_small_for_unicode_scalar(self):
         chunker = TokenChunker(chunk_size=1, chunk_overlap=0)
@@ -296,6 +298,8 @@ class TestTokenChunker:
             assert len(chunker._encoder.encode(chunk['text'])) <= chunker.chunk_size
         for previous, current in zip(chunks, chunks[1:]):
             assert current['metadata']['start_char'] <= previous['metadata']['end_char']
+            overlap = text[current['metadata']['start_char'] : previous['metadata']['end_char']]
+            assert len(chunker._encoder.encode(overlap)) <= chunker.chunk_overlap
 
     def test_real_tokenizer_preserves_literal_replacement_character(self):
         chunker = TokenChunker(chunk_size=4, chunk_overlap=1)
