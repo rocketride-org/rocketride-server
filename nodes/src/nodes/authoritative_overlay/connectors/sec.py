@@ -246,11 +246,11 @@ def select_official_values(
     for measurement in matches:
         val = measurement.get('val')
         if val is None:
-            continue
+            return []
         try:
             values.append(float(val))
         except (TypeError, ValueError):
-            continue
+            return []
     # Different filings can publish conflicting values for the same period
     # after a restatement. Without an explicit filing-version selector there
     # is no authoritative way to choose one, so fail closed.
