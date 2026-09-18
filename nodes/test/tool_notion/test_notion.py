@@ -581,6 +581,12 @@ class TestNotionGetDatabase:
 
 
 class TestNotionQueryDatabase:
+    def test_schema_advertises_optional_request_status(self):
+        schema = _ii.IInstance.notion_query_database.__tool_meta__['output_schema']
+
+        assert schema['properties']['request_status']['type'] == 'object'
+        assert 'request_status' not in schema.get('required', [])
+
     def test_missing_database_id_is_rejected(self, monkeypatch):
         mock_request = Mock()
         monkeypatch.setattr(_ii.notion_client, 'request', mock_request)
@@ -629,6 +635,46 @@ class TestNotionQueryDatabase:
         inst.notion_query_database({'database_id': 'db-1', 'data_source_id': 'ds-explicit'})
 
         mock_resolve.assert_called_once_with('db-1', api_key='test-key', data_source_id='ds-explicit')
+
+    @pytest.mark.parametrize('has_more', [True, False])
+    def test_preserves_incomplete_request_status(self, monkeypatch, has_more):
+        status = {
+            'type': 'incomplete',
+            'incomplete_reason': 'query_result_limit_reached',
+        }
+        cursor = 'next-page' if has_more else None
+        mock_request = Mock(
+            return_value={
+                'results': [{'id': 'row-1'}],
+                'has_more': has_more,
+                'next_cursor': cursor,
+                'request_status': status,
+            }
+        )
+        monkeypatch.setattr(_ii.notion_client, 'request', mock_request)
+        inst = _instance()
+
+        out = inst.notion_query_database({'database_id': 'db-1', 'data_source_id': 'ds-1'})
+
+        assert out == {
+            'success': True,
+            'results': [{'id': 'row-1'}],
+            'has_more': has_more,
+            'next_cursor': cursor,
+            'request_status': status,
+        }
+
+    def test_omits_request_status_when_upstream_omits_it(self, monkeypatch):
+        monkeypatch.setattr(
+            _ii.notion_client,
+            'request',
+            Mock(return_value={'results': [], 'has_more': False, 'next_cursor': None}),
+        )
+        inst = _instance()
+
+        out = inst.notion_query_database({'database_id': 'db-1', 'data_source_id': 'ds-1'})
+
+        assert 'request_status' not in out
 
     def test_ambiguous_data_source_error_is_wrapped(self, monkeypatch):
         monkeypatch.setattr(
