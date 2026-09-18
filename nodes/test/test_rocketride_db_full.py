@@ -61,6 +61,7 @@ _REPO = Path(__file__).resolve().parents[2]
 _AI_SRC = _REPO / 'packages' / 'ai' / 'src'
 _RRDB_PATH = _AI_SRC / 'ai' / 'common' / 'rocketride_db.py'
 _DB_BASE_DIR = _AI_SRC / 'ai' / 'common' / 'database'
+_UTILS_DIR = _AI_SRC / 'ai' / 'common' / 'utils'
 _SQL_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_sql'
 _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 
@@ -102,12 +103,14 @@ if _DB_TESTS_REQUIRED and not _db_reachable():
 pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide test database not reachable at {TEST_DSN}')
 
 
-def _load_from_path(name: str, path: Path, *, is_package: bool = False):
+def _load_from_path(name: str, path: Path, *, is_package: bool = False, register: bool = True):
+    """Load a module from ``path``, optionally exposing it through ``sys.modules``."""
     search = [str(path.parent)] if is_package else None
     spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=search)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    if register:
+        sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -117,8 +120,7 @@ def _load_from_path(name: str, path: Path, *, is_package: bool = False):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
-def rr_env(monkeypatch):
+def _build_rr_env(monkeypatch):
     """Stub the engine surface and install the fake DSN resolver."""
     warnings: list[str] = []
 
@@ -231,7 +233,16 @@ def rr_env(monkeypatch):
     monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
     monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
 
-    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
+    config_utils = _load_from_path(
+        'ai.common.utils.config_utils',
+        _UTILS_DIR / 'config_utils.py',
+        register=False,
+    )
+    utils = types.ModuleType('ai.common.utils')
+    utils.parse_bool = config_utils.parse_bool
+    monkeypatch.setitem(sys.modules, 'ai.common.utils', utils)
+
+    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH, register=False)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
 
     # The injectable fake resolver: same seam a SaaS build fills in.
@@ -250,10 +261,47 @@ def rr_env(monkeypatch):
 
 
 @pytest.fixture()
+def rr_env(monkeypatch):
+    """Provide isolated engine stubs and a fake DSN resolver for one test."""
+    return _build_rr_env(monkeypatch)
+
+
+@pytest.fixture()
 def raw_conn():
+    """Yield a raw connection to the configured PostgreSQL test database."""
     conn = psycopg2.connect(TEST_DSN)
     yield conn
     conn.close()
+
+
+def test_rr_env_does_not_leak_module_aliases(monkeypatch):
+    """Remove temporary module aliases when fixture setup has no prior state."""
+    aliases = ('ai.common.rocketride_db', 'ai.common.utils')
+    for alias in aliases:
+        monkeypatch.delitem(sys.modules, alias, raising=False)
+
+    with monkeypatch.context() as fixture_patch:
+        _build_rr_env(fixture_patch)
+        assert 'ai.common.rocketride_db' in sys.modules
+        assert 'ai.common.utils' in sys.modules
+
+    assert all(alias not in sys.modules for alias in aliases)
+
+
+def test_rr_env_restores_existing_module_aliases(monkeypatch):
+    """Restore aliases registered by previously collected suites."""
+    existing_rocketride_db = types.ModuleType('ai.common.rocketride_db')
+    existing_utils = types.ModuleType('ai.common.utils')
+    monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', existing_rocketride_db)
+    monkeypatch.setitem(sys.modules, 'ai.common.utils', existing_utils)
+
+    with monkeypatch.context() as fixture_patch:
+        _build_rr_env(fixture_patch)
+        assert sys.modules['ai.common.rocketride_db'] is not existing_rocketride_db
+        assert sys.modules['ai.common.utils'] is not existing_utils
+
+    assert sys.modules['ai.common.rocketride_db'] is existing_rocketride_db
+    assert sys.modules['ai.common.utils'] is existing_utils
 
 
 # ---------------------------------------------------------------------------
@@ -262,25 +310,38 @@ def raw_conn():
 
 
 def _load_sql_node(monkeypatch):
-    db_global = _load_from_path('ai.common.database.db_global_base', _DB_BASE_DIR / 'db_global_base.py')
-    sql_safety = _load_from_path('ai.common.database.sql_safety', _DB_BASE_DIR / 'sql_safety.py')
+    db_global = _load_from_path(
+        'ai.common.database.db_global_base',
+        _DB_BASE_DIR / 'db_global_base.py',
+        register=False,
+    )
+    sql_safety = _load_from_path(
+        'ai.common.database.sql_safety',
+        _DB_BASE_DIR / 'sql_safety.py',
+        register=False,
+    )
     database_pkg = types.ModuleType('ai.common.database')
     database_pkg.__path__ = [str(_DB_BASE_DIR)]
     database_pkg.DatabaseGlobalBase = db_global.DatabaseGlobalBase
     monkeypatch.setitem(sys.modules, 'ai.common.database', database_pkg)
     monkeypatch.setitem(sys.modules, 'ai.common.database.db_global_base', db_global)
     monkeypatch.setitem(sys.modules, 'ai.common.database.sql_safety', sql_safety)
-    db_instance = _load_from_path('ai.common.database.db_instance_base', _DB_BASE_DIR / 'db_instance_base.py')
+    db_instance = _load_from_path(
+        'ai.common.database.db_instance_base',
+        _DB_BASE_DIR / 'db_instance_base.py',
+        register=False,
+    )
     database_pkg.DatabaseInstanceBase = db_instance.DatabaseInstanceBase
     monkeypatch.setitem(sys.modules, 'ai.common.database.db_instance_base', db_instance)
 
-    iglobal = _load_from_path('nodes.rocketride_sql.IGlobal', _SQL_NODE_DIR / 'IGlobal.py')
+    iglobal = _load_from_path('nodes.rocketride_sql.IGlobal', _SQL_NODE_DIR / 'IGlobal.py', register=False)
     pkg = types.ModuleType('nodes.rocketride_sql')
     pkg.__path__ = [str(_SQL_NODE_DIR)]
     pkg.IGlobal = iglobal
     monkeypatch.setitem(sys.modules, 'nodes.rocketride_sql', pkg)
     monkeypatch.setitem(sys.modules, 'nodes.rocketride_sql.IGlobal', iglobal)
-    iinstance = _load_from_path('nodes.rocketride_sql.IInstance', _SQL_NODE_DIR / 'IInstance.py')
+    iinstance = _load_from_path('nodes.rocketride_sql.IInstance', _SQL_NODE_DIR / 'IInstance.py', register=False)
+    monkeypatch.setitem(sys.modules, 'nodes.rocketride_sql.IInstance', iinstance)
     return iglobal.IGlobal, iinstance.IInstance
 
 
@@ -378,14 +439,70 @@ class TestRocketrideSqlE2E:
 
 
 def _load_vector_store(monkeypatch):
-    iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py')
+    iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py', register=False)
     pkg = types.ModuleType('nodes.rocketride_vector')
     pkg.__path__ = [str(_VEC_NODE_DIR)]
     pkg.IGlobal = iglobal
     monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector', pkg)
     monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector.IGlobal', iglobal)
-    store = _load_from_path('nodes.rocketride_vector.rocketride_vector', _VEC_NODE_DIR / 'rocketride_vector.py')
+    store = _load_from_path(
+        'nodes.rocketride_vector.rocketride_vector',
+        _VEC_NODE_DIR / 'rocketride_vector.py',
+        register=False,
+    )
+    monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector.rocketride_vector', store)
     return store.Store
+
+
+_NODE_LOADER_ALIASES = (
+    (
+        _load_sql_node,
+        (
+            'ai.common.database',
+            'ai.common.database.db_global_base',
+            'ai.common.database.sql_safety',
+            'ai.common.database.db_instance_base',
+            'nodes.rocketride_sql',
+            'nodes.rocketride_sql.IGlobal',
+            'nodes.rocketride_sql.IInstance',
+        ),
+    ),
+    (
+        _load_vector_store,
+        (
+            'nodes.rocketride_vector',
+            'nodes.rocketride_vector.IGlobal',
+            'nodes.rocketride_vector.rocketride_vector',
+        ),
+    ),
+)
+
+
+@pytest.mark.parametrize(('loader', 'aliases'), _NODE_LOADER_ALIASES)
+def test_node_loader_does_not_leak_module_aliases(rr_env, monkeypatch, loader, aliases):
+    """Remove every temporary node alias when no prior module was loaded."""
+    for alias in aliases:
+        monkeypatch.delitem(sys.modules, alias, raising=False)
+
+    with monkeypatch.context() as loader_patch:
+        loader(loader_patch)
+        assert all(alias in sys.modules for alias in aliases)
+
+    assert all(alias not in sys.modules for alias in aliases)
+
+
+@pytest.mark.parametrize(('loader', 'aliases'), _NODE_LOADER_ALIASES)
+def test_node_loader_restores_existing_module_aliases(rr_env, monkeypatch, loader, aliases):
+    """Restore real modules that were present before a temporary node load."""
+    existing = {alias: types.ModuleType(alias) for alias in aliases}
+    for alias, module in existing.items():
+        monkeypatch.setitem(sys.modules, alias, module)
+
+    with monkeypatch.context() as loader_patch:
+        loader(loader_patch)
+        assert all(sys.modules[alias] is not existing[alias] for alias in aliases)
+
+    assert all(sys.modules[alias] is existing[alias] for alias in aliases)
 
 
 VEC_TABLE = 'rr_vec_e2e'
