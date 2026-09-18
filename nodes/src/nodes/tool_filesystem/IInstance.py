@@ -121,7 +121,7 @@ class IInstance(IInstanceBase):
             raise ValueError('maxBytes must be at least 1')
         max_bytes = min(max_bytes, MAX_READ_LIMIT)
 
-        data = _run_async(self.IGlobal.file_store.read(path, max_size=max_bytes))
+        data = _run_async(self.IGlobal.file_store.read, path, max_size=max_bytes)
         try:
             content = data.decode(encoding)
         except UnicodeDecodeError as e:
@@ -161,7 +161,7 @@ class IInstance(IInstanceBase):
         except UnicodeEncodeError as e:
             raise ValueError(f'Failed to encode content using encoding {encoding!r}: {e}') from e
 
-        _run_async(self.IGlobal.file_store.write(path, data))
+        _run_async(self.IGlobal.file_store.write, path, data)
         return {'path': path, 'bytesWritten': len(data)}
 
     @tool_function(
@@ -183,7 +183,7 @@ class IInstance(IInstanceBase):
     def delete_file(self, args):
         path, _, _ = self._prepare(args, 'delete_file')
 
-        _run_async(self.IGlobal.file_store.delete(path))
+        _run_async(self.IGlobal.file_store.delete, path)
         return {'path': path, 'deleted': True}
 
     @tool_function(
@@ -205,7 +205,7 @@ class IInstance(IInstanceBase):
     def list_directory(self, args):
         path, _, _ = self._prepare(args, 'list_directory', path_required=False)
 
-        result = _run_async(self.IGlobal.file_store.list_dir(path))
+        result = _run_async(self.IGlobal.file_store.list_dir, path)
         return result
 
     @tool_function(
@@ -227,7 +227,7 @@ class IInstance(IInstanceBase):
     def create_directory(self, args):
         path, _, _ = self._prepare(args, 'create_directory')
 
-        _run_async(self.IGlobal.file_store.mkdir(path))
+        _run_async(self.IGlobal.file_store.mkdir, path)
         return {'path': path, 'created': True}
 
     @tool_function(
@@ -249,7 +249,7 @@ class IInstance(IInstanceBase):
     def stat_file(self, args):
         path, _, _ = self._prepare(args, 'stat_file')
 
-        return _run_async(self.IGlobal.file_store.stat(path))
+        return _run_async(self.IGlobal.file_store.stat, path)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -419,13 +419,13 @@ class IInstance(IInstanceBase):
 
         if self.IGlobal.on_conflict == OnConflict.SKIP:
             # 'both' is an object store holding a key and a same-named prefix: still a file.
-            if _run_async(self.IGlobal.file_store.stat(candidate)).get('type') in ('file', 'both'):
+            if _run_async(self.IGlobal.file_store.stat, candidate).get('type') in ('file', 'both'):
                 warning(f'tool_filesystem: {filename!r} already exists and onConflict is skip; not written')
                 return None
             return candidate
 
         n = 0
-        while _run_async(self.IGlobal.file_store.stat(candidate)).get('exists'):
+        while _run_async(self.IGlobal.file_store.stat, candidate).get('exists'):
             n += 1
             if n > MAX_COLLISION_SUFFIX:
                 raise ValueError(
@@ -440,7 +440,11 @@ class IInstance(IInstanceBase):
         """Reference dict for a persisted file, resolving a signed URL if configured."""
         url = None
         if self.IGlobal.emit_url:
-            url = _run_async(self.IGlobal.file_store.get_url(path, expires_in=self.IGlobal.url_expires_in))
+            url = _run_async(
+                self.IGlobal.file_store.get_url,
+                path,
+                expires_in=self.IGlobal.url_expires_in,
+            )
         return {'storePath': path, 'url': url, 'name': os.path.basename(path), 'mime': mime}
 
     def _sink_write(self, data: bytes, filename: str, *, index: int | None = None) -> dict | None:
@@ -458,7 +462,7 @@ class IInstance(IInstanceBase):
         path = self._sink_target_path(filename, index=index)
         if path is None:
             return None
-        _run_async(self.IGlobal.file_store.write(path, data))
+        _run_async(self.IGlobal.file_store.write, path, data)
         return self._sink_ref(path)
 
     def _sink_emit(self, refs: list[dict]) -> None:
@@ -856,8 +860,8 @@ def _run_on_stream_loop(coro):
     return asyncio.run_coroutine_threadsafe(coro, _STREAM_LOOP).result()
 
 
-def _run_async(coro):
-    """Run an async coroutine from a synchronous node method.
+def _run_async(async_fn, *args, **kwargs):
+    """Run an async callable from a synchronous node method.
 
     Only safe to call from a thread with no running event loop. Two callers are
     supported, both synchronous:
@@ -869,8 +873,9 @@ def _run_async(coro):
         engine likewise invokes synchronously.
 
     If invoked from a thread that already has a running loop, ``asyncio.run``
-    would raise a generic ``RuntimeError``; we pre-check so the failure surfaces
-    with a tool_filesystem-specific message that points at that contract.
+    would raise a generic ``RuntimeError``; we pre-check before creating the
+    coroutine so the failure surfaces with a tool_filesystem-specific message
+    and cannot leak an unawaited coroutine.
     """
     try:
         asyncio.get_running_loop()
@@ -881,4 +886,4 @@ def _run_async(coro):
             '_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods and sink lane handlers are designed to be dispatched synchronously by the engine.'
         )
 
-    return asyncio.run(coro)
+    return asyncio.run(async_fn(*args, **kwargs))
