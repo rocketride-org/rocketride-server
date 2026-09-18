@@ -286,6 +286,73 @@ standalone catalog nodes.
 
 ---
 
+## Async ops and the node event loop
+
+Every node's `IGlobal` gets one persistent asyncio event loop on its own daemon
+thread. It starts lazily — nothing runs until an async op or a `run_async()` call
+needs it — and it is torn down once `endGlobal()` returns, whether or not your
+`endGlobal()` override calls `super()`. You never start or stop it yourself. A
+node that ships no `IGlobal` class shares a process-wide fallback loop instead,
+and a node whose handlers are all plain `def` never starts a loop at all.
+
+`@invoke_function` and `@tool_function` handlers may be `async def`. The
+dispatcher runs the coroutine on that loop and blocks the calling engine thread
+until it finishes, so from the engine's side an async op looks like a sync one:
+same call convention, same return value, same errors. Because the loop outlives
+any single call, it is where loop-bound resources belong — an async DB pool, an
+`aiohttp`/`httpx` session, an async SDK client — reused across ops instead of
+reopened on every call:
+
+```python
+import aiohttp
+
+from rocketlib import IGlobalBase, IInstanceBase, invoke_function
+
+
+class IGlobal(IGlobalBase):
+    _pool: aiohttp.ClientSession | None = None
+
+    async def _get_pool(self) -> aiohttp.ClientSession:
+        if self._pool is None:
+            self._pool = aiohttp.ClientSession()
+        return self._pool
+
+    def endGlobal(self) -> None:
+        if self._pool is not None:
+            self.run_async(self._pool.close())
+
+
+class IInstance(IInstanceBase):
+    @invoke_function
+    async def fetch(self, param: dict) -> dict:
+        pool = await self.IGlobal._get_pool()
+        async with pool.get(param['url']) as resp:
+            return {'status': resp.status, 'body': await resp.text()}
+```
+
+`_get_pool()` opens the session once and every later call reuses it. `endGlobal`
+closes it through `run_async()`, which is how sync code — lifecycle hooks, lane
+handlers — drives a coroutine on the loop; the loop is still alive while
+`endGlobal` runs and stops only after it returns. Calling `run_async()` (or
+`invoke()`) from code already running on that loop would deadlock, so it raises
+`RuntimeError` instead: `await` the coroutine directly there.
+
+Both decorators take an optional `timeout=` in seconds —
+`@invoke_function(timeout=30)`, `@tool_function(timeout=30)` — that applies to an
+async handler only; a sync handler ignores it, and the default, `None`, means no
+limit. When it expires the task is cancelled and the call fails with an `APERR`
+timeout rather than hanging the engine thread.
+
+Async ops share the one loop rather than getting a thread each, so they overlap
+only at `await` points. If two of them must not interleave, guard them with an
+`asyncio.Lock` created on that loop, not a `threading.Lock`. This is the
+sanctioned way to hold a connection, pool or client across ops:
+`tool_laserdata_memory`, `tool_filesystem` and `agent_crewai` each hand-roll a
+loop thread for it today, and new nodes should use the one `IGlobalBase` and
+`IInstanceBase` already give them.
+
+---
+
 ## Prototyping Local Nodes
 
 Develop a node in your own workspace -- next to your `.pipe` -- without changing

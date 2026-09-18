@@ -25,6 +25,7 @@
 # -----------------------------------------------------------------------------
 # Declare out interfaces
 # -----------------------------------------------------------------------------
+from .async_bridge import AsyncBridge
 from .engine import args
 from .engine import configureLogger
 from .engine import debug
@@ -93,6 +94,7 @@ from engLib import Filters
 __all__ = [
     'APERR',
     'args',
+    'AsyncBridge',
     'AVI_ACTION',
     'configureLogger',
     'debug',
