@@ -18,18 +18,14 @@ def test_run_async_rejects_running_loop_before_creating_coroutine():
     _install_iinstance_stubs()
     import tool_filesystem.IInstance as mod
 
-    called = False
-
-    async def operation():
-        nonlocal called
-        called = True
+    operation = MagicMock()
 
     async def invoke_from_running_loop():
         with pytest.raises(RuntimeError, match='running event loop'):
             mod._run_async(operation)
 
     asyncio.run(invoke_from_running_loop())
-    assert called is False
+    operation.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
