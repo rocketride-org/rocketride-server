@@ -106,7 +106,7 @@
 		}
 	],
 	"test": {
-		"profiles": ["sentence"],
+		"profiles": ["sentence", "token"],
 		"outputs": ["documents"],
 		"cases": [
 			{

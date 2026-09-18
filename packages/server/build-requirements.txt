@@ -7,6 +7,7 @@ pytest-asyncio
 pytest-timeout
 pytest-xdist
 python-dotenv
+tiktoken>=0.7.0,<1.0.0
 mcp>=1.2.0
 huggingface_hub[hf_xet]
 pydantic
