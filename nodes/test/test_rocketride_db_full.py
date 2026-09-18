@@ -233,9 +233,8 @@ def _build_rr_env(monkeypatch):
     monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
     monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
 
-    monkeypatch.delitem(sys.modules, 'ai.common.config_utils', raising=False)
     config_utils = _load_from_path(
-        'ai.common.config_utils',
+        'ai.common.utils.config_utils',
         _UTILS_DIR / 'config_utils.py',
         register=False,
     )
@@ -277,32 +276,32 @@ def raw_conn():
 
 def test_rr_env_does_not_leak_module_aliases(monkeypatch):
     """Remove temporary module aliases when fixture setup has no prior state."""
-    aliases = ('ai.common.config_utils', 'ai.common.rocketride_db')
+    aliases = ('ai.common.rocketride_db', 'ai.common.utils')
     for alias in aliases:
         monkeypatch.delitem(sys.modules, alias, raising=False)
 
     with monkeypatch.context() as fixture_patch:
         _build_rr_env(fixture_patch)
-        assert 'ai.common.config_utils' not in sys.modules
         assert 'ai.common.rocketride_db' in sys.modules
+        assert 'ai.common.utils' in sys.modules
 
     assert all(alias not in sys.modules for alias in aliases)
 
 
 def test_rr_env_restores_existing_module_aliases(monkeypatch):
     """Restore aliases registered by previously collected suites."""
-    existing_config_utils = types.ModuleType('ai.common.config_utils')
     existing_rocketride_db = types.ModuleType('ai.common.rocketride_db')
-    monkeypatch.setitem(sys.modules, 'ai.common.config_utils', existing_config_utils)
+    existing_utils = types.ModuleType('ai.common.utils')
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', existing_rocketride_db)
+    monkeypatch.setitem(sys.modules, 'ai.common.utils', existing_utils)
 
     with monkeypatch.context() as fixture_patch:
         _build_rr_env(fixture_patch)
-        assert 'ai.common.config_utils' not in sys.modules
         assert sys.modules['ai.common.rocketride_db'] is not existing_rocketride_db
+        assert sys.modules['ai.common.utils'] is not existing_utils
 
-    assert sys.modules['ai.common.config_utils'] is existing_config_utils
     assert sys.modules['ai.common.rocketride_db'] is existing_rocketride_db
+    assert sys.modules['ai.common.utils'] is existing_utils
 
 
 # ---------------------------------------------------------------------------
