@@ -47,7 +47,7 @@
 		"@types/node": "^20.19.41",
 		"@types/react": "~18.3.31",
 		"@types/react-dom": "~18.3.7",
-		"adm-zip": "^0.6.0",
+		"adm-zip": "^0.6.1",
 		"concurrently": "^8.2.2",
 		"dotenv": "^16.4.5",
 		"eslint": "^9.39.4",

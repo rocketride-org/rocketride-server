@@ -658,7 +658,7 @@
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"adm-zip": "^0.6.0",
+		"adm-zip": "^0.6.1",
 		"chart.js": "^4.4.0",
 		"dockerode": "^4.0.12",
 		"ignore": "^7.0.5",
