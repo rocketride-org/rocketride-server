@@ -238,14 +238,20 @@ class TestChunkedUploadSession:
         assert out == {'id': 'X'}
 
     def test_transient_failures_are_retried_with_backoff(self):
-        out, u, sl = self._put([_http_error(503), urllib.error.URLError('reset'), _http_error(429), _resp({'id': 'X'})])
+        retry_error = _http_error(503)
+        retry_body = retry_error.fp
+        out, u, sl = self._put([retry_error, urllib.error.URLError('reset'), _http_error(429), _resp({'id': 'X'})])
         assert out == {'id': 'X'}
         assert u.call_count == 4
         assert [c.args[0] for c in sl.call_args_list] == [1.0, 2, 4.0]
+        assert retry_body.closed
 
     def test_non_transient_failure_raises_immediately(self):
+        error = _http_error(416)
+        body = error.fp
         with pytest.raises(gc.GraphError, match='HTTP 416'):
-            self._put([_http_error(416)])
+            self._put([error])
+        assert body.closed
 
     def test_retry_budget_is_bounded(self):
         with pytest.raises(gc.GraphError, match='HTTP 503'):

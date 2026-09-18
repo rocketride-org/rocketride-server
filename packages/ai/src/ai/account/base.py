@@ -435,7 +435,9 @@ class AccountBase(ABC):
                 body = json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as e:
             # 4xx = unknown/invalid tenant per the broker contract; 5xx = broker fault.
-            raise RuntimeError(f'DB broker rejected provision for this account (HTTP {e.code})') from e
+            code = e.code
+            e.close()
+            raise RuntimeError(f'DB broker rejected provision for this account (HTTP {code})') from e
         except Exception as e:
             raise RuntimeError(f'DB broker unreachable: {e}') from e
 
