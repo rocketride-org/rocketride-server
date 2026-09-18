@@ -6,10 +6,26 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from test_sink_naming import _fs, _sink_instance
+from test_sink_naming import _fs, _install_iinstance_stubs, _sink_instance
+
+
+def test_run_async_rejects_running_loop_before_creating_coroutine():
+    """Reject unsupported async callers before invoking the coroutine factory."""
+    _install_iinstance_stubs()
+    import tool_filesystem.IInstance as mod
+
+    operation = MagicMock()
+
+    async def invoke_from_running_loop():
+        with pytest.raises(RuntimeError, match='running event loop'):
+            mod._run_async(operation)
+
+    asyncio.run(invoke_from_running_loop())
+    operation.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
