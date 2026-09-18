@@ -736,23 +736,28 @@ def test_execute_limit_is_clamped_and_booleans_rejected():
 
 def test_execute_follows_async_run_to_a_result():
     polls = [{'status': 'running'}, {'status': 'succeeded', 'result_id': 'res-1'}]
+    scoped = []
     g = _global()
     g.client = SimpleNamespace(
         query=lambda **_kw: {'query_run_id': 'run-1'},
-        get_query_run=lambda _i: polls.pop(0),
-        get_result=lambda _i, offset=0, limit=None: {'rows': [{'a': 1}]},
+        get_query_run=lambda _i, database_id='': scoped.append(('run', database_id)) or polls.pop(0),
+        get_result=lambda _i, database_id='', offset=0, limit=None: (
+            scoped.append(('result', database_id)) or {'rows': [{'a': 1}]}
+        ),
         create_database=lambda **_kw: {'id': 'db-1'},
     )
     inst = _instance(g)
     out = inst.execute({'sql': 'SELECT a FROM t'})
     assert out['rows'] == [{'a': 1}]
+    # Both endpoints are database-scoped server-side; an unscoped call is a 400.
+    assert scoped == [('run', 'db-1'), ('run', 'db-1'), ('result', 'db-1')]
 
 
 def test_failed_query_run_raises_runtime_error():
     g = _global()
     g.client = SimpleNamespace(
         query=lambda **_kw: {'query_run_id': 'run-1'},
-        get_query_run=lambda _i: {'status': 'failed', 'error': 'syntax error at or near "SELCT"'},
+        get_query_run=lambda _i, database_id='': {'status': 'failed', 'error': 'syntax error at or near "SELCT"'},
         create_database=lambda **_kw: {'id': 'db-1'},
     )
     inst = _instance(g)
@@ -832,7 +837,12 @@ def test_get_data_retries_with_the_error_fed_back():
     def _query(**_kw):
         calls['n'] += 1
         if calls['n'] == 1:
-            raise RuntimeError("Invalid function 'to_number'. Did you mean 'to_char'?")
+            # How the live API rejects a bad statement: HTTP 400. The status is
+            # what marks it as something a regenerated query could fix.
+            raise client_mod.HotdataError(
+                "hotdata: POST /v1/query failed with HTTP 400: Invalid function 'to_number'.",
+                status_code=400,
+            )
         return {'rows': [{'a': 1}]}
 
     g = _loaded_global(max_attempts=3)
@@ -850,7 +860,7 @@ def test_get_data_gives_up_after_max_attempts():
     g = _loaded_global(max_attempts=2)
     g.client = SimpleNamespace(
         information_schema=lambda **_kw: {'tables': []},
-        query=lambda **_kw: (_ for _ in ()).throw(RuntimeError('boom')),
+        query=lambda **_kw: (_ for _ in ()).throw(client_mod.HotdataError('hotdata: HTTP 400: boom', status_code=400)),
     )
     inst = _llm_instance(g, ['SELECT 1', 'SELECT 2'])
     with pytest.raises(RuntimeError, match='after 2 attempts'):
@@ -2416,3 +2426,175 @@ def test_a_new_database_does_not_inherit_the_previous_dedup_records():
 
     assert not out.get('deduplicated'), 'a different database must not reuse the old fingerprint'
     assert len(calls) == 2, 'the load must actually run against the new database'
+
+
+# ---------------------------------------------------------------------------
+# Result rows carry their column names
+#
+# /v1/query and /v1/results answer with `columns` (the names) and `rows` (lists
+# of values), never with objects. Everything downstream is written against
+# objects, so the names are attached in _run_sql. Before that, every lane
+# rendered Python list reprs - "['Reno', 200]" - instead of a table.
+# ---------------------------------------------------------------------------
+
+
+def test_rows_are_named_from_the_columns_beside_them():
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {
+            'columns': ['city', 'units'],
+            'rows': [['Reno', 200], ['Austin', 120], ['Denver', 80]],
+            'row_count': 3,
+            'truncated': False,
+        }
+    )
+    out = _instance(g)._run_sql('SELECT city, units FROM main.sales', 100)
+    assert out['rows'] == [
+        {'city': 'Reno', 'units': 200},
+        {'city': 'Austin', 'units': 120},
+        {'city': 'Denver', 'units': 80},
+    ]
+
+
+def test_named_rows_render_as_a_markdown_table():
+    """The lane output the three bugs were reported against."""
+    rows = iinstance_mod._rows_as_objects([['Reno', 200], ['Austin', 120]], ['city', 'units'])
+    table = iinstance_mod._rows_to_markdown(rows)
+    assert table.splitlines()[0] == '| city | units |'
+    assert '| Reno | 200 |' in table
+    assert '[' not in table, f'must not fall through to a Python list repr: {table!r}'
+
+
+def test_a_repeated_column_name_does_not_collapse():
+    """SELECT city, city is legal; a plain dict would keep only the last value."""
+    rows = iinstance_mod._rows_as_objects([['Reno', 'Austin']], ['city', 'city'])
+    assert rows == [{'city': 'Reno', 'city_1': 'Austin'}]
+
+
+def test_an_unnamed_column_still_gets_a_key():
+    assert iinstance_mod._rows_as_objects([[1, 2]], ['', None]) == [{'column_1': 1, 'column_2': 2}]
+
+
+def test_a_row_wider_than_its_header_keeps_the_tail():
+    """Dropping a value silently is worse than naming it by position."""
+    assert iinstance_mod._rows_as_objects([[1, 2, 3]], ['a']) == [{'a': 1, 'column_2': 2, 'column_3': 3}]
+
+
+def test_rows_that_are_already_objects_pass_through():
+    assert iinstance_mod._rows_as_objects([{'a': 1}], ['a']) == [{'a': 1}]
+
+
+def test_rows_without_columns_are_left_alone():
+    assert iinstance_mod._rows_as_objects([[1]], None) == [[1]]
+
+
+def test_information_schema_over_sql_reshapes_named_rows():
+    """_schema_via_sql skips any row that is not an object, so unnamed rows
+    silently produced an empty schema and the LLM wrote SQL with no columns.
+    """
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {
+            'columns': ['table_schema', 'table_name', 'column_name', 'data_type'],
+            'rows': [['main', 'sales', 'city', 'Utf8'], ['main', 'sales', 'units', 'Int64']],
+            'truncated': False,
+        }
+    )
+    tables = _instance(g)._schema_via_sql()
+    assert tables == [
+        {
+            'schema': 'main',
+            'table': 'sales',
+            'columns': [
+                {'name': 'city', 'data_type': 'Utf8'},
+                {'name': 'units', 'data_type': 'Int64'},
+            ],
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Database-scoped reads
+# ---------------------------------------------------------------------------
+
+
+def test_get_result_and_query_run_send_the_database_header():
+    """Both endpoints answer 400 without X-Database-Id."""
+    c, rec = _client([_Resp(200, {'rows': []}), _Resp(200, {'status': 'succeeded'})])
+    c.get_result('res-1', database_id='db-1', offset=0, limit=10)
+    c.get_query_run('run-1', 'db-1')
+    assert rec.calls[0]['headers']['X-Database-Id'] == 'db-1'
+    assert rec.calls[1]['headers']['X-Database-Id'] == 'db-1'
+
+
+def test_an_unscoped_result_read_sends_no_database_header():
+    """The header is omitted rather than sent empty when no id is available."""
+    c, rec = _client([_Resp(200, {'rows': []})])
+    c.get_result('res-1')
+    assert 'X-Database-Id' not in rec.calls[0]['headers']
+
+
+# ---------------------------------------------------------------------------
+# Retry only what a different statement could fix
+# ---------------------------------------------------------------------------
+
+
+def test_get_data_does_not_retry_a_failure_sql_cannot_fix():
+    """A bad workspace is 404 on every attempt. Re-asking the model spends another
+    LLM call and another round trip to report the same thing.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        raise client_mod.HotdataError(
+            'hotdata: POST /v1/query failed with HTTP 404: {"error": "workspace_not_found"}',
+            status_code=404,
+        )
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(information_schema=lambda **_kw: {'tables': []}, query=_query)
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+
+    with pytest.raises(client_mod.HotdataError, match='workspace_not_found'):
+        inst.get_data({'question': 'x'})
+    assert calls['n'] == 1, 'must stop at the first unfixable failure'
+    assert len(inst.asked) == 1, 'must not spend a second LLM call'
+
+
+def test_get_data_does_not_retry_an_auth_failure():
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=lambda **_kw: (_ for _ in ()).throw(
+            client_mod.HotdataError('hotdata: HTTP 401: invalid_api_key', status_code=401)
+        ),
+    )
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+    with pytest.raises(client_mod.HotdataError, match='invalid_api_key'):
+        inst.get_data({'question': 'x'})
+    assert len(inst.asked) == 1
+
+
+def test_get_data_still_retries_a_failed_query_run():
+    """A deferred run reports its failure in the poll body, with no HTTP status -
+    it is still the statement that failed, so it still earns another turn.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return {'query_run_id': 'run-1'}
+        return {'columns': ['a'], 'rows': [[1]], 'truncated': False}
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=_query,
+        get_query_run=lambda _i, database_id='': {'status': 'failed', 'error': 'Invalid function'},
+    )
+    inst = _llm_instance(g, ['SELECT bad(a) FROM t', 'SELECT a FROM t'])
+    out = inst.get_data({'question': 'x'})
+    assert out['rows'] == [{'a': 1}]
+    assert out['attempts'] == 2

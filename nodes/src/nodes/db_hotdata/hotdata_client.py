@@ -361,14 +361,34 @@ class HotdataClient:
             body['default_schema'] = default_schema
         return self._request('POST', '/v1/query', json_body=body)
 
-    def get_query_run(self, query_run_id: str) -> Dict[str, Any]:
-        return self._request('GET', f'/v1/query-runs/{query_run_id}')
+    def get_query_run(self, query_run_id: str, database_id: str = '') -> Dict[str, Any]:
+        """Read one query run.
 
-    def get_result(self, result_id: str, offset: int = 0, limit: Optional[int] = None) -> Dict[str, Any]:
+        Scoped to a database: without ``X-Database-Id`` the server answers 400
+        ``"this endpoint is scoped to a database"``, so every poll of a deferred
+        query failed. The id is threaded through from the caller rather than read
+        off the global, because the run belongs to the database it was issued
+        against, not to whichever database the node happens to hold now.
+        """
+        return self._request(
+            'GET',
+            f'/v1/query-runs/{query_run_id}',
+            extra_headers={'X-Database-Id': database_id} if database_id else None,
+        )
+
+    def get_result(
+        self, result_id: str, database_id: str = '', offset: int = 0, limit: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Read a window of a stored result. Database-scoped, as ``get_query_run`` is."""
         params: Dict[str, Any] = {'offset': offset}
         if limit is not None:
             params['limit'] = limit
-        return self._request('GET', f'/v1/results/{result_id}', params=params)
+        return self._request(
+            'GET',
+            f'/v1/results/{result_id}',
+            params=params,
+            extra_headers={'X-Database-Id': database_id} if database_id else None,
+        )
 
     def information_schema(
         self,

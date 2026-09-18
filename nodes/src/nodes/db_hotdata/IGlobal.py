@@ -128,7 +128,10 @@ class IGlobal(IGlobalBase):
         self.allow_execute = _bool_or(cfg.get('allow_execute'), False)
         self.allow_destructive_load = _bool_or(cfg.get('allow_destructive_load'), False)
         self.job_timeout_secs = _int_or(cfg.get('job_timeout_secs'), 300, lo=10, hi=3600)
-        self.async_after_ms = _int_or(cfg.get('async_after_ms'), 5000, lo=0, hi=60000)
+        # Floor of 1000, not 0: the API rejects anything lower with
+        # 400 "async_after_ms must be at least 1000", which failed every single
+        # query for a pipeline configured below it.
+        self.async_after_ms = _int_or(cfg.get('async_after_ms'), 5000, lo=1000, hi=60000)
 
         self.client = HotdataClient(
             apikey=self.apikey,

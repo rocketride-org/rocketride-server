@@ -194,6 +194,36 @@ def _to_ndjson(rows: List[Any]) -> bytes:
     return ('\n'.join(lines) + '\n').encode('utf-8')
 
 
+class SqlStatementError(RuntimeError):
+    """The server ran the statement and the statement failed.
+
+    Distinct from a transport or account failure: this one names something in the
+    SQL, so regenerating is worth a turn. Carried as its own type because a
+    deferred run reports its failure in the poll body, with no HTTP status to
+    classify on.
+    """
+
+
+def _is_sql_fixable(error: Exception) -> bool:
+    """Could a *different statement* plausibly succeed where this one failed?
+
+    Only worth another generation turn when the server rejected the SQL itself -
+    a missing table, a parse error, an unknown function all come back 400. A
+    failure that describes the run rather than the statement (401 invalid_api_key,
+    404 workspace_not_found or database not found, an exhausted 429 budget, a
+    connection that never landed) is identical on every retry, so re-asking the
+    model only spends another LLM call and another round trip before reporting
+    the same error with the cause buried behind "could not answer after N
+    attempts".
+
+    Defaults to *not* fixable: a failure this code cannot classify is far more
+    likely to be environmental than to be a statement the model can rewrite.
+    """
+    if isinstance(error, SqlStatementError):
+        return True
+    return getattr(error, 'status_code', None) == 400
+
+
 def _is_missing_column(error: Exception) -> bool:
     """Is this the server refusing a write that omits a column the table has?
 
@@ -309,6 +339,60 @@ def _rows_from_payload(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _name_columns(columns: List[Any]) -> List[str]:
+    """Column names for a result, made unique and non-empty.
+
+    ``SELECT city, city`` is legal and comes back with the name twice; zipping
+    that into a dict would keep only the last value and silently drop a column.
+    """
+    seen: Dict[str, int] = {}
+    named: List[str] = []
+    for index, raw in enumerate(columns):
+        name = str(raw).strip() if raw is not None else ''
+        if not name:
+            name = f'column_{index + 1}'
+        if name in seen:
+            seen[name] += 1
+            name = f'{name}_{seen[name]}'
+        else:
+            seen[name] = 0
+        named.append(name)
+    return named
+
+
+def _rows_as_objects(rows: Any, columns: Any) -> List[Any]:
+    """Pair positional result rows with the column names returned beside them.
+
+    ``/v1/query`` and ``/v1/results`` both answer with ``columns`` (the names) and
+    ``rows`` (a list of value *lists*), never with objects. Everything downstream
+    is written against objects - the Markdown table, the information_schema
+    reshaping, the rows handed to the agent - so the names are attached here, at
+    the one boundary where both halves are in hand. Without this the rows keep
+    their positions and nothing can name a field: the table renderer falls
+    through to ``str(row)`` and emits Python list reprs.
+
+    Rows that are already objects are passed through, so a server that starts
+    returning objects, and the tests that mock them, keep working.
+    """
+    if not isinstance(rows, list) or not rows:
+        return rows if isinstance(rows, list) else []
+    if not isinstance(columns, list) or not columns:
+        return rows
+    names = _name_columns(columns)
+    out: List[Any] = []
+    for row in rows:
+        if isinstance(row, dict) or not isinstance(row, (list, tuple)):
+            out.append(row)
+            continue
+        item: Dict[str, Any] = {name: row[i] for i, name in enumerate(names) if i < len(row)}
+        # A row wider than its header keeps the tail rather than dropping it:
+        # losing a value silently is worse than naming it by position.
+        for i in range(len(names), len(row)):
+            item[f'column_{i + 1}'] = row[i]
+        out.append(item)
+    return out
+
+
 def _cell(value: Any) -> str:
     """Render one table cell: pipes and newlines both break the row otherwise."""
     return str(value).replace('|', '\\|').replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
@@ -381,19 +465,20 @@ class IInstance(IInstanceBase):
         # 25,000 - so the id is only offered when the caller has seen all of it.
         run_id = response.get('query_run_id') or response.get('id')
         if response.get('rows') is not None and not response.get('truncated'):
-            rows = response.get('rows') or []
+            rows = _rows_as_objects(response.get('rows') or [], response.get('columns'))
             result = {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
             if response.get('result_id') and len(rows) <= limit:
                 result['result_id'] = response['result_id']
             return result
 
         if run_id and response.get('result_id') is None:
-            response = self._await_run(run_id)
+            response = self._await_run(run_id, database_id)
 
         result_id = response.get('result_id')
         if result_id:
-            payload = glb.client.get_result(result_id, offset=0, limit=limit)
-            rows = payload.get('rows') or payload.get('data') or []
+            payload = glb.client.get_result(result_id, database_id=database_id, offset=0, limit=limit)
+            raw = payload.get('rows') or payload.get('data') or []
+            rows = _rows_as_objects(raw, payload.get('columns'))
             result = {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
             # get_result is explicitly a window; a full page back means there may
             # be more behind it, and the id would then name more than was seen.
@@ -401,7 +486,7 @@ class IInstance(IInstanceBase):
                 result['result_id'] = result_id
             return result
 
-        rows = response.get('rows') or []
+        rows = _rows_as_objects(response.get('rows') or [], response.get('columns'))
         return {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
 
     def _schema_via_sql(self) -> List[Dict[str, Any]]:
@@ -457,17 +542,17 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 names.append(str(value))
         return names
 
-    def _await_run(self, run_id: str) -> Dict[str, Any]:
+    def _await_run(self, run_id: str, database_id: str = '') -> Dict[str, Any]:
         """Poll a query run to a terminal state under a monotonic deadline."""
         glb = self.IGlobal
         deadline = time.monotonic() + glb.job_timeout_secs
         delay = _POLL_BASE_S
         while True:
-            run = glb.client.get_query_run(run_id)
+            run = glb.client.get_query_run(run_id, database_id)
             status = str(run.get('status') or '').lower()
             if status in _TERMINAL_BAD:
                 message = run.get('error') or run.get('message') or status
-                raise RuntimeError(f'db_hotdata: query failed: {message}')
+                raise SqlStatementError(f'db_hotdata: query failed: {message}')
             if status in _TERMINAL_OK or run.get('result_id'):
                 return run
             if time.monotonic() + delay > deadline:
@@ -913,6 +998,12 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 result['attempts'] = attempt
                 return result
             except Exception as e:
+                if not _is_sql_fixable(e):
+                    # Raised as-is: the original carries the status and the
+                    # server's own wording, which "could not answer after 3
+                    # attempts" would bury behind two pointless LLM calls.
+                    debug(f'db_hotdata: attempt {attempt} hit a failure no rewrite can fix: {e}')
+                    raise
                 previous_sql, last_error = cleaned, str(e)
                 debug(f'db_hotdata: attempt {attempt} failed: {last_error}')
 
