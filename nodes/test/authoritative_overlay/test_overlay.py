@@ -273,6 +273,16 @@ def test_select_allows_equal_duplicate_values_for_same_period():
     assert select_official_values({'USD': measurements}, {'end': '2025-12-31'}) == [100.0, 100.0]
 
 
+@pytest.mark.parametrize('invalid_value', [None, 'not-a-number'])
+def test_select_abstains_when_any_matching_value_is_invalid(invalid_value):
+    measurements = [
+        {'end': '2025-12-31', 'val': 100, 'accn': 'valid'},
+        {'end': '2025-12-31', 'val': invalid_value, 'accn': 'invalid'},
+    ]
+
+    assert select_official_values({'USD': measurements}, {'end': '2025-12-31'}) == []
+
+
 def test_select_explicit_filter_can_exclude_conflicting_filing():
     measurements = [
         {'end': '2025-12-31', 'val': 100, 'accn': 'annual', 'form': '10-K'},
