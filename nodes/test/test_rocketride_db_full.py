@@ -104,6 +104,7 @@ pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide test da
 
 
 def _load_from_path(name: str, path: Path, *, is_package: bool = False, register: bool = True):
+    """Load a module from ``path``, optionally exposing it through ``sys.modules``."""
     search = [str(path.parent)] if is_package else None
     spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=search)
     assert spec is not None and spec.loader is not None
@@ -262,11 +263,13 @@ def _build_rr_env(monkeypatch):
 
 @pytest.fixture()
 def rr_env(monkeypatch):
+    """Provide isolated engine stubs and a fake DSN resolver for one test."""
     return _build_rr_env(monkeypatch)
 
 
 @pytest.fixture()
 def raw_conn():
+    """Yield a raw connection to the configured PostgreSQL test database."""
     conn = psycopg2.connect(TEST_DSN)
     yield conn
     conn.close()
