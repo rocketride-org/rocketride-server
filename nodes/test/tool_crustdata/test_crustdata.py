@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes'))
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _HTTP_RETRY_PATH = _REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'http_retry.py'
+_TOOL_ARGS_PATH = _REPO_ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'tool_args.py'
 
 _STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
 
@@ -51,6 +52,14 @@ def _load_real_post_with_retry():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.post_with_retry
+
+
+def _load_real_optional_str_list():
+    """Load the production optional list validator without importing ai.common."""
+    spec = importlib.util.spec_from_file_location('_real_ai_common_utils_tool_args', _TOOL_ARGS_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.optional_str_list
 
 
 def _install_stubs() -> None:
@@ -96,6 +105,7 @@ def _install_stubs() -> None:
         return value if isinstance(value, dict) else {}
 
     mod_utils.normalize_tool_input = normalize_tool_input
+    mod_utils.optional_str_list = _load_real_optional_str_list()
     mod_utils.post_with_retry = _load_real_post_with_retry()
     sys.modules['ai.common.utils'] = mod_utils
 
@@ -262,7 +272,7 @@ class TestSearchValidation:
 
     @pytest.mark.parametrize(
         'fields',
-        [None, 'name', {}, [], ['name', 42], ['name', '   ']],
+        ['name', {}, [], ['name', 42], ['name', '   ']],
     )
     @pytest.mark.parametrize('method_name', ['company_search', 'person_search'])
     def test_invalid_fields_are_rejected_before_any_request(self, fields, method_name):
@@ -337,12 +347,13 @@ class TestSearchFields:
         ('method_name', 'response_key'),
         [('company_search', 'companies'), ('person_search', 'profiles')],
     )
-    def test_fields_are_omitted_when_not_supplied(self, method_name, response_key):
+    @pytest.mark.parametrize('optional_args', [{}, {'fields': None}])
+    def test_fields_are_omitted_when_absent_or_null(self, method_name, response_key, optional_args):
         inst = _instance()
 
         with patch.object(requests, 'post') as mock_post:
             mock_post.return_value = _resp(200, json_data={response_key: []})
-            out = getattr(inst, method_name)({'filters': [_A_CONDITION]})
+            out = getattr(inst, method_name)({'filters': [_A_CONDITION], **optional_args})
 
         assert out['success'] is True
         assert 'fields' not in mock_post.call_args.kwargs['json']
@@ -385,7 +396,7 @@ class TestSearchFields:
 
 
 class TestSearchRequests:
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_company_search_hits_the_company_endpoint_and_wraps_filters_in_the_op_group(self, mock_post):
         mock_post.return_value = _resp(200, json_data={'companies': [{'name': 'Acme'}], 'total_count': 1})
         inst = _instance()
@@ -407,7 +418,7 @@ class TestSearchRequests:
         }
         assert call_kwargs.kwargs['headers']['authorization'] == 'Bearer test-key'
 
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_person_search_hits_the_person_endpoint(self, mock_post):
         mock_post.return_value = _resp(200, json_data={'profiles': []})
         inst = _instance()
@@ -417,7 +428,7 @@ class TestSearchRequests:
         assert out['success'] is True
         assert mock_post.call_args.args[0] == PERSON_SEARCH_URL
 
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_match_selects_the_op_and_defaults_to_and(self, mock_post):
         mock_post.return_value = _resp(200, json_data={'companies': []})
         inst = _instance()
@@ -428,7 +439,7 @@ class TestSearchRequests:
         inst.company_search({'filters': [_A_CONDITION], 'match': 'not-a-real-op'})
         assert mock_post.call_args.kwargs['json']['filters']['op'] == 'and'
 
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_all_of_is_never_sent_as_the_top_level_op(self, mock_post):
         """all_of is a person-search-only nested-array operator (constrained to one
         employment/education field path, no negation, no further nesting) -- not a
@@ -442,7 +453,7 @@ class TestSearchRequests:
 
         assert mock_post.call_args.kwargs['json']['filters']['op'] == 'and'
 
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_sorts_and_cursor_are_forwarded_when_provided(self, mock_post):
         mock_post.return_value = _resp(200, json_data={'companies': []})
         inst = _instance()
@@ -459,7 +470,7 @@ class TestSearchRequests:
         assert sent['sorts'] == [{'field': 'crustdata_company_id', 'order': 'asc'}]
         assert sent['cursor'] == 'abc123'
 
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_cursor_and_sorts_are_omitted_when_not_provided(self, mock_post):
         mock_post.return_value = _resp(200, json_data={'companies': []})
         inst = _instance()
@@ -470,7 +481,7 @@ class TestSearchRequests:
         assert 'cursor' not in sent
         assert 'sorts' not in sent
 
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_next_cursor_is_surfaced_when_the_response_has_more_pages(self, mock_post):
         mock_post.return_value = _resp(200, json_data={'companies': [], 'next_cursor': 'xyz789', 'total_count': 500})
         inst = _instance()
@@ -480,7 +491,7 @@ class TestSearchRequests:
         assert out['next_cursor'] == 'xyz789'
         assert out['total_count'] == 500
 
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_limit_is_clamped_to_the_documented_range(self, mock_post):
         mock_post.return_value = _resp(200, json_data={'companies': []})
         inst = _instance()
@@ -491,7 +502,7 @@ class TestSearchRequests:
         inst.company_search({'filters': [_A_CONDITION], 'limit': 0})
         assert mock_post.call_args.kwargs['json']['limit'] == 1
 
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_bool_limit_does_not_become_1_or_0(self, mock_post):
         """Bool is a subclass of int in Python; {'limit': True} must not silently become 1."""
         mock_post.return_value = _resp(200, json_data={'companies': []})
@@ -501,7 +512,7 @@ class TestSearchRequests:
         assert mock_post.call_args.kwargs['json']['limit'] == 25
 
     @patch('tenacity.nap.time.sleep', return_value=None)
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_retries_on_429_then_succeeds(self, mock_post, _sleep):
         mock_post.side_effect = [_resp(429), _resp(200, json_data={'companies': [{'name': 'Acme'}]})]
         inst = _instance()
@@ -512,7 +523,7 @@ class TestSearchRequests:
         assert mock_post.call_count == 2
 
     @patch('tenacity.nap.time.sleep', return_value=None)
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_retries_on_5xx_then_gives_up_after_max_retries(self, mock_post, _sleep):
         mock_post.return_value = _resp(503)
         inst = _instance()
@@ -523,7 +534,7 @@ class TestSearchRequests:
         assert mock_post.call_count == 4  # initial attempt + 3 retries (post_with_retry's max_attempts=4)
 
     @patch('tenacity.nap.time.sleep', return_value=None)
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_timeout_is_reported_as_a_structured_error_not_raised(self, mock_post, _sleep):
         mock_post.side_effect = requests.exceptions.Timeout('timed out')
         inst = _instance()
@@ -535,7 +546,7 @@ class TestSearchRequests:
         assert mock_post.call_count == 4
 
     @patch('tenacity.nap.time.sleep', return_value=None)
-    @patch('tool_crustdata.IInstance.requests.post')
+    @patch.object(requests, 'post')
     def test_connection_error_is_reported_as_a_structured_error(self, mock_post, _sleep):
         """A connection error is transient transport failure, not a hard fail on the
         first attempt — post_with_retry must retry it like it retries Timeout, so this
