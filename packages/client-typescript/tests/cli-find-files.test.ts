@@ -39,7 +39,9 @@ import { findFiles } from '../src/cli/commands/tasks';
 let workDir: string;
 
 beforeEach(() => {
-	workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-find-files-'));
+	// Resolved, because process.cwd() is after a chdir: on macOS the temp dir
+	// sits under /var, a symlink to /private/var
+	workDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rr-find-files-')));
 	for (const name of ['alpha.txt', 'beta.txt', 'gamma.pdf']) {
 		fs.writeFileSync(path.join(workDir, name), name);
 	}
