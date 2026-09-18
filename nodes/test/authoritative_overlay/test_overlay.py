@@ -12,6 +12,7 @@ writeAnswers emit contract (match returns normally; abstain calls preventDefault
 from __future__ import annotations
 
 import json
+import importlib
 import sys
 import types
 from collections.abc import Iterator
@@ -68,9 +69,18 @@ def _scoped_stubs() -> Iterator[None]:
 
 
 with _scoped_stubs():
+    _iglobal_module = importlib.import_module('authoritative_overlay.IGlobal')
+    _iinstance_module = importlib.import_module('authoritative_overlay.IInstance')
     from authoritative_overlay.IGlobal import IGlobal
     from authoritative_overlay.IInstance import IInstance, _normalize_number
-    from authoritative_overlay.connectors.sec import query_sec, select_official_values
+    from authoritative_overlay.connectors.sec import PERIOD_SCOPE_KEYS, query_sec, select_official_values
+
+
+def test_services_description_lists_every_supported_period_selector():
+    """Keep the operator-facing selector list aligned with connector behavior."""
+    service_path = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'authoritative_overlay' / 'services.json'
+    description = ' '.join(json.loads(service_path.read_text())['description'])
+    assert f'({" / ".join(PERIOD_SCOPE_KEYS)})' in description
 
 
 # --- _normalize_number -------------------------------------------------------
@@ -538,6 +548,19 @@ def test_query_sec_fails_closed_when_matching_fact_has_no_accession():
     assert get.call_count == 1
 
 
+def test_query_sec_no_matching_fact_does_not_fetch_submission_index():
+    response = MagicMock()
+    response.status_code = 200
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        'units': {'USD': [{'end': '2024-12-31', 'val': 1, 'accn': 'older', 'fy': 2024, 'form': '10-K'}]}
+    }
+    with patch('authoritative_overlay.connectors.sec.requests.get', return_value=response) as get:
+        values = query_sec('Revenue', '0000320196', {'form': '10-K', 'fy': 2025, 'unit': 'USD'})
+    assert values == []
+    assert get.call_count == 1
+
+
 def test_query_sec_submission_failure_returns_none():
     concept_response = MagicMock()
     concept_response.status_code = 200
@@ -600,6 +623,94 @@ def test_query_sec_resolves_report_date_from_historical_submission_file():
     assert values == [5520000000.0]
     assert get.call_count == 3
     assert get.call_args_list[2].args[0].endswith('/CIK0000320198-submissions-001.json')
+
+
+def test_query_sec_missing_accession_does_not_scan_unrelated_historical_files():
+    """Fail closed without downloading shards whose filing range cannot match."""
+    concept_response = MagicMock()
+    concept_response.status_code = 200
+    concept_response.raise_for_status.return_value = None
+    concept_response.json.return_value = {
+        'units': {
+            'USD': [
+                {
+                    'end': '2025-12-31',
+                    'val': 2,
+                    'accn': '0000320201-25-000999',
+                    'fy': 2025,
+                    'form': '10-K',
+                }
+            ]
+        }
+    }
+    index_response = MagicMock()
+    index_response.status_code = 200
+    index_response.raise_for_status.return_value = None
+    index_response.json.return_value = {
+        'filings': {
+            'recent': {'accessionNumber': [], 'reportDate': []},
+            'files': [
+                {
+                    'name': 'CIK0000320201-submissions-001.json',
+                    'filingFrom': '1994-01-01',
+                    'filingTo': '2015-12-31',
+                }
+            ],
+        }
+    }
+
+    with patch(
+        'authoritative_overlay.connectors.sec.requests.get',
+        side_effect=[concept_response, index_response],
+    ) as get:
+        values = query_sec('Revenue', '0000320201', {'form': '10-K', 'fy': 2025, 'unit': 'USD'})
+
+    assert values == []
+    assert get.call_count == 2
+
+
+def test_query_sec_reuses_submission_metadata_within_one_task():
+    """Repeated answers in one task share the SEC submission index."""
+
+    def response(payload):
+        result = MagicMock()
+        result.status_code = 200
+        result.raise_for_status.return_value = None
+        result.json.return_value = payload
+        return result
+
+    concept = {
+        'units': {
+            'USD': [
+                {
+                    'end': '2025-12-31',
+                    'val': 2,
+                    'accn': '0000320202-25-000001',
+                    'fy': 2025,
+                    'form': '10-K',
+                }
+            ]
+        }
+    }
+    index = {
+        'filings': {
+            'recent': {
+                'accessionNumber': ['0000320202-25-000001'],
+                'reportDate': ['2025-12-31'],
+            },
+            'files': [],
+        }
+    }
+    cache = {}
+    with patch(
+        'authoritative_overlay.connectors.sec.requests.get',
+        side_effect=[response(concept), response(index), response(concept)],
+    ) as get:
+        first = query_sec('Revenue', '0000320202', {'form': '10-K', 'fy': 2025}, cache)
+        second = query_sec('Revenue', '0000320202', {'form': '10-K', 'fy': 2025}, cache)
+
+    assert first == second == [2.0]
+    assert get.call_count == 3
 
 
 def test_query_sec_refreshes_submission_index_for_new_filing():
@@ -740,6 +851,7 @@ def _make_instance(regulator='sec', cik='0000320193'):
     inst.IGlobal = MagicMock()
     inst.IGlobal.regulator_type = regulator
     inst.IGlobal.cik = cik
+    inst.IGlobal.sec_submission_cache = {}
     inst.instance = MagicMock()
     inst.preventDefault = MagicMock(side_effect=_PreventDefault)
     return inst
@@ -762,7 +874,7 @@ def test_write_answers_match_does_not_emit_explicitly():
         'form': '10-K',
         'fy': 2025,
     }
-    with patch('authoritative_overlay.IInstance.query_sec', return_value=[69860000000.0]):
+    with patch.object(_iinstance_module, 'query_sec', return_value=[69860000000.0]):
         inst.writeAnswers(_answer(payload))
     inst.instance.writeAnswers.assert_not_called()
     inst.preventDefault.assert_not_called()
@@ -780,7 +892,7 @@ def test_write_answers_forwards_explicit_start_filter():
         'end': '2025-03-29',
         'unit': 'USD',
     }
-    with patch('authoritative_overlay.IInstance.query_sec', return_value=[95359000000.0]) as query:
+    with patch.object(_iinstance_module, 'query_sec', return_value=[95359000000.0]) as query:
         inst.writeAnswers(_answer(payload))
 
     query.assert_called_once_with(
@@ -794,6 +906,7 @@ def test_write_answers_forwards_explicit_start_filter():
             'end': '2025-03-29',
             'unit': 'USD',
         },
+        submission_cache=inst.IGlobal.sec_submission_cache,
     )
     inst.preventDefault.assert_not_called()
 
@@ -806,7 +919,7 @@ def test_write_answers_mismatch_abstains():
         'form': '10-K',
         'fy': 2025,
     }
-    with patch('authoritative_overlay.IInstance.query_sec', return_value=[69860000000.0]):
+    with patch.object(_iinstance_module, 'query_sec', return_value=[69860000000.0]):
         with pytest.raises(_PreventDefault):
             inst.writeAnswers(_answer(payload))
     inst.instance.writeAnswers.assert_not_called()
@@ -815,7 +928,7 @@ def test_write_answers_mismatch_abstains():
 def test_write_answers_without_period_abstains():
     inst = _make_instance()
     payload = {'concept': 'AccountsPayableCurrent', 'value': '$69,860,000,000'}
-    with patch('authoritative_overlay.IInstance.query_sec') as query:
+    with patch.object(_iinstance_module, 'query_sec') as query:
         with pytest.raises(_PreventDefault):
             inst.writeAnswers(_answer(payload))
     query.assert_not_called()
@@ -828,7 +941,7 @@ def test_write_answers_with_only_unit_abstains_before_querying():
         'value': '$69,860,000,000',
         'unit': 'USD',
     }
-    with patch('authoritative_overlay.IInstance.query_sec', return_value=[69860000000.0]) as query:
+    with patch.object(_iinstance_module, 'query_sec', return_value=[69860000000.0]) as query:
         with pytest.raises(_PreventDefault):
             inst.writeAnswers(_answer(payload))
     query.assert_not_called()
@@ -842,7 +955,7 @@ def test_write_answers_unknown_regulator_does_not_look_like_connector_error():
         'form': '10-K',
         'fy': 2025,
     }
-    with patch('authoritative_overlay.IInstance.query_sec') as query:
+    with patch.object(_iinstance_module, 'query_sec') as query:
         with pytest.raises(_PreventDefault):
             inst.writeAnswers(_answer(payload))
     query.assert_not_called()
@@ -857,7 +970,7 @@ def test_write_answers_historical_value_wrong_year_abstains():
         'form': '10-K',
         'fy': 2025,
     }
-    with patch('authoritative_overlay.IInstance.query_sec', return_value=[69860000000.0]):
+    with patch.object(_iinstance_module, 'query_sec', return_value=[69860000000.0]):
         with pytest.raises(_PreventDefault):
             inst.writeAnswers(_answer(payload))
 
@@ -873,10 +986,7 @@ def test_blank_cik_is_not_zero_padded_to_truthy():
     iglobal.glb.logicalType = 'authoritative_overlay'
     iglobal.glb.connConfig = {}
 
-    with patch(
-        'authoritative_overlay.IGlobal.Config.getNodeConfig',
-        return_value={'regulator_type': 'sec', 'cik': ''},
-    ):
+    with patch.object(_iglobal_module.Config, 'getNodeConfig', return_value={'regulator_type': 'sec', 'cik': ''}):
         IGlobal.beginGlobal(iglobal)
     assert iglobal.cik == ''
 
@@ -889,9 +999,6 @@ def test_numeric_cik_is_zero_padded():
     iglobal.glb.logicalType = 'authoritative_overlay'
     iglobal.glb.connConfig = {}
 
-    with patch(
-        'authoritative_overlay.IGlobal.Config.getNodeConfig',
-        return_value={'regulator_type': 'sec', 'cik': '320193'},
-    ):
+    with patch.object(_iglobal_module.Config, 'getNodeConfig', return_value={'regulator_type': 'sec', 'cik': '320193'}):
         IGlobal.beginGlobal(iglobal)
     assert iglobal.cik == '0000320193'
