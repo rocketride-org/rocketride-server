@@ -119,8 +119,7 @@ def _load_from_path(name: str, path: Path, *, is_package: bool = False, register
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
-def rr_env(monkeypatch):
+def _build_rr_env(monkeypatch):
     """Stub the engine surface and install the fake DSN resolver."""
     warnings: list[str] = []
 
@@ -262,6 +261,11 @@ def rr_env(monkeypatch):
 
 
 @pytest.fixture()
+def rr_env(monkeypatch):
+    return _build_rr_env(monkeypatch)
+
+
+@pytest.fixture()
 def raw_conn():
     conn = psycopg2.connect(TEST_DSN)
     yield conn
@@ -272,14 +276,16 @@ def test_rr_env_does_not_register_config_utils_alias(rr_env):  # noqa: ARG001 - 
     assert 'ai.common.config_utils' not in sys.modules
 
 
-def test_rr_env_temporarily_removes_existing_config_utils_alias(monkeypatch, request):
+def test_rr_env_temporarily_removes_existing_config_utils_alias(monkeypatch):
     """Isolate the fixture from aliases registered by previously collected suites."""
     existing = types.ModuleType('ai.common.config_utils')
     monkeypatch.setitem(sys.modules, 'ai.common.config_utils', existing)
 
-    request.getfixturevalue('rr_env')
+    with monkeypatch.context() as fixture_patch:
+        _build_rr_env(fixture_patch)
+        assert 'ai.common.config_utils' not in sys.modules
 
-    assert 'ai.common.config_utils' not in sys.modules
+    assert sys.modules['ai.common.config_utils'] is existing
 
 
 # ---------------------------------------------------------------------------
