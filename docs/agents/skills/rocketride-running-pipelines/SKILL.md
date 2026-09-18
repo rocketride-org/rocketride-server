@@ -41,8 +41,8 @@ state that truthfully, you have not earned the run — do the missing step inste
    - Raw text/data → `send_data` (`input` is a **string** — serialize JSON). Result inline.
    - **Files from the host** → start with `run_dropper_pipe` instead: it returns an
      `upload_url` (multipart-POST the files to it) and a `dropper_url` (browser drag-drop page
-     to hand the user). `send_files` only resolves store-relative paths — it does not upload
-     host files.
+     to hand the user). `send_files` reads paths on the engine host and exists only on a
+     local (loopback-bound) engine.
    - `chat` source → **no MCP chat tool exists**; use the SDK fallback below.
 3. **Poll** longer/async runs with `monitor` (a bounded server-side poll — pass `timeout`).
    Quote the snapshot each round: `state_label`, `terminal`, `counts`, `errors`.
@@ -76,7 +76,8 @@ equivalents. Secrets stay in `${ROCKETRIDE_*}` env vars (loaded from `.env`), ne
 ## Gate D — after a successful run (optional, menu)
 > Run succeeded. Result: <summary>. What next? (save to cloud / publish as an app / nothing / debug)
 Only act on an explicit choice. Mapping: save to cloud → `save_template`; publish →
-`deploy_add` (manage later with `deploy_list`/`deploy_status`/`deploy_update`/`deploy_remove`).
+`deploy_add` then `deploy_to_team` (manage later with `deploy_list`/`deploy_status`/`deploy_set_schedule`/
+`deploy_disable`/`deploy_remove`).
 Saving / publishing is billable / public — treat like an irreversible action (Waiting = STOP).
 
 ## Red flags

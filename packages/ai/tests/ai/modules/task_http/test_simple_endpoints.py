@@ -32,7 +32,7 @@ task_exec_mod = sys.modules['ai.modules.task_http.task_exec']
 # ---------------------------------------------------------------------------
 
 
-def _build_app(endpoint, port=12345, account_auth='ak_test', *, method='GET', path='/x'):
+def _build_app(endpoint, port=12345, account_auth='ak_test', *, method='GET', path='/x', host='0.0.0.0'):
     """
     Build a FastAPI app with the endpoint mounted on `path`.
 
@@ -46,6 +46,7 @@ def _build_app(endpoint, port=12345, account_auth='ak_test', *, method='GET', pa
         account_auth: value placed on ``request.state.account.auth``.
         method: HTTP method to register.
         path: URL path.
+        host: bind host placed on ``server.config``.
 
     Returns:
         FastAPI: ready for TestClient.
@@ -53,6 +54,7 @@ def _build_app(endpoint, port=12345, account_auth='ak_test', *, method='GET', pa
     app = FastAPI()
     server = MagicMock()
     server.get_port = MagicMock(return_value=port)
+    server.config = {'host': host}
     app.state.server = server
 
     @app.middleware('http')
@@ -216,3 +218,62 @@ def test_task_execute_returns_error_envelope_on_client_failure(monkeypatch):
     body = r.json()
     assert body['status'] == 'Error'
     assert 'pipeline invalid' in body['error']['message']
+
+
+# ---------------------------------------------------------------------------
+# task_Execute: caller env on deployed vs loopback-bound engines
+#
+# The engine applies a run's caller env over the org/team/user secrets, and
+# an SDK client built without ``env`` forwards this process's ``ROCKETRIDE_*``
+# vars as that caller env. A real SDK client is used (only its transport is
+# stubbed) so the assertion is on what ``use()`` actually sends.
+# ---------------------------------------------------------------------------
+
+
+def _recording_client_factory(calls):
+    """Return a RocketRideClient stand-in that records ctor kwargs and ``execute`` args."""
+    from rocketride import RocketRideClient
+
+    def _factory(**kwargs):
+        calls['ctor'] = kwargs
+        client = RocketRideClient(**kwargs)
+        client.connect = AsyncMock()
+        client.disconnect = AsyncMock()
+
+        async def _call(command, **arguments):
+            calls['execute'] = arguments
+            return {'token': 'tk_new'}
+
+        client.call = _call
+        return client
+
+    return _factory
+
+
+def _execute_on_bind(monkeypatch, tmp_path, host):
+    """POST a pipeline to task_Execute on an engine bound at ``host``; return the recorded calls."""
+    monkeypatch.chdir(tmp_path)  # no stray ./.env
+    monkeypatch.setenv('ROCKETRIDE_TEST_KEY', 'server-value')
+    calls = {}
+    monkeypatch.setattr(task_exec_mod, 'RocketRideClient', _recording_client_factory(calls))
+
+    app = _build_app(task_exec_mod.task_Execute, path='/exec', method='POST', host=host)
+    r = TestClient(app).post('/exec', json={'components': []}, headers={'authorization': 'Bearer ak_test'})
+    assert r.status_code == 200
+    return calls
+
+
+def test_task_execute_on_deployed_engine_sends_no_server_env(monkeypatch, tmp_path):
+    """A non-loopback bind builds the client with env={} so no server ROCKETRIDE_* var is sent."""
+    calls = _execute_on_bind(monkeypatch, tmp_path, '0.0.0.0')
+
+    assert calls['ctor']['env'] == {}
+    assert 'env' not in calls['execute']
+
+
+def test_task_execute_on_loopback_engine_keeps_sdk_env(monkeypatch, tmp_path):
+    """A loopback bind keeps the SDK default env, so local ROCKETRIDE_* vars still apply."""
+    calls = _execute_on_bind(monkeypatch, tmp_path, '127.0.0.1')
+
+    assert calls['ctor'].get('env') is None
+    assert calls['execute']['env']['ROCKETRIDE_TEST_KEY'] == 'server-value'

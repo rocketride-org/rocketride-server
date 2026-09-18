@@ -13,6 +13,7 @@ import mcp.types as types
 
 from .engine import EngineClient
 from .tools._common import DEFAULT_TIMEOUT_SECONDS
+from .tools.capability import list_envelope_payload
 
 # Public: handlers.py keys its per-URI cache TTLs off these — a renamed
 # URI must fail loudly there, not silently fall through to ttl_ms=0.
@@ -44,7 +45,10 @@ async def read_resource(engine: EngineClient, uri: str) -> str:
     # error envelope, so the SDK surfaces it as a request error.
     uri = str(uri)
     if uri == PIPELINES_URI:
-        return json.dumps(await asyncio.wait_for(engine.deploy_list(), timeout=DEFAULT_TIMEOUT_SECONDS))
+        envelope = await asyncio.wait_for(engine.deploy_list(), timeout=DEFAULT_TIMEOUT_SECONDS)
+        # The deploy_list tool's payload minus `ok`: the first page of the
+        # SDK's list envelope, with count/total so truncation is visible.
+        return json.dumps(list_envelope_payload(envelope, 'deployments'))
     if uri == STATUS_URI:
         tasks = await asyncio.wait_for(engine.list_tasks(), timeout=DEFAULT_TIMEOUT_SECONDS)
         names = [t.get('name') for t in tasks if t.get('name')]

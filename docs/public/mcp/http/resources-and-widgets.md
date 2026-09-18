@@ -14,7 +14,7 @@ interactive widgets in hosts that support MCP Apps.
 | URI | Contents | Freshness |
 | --- | --- | --- |
 | `rocketride://status` | Connection state and currently running tasks: `{"connected": true, "pipeline_count": N, "pipelines": ["name", ...]}` | Live, never cached |
-| `rocketride://pipelines` | Your registered deployments — the same deployment objects `deploy_list` returns, as a bare JSON array without the tool's `ok`/`count` envelope | Cached up to 30 s |
+| `rocketride://pipelines` | The team deployments you can see — exactly what `deploy_list` returns with no arguments, minus `ok`: `{"deployments": [...], "count": N, "total": N, "page": 1, "pageSize": 50}`. Only the first page; call `deploy_list` for more | Cached up to 30 s |
 
 In a resource-aware host the two appear in the resource picker automatically;
 programmatic clients read them with a standard `resources/read` request.

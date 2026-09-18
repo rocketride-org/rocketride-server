@@ -39,9 +39,9 @@ async def test_initmodule_threads_engine_origin_from_configured_uri(monkeypatch,
     monkeypatch.setattr(mcp_module, 'build_mcp_server', _capturing_build_mcp_server)
 
     srv = fake_web_server
-    mcp_module.initModule(srv, {'mcp_dev_no_auth': True, 'rocketride_uri': 'ws://engine-host:5565/'})
+    mcp_module.initModule(srv, {'mcp_dev_no_auth': True, 'rocketride_uri': 'wss://engine-host:5565/'})
 
-    assert captured['engine_origin'] == 'http://engine-host:5565'
+    assert captured['engine_origin'] == 'https://engine-host:5565'
 
 
 @pytest.mark.asyncio
@@ -63,7 +63,7 @@ async def test_build_mcp_server_lists_tools_from_real_registry(fake_engine):
     from mcp.client import Client
     from ai.modules.mcp.handlers import build_mcp_server
 
-    server = build_mcp_server(lambda: fake_engine)
+    server = build_mcp_server(lambda: fake_engine, local_engine=True)
     async with Client(server) as client:
         # v2 auto-mode does a `server/discover` probe on entry.
         from .conftest import PINNED_PROTOCOL_VERSION
@@ -314,3 +314,46 @@ async def test_shutdown_failure_leaves_lifecycle_retryable(monkeypatch, fake_web
     for handler in srv.app.router.on_shutdown:
         await handler()
     assert close_calls == ['close', 'close']
+
+
+# ---------------------------------------------------------------------------
+# Startup guard: registered public PATTERNS, on either server shape
+#
+# The real WebServer keeps its public patterns in `_public_paths`; the test
+# double keeps a plain `public` set. `initModule` already writes to both when
+# it applies the dev bypass, so the guard reads both too.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('pattern', ['/mcp', '/mcp/', '/mcp/{id:int}', '/mcp/{rest:path}'])
+def test_guard_reads_public_patterns_off_the_test_double_too(fake_web_server, pattern):
+    import ai.modules.mcp as mcp_module
+
+    fake_web_server.public.add(pattern)
+
+    with pytest.raises(RuntimeError, match='/mcp'):
+        mcp_module.initModule(fake_web_server, {})
+
+
+@pytest.mark.parametrize('pattern', ['/mcp-server', '/mcpx', '/mcp-server/{page}'])
+def test_guard_leaves_unrelated_public_patterns_alone_on_the_double(monkeypatch, fake_web_server, pattern):
+    import ai.modules.mcp as mcp_module
+
+    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'svc-key')
+    fake_web_server.public.add(pattern)
+
+    mcp_module.initModule(fake_web_server, {})  # must not raise
+
+
+def test_public_pattern_collection_degrades_when_the_registry_is_absent():
+    """Both attributes are optional; neither may be what stops a boot."""
+    import ai.modules.mcp as mcp_module
+
+    class _Bare:
+        pass
+
+    class _NotIterable:
+        _public_paths = object()
+
+    assert mcp_module._registered_public_patterns(_Bare()) == ()
+    assert mcp_module._registered_public_patterns(_NotIterable()) == ()

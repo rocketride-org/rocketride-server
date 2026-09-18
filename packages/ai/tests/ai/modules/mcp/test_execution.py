@@ -22,7 +22,7 @@ PIPE = {'source': 'a', 'components': []}
 
 
 def test_register_all_registers_all_execution_tools():
-    registry = ToolRegistry()
+    registry = ToolRegistry(local_engine=True)
 
     register_all(registry)
 
@@ -31,7 +31,7 @@ def test_register_all_registers_all_execution_tools():
 
 
 def test_execution_register_binds_handlers_directly():
-    registry = ToolRegistry()
+    registry = ToolRegistry(local_engine=True)
 
     execution.register(registry)
 
@@ -246,11 +246,12 @@ async def test_terminate_calls_seam_and_removes_from_registry(fake_engine):
 
 
 # --- send_files ------------------------------------------------------------
+# Local-engine-only; the deployed-engine refusal is covered in test_local_engine.py.
 
 
 @pytest.mark.asyncio
 async def test_send_files_requires_token(fake_engine):
-    registry = ToolRegistry()
+    registry = ToolRegistry(local_engine=True)
     execution.register(registry)
     tasks = TaskRegistry()
 
@@ -263,7 +264,7 @@ async def test_send_files_requires_token(fake_engine):
 
 @pytest.mark.asyncio
 async def test_send_files_rejects_empty_files(fake_engine):
-    registry = ToolRegistry()
+    registry = ToolRegistry(local_engine=True)
     execution.register(registry)
     tasks = TaskRegistry()
 
@@ -277,7 +278,7 @@ async def test_send_files_rejects_empty_files(fake_engine):
 @pytest.mark.asyncio
 async def test_send_files_calls_seam_with_files_then_token_order(fake_engine):
     """Footgun: SDK arg order is (files, token) -- token second, not first."""
-    registry = ToolRegistry()
+    registry = ToolRegistry(local_engine=True)
     execution.register(registry)
     tasks = TaskRegistry()
     files = ['/tmp/a.pdf', '/tmp/b.pdf']

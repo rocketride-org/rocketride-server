@@ -54,6 +54,7 @@ def build_mcp_server(
     registry: Optional[ToolRegistry] = None,
     apps_dir: Optional[Path] = None,
     engine_origin: Optional[str] = None,
+    local_engine: bool = False,
 ) -> Server:
     """Build and return a low-level MCP Server wired with tools and resources.
 
@@ -83,18 +84,22 @@ def build_mcp_server(
             callers never pass this, and `apps.py` falls back to the built
             `apps/dist` directory when omitted.
         engine_origin: The engine's HTTP(S) origin, precomputed by the caller
-            from its configured `rocketride_uri` (see `__init__._base_url_from_uri`),
+            from its resolved engine URI (see `__init__._resolve_engine_uri`),
             for widget CSP stamping in `_on_list_resources`. Reading the
             configured URI directly here -- rather than calling
             `engine_factory().base_url` -- avoids building (and, on the
             per-caller path above, leaking into the request's close bucket) a
             whole EngineClient just to read a string.
+        local_engine: True when the engine is bound to loopback (decided once
+            in ``__init__.initModule``). Only then are ``local_engine_only``
+            tools such as ``send_files`` listed and dispatched; the default is
+            the deployed surface. Ignored when ``registry`` is passed.
 
     Returns:
         A configured mcp.server.lowlevel.Server ready to run.
     """
     if registry is None:
-        registry = ToolRegistry()
+        registry = ToolRegistry(local_engine=local_engine)
         tools_pkg.register_all(registry)
     task_registry = task_registry if task_registry is not None else TaskRegistry()
 

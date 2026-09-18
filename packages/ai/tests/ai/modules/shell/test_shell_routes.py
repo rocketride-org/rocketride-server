@@ -106,7 +106,7 @@ def test_public_routes_contains_home_ui_pages():
         '/store',
         '/oss',
         '/cloud',
-        '/mcp',
+        '/mcp-server',
         '/extension',
         '/sdk',
         '/blog',
@@ -118,8 +118,16 @@ def test_public_routes_contains_home_ui_pages():
         assert route in PUBLIC_ROUTES
 
 
+def test_mcp_api_paths_are_not_shell_pages():
+    # /mcp and /mcp/* are the MCP API (a Starlette Mount in ai.modules.mcp).
+    # A shell page there shadows bare /mcp (405 to POST, public to the auth
+    # middleware), so the marketing page lives at /mcp-server instead.
+    for route in PUBLIC_ROUTES:
+        assert route != '/mcp' and not route.startswith('/mcp/'), route
+
+
 def test_unlisted_routes_are_served_but_not_listed():
-    # routes.ts marks /oss and /mcp `unlisted` (client stamps noindex), and
+    # routes.ts marks /oss and /mcp-server `unlisted` (client stamps noindex), and
     # /store is the legacy alias canonicalized to /marketplace — all three must
     # keep serving while staying out of the advertised subset.
     for route in UNLISTED_ROUTES:
