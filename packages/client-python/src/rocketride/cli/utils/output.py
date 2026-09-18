@@ -80,6 +80,8 @@ class Output:
         # The command's JSON result; set once by result()/fail()
         self._payload: Any = None
         self._has_payload = False
+        # Whether the payload's one flush attempt has been made
+        self._flushed = False
 
     @property
     def json_requested(self) -> bool:
@@ -135,25 +137,52 @@ class Output:
         self._has_payload = True
         return 1
 
-    def finish(self) -> None:
+    def flush(self) -> None:
         """
-        Flush the JSON payload to its destination.
+        Write the JSON payload to its destination, raising on failure.
 
-        Called exactly once, after the command finishes (success or
-        failure). A no-op in human mode or when no payload was recorded.
+        The raising twin of finish(), for a command that has to turn a
+        failed write into its own exit code rather than let it be
+        reported after the code is already decided. The payload is
+        flushed at most once: a later finish() is a no-op whether this
+        call wrote the document or raised.
+
+        The TypeScript twin needs no counterpart: its ``finish()`` does
+        not swallow the write error in the first place.
+
+        Raises:
+            OSError: The destination could not be created or written.
         """
-        if self._mode == 'human' or not self._has_payload:
+        if self._mode == 'human' or not self._has_payload or self._flushed:
             return
         text = json.dumps(self._payload, indent=2, default=str)
+        # The one attempt is recorded before it is made, so a caller that
+        # handles the failure does not get it reported a second time
+        self._flushed = True
         if self._mode == 'stdout':
             print(text)
             return
+        parent = os.path.dirname(os.path.abspath(self._file_path))
+        os.makedirs(parent, exist_ok=True)
+        with open(self._file_path, 'w', encoding='utf-8') as f:
+            f.write(text + '\n')
+
+    def finish(self) -> None:
+        """
+        Flush the JSON payload to its destination, reporting a failed
+        file write instead of raising.
+
+        Called exactly once, after the command finishes (success or
+        failure). A no-op in human mode, when no payload was recorded, or
+        when flush() already made the attempt.
+        """
         # finish() runs from a finally block: a raise here would discard the
-        # command's exit code, so a write failure is reported, not raised
+        # command's exit code, so a failed write to a FILE destination is
+        # reported, not raised. A failing stdout write still propagates, as
+        # it always has: there is no document left on disk to mislead anyone.
         try:
-            parent = os.path.dirname(os.path.abspath(self._file_path))
-            os.makedirs(parent, exist_ok=True)
-            with open(self._file_path, 'w', encoding='utf-8') as f:
-                f.write(text + '\n')
+            self.flush()
         except OSError as err:
+            if self._mode != 'file':
+                raise
             print(f'Error: cannot write JSON output to {self._file_path} — {err}', file=sys.stderr)
