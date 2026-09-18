@@ -48,7 +48,7 @@ import requests
 
 from rocketlib import IInstanceBase, tool_function
 
-from ai.common.utils import normalize_tool_input, post_with_retry
+from ai.common.utils import normalize_tool_input, optional_str_list, post_with_retry
 
 from .IGlobal import IGlobal, _coerce_limit
 
@@ -336,19 +336,15 @@ class IInstance(IInstanceBase):
                 'error': f'{tool_name}: "filters" is required and must be a non-empty array',
             }
 
-        fields_supplied = 'fields' in args
-        fields = args.get('fields')
-        if fields_supplied and (
-            not isinstance(fields, list)
-            or not fields
-            or any(not isinstance(field, str) or not field.strip() for field in fields)
-        ):
+        try:
+            fields = optional_str_list(args, 'fields', tool_name=tool_name)
+        except ValueError as exc:
             return {
                 'success': False,
                 'filters': conditions,
                 'count': 0,
                 'results': [],
-                'error': f'{tool_name}: "fields" must be a non-empty array of non-blank strings',
+                'error': str(exc),
             }
 
         cfg = self.IGlobal
@@ -370,7 +366,7 @@ class IInstance(IInstanceBase):
             'filters': {'op': match, 'conditions': conditions},
             'limit': limit,
         }
-        if fields_supplied:
+        if fields is not None:
             payload['fields'] = fields
 
         sorts = args.get('sorts')
