@@ -149,7 +149,8 @@ _PERSON_ALL_OF_CONDITION_SCHEMA = _condition_schema(
     _PERSON_ALL_OF_OPERATORS,
     entity='nested person',
     description=(
-        'Positive predicate inside an all_of group. Negation, has_all, and another all_of are not supported here.'
+        'Positive predicate inside an all_of group. Nested all_of, has_all, (!), !=, not_in, is_null, and '
+        'geo_exclude are not supported here.'
     ),
 )
 _PERSON_ALL_OF_SUBGROUP_SCHEMA = {
@@ -241,7 +242,7 @@ def _input_schema(*, person: bool) -> Dict[str, Any]:
         filters_schema = _PERSON_FILTERS_SCHEMA
         fields_description = (
             'Optional person sections or dotted field paths to return. '
-            'When omitted, Crustdata returns its default person sections.'
+            'When omitted or null, Crustdata returns its default person sections.'
         )
         cursor_description = (
             "Pagination cursor from a previous call's next_cursor. Omit for the first page. "
@@ -251,7 +252,7 @@ def _input_schema(*, person: bool) -> Dict[str, Any]:
         filters_schema = _COMPANY_FILTERS_SCHEMA
         fields_description = (
             'Optional company sections or dotted field paths to return. '
-            'When omitted, Crustdata returns the full company record.'
+            'When omitted or null, Crustdata returns the full company record.'
         )
         cursor_description = (
             "Pagination cursor from a previous call's next_cursor. Omit for the first page. "
@@ -270,7 +271,7 @@ def _input_schema(*, person: bool) -> Dict[str, Any]:
             },
             'sorts': _SORTS_SCHEMA,
             'fields': {
-                'type': 'array',
+                'type': ['array', 'null'],
                 'minItems': 1,
                 'items': {'type': 'string', 'pattern': r'.*\S.*'},
                 'description': fields_description,

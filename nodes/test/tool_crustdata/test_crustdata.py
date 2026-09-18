@@ -320,7 +320,7 @@ class TestToolSchemas:
         schema = getattr(IInstance, method_name).__tool_meta__['input_schema']
         fields = schema['properties']['fields']
 
-        assert fields['type'] == 'array'
+        assert fields['type'] == ['array', 'null']
         assert fields['minItems'] == 1
         assert fields['items']['type'] == 'string'
         assert fields['items']['pattern'] == r'.*\S.*'
