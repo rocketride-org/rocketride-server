@@ -133,11 +133,12 @@ PUBLIC_ROUTE_MANIFEST = [
         'to run, no capacity to plan, no lock-in.',
     ),
     (
-        '/mcp',
-        # NOTE: /mcp is also a plausible future API path (Model Context Protocol
-        # endpoint). server.add_route() rejects duplicate (method, path)
-        # registrations, so a clash would fail loudly at startup rather than
-        # silently shadowing one side.
+        # NOT /mcp: /mcp and /mcp/* are reserved for the MCP API (see
+        # ai.modules.mcp). A page there would shadow the bare endpoint and
+        # mark it public to the auth middleware; add_route's duplicate check
+        # cannot catch the clash because MCP registers a raw ASGI route and
+        # Mount, so ai.modules.mcp refuses to start over any claimant instead.
+        '/mcp-server',
         'MCP',
         'Connect tools and data to your AI with the Model Context Protocol. Bring '
         'your own servers or use the ones RocketRide ships with.',
@@ -185,12 +186,12 @@ PUBLIC_ROUTES = [route for route, _, _ in PUBLIC_ROUTE_MANIFEST]
 
 # Served but not advertised. These stay registered above (typing the URL or
 # hard-reloading must keep working) while being excluded from /sitemap.xml and
-# /llms.txt: /oss and /mcp are `unlisted` in the client route manifest
+# /llms.txt: /oss and /mcp-server are `unlisted` in the client route manifest
 # (routes.ts stamps them noindex — listing them here would hand crawlers the
 # very URLs the client tells them to drop), and /store is the legacy alias the
 # client canonicalizes to /marketplace, so listing it publishes a duplicate of
 # its own canonical.
-UNLISTED_ROUTES = frozenset({'/oss', '/mcp', '/store'})
+UNLISTED_ROUTES = frozenset({'/oss', '/mcp-server', '/store'})
 
 # The advertised subset — what /sitemap.xml and /llms.txt enumerate.
 LISTED_ROUTE_MANIFEST = [entry for entry in PUBLIC_ROUTE_MANIFEST if entry[0] not in UNLISTED_ROUTES]

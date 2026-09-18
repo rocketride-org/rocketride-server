@@ -145,14 +145,15 @@ def test_engine_factory_state_exposed_for_shutdown(monkeypatch):
 
 
 @contextlib.asynccontextmanager
-async def _e2e_mcp_app(monkeypatch, make_engine_client_fn):
+async def _e2e_mcp_app(monkeypatch, make_engine_client_fn, *, wrap_app=None):
     """Drive the real ASGI `/mcp` mount end to end.
 
     Same `FakeWebServer` double and router-event lifespan handling as
     test_dual_revision.py's `_mcp_test_app`, parameterized on the
     `make_engine_client` override instead of a fixed `fake_engine` so this
     module can record which auth each per-request client was actually built
-    with -- the thing under test.
+    with -- the thing under test. `wrap_app`, when given, wraps the ASGI app
+    to stand in for an upstream layer (e.g. an authenticator).
     """
     import ai.modules.mcp as mcp_module
 
@@ -165,7 +166,7 @@ async def _e2e_mcp_app(monkeypatch, make_engine_client_fn):
     try:
         for handler in srv.app.router.on_startup:
             await handler()
-        transport = httpx.ASGITransport(app=srv.app)
+        transport = httpx.ASGITransport(app=wrap_app(srv.app) if wrap_app else srv.app)
         async with httpx.AsyncClient(
             transport=transport, base_url='http://testserver', follow_redirects=True
         ) as client:
@@ -412,3 +413,131 @@ async def test_handle_mcp_drain_survives_a_cancelled_close_and_still_resets_both
     # this request's (now torn-down) auth/bucket.
     assert identity.CALLER_AUTH.get() is None
     assert identity.REQUEST_CLIENTS.get() is None
+
+
+# --- credentials outside the header never reach the shared client ---------
+
+
+def _recording_factory(built):
+    from .conftest import FakeEngineClient
+
+    def _make(config, on_event=None):
+        client = FakeEngineClient(env_keys=[], auth=config.get('rocketride_auth'))
+        built.append(client)
+        return client
+
+    return _make
+
+
+@contextlib.asynccontextmanager
+async def _webserver_mcp_app(monkeypatch, make_engine_client_fn):
+    """Drive `/mcp` through the REAL `WebServer`, `AuthMiddleware` included.
+
+    The account layer is stubbed to accept any credential -- standing in for
+    a leaked-but-valid key the authenticator chain would honour -- so these
+    tests exercise exactly what the middleware lets through to `/mcp`.
+    Yields the client and the list of credentials the middleware accepted.
+    """
+    pytest.importorskip('rocketlib')  # WebServer needs the engine env
+    from types import SimpleNamespace
+
+    import ai.modules.mcp as mcp_module
+    from ai.web.server import WebServer
+
+    monkeypatch.setattr(mcp_module, 'make_engine_client', make_engine_client_fn)
+
+    server = WebServer()
+    accepted = []
+
+    async def _accept_any(authorization):
+        accepted.append(authorization)
+        return SimpleNamespace(auth=authorization)
+
+    monkeypatch.setattr(server, '_authenticate_credential_inner', _accept_any)
+    server.use('mcp', {})
+    await server._user_startup()
+    try:
+        transport = httpx.ASGITransport(app=server.app)
+        async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
+            yield client, accepted
+    finally:
+        await server._user_shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('credential', ['tk_leaked_task_key', 'rr_valid_user_key'])
+async def test_query_string_credential_through_auth_middleware_is_refused(monkeypatch, credential):
+    """The exploit: `POST /mcp/?auth=<key>` passes AuthMiddleware (which falls
+    back to the query string when no header is sent) but carried no header for
+    auth.authorize() to check -- so tk_ refusal, JWT verification and audience
+    were all skipped and tools ran on the server's shared engine client.
+    """
+    built = []
+    headers = {k: v for k, v in _E2E_HEADERS.items() if k != 'authorization'}
+
+    async with _webserver_mcp_app(monkeypatch, _recording_factory(built)) as (app, accepted):
+        resp = await app.post(f'/mcp/?auth={credential}', json=_E2E_TOOLS_CALL, headers=headers)
+
+    # Precondition of the exploit: the account layer did accept it.
+    assert accepted == [credential]
+    assert resp.status_code == 401
+    assert 'resource_metadata=' in resp.headers['www-authenticate']
+    assert built == [], 'a query-string credential must never reach an engine client'
+
+
+@pytest.mark.asyncio
+async def test_header_credential_through_auth_middleware_still_runs_as_caller(monkeypatch):
+    built = []
+
+    async with _webserver_mcp_app(monkeypatch, _recording_factory(built)) as (app, _):
+        resp = await app.post('/mcp/', json=_E2E_TOOLS_CALL, headers=_E2E_HEADERS)
+
+    assert resp.status_code == 200
+    assert built and built[-1].auth == 'rr_e2e_key'
+
+
+def _with_upstream_account(app):
+    """Mimic an upstream authenticator that set `request.state.account`.
+
+    Starlette's `Request.state` is a view over `scope['state']`, and
+    BaseHTTPMiddleware hands the same scope dict down through the Mount, so
+    this is exactly where `/mcp` sees the middleware's account.
+    """
+
+    async def wrapped(scope, receive, send):
+        if scope['type'] == 'http':
+            scope.setdefault('state', {})['account'] = object()
+        await app(scope, receive, send)
+
+    return wrapped
+
+
+@pytest.mark.asyncio
+async def test_upstream_authenticated_request_without_caller_credential_never_uses_shared_client(monkeypatch):
+    """Defence in depth: however an authenticated request arrives without a
+    header credential, it is refused rather than served by the shared client.
+    """
+    built = []
+    headers = {k: v for k, v in _E2E_HEADERS.items() if k != 'authorization'}
+
+    async with _e2e_mcp_app(monkeypatch, _recording_factory(built), wrap_app=_with_upstream_account) as app:
+        resp = await app.post('/mcp', json=_E2E_TOOLS_CALL, headers=headers)
+
+    assert resp.status_code == 401
+    assert 'www-authenticate' in resp.headers
+    assert built == []
+
+
+@pytest.mark.asyncio
+async def test_dev_bypass_without_credential_still_uses_shared_client(monkeypatch):
+    """MCP_DEV_NO_AUTH: no middleware account, no credential -- the shared
+    client is the intended path and must keep working.
+    """
+    built = []
+    headers = {k: v for k, v in _E2E_HEADERS.items() if k != 'authorization'}
+
+    async with _e2e_mcp_app(monkeypatch, _recording_factory(built)) as app:
+        resp = await app.post('/mcp', json=_E2E_TOOLS_CALL, headers=headers)
+
+    assert resp.status_code == 200
+    assert built and built[-1].auth is None

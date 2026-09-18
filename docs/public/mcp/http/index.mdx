@@ -35,7 +35,7 @@ for each client are on [Connect a client](/connect/mcp/http/connect).
 
 ## What you can do
 
-The server exposes 29 tools, organized by capability — the full parameter-level
+The server exposes 33 tools (`send_files` only on a local engine), organized by capability — the full parameter-level
 reference is on [Tools](/connect/mcp/http/tools):
 
 | Capability | Tools |
@@ -45,7 +45,7 @@ reference is on [Tools](/connect/mcp/http/tools):
 | [Run pipelines](/connect/mcp/http/tools#run-pipelines) | `run_pipeline`, `run_dropper_pipe`, `send_data`, `send_files`, `terminate` |
 | [Watch what's running](/connect/mcp/http/tools#watch-whats-running) | `monitor`, `list_running_pipelines` |
 | [Read the file store](/connect/mcp/http/tools#read-the-file-store) | `store_read`, `store_list`, `store_stat`, `store_get_url` |
-| [Manage deployments](/connect/mcp/http/tools#manage-deployments) | `deploy_add`, `deploy_list`, `deploy_status`, `deploy_remove`, `deploy_update` |
+| [Manage deployments](/connect/mcp/http/tools#manage-deployments) | `deploy_add`, `deploy_list`, `deploy_status`, `deploy_versions`, `deploy_to_team`, `deploy_set_schedule`, `deploy_enable`, `deploy_disable`, `deploy_remove` |
 | [Replay past runs](/connect/mcp/http/tools#replay-past-runs) | `log_chapters`, `log_read`, `log_traces`, `log_trace` |
 
 Two things to know when working with the tools:
@@ -72,9 +72,9 @@ Two things to know when working with the tools:
   a caller can never make the engine read pipeline definitions off its own
   disk.
 - **Store-scoped reads** — the four `store_*` tools resolve paths through your
-  account's file store on the engine, nothing else. (`send_files` is the one
-  exception: its paths resolve on the machine the engine runs on — see its
-  [reference entry](/connect/mcp/http/tools#send_files).)
+  account's file store on the engine, nothing else. (`send_files` reads paths
+  on the engine host, so only a loopback-bound local engine offers it — see
+  its [reference entry](/connect/mcp/http/tools#send_files).)
 - **Credential names, never values** — integration-readiness tools report which
   environment variables are configured; the values never transit MCP.
 - **Audience-enforced OAuth** — tokens must be minted for this resource;
@@ -94,7 +94,7 @@ Two things to know when working with the tools:
 
 <a className="rr-side-card" href="/connect/mcp/http/tools">
   <span className="rr-side-card__head"><LuWrench className="rr-card-icon" /><span className="rr-side-card__title">Tools</span></span>
-  <span className="rr-side-card__body">All 29 tools with parameters, return shapes, and the error contract.</span>
+  <span className="rr-side-card__body">All 33 tools with parameters, return shapes, and the error contract.</span>
 </a>
 
 <a className="rr-side-card" href="/connect/mcp/http/resources-and-widgets">

@@ -2,15 +2,17 @@
 """In-process Streamable-HTTP MCP server module."""
 
 import contextlib
+import ipaddress
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+from urllib.parse import urlsplit
 
-from starlette.routing import Mount
+from starlette.routing import Mount, Route
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-from ai.constants import CONST_DEFAULT_WEB_HOST
+from ai.constants import CONST_DEFAULT_WEB_HOST, CONST_DEFAULT_WEB_PORT
 from ai.web import oauth_resource
 
 from . import auth
@@ -22,6 +24,142 @@ from .registry import TaskRegistry
 logger = logging.getLogger(__name__)
 
 _MOUNT_PATH = '/mcp'
+
+# The request paths an MCP client may address: the advertised resource
+# identifier (bare, no slash -- what spec clients POST to) and its slash form.
+_ENDPOINT_PATHS = (_MOUNT_PATH, _MOUNT_PATH + '/')
+
+# Representative paths fed through ``is_public_route`` at startup. The endpoint
+# paths alone are not enough: public entries are PATTERNS (compiled with
+# Starlette's ``compile_path``), so ``/mcp/{path}`` or ``/mcp/{rest:path}``
+# would make AuthMiddleware skip requests the Mount still forwards to
+# ``handle_mcp`` -- without ever matching ``/mcp`` or ``/mcp/`` themselves.
+# One single-segment and one multi-segment descendant catch both shapes.
+#
+# Probing can never be exhaustive, though: a CONVERTER narrows the compiled
+# regex to values no fixed probe string satisfies (``/mcp/{id:int}`` matches
+# only digits, ``{x:uuid}`` only UUIDs), so the registered pattern STRINGS are
+# read as well -- see ``_registered_public_patterns``.
+_PUBLIC_PROBE_PATHS = _ENDPOINT_PATHS + (
+    _MOUNT_PATH + '/probe',
+    _MOUNT_PATH + '/probe/nested',
+)
+
+# Where a server keeps its registered public route PATTERNS. The real
+# ``WebServer`` uses ``_public_paths`` (a list ``is_public_route`` compiles);
+# test doubles keep a plain ``public`` set. ``initModule``'s dev bypass already
+# writes to whichever is present, so the guard reads both the same way.
+_PUBLIC_PATTERN_ATTRS = ('_public_paths', 'public')
+
+# Engine URI schemes that put the caller's credential on the wire in the clear:
+# ``handle_mcp`` hands that credential to ``WsEngineClient``, which sends it in
+# the first DAP ``auth`` message.
+_CLEARTEXT_SCHEMES = ('ws://', 'http://')
+
+
+class _AsgiEndpoint:
+    """Hand a raw ASGI callable to a Starlette ``Route``.
+
+    ``Route`` wraps a plain function as a ``request -> response`` endpoint;
+    any other callable is served as an ASGI app, method-agnostic.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        await self._app(scope, receive, send)
+
+
+def _claims_mcp_path(path: Optional[str]) -> bool:
+    """Report whether a registered route path lies in the MCP namespace."""
+    return bool(path) and (path == _MOUNT_PATH or path.startswith(_MOUNT_PATH + '/'))
+
+
+def _claims_mcp_pattern(pattern: Any) -> bool:
+    """Report whether a route PATTERN is rooted at the MCP mount.
+
+    Textual, not a match test: ``/mcp/{id:int}`` matches no probe literal the
+    guard could guess, but it is unmistakably inside the namespace the Mount
+    forwards. Normalised first so the spelling does not decide -- surrounding
+    whitespace is stripped and one or more trailing slashes are dropped, which
+    is what makes ``/mcp/`` equal to ``/mcp``.
+
+    The prefix must be a whole segment: ``/mcpx`` and ``/mcp-server`` are
+    different routes the Mount never sees, and refusing them would stop the
+    engine booting over nothing.
+
+    Args:
+        pattern: A registered public path pattern (any stringable value).
+
+    Returns:
+        bool: True when the pattern is ``/mcp`` or a descendant of it.
+    """
+    text = str(pattern or '').strip()
+    if len(text) > 1:
+        text = text.rstrip('/') or '/'
+    return _claims_mcp_path(text)
+
+
+def _registered_public_patterns(server: Any) -> Tuple[str, ...]:
+    """Collect the public route patterns a server has registered, if any.
+
+    Both shapes in ``_PUBLIC_PATTERN_ATTRS`` are optional and a server may
+    expose neither -- reading them must never be what stops an engine booting,
+    so an absent (or non-iterable) registry simply contributes nothing.
+
+    Args:
+        server: The WebServer (or test double) being mounted onto.
+
+    Returns:
+        Tuple[str, ...]: Every registered pattern found, as strings.
+    """
+    patterns: list = []
+    for attr in _PUBLIC_PATTERN_ATTRS:
+        registered = getattr(server, attr, None)
+        if not registered:
+            continue
+        try:
+            patterns.extend(str(pattern) for pattern in registered)
+        except TypeError:  # not iterable -- nothing to inspect here
+            continue
+    return tuple(patterns)
+
+
+def _refuse_existing_claimants(server: Any) -> None:
+    """Fail engine boot if anything already owns or opens the MCP paths.
+
+    ``WebServer.add_route`` rejects duplicate ``(method, path)`` pairs, but
+    the endpoint below is registered straight onto the router, so that check
+    never sees a clash. A route at ``/mcp`` would shadow the bare endpoint
+    (a GET-only page answers ``POST /mcp`` with 405), and a public pattern
+    matching it -- or any of its DESCENDANTS, since the Mount forwards
+    ``/mcp/anything`` to ``handle_mcp`` just the same -- would make
+    AuthMiddleware skip those MCP requests.
+
+    Public entries are patterns, not literals, so the endpoint paths are
+    probed alongside representative descendants (``_PUBLIC_PROBE_PATHS``) AND
+    the registered pattern strings are read directly
+    (``_registered_public_patterns``). Probing alone is not enough: a
+    converter-typed pattern such as ``/mcp/{id:int}`` compiles to a regex no
+    fixed probe satisfies, yet still disarms auth for every ``/mcp/<digits>``
+    the Mount forwards.
+
+    Raises:
+        RuntimeError: naming the claimant(s).
+    """
+    claimants = sorted({p for p in (getattr(r, 'path', None) for r in server.app.router.routes) if _claims_mcp_path(p)})
+    public: set = set()
+    is_public = getattr(server, 'is_public_route', None)
+    if is_public is not None:
+        public.update(p for p in _PUBLIC_PROBE_PATHS if is_public(p))
+    public.update(p for p in _registered_public_patterns(server) if _claims_mcp_pattern(p))
+    claimants += [f'public:{p}' for p in sorted(public)]
+    if claimants:
+        raise RuntimeError(
+            f'{_MOUNT_PATH} and {_MOUNT_PATH}/* are reserved for the MCP API, but already claimed by: '
+            + ', '.join(claimants)
+        )
 
 
 def _base_url_from_uri(uri: str) -> str:
@@ -98,6 +236,215 @@ def _bind_host(server: 'Any', config: Dict[str, Any]) -> str:
     return str(host) if host is not None else ''
 
 
+def _host_is_configured(server: 'Any', config: Dict[str, Any]) -> bool:
+    """Report whether a bind host was set anywhere, or merely defaulted.
+
+    ``CONST_DEFAULT_WEB_HOST`` is ``'localhost'``, so an engine that never sets
+    a host is judged loopback and quietly behaves as a *local* engine. That is
+    correct on a laptop and a silent misconfiguration in a deployment, and the
+    two are indistinguishable from the resolved host alone -- hence this flag,
+    which is what makes the startup log able to say which one it is looking at.
+
+    Args:
+        server: The WebServer (or test double) that may carry a ``config``.
+        config: Module configuration dict.
+
+    Returns:
+        bool: True when ``host`` is present in either config.
+    """
+    server_config = getattr(server, 'config', None) or {}
+    return 'host' in server_config or 'host' in config
+
+
+def _bind_port(server: 'Any', config: Dict[str, Any]) -> int:
+    """Return the server's configured port, with the same fallback as WebServer.
+
+    Args:
+        server: The WebServer (or test double) that may carry a ``config``.
+        config: Module configuration dict, used as a fallback.
+
+    Returns:
+        int: The configured port (``CONST_DEFAULT_WEB_PORT`` when unset).
+    """
+    server_config = getattr(server, 'config', None) or {}
+    return int(server_config.get('port', config.get('port', CONST_DEFAULT_WEB_PORT)))
+
+
+def _redacted_uri(uri: str) -> str:
+    """Drop userinfo, query and fragment from a URI so it is safe to log."""
+    parts = urlsplit(uri if '://' in uri else '//' + uri)
+    scheme = f'{parts.scheme}://' if parts.scheme else ''
+    return f'{scheme}{parts.netloc.rpartition("@")[2]}{parts.path}'
+
+
+def _targets_loopback_host(uri: str) -> bool:
+    """Report whether a URI addresses an engine on this machine.
+
+    Deliberately NOT ``auth.is_loopback_bind``: that judges a configured BIND
+    string against exact literals, while this reads the TARGET out of a URI
+    netloc -- userinfo and port removed, IPv6 brackets unwrapped -- and has to
+    accept the whole ``127.0.0.0/8`` range a bind never names. ``ipaddress``
+    settles the literals; ``auth.LOOPBACK_HOSTS`` stays the one place the
+    by-name allowlist (``localhost``) is written down.
+
+    Args:
+        uri: The resolved engine URI (a bare ``host:port`` is tolerated).
+
+    Returns:
+        bool: True only when the target is a loopback name or literal.
+    """
+    host = (urlsplit(uri if '://' in uri else '//' + uri).hostname or '').strip()
+    if not host:
+        return False
+    if host in auth.LOOPBACK_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:  # a hostname, not an IP literal -- names decide above
+        return False
+
+
+def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) -> None:
+    """Fail boot when an engine URI would put the credential on a real wire.
+
+    ``handle_mcp`` binds the CALLER's credential to the per-request engine
+    client, and ``WsEngineClient`` sends it in the first DAP ``auth`` frame. On
+    ``ws://`` that frame is plaintext, so every MCP caller's API key or OAuth
+    token is exposed to anything on the path.
+
+    The rule keys on the TARGET HOST, not on the bind, and every resolved URI
+    goes through it -- explicit or derived, on any bind. A loopback-bound MCP
+    server pointed at a remote engine still puts the credential on the network,
+    so the bind can never excuse the check. A credential sent to
+    ``ws://127.0.0.1:5565`` never reaches a wire anyone can tap, so there is
+    nothing to protect -- and refusing it would be a real deployment hazard:
+    ``WebServer.__init__`` loads ``dist/server/.env``, ``.env.template`` ships
+    ``ROCKETRIDE_URI=http://localhost:5565``, and ``docker/Dockerfile.engine``
+    copies all of ``dist/server/`` into the image, so a pod carrying that file
+    would fail to boot over a credential that never leaves it. Only a
+    non-loopback target is refused.
+
+    Args:
+        uri: The resolved engine URI.
+        source_value: The value the operator actually set (which may be an
+            ``http://`` resource identifier the URI was derived from).
+        source_name: The variable that value came from, for the message.
+
+    Raises:
+        RuntimeError: naming the offending value and where it came from.
+    """
+    if not uri.startswith(_CLEARTEXT_SCHEMES):
+        return
+    if _targets_loopback_host(uri):
+        return
+    raise RuntimeError(
+        f'MCP refuses a cleartext engine transport to a non-loopback engine host: {source_name}='
+        f'{_redacted_uri(source_value)} resolves to {_redacted_uri(uri)}. The caller credential is sent to '
+        'the engine in the first DAP auth message, so it must not ride an unencrypted connection -- use '
+        'wss:// (or an https:// resource identifier).'
+    )
+
+
+def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) -> Tuple[str, str]:
+    """Resolve the engine URI the MCP tools connect back to.
+
+    The single source for this value: the shared and per-caller engine
+    clients, the widget CSP origin and the user-facing upload/dropper links
+    all derive from what this returns. Rules, first match wins:
+
+    1. ``explicit`` -- ``config['rocketride_uri']`` or env ``ROCKETRIDE_URI``,
+       used as-is.
+    2. ``loopback default`` -- a loopback-only bind talks to this engine
+       itself, ``ws://<host>:<port>``, so an unconfigured laptop engine never
+       silently drives RocketRide's cloud. ``localhost`` maps to
+       ``127.0.0.1`` (uvicorn binds a non-literal host as IPv4); ``::1`` is
+       bracketed.
+    3. ``public default`` -- any other bind (including bind-all / unset) uses
+       the public origin of the MCP resource identifier: path dropped,
+       ``https`` -> ``wss``, ``http`` -> ``ws``.
+
+    Whatever rule wins, the resolved URI requires ENCRYPTED transport whenever
+    it addresses a REMOTE engine: the caller's own credential is handed to the
+    engine client, so a ``ws://``/``http://`` value -- explicit or derived --
+    pointed at a non-loopback host is refused rather than quietly used. The
+    check keys on the TARGET host, never on the bind: a loopback-bound MCP
+    server still puts the credential on the network when the engine lives
+    somewhere else. Cleartext to a loopback target stays allowed, since that
+    credential never reaches a wire. See ``_refuse_cleartext_engine_uri``.
+
+    ``bind_host`` therefore only selects the DEFAULT URI (rules 2 and 3); it
+    has no say in whether a value is encrypted enough.
+
+    Args:
+        config: Module configuration dict.
+        bind_host: The configured bind host (see ``_bind_host``).
+        bind_port: The configured bind port (see ``_bind_port``).
+
+    Returns:
+        Tuple[str, str]: The URI and the name of the rule that chose it.
+
+    Raises:
+        RuntimeError: when the resolved engine URI is cleartext and addresses a
+            non-loopback host.
+    """
+    explicit = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI')
+    if explicit:
+        source_name = 'rocketride_uri' if config.get('rocketride_uri') else 'ROCKETRIDE_URI'
+        _refuse_cleartext_engine_uri(explicit, explicit, source_name)
+        return explicit, 'explicit'
+    if auth.is_loopback_bind(bind_host):
+        host = '[::1]' if bind_host == '::1' else '127.0.0.1'
+        return f'ws://{host}:{bind_port}', 'loopback default'
+    resource = oauth_resource.resource_identifier()
+    parts = urlsplit(resource)
+    scheme = {'https': 'wss', 'http': 'ws'}.get(parts.scheme, parts.scheme)
+    uri = f'{scheme}://{parts.netloc.rpartition("@")[2]}'
+    _refuse_cleartext_engine_uri(uri, resource, oauth_resource.ENV_RESOURCE)
+    return uri, 'public default'
+
+
+def _log_bind_mode(bind_host: str, local_engine: bool, host_configured: bool) -> None:
+    """Log the bind mode MCP resolved, and what that mode grants.
+
+    ``auth.is_loopback_bind`` judges the CONFIGURED host by name, and the
+    fallback that host defaults to is ``CONST_DEFAULT_WEB_HOST`` --
+    ``'localhost'``. A deployment that never sets ``host`` therefore lands in
+    local mode: the dev bypass becomes available, ``send_files`` is listed
+    (host-filesystem access), and engine clients forward this process's SDK
+    env as the caller's env. None of that is visible from behaviour until
+    something goes wrong, so it is stated outright in the first lines of the
+    log instead.
+
+    The loopback-BY-FALLBACK case -- local privileges granted because nobody
+    said otherwise, rather than because someone asked -- is the silent
+    misconfiguration, and is warned about rather than merely noted.
+
+    Args:
+        bind_host: The configured bind host (see ``_bind_host``).
+        local_engine: The resolved mode (see ``auth.is_loopback_bind``).
+        host_configured: Whether a host was set anywhere, or merely defaulted.
+    """
+    shown = bind_host or '<unset/bind-all>'
+    if local_engine:
+        logger.info(
+            'MCP bind mode: local/loopback (host=%s) -- MCP_DEV_NO_AUTH bypass available, send_files listed '
+            '(host filesystem), engine SDK env forwarded as caller env',
+            shown,
+        )
+    else:
+        logger.info(
+            'MCP bind mode: public/deployed (host=%s) -- MCP_DEV_NO_AUTH bypass refused, send_files not listed, '
+            'no engine SDK env forwarded to callers',
+            shown,
+        )
+    if local_engine and not host_configured:
+        logger.warning(
+            'MCP bind mode is local/loopback only because no host is configured (defaulted to %r). If this is a '
+            'deployed engine, set host explicitly: it is currently granting local-engine privileges.',
+            CONST_DEFAULT_WEB_HOST,
+        )
+
+
 def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     """Mount the Streamable-HTTP MCP endpoint on the engine web server.
 
@@ -112,34 +459,57 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             and optional public-path registration hooks.
         config: Module configuration dict. Recognised keys:
 
-            - ``mcp_dev_no_auth`` (bool): skip auth for ``/mcp`` in dev.
+            - ``mcp_dev_no_auth`` (bool): skip auth for ``/mcp`` and
+              ``/mcp/`` in dev (loopback binds only).
+
+    Raises:
+        RuntimeError: If a route already claims ``/mcp`` or ``/mcp/*``, if a
+            public pattern is rooted at (or matches) the endpoint or any of its
+            descendants, or if the resolved engine URI is cleartext
+            (``ws://``/``http://``) and addresses a non-loopback host. That last
+            check keys on the engine's TARGET host, not on the MCP bind.
     """
     # ------------------------------------------------------------------
     # 1. Hoisted TaskRegistry
     # Created before the engine factory so the same registry instance is
     # handed to build_mcp_server below.
     # ------------------------------------------------------------------
+    _refuse_existing_claimants(server)
     task_registry = TaskRegistry()
 
     # ------------------------------------------------------------------
-    # 2. Engine client factory
-    # Deferring make_engine_client means missing ROCKETRIDE_URI/AUTH env
-    # vars don't raise ValueError at engine boot — only on first request.
+    # 2. Engine URI + client factory
+    # The URI and local_engine are resolved ONCE, here, where the bind
+    # host/port are known, and injected into a copy of config so every client
+    # the factory builds (shared or per-caller) uses exactly these values.
+    # Deferring make_engine_client means a missing ROCKETRIDE_AUTH/APIKEY
+    # doesn't raise ValueError at engine boot — only on first request.
     # Per-caller requests (identity.CALLER_AUTH set by handle_mcp below) get
     # a fresh client instead of the shared singleton — see _make_engine_factory.
     # ------------------------------------------------------------------
+    bind_host = _bind_host(server, config)
+    # Local engine: loopback-only bind, so the engine host is the caller's own
+    # machine. Decided once here; gates the host-filesystem tools and whether
+    # engine clients forward this process's SDK env (see make_engine_client).
+    local_engine = auth.is_loopback_bind(bind_host)
+    # The bypass decision is made ONCE, here, and reused by both the public-path
+    # registration below and auth.authorize -- see auth.dev_bypass_active.
+    dev_no_auth = auth.dev_bypass_active(config, bind_host)
+    _log_bind_mode(bind_host, local_engine, _host_is_configured(server, config))
+    engine_uri, engine_uri_rule = _resolve_engine_uri(config, bind_host, _bind_port(server, config))
+    logger.info('MCP engine URI: %s (%s)', _redacted_uri(engine_uri), engine_uri_rule)
+    config = {**config, 'rocketride_uri': engine_uri, 'local_engine': local_engine}
     engine_factory = _make_engine_factory(config)
 
     # ------------------------------------------------------------------
     # 3. Build MCP server + stateless StreamableHTTP session manager
-    # engine_origin is read straight from the configured URI (not built via
+    # engine_origin is derived from the resolved URI string (not built via
     # engine_factory()) so widget CSP stamping never has to construct --
     # and, on the per-caller path, bucket for later close -- a whole
     # EngineClient just to read a string. See handlers.py's docstring.
     # ------------------------------------------------------------------
-    _configured_uri = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI') or ''
-    engine_origin = _base_url_from_uri(_configured_uri) if _configured_uri else None
-    mcp_server = build_mcp_server(engine_factory, task_registry, engine_origin=engine_origin)
+    engine_origin = _base_url_from_uri(engine_uri)
+    mcp_server = build_mcp_server(engine_factory, task_registry, engine_origin=engine_origin, local_engine=local_engine)
 
     session_manager = StreamableHTTPSessionManager(
         app=mcp_server,
@@ -149,15 +519,19 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     )
 
     # ------------------------------------------------------------------
-    # 4. Mount the raw ASGI handler at /mcp
+    # 4. Route the raw ASGI handler at /mcp and /mcp/
     # app.add_api_route / add_route expect FastAPI callables with Request
-    # signatures; a raw ASGI app must be mounted via starlette.routing.Mount.
+    # signatures, so the handler goes straight onto the router. A Mount only
+    # matches /mcp/..., and bare /mcp -- the advertised resource identifier
+    # spec clients POST to -- would otherwise get a 307 to /mcp/ (or be
+    # shadowed by any route at /mcp), so an exact, method-agnostic Route
+    # serves the bare path too. The session manager is path-agnostic, so
+    # both forms behave identically.
     #
     # The audience guard runs first: a Zitadel token must be stamped for the
     # MCP project, or it does not reach the session manager. Static API keys
     # and credential-less dev requests pass straight through — see auth.py.
     # ------------------------------------------------------------------
-    bind_host = _bind_host(server, config)
 
     async def _reject(send: Any, message: str) -> None:
         """Send a 401 carrying the discovery challenge, in raw ASGI."""
@@ -190,7 +564,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
                 await send({'type': 'websocket.close', 'code': 1008})
             return
 
-        denial = auth.authorize(scope, bind_host=bind_host)
+        denial = auth.authorize(scope, bind_host=bind_host, dev_bypass=dev_no_auth)
         if denial is not None:
             await _reject(send, denial)
             return
@@ -237,6 +611,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
                 raise pending
 
     server.app.router.routes.append(Mount(_MOUNT_PATH, app=handle_mcp))
+    server.app.router.routes.append(Route(_MOUNT_PATH, endpoint=_AsgiEndpoint(handle_mcp), include_in_schema=False))
 
     # ------------------------------------------------------------------
     # 5. Session-manager lifespan + engine-client teardown
@@ -337,24 +712,23 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     if hasattr(server, 'add_route'):
         oauth_resource.register_routes(server)
 
-    dev_no_auth = bool(config.get('mcp_dev_no_auth')) or os.environ.get('MCP_DEV_NO_AUTH') == '1'
+    # dev_no_auth was decided once in section 2 via auth.dev_bypass_active --
+    # the same answer handle_mcp passes to auth.authorize. Asking for the
+    # bypass on a public bind is refused (auth stays on) rather than failing
+    # engine boot, so say so instead of leaving the setting looking effective.
+    if auth.dev_bypass_requested(config) and not dev_no_auth:
+        logger.warning(
+            'MCP_DEV_NO_AUTH ignored: server binds %s (non-loopback); /mcp stays authenticated',
+            bind_host or '<unset/bind-all>',
+        )
     if dev_no_auth:
-        # Loopback-only: an unauthenticated /mcp on a public bind hands the
-        # whole tool surface (pipeline execution, store access) to anyone who
-        # can reach it. Refuse the bypass (auth stays on) rather than fail
-        # engine boot.
-        if not auth.is_loopback_bind(bind_host):
-            logger.warning(
-                'MCP_DEV_NO_AUTH ignored: server binds %s (non-loopback); /mcp stays authenticated',
-                bind_host or '<unset/bind-all>',
-            )
-            dev_no_auth = False
-    if dev_no_auth:
+        # Exactly the two endpoint paths -- never a /mcp/{path} pattern, and
+        # never outside this loopback-only branch.
         if hasattr(server, '_public_paths'):
-            server._public_paths.append(_MOUNT_PATH)
+            server._public_paths.extend(_ENDPOINT_PATHS)
             # Invalidate the compiled-regex cache so the next is_public_route()
             # call re-builds from the updated list.
             if hasattr(server, '_compiled_public_paths'):
                 server._compiled_public_paths = None
         if hasattr(server, 'public'):
-            server.public.add(_MOUNT_PATH)
+            server.public.update(_ENDPOINT_PATHS)

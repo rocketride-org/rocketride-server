@@ -3,6 +3,8 @@ import asyncio
 import json
 import pytest
 
+from .conftest import FAKE_DEPLOYMENT
+
 
 def test_list_resources_has_two_uris():
     from ai.modules.mcp.resources import list_resources
@@ -25,8 +27,24 @@ async def test_read_status_resource(fake_engine):
 async def test_read_pipelines_resource_returns_deploy_list(fake_engine):
     from ai.modules.mcp.resources import read_resource
 
+    fake_engine.deploy_results['list'] = {
+        'rows': [FAKE_DEPLOYMENT, {**FAKE_DEPLOYMENT, 'teamId': 'team-2'}],
+        'total': 60,
+        'page': 1,
+        'pageSize': 50,
+    }
+
     payload = json.loads(await read_resource(fake_engine, 'rocketride://pipelines'))
-    assert payload == [{'project_id': 'dep-1'}]
+
+    # The deploy_list tool's payload minus `ok`: the SDK's list envelope
+    # unwrapped, so a truncated first page is visible (count < total).
+    assert payload == {
+        'deployments': [FAKE_DEPLOYMENT, {**FAKE_DEPLOYMENT, 'teamId': 'team-2'}],
+        'count': 2,
+        'total': 60,
+        'page': 1,
+        'pageSize': 50,
+    }
     assert fake_engine.deploy_list_calls == 1
 
 

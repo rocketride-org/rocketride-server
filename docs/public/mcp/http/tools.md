@@ -5,7 +5,8 @@ sidebar_position: 2
 
 # Tools
 
-The server exposes **29 tools**. This page is the full reference; the
+The server exposes **33 tools** — 32 on a deployed engine, where `send_files`
+is not offered (see its entry). This page is the full reference; the
 [overview](/connect/mcp/http/) has the one-table summary.
 
 ## How every tool behaves
@@ -18,7 +19,8 @@ The server exposes **29 tools**. This page is the full reference; the
   `{ok: false, error_type, message, hint}` with the MCP `isError` flag set:
   `BadRequest` (bad or missing arguments), `Timeout` (one engine call ran past
   its budget — the hint says how to recover), `NotFound`/`TraceExpired` (log
-  tools), `UnknownTool`. Hard failures (lost engine connection, auth) surface
+  tools), `Unavailable` (a local-engine-only tool called on a deployed engine),
+  `UnknownTool`. Hard failures (lost engine connection, auth) surface
   as MCP protocol errors with the original message preserved.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
@@ -126,7 +128,10 @@ nothing itself.
   defaults to `lane_in`); `class_type` (string, optional, defaults to
   `lane_in`).
 - **Returns:** `{ok, name, provider, files, next_steps}` — `files` maps
-  `local_nodes/<name>/...` paths to file contents.
+  `local_nodes/__init__.py` (the parent package marker) and
+  `local_nodes/<name>/...` paths to file contents. Write every returned path:
+  without the marker `local_nodes` is not a package and the engine cannot
+  import `local_nodes.<name>`.
 - **Notable:** lanes and `class_type` are validated against the connected
   engine's live catalog, so the allowed sets never drift from what is actually
   in service.
@@ -195,16 +200,19 @@ Send data to a running task and return its result.
 
 ### send_files
 
-Upload files to a running task by token.
+Upload files from the engine host's local filesystem to a running task by
+token.
 
-- **Parameters:** `task_token` (string, required); `files` (array of strings,
-  at least one, required).
+- **Availability:** local engines only — the engine binds a loopback host
+  (`localhost`, `127.0.0.1`, `::1`), so the engine host is your own machine.
+  Any other bind neither lists the tool nor runs it: a call by name returns
+  `Unavailable` without looking at the paths. To get files into a pipeline on
+  a deployed engine (including RocketRide Cloud), use `run_dropper_pipe` and
+  its `upload_url`.
+- **Parameters:** `task_token` (string, required); `files` (array of paths on
+  the engine host's filesystem, at least one, required).
 - **Returns:** `{ok, result}` — per-file upload results (status, timing,
   processing results).
-- **Caution:** paths are resolved on the machine the engine runs on — **not**
-  through your account file store. Against RocketRide Cloud this tool is only
-  useful for files the engine host can already see; to get local files into a
-  pipeline, use `run_dropper_pipe` and its `upload_url` instead.
 
 ### terminate
 
@@ -281,45 +289,109 @@ counterpart to `store_read` for large or binary files.
 
 ## Manage deployments
 
+Deployments follow the teams-as-environments model. `deploy_add` registers a
+pipeline as the next immutable, numbered **version** of its project in your
+organization's registry; nothing runs yet. `deploy_to_team` then points a
+**team** (the environment, such as Staging or Production) at a version, and
+everything after that acts on one team's deployment, addressed by
+`project_id` + `team_id`. A typical sequence:
+
+1. `deploy_add` the pipeline (optionally with `deploy_to` to do step 2 in the
+   same call).
+2. `deploy_to_team` with `artifact.version` from step 1. The same call
+   promotes a version to another team or rolls back to an older one.
+3. `deploy_set_schedule` for each source that should run on a cron.
+
+`project_id` is the pipeline's `project_id` (`projectId` on `deploy_list`
+rows). `team_id` is `teamId` on a `deploy_list` row, or `"@me"` for your
+personal space. Every tool here returns records as the engine sends them,
+with camelCase fields (`projectId`, `teamId`, `version`, `state`, `schedules`).
+
 ### deploy_add
 
-Register an inline pipeline as a deployment, optionally on a cron schedule.
+Register an inline pipeline as the next version of its project.
 
-- **Parameters:** `pipeline` (object, required); `schedule` (string, optional
-  cron expression).
-- **Returns:** `{ok, deployment}`.
-- **Notable:** creation is not idempotent — after a timeout, call
-  `deploy_list` before retrying, since the deployment may already exist.
+- **Parameters:** `pipeline` (object, required — must carry `name` and
+  `project_id`); `comment` (string, optional — a "what changed" note kept with
+  the version); `deploy_to` (string, optional — a team id to point at the new
+  version in the same call).
+- **Returns:** `{ok, artifact}` — `artifact.version` is the new version
+  number — plus `deployment` when `deploy_to` was given.
+- **Notable:** every call registers a new version, so it is not idempotent —
+  after a timeout, call `deploy_versions` before retrying.
 
 ### deploy_list
 
-List your deployments.
+List the team deployments you can see: your teams and your personal space, or
+the whole organization for an org admin. One row per project per team.
 
-- **Parameters:** none.
-- **Returns:** `{ok, deployments, count}`.
+- **Parameters:** all optional — `team_id` (string, restrict to one team);
+  `page` (integer ≥ 1); `page_size` (integer ≥ 1, server default 50, max 100);
+  `search` (string, over `projectId`, `pipelineName`, `teamId`); `filters`
+  (object, e.g. `{"state": "enabled"}`); `sort` (array of
+  `{field, dir}`; default `updatedAt` descending).
+- **Returns:** `{ok, deployments, count, total, page, pageSize}` — `count` is
+  the rows on this page, `total` every match.
 
 ### deploy_status
 
-Detailed status of one deployment.
+One team's deployment of a project: version, state, per-source schedules, and
+who deployed it when.
 
-- **Parameters:** `project_id` (string, required).
+- **Parameters:** `project_id` (string, required); `team_id` (string,
+  required).
 - **Returns:** `{ok, deployment}`.
+
+### deploy_versions
+
+A project's registered versions, newest first — the versions `deploy_to_team`
+can point a team at.
+
+- **Parameters:** `project_id` (string, required); `page`, `page_size`
+  (integers, optional).
+- **Returns:** `{ok, project_id, versions, count, total, page, pageSize}` —
+  each row carries `version`, `pipelineName`, `comment`, `publishedAt`,
+  `publishedBy`.
+
+### deploy_to_team
+
+Point a team at a registered version: first deploy, promotion, and rollback
+are all this call. Deploying to a removed deployment revives it.
+
+- **Parameters:** `project_id` (string, required); `version` (integer,
+  required); `team_id` (string, required).
+- **Returns:** `{ok, deployment}`.
+
+### deploy_set_schedule
+
+Set or clear the cron schedule of one source on a team's deployment.
+
+- **Parameters:** `project_id` (string, required); `source_id` (string,
+  required — a source component of the deployed version); `schedule` (string,
+  required — a 5-field cron expression, or `"manual"` to clear it); `team_id`
+  (string, required); `ttl` (integer seconds, optional — a fixed run window;
+  omit to run until the pipeline finishes).
+- **Returns:** `{ok, deployment}`.
+- **Notable:** the team must already be deployed (`deploy_to_team`), and
+  schedules fire only while the deployment is enabled.
+
+### deploy_enable / deploy_disable
+
+Turn a team's deployment back on, or off. Disabling is the kill switch:
+schedules stop firing and manual runs are refused until it is enabled again.
+
+- **Parameters:** `project_id` (string, required); `team_id` (string,
+  required).
+- **Returns:** `{ok, deployment}` with the new `state`.
 
 ### deploy_remove
 
-Undeploy and remove a deployment.
+Soft-remove a team's deployment. It leaves listings and stops running; its
+versions and audit history are kept, and `deploy_to_team` revives it.
 
-- **Parameters:** `project_id` (string, required).
-- **Returns:** `{ok, removed}`.
-
-### deploy_update
-
-Update a deployment's pipeline and/or schedule.
-
-- **Parameters:** `project_id` (string, required); `pipeline` (object,
-  optional); `schedule` (string, optional — a replacement cron expression or
-  `"manual"`). At least one of `pipeline`/`schedule` is required.
-- **Returns:** `{ok, project_id, updated}` — which of the two changed.
+- **Parameters:** `project_id` (string, required); `team_id` (string,
+  required).
+- **Returns:** `{ok, deployment}` with `state: "removed"`.
 
 ## Replay past runs
 

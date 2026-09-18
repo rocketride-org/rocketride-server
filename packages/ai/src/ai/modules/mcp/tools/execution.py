@@ -101,7 +101,7 @@ _SEND_FILES_SCHEMA = {
             'type': 'array',
             'items': {'type': 'string'},
             'minItems': 1,
-            'description': 'Store-relative file paths to upload to the running task',
+            'description': "Paths on the engine host's local filesystem to upload to the running task",
         },
     },
     'required': ['task_token', 'files'],
@@ -292,10 +292,14 @@ async def _send_files(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 def register(registry: ToolRegistry) -> None:
-    """Register the 5 token-based execution tools against ``registry``."""
+    """Register the 5 token-based execution tools against ``registry``.
+
+    ``send_files`` is ``local_engine_only``: a deployed engine's registry
+    neither lists nor runs it.
+    """
     registry.register(
         'run_pipeline',
-        'Start a RocketRide pipeline from an inline definition or filepath, returning a task_token. '
+        'Start a RocketRide pipeline from an inline definition, returning a task_token. '
         'Pass inputs to also send data immediately and get a result back in the same call. '
         'Result includes projectId and source for use with log_traces/log_trace.',
         _RUN_PIPELINE_SCHEMA,
@@ -326,6 +330,12 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         'send_files',
-        'Upload one or more store-relative file paths to a running pipeline task by task_token.',
+        "Upload files from the engine host's local filesystem to a running pipeline task by task_token. "
+        'Only available on a local engine (bound to loopback), where that filesystem is your own machine; '
+        'otherwise use run_dropper_pipe.',
         _SEND_FILES_SCHEMA,
+        # The SDK opens these paths on the machine running this module: on a
+        # deployed engine that is our server, so a caller could probe and
+        # upload its files.
+        local_engine_only=True,
     )(_send_files)

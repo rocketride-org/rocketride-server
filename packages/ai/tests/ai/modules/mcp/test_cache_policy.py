@@ -26,7 +26,7 @@ async def test_list_tools_order_is_deterministic_and_pinned(fake_engine):
     """
     from ai.modules.mcp.handlers import build_mcp_server
 
-    server = build_mcp_server(lambda: fake_engine)
+    server = build_mcp_server(lambda: fake_engine, local_engine=True)
     async with Client(server) as client:
         names_1 = [t.name for t in (await client.list_tools()).tools]
         names_2 = [t.name for t in (await client.list_tools()).tools]
