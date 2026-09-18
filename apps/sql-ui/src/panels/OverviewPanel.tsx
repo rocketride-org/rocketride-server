@@ -34,8 +34,10 @@ import type { ISqlEndpoint, ISqlSchemaTable } from '../connect';
 import type { ISchemaState } from '../schema/schemaStore';
 import { refreshSchema } from '../schema/schemaStore';
 import { useTableRecordRequest } from '../navigation';
-import { designUri, getDocs, tableDataUri } from '../docs';
+import { designUri, getDocs, nextQueryDoc, tableDataUri } from '../docs';
+import type { IQueryDocPayload } from '../docs';
 import TableRecordPanel from '../components/TableRecordPanel';
+import { buildRelationGraph } from '../schema/relations';
 import { DatabaseIcon } from '../icons';
 
 // =============================================================================
@@ -101,14 +103,16 @@ const styles = {
  * record drawer.
  */
 export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapshot, client }) => {
-	// The table whose record drawer is open (null = closed).
-	const [openTable, setOpenTable] = useState<string | null>(null);
+	// Open record drawers, outermost first. A drawer opened FROM a drawer
+	// (following an inbound foreign key) pushes onto this stack, and the
+	// shell's DetailPanel renders the back arrow and the peel-away sliver.
+	const [stack, setStack] = useState<string[]>([]);
 
 	// Sidebar tree clicks arrive as table-record requests for this connection.
 	const request = useTableRecordRequest();
 	useEffect(() => {
 		if (request && request.key === endpoint.key) {
-			setOpenTable(request.table);
+			setStack([request.table]);
 		}
 	}, [request, endpoint.key]);
 
@@ -126,6 +130,10 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 	);
 	const totalColumns = rows.reduce((sum, r) => sum + r.columns, 0);
 	const totalForeignKeys = rows.reduce((sum, r) => sum + r.foreignKeys, 0);
+
+	// The connection's declared-foreign-key graph, shared by every open
+	// drawer so "Referenced by" and the join finder agree with each other.
+	const graph = useMemo(() => buildRelationGraph(snapshot.schema), [snapshot.schema]);
 
 	/**
 	 * Full per-column contract for the tables grid (LOCAL mode).
@@ -191,7 +199,7 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 				<div>
 					<Button
 						variant="primary"
-						onClick={() => { if (client) void refreshSchema(client, endpoint); }}
+						onClick={() => { if (client) void refreshSchema(client, endpoint, { fresh: true }); }}
 						disabled={!client}
 					>
 						Retry
@@ -249,36 +257,49 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 						tableId="sql-overview-tables"
 						paginate={false}
 						height="100%"
-						onRowClick={(row) => setOpenTable(row.name)}
+						onRowClick={(row) => setStack([row.name])}
 						emptyTitle="No tables"
 						emptyDescription="The attached database reports no tables."
 					/>
 				</Card>
 			</div>
 
-			{/* Record drawer for the selected table. */}
-			<TableRecordPanel
-				open={openTable !== null}
-				onClose={() => setOpenTable(null)}
-				database={snapshot.schema?.database ?? ''}
-				table={openTable ?? ''}
-				def={openTable ? (tables[openTable] as ISqlSchemaTable | undefined) ?? null : null}
-				onBrowseData={() => {
-					// Open (or focus) the table's data-browser document; the
-					// endpoint + table ride as the static doc's content payload.
-					if (openTable) {
-						getDocs()?.openStaticDocument(tableDataUri(endpoint.key, openTable), `${openTable} - data`, { endpoint, table: openTable });
-						setOpenTable(null);
-					}
-				}}
-				onDesign={() => {
-					// Open (or focus) the table's designer document.
-					if (openTable) {
-						getDocs()?.openStaticDocument(designUri(endpoint.key, openTable), `${openTable} - design`, { endpoint, table: openTable });
-						setOpenTable(null);
-					}
-				}}
-			/>
+			{/* Record drawers, outermost first. Following an inbound foreign
+			    key pushes another drawer on top rather than swapping this
+			    one, so the way back is the shell's own back arrow. */}
+			{stack.map((name, depth) => (
+				<TableRecordPanel
+					key={`${name}-${depth}`}
+					open
+					onClose={() => setStack((current) => current.slice(0, depth))}
+					database={snapshot.schema?.database ?? ''}
+					table={name}
+					def={(tables[name] as ISqlSchemaTable | undefined) ?? null}
+					dialect={snapshot.dialect}
+					graph={graph}
+					refreshedAt={snapshot.refreshedAt}
+					onOpenTable={(next) => setStack((current) => [...current.slice(0, depth + 1), next])}
+					onOpenQuery={(sql, label) => {
+						// Generated SQL always opens a NEW document and never
+						// runs; `origin` lets the query view say so on screen.
+						const { uri } = nextQueryDoc(endpoint.key);
+						const payload: IQueryDocPayload = { endpoint, label, initialSql: sql, origin: 'generated' };
+						getDocs()?.openStaticDocument(uri, label, payload);
+						setStack([]);
+					}}
+					onBrowseData={() => {
+						// Open (or focus) the table's data-browser document; the
+						// endpoint + table ride as the static doc's content payload.
+						getDocs()?.openStaticDocument(tableDataUri(endpoint.key, name), `${name} - data`, { endpoint, table: name });
+						setStack([]);
+					}}
+					onDesign={() => {
+						// Open (or focus) the table's designer document.
+						getDocs()?.openStaticDocument(designUri(endpoint.key, name), `${name} - design`, { endpoint, table: name });
+						setStack([]);
+					}}
+				/>
+			))}
 		</div>
 	);
 };
