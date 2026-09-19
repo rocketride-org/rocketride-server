@@ -79,9 +79,13 @@ _POLL_BASE_S = 0.5
 _POLL_MAX_S = 5.0
 
 _TERMINAL_OK = frozenset({'succeeded', 'success', 'completed', 'complete', 'ready', 'finished'})
-_TERMINAL_BAD = frozenset({'failed', 'error', 'cancelled', 'canceled'})
-#: The terminal-bad states that say nothing about the SQL itself.
-_CANCELLED = frozenset({'cancelled', 'canceled'})
+_TERMINAL_BAD = frozenset({'failed', 'error', 'interrupted', 'cancelled', 'canceled'})
+#: Terminal, but not the statement's fault, so raised as a plain RuntimeError and
+#: never as SqlStatementError. Only `interrupted` is a documented status of a
+#: query run (https://www.hotdata.dev/openapi.yaml: "terminal, and safe to
+#: retry"); `cancelled` / `canceled` were never seen from this endpoint and are
+#: kept from the original set as a guard.
+_ENDED_NOT_BY_THE_SQL = frozenset({'interrupted', 'cancelled', 'canceled'})
 
 #: Async job states from the loads/indexes 202 envelope.
 _JOB_PENDING = frozenset({'pending', 'running'})
@@ -531,7 +535,13 @@ class IInstance(IInstanceBase):
                 result['result_id'] = response['result_id']
             return result
 
-        if run_id and response.get('result_id') is None:
+        # A truncated response always carries a result_id, but per QueryResponse in
+        # https://www.hotdata.dev/openapi.yaml that id "is issued while the save is
+        # still in flight, so on its own it does not mean the result can be
+        # retrieved": a read against it answers 202 with no rows, which came back
+        # from here as an empty result. The run is the readiness signal, so wait
+        # on it whenever the server deferred or truncated.
+        if run_id and (response.get('result_id') is None or response.get('truncated')):
             response = self._await_run(run_id, database_id)
 
         result_id = response.get('result_id')
@@ -612,11 +622,12 @@ ORDER BY table_schema, table_name, ordinal_position"""
             status = str(run.get('status') or '').lower()
             if status in _TERMINAL_BAD:
                 message = _run_failure_text(run, status)
-                if status in _CANCELLED:
+                if status in _ENDED_NOT_BY_THE_SQL:
                     # Not the statement's fault, so not SqlStatementError: a
-                    # rewritten query cannot un-cancel a run, and classifying
-                    # it as fixable would spend an LLM turn finding that out.
-                    raise RuntimeError(f'db_hotdata: query was cancelled: {message}')
+                    # rewritten query cannot un-interrupt or un-cancel a run, and
+                    # classifying it as fixable would spend an LLM turn finding
+                    # that out.
+                    raise RuntimeError(f'db_hotdata: query run ended as {status!r}: {message}')
                 raise SqlStatementError(f'db_hotdata: query failed: {message}')
             if status in _TERMINAL_OK or run.get('result_id'):
                 return run

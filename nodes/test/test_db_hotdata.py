@@ -2800,3 +2800,123 @@ def test_run_failure_text_reads_every_shape_the_api_uses():
     assert text({'error': {'code': 'BAD_REQUEST', 'message': 'boom'}}, 'failed') == 'boom'
     assert text({'message': 'boom'}, 'failed') == 'boom'
     assert text({'status': 'failed'}, 'failed') == 'failed'
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups, read against https://www.hotdata.dev/openapi.yaml
+# ---------------------------------------------------------------------------
+
+
+def _bounded_poll(body, most=3):
+    """A get_query_run stub that fails the test if it is polled past `most`.
+
+    `time.sleep` is a no-op under test, so a status the poll loop does not
+    recognise would otherwise spin for the whole of job_timeout_secs.
+    """
+    seen = {'n': 0}
+
+    def _poll(_i, database_id=''):
+        """Return the same body, a bounded number of times."""
+        seen['n'] += 1
+        assert seen['n'] <= most, 'the poll loop did not treat this status as terminal'
+        return body
+
+    return _poll
+
+
+def test_a_truncated_result_is_read_only_after_its_run_succeeds():
+    """A truncated body always carries a result_id, so the old `result_id is None`
+    test never waited for it - and that id is issued while the save is still in
+    flight. The read must follow the run.
+    """
+    events = []
+    polls = [{'status': 'running'}, {'status': 'succeeded', 'result_id': 'res-from-run'}]
+
+    def _get_query_run(_i, database_id=''):
+        """Record the poll, then answer with the next queued run body."""
+        events.append('poll')
+        return polls.pop(0)
+
+    def _get_result(result_id, database_id='', offset=0, limit=None):
+        """Record which result id was read, and when."""
+        events.append(f'read:{result_id}')
+        return {'status': 'ready', 'columns': ['n'], 'rows': [[1], [2]]}
+
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {
+            'query_run_id': 'run-1',
+            'result_id': 'res-from-body',
+            'truncated': True,
+            'columns': ['n'],
+            'rows': [[1]],
+        },
+        get_query_run=_get_query_run,
+        get_result=_get_result,
+    )
+    out = _instance(g)._run_sql('SELECT n FROM big', 2)
+    assert events == ['poll', 'poll', 'read:res-from-run'], events
+    assert out['rows'] == [{'n': 1}, {'n': 2}]
+
+
+def test_a_result_that_is_not_ready_raises_instead_of_reading_as_empty():
+    """202 {status, result_id} carries no rows. It means "not ready", and must
+    never come back as a query that matched nothing.
+    """
+    for state in ('processing', 'pending'):
+        c, _rec = _client([_Resp(202, {'status': state, 'result_id': 'res-1'}, headers={'Retry-After': '1'})])
+        with pytest.raises(client_mod.HotdataError, match='not ready') as excinfo:
+            c.get_result('res-1', database_id='db-1')
+        assert excinfo.value.status_code == 202
+        assert iinstance_mod._is_sql_fixable(excinfo.value) is False
+
+
+def test_a_ready_result_with_no_rows_is_still_an_empty_result():
+    """The guard keys on the not-ready status, so a genuinely empty result passes."""
+    c, _rec = _client([_Resp(200, {'status': 'ready', 'columns': ['n'], 'rows': []})])
+    assert c.get_result('res-1', database_id='db-1')['rows'] == []
+
+
+def test_an_interrupted_run_ends_the_poll_at_once():
+    """`interrupted` is a documented terminal status. Unknown to the poll loop, it
+    read as "still running" and was polled until job_timeout_secs ran out, then
+    reported as a timeout that never happened.
+    """
+    g = _loaded_global(job_timeout_secs=300)
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {'query_run_id': 'run-1'},
+        get_query_run=_bounded_poll({'status': 'interrupted'}, most=1),
+    )
+    with pytest.raises(RuntimeError, match='interrupted') as excinfo:
+        _instance(g)._run_sql('SELECT a FROM t', 10)
+    assert not isinstance(excinfo.value, iinstance_mod.SqlStatementError)
+    assert 'did not finish within' not in str(excinfo.value)
+
+
+def test_an_interrupted_run_is_not_handed_to_the_model_to_rewrite():
+    """A rewritten statement cannot un-interrupt a run, so it must not cost an
+    LLM turn.
+    """
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=lambda **_kw: {'query_run_id': 'run-1'},
+        get_query_run=_bounded_poll({'status': 'interrupted'}),
+    )
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+    with pytest.raises(RuntimeError, match='interrupted'):
+        inst.get_data({'question': 'x'})
+    assert len(inst.asked) == 1
+
+
+def test_the_query_run_id_is_read_from_inside_the_error_object_too():
+    """The documented error body is {"error": {code, message}}. The live API puts
+    the run id beside `error`; were it to move inside, every retry would stop.
+    """
+    c, _rec = _client(
+        [_Resp(400, {'error': {'code': 'BAD_REQUEST', 'message': "table 'x' not found", 'query_run_id': 'qrun-7'}})]
+    )
+    with pytest.raises(client_mod.HotdataError) as excinfo:
+        c.query(sql='SELECT * FROM x', database_id='db-1')
+    assert excinfo.value.query_run_id == 'qrun-7'
+    assert iinstance_mod._is_sql_fixable(excinfo.value) is True
