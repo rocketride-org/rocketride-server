@@ -129,7 +129,7 @@
 			"title": "Run asynchronously after (milliseconds)",
 			"description": "Wait this long before a query continues as an asynchronous job.",
 			"default": 5000,
-			"minimum": 0,
+			"minimum": 1000,
 			"maximum": 60000
 		}
 	},

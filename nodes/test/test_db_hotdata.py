@@ -2470,7 +2470,7 @@ def test_named_rows_render_as_a_markdown_table():
 
 
 def test_a_repeated_column_name_does_not_collapse():
-    """SELECT city, city is legal; a plain dict would keep only the last value."""
+    """A join answers ['city', 'city']; a plain dict would keep only the last value."""
     rows = iinstance_mod._rows_as_objects([['Reno', 'Austin']], ['city', 'city'])
     assert rows == [{'city': 'Reno', 'city_1': 'Austin'}]
 
@@ -2605,8 +2605,8 @@ def test_get_data_still_retries_a_failed_query_run():
 
 
 def test_a_generated_suffix_cannot_collide_with_a_real_column():
-    """`SELECT city, city, city_1` - the generated name for the second `city`
-    must not land on a column the result already has.
+    """For columns ['city', 'city', 'city_1'] the generated name for the second
+    `city` must not land on a column the result already has.
     """
     names = iinstance_mod._name_columns(['city', 'city', 'city_1'])
     assert len(set(names)) == 3, f'names collide: {names}'
@@ -2672,3 +2672,80 @@ def test_the_client_leaves_the_run_id_empty_when_the_body_has_none():
         c.query(sql='SELECT 1', database_id='db-1')
     assert excinfo.value.query_run_id == ''
     assert iinstance_mod._is_sql_fixable(excinfo.value) is False
+
+
+def test_get_result_keeps_its_positional_arguments():
+    """``get_result(result_id, offset, limit)`` predates database scoping. The new
+    parameter is keyword-only, so an old positional call cannot send its offset
+    as the X-Database-Id header.
+    """
+    c, rec = _client([_Resp(200, {'rows': []})])
+    c.get_result('res-1', 5, 10)
+    assert rec.calls[0]['params'] == {'offset': 5, 'limit': 10}
+    assert 'X-Database-Id' not in rec.calls[0]['headers']
+    with pytest.raises(TypeError):
+        c.get_result('res-1', 5, 10, 'db-1')
+
+
+def test_a_cancelled_run_is_not_treated_as_a_statement_failure():
+    """A rewritten query cannot un-cancel a run, so it must not earn a retry."""
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        return {'query_run_id': 'run-1'}
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=_query,
+        get_query_run=lambda _i, database_id='': {'status': 'cancelled'},
+    )
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+    with pytest.raises(RuntimeError, match='cancelled') as excinfo:
+        inst.get_data({'question': 'x'})
+    assert not isinstance(excinfo.value, iinstance_mod.SqlStatementError)
+    assert calls['n'] == 1
+    assert len(inst.asked) == 1
+
+
+def test_a_pipe_in_a_column_name_does_not_split_the_header():
+    """``SELECT total AS "a|b"`` is a legal alias. Unreachable while rows were
+    never objects; reachable now that the header is built from real names.
+    """
+    table = iinstance_mod._rows_to_markdown([{'a|b': 1}])
+    header, divider, body = table.splitlines()
+    assert header == '| a\\|b |'
+    assert divider == '| --- |'
+    assert body == '| 1 |'
+
+
+def test_a_null_renders_as_an_empty_cell():
+    """SQL NULL arrives as None; the Python word must not reach the reader."""
+    table = iinstance_mod._rows_to_markdown([{'city': 'Reno', 'units': None}])
+    assert table.splitlines()[2] == '| Reno |  |'
+    assert 'None' not in table
+
+
+def test_a_row_narrower_than_its_header_omits_the_missing_keys():
+    """No nulls are invented for values the server never sent."""
+    assert iinstance_mod._rows_as_objects([[1]], ['a', 'b']) == [{'a': 1}]
+
+
+def test_the_config_schema_advertises_the_floor_the_node_enforces():
+    """The form must not accept a value the node silently overrides, and neither
+    may drift from what the API accepts.
+    """
+    services = json.loads((_NODE_DIR / 'services.json').read_text(encoding='utf-8'))
+    field = services['fields']['hotdata.async_after_ms']
+    assert field['minimum'] == iglobal_mod.ASYNC_AFTER_MS_MIN == 1000
+    assert field['default'] >= field['minimum']
+
+
+def test_a_self_join_keeps_every_value():
+    """The shape the live API returns for ``SELECT * FROM sales a JOIN sales b``:
+    every name twice. This is how repeated names are actually reached - the
+    planner rejects a bare ``SELECT city, city``.
+    """
+    rows = iinstance_mod._rows_as_objects([['Reno', 200, 'Reno', 200]], ['city', 'units', 'city', 'units'])
+    assert rows == [{'city': 'Reno', 'units': 200, 'city_1': 'Reno', 'units_1': 200}]
