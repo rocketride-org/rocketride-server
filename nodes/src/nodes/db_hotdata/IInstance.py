@@ -79,7 +79,13 @@ _POLL_BASE_S = 0.5
 _POLL_MAX_S = 5.0
 
 _TERMINAL_OK = frozenset({'succeeded', 'success', 'completed', 'complete', 'ready', 'finished'})
-_TERMINAL_BAD = frozenset({'failed', 'error', 'cancelled', 'canceled'})
+_TERMINAL_BAD = frozenset({'failed', 'error', 'interrupted', 'cancelled', 'canceled'})
+#: Terminal, but not the statement's fault, so raised as a plain RuntimeError and
+#: never as SqlStatementError. Only `interrupted` is a documented status of a
+#: query run (https://www.hotdata.dev/openapi.yaml: "terminal, and safe to
+#: retry"); `cancelled` / `canceled` were never seen from this endpoint and are
+#: kept from the original set as a guard.
+_ENDED_NOT_BY_THE_SQL = frozenset({'interrupted', 'cancelled', 'canceled'})
 
 #: Async job states from the loads/indexes 202 envelope.
 _JOB_PENDING = frozenset({'pending', 'running'})
@@ -192,6 +198,64 @@ def _to_ndjson(rows: List[Any]) -> bytes:
             raise ValueError('db_hotdata: every row must be an object, not a scalar or list')
         lines.append(json.dumps(row, default=str))
     return ('\n'.join(lines) + '\n').encode('utf-8')
+
+
+class SqlStatementError(RuntimeError):
+    """The server ran the statement and the statement failed.
+
+    Distinct from a transport or account failure: this one names something in the
+    SQL, so regenerating is worth a turn. Carried as its own type because a
+    deferred run reports its failure in the poll body, with no HTTP status to
+    classify on.
+    """
+
+
+def _run_failure_text(run: Dict[str, Any], fallback: str) -> str:
+    """Why a query run failed, in the server's words.
+
+    The run body reports it as ``error_message`` ("query execution failed: Arrow
+    error: Divide by zero error"). This text is what gets fed back to the model
+    for its corrective attempt, so falling through to the bare status would send
+    it "failed" and leave it rewriting blind. ``error`` and ``message`` are read
+    too - ``error`` as either a string or the ``{"message": ...}`` object the
+    query endpoint uses - so a body shaped like the other endpoints still works.
+    """
+    for key in ('error_message', 'error', 'message'):
+        value = run.get(key)
+        if isinstance(value, dict):
+            value = value.get('message')
+        if value:
+            return str(value)
+    return fallback
+
+
+def _is_sql_fixable(error: Exception) -> bool:
+    """Could a *different statement* plausibly succeed where this one failed?
+
+    Only worth another generation turn when the server rejected the SQL itself -
+    a missing table, a parse error, an unknown function all come back 400. A
+    failure that describes the run rather than the statement (401 invalid_api_key,
+    404 workspace_not_found or database not found, an exhausted 429 budget, a
+    connection that never landed) is identical on every retry, so re-asking the
+    model only spends another LLM call and another round trip before reporting
+    the same error with the cause buried behind "could not answer after N
+    attempts".
+
+    The status alone is too coarse: ``_run_sql`` drives four endpoints, and a
+    bad ttl on create_database, a malformed limit on get_result or a missing
+    scoping header all answer 400 without a single thing being wrong with the
+    SQL. The server marks a real statement failure by answering with a
+    ``query_run_id`` - it only mints one once it has created a run and executed
+    the statement - so that, not the bare 400, is the test.
+
+    Defaults to *not* fixable: a failure this code cannot classify is far more
+    likely to be environmental than to be a statement the model can rewrite.
+    """
+    if isinstance(error, SqlStatementError):
+        return True
+    if getattr(error, 'status_code', None) != 400:
+        return False
+    return bool(getattr(error, 'query_run_id', ''))
 
 
 def _is_missing_column(error: Exception) -> bool:
@@ -309,8 +373,90 @@ def _rows_from_payload(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _free_name(base: str, used: set[str]) -> str:
+    """``base``, suffixed until it is a key nothing has claimed, then reserved.
+
+    The generated name has to be checked against the names already taken, not
+    just against the base: for columns ``['city', 'city', 'city_1']`` the second
+    ``city`` would otherwise become ``city_1`` and collide with the real third
+    column.
+    """
+    name = base
+    suffix = 1
+    while name in used:
+        name = f'{base}_{suffix}'
+        suffix += 1
+    used.add(name)
+    return name
+
+
+def _name_columns(columns: List[Any]) -> List[str]:
+    """Column names for a result, made unique and non-empty.
+
+    A join comes back with the same name twice: ``SELECT a.city, b.city`` answers
+    ``['city', 'city']`` and ``SELECT *`` over a self-join answers ``['city',
+    'units', 'city', 'units']`` (the planner rejects a bare ``SELECT city, city``,
+    so joins are how this is reached). Zipping that into a dict would keep only
+    the last value and silently drop a column.
+    """
+    used: set[str] = set()
+    named: List[str] = []
+    for index, raw in enumerate(columns):
+        name = str(raw).strip() if raw is not None else ''
+        if not name:
+            name = f'column_{index + 1}'
+        named.append(_free_name(name, used))
+    return named
+
+
+def _rows_as_objects(rows: Any, columns: Any) -> List[Any]:
+    """Pair positional result rows with the column names returned beside them.
+
+    ``/v1/query`` and ``/v1/results`` both answer with ``columns`` (the names) and
+    ``rows`` (a list of value *lists*), never with objects. Everything downstream
+    is written against objects - the Markdown table, the information_schema
+    reshaping, the rows handed to the agent - so the names are attached here, at
+    the one boundary where both halves are in hand. Without this the rows keep
+    their positions and nothing can name a field: the table renderer falls
+    through to ``str(row)`` and emits Python list reprs.
+
+    Rows that are already objects are passed through, so a server that starts
+    returning objects, and the tests that mock them, keep working. A row
+    *narrower* than its header yields an object without the trailing keys rather
+    than inventing nulls for values the server never sent.
+    """
+    if not isinstance(rows, list) or not rows:
+        return rows if isinstance(rows, list) else []
+    if not isinstance(columns, list) or not columns:
+        return rows
+    names = _name_columns(columns)
+    out: List[Any] = []
+    for row in rows:
+        if isinstance(row, dict) or not isinstance(row, (list, tuple)):
+            out.append(row)
+            continue
+        item: Dict[str, Any] = {name: row[i] for i, name in enumerate(names) if i < len(row)}
+        # A row wider than its header keeps the tail rather than dropping it:
+        # losing a value silently is worse than naming it by position. The
+        # positional key goes through _free_name too, because `column_3` is
+        # itself a legal column name and would otherwise be overwritten.
+        if len(row) > len(names):
+            used = set(item)
+            for i in range(len(names), len(row)):
+                item[_free_name(f'column_{i + 1}', used)] = row[i]
+        out.append(item)
+    return out
+
+
 def _cell(value: Any) -> str:
-    """Render one table cell: pipes and newlines both break the row otherwise."""
+    """Render one table cell: pipes and newlines both break the row otherwise.
+
+    SQL NULL arrives as ``None`` and renders as an empty cell. ``str(None)`` would
+    put the Python word "None" in front of a reader who asked a question about
+    their data - the same leak as the list reprs, one value at a time.
+    """
+    if value is None:
+        return ''
     return str(value).replace('|', '\\|').replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
 
 
@@ -328,7 +474,9 @@ def _rows_to_markdown(rows: List[Any], limit: int = 100) -> str:
             if key not in columns:
                 columns.append(key)
 
-    header = '| ' + ' | '.join(columns) + ' |'
+    # Header cells are escaped like body cells: `SELECT total AS "a|b"` is a
+    # legal alias, and an unescaped pipe in the header splits the column in two.
+    header = '| ' + ' | '.join(_cell(c) for c in columns) + ' |'
     divider = '| ' + ' | '.join('---' for _ in columns) + ' |'
     body = ['| ' + ' | '.join(_cell(row.get(c, '')) for c in columns) + ' |' for row in shown]
     table = '\n'.join([header, divider] + body)
@@ -381,19 +529,26 @@ class IInstance(IInstanceBase):
         # 25,000 - so the id is only offered when the caller has seen all of it.
         run_id = response.get('query_run_id') or response.get('id')
         if response.get('rows') is not None and not response.get('truncated'):
-            rows = response.get('rows') or []
+            rows = _rows_as_objects(response.get('rows') or [], response.get('columns'))
             result = {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
             if response.get('result_id') and len(rows) <= limit:
                 result['result_id'] = response['result_id']
             return result
 
-        if run_id and response.get('result_id') is None:
-            response = self._await_run(run_id)
+        # A truncated response always carries a result_id, but per QueryResponse in
+        # https://www.hotdata.dev/openapi.yaml that id "is issued while the save is
+        # still in flight, so on its own it does not mean the result can be
+        # retrieved": a read against it answers 202 with no rows, which came back
+        # from here as an empty result. The run is the readiness signal, so wait
+        # on it whenever the server deferred or truncated.
+        if run_id and (response.get('result_id') is None or response.get('truncated')):
+            response = self._await_run(run_id, database_id)
 
         result_id = response.get('result_id')
         if result_id:
-            payload = glb.client.get_result(result_id, offset=0, limit=limit)
-            rows = payload.get('rows') or payload.get('data') or []
+            payload = glb.client.get_result(result_id, database_id=database_id, offset=0, limit=limit)
+            raw = payload.get('rows') or payload.get('data') or []
+            rows = _rows_as_objects(raw, payload.get('columns'))
             result = {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
             # get_result is explicitly a window; a full page back means there may
             # be more behind it, and the id would then name more than was seen.
@@ -401,7 +556,7 @@ class IInstance(IInstanceBase):
                 result['result_id'] = result_id
             return result
 
-        rows = response.get('rows') or []
+        rows = _rows_as_objects(response.get('rows') or [], response.get('columns'))
         return {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
 
     def _schema_via_sql(self) -> List[Dict[str, Any]]:
@@ -457,17 +612,23 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 names.append(str(value))
         return names
 
-    def _await_run(self, run_id: str) -> Dict[str, Any]:
+    def _await_run(self, run_id: str, database_id: str = '') -> Dict[str, Any]:
         """Poll a query run to a terminal state under a monotonic deadline."""
         glb = self.IGlobal
         deadline = time.monotonic() + glb.job_timeout_secs
         delay = _POLL_BASE_S
         while True:
-            run = glb.client.get_query_run(run_id)
+            run = glb.client.get_query_run(run_id, database_id=database_id)
             status = str(run.get('status') or '').lower()
             if status in _TERMINAL_BAD:
-                message = run.get('error') or run.get('message') or status
-                raise RuntimeError(f'db_hotdata: query failed: {message}')
+                message = _run_failure_text(run, status)
+                if status in _ENDED_NOT_BY_THE_SQL:
+                    # Not the statement's fault, so not SqlStatementError: a
+                    # rewritten query cannot un-interrupt or un-cancel a run, and
+                    # classifying it as fixable would spend an LLM turn finding
+                    # that out.
+                    raise RuntimeError(f'db_hotdata: query run ended as {status!r}: {message}')
+                raise SqlStatementError(f'db_hotdata: query failed: {message}')
             if status in _TERMINAL_OK or run.get('result_id'):
                 return run
             if time.monotonic() + delay > deadline:
@@ -888,6 +1049,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
         ),
     )
     def get_data(self, args: Any) -> Dict[str, Any]:
+        """Answer a question: generate SQL, run it, and retry a rejected statement with its error fed back."""
         args = normalize_tool_input(args, tool_name='get_data')
         question_text = str(args.get('question') or '').strip()
         if not question_text:
@@ -913,6 +1075,12 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 result['attempts'] = attempt
                 return result
             except Exception as e:
+                if not _is_sql_fixable(e):
+                    # Raised as-is: the original carries the status and the
+                    # server's own wording, which "could not answer after 3
+                    # attempts" would bury behind two pointless LLM calls.
+                    debug(f'db_hotdata: attempt {attempt} hit a failure no rewrite can fix: {e}')
+                    raise
                 previous_sql, last_error = cleaned, str(e)
                 debug(f'db_hotdata: attempt {attempt} failed: {last_error}')
 
