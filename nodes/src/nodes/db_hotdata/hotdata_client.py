@@ -80,6 +80,10 @@ _HTTP_CONFLICT = 409
 #: which must NOT be retried.
 _RESOURCE_LOCKED = 'RESOURCE_LOCKED'
 
+#: States in which GET /v1/results/{id} answers 202 with {status, result_id} and
+#: no data, per the endpoint's status table in https://www.hotdata.dev/openapi.yaml.
+_RESULT_NOT_READY = frozenset({'pending', 'processing'})
+
 
 def _creates_a_database(method: str, path: str) -> bool:
     """Is this the one request whose replay could orphan a billable resource?"""
@@ -401,12 +405,24 @@ class HotdataClient:
         params: Dict[str, Any] = {'offset': offset}
         if limit is not None:
             params['limit'] = limit
-        return self._request(
+        body = self._request(
             'GET',
             f'/v1/results/{result_id}',
             params=params,
             extra_headers={'X-Database-Id': database_id} if database_id else None,
         )
+        # A result still being saved answers 202 with {status, result_id} and no
+        # rows. _request only raises from 400 up, so without this the caller reads
+        # "no rows" and reports that the query matched nothing. Not ready is not
+        # the same as empty.
+        state = str(body.get('status') or '').lower()
+        if state in _RESULT_NOT_READY and body.get('rows') is None:
+            raise HotdataError(
+                f'hotdata: result {result_id} is not ready yet (status {state!r}); '
+                'wait for its query run to succeed before reading it',
+                status_code=202,
+            )
+        return body
 
     def information_schema(
         self,
@@ -716,6 +732,12 @@ def _query_run_id(response: Any) -> str:
         return ''
     if not isinstance(body, dict):
         return ''
+    # Both levels, the way _error_code reads the code: the documented error body
+    # is {"error": {code, message}}, so the run id is looked for inside `error`
+    # as well as beside it, where the live API puts it today.
+    error = body.get('error')
+    if isinstance(error, dict) and error.get('query_run_id'):
+        return str(error['query_run_id'])
     return str(body.get('query_run_id') or '')
 
 
