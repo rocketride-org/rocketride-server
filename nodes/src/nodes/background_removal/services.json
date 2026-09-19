@@ -84,6 +84,7 @@
 	],
 	"test": {
 		"profiles": ["birefnet-default"],
+		"requiresHardware": { "cuda": { "vramGb": 6 }, "mps": { "ramGb": 12 }, "cpu": { "ramGb": 12 } },
 		"outputs": ["text"],
 		"timeout": 180,
 		"cases": [
@@ -96,18 +97,36 @@
 			}
 		]
 	},
-	"fulltest": {
-		"profiles": ["birefnet-default", "birefnet-hr"],
-		"outputs": ["text"],
-		"timeout": 300,
-		"cases": [
-			{
-				"name": "Remove background from image",
-				"image": "images/einstein.jpg",
-				"expect": {
-					"text": { "notEmpty": true, "contains": "mean_alpha" }
+	"fulltest": [
+		{
+			"profiles": ["birefnet-default"],
+			"requiresHardware": { "cuda": { "vramGb": 6 }, "mps": { "ramGb": 12 }, "cpu": { "ramGb": 12 } },
+			"outputs": ["text"],
+			"timeout": 300,
+			"cases": [
+				{
+					"name": "Remove background from image",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true, "contains": "mean_alpha" }
+					}
 				}
-			}
-		]
-	}
+			]
+		},
+		{
+			"profiles": ["birefnet-hr"],
+			"requiresHardware": { "cuda": { "vramGb": 16 }, "mps": { "ramGb": 32 }, "cpu": { "ramGb": 32 } },
+			"outputs": ["text"],
+			"timeout": 300,
+			"cases": [
+				{
+					"name": "Remove background from image",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true, "contains": "mean_alpha" }
+					}
+				}
+			]
+		}
+	]
 }

@@ -89,6 +89,8 @@ class NodeTestConfig:
     # Test configuration
     requires: List[str] = field(default_factory=list)
     requires_libs: List[str] = field(default_factory=list)
+    # Raw `requiresHardware` value (None when absent); parsed by framework.gate.
+    requires_hardware: Any = None
     avoid_mocks: bool = False
     profiles: List[str] = field(default_factory=list)
     controls: List[str] = field(default_factory=list)
@@ -363,6 +365,7 @@ def _parse_test_config(
                 service_file=service_file,
                 requires=_ensure_list_field(group.get('requires'), 'requires', service_file),
                 requires_libs=_resolve_platform_libs(group.get('requiresLibs'), service_file),
+                requires_hardware=group.get('requiresHardware'),
                 avoid_mocks=bool(group.get('avoidMocks', False)),
                 profiles=_ensure_list_field(group.get('profiles'), 'profiles', service_file),
                 controls=_ensure_list_field(group.get('controls'), 'controls', service_file),
