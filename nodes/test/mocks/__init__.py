@@ -52,9 +52,16 @@ Mock Coverage (all external calls go through mocks when ROCKETRIDE_MOCK is set):
 - LLM validateConfig: openai, anthropic (direct SDK - no real API calls)
 - Vector stores: qdrant_client, weaviate, psycopg2, pgvector, pinecone,
   chromadb, pymilvus, astrapy, elasticsearch, opensearchpy (index_search)
+- Raw HTTP (no vendor SDK): `requests/` -- unlike every other entry here, this
+  shadows a *transport* library, not a vendor SDK. It re-exports the real
+  `requests` package as a passthrough and fakes only specific endpoints (see
+  requests/__init__.py's own docstring for why, and the avoidMocks interaction
+  that keeps this out of credential-gated live tests). Currently fakes:
+  Deepgram's POST /v1/listen (cloud_stt).
 
 LLM credential placeholders (pipeline injects when ROCKETRIDE_MOCK): anthropic, xai,
-openai, perplexity, deepseek, mistral, vision_mistral, gemini, ibm_watson, bedrock.
+openai, perplexity, deepseek, mistral, vision_mistral, gemini, ibm_watson, bedrock,
+stt_deepgram.
 
 Not mocked (native SDK; would need mocks for full test): Mistral SDK, Google genai,
 IBM Watson. Bedrock uses langchain mocks + credential placeholders.

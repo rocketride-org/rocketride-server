@@ -24,12 +24,15 @@ Public surface:
 - ``colorize_depth``, ``decode_ndarray``, ``encode_ndarray``, ``image_to_bytes``
   — image/ndarray (de)serialization helpers.
 - ``validate_public_url`` — reject non-public/SSRF-prone URLs.
+- ``resolve_vendor`` — pick a cloud_* node's vendor (longest-id-first match)
+  from its logicalType.
 
 Implementations live in submodules (``string_utils``, ``content_blocks``,
 ``tool_args``,
 ``config_utils``, ``agent_tools``, ``file_utils``, ``cuda_utils``,
-``http_retry``, ``image_utils``, ``url_utils``); this package re-exports them so
-the canonical import path is ``from ai.common.utils import <name>``.
+``http_retry``, ``image_utils``, ``url_utils``, ``vendor_resolution``); this
+package re-exports them so the canonical import path is
+``from ai.common.utils import <name>``.
 """
 
 from .agent_tools import langchain_messages_to_transcript, normalize_bound_tools
@@ -62,6 +65,7 @@ from .tool_args import (
     validate_tool_input_schema,
 )
 from .url_utils import validate_public_url
+from .vendor_resolution import resolve_vendor
 
 __all__ = [
     'colorize_depth',
@@ -92,6 +96,7 @@ __all__ = [
     'require_str',
     'require_str_list',
     'resolve_pipeline_device',
+    'resolve_vendor',
     'safe_str',
     'source_quality',
     'validate_public_url',
