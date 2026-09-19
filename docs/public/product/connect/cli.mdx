@@ -102,7 +102,7 @@ file, and streams results back.
 ```bash
 rocketride upload --pipeline ./extract.pipe ./invoice.pdf
 
-# Upload multiple files concurrently
+# Upload multiple files, at most 4 in flight at a time (default 5)
 rocketride upload --pipeline ./extract.pipe ./docs/*.pdf --max-concurrent 4
 
 # Feed files into an already-running task
@@ -115,7 +115,8 @@ Key flags:
 | --- | --- |
 | `--pipeline <path>` | Path to the `.pipe` file. Required unless `--token` is given. |
 | `--token <token>` | Send files to an existing task instead of starting a new one. |
-| `--max-concurrent <n>` | Maximum number of files to upload in parallel. Default 5. TypeScript CLI only. |
+| `--max-concurrent <n>` | Maximum number of files uploaded at the same time. Default 5. Must be a positive integer. |
+| `--threads <n>` | Worker threads for the pipeline this command starts. Default 4. Independent of `--max-concurrent`. |
 
 ### stop
 

@@ -60,6 +60,17 @@ from .utils.env import (
 )
 
 
+def positive_int(value: str) -> int:
+    """Parse a flag value that must be a whole number of at least 1."""
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'must be a positive integer, got {value!r}') from None
+    if number < 1:
+        raise argparse.ArgumentTypeError(f'must be a positive integer, got {value!r}')
+    return number
+
+
 def _add_connection_args(parser: argparse.ArgumentParser, *, json_arg: bool = True) -> None:
     """
     Add the development-connection options (``--uri``, ``--apikey``,
@@ -213,13 +224,16 @@ def setup_parser() -> argparse.ArgumentParser:
         default=os.getenv('ROCKETRIDE_TOKEN'),
         help='Existing task token to use for uploads (can use ROCKETRIDE_TOKEN in .env or env var)',
     )
-    upload_parser.add_argument('--threads', type=int, default=4, help='Number of threads (default: %(default)s)')
+    upload_parser.add_argument(
+        '--threads', type=int, default=4, help='Number of threads for pipeline execution (default: %(default)s)'
+    )
+    # Upload fan-out, independent of --threads and matching the TypeScript CLI
     upload_parser.add_argument(
         '--max-concurrent',
         dest='max_concurrent',
-        type=int,
+        type=positive_int,
         default=5,
-        help='Maximum concurrent uploads (accepted for parity; the Python client parallelizes automatically)',
+        help='Maximum number of concurrent file uploads (default: %(default)s)',
     )
     upload_parser.add_argument(
         '--args', dest='pipeline_args', nargs=argparse.REMAINDER, help='Additional pipeline arguments'

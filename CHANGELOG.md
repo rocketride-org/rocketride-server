@@ -85,6 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **chroma**: validate server version and surface silent index failures (#1494)
 - **ci**: read full marker body in Discord issue/PR notifiers (#1530)
 - **client**: make connection lifecycle generation-safe (#1668)
+- **client-python**: bound `send_files()` concurrency with `max_concurrent` (default 5) and wire the CLI's `--max-concurrent` to it (RR-1841) (#1895)
 - **depends**: pin bootstrap tools and pydantic to stop downgrade churn (#1536)
 - **deps**: restore a resolvable onnxruntime pin — 1.20.1 is gone from PyPI (#1725)
 - **docs**: normalize Discord invite links to a single code (#1746)
