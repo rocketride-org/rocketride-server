@@ -816,7 +816,7 @@ Point a team at a published version. Promotion (Staging to Production) and rollb
 
 #### Schedules
 
-- `async deploy.set_schedule(project_id: str, source_id: str, schedule: str | None, team_id: str, *, ttl: int | None = None) -> Deployment` — set (or clear) one source's schedule on a team deployment. `schedule` is a 5-field cron expression; `None` or `'manual'` clears it. `ttl` is **the run-window bound** in seconds — how long each scheduled run may execute before the server ends it; `None` = run each task until the pipeline finishes on its own. Editing cron/ttl preserves the paused flag (a new schedule starts unpaused).
+- `async deploy.set_schedule(project_id: str, source_id: str, schedule: str | None, team_id: str, *, ttl: int | None = None) -> Deployment` — set (or clear) one source's schedule on a team deployment. `schedule` is a 5-field cron expression; `None` or `'manual'` clears it. `ttl` is **the run-window bound** in seconds — how long each scheduled run may execute before the server ends it; `None` = no fixed window; each run is stopped once idle for the server's default idle timeout. Editing cron/ttl preserves the paused flag (a new schedule starts unpaused).
 - `async deploy.pause_schedule(project_id: str, source_id: str, team_id: str) -> Deployment` — pause ONE source's schedule; cron/ttl stay configured, it just stops firing until resumed.
 - `async deploy.resume_schedule(project_id: str, source_id: str, team_id: str) -> Deployment` — resume a paused source schedule.
 - `async deploy.set_source_config(project_id: str, source_id: str, team_id: str, *, trace_level: str | None = None, debug_out: bool = False) -> Deployment` — set one source's execution settings for deploy runs (scheduled and manual alike). `trace_level`: `'none'`|`'metadata'`|`'summary'`|`'full'` (`None` = the deploy default, full); `debug_out`: full task debug output. Editing the schedule never touches these.
@@ -865,7 +865,7 @@ await client.deploy.set_schedule(
 )
 ```
 
-If you omit `ttl`, each scheduled run executes until the pipeline finishes on its own — correct for batch jobs that end naturally, wrong for always-on sources that must only occupy a window.
+If you omit `ttl`, each scheduled run is stopped once it has been idle for the server's default idle timeout — fine for batch jobs that keep working until they end, but a source that must occupy a set window still needs an explicit `ttl`.
 
 ## 10. Apps
 

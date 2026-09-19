@@ -593,8 +593,8 @@ class DeployApi:
             schedule: 5-field cron expression; ``None`` or ``'manual'``
                 clears the schedule.
             team_id: The team whose deployment to schedule.
-            ttl: Run window in seconds ('fixed window'); ``None`` runs each
-                task until the pipeline finishes.
+            ttl: Run window in seconds ('fixed window'); ``None`` stops each
+                task once idle for the server's default idle timeout.
 
         Returns:
             The updated deployment record.

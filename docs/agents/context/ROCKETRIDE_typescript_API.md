@@ -801,7 +801,7 @@ Point a team at a published version. Promotion (Staging → Production) and roll
 
 **Schedules:**
 
-- `setSchedule(projectId, sourceId, schedule, teamId, options?): Promise<Deployment>` — set (or clear) one source's schedule. `schedule` is a 5-field cron expression (`null` or `'manual'` clears it); `options.ttl` is the run window in seconds (omitted = each run executes until the pipeline finishes). Editing cron/ttl preserves the paused flag — `pauseSchedule`/`resumeSchedule` own it
+- `setSchedule(projectId, sourceId, schedule, teamId, options?): Promise<Deployment>` — set (or clear) one source's schedule. `schedule` is a 5-field cron expression (`null` or `'manual'` clears it); `options.ttl` is the run window in seconds (omitted = each run is stopped once idle for the server's default idle timeout). Editing cron/ttl preserves the paused flag — `pauseSchedule`/`resumeSchedule` own it
 - `setSourceConfig(projectId, sourceId, teamId, options?): Promise<Deployment>` — per-source settings riding every deploy run: `options.traceLevel?: 'none' | 'metadata' | 'summary' | 'full' | null` (null/omitted = deploy default, full) and `options.debugOut?: boolean`. Editing the schedule never touches them
 - `pauseSchedule(projectId, sourceId, teamId)` / `resumeSchedule(...)` — pause ONE source's schedule (cron/ttl stay configured, it just stops firing) / resume it
 - `preview(schedule, count?): Promise<SchedulePreview>` — validate a cron expression and get its next occurrences (`{ valid, error?, next? }`). THE cron evaluator: render "next run" lines from it rather than parsing cron client-side, so previews never disagree with what the scheduler fires
@@ -847,7 +847,7 @@ await client.deploy.pauseSchedule('proj-123', 'webhook_1', 'team-prod');
 await client.deploy.resumeSchedule('proj-123', 'webhook_1', 'team-prod');
 ```
 
-Without the `ttl` the run would start at 08:00 and simply run until the pipeline finishes — the cron alone cannot express the 15:00 boundary.
+Without the `ttl` the run would start at 08:00 and stop only when it finishes or goes idle past the server's default idle timeout — the cron alone cannot express the 15:00 boundary.
 
 ---
 
