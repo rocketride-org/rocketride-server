@@ -36,7 +36,7 @@ An agent flow: `load_data` the rows, `build_index` on the text column, then `get
 | Function      | Description                                                                                                 |
 | ------------- | ------------------------------------------------------------------------------------------------------------- |
 | `load_data`   | Load rows, or a previous query result by `result_id`, into a table. Creates the table if needed              |
-| `get_data`    | Answer a plain-language question. The bound LLM writes the SQL; failures are retried with the error fed back |
+| `get_data`    | Answer a plain-language question. The bound LLM writes the SQL; only rejected SQL is retried, with its error |
 | `get_sql`     | Generate the SQL for a question without running it                                                           |
 | `execute`     | Run one raw read-only SQL statement. Gated by `allow_execute`                                                |
 | `get_schema`  | Live tables and columns from `information_schema`                                                            |
@@ -125,6 +125,7 @@ Hotdata runs **Apache DataFusion 54 behind the PostgreSQL parser dialect**. Trea
 | Symptom                                           | Cause                                                                                                   |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apikey is required` / `workspace_id is required` | Neither the config field nor the env var is set                                                         |
+| `HTTP 401` / `HTTP 404` from `get_data`           | Wrong API key, workspace or database ID. Raised at once: only a rejected SQL statement is retried       |
 | `raw SQL execution is disabled`                   | Turn on `allow_execute`, or use `get_data` instead                                                      |
 | `only one statement per call`                     | Hotdata rejects semicolon-separated batches                                                             |
 | Unknown function errors                           | A Postgres-only function that DataFusion lacks — check `dialect`                                        |

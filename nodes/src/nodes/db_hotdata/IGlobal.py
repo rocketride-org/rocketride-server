@@ -46,6 +46,12 @@ from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 from .hotdata_client import HotdataClient
 
 
+#: Smallest async_after_ms the API accepts. Anything lower is answered with
+#: 400 "async_after_ms must be at least 1000", which failed every single query
+#: for a pipeline configured below it. services.json advertises the same floor.
+ASYNC_AFTER_MS_MIN = 1000
+
+
 def _int_or(value: Any, default: int, *, lo: int, hi: int) -> int:
     try:
         n = int(value)
@@ -94,6 +100,7 @@ class IGlobal(IGlobalBase):
     async_after_ms: int = 5000
 
     def beginGlobal(self) -> None:
+        """Read the node config and build the REST client; the database itself is created lazily."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
@@ -128,7 +135,7 @@ class IGlobal(IGlobalBase):
         self.allow_execute = _bool_or(cfg.get('allow_execute'), False)
         self.allow_destructive_load = _bool_or(cfg.get('allow_destructive_load'), False)
         self.job_timeout_secs = _int_or(cfg.get('job_timeout_secs'), 300, lo=10, hi=3600)
-        self.async_after_ms = _int_or(cfg.get('async_after_ms'), 5000, lo=0, hi=60000)
+        self.async_after_ms = _int_or(cfg.get('async_after_ms'), 5000, lo=ASYNC_AFTER_MS_MIN, hi=60000)
 
         self.client = HotdataClient(
             apikey=self.apikey,

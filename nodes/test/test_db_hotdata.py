@@ -735,24 +735,34 @@ def test_execute_limit_is_clamped_and_booleans_rejected():
 
 
 def test_execute_follows_async_run_to_a_result():
+    """A deferred query is polled to completion and its result read, both scoped to the database."""
     polls = [{'status': 'running'}, {'status': 'succeeded', 'result_id': 'res-1'}]
+    scoped = []
     g = _global()
     g.client = SimpleNamespace(
         query=lambda **_kw: {'query_run_id': 'run-1'},
-        get_query_run=lambda _i: polls.pop(0),
-        get_result=lambda _i, offset=0, limit=None: {'rows': [{'a': 1}]},
+        get_query_run=lambda _i, database_id='': scoped.append(('run', database_id)) or polls.pop(0),
+        get_result=lambda _i, database_id='', offset=0, limit=None: (
+            scoped.append(('result', database_id)) or {'rows': [{'a': 1}]}
+        ),
         create_database=lambda **_kw: {'id': 'db-1'},
     )
     inst = _instance(g)
     out = inst.execute({'sql': 'SELECT a FROM t'})
     assert out['rows'] == [{'a': 1}]
+    # Both endpoints are database-scoped server-side; an unscoped call is a 400.
+    assert scoped == [('run', 'db-1'), ('run', 'db-1'), ('result', 'db-1')]
 
 
 def test_failed_query_run_raises_runtime_error():
+    """A run that ends failed raises with the server's reason, read from ``error_message``."""
     g = _global()
     g.client = SimpleNamespace(
         query=lambda **_kw: {'query_run_id': 'run-1'},
-        get_query_run=lambda _i: {'status': 'failed', 'error': 'syntax error at or near "SELCT"'},
+        get_query_run=lambda _i, database_id='': {
+            'status': 'failed',
+            'error_message': 'query execution failed: syntax error at or near "SELCT"',
+        },
         create_database=lambda **_kw: {'id': 'db-1'},
     )
     inst = _instance(g)
@@ -827,12 +837,20 @@ def test_get_sql_requires_a_question():
 
 
 def test_get_data_retries_with_the_error_fed_back():
+    """A rejected statement earns another attempt, and the model sees why the first one failed."""
     calls = {'n': 0}
 
     def _query(**_kw):
         calls['n'] += 1
         if calls['n'] == 1:
-            raise RuntimeError("Invalid function 'to_number'. Did you mean 'to_char'?")
+            # How the live API rejects a bad statement: HTTP 400 carrying a
+            # query_run_id, which is what marks it as the statement failing
+            # rather than the request being malformed.
+            raise client_mod.HotdataError(
+                "hotdata: POST /v1/query failed with HTTP 400: Invalid function 'to_number'.",
+                status_code=400,
+                query_run_id='qrun-1',
+            )
         return {'rows': [{'a': 1}]}
 
     g = _loaded_global(max_attempts=3)
@@ -847,10 +865,13 @@ def test_get_data_retries_with_the_error_fed_back():
 
 
 def test_get_data_gives_up_after_max_attempts():
+    """Statement failures stop after max_attempts and report the last error."""
     g = _loaded_global(max_attempts=2)
     g.client = SimpleNamespace(
         information_schema=lambda **_kw: {'tables': []},
-        query=lambda **_kw: (_ for _ in ()).throw(RuntimeError('boom')),
+        query=lambda **_kw: (_ for _ in ()).throw(
+            client_mod.HotdataError('hotdata: HTTP 400: boom', status_code=400, query_run_id='qrun-1')
+        ),
     )
     inst = _llm_instance(g, ['SELECT 1', 'SELECT 2'])
     with pytest.raises(RuntimeError, match='after 2 attempts'):
@@ -2416,3 +2437,486 @@ def test_a_new_database_does_not_inherit_the_previous_dedup_records():
 
     assert not out.get('deduplicated'), 'a different database must not reuse the old fingerprint'
     assert len(calls) == 2, 'the load must actually run against the new database'
+
+
+# ---------------------------------------------------------------------------
+# Result rows carry their column names
+#
+# /v1/query and /v1/results answer with `columns` (the names) and `rows` (lists
+# of values), never with objects. Everything downstream is written against
+# objects, so the names are attached in _run_sql. Before that, every lane
+# rendered Python list reprs - "['Reno', 200]" - instead of a table.
+# ---------------------------------------------------------------------------
+
+
+def test_rows_are_named_from_the_columns_beside_them():
+    """The live wire shape - `columns` beside positional `rows` - becomes a list of objects."""
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {
+            'columns': ['city', 'units'],
+            'rows': [['Reno', 200], ['Austin', 120], ['Denver', 80]],
+            'row_count': 3,
+            'truncated': False,
+        }
+    )
+    out = _instance(g)._run_sql('SELECT city, units FROM main.sales', 100)
+    assert out['rows'] == [
+        {'city': 'Reno', 'units': 200},
+        {'city': 'Austin', 'units': 120},
+        {'city': 'Denver', 'units': 80},
+    ]
+
+
+def test_named_rows_render_as_a_markdown_table():
+    """The lane output the three bugs were reported against."""
+    rows = iinstance_mod._rows_as_objects([['Reno', 200], ['Austin', 120]], ['city', 'units'])
+    table = iinstance_mod._rows_to_markdown(rows)
+    assert table.splitlines()[0] == '| city | units |'
+    assert '| Reno | 200 |' in table
+    assert '[' not in table, f'must not fall through to a Python list repr: {table!r}'
+
+
+def test_a_repeated_column_name_does_not_collapse():
+    """A join answers ['city', 'city']; a plain dict would keep only the last value."""
+    rows = iinstance_mod._rows_as_objects([['Reno', 'Austin']], ['city', 'city'])
+    assert rows == [{'city': 'Reno', 'city_1': 'Austin'}]
+
+
+def test_an_unnamed_column_still_gets_a_key():
+    """An empty or null column name falls back to its position."""
+    assert iinstance_mod._rows_as_objects([[1, 2]], ['', None]) == [{'column_1': 1, 'column_2': 2}]
+
+
+def test_a_row_wider_than_its_header_keeps_the_tail():
+    """Dropping a value silently is worse than naming it by position."""
+    assert iinstance_mod._rows_as_objects([[1, 2, 3]], ['a']) == [{'a': 1, 'column_2': 2, 'column_3': 3}]
+
+
+def test_rows_that_are_already_objects_pass_through():
+    """Rows that arrive as objects are left exactly as they are."""
+    assert iinstance_mod._rows_as_objects([{'a': 1}], ['a']) == [{'a': 1}]
+
+
+def test_rows_without_columns_are_left_alone():
+    """With no names to attach there is nothing to do; rows keep their positions."""
+    assert iinstance_mod._rows_as_objects([[1]], None) == [[1]]
+
+
+def test_information_schema_over_sql_reshapes_named_rows():
+    """_schema_via_sql skips any row that is not an object, so unnamed rows
+    silently produced an empty schema and the LLM wrote SQL with no columns.
+    """
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {
+            'columns': ['table_schema', 'table_name', 'column_name', 'data_type'],
+            'rows': [['main', 'sales', 'city', 'Utf8'], ['main', 'sales', 'units', 'Int64']],
+            'truncated': False,
+        }
+    )
+    tables = _instance(g)._schema_via_sql()
+    assert tables == [
+        {
+            'schema': 'main',
+            'table': 'sales',
+            'columns': [
+                {'name': 'city', 'data_type': 'Utf8'},
+                {'name': 'units', 'data_type': 'Int64'},
+            ],
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Database-scoped reads
+# ---------------------------------------------------------------------------
+
+
+def test_get_result_and_query_run_send_the_database_header():
+    """Both endpoints answer 400 without X-Database-Id."""
+    c, rec = _client([_Resp(200, {'rows': []}), _Resp(200, {'status': 'succeeded'})])
+    c.get_result('res-1', database_id='db-1', offset=0, limit=10)
+    c.get_query_run('run-1', 'db-1')
+    assert rec.calls[0]['headers']['X-Database-Id'] == 'db-1'
+    assert rec.calls[1]['headers']['X-Database-Id'] == 'db-1'
+
+
+def test_an_unscoped_result_read_sends_no_database_header():
+    """The header is omitted rather than sent empty when no id is available."""
+    c, rec = _client([_Resp(200, {'rows': []})])
+    c.get_result('res-1')
+    assert 'X-Database-Id' not in rec.calls[0]['headers']
+
+
+# ---------------------------------------------------------------------------
+# Retry only what a different statement could fix
+# ---------------------------------------------------------------------------
+
+
+def test_get_data_does_not_retry_a_failure_sql_cannot_fix():
+    """A bad workspace is 404 on every attempt. Re-asking the model spends another
+    LLM call and another round trip to report the same thing.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        raise client_mod.HotdataError(
+            'hotdata: POST /v1/query failed with HTTP 404: {"error": "workspace_not_found"}',
+            status_code=404,
+        )
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(information_schema=lambda **_kw: {'tables': []}, query=_query)
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+
+    with pytest.raises(client_mod.HotdataError, match='workspace_not_found'):
+        inst.get_data({'question': 'x'})
+    assert calls['n'] == 1, 'must stop at the first unfixable failure'
+    assert len(inst.asked) == 1, 'must not spend a second LLM call'
+
+
+def test_get_data_does_not_retry_an_auth_failure():
+    """A rejected API key is a 401 on every attempt, so it is raised after the first."""
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=lambda **_kw: (_ for _ in ()).throw(
+            client_mod.HotdataError('hotdata: HTTP 401: invalid_api_key', status_code=401)
+        ),
+    )
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+    with pytest.raises(client_mod.HotdataError, match='invalid_api_key'):
+        inst.get_data({'question': 'x'})
+    assert len(inst.asked) == 1
+
+
+def test_get_data_still_retries_a_failed_query_run():
+    """A deferred run reports its failure in the poll body, with no HTTP status -
+    it is still the statement that failed, so it still earns another turn.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return {'query_run_id': 'run-1'}
+        return {'columns': ['a'], 'rows': [[1]], 'truncated': False}
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=_query,
+        get_query_run=lambda _i, database_id='': {'status': 'failed', 'error': 'Invalid function'},
+    )
+    inst = _llm_instance(g, ['SELECT bad(a) FROM t', 'SELECT a FROM t'])
+    out = inst.get_data({'question': 'x'})
+    assert out['rows'] == [{'a': 1}]
+    assert out['attempts'] == 2
+
+
+def test_a_generated_suffix_cannot_collide_with_a_real_column():
+    """For columns ['city', 'city', 'city_1'] the generated name for the second
+    `city` must not land on a column the result already has.
+    """
+    names = iinstance_mod._name_columns(['city', 'city', 'city_1'])
+    assert len(set(names)) == 3, f'names collide: {names}'
+    rows = iinstance_mod._rows_as_objects([['a', 'b', 'c']], ['city', 'city', 'city_1'])
+    assert list(rows[0].values()) == ['a', 'b', 'c'], f'a value was dropped: {rows}'
+
+
+def test_an_excess_value_cannot_overwrite_a_named_column():
+    """A row wider than its header must not park a value on a key the header
+    already used - `column_3` is a legal column name.
+    """
+    rows = iinstance_mod._rows_as_objects([[1, 2, 3]], ['a', 'column_3'])
+    assert list(rows[0].values()) == [1, 2, 3], f'a value was dropped: {rows}'
+
+
+def test_a_400_without_a_query_run_id_is_not_retried():
+    """`_run_sql` drives four endpoints. A bad ttl, a malformed limit or a
+    missing scoping header all answer 400 with nothing wrong with the SQL, and
+    the server mints no run id for them.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        raise client_mod.HotdataError(
+            "hotdata: POST /v1/databases failed with HTTP 400: expires_at 'not-a-ttl' is not an RFC 3339 timestamp",
+            status_code=400,
+        )
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(information_schema=lambda **_kw: {'tables': []}, query=_query)
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+
+    with pytest.raises(client_mod.HotdataError, match='not an RFC 3339 timestamp'):
+        inst.get_data({'question': 'x'})
+    assert calls['n'] == 1, 'a request-shaped 400 is identical on every attempt'
+    assert len(inst.asked) == 1, 'must not spend a second LLM call'
+
+
+def test_a_400_with_a_query_run_id_is_retried():
+    """The server mints a run id only once it has executed the statement."""
+    err = client_mod.HotdataError('boom', status_code=400, query_run_id='qrun-1')
+    assert iinstance_mod._is_sql_fixable(err) is True
+    assert iinstance_mod._is_sql_fixable(client_mod.HotdataError('boom', status_code=400)) is False
+
+
+def test_the_client_carries_the_query_run_id_off_an_error_body():
+    """A statement failure comes back as 400 with the run id beside the error."""
+    c, _rec = _client(
+        [_Resp(400, {'error': {'code': 'BAD_REQUEST', 'message': "table 'x' not found"}, 'query_run_id': 'qrun-9'})]
+    )
+    with pytest.raises(client_mod.HotdataError) as excinfo:
+        c.query(sql='SELECT * FROM x', database_id='db-1')
+    assert excinfo.value.query_run_id == 'qrun-9'
+    assert iinstance_mod._is_sql_fixable(excinfo.value) is True
+
+
+def test_the_client_leaves_the_run_id_empty_when_the_body_has_none():
+    """A request-shaped 400 carries no run id, and is classified as not fixable."""
+    c, _rec = _client(
+        [_Resp(400, {'error': {'code': 'BAD_REQUEST', 'message': 'async_after_ms must be at least 1000'}})]
+    )
+    with pytest.raises(client_mod.HotdataError) as excinfo:
+        c.query(sql='SELECT 1', database_id='db-1')
+    assert excinfo.value.query_run_id == ''
+    assert iinstance_mod._is_sql_fixable(excinfo.value) is False
+
+
+def test_get_result_keeps_its_positional_arguments():
+    """``get_result(result_id, offset, limit)`` predates database scoping. The new
+    parameter is keyword-only, so an old positional call cannot send its offset
+    as the X-Database-Id header.
+    """
+    c, rec = _client([_Resp(200, {'rows': []})])
+    c.get_result('res-1', 5, 10)
+    assert rec.calls[0]['params'] == {'offset': 5, 'limit': 10}
+    assert 'X-Database-Id' not in rec.calls[0]['headers']
+    with pytest.raises(TypeError):
+        c.get_result('res-1', 5, 10, 'db-1')
+
+
+def test_a_cancelled_run_is_not_treated_as_a_statement_failure():
+    """A rewritten query cannot un-cancel a run, so it must not earn a retry."""
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        return {'query_run_id': 'run-1'}
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=_query,
+        get_query_run=lambda _i, database_id='': {'status': 'cancelled'},
+    )
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+    with pytest.raises(RuntimeError, match='cancelled') as excinfo:
+        inst.get_data({'question': 'x'})
+    assert not isinstance(excinfo.value, iinstance_mod.SqlStatementError)
+    assert calls['n'] == 1
+    assert len(inst.asked) == 1
+
+
+def test_a_pipe_in_a_column_name_does_not_split_the_header():
+    """``SELECT total AS "a|b"`` is a legal alias. Unreachable while rows were
+    never objects; reachable now that the header is built from real names.
+    """
+    table = iinstance_mod._rows_to_markdown([{'a|b': 1}])
+    header, divider, body = table.splitlines()
+    assert header == '| a\\|b |'
+    assert divider == '| --- |'
+    assert body == '| 1 |'
+
+
+def test_a_null_renders_as_an_empty_cell():
+    """SQL NULL arrives as None; the Python word must not reach the reader."""
+    table = iinstance_mod._rows_to_markdown([{'city': 'Reno', 'units': None}])
+    assert table.splitlines()[2] == '| Reno |  |'
+    assert 'None' not in table
+
+
+def test_a_row_narrower_than_its_header_omits_the_missing_keys():
+    """No nulls are invented for values the server never sent."""
+    assert iinstance_mod._rows_as_objects([[1]], ['a', 'b']) == [{'a': 1}]
+
+
+def test_the_config_schema_advertises_the_floor_the_node_enforces():
+    """The form must not accept a value the node silently overrides, and neither
+    may drift from what the API accepts.
+    """
+    services = json.loads((_NODE_DIR / 'services.json').read_text(encoding='utf-8'))
+    field = services['fields']['hotdata.async_after_ms']
+    assert field['minimum'] == iglobal_mod.ASYNC_AFTER_MS_MIN == 1000
+    assert field['default'] >= field['minimum']
+
+
+def test_a_self_join_keeps_every_value():
+    """The shape the live API returns for ``SELECT * FROM sales a JOIN sales b``:
+    every name twice. This is how repeated names are actually reached - the
+    planner rejects a bare ``SELECT city, city``.
+    """
+    rows = iinstance_mod._rows_as_objects([['Reno', 200, 'Reno', 200]], ['city', 'units', 'city', 'units'])
+    assert rows == [{'city': 'Reno', 'units': 200, 'city_1': 'Reno', 'units_1': 200}]
+
+
+def test_a_failed_run_feeds_the_real_reason_back_to_the_model():
+    """The live poll body reports the cause as ``error_message``. Reading only
+    ``error``/``message`` fell through to the status, so the corrective attempt
+    was handed "failed" and rewrote blind.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return {'query_run_id': 'run-1'}
+        return {'columns': ['a'], 'rows': [[1]], 'truncated': False}
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=_query,
+        get_query_run=lambda _i, database_id='': {
+            'status': 'failed',
+            'error_message': 'query execution failed: Arrow error: Divide by zero error',
+        },
+    )
+    inst = _llm_instance(g, ['SELECT 1 / 0 FROM t', 'SELECT 1 FROM t'])
+    out = inst.get_data({'question': 'x'})
+    assert out['attempts'] == 2
+    assert 'Divide by zero' in inst.asked[1].all_text(), 'the model must see why the first statement failed'
+
+
+def test_run_failure_text_reads_every_shape_the_api_uses():
+    """``error_message`` first, then ``error`` as text or object, then ``message``, then the fallback."""
+    text = iinstance_mod._run_failure_text
+    assert text({'error_message': 'boom'}, 'failed') == 'boom'
+    assert text({'error': 'boom'}, 'failed') == 'boom'
+    assert text({'error': {'code': 'BAD_REQUEST', 'message': 'boom'}}, 'failed') == 'boom'
+    assert text({'message': 'boom'}, 'failed') == 'boom'
+    assert text({'status': 'failed'}, 'failed') == 'failed'
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups, read against https://www.hotdata.dev/openapi.yaml
+# ---------------------------------------------------------------------------
+
+
+def _bounded_poll(body, most=3):
+    """A get_query_run stub that fails the test if it is polled past `most`.
+
+    `time.sleep` is a no-op under test, so a status the poll loop does not
+    recognise would otherwise spin for the whole of job_timeout_secs.
+    """
+    seen = {'n': 0}
+
+    def _poll(_i, database_id=''):
+        """Return the same body, a bounded number of times."""
+        seen['n'] += 1
+        assert seen['n'] <= most, 'the poll loop did not treat this status as terminal'
+        return body
+
+    return _poll
+
+
+def test_a_truncated_result_is_read_only_after_its_run_succeeds():
+    """A truncated body always carries a result_id, so the old `result_id is None`
+    test never waited for it - and that id is issued while the save is still in
+    flight. The read must follow the run.
+    """
+    events = []
+    polls = [{'status': 'running'}, {'status': 'succeeded', 'result_id': 'res-from-run'}]
+
+    def _get_query_run(_i, database_id=''):
+        """Record the poll, then answer with the next queued run body."""
+        events.append('poll')
+        return polls.pop(0)
+
+    def _get_result(result_id, database_id='', offset=0, limit=None):
+        """Record which result id was read, and when."""
+        events.append(f'read:{result_id}')
+        return {'status': 'ready', 'columns': ['n'], 'rows': [[1], [2]]}
+
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {
+            'query_run_id': 'run-1',
+            'result_id': 'res-from-body',
+            'truncated': True,
+            'columns': ['n'],
+            'rows': [[1]],
+        },
+        get_query_run=_get_query_run,
+        get_result=_get_result,
+    )
+    out = _instance(g)._run_sql('SELECT n FROM big', 2)
+    assert events == ['poll', 'poll', 'read:res-from-run'], events
+    assert out['rows'] == [{'n': 1}, {'n': 2}]
+
+
+def test_a_result_that_is_not_ready_raises_instead_of_reading_as_empty():
+    """202 {status, result_id} carries no rows. It means "not ready", and must
+    never come back as a query that matched nothing.
+    """
+    for state in ('processing', 'pending'):
+        c, _rec = _client([_Resp(202, {'status': state, 'result_id': 'res-1'}, headers={'Retry-After': '1'})])
+        with pytest.raises(client_mod.HotdataError, match='not ready') as excinfo:
+            c.get_result('res-1', database_id='db-1')
+        assert excinfo.value.status_code == 202
+        assert iinstance_mod._is_sql_fixable(excinfo.value) is False
+
+
+def test_a_ready_result_with_no_rows_is_still_an_empty_result():
+    """The guard keys on the not-ready status, so a genuinely empty result passes."""
+    c, _rec = _client([_Resp(200, {'status': 'ready', 'columns': ['n'], 'rows': []})])
+    assert c.get_result('res-1', database_id='db-1')['rows'] == []
+
+
+def test_an_interrupted_run_ends_the_poll_at_once():
+    """`interrupted` is a documented terminal status. Unknown to the poll loop, it
+    read as "still running" and was polled until job_timeout_secs ran out, then
+    reported as a timeout that never happened.
+    """
+    g = _loaded_global(job_timeout_secs=300)
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {'query_run_id': 'run-1'},
+        get_query_run=_bounded_poll({'status': 'interrupted'}, most=1),
+    )
+    with pytest.raises(RuntimeError, match='interrupted') as excinfo:
+        _instance(g)._run_sql('SELECT a FROM t', 10)
+    assert not isinstance(excinfo.value, iinstance_mod.SqlStatementError)
+    assert 'did not finish within' not in str(excinfo.value)
+
+
+def test_an_interrupted_run_is_not_handed_to_the_model_to_rewrite():
+    """A rewritten statement cannot un-interrupt a run, so it must not cost an
+    LLM turn.
+    """
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=lambda **_kw: {'query_run_id': 'run-1'},
+        get_query_run=_bounded_poll({'status': 'interrupted'}),
+    )
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+    with pytest.raises(RuntimeError, match='interrupted'):
+        inst.get_data({'question': 'x'})
+    assert len(inst.asked) == 1
+
+
+def test_the_query_run_id_is_read_from_inside_the_error_object_too():
+    """The documented error body is {"error": {code, message}}. The live API puts
+    the run id beside `error`; were it to move inside, every retry would stop.
+    """
+    c, _rec = _client(
+        [_Resp(400, {'error': {'code': 'BAD_REQUEST', 'message': "table 'x' not found", 'query_run_id': 'qrun-7'}})]
+    )
+    with pytest.raises(client_mod.HotdataError) as excinfo:
+        c.query(sql='SELECT * FROM x', database_id='db-1')
+    assert excinfo.value.query_run_id == 'qrun-7'
+    assert iinstance_mod._is_sql_fixable(excinfo.value) is True

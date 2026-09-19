@@ -80,6 +80,10 @@ _HTTP_CONFLICT = 409
 #: which must NOT be retried.
 _RESOURCE_LOCKED = 'RESOURCE_LOCKED'
 
+#: States in which GET /v1/results/{id} answers 202 with {status, result_id} and
+#: no data, per the endpoint's status table in https://www.hotdata.dev/openapi.yaml.
+_RESULT_NOT_READY = frozenset({'pending', 'processing'})
+
 
 def _creates_a_database(method: str, path: str) -> bool:
     """Is this the one request whose replay could orphan a billable resource?"""
@@ -114,10 +118,22 @@ class HotdataError(RuntimeError):
     treat as success, and "this table is busy", which they must not.
     """
 
-    def __init__(self, message: str, status_code: Optional[int] = None, error_code: str = '') -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        error_code: str = '',
+        query_run_id: str = '',
+    ) -> None:
+        """Keep the HTTP status, API error code and query run id beside the message."""
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code
+        #: Set when the server answered the error with a query run id, which it
+        #: does only once it has created a run and executed the statement. That
+        #: makes it the marker for "the SQL failed" as opposed to "the request
+        #: was wrong" - both of which are plain 400s otherwise.
+        self.query_run_id = query_run_id
 
 
 class HotdataOverloadedError(HotdataError):
@@ -294,6 +310,7 @@ class HotdataClient:
                     f'hotdata: {method} {path} failed with HTTP {status}: {_body_snippet(response)}',
                     status_code=status,
                     error_code=error_code,
+                    query_run_id=_query_run_id(response),
                 )
 
             return _parse_json(response)
@@ -361,14 +378,51 @@ class HotdataClient:
             body['default_schema'] = default_schema
         return self._request('POST', '/v1/query', json_body=body)
 
-    def get_query_run(self, query_run_id: str) -> Dict[str, Any]:
-        return self._request('GET', f'/v1/query-runs/{query_run_id}')
+    def get_query_run(self, query_run_id: str, database_id: str = '') -> Dict[str, Any]:
+        """Read one query run.
 
-    def get_result(self, result_id: str, offset: int = 0, limit: Optional[int] = None) -> Dict[str, Any]:
+        Scoped to a database: without ``X-Database-Id`` the server answers 400
+        ``"this endpoint is scoped to a database"``, so every poll of a deferred
+        query failed. The id is threaded through from the caller rather than read
+        off the global, because the run belongs to the database it was issued
+        against, not to whichever database the node happens to hold now.
+        """
+        return self._request(
+            'GET',
+            f'/v1/query-runs/{query_run_id}',
+            extra_headers={'X-Database-Id': database_id} if database_id else None,
+        )
+
+    def get_result(
+        self, result_id: str, offset: int = 0, limit: Optional[int] = None, *, database_id: str = ''
+    ) -> Dict[str, Any]:
+        """Read a window of a stored result. Database-scoped, as ``get_query_run`` is.
+
+        ``database_id`` is keyword-only and sits after the original parameters, so
+        a positional ``get_result(result_id, offset, limit)`` call written against
+        the old signature still means what it meant.
+        """
         params: Dict[str, Any] = {'offset': offset}
         if limit is not None:
             params['limit'] = limit
-        return self._request('GET', f'/v1/results/{result_id}', params=params)
+        body = self._request(
+            'GET',
+            f'/v1/results/{result_id}',
+            params=params,
+            extra_headers={'X-Database-Id': database_id} if database_id else None,
+        )
+        # A result still being saved answers 202 with {status, result_id} and no
+        # rows. _request only raises from 400 up, so without this the caller reads
+        # "no rows" and reports that the query matched nothing. Not ready is not
+        # the same as empty.
+        state = str(body.get('status') or '').lower()
+        if state in _RESULT_NOT_READY and body.get('rows') is None:
+            raise HotdataError(
+                f'hotdata: result {result_id} is not ready yet (status {state!r}); '
+                'wait for its query run to succeed before reading it',
+                status_code=202,
+            )
+        return body
 
     def information_schema(
         self,
@@ -662,6 +716,29 @@ def _error_code(response: Any) -> str:
     if isinstance(error, dict):
         return str(error.get('code') or '')
     return str(body.get('code') or '')
+
+
+def _query_run_id(response: Any) -> str:
+    """The ``query_run_id`` on an error body, or '' if there isn't one.
+
+    Only the query endpoint sets it, and only after it has run the statement, so
+    its presence separates "your SQL is wrong" - which a regenerated statement
+    could fix - from "your request is wrong" (a bad ttl, a missing header, an
+    out-of-range limit), which is identical on every attempt.
+    """
+    try:
+        body = response.json()
+    except Exception:
+        return ''
+    if not isinstance(body, dict):
+        return ''
+    # Both levels, the way _error_code reads the code: the documented error body
+    # is {"error": {code, message}}, so the run id is looked for inside `error`
+    # as well as beside it, where the live API puts it today.
+    error = body.get('error')
+    if isinstance(error, dict) and error.get('query_run_id'):
+        return str(error['query_run_id'])
+    return str(body.get('query_run_id') or '')
 
 
 def _body_snippet(response: Any, limit: int = 500) -> str:
