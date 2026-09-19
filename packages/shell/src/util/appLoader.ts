@@ -123,6 +123,52 @@ export function isRemoteLoaded(moduleId: string): boolean {
 	return loadedModules.has(moduleId);
 }
 
+// =============================================================================
+// PINS THAT ARE BEHIND — the tab is running old code and says nothing
+// =============================================================================
+// A session pin is a deliberate choice and stays honoured. What it must not be
+// is UNNOTICED. A pin now lives in the address bar (see versionOverride), which
+// makes it findable — but a URL carrying `&version=` still looks like an
+// ordinary link, and the bytes behind a version are immutable, so the pinned
+// app works perfectly. It is simply the app as it was, and every explanation
+// the developer reaches for (a stale build, a missed copy, a bad seed) is
+// wrong.
+//
+// Recorded at registration, where both numbers are in hand, and read by the
+// chrome so the fact is on SCREEN. A console warning alone was the state of the
+// art here, and a console is precisely where nobody looks.
+
+/** One app pinned below the version the server would have served. */
+export interface StalePin {
+	appId: string;
+	name: string;
+	/** The version this document loads. */
+	pinned: number;
+	/** What the server resolves for this caller. */
+	latest: number;
+}
+
+const stalePins = new Map<string, StalePin>();
+
+/**
+ * The pin holding one app behind, if any.
+ *
+ * @param appId - The app id.
+ * @returns The pin, or null when the app loads the server's own answer.
+ */
+export function getStalePin(appId: string): StalePin | null {
+	return stalePins.get(appId) ?? null;
+}
+
+/**
+ * Every app currently held behind by a session pin.
+ *
+ * @returns The pins, in registration order.
+ */
+export function listStalePins(): StalePin[] {
+	return [...stalePins.values()];
+}
+
 /**
  * Force re-register an MF container at a new entry URL (version override
  * apply/boot). Refuses dev-owned containers — the live dev build always
@@ -658,6 +704,26 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
 	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
+
+	// Which apps a pin is holding BEHIND — see StalePin. Refreshed for the apps
+	// in THIS call only, so clearing a pin and re-registering clears the notice
+	// with it. Not a rebuild: a registration can be partial — post-auth, Shell
+	// registers only the apps the probe did not list — and clearing everything
+	// would silently drop a probed app's notice.
+	for (const a of serverApps) stalePins.delete(a.id);
+	// `resolved` is what `validApps` was before this merge: the server entries
+	// whose load URL resolved. Same filter, restructured to carry the URL with
+	// the entry — a pin cannot hold back an app that was never registered.
+	for (const { app: a } of resolved) {
+		const pin = overrideOf(a);
+		if (!pin || typeof a.registryVersion !== 'number') continue;
+		if (pin.version >= a.registryVersion) continue;
+		stalePins.set(a.id, { appId: a.id, name: a.name, pinned: pin.version, latest: a.registryVersion });
+		console.warn(
+			`[shell] ${a.name} is pinned to v${pin.version}; the server would serve v${a.registryVersion}. ` +
+			'This tab loads the pinned version until the pin is cleared — rebuilding cannot change it.',
+		);
+	}
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return resolved.map(({ app: a }) => ({
