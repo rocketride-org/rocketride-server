@@ -119,7 +119,7 @@ class TransformersLoader(BaseLoader):
     ) -> Tuple[Any, Dict[str, Any], int]:
         """Load a transformers model with CPU-first loading."""
         from transformers import AutoModel
-        from ai.common.torch import torch
+        from ai.common.torch import torch, probe_cuda
 
         # Enable trust_remote_code by default (can be overridden via kwargs)
         kwargs.setdefault('trust_remote_code', True)
@@ -158,6 +158,12 @@ class TransformersLoader(BaseLoader):
             if device is None:
                 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
+            if 'cuda' in str(device):
+                dev_idx = int(device.split(':')[1]) if ':' in str(device) else 0
+                if not probe_cuda(dev_idx):
+                    logger.warning(f'CUDA device {dev_idx} kernel probe failed, falling back to CPU')
+                    device = 'cpu'
+
             # Load directly to device
             model = ModelClass.from_pretrained(model_name, **kwargs)
             model = model.to(device)
@@ -191,7 +197,7 @@ class TransformersLoader(BaseLoader):
     ) -> Tuple[Any, Dict[str, Any], int]:
         """Load a transformers pipeline."""
         from transformers import pipeline as hf_pipeline
-        from ai.common.torch import torch
+        from ai.common.torch import torch, probe_cuda
 
         # Enable trust_remote_code by default (can be overridden via kwargs)
         kwargs.setdefault('trust_remote_code', True)
@@ -217,6 +223,10 @@ class TransformersLoader(BaseLoader):
                     device = int(device.split(':')[1])
                 elif device == 'cuda':
                     device = 0
+
+            if device >= 0 and not probe_cuda(device):
+                logger.warning(f'CUDA device {device} kernel probe failed, falling back to CPU')
+                device = -1
 
             pipe = hf_pipeline(task=task, model=model_name, device=device, **kwargs)
             gpu_index = device if device >= 0 else -1
