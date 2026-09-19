@@ -837,11 +837,13 @@ def test_get_data_retries_with_the_error_fed_back():
     def _query(**_kw):
         calls['n'] += 1
         if calls['n'] == 1:
-            # How the live API rejects a bad statement: HTTP 400. The status is
-            # what marks it as something a regenerated query could fix.
+            # How the live API rejects a bad statement: HTTP 400 carrying a
+            # query_run_id, which is what marks it as the statement failing
+            # rather than the request being malformed.
             raise client_mod.HotdataError(
                 "hotdata: POST /v1/query failed with HTTP 400: Invalid function 'to_number'.",
                 status_code=400,
+                query_run_id='qrun-1',
             )
         return {'rows': [{'a': 1}]}
 
@@ -860,7 +862,9 @@ def test_get_data_gives_up_after_max_attempts():
     g = _loaded_global(max_attempts=2)
     g.client = SimpleNamespace(
         information_schema=lambda **_kw: {'tables': []},
-        query=lambda **_kw: (_ for _ in ()).throw(client_mod.HotdataError('hotdata: HTTP 400: boom', status_code=400)),
+        query=lambda **_kw: (_ for _ in ()).throw(
+            client_mod.HotdataError('hotdata: HTTP 400: boom', status_code=400, query_run_id='qrun-1')
+        ),
     )
     inst = _llm_instance(g, ['SELECT 1', 'SELECT 2'])
     with pytest.raises(RuntimeError, match='after 2 attempts'):
@@ -2616,3 +2620,55 @@ def test_an_excess_value_cannot_overwrite_a_named_column():
     """
     rows = iinstance_mod._rows_as_objects([[1, 2, 3]], ['a', 'column_3'])
     assert list(rows[0].values()) == [1, 2, 3], f'a value was dropped: {rows}'
+
+
+def test_a_400_without_a_query_run_id_is_not_retried():
+    """`_run_sql` drives four endpoints. A bad ttl, a malformed limit or a
+    missing scoping header all answer 400 with nothing wrong with the SQL, and
+    the server mints no run id for them.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        raise client_mod.HotdataError(
+            "hotdata: POST /v1/databases failed with HTTP 400: expires_at 'not-a-ttl' is not an RFC 3339 timestamp",
+            status_code=400,
+        )
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(information_schema=lambda **_kw: {'tables': []}, query=_query)
+    inst = _llm_instance(g, ['SELECT 1', 'SELECT 2', 'SELECT 3'])
+
+    with pytest.raises(client_mod.HotdataError, match='not an RFC 3339 timestamp'):
+        inst.get_data({'question': 'x'})
+    assert calls['n'] == 1, 'a request-shaped 400 is identical on every attempt'
+    assert len(inst.asked) == 1, 'must not spend a second LLM call'
+
+
+def test_a_400_with_a_query_run_id_is_retried():
+    """The server mints a run id only once it has executed the statement."""
+    err = client_mod.HotdataError('boom', status_code=400, query_run_id='qrun-1')
+    assert iinstance_mod._is_sql_fixable(err) is True
+    assert iinstance_mod._is_sql_fixable(client_mod.HotdataError('boom', status_code=400)) is False
+
+
+def test_the_client_carries_the_query_run_id_off_an_error_body():
+    """A statement failure comes back as 400 with the run id beside the error."""
+    c, _rec = _client(
+        [_Resp(400, {'error': {'code': 'BAD_REQUEST', 'message': "table 'x' not found"}, 'query_run_id': 'qrun-9'})]
+    )
+    with pytest.raises(client_mod.HotdataError) as excinfo:
+        c.query(sql='SELECT * FROM x', database_id='db-1')
+    assert excinfo.value.query_run_id == 'qrun-9'
+    assert iinstance_mod._is_sql_fixable(excinfo.value) is True
+
+
+def test_the_client_leaves_the_run_id_empty_when_the_body_has_none():
+    c, _rec = _client(
+        [_Resp(400, {'error': {'code': 'BAD_REQUEST', 'message': 'async_after_ms must be at least 1000'}})]
+    )
+    with pytest.raises(client_mod.HotdataError) as excinfo:
+        c.query(sql='SELECT 1', database_id='db-1')
+    assert excinfo.value.query_run_id == ''
+    assert iinstance_mod._is_sql_fixable(excinfo.value) is False
