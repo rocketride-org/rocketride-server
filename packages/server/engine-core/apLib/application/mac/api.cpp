@@ -1,6 +1,5 @@
 // =============================================================================
 // MIT License
-//
 // Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,35 +21,29 @@
 // SOFTWARE.
 // =============================================================================
 
-#pragma once
 
-// The main entry point for an rocketride based executable
-int main(int argc, const char **argv) noexcept {
-    // Set the global commandline
-    ::ap::application::cmdline() = {argc, argv};
+#include <apLib/ap.h>
 
-    // Ready the core
-    auto initScope = ::ap::init();
+#include <limits.h>
+#include <mach-o/dyld.h>
 
-    // We'll read our path from /proc/self/exe, in a scope so we don't
-    // park the stack allocation for the duration of the app
-    {
-        std::array<char, 4 * ::ap::Size::kKilobyte> execPath = {};
+namespace ap::application {
 
-        ASSERTD_MSG(
-            ::readlink("/proc/self/exe", &execPath[0], execPath.size()) >= 0,
-            "Failed to determine app path: ", ::strerror(errno), errno);
+// Resolves the executable path from the mach-o loader
+// @returns
+// Zero, or ENAMETOOLONG if PATH_MAX was not enough
+int detectExecPath() noexcept {
+    std::array<char, PATH_MAX> execPath{};
+    uint32_t execPathsize = PATH_MAX;
 
-        // Set this as the applications exec path
-        ::ap::application::cmdline().setExecPath(&execPath[0]);
+    // Non-zero means the buffer was too small, execPathsize gets the size needed
+    if (::_NSGetExecutablePath(&execPath[0], &execPathsize)) {
+        log::write(_location, "Failed to determine app path: needs {} bytes", execPathsize);
+        return ENAMETOOLONG;
     }
 
-    // Call main with blocking and translation of exceptions to errors
-    auto res = ::ap::error::call(
-        _location, [&] { return ::ap::application::Main().value(); });
-
-    // Return the error code if one was returned
-    if (!res) return res.ccode().plat();
-
-    return *res;
+    cmdline().setExecPath(&execPath[0]);
+    return 0;
 }
+
+}  // namespace ap::application

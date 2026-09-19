@@ -37,7 +37,7 @@ function(rocketride_configure_jvm_linkage target)
 	if (ROCKETRIDE_PLAT_WIN)
 		# On Windows, we delay-load jvm.dll after explicitly adding its installed directory to the DLL search path
 		target_link_libraries(${target} PUBLIC delayimp.lib)
-		set_target_properties(${target} PROPERTIES LINK_OPTIONS "/DELAYLOAD:jvm.dll")
+		target_link_options(${target} PRIVATE "/DELAYLOAD:jvm.dll")
 	elseif (ROCKETRIDE_PLAT_LIN)
 		# On Linux, change the RPATH to include the JRE directory and ./lib
 		set_target_properties(${target} PROPERTIES
