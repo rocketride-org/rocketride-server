@@ -114,10 +114,21 @@ class HotdataError(RuntimeError):
     treat as success, and "this table is busy", which they must not.
     """
 
-    def __init__(self, message: str, status_code: Optional[int] = None, error_code: str = '') -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        error_code: str = '',
+        query_run_id: str = '',
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code
+        #: Set when the server answered the error with a query run id, which it
+        #: does only once it has created a run and executed the statement. That
+        #: makes it the marker for "the SQL failed" as opposed to "the request
+        #: was wrong" - both of which are plain 400s otherwise.
+        self.query_run_id = query_run_id
 
 
 class HotdataOverloadedError(HotdataError):
@@ -294,6 +305,7 @@ class HotdataClient:
                     f'hotdata: {method} {path} failed with HTTP {status}: {_body_snippet(response)}',
                     status_code=status,
                     error_code=error_code,
+                    query_run_id=_query_run_id(response),
                 )
 
             return _parse_json(response)
@@ -682,6 +694,23 @@ def _error_code(response: Any) -> str:
     if isinstance(error, dict):
         return str(error.get('code') or '')
     return str(body.get('code') or '')
+
+
+def _query_run_id(response: Any) -> str:
+    """The ``query_run_id`` on an error body, or '' if there isn't one.
+
+    Only the query endpoint sets it, and only after it has run the statement, so
+    its presence separates "your SQL is wrong" - which a regenerated statement
+    could fix - from "your request is wrong" (a bad ttl, a missing header, an
+    out-of-range limit), which is identical on every attempt.
+    """
+    try:
+        body = response.json()
+    except Exception:
+        return ''
+    if not isinstance(body, dict):
+        return ''
+    return str(body.get('query_run_id') or '')
 
 
 def _body_snippet(response: Any, limit: int = 500) -> str:

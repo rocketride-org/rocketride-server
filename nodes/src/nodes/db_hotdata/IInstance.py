@@ -216,12 +216,21 @@ def _is_sql_fixable(error: Exception) -> bool:
     the same error with the cause buried behind "could not answer after N
     attempts".
 
+    The status alone is too coarse: ``_run_sql`` drives four endpoints, and a
+    bad ttl on create_database, a malformed limit on get_result or a missing
+    scoping header all answer 400 without a single thing being wrong with the
+    SQL. The server marks a real statement failure by answering with a
+    ``query_run_id`` - it only mints one once it has created a run and executed
+    the statement - so that, not the bare 400, is the test.
+
     Defaults to *not* fixable: a failure this code cannot classify is far more
     likely to be environmental than to be a statement the model can rewrite.
     """
     if isinstance(error, SqlStatementError):
         return True
-    return getattr(error, 'status_code', None) == 400
+    if getattr(error, 'status_code', None) != 400:
+        return False
+    return bool(getattr(error, 'query_run_id', ''))
 
 
 def _is_missing_column(error: Exception) -> bool:
