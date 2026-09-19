@@ -1167,7 +1167,7 @@ export class RocketRideClient extends DAPClient {
 	 * Check if the client is currently connected to the RocketRide server.
 	 * Equivalent to ``isAttached()`` — kept for backward compatibility.
 	 */
-	isConnected(): boolean {
+	override isConnected(): boolean {
 		return this.isAttached();
 	}
 
@@ -1207,7 +1207,7 @@ export class RocketRideClient extends DAPClient {
 	 * Disconnect from the RocketRide server and stop automatic reconnection.
 	 * Backward-compatible wrapper around ``logout()`` + ``detach()``.
 	 */
-	async disconnect(): Promise<void> {
+	override async disconnect(): Promise<void> {
 		await this._detach(true);
 	}
 
@@ -1940,7 +1940,7 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Handle incoming events from the RocketRide server.
 	 */
-	async onEvent(message: DAPMessage): Promise<void> {
+	override async onEvent(message: DAPMessage): Promise<void> {
 		const eventEpoch = this._eventTransportEpoch(message);
 		if (!this._isCurrentEventTransportEpoch(eventEpoch)) return;
 		// Extract event information
@@ -1994,7 +1994,7 @@ export class RocketRideClient extends DAPClient {
 	 * Handle connection attempt failure.
 	 * Calls the user callback and chains to parent.
 	 */
-	async onConnectError(error: Error): Promise<void> {
+	override async onConnectError(error: Error): Promise<void> {
 		if (this._callerOnConnectError) {
 			try {
 				const connectionError = error instanceof ConnectionException ? error : new ConnectionException({ message: String(error) });
@@ -2013,7 +2013,7 @@ export class RocketRideClient extends DAPClient {
 	 * (before auth). The ``_internalLogin`` method handles the auth
 	 * notification separately, so this is intentionally minimal.
 	 */
-	async onConnected(connectionInfo: string): Promise<void> {
+	override async onConnected(connectionInfo: string): Promise<void> {
 		await super.onConnected(connectionInfo);
 	}
 
@@ -2023,7 +2023,7 @@ export class RocketRideClient extends DAPClient {
 	 * Clears transport and auth state, notifies the user callback,
 	 * then consults ``_desiredState`` to decide whether to reconnect.
 	 */
-	async onDisconnected(reason: string, hasError: boolean): Promise<void> {
+	override async onDisconnected(reason: string, hasError: boolean): Promise<void> {
 		const ownerGeneration = this._lifecycleGeneration;
 		const operation = this._lifecycleOperation;
 		if (operation && this._isCurrentOperation(operation) && !operation.cancellationReason) {
