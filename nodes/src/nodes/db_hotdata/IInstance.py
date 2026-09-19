@@ -206,6 +206,25 @@ class SqlStatementError(RuntimeError):
     """
 
 
+def _run_failure_text(run: Dict[str, Any], fallback: str) -> str:
+    """Why a query run failed, in the server's words.
+
+    The run body reports it as ``error_message`` ("query execution failed: Arrow
+    error: Divide by zero error"). This text is what gets fed back to the model
+    for its corrective attempt, so falling through to the bare status would send
+    it "failed" and leave it rewriting blind. ``error`` and ``message`` are read
+    too - ``error`` as either a string or the ``{"message": ...}`` object the
+    query endpoint uses - so a body shaped like the other endpoints still works.
+    """
+    for key in ('error_message', 'error', 'message'):
+        value = run.get(key)
+        if isinstance(value, dict):
+            value = value.get('message')
+        if value:
+            return str(value)
+    return fallback
+
+
 def _is_sql_fixable(error: Exception) -> bool:
     """Could a *different statement* plausibly succeed where this one failed?
 
@@ -592,7 +611,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             run = glb.client.get_query_run(run_id, database_id=database_id)
             status = str(run.get('status') or '').lower()
             if status in _TERMINAL_BAD:
-                message = run.get('error') or run.get('message') or status
+                message = _run_failure_text(run, status)
                 if status in _CANCELLED:
                     # Not the statement's fault, so not SqlStatementError: a
                     # rewritten query cannot un-cancel a run, and classifying
@@ -1019,6 +1038,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
         ),
     )
     def get_data(self, args: Any) -> Dict[str, Any]:
+        """Answer a question: generate SQL, run it, and retry a rejected statement with its error fed back."""
         args = normalize_tool_input(args, tool_name='get_data')
         question_text = str(args.get('question') or '').strip()
         if not question_text:
