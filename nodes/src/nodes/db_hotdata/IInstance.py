@@ -339,24 +339,35 @@ def _rows_from_payload(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _free_name(base: str, used: set[str]) -> str:
+    """``base``, suffixed until it is a key nothing has claimed, then reserved.
+
+    The generated name has to be checked against the names already taken, not
+    just against the base: ``SELECT city, city, city_1`` would otherwise rename
+    the second ``city`` to ``city_1`` and collide with the real third column.
+    """
+    name = base
+    suffix = 1
+    while name in used:
+        name = f'{base}_{suffix}'
+        suffix += 1
+    used.add(name)
+    return name
+
+
 def _name_columns(columns: List[Any]) -> List[str]:
     """Column names for a result, made unique and non-empty.
 
     ``SELECT city, city`` is legal and comes back with the name twice; zipping
     that into a dict would keep only the last value and silently drop a column.
     """
-    seen: Dict[str, int] = {}
+    used: set[str] = set()
     named: List[str] = []
     for index, raw in enumerate(columns):
         name = str(raw).strip() if raw is not None else ''
         if not name:
             name = f'column_{index + 1}'
-        if name in seen:
-            seen[name] += 1
-            name = f'{name}_{seen[name]}'
-        else:
-            seen[name] = 0
-        named.append(name)
+        named.append(_free_name(name, used))
     return named
 
 
@@ -386,9 +397,13 @@ def _rows_as_objects(rows: Any, columns: Any) -> List[Any]:
             continue
         item: Dict[str, Any] = {name: row[i] for i, name in enumerate(names) if i < len(row)}
         # A row wider than its header keeps the tail rather than dropping it:
-        # losing a value silently is worse than naming it by position.
-        for i in range(len(names), len(row)):
-            item[f'column_{i + 1}'] = row[i]
+        # losing a value silently is worse than naming it by position. The
+        # positional key goes through _free_name too, because `column_3` is
+        # itself a legal column name and would otherwise be overwritten.
+        if len(row) > len(names):
+            used = set(item)
+            for i in range(len(names), len(row)):
+                item[_free_name(f'column_{i + 1}', used)] = row[i]
         out.append(item)
     return out
 

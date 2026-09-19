@@ -2598,3 +2598,21 @@ def test_get_data_still_retries_a_failed_query_run():
     out = inst.get_data({'question': 'x'})
     assert out['rows'] == [{'a': 1}]
     assert out['attempts'] == 2
+
+
+def test_a_generated_suffix_cannot_collide_with_a_real_column():
+    """`SELECT city, city, city_1` - the generated name for the second `city`
+    must not land on a column the result already has.
+    """
+    names = iinstance_mod._name_columns(['city', 'city', 'city_1'])
+    assert len(set(names)) == 3, f'names collide: {names}'
+    rows = iinstance_mod._rows_as_objects([['a', 'b', 'c']], ['city', 'city', 'city_1'])
+    assert list(rows[0].values()) == ['a', 'b', 'c'], f'a value was dropped: {rows}'
+
+
+def test_an_excess_value_cannot_overwrite_a_named_column():
+    """A row wider than its header must not park a value on a key the header
+    already used - `column_3` is a legal column name.
+    """
+    rows = iinstance_mod._rows_as_objects([[1, 2, 3]], ['a', 'column_3'])
+    assert list(rows[0].values()) == [1, 2, 3], f'a value was dropped: {rows}'
