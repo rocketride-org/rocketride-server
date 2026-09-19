@@ -80,6 +80,8 @@ _POLL_MAX_S = 5.0
 
 _TERMINAL_OK = frozenset({'succeeded', 'success', 'completed', 'complete', 'ready', 'finished'})
 _TERMINAL_BAD = frozenset({'failed', 'error', 'cancelled', 'canceled'})
+#: The terminal-bad states that say nothing about the SQL itself.
+_CANCELLED = frozenset({'cancelled', 'canceled'})
 
 #: Async job states from the loads/indexes 202 envelope.
 _JOB_PENDING = frozenset({'pending', 'running'})
@@ -352,8 +354,9 @@ def _free_name(base: str, used: set[str]) -> str:
     """``base``, suffixed until it is a key nothing has claimed, then reserved.
 
     The generated name has to be checked against the names already taken, not
-    just against the base: ``SELECT city, city, city_1`` would otherwise rename
-    the second ``city`` to ``city_1`` and collide with the real third column.
+    just against the base: for columns ``['city', 'city', 'city_1']`` the second
+    ``city`` would otherwise become ``city_1`` and collide with the real third
+    column.
     """
     name = base
     suffix = 1
@@ -367,8 +370,11 @@ def _free_name(base: str, used: set[str]) -> str:
 def _name_columns(columns: List[Any]) -> List[str]:
     """Column names for a result, made unique and non-empty.
 
-    ``SELECT city, city`` is legal and comes back with the name twice; zipping
-    that into a dict would keep only the last value and silently drop a column.
+    A join comes back with the same name twice: ``SELECT a.city, b.city`` answers
+    ``['city', 'city']`` and ``SELECT *`` over a self-join answers ``['city',
+    'units', 'city', 'units']`` (the planner rejects a bare ``SELECT city, city``,
+    so joins are how this is reached). Zipping that into a dict would keep only
+    the last value and silently drop a column.
     """
     used: set[str] = set()
     named: List[str] = []
@@ -392,7 +398,9 @@ def _rows_as_objects(rows: Any, columns: Any) -> List[Any]:
     through to ``str(row)`` and emits Python list reprs.
 
     Rows that are already objects are passed through, so a server that starts
-    returning objects, and the tests that mock them, keep working.
+    returning objects, and the tests that mock them, keep working. A row
+    *narrower* than its header yields an object without the trailing keys rather
+    than inventing nulls for values the server never sent.
     """
     if not isinstance(rows, list) or not rows:
         return rows if isinstance(rows, list) else []
@@ -418,7 +426,14 @@ def _rows_as_objects(rows: Any, columns: Any) -> List[Any]:
 
 
 def _cell(value: Any) -> str:
-    """Render one table cell: pipes and newlines both break the row otherwise."""
+    """Render one table cell: pipes and newlines both break the row otherwise.
+
+    SQL NULL arrives as ``None`` and renders as an empty cell. ``str(None)`` would
+    put the Python word "None" in front of a reader who asked a question about
+    their data - the same leak as the list reprs, one value at a time.
+    """
+    if value is None:
+        return ''
     return str(value).replace('|', '\\|').replace('\r\n', ' ').replace('\n', ' ').replace('\r', ' ')
 
 
@@ -436,7 +451,9 @@ def _rows_to_markdown(rows: List[Any], limit: int = 100) -> str:
             if key not in columns:
                 columns.append(key)
 
-    header = '| ' + ' | '.join(columns) + ' |'
+    # Header cells are escaped like body cells: `SELECT total AS "a|b"` is a
+    # legal alias, and an unescaped pipe in the header splits the column in two.
+    header = '| ' + ' | '.join(_cell(c) for c in columns) + ' |'
     divider = '| ' + ' | '.join('---' for _ in columns) + ' |'
     body = ['| ' + ' | '.join(_cell(row.get(c, '')) for c in columns) + ' |' for row in shown]
     table = '\n'.join([header, divider] + body)
@@ -572,10 +589,15 @@ ORDER BY table_schema, table_name, ordinal_position"""
         deadline = time.monotonic() + glb.job_timeout_secs
         delay = _POLL_BASE_S
         while True:
-            run = glb.client.get_query_run(run_id, database_id)
+            run = glb.client.get_query_run(run_id, database_id=database_id)
             status = str(run.get('status') or '').lower()
             if status in _TERMINAL_BAD:
                 message = run.get('error') or run.get('message') or status
+                if status in _CANCELLED:
+                    # Not the statement's fault, so not SqlStatementError: a
+                    # rewritten query cannot un-cancel a run, and classifying
+                    # it as fixable would spend an LLM turn finding that out.
+                    raise RuntimeError(f'db_hotdata: query was cancelled: {message}')
                 raise SqlStatementError(f'db_hotdata: query failed: {message}')
             if status in _TERMINAL_OK or run.get('result_id'):
                 return run

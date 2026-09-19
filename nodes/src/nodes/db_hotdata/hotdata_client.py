@@ -389,9 +389,14 @@ class HotdataClient:
         )
 
     def get_result(
-        self, result_id: str, database_id: str = '', offset: int = 0, limit: Optional[int] = None
+        self, result_id: str, offset: int = 0, limit: Optional[int] = None, *, database_id: str = ''
     ) -> Dict[str, Any]:
-        """Read a window of a stored result. Database-scoped, as ``get_query_run`` is."""
+        """Read a window of a stored result. Database-scoped, as ``get_query_run`` is.
+
+        ``database_id`` is keyword-only and sits after the original parameters, so
+        a positional ``get_result(result_id, offset, limit)`` call written against
+        the old signature still means what it meant.
+        """
         params: Dict[str, Any] = {'offset': offset}
         if limit is not None:
             params['limit'] = limit
