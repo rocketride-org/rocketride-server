@@ -47,7 +47,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
 
     Tests seed only the attributes consumed by the method under test:
     ``id``, ``source``, ``_task_name``, ``_pipeline``, ``_status``,
-    ``_threads``, ``_pipelineTraceLevel``, ``token``.
+    ``_threads``, ``_torch_threads``, ``_pipelineTraceLevel``, ``token``.
 
     Args:
         source: id of the source component to look up in ``_check_pipeline``.
@@ -72,6 +72,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._task_name = task_name
     t._pipeline = pipeline if pipeline is not None else {}
     t._threads = 4
+    t._torch_threads = 0
     t._pipelineTraceLevel = None
     t._run_kind = 'dev'
     t._owner_kind = 'user'

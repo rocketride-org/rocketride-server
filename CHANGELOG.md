@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **ai**: every subprocess exposes /task/data via a shared web server (#912)
+- **ai**: `torchThreads` on `use()` — pin a task's BLAS/OMP thread count into its engine process; `ROCKETRIDE_TORCH_THREADS` sets the server default (#2128)
 - **analytics**: shared, transport-agnostic telemetry core (loose report + app) (#1523)
 - **anonymize**: configurable entity types + token redaction style (#1447)
 - **chat-widget**: embeddable, brandable chat widget — web component + script-tag bubble (#1586)

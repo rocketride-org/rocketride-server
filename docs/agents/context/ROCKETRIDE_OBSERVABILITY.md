@@ -436,7 +436,7 @@ Sent the same way as `rrext_monitor`:
 | `auth`                  | `{ auth, clientName?, clientVersion? }`                                          | `{ success }`    | Required first message             |
 | `rrext_get_task_status` | - (uses `token`)                                                                 | `TASK_STATUS`    | Fetch current status synchronously |
 | `rrext_get_token`       | `{ projectId, source }`                                                          | `{ token }`      | Resolve a running task's token     |
-| `execute`               | `{ pipeline, token?, threads?, args?, useExisting?, ttl?, pipelineTraceLevel? }` | `{ token, ... }` | Start a pipeline                   |
+| `execute`               | `{ pipeline, token?, threads?, torchThreads?, args?, useExisting?, ttl?, pipelineTraceLevel? }` | `{ token, ... }` | Start a pipeline                   |
 | `terminate`             | - (uses `token`)                                                                 | -                | Stop a running pipeline            |
 
 ---

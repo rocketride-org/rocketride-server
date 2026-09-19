@@ -1361,7 +1361,8 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
 	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
-	 * @param options.threads - Number of threads for execution (default: 1)
+	 * @param options.threads - Engine worker threads for pipe execution; does not parallelize one model's inference
+	 * @param options.torchThreads - BLAS/OMP threads pinned into the engine process for this task; unset uses the server default from ROCKETRIDE_TORCH_THREADS, 0 disables pinning for this task
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
@@ -1391,6 +1392,8 @@ export class RocketRideClient extends DAPClient {
 			pipeline?: PipelineConfig;
 			source?: string;
 			threads?: number;
+			/** BLAS/OMP threads pinned into the engine process for this task. Unset uses the server default from ROCKETRIDE_TORCH_THREADS; 0 disables pinning for this task. */
+			torchThreads?: number;
 			useExisting?: boolean;
 			args?: string[];
 			ttl?: number;
@@ -1402,7 +1405,7 @@ export class RocketRideClient extends DAPClient {
 			env?: Record<string, string>;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env } = options;
+		const { token, filepath, pipeline, source, threads, torchThreads, useExisting, args, ttl, pipelineTraceLevel, name, env } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -1453,6 +1456,9 @@ export class RocketRideClient extends DAPClient {
 		}
 		if (threads !== undefined) {
 			arguments_.threads = threads;
+		}
+		if (torchThreads !== undefined) {
+			arguments_.torchThreads = torchThreads;
 		}
 		if (useExisting !== undefined) {
 			arguments_.useExisting = useExisting;
