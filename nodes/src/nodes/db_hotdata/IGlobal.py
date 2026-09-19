@@ -100,6 +100,7 @@ class IGlobal(IGlobalBase):
     async_after_ms: int = 5000
 
     def beginGlobal(self) -> None:
+        """Read the node config and build the REST client; the database itself is created lazily."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 

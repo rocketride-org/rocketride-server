@@ -121,6 +121,7 @@ class HotdataError(RuntimeError):
         error_code: str = '',
         query_run_id: str = '',
     ) -> None:
+        """Keep the HTTP status, API error code and query run id beside the message."""
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code

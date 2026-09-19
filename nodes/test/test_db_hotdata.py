@@ -735,6 +735,7 @@ def test_execute_limit_is_clamped_and_booleans_rejected():
 
 
 def test_execute_follows_async_run_to_a_result():
+    """A deferred query is polled to completion and its result read, both scoped to the database."""
     polls = [{'status': 'running'}, {'status': 'succeeded', 'result_id': 'res-1'}]
     scoped = []
     g = _global()
@@ -754,10 +755,14 @@ def test_execute_follows_async_run_to_a_result():
 
 
 def test_failed_query_run_raises_runtime_error():
+    """A run that ends failed raises with the server's reason, read from ``error_message``."""
     g = _global()
     g.client = SimpleNamespace(
         query=lambda **_kw: {'query_run_id': 'run-1'},
-        get_query_run=lambda _i, database_id='': {'status': 'failed', 'error': 'syntax error at or near "SELCT"'},
+        get_query_run=lambda _i, database_id='': {
+            'status': 'failed',
+            'error_message': 'query execution failed: syntax error at or near "SELCT"',
+        },
         create_database=lambda **_kw: {'id': 'db-1'},
     )
     inst = _instance(g)
@@ -832,6 +837,7 @@ def test_get_sql_requires_a_question():
 
 
 def test_get_data_retries_with_the_error_fed_back():
+    """A rejected statement earns another attempt, and the model sees why the first one failed."""
     calls = {'n': 0}
 
     def _query(**_kw):
@@ -859,6 +865,7 @@ def test_get_data_retries_with_the_error_fed_back():
 
 
 def test_get_data_gives_up_after_max_attempts():
+    """Statement failures stop after max_attempts and report the last error."""
     g = _loaded_global(max_attempts=2)
     g.client = SimpleNamespace(
         information_schema=lambda **_kw: {'tables': []},
@@ -2443,6 +2450,7 @@ def test_a_new_database_does_not_inherit_the_previous_dedup_records():
 
 
 def test_rows_are_named_from_the_columns_beside_them():
+    """The live wire shape - `columns` beside positional `rows` - becomes a list of objects."""
     g = _loaded_global()
     g.client = SimpleNamespace(
         query=lambda **_kw: {
@@ -2476,6 +2484,7 @@ def test_a_repeated_column_name_does_not_collapse():
 
 
 def test_an_unnamed_column_still_gets_a_key():
+    """An empty or null column name falls back to its position."""
     assert iinstance_mod._rows_as_objects([[1, 2]], ['', None]) == [{'column_1': 1, 'column_2': 2}]
 
 
@@ -2485,10 +2494,12 @@ def test_a_row_wider_than_its_header_keeps_the_tail():
 
 
 def test_rows_that_are_already_objects_pass_through():
+    """Rows that arrive as objects are left exactly as they are."""
     assert iinstance_mod._rows_as_objects([{'a': 1}], ['a']) == [{'a': 1}]
 
 
 def test_rows_without_columns_are_left_alone():
+    """With no names to attach there is nothing to do; rows keep their positions."""
     assert iinstance_mod._rows_as_objects([[1]], None) == [[1]]
 
 
@@ -2567,6 +2578,7 @@ def test_get_data_does_not_retry_a_failure_sql_cannot_fix():
 
 
 def test_get_data_does_not_retry_an_auth_failure():
+    """A rejected API key is a 401 on every attempt, so it is raised after the first."""
     g = _loaded_global(max_attempts=3)
     g.client = SimpleNamespace(
         information_schema=lambda **_kw: {'tables': []},
@@ -2665,6 +2677,7 @@ def test_the_client_carries_the_query_run_id_off_an_error_body():
 
 
 def test_the_client_leaves_the_run_id_empty_when_the_body_has_none():
+    """A request-shaped 400 carries no run id, and is classified as not fixable."""
     c, _rec = _client(
         [_Resp(400, {'error': {'code': 'BAD_REQUEST', 'message': 'async_after_ms must be at least 1000'}})]
     )
@@ -2749,3 +2762,41 @@ def test_a_self_join_keeps_every_value():
     """
     rows = iinstance_mod._rows_as_objects([['Reno', 200, 'Reno', 200]], ['city', 'units', 'city', 'units'])
     assert rows == [{'city': 'Reno', 'units': 200, 'city_1': 'Reno', 'units_1': 200}]
+
+
+def test_a_failed_run_feeds_the_real_reason_back_to_the_model():
+    """The live poll body reports the cause as ``error_message``. Reading only
+    ``error``/``message`` fell through to the status, so the corrective attempt
+    was handed "failed" and rewrote blind.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return {'query_run_id': 'run-1'}
+        return {'columns': ['a'], 'rows': [[1]], 'truncated': False}
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=_query,
+        get_query_run=lambda _i, database_id='': {
+            'status': 'failed',
+            'error_message': 'query execution failed: Arrow error: Divide by zero error',
+        },
+    )
+    inst = _llm_instance(g, ['SELECT 1 / 0 FROM t', 'SELECT 1 FROM t'])
+    out = inst.get_data({'question': 'x'})
+    assert out['attempts'] == 2
+    assert 'Divide by zero' in inst.asked[1].all_text(), 'the model must see why the first statement failed'
+
+
+def test_run_failure_text_reads_every_shape_the_api_uses():
+    """``error_message`` first, then ``error`` as text or object, then ``message``, then the fallback."""
+    text = iinstance_mod._run_failure_text
+    assert text({'error_message': 'boom'}, 'failed') == 'boom'
+    assert text({'error': 'boom'}, 'failed') == 'boom'
+    assert text({'error': {'code': 'BAD_REQUEST', 'message': 'boom'}}, 'failed') == 'boom'
+    assert text({'message': 'boom'}, 'failed') == 'boom'
+    assert text({'status': 'failed'}, 'failed') == 'failed'
