@@ -57,7 +57,7 @@ The manual profile passes host, port, optional username/password, and TLS to the
 
 ### Graph description and retries
 
-`graph` selects the named graph when a tool caller does not supply one. `db_description` is supplied to the LLM when it writes Cypher; add labels, relationships, and domain language when generation targets the wrong shape. `max_attempts` defaults to five and controls how often a rejected `EXPLAIN` result is repaired.
+`graph` selects the named graph when a tool caller does not supply one, defaulting to `agent` when left blank. Unless `allow_writes` or `allow_execute` is on, the node checks at save time and at pipeline start that this graph actually exists on the server, since FalkorDB otherwise accepts a query against a missing graph and only fails later, on the first result, with a Redis-level error that gives no hint the graph itself was the problem. With a write path enabled, no such check runs, since FalkorDB creates a graph lazily on its first write. `db_description` is supplied to the LLM when it writes Cypher; add labels, relationships, and domain language when generation targets the wrong shape. `max_attempts` defaults to five and controls how often a rejected `EXPLAIN` result is repaired.
 
 ### Write access, row caps, and timeout
 
@@ -65,7 +65,7 @@ The manual profile passes host, port, optional username/password, and TLS to the
 
 ## Authentication
 
-Manual connections can omit credentials or provide the configured username and password. URL connections may carry credentials, but the separate Password field takes precedence when present. The node probes the connection at startup, so malformed connection settings or an unavailable server fail before a tool call.
+Manual connections can omit credentials or provide the configured username and password. URL connections may carry credentials, but the separate Password field takes precedence when present. The node probes the connection at startup, so malformed connection settings, an unavailable server, or (in read-only mode) a configured graph that does not exist all fail before a tool call, rather than surfacing as a Redis error on the first query.
 
 ## Notes
 

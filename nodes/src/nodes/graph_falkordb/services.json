@@ -56,7 +56,11 @@
 	//
 	"icon": "falkordb.svg",
 	"documentation": "https://docs.rocketride.org/nodes/graph_falkordb",
-	"tile": [],
+	// Surfaces the active graph on the canvas tile (see #2155): an unopened
+	// node silently resolves to preconfig.default's "graph": "agent", and
+	// nothing on the canvas showed which graph -- or that it was a fallback
+	// -- until a query failed at runtime.
+	"tile": ["Graph: ${parameters.graph_falkordb.${profile}.graph}"],
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected

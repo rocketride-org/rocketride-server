@@ -82,8 +82,8 @@ class IGlobal(GraphGlobalBase):
     # ------------------------------------------------------------------
 
     def _open_driver(self, config: Dict[str, Any]) -> None:
-        """Create the FalkorDB client and fail fast on a bad host or credentials."""
-        self.graph_name = str(config.get('graph') or DEFAULT_GRAPH).strip() or DEFAULT_GRAPH
+        """Create the FalkorDB client and fail fast on a bad host, credentials, or graph name."""
+        self.graph_name = _resolve_graph_name(config)
         self.allow_writes = parse_bool(config.get('allow_writes'))
         self.max_rows = config_int(config, 'max_rows', DEFAULT_ROW_CAP, min_value=1, max_value=self.max_execute_rows)
         self.query_timeout_ms = config_int(
@@ -92,8 +92,27 @@ class IGlobal(GraphGlobalBase):
 
         self.client = self._connect(config)
         # Round-trip now so a wrong host or password fails at pipeline start
-        # rather than on the first tool call.
-        self.client.list_graphs()
+        # rather than on the first tool call. FalkorDB has no per-database
+        # session open to piggyback a "does this graph exist" check on (unlike
+        # Neo4j's session(database=...)), so check list_graphs() by hand:
+        # select_graph() on a missing name always succeeds and only fails
+        # later, on the first real query, with a cryptic "ERR Invalid graph
+        # operation on empty key" (#2155).
+        #
+        # Only when neither write path is enabled: FalkorDB creates a graph
+        # lazily on its first write, so a write-capable node may legitimately
+        # be pointed at a graph that does not exist yet. A read-only node can
+        # never create one, so a missing graph there can only ever be a
+        # misconfiguration -- exactly this issue's silent fallback to the
+        # unrelated default graph "agent".
+        if not self.allow_writes and not parse_bool(config.get('allow_execute')):
+            graphs = [str(g) for g in (self.client.list_graphs() or [])]
+            if self.graph_name not in graphs:
+                available = ', '.join(graphs) or 'none'
+                raise Exception(
+                    f'FalkorDB graph "{self.graph_name}" does not exist on this server '
+                    f'(available: {available}). Set "Default Graph" to an existing graph name.'
+                )
 
     def _close_driver(self) -> None:
         if self.client is not None:
@@ -103,7 +122,16 @@ class IGlobal(GraphGlobalBase):
                 self.client = None
 
     def _probe_connection(self, config: Dict[str, Any]) -> None:
-        """Save-time probe: connect and list graphs, reporting failures as warnings."""
+        """Save-time probe: connect, and warn if a read-only node's graph does not exist.
+
+        Only warns for a node with neither write path enabled: FalkorDB
+        creates a graph lazily on its first write, so a write-capable node
+        may legitimately be pointed at a graph that does not exist yet, and
+        a warning there would just be noise. A read-only node can never
+        create one, so this is the save-time half of the same check
+        _open_driver raises on -- catching the silent fallback to the
+        unrelated default graph "agent" (#2155) before the pipeline runs.
+        """
         try:
             target = _connection_url(config)
         except ValueError as e:
@@ -116,10 +144,19 @@ class IGlobal(GraphGlobalBase):
                 warning('host is required')
                 return
 
+        write_capable = parse_bool(config.get('allow_writes')) or parse_bool(config.get('allow_execute'))
+
         client = None
         try:
             client = self._connect(config)
-            client.list_graphs()
+            graphs = [str(g) for g in (client.list_graphs() or [])]
+            graph_name = _resolve_graph_name(config)
+            if not write_capable and graph_name not in graphs:
+                available = ', '.join(graphs) or 'none'
+                warning(
+                    f'FalkorDB graph "{graph_name}" was not found on {_redact(target)} '
+                    f'(available: {available}). Queries will fail until this graph exists.'
+                )
         except RedisError as e:
             warning(f'Could not connect to FalkorDB at {_redact(target)}: {e}')
         except Exception as e:
@@ -289,6 +326,16 @@ class IGlobal(GraphGlobalBase):
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_graph_name(config: Dict[str, Any]) -> str:
+    """Read 'graph' from config, falling back to DEFAULT_GRAPH when absent or blank.
+
+    Single source for the fallback both _open_driver and _probe_connection
+    apply, so the graph they check for existence is always the one that will
+    actually be selected at query time.
+    """
+    return str(config.get('graph') or DEFAULT_GRAPH).strip() or DEFAULT_GRAPH
 
 
 def _connection_url(config: Dict[str, Any]) -> str:
