@@ -116,6 +116,18 @@ private:
 
 //---------------------------------------------------------------------
 /// @details
+///     What a worker reports, held by shared_ptr rather than on the
+///     Catch2 thread's stack: a worker abandoned on timeout keeps
+///     running while Catch2 unwinds the failed case, and would write
+///     into destroyed objects
+//---------------------------------------------------------------------
+struct State {
+    Names names;
+    Done done;
+};
+
+//---------------------------------------------------------------------
+/// @details
 ///     Starts a Python thread named @p name that calls into the engine,
 ///     the way the data path hands a document to the engine from an
 ///     asyncio worker, and returns what that thread saw.  With
@@ -133,8 +145,11 @@ import engtest_thread_names as _rr_thread_names
 
 def rr_thread_names_run(name, engine_first):
     seen = []
+    # daemon: a worker stuck in a GIL path must not hold up Py_FinalizeEx()
+    # at the end of the run, which waits for every other thread
     thread = _rr_threading.Thread(
         name=name,
+        daemon=True,
         target=lambda: seen.append(_rr_thread_names.enter_engine(engine_first)))
     thread.start()
     thread.join(60)
@@ -201,43 +216,43 @@ TEST_CASE("python::thread_names::python_thread_engine_first") {
 // A thread the engine started gives its name to Python.
 //-----------------------------------------------------------------------------
 TEST_CASE("python::thread_names::engine_thread") {
-    thread_names::Names names;
-    thread_names::Done done;
+    auto state = std::make_shared<thread_names::State>();
     auto thread =
-        std::make_unique<ap::async::Thread>(_location, "rr-engine", [&] {
-            names = thread_names::bothNames();
-            done.signal();
+        std::make_unique<ap::async::Thread>(_location, "rr-engine", [state] {
+            state->names = thread_names::bothNames();
+            state->done.signal();
         });
     REQUIRE_NO_ERROR(thread->start());
 
-    if (!done.wait()) {
-        // Joining a hung thread would hang the run; leak it instead
+    if (!state->done.wait()) {
+        // Joining a hung thread would hang the run; leak it instead. Its copy
+        // of the shared state keeps what it writes to alive
         (void)thread.release();
         FAIL("engine thread did not finish within the timeout");
     }
     thread.reset();
 
-    CHECK(names.engine == "rr-engine");
-    CHECK(names.python == "rr-engine");
+    CHECK(state->names.engine == "rr-engine");
+    CHECK(state->names.python == "rr-engine");
 }
 
 //-----------------------------------------------------------------------------
 // A thread neither side started keeps the engine's placeholder on both sides.
 //-----------------------------------------------------------------------------
 TEST_CASE("python::thread_names::foreign_thread") {
-    thread_names::Names names;
-    thread_names::Done done;
-    std::thread thread([&] {
-        names = thread_names::bothNames();
-        done.signal();
+    auto state = std::make_shared<thread_names::State>();
+    std::thread thread([state] {
+        state->names = thread_names::bothNames();
+        state->done.signal();
     });
 
-    if (!done.wait()) {
+    if (!state->done.wait()) {
+        // Detached, and its copy of the shared state outlives this case
         thread.detach();
         FAIL("foreign thread did not finish within the timeout");
     }
     thread.join();
 
-    CHECK(names.engine == "External");
-    CHECK(names.python == "External");
+    CHECK(state->names.engine == "External");
+    CHECK(state->names.python == "External");
 }
