@@ -542,7 +542,8 @@ class IInstance(IInstanceBase):
         # from here as an empty result. The run is the readiness signal, so wait
         # on it whenever the server deferred or truncated.
         if run_id and (response.get('result_id') is None or response.get('truncated')):
-            response = self._await_run(run_id, database_id)
+            deferred = self._await_run(run_id, database_id)
+            response = {**deferred, 'result_id': deferred.get('result_id') or response.get('result_id')}
 
         result_id = response.get('result_id')
         if result_id:
