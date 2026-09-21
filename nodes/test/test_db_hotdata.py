@@ -3004,14 +3004,14 @@ def test_only_an_interrupted_run_is_run_again():
 
 
 # ---------------------------------------------------------------------------
-# The query body's result_id survives the wait on the run
+# A run that names no result saved nothing
 # ---------------------------------------------------------------------------
 
 
-def test_a_run_that_names_no_result_still_reads_the_one_the_query_named():
-    """A run can reach a terminal-OK status without a `result_id` key. The run
-    body has no rows, so dropping the id the query answered with would fall
-    through to an empty result - for one large enough to have been truncated.
+def test_a_run_that_saved_nothing_returns_the_preview_rows():
+    """The spec: "A run carrying no `result_id` saved nothing". So the id the query
+    answered with names a result that was never saved. The statement did succeed,
+    and the truncated response brought a preview with it - the only copy there is.
     """
     read = []
     g = _loaded_global()
@@ -3021,13 +3021,82 @@ def test_a_run_that_names_no_result_still_reads_the_one_the_query_named():
             'result_id': 'res-from-body',
             'truncated': True,
             'columns': ['n'],
-            'rows': [[1]],
+            'rows': [[1], [2], [3]],
         },
-        get_query_run=_bounded_poll({'status': 'succeeded'}),
-        get_result=lambda result_id, database_id='', offset=0, limit=None: (
-            read.append(result_id) or {'status': 'ready', 'columns': ['n'], 'rows': [[1], [2]]}
-        ),
+        get_query_run=_bounded_poll({'status': 'succeeded', 'warning_message': 'result store unavailable'}),
+        get_result=lambda result_id, **_kw: read.append(result_id) or {'columns': ['n'], 'rows': []},
     )
     out = _instance(g)._run_sql('SELECT n FROM big', 2)
-    assert read == ['res-from-body'], 'the read must still happen, with the id the query gave'
-    assert out['rows'] == [{'n': 1}, {'n': 2}]
+    assert read == [], 'an id that was never saved must not be read'
+    assert out['rows'] == [{'n': 1}, {'n': 2}], 'the preview, cut to the limit'
+    assert 'result_id' not in out, 'nothing was saved, so there is no id to offer'
+
+
+def test_a_deferred_run_that_saved_nothing_raises_with_the_servers_reason():
+    """With nothing inline either there are no rows to give, and saying so beats
+    reporting that the query matched nothing.
+    """
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {'query_run_id': 'run-1'},
+        get_query_run=_bounded_poll({'status': 'succeeded', 'warning_message': 'result store unavailable'}),
+    )
+    with pytest.raises(RuntimeError, match='result store unavailable'):
+        _instance(g)._run_sql('SELECT a FROM t', 10)
+
+
+# ---------------------------------------------------------------------------
+# The run is finished when its status says so, not when it names a result
+# ---------------------------------------------------------------------------
+
+
+def test_a_run_is_not_finished_just_because_it_names_a_result():
+    """`running` covers "still executing, or still being saved". A result_id on a
+    run that is still running names a result that is not ready; returning on it
+    hands back an id that answers 202, which fails the whole question.
+    """
+    events = []
+    polls = [{'status': 'running', 'result_id': 'res-early'}, {'status': 'succeeded', 'result_id': 'res-1'}]
+
+    def _get_query_run(_i, database_id=''):
+        """Record the poll, then answer with the next queued run body."""
+        events.append('poll')
+        return polls.pop(0)
+
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {'query_run_id': 'run-1', 'result_id': 'res-early', 'truncated': True, 'rows': [[0]]},
+        get_query_run=_get_query_run,
+        get_result=lambda result_id, **_kw: events.append(f'read:{result_id}') or {'columns': ['a'], 'rows': [[1]]},
+    )
+    _instance(g)._run_sql('SELECT a FROM big', 10)
+    assert events == ['poll', 'poll', 'read:res-1'], events
+
+
+def test_a_failed_run_behind_a_truncated_preview_is_still_a_statement_failure():
+    """The preview is streamed before the statement finishes, so it can fail on a
+    later row. Live, 2026-09-21: an 8M-row query whose last row divides by zero
+    answered 200 truncated with 10,000 rows, and its run then ended failed. A
+    rewritten statement fixes that, so it must still earn the model a turn.
+    """
+    calls = {'n': 0}
+
+    def _query(**_kw):
+        """Truncated preview first; a plain small result once the SQL is rewritten."""
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return {'query_run_id': 'run-1', 'result_id': 'res-1', 'truncated': True, 'columns': ['n'], 'rows': [[1]]}
+        return {'columns': ['n'], 'rows': [[1]], 'truncated': False}
+
+    g = _loaded_global(max_attempts=3)
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=_query,
+        get_query_run=_bounded_poll(
+            {'status': 'failed', 'error_message': 'query execution failed: Arrow error: Divide by zero error'}
+        ),
+    )
+    inst = _llm_instance(g, ['SELECT 1 / (8000000 - n) FROM big', 'SELECT n FROM big'])
+    out = inst.get_data({'question': 'x'})
+    assert out['attempts'] == 2
+    assert 'Divide by zero' in inst.asked[1].all_text(), 'the model must see why the first statement failed'

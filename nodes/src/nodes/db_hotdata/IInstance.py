@@ -578,8 +578,26 @@ class IInstance(IInstanceBase):
         # from here as an empty result. The run is the readiness signal, so wait
         # on it whenever the server deferred or truncated.
         if run_id and (response.get('result_id') is None or response.get('truncated')):
-            deferred = self._await_run(run_id, database_id)
-            response = {**deferred, 'result_id': deferred.get('result_id') or response.get('result_id')}
+            run = self._await_run(run_id, database_id)
+            if not run.get('result_id'):
+                # "A run carrying no `result_id` saved nothing", so the id on the
+                # query body names a result that was never saved and a read
+                # against it answers 404 or 202. The statement did succeed, though,
+                # and a truncated response brought a preview of its rows with it:
+                # that preview is the only copy there is, so it is what is
+                # returned - and no result_id is offered, since nothing was saved.
+                preview = _rows_as_objects(response.get('rows') or [], response.get('columns'))
+                reason = run.get('warning_message') or 'the run finished without saving a result'
+                if not preview:
+                    # A deferred query returned nothing inline, so there are no
+                    # rows to give at all. Saying so beats reporting that the
+                    # query matched nothing. (A query that genuinely matches
+                    # nothing is not this case: checked live, its run carries a
+                    # result_id whose result has zero rows.)
+                    raise RuntimeError(f'db_hotdata: the query ran but its result cannot be read back: {reason}')
+                warning(f'db_hotdata: returning the inline preview of {len(preview)} rows - {reason}')
+                return {'rows': preview[:limit], 'row_count': len(preview[:limit]), 'sql': sql}
+            response = run
 
         result_id = response.get('result_id')
         if result_id:
@@ -666,8 +684,21 @@ ORDER BY table_schema, table_name, ordinal_position"""
                     # that out.
                     ended = RunInterrupted if status == 'interrupted' else RuntimeError
                     raise ended(f'db_hotdata: query run ended as {status!r}: {message}')
+                # A `failed` run is handed to the model as a statement failure even
+                # behind a truncated preview, where the statement has visibly
+                # produced rows. That preview is streamed before the statement
+                # finishes, so it can still fail on a later row: checked live
+                # 2026-09-21, an 8M-row query whose last row divides by zero
+                # answered 200 truncated with 10,000 rows in 0.3s, and its run
+                # then ended failed with "query execution failed: Arrow error:
+                # Divide by zero error" - which a rewritten statement can fix.
+                # `failed` also covers a failed save, and only error_message
+                # tells the two apart, which is prose rather than contract.
                 raise SqlStatementError(f'db_hotdata: query failed: {message}')
-            if status in _TERMINAL_OK or run.get('result_id'):
+            # On the status alone. `running` covers "still executing, or still
+            # being saved", so a result_id on a run that is still running names a
+            # result that is not ready yet, and a read against it answers 202.
+            if status in _TERMINAL_OK:
                 return run
             if time.monotonic() + delay > deadline:
                 raise RuntimeError(f'db_hotdata: query did not finish within {glb.job_timeout_secs}s')
