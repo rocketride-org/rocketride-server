@@ -88,3 +88,11 @@ means the registration you reached does not list your editor's scheme.
 
 **Sign-in reports success but you are still signed out.** Report it. That
 combination should not be reachable, and it hides its own cause.
+
+**"No active API key was found for this account."** Authentication itself
+succeeded — the account exists and is not on the access waitlist — but the
+server minted no token because every `rr_*` key on the account is inactive or
+revoked. Sign in to RocketRide Cloud in your browser to create or reactivate a
+key, then sign in from the extension again. This is distinct from the waitlist
+case: a waitlisted account shows an access-queue message instead, with no
+mention of API keys.
