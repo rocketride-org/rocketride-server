@@ -33,6 +33,7 @@ a non-zero exit. Deploy verbs (`deploy *`, `app deploy`) use the
 | Files in the account store | `rocketride store dir|type|write|rm|mkdir|stat` |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target) |
 | Apps | `rocketride app create|verify|deploy` (deployment target) |
+| Find what is slow | `rocketride profile run --token TOKEN --duration 30`, then `rocketride profile tree --token TOKEN` |
 
 Two things the table cannot hide: component discovery is file-based, and
 run logs need the SDK. Everything else in the build-validate-run-deploy
@@ -158,6 +159,40 @@ rocketride deploy enable|disable|remove <projectId> --team <teamId>
 Every verb here fronts a `client.deploy.*` SDK method — prefer the API in
 application code; the CLI is the one-shot form for terminals, CI, and
 quick lifecycle operations (all verbs support `--json`).
+
+## Profile commands (`rocketride profile ...`)
+
+Where does the time go? `--token <token>` profiles a running pipeline's
+engine subprocess, where its nodes run; the token is the one `start`
+prints and `list` shows. Without `--token` the server process itself is
+profiled; unlike the task commands, `--token` here does not default to
+`ROCKETRIDE_TOKEN`.
+
+```bash
+rocketride profile start --token TOKEN [--session NAME]   # start, return at once
+rocketride profile stop --token TOKEN                     # stop; results stay readable
+rocketride profile run [--token TOKEN] [--duration 30]    # start, wait for Ctrl+C or --duration, stop
+rocketride profile status [--token TOKEN]                 # active session, or whether a report exists
+rocketride profile list [--active]                        # the same for the server process and every task
+rocketride profile report [--token TOKEN]                 # text report of the last session
+rocketride profile threads [--token TOKEN]                # threads, busiest first: ID, name, tid, time, share
+rocketride profile tree [--token TOKEN] [--thread ID] [--min-pct 0.1] [--max-depth 50] [--no-include-system]
+```
+
+- `start` and `stop` need `--token`: a session on the server process ends
+  when the connection that started it closes, and each command is its own
+  connection. Profile the server process with `run`, which holds its
+  connection until Ctrl+C or `--duration` and then stops the session.
+- `report`, `threads` and `tree` read the last completed session, so run
+  them after `stop` or `run`. `--thread` takes an ID from `threads`; without
+  it the tree covers every thread.
+- `tree` hides calls below `--min-pct` percent of the total time
+  (`--min-pct 0` keeps them all, useful on short runs), and
+  `--no-include-system` drops stdlib code while keeping the project code it
+  calls. A function can appear under several callers, each with its own
+  numbers.
+- `--session` only names the session in the report
+  (default `session_<timestamp>`).
 
 ## MCP, if your harness has a client for it
 

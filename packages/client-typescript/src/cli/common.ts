@@ -52,6 +52,9 @@ export interface ConnectionOptions {
 /** Clients opened by the running command, disconnected on exit/signal. */
 const activeClients = new Set<RocketRideClient>();
 
+/** Set by a command whose normal end is Ctrl+C; takes the first signal. */
+let interruptHandler: (() => void) | null = null;
+
 /**
  * Add the development-connection options (`--uri`, `--apikey`, `--json`).
  *
@@ -110,6 +113,32 @@ export async function disconnectAll(): Promise<void> {
 	const clients = [...activeClients];
 	activeClients.clear();
 	await Promise.all(clients.map((client) => client.disconnect().catch(() => {})));
+}
+
+/**
+ * Let the running command end on Ctrl+C instead of being torn down.
+ *
+ * The next SIGINT/SIGTERM calls the handler and nothing else, so the
+ * command still has its connection to finish on; the one after that
+ * shuts down as usual.
+ *
+ * @param handler - Called on the next signal, or null to stop listening.
+ */
+export function onInterrupt(handler: (() => void) | null): void {
+	interruptHandler = handler;
+}
+
+/**
+ * Hand a signal to the running command, if one is listening.
+ *
+ * @returns True when the command took the signal.
+ */
+export function takeInterrupt(): boolean {
+	const handler = interruptHandler;
+	if (!handler) return false;
+	interruptHandler = null;
+	handler();
+	return true;
 }
 
 /**

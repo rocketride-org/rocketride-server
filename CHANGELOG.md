@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ci**: migrate Discord notifier workflows to forum channels (tags + auto-archive) (#1510)
 - **ci**: on-demand + monthly multi-OS compile/test matrix (#1537)
 - **ci**: keep Discord forum tags live (re-apply on state/label change via bot) (#1722)
+- **cli**: `rocketride profile` subcommand (Python + TS) — profile the server process or a pipeline (#2382)
 - **cli**: rocketride validate subcommand (Python + TS) + validate-pipes composite action (#1573)
 - **client-python**: `rocketride diff` — semantic `.pipe` diff + pipe-diff composite action (#1607)
 - **client-python**: `rocketride otel` — OpenTelemetry bridge over the ingester protocol (#1612)
