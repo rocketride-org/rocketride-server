@@ -38,6 +38,7 @@ import type { Documents } from 'shell';
 import { Button, EmptyState } from 'shell';
 import { commonStyles } from 'shell';
 import { CONNECTIONS_URI, createDocs, destroyDocs, endpointKeyFromAnyUri, endpointKeyFromUri, getDocs, isDesignUri, isDiagramUri, isQueryUri, isTableDataUri } from './docs';
+import type { IQueryDocPayload } from './docs';
 import { setActiveConnection } from './navigation';
 import type { ISqlEndpoint } from './connect';
 import ConnectionsView from './views/ConnectionsView';
@@ -47,7 +48,16 @@ import TableDataView from './views/TableDataView';
 import TableDesignView from './views/TableDesignView';
 import DiagramView from './views/DiagramView';
 import SqlSidebar from './SqlSidebar';
+import LiveRegion from './components/LiveRegion';
+import { HistoryPrefsBridge } from './history/historyStore';
 import { DatabaseIcon } from './icons';
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+// The query-document payload type lives beside the URI builders in docs.ts
+// (IQueryDocPayload); producers and this consumer import it from there.
 
 // =============================================================================
 // STYLES
@@ -155,6 +165,14 @@ const SqlAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 
 	return (
 		<div style={styles.container}>
+			{/* One polite live region for the whole app; announce() writes to it. */}
+			<LiveRegion />
+
+			{/* The history store only writes while a bridge is mounted. This one
+			    is app-level so a query document whose connection tab was closed
+			    still records; the bridge is reference-counted, so the copies in
+			    ConnectionView and the drawer stay harmless. */}
+			<HistoryPrefsBridge />
 			<DocSplitLayout
 				docs={docs}
 				renderPane={(groupId: string) => {
@@ -227,8 +245,18 @@ const DocumentPane: React.FC<{ uri: string; docs: Documents }> = ({ uri, docs })
 	// Query document — payload carries the endpoint and the tab label.
 	if (isQueryUri(uri)) {
 		const doc = docs.getState().documents[uri];
-		const payload = doc?.content as { endpoint: ISqlEndpoint; label: string } | undefined;
-		if (payload) return <QueryView key={uri} endpoint={payload.endpoint} label={payload.label} />;
+		const payload = doc?.content as IQueryDocPayload | undefined;
+		if (payload) {
+			return (
+				<QueryView
+					key={uri}
+					endpoint={payload.endpoint}
+					label={payload.label}
+					initialSql={payload.initialSql}
+					origin={payload.origin}
+				/>
+			);
+		}
 	}
 
 	// Table data-browser document — payload carries the endpoint and table.
