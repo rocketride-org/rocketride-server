@@ -418,9 +418,17 @@ export function fallbackSkippedRemote(appId: string): boolean {
  * marker that survives the OAuth redirect stripping the query string).
  * Such a page ALWAYS receives an rrdev:registerRemote for its locked app,
  * so loading that app before the registration arrives can only fail.
+ *
+ * FRAMED pages only: the injection arrives via postMessage from a parent
+ * embedder (the App Builder panel). A TOP-LEVEL page with `rrdev=1` — an F5
+ * external-browser debug session — has no embedder to inject anything; its
+ * dev entry is already in the server manifest (register_dev, resolved by the
+ * `?rrsession=` nonce), so it must register and load straight from the
+ * manifest instead of holding for a message that can never come.
  */
 export function isDevPreviewPage(): boolean {
 	try {
+		if (window.self === window.top) return false;
 		if (new URLSearchParams(window.location.search).get('rrdev') === '1') return true;
 		return sessionStorage.getItem('rr:dev') === '1';
 	} catch {

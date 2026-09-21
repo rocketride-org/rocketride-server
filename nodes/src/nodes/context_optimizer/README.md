@@ -91,7 +91,7 @@ Token counting uses `tiktoken`, which downloads its BPE vocabulary from `openaip
 
 ## Dependencies
 
-- `tiktoken` `>=0.7.0`
+- `tiktoken` `>=0.7.0,<1.0.0`
 
 ## Source
 

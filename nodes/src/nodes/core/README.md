@@ -262,7 +262,7 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `google.customerId` | `string` | **Customer ID**<br/>Enter your Google Workspace Customer ID.<br/><br/>This unique identifier is assigned to your organization by Google. It is used to specify the particular Google Workspace domain you want to manage. |  |
 | `google.oAuthButton` | `string` | **Login with Google** |  |
 | `google.serviceKey` | `string` | **Service Account Key File**<br/>Upload the JSON key file for your Google Workspace service account.<br/><br/>This file contains the credentials necessary to authenticate API requests. |  |
-| `google.userToken` | `string` | **Access Token**<br/>It is a long-term token that allows you to get new access tokens to access the Google API. |  |
+| `google.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Google API. |  |
 
 ### `services.common.json`
 
