@@ -10,6 +10,7 @@ import { VSCodeProvider, VSCodeContextType } from './hooks/useVSCode';
 import { DropperContainer } from './components/DropperContainer';
 import { API_CONFIG, setAPIConfig } from './config/apiConfig';
 import { startClient } from './hooks/clientSingleton';
+import { getSessionStorageItem, setSessionStorageItem } from 'shell/src/util/sessionStorage';
 
 const App: React.FC = () => {
 	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
@@ -68,7 +69,7 @@ const App: React.FC = () => {
 		if (token) {
 			window.history.replaceState({}, '', window.location.pathname);
 		} else if (!isVSCode) {
-			token = sessionStorage.getItem('auth') || '';
+			token = getSessionStorageItem('auth') || '';
 		}
 		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
@@ -89,7 +90,7 @@ const App: React.FC = () => {
 		});
 
 		if (!isVSCode) {
-			sessionStorage.setItem('auth', token);
+			setSessionStorageItem('auth', token);
 		}
 		setAuthToken(token);
 
