@@ -24,7 +24,7 @@
 // SQL-UI — TABLE DATA VIEW (server-paged data browser for one table)
 // =============================================================================
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useShellConnection } from 'shell';
 import type { GridCellComponent } from 'shell';
@@ -65,6 +65,18 @@ const styles = {
 		flexDirection: 'column',
 		padding: '16px 24px 24px',
 	} as CSSProperties,
+
+	// One-line caveat above the grid (no primary key = no stable page order).
+	note: {
+		margin: '0 0 8px',
+		fontSize: 12,
+		opacity: 0.7,
+	} as CSSProperties,
+
+	// The load-failure banner sits above the grid, inside the body padding.
+	banner: {
+		marginBottom: 8,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -97,6 +109,22 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 	const { client, isConnected } = useShellConnection();
 	const snapshot = useSchema(endpoint.key);
 
+	// Last page-load failure, surfaced as a banner. The grid keeps showing the
+	// previous rows on failure, so without this the error is invisible.
+	const [loadError, setLoadError] = useState<string | null>(null);
+
+	// Whether the grid is currently sorted by the user. Read from the page
+	// requests themselves — remote sorting is the only way sorters reach here.
+	const [gridSorted, setGridSorted] = useState(false);
+
+	// Stale-response guard. Two page requests can be in flight (a fast typist
+	// on the search box, a double page click), and the grid applies whichever
+	// resolves LAST — so a slow earlier answer can overwrite a newer one. Each
+	// request takes a sequence number; a request that has been superseded by
+	// the time it resolves adopts the newest answer instead of landing its own.
+	const seqRef = useRef(0);
+	const newestRef = useRef<Promise<IDataGridPage<Record<string, unknown>>> | null>(null);
+
 	// The table's reflected schema drives columns, search targets, and the
 	// default sort (primary key).
 	const tableDef = snapshot.schema?.tables?.[table] ?? null;
@@ -118,19 +146,67 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 	}, [tableDef]);
 
 	/**
-	 * REMOTE page fetcher: SELECT + COUNT per request through the session.
+	 * REMOTE page fetcher: SELECT + COUNT per request through the session,
+	 * with every filter and search value bound as a `$n` parameter.
+	 *
+	 * @param req - The grid's page request.
+	 * @returns The page rows and the matching total.
 	 */
-	const fetchPage = useCallback(async (req: IDataGridPageRequest): Promise<IDataGridPage<Record<string, unknown>>> => {
-		if (!client || !tableDef) return { rows: [], total: 0 };
-		const session = getSession(client, endpoint);
-		const statements = buildPageStatements(dialect, table, tableDef, req);
+	const fetchPage = useCallback((req: IDataGridPageRequest): Promise<IDataGridPage<Record<string, unknown>>> => {
+		setGridSorted(req.sort.length > 0);
+		const seq = ++seqRef.current;
+		// The banner describes ONE request. A new search, sort or page is a
+		// different question, so the previous answer's failure stops being
+		// shown the moment this one starts rather than the moment it lands.
+		setLoadError(null);
 
-		// Page rows + total over the same WHERE (drives the pager).
-		const pageResult = await session.execute(statements.select);
-		const countResult = await session.execute(statements.count);
-		const total = Number((countResult.rows[0] as { total?: unknown } | undefined)?.total ?? pageResult.rows.length);
-		return { rows: pageResult.rows, total };
+		const run = (async (): Promise<IDataGridPage<Record<string, unknown>>> => {
+			if (!client || !tableDef) return { rows: [], total: 0 };
+			const session = getSession(client, endpoint);
+			const { select, count, params } = buildPageStatements(dialect, table, tableDef, req);
+
+			// Page rows + total over the same WHERE (drives the pager). The two
+			// statements are independent, so one round trip instead of two.
+			// Both statements are SELECTs: safe to re-run, so they opt in to the
+			// session's one retry with a re-resolved token (the task may have
+			// restarted since this view last paged).
+			const [pageResult, countResult] = await Promise.all([
+				session.execute(select, { params, idempotent: true }),
+				session.execute(count, { params, idempotent: true }),
+			]);
+			const total = Number((countResult.rows[0] as { total?: unknown } | undefined)?.total ?? pageResult.rows.length);
+			return { rows: pageResult.rows, total };
+		})();
+
+		// `newest` is assigned BEFORE any await settles, so a superseded
+		// request always finds the newer chain here — which in turn resolves
+		// to the newest of all (each link applies the same rule).
+		const chain = run.then(
+			(page) => {
+				if (seq !== seqRef.current) return newestRef.current ?? page;
+				setLoadError(null);
+				return page;
+			},
+			(err: unknown) => {
+				// A superseded request's failure is not the user's problem; the
+				// request that replaced it reports its own outcome.
+				if (seq !== seqRef.current && newestRef.current) return newestRef.current;
+				throw err;
+			},
+		);
+		newestRef.current = chain;
+		return chain;
 	}, [client, endpoint, table, tableDef, dialect]);
+
+	/**
+	 * Surface a page-load failure (the grid itself only shows a transient
+	 * toast and keeps the previous rows on screen).
+	 *
+	 * @param error - The error the page fetcher rejected with.
+	 */
+	const handleLoadError = useCallback((error: Error): void => {
+		setLoadError(error.message || String(error));
+	}, []);
 
 	// ── Framing states ───────────────────────────────────────────────────────
 
@@ -158,6 +234,12 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 		);
 	}
 
+	// Without a primary key AND without a user sort, the page SELECT carries no
+	// ORDER BY at all, and SQL does not promise a stable row order between
+	// calls — rows can repeat or vanish across pages. Say so rather than let
+	// the pager look authoritative.
+	const unordered = (tableDef.primary_key ?? []).length === 0 && !gridSorted;
+
 	return (
 		<div style={styles.root}>
 			<ContentHeader
@@ -166,11 +248,22 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 			/>
 
 			<div style={styles.body}>
+				{loadError && (
+					<div style={styles.banner}>
+						{/* Clears itself on the next page that loads. */}
+						<Banner variant="error">Could not load this page: {loadError}</Banner>
+					</div>
+				)}
+				{unordered && (
+					<div style={styles.note}>No primary key — page order is not guaranteed by the database</div>
+				)}
 				<Card noBodyPadding fill>
 					<DataGrid<Record<string, unknown>>
 						title={table}
 						columns={columns}
 						fetchPage={isConnected ? fetchPage : undefined}
+						remoteSort
+						onLoadError={handleLoadError}
 						tableId={`sql-data-${endpoint.provider}`}
 						height="100%"
 						emptyTitle="No rows"

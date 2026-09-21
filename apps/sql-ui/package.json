@@ -22,7 +22,8 @@
 		"build": "rsbuild build",
 		"build:prod": "rsbuild build --env-mode production",
 		"dev": "rsbuild dev",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"typecheck:tests": "tsc -p tsconfig.test.json --noEmit"
 	},
 	"browserslist": [
 		"chrome >= 81",
@@ -46,6 +47,7 @@
 		"@rsbuild/plugin-react": "~2.0.1",
 		"typescript": "^5.3.0",
 		"@types/react": "~18.3.31",
-		"@types/react-dom": "~18.3.7"
+		"@types/react-dom": "~18.3.7",
+		"tsx": "~4.23.1"
 	}
 }

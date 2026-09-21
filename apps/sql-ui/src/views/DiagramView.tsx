@@ -180,7 +180,7 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 					icon={<DatabaseIcon />}
 					title="Reverse engineering failed"
 					description={snapshot.error ?? 'Schema reflection failed.'}
-					action={<Button variant="primary" onClick={() => { if (client) void refreshSchema(client, endpoint); }}>Retry</Button>}
+					action={<Button variant="primary" onClick={() => { if (client) void refreshSchema(client, endpoint, { fresh: true }); }}>Retry</Button>}
 				/>
 			</div>
 		);
@@ -209,7 +209,7 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 				<Button
 					variant="secondary"
 					small
-					onClick={() => { if (client) void refreshSchema(client, endpoint); }}
+					onClick={() => { if (client) void refreshSchema(client, endpoint, { fresh: true }); }}
 					disabled={!client || snapshot.status !== 'ready'}
 				>
 					Reverse Engineer

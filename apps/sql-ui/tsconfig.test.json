@@ -1,0 +1,38 @@
+{
+	// Typechecks tests/ alongside the source it exercises.
+	//
+	// The app's own program (tsconfig.json) includes src/** and
+	// rsbuild.config.mts only, so the ~4.9k lines under tests/ were checked
+	// by nothing — tsx erases types rather than checking them.
+	//
+	// Why a second program rather than widening the app's `include`: the
+	// `typecheck` script runs the default program, and that script name is
+	// the one scripts/lib/uiAudit.js requires of every app. Keeping it over
+	// src/** alone leaves it describing what this remote actually ships,
+	// with the tests checked beside it by `typecheck:tests`.
+	// packages/chat-widget/tsconfig.test.json already carries this shape;
+	// apps/shared goes the other way and excludes its tests outright.
+	//
+	// This is a file boundary, not a type boundary. tsconfig.json declares
+	// no `types`, so tsc's automatic @types walk already resolves the root
+	// @types/node into the src program — adding tests/** to that `include`
+	// also typechecks clean. `types` is named here only to state the
+	// dependency outright: @types/node is a root devDependency that this
+	// app does not declare, and the tests need it for node:test/node:assert.
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"types": [
+			"node"
+		]
+	},
+	"include": [
+		"src/**/*.ts",
+		"src/**/*.tsx",
+		"tests/**/*.ts",
+		"tests/**/*.tsx"
+	],
+	"exclude": [
+		"node_modules",
+		"dist"
+	]
+}
