@@ -49,6 +49,8 @@ def _make_discord_stub():
     discord.RateLimited = type('RateLimited', (Exception,), {})
     discord.Message = type('Message', (), {})
     discord.Attachment = type('Attachment', (), {})
+    discord.Thread = type('Thread', (), {})
+    discord.TextChannel = type('TextChannel', (), {})
 
     class _Intents:
         def __init__(self):
@@ -383,11 +385,12 @@ class TestOutboundSends:
         kwargs = message.channel.send.await_args.kwargs
         assert kwargs['allowed_mentions'] is discord.AllowedMentions.none()
 
-    def test_thread_mode_creates_thread_and_suppresses_mentions(self):
+    def test_thread_mode_creates_thread_for_text_channel(self):
         endpoint = self._endpoint('thread')
-        thread = mock.Mock()
+        thread = discord.Thread()
         thread.send = mock.AsyncMock()
         message = mock.Mock()
+        message.channel = discord.TextChannel()  # threadable
         message.create_thread = mock.AsyncMock(return_value=thread)
 
         result = asyncio.run(endpoint._send_chunk(message, 'hi', None))
@@ -397,9 +400,9 @@ class TestOutboundSends:
         kwargs = thread.send.await_args.kwargs
         assert kwargs['allowed_mentions'] is discord.AllowedMentions.none()
 
-    def test_thread_mode_reuses_existing_thread(self):
+    def test_thread_mode_reuses_existing_thread_arg(self):
         endpoint = self._endpoint('thread')
-        existing = mock.Mock()
+        existing = discord.Thread()
         existing.send = mock.AsyncMock()
         message = mock.Mock()
         message.create_thread = mock.AsyncMock()
@@ -409,6 +412,40 @@ class TestOutboundSends:
         assert result is existing
         message.create_thread.assert_not_called()  # no second thread
         existing.send.assert_awaited_once()
+
+    def test_thread_mode_posts_into_message_own_thread(self):
+        # A message already inside a thread must post into that thread, not try
+        # to create a nested one (which Discord rejects).
+        endpoint = self._endpoint('thread')
+        channel = discord.Thread()
+        channel.send = mock.AsyncMock()
+        message = mock.Mock()
+        message.channel = channel
+        message.create_thread = mock.AsyncMock()
+
+        result = asyncio.run(endpoint._send_chunk(message, 'hi', None))
+
+        assert result is channel
+        message.create_thread.assert_not_called()
+        channel.send.assert_awaited_once()
+
+    def test_thread_mode_falls_back_to_reply_in_dm(self):
+        # DMs (and other non-threadable channels) can't host a thread; the node
+        # must fall back to a plain reply instead of raising.
+        endpoint = self._endpoint('thread')
+        message = mock.Mock()
+        message.channel = mock.Mock()  # neither Thread nor TextChannel
+        message.reply = mock.AsyncMock()
+        message.create_thread = mock.AsyncMock()
+
+        result = asyncio.run(endpoint._send_chunk(message, 'hi', None))
+
+        assert result is None
+        message.create_thread.assert_not_called()
+        message.reply.assert_awaited_once()
+        kwargs = message.reply.await_args.kwargs
+        assert kwargs['mention_author'] is False
+        assert kwargs['allowed_mentions'] is discord.AllowedMentions.none()
 
 
 # ---------------------------------------------------------------------------

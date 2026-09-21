@@ -639,13 +639,27 @@ class IEndpoint(IEndpointBase):
         # text and must never ping users, roles, @here or @everyone even if it
         # contains mention syntax.
         no_mentions = discord.AllowedMentions.none()
+
         if self._reply_mode == 'reply':
             await message.reply(chunk, mention_author=False, allowed_mentions=no_mentions)
             return None
+
         if self._reply_mode == 'thread':
             if thread is None:
-                thread = await message.create_thread(name='Pipeline Response')
+                channel = message.channel
+                if isinstance(channel, discord.Thread):
+                    # The message already lives in a thread: post into it
+                    # rather than trying to create a nested one (which fails).
+                    thread = channel
+                elif isinstance(channel, discord.TextChannel):
+                    thread = await message.create_thread(name='Pipeline Response')
+                else:
+                    # DMs and other non-threadable channels cannot host a
+                    # thread; fall back to a plain reply.
+                    await message.reply(chunk, mention_author=False, allowed_mentions=no_mentions)
+                    return None
             await thread.send(chunk, allowed_mentions=no_mentions)
             return thread
+
         await message.channel.send(chunk, allowed_mentions=no_mentions)
         return None

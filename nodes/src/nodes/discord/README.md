@@ -67,6 +67,7 @@ Paste the token into the `discord.botToken` field. A missing token, an invalid t
 
 - **Message Content Intent** must be enabled in the Developer Portal (`Bot > Privileged Gateway Intents`); without it `message.content` arrives empty. The node fails fast if the intent is missing.
 - The bot needs **View Channels / Read Messages**, **Send Messages**, and **Read Message History** in the channels it serves. Apply them via the OAuth2 URL generator or per role/channel.
+- For `thread` reply mode, the bot additionally needs **Create Public Threads** and **Send Messages in Threads**. In a DM or a channel that cannot host a thread, the node falls back to a plain reply.
 
 ### Message handling and replies
 
