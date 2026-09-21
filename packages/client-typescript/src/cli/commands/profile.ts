@@ -102,21 +102,37 @@ function scopeOf(token?: string): string {
 /**
  * Parse a non-negative decimal exactly as typed; one grammar in both CLIs.
  *
+ * Digits alone do not make a number: enough of them overflow to Infinity,
+ * which would pass every range check below and turn --duration into a wait
+ * with no end.
+ *
  * @param text - The option value.
- * @returns The number, or null when the text is not one.
+ * @returns The number, or null when the text is not a finite one.
  */
 function parseDecimal(text: string | undefined): number | null {
-	return text !== undefined && /^([0-9]+\.?[0-9]*|\.[0-9]+)$/.test(text) ? Number(text) : null;
+	if (text === undefined || !/^([0-9]+\.?[0-9]*|\.[0-9]+)$/.test(text)) {
+		return null;
+	}
+	const value = Number(text);
+	return Number.isFinite(value) ? value : null;
 }
 
 /**
  * Parse a non-negative integer exactly as typed; one grammar in both CLIs.
  *
+ * Past 2^53 a JavaScript number no longer holds the digits it was given,
+ * so such a count is refused rather than silently rounded; the Python CLI
+ * refuses the same range to keep the two answering alike.
+ *
  * @param text - The option value.
- * @returns The number, or null when the text is not one.
+ * @returns The number, or null when the text is not an exact one.
  */
 function parseCount(text: string | undefined): number | null {
-	return text !== undefined && /^[0-9]+$/.test(text) ? Number(text) : null;
+	if (text === undefined || !/^[0-9]+$/.test(text)) {
+		return null;
+	}
+	const value = Number(text);
+	return Number.isSafeInteger(value) ? value : null;
 }
 
 /**

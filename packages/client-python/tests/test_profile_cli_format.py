@@ -229,12 +229,20 @@ class TestOptionChecks:
             (['stop'], 'profile stop needs --token'),
             (['run', '--duration', '0'], '--duration must be a positive number of seconds'),
             (['run', '--duration', '1e3'], '--duration must be a positive number of seconds'),
+            # Digits alone are not a number: this many overflow to infinity
+            (['run', '--duration', '9' * 400], '--duration must be a positive number of seconds'),
             (['tree', '--thread', 'main'], "--thread must be a thread id from 'rocketride profile threads'"),
             (['tree', '--thread', '-1'], "--thread must be a thread id from 'rocketride profile threads'"),
             (['tree', '--min-pct', 'abc'], '--min-pct must be a number from 0 to 100'),
             (['tree', '--min-pct', '100.5'], '--min-pct must be a number from 0 to 100'),
             (['tree', '--max-depth', '0'], '--max-depth must be a positive integer'),
             (['tree', '--max-depth', '2.5'], '--max-depth must be a positive integer'),
+            # Past 2^53 the TypeScript CLI cannot hold the digits; both refuse it
+            (['tree', '--max-depth', '9007199254740993'], '--max-depth must be a positive integer'),
+            (
+                ['tree', '--thread', '9007199254740993'],
+                "--thread must be a thread id from 'rocketride profile threads'",
+            ),
         ],
     )
     async def test_refuses_a_bad_option_without_connecting(self, argv, message, capsys):

@@ -34,6 +34,7 @@ Kept in exact parity with the TypeScript CLI's ``src/cli/commands/profile.ts``
 """
 
 import asyncio
+import math
 import re
 import signal
 import sys
@@ -48,6 +49,9 @@ _COUNT = re.compile(r'[0-9]+')
 
 # How long `profile list` waits for one task's status before giving up on it
 _LIST_TIMEOUT_SECONDS = 10
+
+# Number.MAX_SAFE_INTEGER: the largest count the TypeScript CLI holds exactly
+_MAX_EXACT_COUNT = 2**53 - 1
 
 
 def _seconds(value: float) -> str:
@@ -66,13 +70,31 @@ def _scope(token: Optional[str]) -> str:
 
 
 def _parse_decimal(text: Optional[str]) -> Optional[float]:
-    """Parse a non-negative decimal exactly as typed, or None when it is not one."""
-    return float(text) if text is not None and _DECIMAL.fullmatch(text) else None
+    """
+    Parse a non-negative decimal exactly as typed, or None when it is not a finite one.
+
+    Digits alone do not make a number: enough of them overflow to inf,
+    which would pass every range check and turn --duration into a wait with
+    no end.
+    """
+    if text is None or not _DECIMAL.fullmatch(text):
+        return None
+    value = float(text)
+    return value if math.isfinite(value) else None
 
 
 def _parse_count(text: Optional[str]) -> Optional[int]:
-    """Parse a non-negative integer exactly as typed, or None when it is not one."""
-    return int(text) if text is not None and _COUNT.fullmatch(text) else None
+    """
+    Parse a non-negative integer exactly as typed, or None when it is not an exact one.
+
+    Python counts as high as you like, but past 2^53 a JavaScript number no
+    longer holds the digits it was given; the same range is refused here so
+    both CLIs answer a given count alike.
+    """
+    if text is None or not _COUNT.fullmatch(text):
+        return None
+    value = int(text)
+    return value if value <= _MAX_EXACT_COUNT else None
 
 
 def _fail_without_token(out: Output, verb: str) -> int:
