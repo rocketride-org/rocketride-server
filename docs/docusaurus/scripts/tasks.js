@@ -144,6 +144,31 @@ function makeTestAction() {
 	};
 }
 
+/** True when `cmd -c <code>` exits 0, with `cmd` resolved exactly as execCommand will run it. */
+async function pythonRuns(cmd, code) {
+	try {
+		await execCommand(cmd, ['-c', code], { cwd: PROJECT_ROOT, stdio: 'ignore', silent: true });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The Python docs:validate runs under: the built engine, like every other
+ * pytest task, else the first working Python 3.10+ on PATH, because
+ * docs-schemas.yml runs on a clean checkout with no engine.
+ */
+async function resolvePython() {
+	if (await exists(ENGINE + (isWindows() ? '.exe' : ''))) return ENGINE;
+	// Run each candidate rather than look it up: on Windows either name can be
+	// a Microsoft Store stub that sits on PATH and only prints an install hint.
+	for (const cmd of ['python3', 'python']) {
+		if (await pythonRuns(cmd, 'import sys; sys.exit(sys.version_info < (3, 10))')) return cmd;
+	}
+	throw new Error(`docs:validate: no Python 3.10+ found (tried ${ENGINE}, python3, python)`);
+}
+
 /**
  * docs:validate — the deterministic documentation checks, run as a builder
  * task so `docs:test` (and therefore `./builder test`) carries them; CI does
@@ -156,29 +181,26 @@ function makeValidateAction() {
 	return {
 		description: 'Validate documentation schemas',
 		run: async (ctx, task) => {
+			const python = await resolvePython();
+
 			// 1. client-doc parity — blocking
-			await execCommand('python3', ['scripts/validate-client-docs.py'], { task, cwd: PROJECT_ROOT });
+			await execCommand(python, ['scripts/validate-client-docs.py'], { task, cwd: PROJECT_ROOT });
 
 			// 2. the whole node corpus — blocking now that it is clean
-			await execCommand('python3', ['scripts/validate-node-readme.py', '--all', 'nodes/src/nodes'], { task, cwd: PROJECT_ROOT });
+			await execCommand(python, ['scripts/validate-node-readme.py', '--all', 'nodes/src/nodes'], { task, cwd: PROJECT_ROOT });
 
 			// 3. the validator's own regression tests — the only per-PR gate on
 			// scripts/validate-node-readme.py itself; nodes:test also runs this
 			// file, but nothing in .github/workflows invokes nodes:test.
-			// Run them under the engine's Python like every other pytest task:
-			// a bare `python3` is whatever the runner has on PATH, and the
-			// Windows CI interpreter ships without pytest. docs:validate also
-			// runs where no engine is built (docs-schemas.yml, a clean
-			// checkout), so skip there instead of failing on ENOENT; the full
-			// build jobs still exercise the tests. nodes:test keeps hard-failing
-			// on a missing engine, which is why this guard is local.
+			// The engine carries pytest; a PATH Python may not (docs-schemas.yml
+			// installs it), so skip there instead of failing on the import.
 			const testsFile = path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py');
-			if (!(await exists(ENGINE + (isWindows() ? '.exe' : '')))) {
-				task.output = `pytest: engine not built at ${ENGINE}, skipping ${path.relative(PROJECT_ROOT, testsFile)} (run server:build to include it)`;
+			if (python !== ENGINE && !(await pythonRuns(python, 'import pytest'))) {
+				task.output = `pytest: not installed for ${python}, skipping ${path.relative(PROJECT_ROOT, testsFile)} (install pytest, or run server:build to use the engine)`;
 				return;
 			}
 			await runPytest({
-				engine: ENGINE,
+				engine: python,
 				testsDir: testsFile,
 				execOpts: { task, cwd: PROJECT_ROOT },
 			});
