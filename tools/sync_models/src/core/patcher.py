@@ -303,7 +303,8 @@ def _shared_properties(
         namespace: Field namespace prefix (e.g. ``'image_vision_mistral'``)
         protected: Profile keys whose forms are not models (e.g. ``{'custom'}``)
         profiles: The profiles dict; when given, forms of profiles without a
-            ``model`` (placeholders) are ignored too
+            ``model`` are ignored too — placeholders, and the non-dict values
+            ``_normalize_profile`` preserves
 
     Returns:
         The shared properties, in the order the first model form lists them
@@ -316,8 +317,10 @@ def _shared_properties(
         props = value.get('properties')
         if not isinstance(obj, str) or not isinstance(props, list) or obj in protected:
             continue
-        if profiles is not None and not (profiles.get(obj) or {}).get('model'):
-            continue
+        if profiles is not None:
+            profile = profiles.get(obj)
+            if not isinstance(profile, dict) or not profile.get('model'):
+                continue
         own = [p for p in props if p not in _MANAGED_PROPERTIES and not str(p).endswith('.apikey')]
         shared = own if shared is None else [p for p in shared if p in own]
     return shared or []

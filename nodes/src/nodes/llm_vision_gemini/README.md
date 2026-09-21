@@ -76,7 +76,7 @@ Retry behavior: one retry for transient errors (timeout, connection, `500`/`502`
 
 ### Model sync
 
-Profiles are maintained by the `sync_models` tooling (`llm_vision_gemini` provider, `ROCKETRIDE_GEMINI_KEY`). The Gemini API does not say which models accept images, so the sync asks OpenRouter and LiteLLM, and adds a model only when one of them reports vision support. Each new model is then verified with a real image; TTS, audio and embedding variants are filtered out before that.
+Profiles are maintained by the `sync_models` tooling (`llm_vision_gemini` provider, `ROCKETRIDE_GEMINI_KEY`). The Gemini API does not say which models accept images, so the sync asks OpenRouter first, then LiteLLM, and takes the first answer it gets: a model is added only when that answer is yes, and a `no` from OpenRouter settles it without asking LiteLLM. Each new model is then verified with a real image; TTS, audio and embedding variants are filtered out before that.
 
 The sync runs **only** with that key, and is skipped without it, leaving this file untouched — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
 
