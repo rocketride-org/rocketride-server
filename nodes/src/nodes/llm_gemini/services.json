@@ -223,8 +223,8 @@
 				"title": "Google: Gemini 2.5 Pro Preview 05-06",
 				"model": "models/gemini-2.5-pro-preview-05-06",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65535, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65535, // manual
 				"deprecated": true,
 				"migration": "Model no longer available from the Gemini API. Please select a current model.",
 				"apikey": ""
@@ -307,6 +307,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65535, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-20). Please select a current model.",
 				"apikey": ""
 			},
 			"models-gemini-2-5-flash-lite-batch": {
@@ -323,6 +326,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-20). Please select a current model.",
 				"apikey": ""
 			},
 			"models-gemini-3-1-flash-lite-batch": {
