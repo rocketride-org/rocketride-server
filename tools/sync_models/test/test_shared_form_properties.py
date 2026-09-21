@@ -71,6 +71,15 @@ class TestSharedProperties:
         profiles = {'custom': {'model': ''}, 'blank': {'model': ''}, 'a': {'model': 'm'}}
         assert _shared_properties(fields, 'ns', {'custom'}, profiles) == _VISION
 
+    def test_a_non_dict_profile_value_is_ignored(self):
+        """The serialiser keeps non-dict profile values, so a form pointing at one is not a model form."""
+        fields = {
+            'ns.odd': _form('odd', 'legacy', 'llm.cloud.apikey'),
+            'ns.a': _form('a', 'llm.cloud.apikey', *_VISION),
+        }
+        profiles = {'odd': 'not-a-dict', 'a': {'model': 'm'}}
+        assert _shared_properties(fields, 'ns', set(), profiles) == _VISION
+
     def test_forms_of_another_namespace_are_ignored(self):
         """Shared field definitions outside the namespace are not model forms."""
         fields = {

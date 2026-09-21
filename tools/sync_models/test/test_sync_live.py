@@ -293,9 +293,19 @@ def test_mistral_profiles_exist_in_api():
 
 @requires_mistral
 def test_vision_mistral_profiles_exist_and_accept_images():
-    """Every non-deprecated llm_vision_mistral profile must be listed, and Mistral must report vision for it."""
+    """
+    Every non-deprecated llm_vision_mistral profile must be listed, and must answer a real image request.
+
+    The model card is not enough: a missing or wrong ``capabilities.vision`` would
+    pass while the model rejects the image. So each profile is called the way the
+    sync calls a new one, with a small PNG attached. A transient failure is
+    ignored; anything else is reported with the provider's own words.
+
+    One request per profile, so it is slower than the listing check by design.
+    """
     import openai
 
+    from core.smoke import run as smoke_run
     from providers.mistral import MistralProvider
 
     client = openai.OpenAI(api_key=os.environ['ROCKETRIDE_MISTRAL_KEY'], base_url='https://api.mistral.ai/v1')
@@ -303,12 +313,16 @@ def test_vision_mistral_profiles_exist_and_accept_images():
     profiles = _load_profiles('llm_vision_mistral')
     _check_missing_models(profiles, set(cards), 'llm_vision_mistral')
 
-    blind = sorted(
-        p['model']
-        for p in profiles.values()
-        if p.get('model') in cards and (cards[p['model']].get('capabilities') or {}).get('vision') is False
-    )
-    assert not blind, f'llm_vision_mistral profiles Mistral reports as not vision-capable: {blind}'
+    rejected = []
+    for profile_key, profile in profiles.items():
+        model_id = profile.get('model')
+        if not model_id:
+            continue
+        result = smoke_run('vision_openai_compat', client, model_id)
+        if result.passed() or result.outcome == 'error':
+            continue
+        rejected.append(f'{profile_key} ({model_id}): {result.reason[:160]}')
+    assert not rejected, 'llm_vision_mistral profiles that refused an image request:\n' + '\n'.join(rejected)
 
 
 # ---------------------------------------------------------------------------
