@@ -152,67 +152,6 @@ function ensureWorkspaceSettings(workspaceRoot: string): void {
 }
 
 // =============================================================================
-// LAUNCH CONFIG
-// =============================================================================
-
-/**
- * Merges the app's F5 debug configuration into the WORKSPACE root's
- * .vscode/launch.json — one entry per app, keyed by name ("Debug <app>").
- *
- * Conservative with the user-owned file: a missing file is created whole; a
- * parseable file gains (or updates) only this app's entry; an unparseable
- * file (launch.json allows comments, which JSON.parse rejects) is left
- * untouched with a log naming the config to add by hand. Non-fatal — a
- * debug config is never a reason to fail a scaffold.
- *
- * @param workspaceRoot - The workspace folder owning .vscode/.
- * @param appName - Display name (the config is "Debug <appName>").
- * @param appRelFolder - App folder relative to the root (webRoot target).
- * @param previewUrl - The preview shell URL the debugger opens.
- */
-function ensureLaunchConfig(workspaceRoot: string, appName: string, appRelFolder: string, previewUrl: string): void {
-	const logger = getLogger();
-	const launchDir = path.join(workspaceRoot, '.vscode');
-	const launchPath = path.join(launchDir, 'launch.json');
-	// step: the entry — msedge against the preview shell, sources mapped
-	// into the app's folder
-	const config = {
-		name: `Debug ${appName}`,
-		type: 'msedge',
-		request: 'launch',
-		url: previewUrl,
-		webRoot: `\${workspaceFolder}/${appRelFolder}`,
-		sourceMapPathOverrides: {
-			'webpack:///./*': `\${workspaceFolder}/${appRelFolder}/*`,
-			'webpack:///*': '*',
-		},
-	};
-	try {
-		if (!fs.existsSync(launchPath)) {
-			// step: no file — create the standard skeleton with this entry
-			fs.mkdirSync(launchDir, { recursive: true });
-			fs.writeFileSync(launchPath, `${JSON.stringify({ version: '0.2.0', configurations: [config] }, null, 2)}\n`);
-			logger.output(`[appdev] wrote ${launchPath} with "${config.name}"`);
-			return;
-		}
-		// step: merge into the existing file — replace this app's entry by
-		// name, keep everything else byte-for-byte semantically intact
-		const parsed = JSON.parse(fs.readFileSync(launchPath, 'utf8'));
-		const configurations: Record<string, unknown>[] = Array.isArray(parsed.configurations) ? parsed.configurations : [];
-		const idx = configurations.findIndex((c) => c && c.name === config.name);
-		if (idx >= 0) configurations[idx] = config;
-		else configurations.push(config);
-		parsed.configurations = configurations;
-		fs.writeFileSync(launchPath, `${JSON.stringify(parsed, null, 2)}\n`);
-		logger.output(`[appdev] ${idx >= 0 ? 'updated' : 'added'} "${config.name}" in ${launchPath}`);
-	} catch (err) {
-		// launch.json permits comments/trailing commas; never mangle a file
-		// this code cannot faithfully rewrite.
-		logger.output(`[appdev] could not merge the debug config into ${launchPath} (${err instanceof Error ? err.message : String(err)}) — add a "${config.name}" msedge configuration for ${previewUrl} manually`);
-	}
-}
-
-// =============================================================================
 // SCAFFOLD
 // =============================================================================
 
@@ -292,11 +231,10 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	await ensureAppTrigger(target.fsPath, appId);
 	await ensureProjectId(target.fsPath);
 
-	// F5 debug config lives in the WORKSPACE root's .vscode/launch.json —
-	// VSCode only surfaces launch configs from workspace-folder roots, so an
-	// app-local .vscode would never appear in the debug dropdown. One entry
-	// per app, merged beside whatever the user already has.
-	ensureLaunchConfig(root.uri.fsPath, appName, `apps/${folderName}`, previewUrl);
+	// No launch.json entry is scaffolded: F5 debugging goes through the
+	// rocketride.app.debug command, which builds its config in-memory and
+	// ensures the watch session first — a static launch entry would open
+	// the preview with no dev bundle being served.
 
 	// Dependency trees and build output stay out of the user's repository —
 	// the root install and app builds generate both at multiple depths.
