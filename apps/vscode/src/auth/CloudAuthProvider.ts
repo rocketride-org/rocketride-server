@@ -328,7 +328,18 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 				this.pendingSignOut = false;
 				this._onDidChange.emit('changed');
 			} else {
-				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: no token received.');
+				// Not waitlisted, but still no token: the account is enabled
+				// (auto-provisioned on first sign-in, and not queued above),
+				// so the only remaining cause is that every rr_* API key on
+				// it is inactive/revoked. "No token received" left the user
+				// with nowhere to go, so name the actual cause and the fix
+				// instead — no link is offered here because this scope has
+				// no cloud-app URL to point at (the exchange target above is
+				// the engine endpoint, not a browsable dashboard) and no
+				// authenticated client to ask the server for one.
+				vscode.window.showErrorMessage(
+					'RocketRide Cloud sign-in succeeded, but no active API key was found for this account. Sign in to RocketRide Cloud in your browser to create or reactivate a key, then try again.'
+				);
 			}
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
