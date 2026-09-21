@@ -41,6 +41,7 @@
 
 import { RocketRideClient, RocketRideClientConfig, ConnectionException } from 'rocketride';
 import { API_CONFIG } from '../config/apiConfig';
+import { getSessionStorageItem, setSessionStorageItem } from 'shell/src/util/sessionStorage';
 
 // ============================================================================
 // SINGLETON STATE
@@ -120,7 +121,7 @@ let lastConnectionError: { reason: string; hasError: boolean } | null = null;
  */
 async function getAuthToken(): Promise<string | null> {
 	// Check session storage first for cached token
-	let auth = sessionStorage.getItem('auth');
+	let auth = getSessionStorageItem('auth');
 	if (auth) return auth;
 
 	if (API_CONFIG.devMode) {
@@ -150,7 +151,7 @@ async function getAuthToken(): Promise<string | null> {
 	}
 
 	// Cache token in session storage for subsequent requests
-	if (auth) sessionStorage.setItem('auth', auth);
+	if (auth) setSessionStorageItem('auth', auth);
 	return auth;
 }
 
