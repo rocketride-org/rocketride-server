@@ -2885,7 +2885,8 @@ def test_an_interrupted_run_ends_the_poll_at_once():
     g = _loaded_global(job_timeout_secs=300)
     g.client = SimpleNamespace(
         query=lambda **_kw: {'query_run_id': 'run-1'},
-        get_query_run=_bounded_poll({'status': 'interrupted'}, most=1),
+        # One poll per run, and the statement is run twice: see the re-run tests.
+        get_query_run=_bounded_poll({'status': 'interrupted'}, most=2),
     )
     with pytest.raises(RuntimeError, match='interrupted') as excinfo:
         _instance(g)._run_sql('SELECT a FROM t', 10)
@@ -2920,3 +2921,113 @@ def test_the_query_run_id_is_read_from_inside_the_error_object_too():
         c.query(sql='SELECT * FROM x', database_id='db-1')
     assert excinfo.value.query_run_id == 'qrun-7'
     assert iinstance_mod._is_sql_fixable(excinfo.value) is True
+
+
+# ---------------------------------------------------------------------------
+# `interrupted` is "terminal, and safe to retry" - so it is retried, once
+# ---------------------------------------------------------------------------
+
+
+def _interrupting_client(outcomes, seen):
+    """A client whose Nth query starts a run that ends as `outcomes[N]`.
+
+    `seen` collects the SQL of every query, so a test can assert both how many
+    times the statement ran and that it was the same statement each time.
+    """
+
+    def _query(**kw):
+        """Start the next run and remember the SQL it was given."""
+        seen.append(kw['sql'])
+        return {'query_run_id': f'run-{len(seen)}'}
+
+    def _get_query_run(run_id, database_id=''):
+        """End each run the way `outcomes` says, bounded so a loop fails the test."""
+        index = int(run_id.split('-')[1]) - 1
+        assert index < len(outcomes), f'the statement was run {index + 1} times'
+        return outcomes[index]
+
+    return SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=_query,
+        get_query_run=_get_query_run,
+        get_result=lambda _i, database_id='', offset=0, limit=None: {'columns': ['a'], 'rows': [[1]]},
+    )
+
+
+def test_an_interrupted_run_is_run_again_with_the_same_sql():
+    """The contract's answer to `interrupted` is to run the query again. Without
+    it the caller loses a whole tool call because Hotdata replaced a server.
+    """
+    seen = []
+    g = _loaded_global()
+    g.client = _interrupting_client([{'status': 'interrupted'}, {'status': 'succeeded', 'result_id': 'res-2'}], seen)
+    out = _instance(g)._run_sql('SELECT a FROM t', 10)
+    assert out['rows'] == [{'a': 1}]
+    assert seen == ['SELECT a FROM t', 'SELECT a FROM t'], 'the same statement, run twice'
+
+
+def test_the_re_run_costs_no_llm_turn():
+    """It is the same SQL again, so the model is not asked for a new one."""
+    seen = []
+    g = _loaded_global(max_attempts=3)
+    g.client = _interrupting_client([{'status': 'interrupted'}, {'status': 'succeeded', 'result_id': 'res-2'}], seen)
+    inst = _llm_instance(g, ['SELECT a FROM t', 'SELECT 2', 'SELECT 3'])
+    out = inst.get_data({'question': 'x'})
+    assert out['rows'] == [{'a': 1}]
+    assert out['attempts'] == 1
+    assert len(inst.asked) == 1
+    assert len(seen) == 2
+
+
+def test_a_run_interrupted_twice_gives_up_after_the_second_attempt():
+    """Bounded at one re-run, so a run that is interrupted every time still ends."""
+    seen = []
+    g = _loaded_global()
+    g.client = _interrupting_client([{'status': 'interrupted'}, {'status': 'interrupted'}], seen)
+    with pytest.raises(iinstance_mod.RunInterrupted, match='interrupted'):
+        _instance(g)._run_sql('SELECT a FROM t', 10)
+    assert len(seen) == 2, 'one re-run, no more'
+
+
+def test_only_an_interrupted_run_is_run_again():
+    """The spec says "safe to retry" of `interrupted` alone. A cancelled run and a
+    failed statement are each raised after a single attempt.
+    """
+    for ending in ({'status': 'cancelled'}, {'status': 'failed', 'error_message': 'boom'}):
+        seen = []
+        g = _loaded_global()
+        g.client = _interrupting_client([ending], seen)
+        with pytest.raises(RuntimeError) as excinfo:
+            _instance(g)._run_sql('SELECT a FROM t', 10)
+        assert not isinstance(excinfo.value, iinstance_mod.RunInterrupted)
+        assert len(seen) == 1, ending
+
+
+# ---------------------------------------------------------------------------
+# The query body's result_id survives the wait on the run
+# ---------------------------------------------------------------------------
+
+
+def test_a_run_that_names_no_result_still_reads_the_one_the_query_named():
+    """A run can reach a terminal-OK status without a `result_id` key. The run
+    body has no rows, so dropping the id the query answered with would fall
+    through to an empty result - for one large enough to have been truncated.
+    """
+    read = []
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        query=lambda **_kw: {
+            'query_run_id': 'run-1',
+            'result_id': 'res-from-body',
+            'truncated': True,
+            'columns': ['n'],
+            'rows': [[1]],
+        },
+        get_query_run=_bounded_poll({'status': 'succeeded'}),
+        get_result=lambda result_id, database_id='', offset=0, limit=None: (
+            read.append(result_id) or {'status': 'ready', 'columns': ['n'], 'rows': [[1], [2]]}
+        ),
+    )
+    out = _instance(g)._run_sql('SELECT n FROM big', 2)
+    assert read == ['res-from-body'], 'the read must still happen, with the id the query gave'
+    assert out['rows'] == [{'n': 1}, {'n': 2}]

@@ -84,7 +84,8 @@ _TERMINAL_BAD = frozenset({'failed', 'error', 'interrupted', 'cancelled', 'cance
 #: never as SqlStatementError. Only `interrupted` is a documented status of a
 #: query run (https://www.hotdata.dev/openapi.yaml: "terminal, and safe to
 #: retry"); `cancelled` / `canceled` were never seen from this endpoint and are
-#: kept from the original set as a guard.
+#: kept from the original set as a guard. "Safe to retry" is acted on in
+#: _run_sql, which runs the same statement once more - for `interrupted` only.
 _ENDED_NOT_BY_THE_SQL = frozenset({'interrupted', 'cancelled', 'canceled'})
 
 #: Async job states from the loads/indexes 202 envelope.
@@ -207,6 +208,17 @@ class SqlStatementError(RuntimeError):
     SQL, so regenerating is worth a turn. Carried as its own type because a
     deferred run reports its failure in the poll body, with no HTTP status to
     classify on.
+    """
+
+
+class RunInterrupted(RuntimeError):
+    """Hotdata interrupted the run before it finished; the statement is untouched.
+
+    The spec's example is the server handling the run being replaced, and it
+    calls the status "terminal, and safe to retry". Its own type so that
+    ``_run_sql`` can run the same statement again for this status and no other,
+    and a RuntimeError so that everything that already treats it as "not the
+    statement's fault" keeps doing so.
     """
 
 
@@ -503,6 +515,24 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
 
     def _run_sql(self, sql: str, limit: int) -> Dict[str, Any]:
+        """Execute one statement, running it once more if Hotdata interrupts the run.
+
+        `interrupted` is the one failure the contract says to simply run again:
+        the server handling the run was replaced, and nothing is wrong with the
+        statement. Without this the caller loses a whole tool call to it, and so
+        do `execute` and `get_schema`, which come through here too.
+
+        Bounded at one re-run, so a run that is interrupted every time still
+        ends. The same SQL is sent, so no LLM turn is spent; and it is safe to
+        send twice because only read-only statements reach this point.
+        """
+        try:
+            return self._run_sql_once(sql, limit)
+        except RunInterrupted as e:
+            warning(f'db_hotdata: {e} - running the same statement once more')
+            return self._run_sql_once(sql, limit)
+
+    def _run_sql_once(self, sql: str, limit: int) -> Dict[str, Any]:
         """Execute one statement, following the async job if the server defers it."""
         glb = self.IGlobal
         database = glb.get_database()
@@ -527,6 +557,12 @@ class IInstance(IInstanceBase):
         # first `limit` of it. Surfacing the id next to a truncated window would
         # let an agent read 10 rows, pass the id to load_data and materialise
         # 25,000 - so the id is only offered when the caller has seen all of it.
+        #
+        # This id is issued while the save is still in flight, and it is handed
+        # out anyway because a load against it cannot go quietly wrong: the loads
+        # endpoint answers 409 "the result is still being computed" rather than
+        # loading part of it. Checked live 2026-09-21 - three loads issued right
+        # behind a 9,500-row query each returned 200 with all 9,500 rows.
         run_id = response.get('query_run_id') or response.get('id')
         if response.get('rows') is not None and not response.get('truncated'):
             rows = _rows_as_objects(response.get('rows') or [], response.get('columns'))
@@ -628,7 +664,8 @@ ORDER BY table_schema, table_name, ordinal_position"""
                     # rewritten query cannot un-interrupt or un-cancel a run, and
                     # classifying it as fixable would spend an LLM turn finding
                     # that out.
-                    raise RuntimeError(f'db_hotdata: query run ended as {status!r}: {message}')
+                    ended = RunInterrupted if status == 'interrupted' else RuntimeError
+                    raise ended(f'db_hotdata: query run ended as {status!r}: {message}')
                 raise SqlStatementError(f'db_hotdata: query failed: {message}')
             if status in _TERMINAL_OK or run.get('result_id'):
                 return run
