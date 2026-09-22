@@ -18,6 +18,8 @@ target_link_libraries(engLib PRIVATE zstd::libzstd)
 find_package(cpprestsdk CONFIG REQUIRED)
 target_link_libraries(engLib PRIVATE cpprestsdk::cpprest)
 rocketride_reexport_library_defines(engLib cpprestsdk::cpprest)
+# Disable platform strings, this prevents cpprest from defining the U macro
+target_compile_definitions(engLib PUBLIC -D_TURN_OFF_PLATFORM_STRING=1)
 
 # Find package has issues when attempting to find our interpreter
 # so we set it up ourselves
@@ -33,10 +35,6 @@ set(Python3_Interpreter_FOUND TRUE)
 # for the development end
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 target_link_libraries(engLib PUBLIC Python3::Python)
-
-find_package(azure-identity-cpp CONFIG REQUIRED)
-find_package(azure-storage-blobs-cpp CONFIG REQUIRED)
-target_link_libraries(engLib PUBLIC Azure::azure-identity Azure::azure-storage-blobs)
 
 # Find pybind11 module with CMake
 find_package(pybind11 REQUIRED)
@@ -70,10 +68,6 @@ target_link_libraries(engLib PUBLIC apLib)
 if(ROCKETRIDE_PLAT_MAC)
     target_link_libraries(engLib PUBLIC compression)
 endif()
-
-# Disable export definitions on the azure sdk otherwise it tries to dll import on us
-# Disable platform strings this prevents the U macro from being defined
-target_compile_definitions(engLib PUBLIC -D_NO_WASTORAGE_API=1 -D_TURN_OFF_PLATFORM_STRING=1)
 
 # Register our own public include paths for dependencies linking to engLib with
 # un-ambiguous include paths e.g. <engLib/eng.h>

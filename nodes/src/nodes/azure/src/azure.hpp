@@ -23,39 +23,13 @@
 
 //-----------------------------------------------------------------------------
 //
-//	Defines the remove interface for the azure storage endpoint
+//	Declares the interface for Azure node
 //
 //-----------------------------------------------------------------------------
+#pragma once
 
-namespace engine::store::filter::azure {
-//-------------------------------------------------------------------------
-/// @details
-///     Remove the entry object
-/// @param[in]  object
-///     The name to remove
-/// @returns
-///     Error
-//-------------------------------------------------------------------------
-Error IFilterInstance::removeObject(Entry &object) noexcept {
-    Error ccode;
+#include <engLib/eng.h>
 
-    // get the filename
-    std::shared_ptr<Azure::Storage::Blobs::BlobContainerClient>
-        blobContainerClient;
-    auto errorOr = processPath(object, blobContainerClient);
-    if (errorOr.hasCcode()) return errorOr.ccode();
-
-    Text pathName = errorOr.value().gen();
-
-    LOGT("Removing object: {}", pathName);
-    auto blob =
-        blobContainerClient->GetBlobClient(Text(object.url().path().subpth(2)));
-
-    auto deleted = blob.DeleteIfExists();
-    if (!deleted.Value.Deleted) {
-        LOGT("Azure object '{}' {}", pathName,
-             "couldn't be deleted because doesn't exist");
-    }
-    return {};
-}
-}  // namespace engine::store::filter::azure
+#include "cpprest.hpp"
+#include "error.hpp"
+#include "blob.hpp"
