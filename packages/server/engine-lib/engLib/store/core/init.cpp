@@ -36,7 +36,6 @@ void deinit() noexcept {
     Factory::deregisterFactory(
         // Instances
         filter::bottom::IFilterInstance::Factory,
-        filter::classify::IFilterInstance::Factory,
         filter::pipe::IFilterInstance::Factory,
 
         filter::null::IFilterInstance::Factory,
@@ -54,7 +53,6 @@ void deinit() noexcept {
 
         // Global data
         filter::bottom::IFilterGlobal::Factory,
-        filter::classify::IFilterGlobal::Factory,
         filter::pipe::IFilterGlobal::Factory,
 
         filter::null::IFilterGlobal::Factory,
@@ -103,7 +101,6 @@ Error init() noexcept {
     if (auto ccode = Factory::registerFactory(
             // Instances
             filter::bottom::IFilterInstance::Factory,
-            filter::classify::IFilterInstance::Factory,
             filter::pipe::IFilterInstance::Factory,
 
             filter::null::IFilterInstance::Factory,
@@ -121,7 +118,6 @@ Error init() noexcept {
 
             // Global data
             filter::bottom::IFilterGlobal::Factory,
-            filter::classify::IFilterGlobal::Factory,
             filter::pipe::IFilterGlobal::Factory,
 
             filter::null::IFilterGlobal::Factory,
