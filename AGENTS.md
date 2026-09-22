@@ -34,7 +34,7 @@ Read the doc for your task before writing code. Paths are repo-relative.
 ## Common commands
 
 ```bash
-./builder build                  # Full build (server-only: build server)
+./builder build                  # Build EVERYTHING (global command: expands to every module's :build — server, shell, all UIs, SDKs, vscode)
 ./builder test                   # All tests
 python -m pytest <path>          # Python tests directly
 python -m ruff check <path>      # Python lint (format: ruff format)

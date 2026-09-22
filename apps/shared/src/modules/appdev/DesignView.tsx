@@ -490,6 +490,13 @@ const styles: Record<string, React.CSSProperties> = {
 		color: 'var(--rr-brand)',
 		fontWeight: 700,
 	},
+	// The watch target rendered as a link — clicking it launches the same
+	// external-browser debug session as the gear menu's Debug (F5) row.
+	devBadgeLink: {
+		color: 'var(--rr-color-secondary)',
+		textDecoration: 'underline',
+		cursor: 'pointer',
+	},
 	devBadgeOk: {
 		color: 'var(--rr-color-success)',
 	},
@@ -848,7 +855,19 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane, code
 							{watch && watch.state !== 'idle' && (
 								<>
 									<span style={styles.devBadgeBrand}>DEV</span>
-									{watch.target ? <span>&rarr; {watch.target}</span> : null}
+									{watch.target ? (
+										<span>
+											&rarr;{' '}
+											{caps.canDebug && host.debug ? (
+												<a
+													style={styles.devBadgeLink}
+													title="Launch the debug session (F5)"
+													onClick={(e) => { e.preventDefault(); host.debug?.(); }}
+													href="#"
+												>{watch.target}</a>
+											) : watch.target}
+										</span>
+									) : null}
 									<span style={watch.state === 'error' ? styles.devBadgeErr : styles.devBadgeOk}>
 										watch: {watch.state}
 										{watch.durationMs != null ? ` · ${(watch.durationMs / 1000).toFixed(1)}s` : ''}
