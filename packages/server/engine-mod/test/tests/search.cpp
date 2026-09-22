@@ -289,7 +289,7 @@ TEST_CASE("store::search::prepare", "[.]") {
 
     // Prepare words for search
     SECTION("prepare dictionary for search") {
-        IFilterTest filter({engine::store::filter::indexer::Type}, indexConfig);
+        IFilterTest filter({"indexer"_itv}, indexConfig);
         Error ccode;
 
         // Build and connect the endpoint
