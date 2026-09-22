@@ -27,6 +27,8 @@
 //    object on the Azure into a tagged format
 //
 //-----------------------------------------------------------------------------
+#include "azure.hpp"
+
 namespace engine::store::filter::azure {
 //-------------------------------------------------------------------------
 /// @details

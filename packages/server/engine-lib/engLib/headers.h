@@ -23,10 +23,11 @@
 
 #pragma once
 
-// Include the Azure definitions
+// Include the cpprest definitions
 
 #include <cpprest/rawptrstream.h>
 #include <cpprest/asyncrt_utils.h>
+#include <cpprest/http_client.h>
 #ifdef dllimport
 // cpprest SDK is leaking #define dllimport which causes issues with unicode
 // platform.h on osx
@@ -58,7 +59,7 @@
 // Boost lambda -> output iterator utility class
 #include <boost/iterator/function_output_iterator.hpp>
 
-// Include the Azure definitions
+// Include the cpprest definitions
 #include <cpprest/rawptrstream.h>
 #include <cpprest/asyncrt_utils.h>
 
@@ -106,5 +107,3 @@
 #endif
 #endif
 
-// Azure SDK
-#include <azure/storage/blobs.hpp>

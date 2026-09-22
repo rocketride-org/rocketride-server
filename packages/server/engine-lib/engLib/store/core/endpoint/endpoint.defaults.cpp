@@ -63,7 +63,7 @@ Error IServiceEndpoint::mapPath(const Url &sourceUrl, Url &targetUrl) noexcept {
         config.logicalType == filter::filesys::smb::Type ||
         config.logicalType == "objstore"_itv ||
         config.logicalType == "aws"_itv ||
-        config.logicalType == filter::azure::Type ||
+        config.logicalType == "azure"_itv ||
         config.physicalType == filter::python::Type ||
         config.logicalType == filter::sharepoint::Type ||
         config.logicalType == filter::outlook::TypeEnterprise ||

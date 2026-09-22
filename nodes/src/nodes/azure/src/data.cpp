@@ -27,5 +27,7 @@
 //
 //-----------------------------------------------------------------------------
 
+#include "azure.hpp"
+
 namespace engine::store::filter::azure {
 }  // namespace engine::store::filter::azure

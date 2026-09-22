@@ -21,13 +21,27 @@
 // SOFTWARE.
 // =============================================================================
 
-//-----------------------------------------------------------------------------
-//
-//	Declares the interface for Azure node
-//
-//-----------------------------------------------------------------------------
-#pragma once
+#include <node_api.h>
 
-#include "./cpprest.hpp"
-#include "./error.hpp"
-#include "./blob.hpp"
+#include "azure.hpp"
+
+extern "C" ROCKETRIDE_NODE_API bool initializeNode() noexcept {
+    using namespace engine::store::filter::azure;
+
+    if (auto ccode = ap::Factory::registerFactory(
+            IFilterInstance::Factory, IFilterGlobal::Factory,
+            IFilterEndpoint::Factory)) {
+        LOG(Services, "Failed to register the azure factories:", ccode);
+        return false;
+    }
+
+    return true;
+}
+
+extern "C" ROCKETRIDE_NODE_API void deinitializeNode() noexcept {
+    using namespace engine::store::filter::azure;
+
+    ap::Factory::deregisterFactory(IFilterInstance::Factory,
+                                   IFilterGlobal::Factory,
+                                   IFilterEndpoint::Factory);
+}
