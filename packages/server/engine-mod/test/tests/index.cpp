@@ -41,7 +41,7 @@ auto indexConfig = R"(
 TEST_CASE("store::index") {
     // Creates a small subset of words
     SECTION("write a few words") {
-        IFilterTest filter({engine::store::filter::indexer::Type}, indexConfig);
+        IFilterTest filter({"indexer"_itv}, indexConfig);
         Error ccode;
 
         // Build and connect the endpoint
@@ -60,7 +60,7 @@ TEST_CASE("store::index") {
 
     // Adds a huge number of unique words
     SECTION("write lots of words") {
-        IFilterTest filter({engine::store::filter::indexer::Type}, indexConfig);
+        IFilterTest filter({"indexer"_itv}, indexConfig);
         Error ccode;
 
         // Build and connect the endpoint

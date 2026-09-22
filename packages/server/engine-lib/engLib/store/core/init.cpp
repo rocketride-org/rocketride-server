@@ -37,7 +37,6 @@ void deinit() noexcept {
         // Instances
         filter::bottom::IFilterInstance::Factory,
         filter::classify::IFilterInstance::Factory,
-        filter::indexer::IFilterInstance::Factory,
         filter::pipe::IFilterInstance::Factory,
 
         filter::null::IFilterInstance::Factory,
@@ -56,7 +55,6 @@ void deinit() noexcept {
         // Global data
         filter::bottom::IFilterGlobal::Factory,
         filter::classify::IFilterGlobal::Factory,
-        filter::indexer::IFilterGlobal::Factory,
         filter::pipe::IFilterGlobal::Factory,
 
         filter::null::IFilterGlobal::Factory,
@@ -106,7 +104,6 @@ Error init() noexcept {
             // Instances
             filter::bottom::IFilterInstance::Factory,
             filter::classify::IFilterInstance::Factory,
-            filter::indexer::IFilterInstance::Factory,
             filter::pipe::IFilterInstance::Factory,
 
             filter::null::IFilterInstance::Factory,
@@ -125,7 +122,6 @@ Error init() noexcept {
             // Global data
             filter::bottom::IFilterGlobal::Factory,
             filter::classify::IFilterGlobal::Factory,
-            filter::indexer::IFilterGlobal::Factory,
             filter::pipe::IFilterGlobal::Factory,
 
             filter::null::IFilterGlobal::Factory,
