@@ -95,11 +95,12 @@ Error ITask::execute() noexcept {
     // Allow the task to read any configuration it needs
     if (auto ccode = beginTask()) return ccode;
 
-    // Execute the job
-    if (auto ccode = exec()) return ccode;
-
-    // End the task
-    if (auto ccode = endTask()) return ccode;
+    // Every successfully begun task must end, including failed/cancelled
+    // executions. Keep the execution error if teardown also fails.
+    auto ccode = exec();
+    auto endCode = endTask();
+    if (ccode) return ccode;
+    if (endCode) return endCode;
 
     // And done
     LOGT("Job {} completed successfully", type());
