@@ -788,14 +788,16 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
     Text filterPipe = engine::store::filter::pipe::Type;
     Text filterBottom = engine::store::filter::bottom::Type;
 
-    // The hash and parse filters are C++ nodes and not available in tests
+    // The C++ nodes and not available in tests.
     const auto filterHash = "hash"_itv;
     const auto filterParse = "parse"_itv;
+    const auto filterClassify = "classify"_itv;
     const auto isDeclared = [](TextView type) noexcept {
         return (bool) IServices::getServiceDefinition((Text) type);
     };
     const bool hasHashFilter = isDeclared(filterHash);
     const bool hasParseFilter = isDeclared(filterParse);
+    const bool hasClassifyFilter = isDeclared(filterClassify);
 
     // Add the filter
     const auto pushAbsolute =
@@ -892,7 +894,7 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
             // This is primarily used as a target to receives text
             // on the writeText interface and classify the incoming
             // documents classification
-            pushString(filter::classify::Type);
+            if (hasClassifyFilter) pushString(filterClassify);
             break;
         }
 
@@ -913,8 +915,9 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
             pushString("autopipe");
 
             // We can classify at the same time if desired
-            if (config.taskConfig.lookup<bool>("enableClassification"))
-                pushString(filter::classify::Type);
+            if (hasClassifyFilter &&
+                config.taskConfig.lookup<bool>("enableClassification"))
+                pushString(filterClassify);
             break;
         }
 
@@ -927,7 +930,7 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
             // We are classifying a single file
             if (hasParseFilter) pushString(filterParse);
             // pushString(filter::tokenize::Type);
-            pushString(filter::classify::Type);
+            if (hasClassifyFilter) pushString(filterClassify);
             break;
         }
 
