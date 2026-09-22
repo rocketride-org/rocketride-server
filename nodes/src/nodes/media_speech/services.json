@@ -1,0 +1,156 @@
+{
+  "title": "Media Toolkit: Speech",
+  "protocol": "media_speech://",
+  "classType": [
+    "audio"
+  ],
+  "capabilities": [],
+  "node": "python",
+  "path": "nodes.media_speech",
+  "prefix": "media_speech",
+  "register": "filter",
+  "description": [
+    "Segment streamed media or produce word timings.",
+    " Outputs are returned through lanes; persistence belongs to downstream nodes."
+  ],
+  "icon": "media_speech.svg",
+  "documentation": "https://docs.rocketride.org/nodes/media_speech",
+  "lanes": {
+    "video": [
+      "text",
+      "answers",
+      "audio"
+    ],
+    "audio": [
+      "text",
+      "answers",
+      "audio"
+    ]
+  },
+  "preconfig": {
+    "default": "default",
+    "profiles": {
+      "default": {
+        "event_type": "media_speech",
+        "chunk_kb": 1024,
+        "piece_seconds": 45,
+        "model": "small",
+        "language": "en",
+        "title": "Default",
+        "request": "{}"
+      }
+    }
+  },
+  "fields": {
+    "media_speech.event_type": {
+      "type": "string",
+      "title": "Name of the progress event this pipeline emits",
+      "default": "media_speech"
+    },
+    "media_speech.chunk_kb": {
+      "type": "number",
+      "title": "Stream chunk size (KB)",
+      "default": 1024
+    },
+    "media_speech.piece_seconds": {
+      "type": "number",
+      "title": "Audio piece length sent to a transcriber (s, max 58)",
+      "default": 45
+    },
+    "media_speech.model": {
+      "type": "string",
+      "title": "Speech model used for word timings",
+      "default": "small",
+      "enum": [
+        [
+          "tiny",
+          "tiny"
+        ],
+        [
+          "base",
+          "base"
+        ],
+        [
+          "small",
+          "small"
+        ],
+        [
+          "medium",
+          "medium"
+        ],
+        [
+          "large-v3",
+          "large-v3"
+        ]
+      ]
+    },
+    "media_speech.language": {
+      "type": "string",
+      "title": "Spoken language for word timings (blank = detect)",
+      "default": "en"
+    },
+    "media_speech.default": {
+      "object": "default",
+      "properties": [
+        "media_speech.event_type",
+        "media_speech.chunk_kb",
+        "media_speech.piece_seconds",
+        "media_speech.model",
+        "media_speech.language",
+        "media_speech.request"
+      ]
+    },
+    "media_speech.profile": {
+      "type": "string",
+      "title": "Profile",
+      "default": "default",
+      "enum": [
+        "*>preconfig.profiles.*.title"
+      ],
+      "conditional": [
+        {
+          "value": "default",
+          "properties": [
+            "media_speech.default"
+          ]
+        }
+      ]
+    },
+    "media_speech.request": {
+      "type": "string",
+      "title": "Operation request (JSON)",
+      "format": "textarea",
+      "default": "{}",
+      "description": "JSON request: input_name selects the source stream; pieces (piece_seconds, max_pieces, skip_pieces) or words (range, model, language, sample_rate). Sources arrive as media streams."
+    }
+  },
+  "shape": [
+    {
+      "section": "Pipe",
+      "title": "Media Toolkit: Speech",
+      "properties": [
+        "media_speech.profile"
+      ]
+    }
+  ],
+  "test": {
+    "profiles": [
+      "default"
+    ],
+    "outputs": [
+      "text",
+      "audio"
+    ],
+    "cases": [
+      {
+        "name": "Split streamed audio",
+        "audio": "audio/Star Wars.mp3",
+        "expect": {
+          "text": {
+            "notEmpty": true
+          }
+        }
+      }
+    ]
+  }
+}

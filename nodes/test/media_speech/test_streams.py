@@ -1,0 +1,419 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""Stream lifecycle, isolation and real FFmpeg regressions without account storage."""
+
+import ast
+import builtins
+import importlib
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from rocketlib import AVI_ACTION, APERR, Ec, OPEN_MODE
+
+from media_speech import IInstance
+from media_speech.IGlobal import DEFAULTS, IGlobal
+from media_speech._support.workspace import Workspace
+from media_speech._support.media import run_ffmpeg, probe
+
+NODE = 'media_speech'
+
+
+class Output:
+    """Capture typed outputs and verify declared stream lengths."""
+
+    def __init__(self):
+        self.answers = []
+        self.texts = []
+        self.files = {}
+        self.active = {}
+
+    def hasListener(self, lane):
+        """Expose all output lanes to the processor under test."""
+        return True
+
+    def writeAnswers(self, answer):
+        """Capture the JSON answer delivered by the node."""
+        self.answers.append(answer.getJson())
+
+    def writeText(self, text):
+        """Capture each text-lane write in order."""
+        self.texts.append(text)
+
+    def media(self, lane, action, mime, data):
+        """Collect one typed media stream and verify its final byte count."""
+        if action == AVI_ACTION.BEGIN:
+            descriptor = json.loads(bytes(data))
+            self.active[lane] = descriptor
+            self.files[descriptor['name']] = bytearray()
+        elif action == AVI_ACTION.WRITE:
+            self.files[self.active[lane]['name']].extend(data)
+        else:
+            descriptor = self.active.pop(lane)
+            assert len(self.files[descriptor['name']]) == descriptor['size']
+
+    def writeVideo(self, *args):
+        """Capture video lane actions."""
+        self.media('video', *args)
+
+    def writeAudio(self, *args):
+        """Capture audio lane actions."""
+        self.media('audio', *args)
+
+    def writeImage(self, *args):
+        """Capture image lane actions."""
+        self.media('image', *args)
+
+
+def node(request=None):
+    """Create an isolated node instance with a JSON request."""
+    instance = IInstance()
+    instance.IGlobal = SimpleNamespace(config={**DEFAULTS, 'chunk_bytes': 65536, 'request': json.dumps(request or {})})
+    instance.instance = Output()
+    instance.open(SimpleNamespace(name='source.mp4'))
+    return instance
+
+
+def deliver(instance, lane, action, data=b''):
+    """Deliver one lane action while handling the engine consumption signal."""
+    try:
+        getattr(instance, 'write' + lane.title())(action, 'video/mp4' if lane == 'video' else 'audio/wav', data)
+    except APERR as exc:
+        if exc.ec != Ec.PreventDefault:
+            raise
+
+
+def feed(instance, path, name=None, lane='video'):
+    """Send a local fixture with an exact length descriptor in uneven chunks."""
+    deliver(
+        instance, lane, AVI_ACTION.BEGIN, json.dumps({'name': name or path.name, 'size': path.stat().st_size}).encode()
+    )
+    with path.open('rb') as stream:
+        while chunk := stream.read(7919):
+            deliver(instance, lane, AVI_ACTION.WRITE, chunk)
+    deliver(instance, lane, AVI_ACTION.END)
+
+
+@pytest.fixture(scope='module')
+def media(tmp_path_factory):
+    """Generate a short audiovisual fixture using real FFmpeg."""
+    path = tmp_path_factory.mktemp(NODE) / 'source.mp4'
+    run_ffmpeg(
+        [
+            '-f',
+            'lavfi',
+            '-i',
+            'testsrc2=size=320x180:rate=24',
+            '-f',
+            'lavfi',
+            '-i',
+            'sine=frequency=440:sample_rate=48000',
+            '-t',
+            '2',
+            '-c:v',
+            'libx264',
+            '-pix_fmt',
+            'yuv420p',
+            '-c:a',
+            'aac',
+            '-y',
+            str(path),
+        ]
+    )
+    return path
+
+
+@pytest.fixture(autouse=True)
+def forbid_account_storage(monkeypatch):
+    """Fail if custom processing imports account-storage or former shared helpers."""
+    original = builtins.__import__
+
+    def guarded(name, *args, **kwargs):
+        """Guarded."""
+        if name.startswith('ai.account') or name.startswith('ai.common.media'):
+            raise AssertionError('Custom media node attempted account/shared-media access')
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', guarded)
+
+
+def test_no_storage_or_cross_node_dependency():
+    """Verify no storage or cross node dependency."""
+    package = Path(importlib.import_module(NODE).__file__).parent
+    for path in package.rglob('*.py'):
+        text = path.read_text(encoding='utf-8')
+        assert 'ai.account' not in text and 'engine_file_store' not in text and 'ai.common.media' not in text
+        other_nodes = {'media_inspect', 'media_speech', 'media_render'} - {NODE}
+        for statement in ast.walk(ast.parse(text, filename=str(path))):
+            imports = []
+            if isinstance(statement, ast.Import):
+                imports = [alias.name for alias in statement.names]
+            elif isinstance(statement, ast.ImportFrom) and statement.level == 0:
+                imports = [statement.module or '']
+                if statement.module == 'nodes':
+                    imports.extend(alias.name for alias in statement.names)
+            for name in imports:
+                assert not other_nodes.intersection(name.split('.')), (path, name)
+
+
+@pytest.mark.parametrize('path', ['../x', '/x', 'x/../y', 'x//y', 'x\\y', 'https://a/b', './x', 'x\x00'])
+def test_scratch_path_escape_is_rejected(path):
+    """Verify scratch path escape is rejected."""
+    workspace = Workspace()
+    try:
+        with pytest.raises(ValueError):
+            workspace.resolve(path)
+    finally:
+        workspace.close()
+
+
+def test_workspace_isolated_and_cleaned():
+    """Verify workspace isolated and cleaned."""
+    a, b = Workspace(), Workspace()
+    paths = [a.root, b.root]
+    try:
+        a.resolve('same').write_bytes(b'a')
+        b.resolve('same').write_bytes(b'b')
+        assert a.resolve('same').read_bytes() != b.resolve('same').read_bytes()
+    finally:
+        a.close()
+        b.close()
+    assert all(not path.exists() for path in paths)
+
+
+@pytest.mark.parametrize('action', [AVI_ACTION.WRITE, AVI_ACTION.END])
+def test_requires_begin(action):
+    """Verify requires begin."""
+    instance = node()
+    try:
+        with pytest.raises(ValueError, match='without BEGIN'):
+            deliver(instance, 'video', action, b'x')
+    finally:
+        instance.close()
+
+
+@pytest.mark.parametrize('declared,actual', [(4, b'abc'), (2, b'abc'), (0, b'')])
+def test_rejects_truncated_or_overrun_stream(declared, actual):
+    """Verify rejects truncated or overrun stream."""
+    instance = node()
+    root = instance._workspace.root
+    try:
+        deliver(instance, 'video', AVI_ACTION.BEGIN, json.dumps({'name': 'x', 'size': declared}).encode())
+        if len(actual) > declared:
+            with pytest.raises(ValueError, match='exceeded'):
+                deliver(instance, 'video', AVI_ACTION.WRITE, actual)
+        else:
+            deliver(instance, 'video', AVI_ACTION.WRITE, actual)
+            with pytest.raises(ValueError, match='Empty or truncated'):
+                deliver(instance, 'video', AVI_ACTION.END)
+    finally:
+        instance.close()
+    assert not root.exists()
+
+
+def test_unfinished_stream_cleans_on_closing():
+    """Verify unfinished stream cleans on closing."""
+    instance = node()
+    root = instance._workspace.root
+    deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"size": 10, "name": "x"}')
+    with pytest.raises(ValueError, match='did not finish'):
+        instance.closing()
+    assert not root.exists()
+
+
+def test_reopen_cleans_previous_object():
+    """Verify reopen cleans previous object."""
+    instance = node()
+    old = instance._workspace.root
+    deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"size": 10, "name": "x"}')
+    instance.open(SimpleNamespace(name='new.mp4'))
+    try:
+        assert not old.exists()
+        assert not instance._inputs and not instance._active
+    finally:
+        instance.close()
+
+
+@pytest.mark.parametrize('name', ['../x', '/x', 'outputs/x', 'x\\y'])
+def test_descriptor_cannot_escape_or_overwrite_outputs(name):
+    """Verify descriptor cannot escape or overwrite outputs."""
+    instance = node()
+    try:
+        with pytest.raises(ValueError):
+            deliver(instance, 'video', AVI_ACTION.BEGIN, json.dumps({'name': name, 'size': 3}).encode())
+    finally:
+        instance.close()
+
+
+def test_duplicate_stream_names_rejected(media):
+    """Verify duplicate stream names rejected."""
+    instance = node()
+    try:
+        feed(instance, media)
+        with pytest.raises(ValueError, match='Duplicate'):
+            feed(instance, media)
+    finally:
+        instance.close()
+
+
+@pytest.mark.parametrize('invalid_request', [{'write_to': 'saved/result'}, {'mode': 'layout'}, []])
+def test_invalid_request_fails_and_cleans(media, invalid_request):
+    """Verify invalid request fails and cleans."""
+    instance = node()
+    instance.IGlobal.config['request'] = json.dumps(invalid_request)
+    root = instance._workspace.root
+    feed(instance, media)
+    with pytest.raises(ValueError):
+        instance.closing()
+    assert not root.exists()
+
+
+def test_editor_validation_has_no_dependency_side_effects(monkeypatch):
+    """Verify editor validation has no dependency side effects."""
+    import depends
+
+    monkeypatch.setattr(depends, 'load_depends', lambda *_: pytest.fail('Dependencies loaded in CONFIG mode'))
+    state = IGlobal()
+    state.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.CONFIG))
+    state.beginGlobal()
+    assert not hasattr(state, 'store')
+
+
+def test_dependency_errors_propagate(monkeypatch):
+    """Verify dependency errors propagate."""
+    import depends
+
+    def fail(*_):
+        """Fail."""
+        raise RuntimeError('dependency unavailable')
+
+    monkeypatch.setattr(depends, 'load_depends', fail)
+    state = IGlobal()
+    state.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=None))
+    with pytest.raises(RuntimeError, match='dependency unavailable'):
+        state.beginGlobal()
+
+
+def test_operation_outputs(media, tmp_path, monkeypatch):
+    """Verify operation outputs."""
+    if NODE == 'media_inspect':
+        for request in (
+            {'mode': 'probe'},
+            {'mode': 'levels', 'scan_scenes': 'no'},
+            {
+                'mode': 'stills',
+                'stills': [{'id': 'poster', 't_ms': 500, 'width': 160}, {'id': '../invalid', 't_ms': 500}],
+            },
+        ):
+            instance = node(request)
+            feed(instance, media)
+            instance.closing()
+            answer = instance.instance.answers[-1]
+            assert answer['mode'] == request['mode']
+            if request['mode'] == 'probe':
+                assert answer['width'] == 320 and 1900 <= answer['duration_ms'] <= 2100
+            if request['mode'] == 'stills':
+                assert answer['streamed'] == ['poster'] and answer['failed'] == ['../invalid']
+                assert instance.instance.files['poster.jpg'][:2] == b'\xff\xd8'
+    elif NODE == 'media_speech':
+        instance = node({'mode': 'pieces', 'piece_seconds': '1', 'max_pieces': '2'})
+        feed(instance, media)
+        instance.closing()
+        assert len(instance.instance.files) == 1
+        for i, data in enumerate(instance.instance.files.values()):
+            path = tmp_path / f'{i}.wav'
+            path.write_bytes(data)
+            assert probe(path)['has_audio']
+        module = importlib.import_module(NODE + '.IInstance')
+
+        def align(path, *args, **kwargs):
+            """Align."""
+            info = probe(Path(path))
+            assert info['audio_sample_rate'] == 16000
+            return {
+                'words': [{'word': 'hello', 'start_ms': 0, 'end_ms': 200, 'probability': 1}],
+                'text': 'hello',
+                'language': 'en',
+            }
+
+        monkeypatch.setattr(module, 'align_words', align)
+        instance = node({'mode': 'words', 'range': '500-1500'})
+        feed(instance, media)
+        instance.closing()
+        assert instance.instance.answers[-1]['words'][0]['s'] == 500
+    else:
+        spec = {
+            'schema_version': 1,
+            'kind': 'media_render_spec',
+            'mode': 'preview',
+            'source': media.name,
+            'media': {
+                'width': 320,
+                'height': 180,
+                'fps': 24,
+                'duration_ms': 2000,
+                'has_video': True,
+                'has_audio': True,
+            },
+            'keep': [[0, 1800]],
+            'audio': {'master': False},
+            'captions': False,
+            'thumbnail': False,
+            'outputs': [{'key': 'original', 'file': 'result.mp4', 'aspect': '16:9', 'width': 320, 'height': 180}],
+        }
+        instance = node({'mode': 'render', 'spec': spec})
+        feed(instance, media)
+        instance.closing()
+        answer = instance.instance.answers[-1]
+        assert answer['storage'] == 'downstream'
+        assert all(not name.startswith('outputs/') for name in answer['files'].values())
+        videos = [data for name, data in instance.instance.files.items() if name.endswith('.mp4')]
+        assert len(videos) == 1
+        path = tmp_path / 'render.mp4'
+        path.write_bytes(videos[0])
+        info = probe(path)
+        assert info['has_video'] and info['has_audio'] and 1600 <= info['duration_ms'] <= 2000
+
+
+@pytest.mark.parametrize('model', ['../model', '/tmp/model', 'untrusted/repository', 'unknown'])
+def test_only_catalog_speech_models_are_accepted(media, model):
+    """Verify only catalog speech models are accepted."""
+    instance = node({'mode': 'words', 'model': model})
+    feed(instance, media)
+    with pytest.raises(ValueError, match='model must be'):
+        instance.closing()
+
+
+def test_audio_descriptors_preserve_name_size_and_offset():
+    """Verify audio descriptors preserve name size and offset."""
+    instance = node()
+    try:
+        payload = json.loads(instance._descriptor(2, 10040, 10020, 12345))
+        assert payload['name'] == 'piece0002.wav'
+        assert payload['size'] == 12345
+        assert payload['offset_ms'] == 10040 and payload['start_offset'] == 10.04
+        assert payload['sample_rate'] == 16000 and payload['channels'] == 1
+    finally:
+        instance.close()

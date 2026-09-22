@@ -1,0 +1,4 @@
+av>=18,<19
+imageio-ffmpeg>=0.6,<0.7
+faster-whisper>=1.2,<2
+ctranslate2>=4.5,<5
