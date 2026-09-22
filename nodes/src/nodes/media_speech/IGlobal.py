@@ -32,6 +32,7 @@ DEFAULTS = {
     'request': '{}',
     'event_type': 'media_speech',
     'chunk_kb': 1024,
+    'max_input_mb': 16384,
     'piece_seconds': 45,
     'model': 'small',
     'language': 'en',
@@ -49,6 +50,8 @@ class IGlobal(IGlobalBase):
 
         load_depends(__file__)
         self.config = load_node_config(self, DEFAULTS, 'media_speech')
+        self.config['max_input_mb'] = max(1, min(1048576, int(self.config['max_input_mb'])))
+        self.config['max_input_bytes'] = self.config['max_input_mb'] * 1024 * 1024
         self.config['chunk_bytes'] = max(64, min(8192, int(self.config['chunk_kb']))) * 1024
         self.config['event_type'] = str(self.config['event_type'] or 'media_speech').strip() or 'media_speech'
         self.config['piece_seconds'] = clamp_piece_seconds(self.config['piece_seconds'])

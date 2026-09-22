@@ -2,3 +2,9 @@ av>=18,<19
 imageio-ffmpeg>=0.6,<0.7
 faster-whisper>=1.2,<2
 ctranslate2>=4.5,<5
+tokenizers
+huggingface-hub
+tqdm
+# Match the stock audio_transcribe runtime selection used by Whisper VAD.
+onnxruntime-gpu==1.22.0; platform_system != 'Darwin'
+onnxruntime==1.22.0; platform_system == 'Darwin'

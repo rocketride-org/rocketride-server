@@ -68,11 +68,12 @@ def test_bad_skip_pieces_fails_explicitly(value):
 
 def test_model_cache_keeps_only_most_recent_model(monkeypatch):
     """Reuse one model, and release the cache's old reference when switching."""
-    import faster_whisper
+    import sys
 
     module = importlib.import_module(NODE + '.align')
     monkeypatch.setattr(module, '_models', {})
-    monkeypatch.setattr(faster_whisper, 'WhisperModel', lambda name, **kwargs: SimpleNamespace(name=name))
+    fake_whisper = SimpleNamespace(WhisperModel=lambda name, **kwargs: SimpleNamespace(name=name))
+    monkeypatch.setitem(sys.modules, 'faster_whisper', fake_whisper)
     first = module.get_model('tiny')
     assert module.get_model('tiny') is first
     second = module.get_model('small')
@@ -140,3 +141,84 @@ def test_piece_order_stays_chronological_after_four_digits(tmp_path, monkeypatch
     pieces = module.split_audio(tmp_path / 'source.wav', tmp_path, 10)
     assert [piece['path'].name for piece in pieces] == ['piece0000.wav', 'piece9999.wav', 'piece10000.wav']
     assert [piece['offset_ms'] for piece in pieces] == [0, 1000, 2000]
+
+
+def test_undeclared_stream_rejects_bytes_above_input_budget():
+    """Unknown-length streams cannot fill disk beyond the configured budget."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    root = instance._workspace.root
+    try:
+        deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4"}')
+        deliver(instance, 'video', AVI_ACTION.WRITE, b'123456')
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'video', AVI_ACTION.WRITE, b'7')
+        active = instance._active['video']
+        active['file'].flush()
+        assert (root / 'source.mp4').read_bytes() == b'123456'
+    finally:
+        instance.close()
+    assert not root.exists()
+
+
+def test_declared_input_above_budget_is_rejected_before_file_creation():
+    """Known oversized inputs fail immediately instead of consuming scratch disk."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    try:
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4","size":7}')
+        assert not list(instance._workspace.root.iterdir())
+    finally:
+        instance.close()
+
+
+def test_input_budget_is_cumulative_across_streams():
+    """Separate assets cannot each consume the entire per-object budget."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    try:
+        deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4","size":4}')
+        deliver(instance, 'video', AVI_ACTION.WRITE, b'1234')
+        deliver(instance, 'video', AVI_ACTION.END)
+        deliver(instance, 'audio', AVI_ACTION.BEGIN, b'{"name":"music.wav"}')
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'audio', AVI_ACTION.WRITE, b'abc')
+        assert instance._active['audio']['file'].tell() == 0
+    finally:
+        instance.close()
+
+
+def test_input_budget_resets_for_next_object(tmp_path):
+    """Reused instances receive a fresh input allowance for each object."""
+    from .test_streams import node, feed
+
+    instance = node({'spec': {}}, config={'max_input_bytes': 6})
+    instance._process = lambda *args: None
+    source = tmp_path / 'input.mp4'
+    source.write_bytes(b'123456')
+    feed(instance, source)
+    instance.closing()
+    instance.open(SimpleNamespace(name='source.mp4'))
+    feed(instance, source)
+    instance.closing()
+
+
+@pytest.mark.parametrize('starts', [[100, 100], [200, 100], [100, 200, 100]])
+def test_equal_or_decreasing_word_starts_never_overlap(starts):
+    """Discard intervals that cannot be shortened to a positive duration."""
+    from media_speech.align import sanitize_words
+
+    result = sanitize_words(
+        [{'word': str(i), 'start_ms': start, 'end_ms': 500, 'probability': 1} for i, start in enumerate(starts)]
+    )
+    assert result
+    assert all(word['end_ms'] > word['start_ms'] for word in result)
+    assert all(a['end_ms'] <= b['start_ms'] for a, b in zip(result, result[1:]))
+    assert result[-1]['word'] == str(len(starts) - 1)

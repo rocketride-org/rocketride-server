@@ -36,7 +36,7 @@ Word alignment uses local faster-whisper with VAD and no initial prompt. Weights
 
 `ROCKETRIDE_MEDIA_FFMPEG_TIMEOUT` bounds each FFmpeg encode (default 3600 seconds, configurable from above 0 to 86400). Metadata subprocesses have a maximum 60-second timeout. Invalid timeout values fail explicitly.
 
-Each descriptor should declare `size` and a unique `name`. Empty, truncated, oversized-relative-to-declaration and duplicate inputs fail. At most 128 streams are accepted per object. This processor accepts exactly one media stream per object. Media ingress uses bounded stream chunks. Decoders, analysis and speech models have additional memory requirements; temporary disk usage scales with input and intermediate outputs. Abrupt process termination may leave scratch files for host cleanup.
+Each descriptor should declare `size` and a unique `name`. `max_input_mb` limits cumulative incoming bytes across all streams in an object (default 16384 MiB / 16 GiB, clamped to 1–1048576 MiB). It is enforced before writing each chunk, including when `size` is absent; declared sizes above the remaining budget fail at BEGIN. This ingress limit does not bound decoded/intermediate output size. Empty, truncated, oversized-relative-to-declaration and duplicate inputs fail. At most 128 streams are accepted per object. This processor accepts exactly one media stream per object. Media ingress uses bounded stream chunks. Decoders, analysis and speech models have additional memory requirements; temporary disk usage scales with input and intermediate outputs. Abrupt process termination may leave scratch files for host cleanup.
 
 No browser download/re-upload relay is required by the node contract. The stock `filestore_source` currently rejects saved files above 100 MiB; direct webhook uploads avoid that source limit. These nodes do not change the stock source or sink. Durable progress, recovery and output naming belong to pipeline/application orchestration.
 
@@ -54,6 +54,7 @@ Tests are in `nodes/test/media_speech`: stream lifecycle, isolation, path valida
 | `media_speech.chunk_kb` | `number` | **Stream chunk size (KB)** | `1024` |
 | `media_speech.event_type` | `string` | **Name of the progress event this pipeline emits** | `"media_speech"` |
 | `media_speech.language` | `string` | **Spoken language for word timings (blank = detect)** | `"en"` |
+| `media_speech.max_input_mb` | `number` | **Maximum cumulative input per object (MiB)**<br/>Total incoming media bytes, including all assets. Clamped to 1–1048576 MiB; enforced even when stream size is undeclared. | `16384` |
 | `media_speech.model` | `string` | **Speech model used for word timings** | `"small"` |
 | `media_speech.piece_seconds` | `number` | **Audio piece length sent to a transcriber (s, max 58)** | `45` |
 | `media_speech.profile` | `string` | **Profile** | `"default"` |
@@ -65,6 +66,11 @@ Tests are in `nodes/test/media_speech`: stream lifecycle, isolation, path valida
 - `imageio-ffmpeg` `>=0.6,<0.7`
 - `faster-whisper` `>=1.2,<2`
 - `ctranslate2` `>=4.5,<5`
+- `tokenizers`
+- `huggingface-hub`
+- `tqdm`
+- `onnxruntime-gpu` `==1.22.0; platform_system != 'Darwin'`
+- `onnxruntime` `==1.22.0; platform_system == 'Darwin'`
 
 ## Source
 

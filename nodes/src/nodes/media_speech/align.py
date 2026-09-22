@@ -80,10 +80,13 @@ def sanitize_words(words: list[dict]) -> list[dict]:
             continue
         if end - start > MAX_WORD_MS:
             start = end - MAX_WORD_MS
+        # A prior interval cannot be shortened to a positive duration if the
+        # next hypothesis starts at or before it (including millisecond rounding).
+        while out and out[-1]['start_ms'] >= start:
+            out.pop()
+        if out and out[-1]['end_ms'] > start:
+            out[-1]['end_ms'] = start
         out.append({**w, 'start_ms': start, 'end_ms': end})
-    for i in range(len(out) - 1):
-        if out[i]['end_ms'] > out[i + 1]['start_ms']:
-            out[i]['end_ms'] = max(out[i]['start_ms'] + 1, out[i + 1]['start_ms'])
     return out
 
 

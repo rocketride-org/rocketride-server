@@ -49,6 +49,8 @@ class MediaInstance(IInstanceBase):
         self._workspace = Workspace()
         self._active = {}
         self._inputs = {}
+        self._input_bytes = 0
+        self._input_limit = self.IGlobal.config.get('max_input_bytes', 16 * 1024**3)
         self._assets = []
         self._handled = False
         self._t0 = time.time()
@@ -103,6 +105,8 @@ class MediaInstance(IInstanceBase):
             expected = descriptor.get('size')
             if expected is not None and (type(expected) is not int or expected < 0):
                 raise ValueError('Declared stream size must be a non-negative integer')
+            if expected is not None and expected > self._input_limit - self._input_bytes:
+                raise ValueError('Media input exceeds the configured max_input_mb limit')
             path.parent.mkdir(parents=True, exist_ok=True)
             self._active[lane] = {
                 'file': path.open('xb'),
@@ -117,10 +121,13 @@ class MediaInstance(IInstanceBase):
                 raise ValueError('Media bytes/end received without BEGIN')
             item = self._active[lane]
             if action == AVI_ACTION.WRITE:
+                if len(data) > self._input_limit - self._input_bytes:
+                    raise ValueError('Media input exceeds the configured max_input_mb limit')
                 if item['size'] is not None and item['received'] + len(data) > item['size']:
                     raise ValueError('Media stream exceeded its declared byte count')
                 item['file'].write(data)
                 item['received'] += len(data)
+                self._input_bytes += len(data)
             else:
                 item['file'].close()
                 del self._active[lane]

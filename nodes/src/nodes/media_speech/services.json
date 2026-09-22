@@ -37,7 +37,8 @@
         "model": "small",
         "language": "en",
         "title": "Default",
-        "request": "{}"
+        "request": "{}",
+        "max_input_mb": 16384
       }
     }
   },
@@ -97,7 +98,8 @@
         "media_speech.piece_seconds",
         "media_speech.model",
         "media_speech.language",
-        "media_speech.request"
+        "media_speech.request",
+        "media_speech.max_input_mb"
       ]
     },
     "media_speech.profile": {
@@ -122,6 +124,12 @@
       "format": "textarea",
       "default": "{}",
       "description": "JSON request: input_name selects the source stream; pieces (piece_seconds, max_pieces, skip_pieces) or words (range, model, language, sample_rate). Sources arrive as media streams."
+    },
+    "media_speech.max_input_mb": {
+      "type": "number",
+      "title": "Maximum cumulative input per object (MiB)",
+      "default": 16384,
+      "description": "Total incoming media bytes, including all assets. Clamped to 1\u20131048576 MiB; enforced even when stream size is undeclared."
     }
   },
   "shape": [

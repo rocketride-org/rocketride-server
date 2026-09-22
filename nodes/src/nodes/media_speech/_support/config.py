@@ -65,12 +65,12 @@ def load_node_config(iglobal, defaults: dict, name: str) -> dict:
         elif isinstance(default, int):
             try:
                 config[key] = int(float(value))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 pass
         elif isinstance(default, float):
             try:
                 config[key] = float(value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 pass
         else:
             config[key] = value
