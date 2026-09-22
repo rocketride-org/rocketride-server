@@ -63,9 +63,6 @@ endif()
 find_package(LibXml2 REQUIRED)
 target_link_libraries(engLib PUBLIC LibXml2::LibXml2)
 
-# classify_api.h lives in engine-lib/include/ (public header for the classify DLL ABI)
-target_include_directories(engLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)
-
 # Link to platform libs
 if(ROCKETRIDE_PLAT_LIN)
     # target_link_libraries(engLib PUBLIC /usr/lib/x86_64-linux-gnu/libfuse.a dl)

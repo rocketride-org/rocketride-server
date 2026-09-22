@@ -1396,7 +1396,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///------------------------------------------------------------
     class __FiltersStub {};
     py::class_<__FiltersStub>(engLib, "Filters")
-        .PYBIND_PROP_READONLY_STATIC(CLASSIFY, filter::classify::Type.data());
+        .PYBIND_PROP_READONLY_STATIC(CLASSIFY, "classify");
 
     //-------------------------------------------------------------
     /// @details
