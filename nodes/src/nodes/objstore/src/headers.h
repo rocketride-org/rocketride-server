@@ -28,6 +28,22 @@
 //-----------------------------------------------------------------------------
 #pragma once
 
+// AWS defines JSON_USE_EXCEPTION in SDKConfig.h, and it conflicts with our
+// definition (fixed upstream: https://github.com/aws/aws-sdk-cpp/pull/1189).
+// On Windows the engine headers pull in wingdi.h, whose ERROR macro breaks
+// `typedef E ERROR;` in aws/core/utils/Outcome.h. Both are suppressed across
+// the AWS includes and restored afterwards
+#pragma push_macro("JSON_USE_EXCEPTION")
+#undef JSON_USE_EXCEPTION
+#pragma push_macro("ERROR")
+#undef ERROR
+
+#include <aws/core/Aws.h>
+#include <aws/core/auth/AWSCredentialsProvider.h>
+#include <aws/core/http/Scheme.h>
+#include <aws/core/utils/memory/stl/AWSSet.h>
+#include <aws/core/utils/logging/DefaultLogSystem.h>
+#include <aws/core/utils/logging/AWSLogging.h>
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/Bucket.h>
 #include <aws/s3/model/ListObjectsV2Request.h>
@@ -54,3 +70,6 @@
 #include <aws/s3/model/GetObjectAclRequest.h>
 #include <aws/s3/model/Permission.h>
 #include <aws/s3/model/Type.h>
+
+#pragma pop_macro("ERROR")
+#pragma pop_macro("JSON_USE_EXCEPTION")

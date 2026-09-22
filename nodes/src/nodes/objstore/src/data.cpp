@@ -23,43 +23,9 @@
 
 //-----------------------------------------------------------------------------
 //
-// Defines the stat interface for the generic S3/object storage endpoint
+//	Defines the data interface for the generic S3/object storage endpoint
 //
 //-----------------------------------------------------------------------------
-#include <engLib/eng.h>
+#include "base.hpp"
 
-namespace engine::store::filter::baseObjectStore {
-//---------------------------------------------------------------------
-/// @details
-///		Determines existence of the entry
-///	@param[in]	entry
-///		The entry that should be stat-ed
-///	@returns
-///		ErrorOr<bool>
-///         - where
-///             Error if there are some errors
-///             true  if file was deleted
-///             false if entry exists is a file
-//---------------------------------------------------------------------
-
-ErrorOr<bool> IBaseInstance::stat(Entry &entry) noexcept {
-    Error ccode;
-    // Get the path from URL
-    Text path;
-    if (ccode = Url::toPath(entry.url(), path)) return ccode;
-
-    LOGT("Checking existence of file:", entry.url().fileName());
-
-    Text bucket, key;
-    endpoint.extractBucketAndKeyFromPath(path, bucket, key);
-
-    // Define a HeadObjectRequest
-    const auto objectsReq =
-        Aws::S3::Model::HeadObjectRequest().WithBucket(bucket).WithKey(key);
-
-    // Get the metadata from the bucket
-    auto objectsResp = m_streamClient->HeadObject(objectsReq);
-    if (objectsResp.IsSuccess()) return false;
-    return true;
-}
-}  // namespace engine::store::filter::baseObjectStore
+namespace engine::store::filter::baseObjectStore {}

@@ -30,8 +30,6 @@ namespace engine::store {
 ///		factories
 //-------------------------------------------------------------------------
 void deinit() noexcept {
-    filter::s3::deinit();
-
     // Register our command factories
     Factory::deregisterFactory(
         // Instances
@@ -41,8 +39,6 @@ void deinit() noexcept {
         filter::null::IFilterInstance::Factory,
         filter::filesys::filesys::IFilterInstance::Factory,
         filter::filesys::smb::IFilterInstance::Factory,
-        filter::objstore::IFilterInstance::Factory,
-        filter::s3::IFilterInstance::Factory,
         filter::azure::IFilterInstance::Factory,
         filter::zip::IFilterInstance::Factory,
         filter::python::IFilterInstance::Factory,
@@ -58,8 +54,6 @@ void deinit() noexcept {
         filter::null::IFilterGlobal::Factory,
         filter::filesys::filesys::IFilterGlobal::Factory,
         filter::filesys::smb::IFilterGlobal::Factory,
-        filter::objstore::IFilterGlobal::Factory,
-        filter::s3::IFilterGlobal::Factory,
         filter::azure::IFilterGlobal::Factory,
         filter::zip::IFilterGlobal::Factory,
         filter::python::IFilterGlobal::Factory,
@@ -72,8 +66,6 @@ void deinit() noexcept {
         filter::null::IFilterEndpoint::Factory,
         filter::filesys::filesys::IFilterEndpoint::Factory,
         filter::filesys::smb::IFilterEndpoint::Factory,
-        filter::objstore::IFilterEndpoint::Factory,
-        filter::s3::IFilterEndpoint::Factory,
         filter::azure::IFilterEndpoint::Factory,
         filter::zip::IFilterEndpoint::Factory,
         filter::python::IFilterEndpoint::Factory,
@@ -92,8 +84,6 @@ void deinit() noexcept {
 ///		factories
 //-------------------------------------------------------------------------
 Error init() noexcept {
-    filter::s3::init();
-
     // Init the service controllers
     if (auto ccode = IServices::init()) return ccode;
 
@@ -106,8 +96,6 @@ Error init() noexcept {
             filter::null::IFilterInstance::Factory,
             filter::filesys::filesys::IFilterInstance::Factory,
             filter::filesys::smb::IFilterInstance::Factory,
-            filter::objstore::IFilterInstance::Factory,
-            filter::s3::IFilterInstance::Factory,
             filter::azure::IFilterInstance::Factory,
             filter::zip::IFilterInstance::Factory,
             filter::python::IFilterInstance::Factory,
@@ -123,8 +111,6 @@ Error init() noexcept {
             filter::null::IFilterGlobal::Factory,
             filter::filesys::filesys::IFilterGlobal::Factory,
             filter::filesys::smb::IFilterGlobal::Factory,
-            filter::objstore::IFilterGlobal::Factory,
-            filter::s3::IFilterGlobal::Factory,
             filter::azure::IFilterGlobal::Factory,
             filter::zip::IFilterGlobal::Factory,
             filter::python::IFilterGlobal::Factory,
@@ -137,8 +123,6 @@ Error init() noexcept {
             filter::null::IFilterEndpoint::Factory,
             filter::filesys::filesys::IFilterEndpoint::Factory,
             filter::filesys::smb::IFilterEndpoint::Factory,
-            filter::objstore::IFilterEndpoint::Factory,
-            filter::s3::IFilterEndpoint::Factory,
             filter::azure::IFilterEndpoint::Factory,
             filter::zip::IFilterEndpoint::Factory,
             filter::python::IFilterEndpoint::Factory,

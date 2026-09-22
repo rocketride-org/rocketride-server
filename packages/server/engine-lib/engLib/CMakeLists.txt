@@ -19,15 +19,6 @@ find_package(cpprestsdk CONFIG REQUIRED)
 target_link_libraries(engLib PRIVATE cpprestsdk::cpprest)
 rocketride_reexport_library_defines(engLib cpprestsdk::cpprest)
 
-find_package(aws-cpp-sdk-core CONFIG REQUIRED)
-find_package(aws-cpp-sdk-s3 CONFIG REQUIRED)
-find_package(aws-cpp-sdk-transfer CONFIG REQUIRED)
-target_link_libraries(engLib PRIVATE aws-cpp-sdk-core aws-cpp-sdk-s3 aws-cpp-sdk-transfer)
-rocketride_reexport_library_defines(engLib aws-cpp-sdk-core aws-cpp-sdk-s3 aws-cpp-sdk-transfer)
-# AWS_ENABLE_IO_COMPLETION_PORTS is not listed in aws-cpp-sdk-core defines,
-# but it's required to link the engLib PCH to the engine, so we define it manually.
-target_compile_definitions(engLib PUBLIC AWS_ENABLE_IO_COMPLETION_PORTS)
-
 # Find package has issues when attempting to find our interpreter
 # so we set it up ourselves
 if(ROCKETRIDE_PLAT_WIN)
@@ -69,6 +60,9 @@ if(ROCKETRIDE_PLAT_LIN)
 elseif(ROCKETRIDE_PLAT_WIN)
     target_link_libraries(engLib PUBLIC Activeds.lib ADSIid.lib WinHTTP.lib httpapi.lib)
     target_link_libraries(engLib PUBLIC ws2_32.lib iphlpapi.lib rpcrt4.lib WebServices.lib)
+    # Version.lib backs plat::fileVersion - it used to arrive through the AWS
+    # SDK, which now lives in the objstore node
+    target_link_libraries(engLib PUBLIC Version.lib)
 endif()
 
 target_link_libraries(engLib PUBLIC apLib)
