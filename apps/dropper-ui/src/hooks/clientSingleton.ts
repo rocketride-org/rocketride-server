@@ -41,7 +41,7 @@
 
 import { RocketRideClient, RocketRideClientConfig, ConnectionException } from 'rocketride';
 import { API_CONFIG } from '../config/apiConfig';
-import { getSessionStorageItem, setSessionStorageItem } from 'shell/src/util/sessionStorage';
+import { getSessionStorageItem, setSessionStorageItem } from 'shell';
 
 // ============================================================================
 // SINGLETON STATE
