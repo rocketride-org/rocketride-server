@@ -1,0 +1,118 @@
+{
+  "project_id": "9a486047-edd4-4f1a-b2f5-ed8f15743160",
+  "version": 1,
+  "components": [
+    {
+      "id": "source",
+      "provider": "webhook",
+      "config": {
+        "mode": "Source",
+        "type": "webhook"
+      }
+    },
+    {
+      "id": "parse",
+      "provider": "parse",
+      "config": {},
+      "input": [
+        {
+          "from": "source",
+          "lane": "tags"
+        }
+      ]
+    },
+    {
+      "id": "media",
+      "provider": "media_render",
+      "config": {
+        "profile": "default",
+        "default": {
+          "request": "{\"mode\": \"render\", \"spec\": {\"kind\": \"media_render_spec\", \"keep\": [[0, 1000]], \"thumbnail\": false, \"audio\": {\"master\": false}, \"subtitles\": {\"sidecars\": false, \"enabled\": false}, \"outputs\": [{\"key\": \"wide\", \"file\": \"render.mp4\", \"aspect\": \"16:9\", \"width\": 640, \"height\": 360}]}}"
+        }
+      },
+      "input": [
+        {
+          "from": "parse",
+          "lane": "video"
+        },
+        {
+          "from": "parse",
+          "lane": "audio"
+        },
+        {
+          "from": "parse",
+          "lane": "image"
+        }
+      ]
+    },
+    {
+      "id": "response",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "from": "media",
+          "lane": "answers"
+        }
+      ]
+    },
+    {
+      "id": "save_audio",
+      "provider": "filestore",
+      "config": {
+        "profile": "default",
+        "default": {
+          "targetDir": "media-results/audio",
+          "onConflict": "unique"
+        }
+      },
+      "input": [
+        {
+          "from": "media",
+          "lane": "audio"
+        }
+      ]
+    },
+    {
+      "id": "save_image",
+      "provider": "filestore",
+      "config": {
+        "profile": "default",
+        "default": {
+          "targetDir": "media-results/image",
+          "onConflict": "unique"
+        }
+      },
+      "input": [
+        {
+          "from": "media",
+          "lane": "image"
+        }
+      ]
+    },
+    {
+      "id": "save_video",
+      "provider": "filestore",
+      "config": {
+        "profile": "default",
+        "default": {
+          "targetDir": "media-results/video",
+          "onConflict": "unique"
+        }
+      },
+      "input": [
+        {
+          "from": "media",
+          "lane": "video"
+        }
+      ]
+    }
+  ],
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  }
+}

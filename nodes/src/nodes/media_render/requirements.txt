@@ -1,0 +1,2 @@
+av>=18,<19
+imageio-ffmpeg>=0.6,<0.7

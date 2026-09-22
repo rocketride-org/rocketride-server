@@ -1,0 +1,205 @@
+{
+  "title": "Media Toolkit: Render",
+  "protocol": "media_render://",
+  "classType": [
+    "video"
+  ],
+  "capabilities": [],
+  "node": "python",
+  "path": "nodes.media_render",
+  "prefix": "media_render",
+  "register": "filter",
+  "description": [
+    "Render supplied media streams using a caller-provided edit specification.",
+    " Outputs are returned through lanes; persistence belongs to downstream nodes."
+  ],
+  "icon": "media_render.svg",
+  "documentation": "https://docs.rocketride.org/nodes/media_render",
+  "lanes": {
+    "video": [
+      "text",
+      "answers",
+      "image",
+      "audio",
+      "video"
+    ],
+    "audio": [
+      "text",
+      "answers",
+      "image",
+      "audio",
+      "video"
+    ],
+    "image": [
+      "text",
+      "answers",
+      "image",
+      "audio",
+      "video"
+    ]
+  },
+  "preconfig": {
+    "default": "default",
+    "profiles": {
+      "default": {
+        "event_type": "media_render",
+        "chunk_kb": 1024,
+        "long_edge": 960,
+        "fps": 30,
+        "crf": 28,
+        "preset": "ultrafast",
+        "captions": true,
+        "sidecars": false,
+        "part_ms": 300000,
+        "title": "Default",
+        "request": "{}"
+      },
+      "export": {
+        "event_type": "media_render",
+        "chunk_kb": 1024,
+        "long_edge": 1920,
+        "fps": 30,
+        "crf": 20,
+        "preset": "veryfast",
+        "captions": true,
+        "sidecars": true,
+        "part_ms": 300000,
+        "title": "Export",
+        "request": "{}"
+      }
+    }
+  },
+  "fields": {
+    "media_render.event_type": {
+      "type": "string",
+      "title": "Name of the progress event this pipeline emits",
+      "default": "media_render"
+    },
+    "media_render.chunk_kb": {
+      "type": "number",
+      "title": "Stream chunk size (KB)",
+      "default": 1024
+    },
+    "media_render.long_edge": {
+      "type": "number",
+      "title": "Default long edge in pixels (an output may state its own size)",
+      "default": 1920
+    },
+    "media_render.fps": {
+      "type": "number",
+      "title": "Default frames per second",
+      "default": 30
+    },
+    "media_render.crf": {
+      "type": "number",
+      "title": "Default x264 quality (lower = better)",
+      "default": 20
+    },
+    "media_render.preset": {
+      "type": "string",
+      "title": "Default x264 speed preset",
+      "default": "veryfast",
+      "enum": [
+        [
+          "ultrafast",
+          "ultrafast"
+        ],
+        [
+          "veryfast",
+          "veryfast"
+        ],
+        [
+          "fast",
+          "fast"
+        ],
+        [
+          "medium",
+          "medium"
+        ]
+      ]
+    },
+    "media_render.captions": {
+      "type": "boolean",
+      "title": "Allow burned-in captions",
+      "default": true
+    },
+    "media_render.sidecars": {
+      "type": "boolean",
+      "title": "Write SRT / VTT sidecars (unless the document says otherwise)",
+      "default": true
+    },
+    "media_render.part_ms": {
+      "type": "number",
+      "title": "Length of one rendered part of a long timeline (ms)",
+      "default": 300000
+    },
+    "media_render.default": {
+      "object": "default",
+      "properties": [
+        "media_render.event_type",
+        "media_render.chunk_kb",
+        "media_render.long_edge",
+        "media_render.fps",
+        "media_render.crf",
+        "media_render.preset",
+        "media_render.captions",
+        "media_render.sidecars",
+        "media_render.part_ms",
+        "media_render.request"
+      ]
+    },
+    "media_render.export": {
+      "object": "export",
+      "properties": [
+        "media_render.event_type",
+        "media_render.chunk_kb",
+        "media_render.long_edge",
+        "media_render.fps",
+        "media_render.crf",
+        "media_render.preset",
+        "media_render.captions",
+        "media_render.sidecars",
+        "media_render.part_ms",
+        "media_render.request"
+      ]
+    },
+    "media_render.profile": {
+      "type": "string",
+      "title": "Profile",
+      "default": "default",
+      "enum": [
+        "*>preconfig.profiles.*.title"
+      ],
+      "conditional": [
+        {
+          "value": "default",
+          "properties": [
+            "media_render.default"
+          ]
+        },
+        {
+          "value": "export",
+          "properties": [
+            "media_render.export"
+          ]
+        }
+      ]
+    },
+    "media_render.request": {
+      "type": "string",
+      "title": "Operation request (JSON)",
+      "format": "textarea",
+      "default": "{}",
+      "description": "JSON request with mode render and a spec object. All referenced sources must arrive as named media streams."
+    }
+  },
+  "shape": [
+    {
+      "section": "Pipe",
+      "title": "Media Toolkit: Render",
+      "properties": [
+        "media_render.profile"
+      ]
+    }
+  ]
+}
