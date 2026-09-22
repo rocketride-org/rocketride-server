@@ -26,7 +26,7 @@
 // Defines the permissions interface for the generic S3/object storage endpoint
 //
 //-----------------------------------------------------------------------------
-#include <engLib/eng.h>
+#include "base.hpp"
 
 namespace engine::store::filter::baseObjectStore {
 ErrorOr<engine::perms::Rights> IBaseInstance::getRights(

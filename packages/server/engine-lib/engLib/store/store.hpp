@@ -71,8 +71,6 @@
 #include "./endpoints/azure/azure.hpp"
 #include "./endpoints/filesys/filesys/filesys.hpp"
 #include "./endpoints/filesys/smb/smb.hpp"
-#include "./endpoints/objstore/s3/s3.hpp"
-#include "./endpoints/objstore/objstore/objstore.hpp"
 #include "./endpoints/null/null.hpp"
 #include "./endpoints/zip/zip.hpp"
 #include "./endpoints/python/python.hpp"

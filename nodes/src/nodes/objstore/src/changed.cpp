@@ -27,7 +27,7 @@
 //    object on the S3 compatible system into a tagged format
 //
 //-----------------------------------------------------------------------------
-#include <engLib/eng.h>
+#include "base.hpp"
 
 namespace engine::store::filter::baseObjectStore {
 //-------------------------------------------------------------------------

@@ -71,28 +71,6 @@
 #include <atlbase.h>
 #endif
 
-// Include the Aws/S3 definitions
-// AWS defines JSON_USE_EXCEPTION in SDKConfig.h, and it conflicts with our
-// definition Note that this has been fixed in upstream AWS:
-// https://github.com/aws/aws-sdk-cpp/pull/1189
-#pragma push_macro("JSON_USE_EXCEPTION")
-#undef JSON_USE_EXCEPTION
-// atlbase.h (included above) pulls in wingdi.h, which defines the ERROR macro
-// (#define ERROR 0). The newer aws-sdk-cpp declares `typedef E ERROR;` in
-// aws/core/utils/Outcome.h, so the macro expands it to `typedef E 0;` and the
-// header fails to compile. Suppress the GDI macro across the AWS includes and
-// restore it afterwards so Windows code below is unaffected.
-#pragma push_macro("ERROR")
-#undef ERROR
-#include <aws/core/Aws.h>
-#include <aws/core/auth/AWSCredentialsProvider.h>
-#include <aws/core/http/Scheme.h>
-#include <aws/core/utils/memory/stl/AWSSet.h>
-#include <aws/core/utils/logging/DefaultLogSystem.h>
-#include <aws/core/utils/logging/AWSLogging.h>
-#pragma pop_macro("ERROR")
-#pragma pop_macro("JSON_USE_EXCEPTION")
-
 #if ROCKETRIDE_PLAT_WIN
 #include <Lm.h>
 #else

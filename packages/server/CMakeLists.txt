@@ -171,6 +171,7 @@ add_subdirectory(engine)
 add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/hash ${CMAKE_BINARY_DIR}/nodes/hash)
 add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/parse ${CMAKE_BINARY_DIR}/nodes/parse)
 add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/indexer ${CMAKE_BINARY_DIR}/nodes/indexer)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/objstore ${CMAKE_BINARY_DIR}/nodes/objstore)
 
 # -----------------------------------------------------------------------------
 # Testing configuration

@@ -23,46 +23,43 @@
 
 //-----------------------------------------------------------------------------
 //
-// Defines the remove interface for the generic S3/object storage endpoint
+// Defines the stat interface for the generic S3/object storage endpoint
 //
 //-----------------------------------------------------------------------------
-#include <engLib/eng.h>
+#include "base.hpp"
 
 namespace engine::store::filter::baseObjectStore {
-//-----------------------------------------------------------------
+//---------------------------------------------------------------------
 /// @details
-///		Removes the entry
-///	@param[in] entry
-///		The entry to remove
+///		Determines existence of the entry
+///	@param[in]	entry
+///		The entry that should be stat-ed
 ///	@returns
-///		Error
-//-----------------------------------------------------------------
-Error IBaseInstance::removeObject(Entry &entry) noexcept {
-    Error ccode;
+///		ErrorOr<bool>
+///         - where
+///             Error if there are some errors
+///             true  if file was deleted
+///             false if entry exists is a file
+//---------------------------------------------------------------------
 
-    // Get the path
+ErrorOr<bool> IBaseInstance::stat(Entry &entry) noexcept {
+    Error ccode;
+    // Get the path from URL
     Text path;
     if (ccode = Url::toPath(entry.url(), path)) return ccode;
 
-    LOGT("Add object to delete: {}", path);
+    LOGT("Checking existence of file:", entry.url().fileName());
 
     Text bucket, key;
     endpoint.extractBucketAndKeyFromPath(path, bucket, key);
 
-    // Define the request to delete the segment
-    auto delRequest =
-        Aws::S3::Model::DeleteObjectRequest().WithBucket(bucket).WithKey(key);
+    // Define a HeadObjectRequest
+    const auto objectsReq =
+        Aws::S3::Model::HeadObjectRequest().WithBucket(bucket).WithKey(key);
 
-    LOGT("Deleting {} object...", path);
-
-    // Delete the segment
-    auto delResponse = m_streamClient->DeleteObject(delRequest);
-    if (!delResponse.IsSuccess())
-        return errorFromS3Error(m_streamClient, _location,
-                                delResponse.GetError(), bucket);
-
-    LOGT("{} object removed", path);
-
-    return {};
+    // Get the metadata from the bucket
+    auto objectsResp = m_streamClient->HeadObject(objectsReq);
+    if (objectsResp.IsSuccess()) return false;
+    return true;
 }
 }  // namespace engine::store::filter::baseObjectStore
