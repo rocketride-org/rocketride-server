@@ -28,6 +28,8 @@
 //
 //-----------------------------------------------------------------------------
 #pragma once
+#include <engLib/eng.h>
+
 #include "./headers.h"
 
 namespace engine::store::filter::baseObjectStore {

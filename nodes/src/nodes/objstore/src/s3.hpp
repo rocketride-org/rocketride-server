@@ -30,16 +30,16 @@
 //-----------------------------------------------------------------------------
 #pragma once
 
-#include "../base/base.hpp"
+#include "base.hpp"
 
-namespace engine::store::filter::objstore {
+namespace engine::store::filter::s3 {
 using namespace baseObjectStore;
 
 //-------------------------------------------------------------------------
 /// @details
 ///		Declare our factory info
 //-------------------------------------------------------------------------
-_const auto Type = "objstore"_itv;
+_const auto Type = "aws"_itv;
 
 //-------------------------------------------------------------------------
 /// @details
@@ -102,4 +102,4 @@ public:
     IFilterEndpoint(const FactoryArgs &args) noexcept : Parent(args, Type) {};
     virtual ~IFilterEndpoint() {};
 };
-}  // namespace engine::store::filter::objstore
+}  // namespace engine::store::filter::s3

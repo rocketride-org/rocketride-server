@@ -23,9 +23,46 @@
 
 //-----------------------------------------------------------------------------
 //
-//	Defines the data interface for the generic S3/object storage endpoint
+// Defines the remove interface for the generic S3/object storage endpoint
 //
 //-----------------------------------------------------------------------------
-#include <engLib/eng.h>
+#include "base.hpp"
 
-namespace engine::store::filter::baseObjectStore {}
+namespace engine::store::filter::baseObjectStore {
+//-----------------------------------------------------------------
+/// @details
+///		Removes the entry
+///	@param[in] entry
+///		The entry to remove
+///	@returns
+///		Error
+//-----------------------------------------------------------------
+Error IBaseInstance::removeObject(Entry &entry) noexcept {
+    Error ccode;
+
+    // Get the path
+    Text path;
+    if (ccode = Url::toPath(entry.url(), path)) return ccode;
+
+    LOGT("Add object to delete: {}", path);
+
+    Text bucket, key;
+    endpoint.extractBucketAndKeyFromPath(path, bucket, key);
+
+    // Define the request to delete the segment
+    auto delRequest =
+        Aws::S3::Model::DeleteObjectRequest().WithBucket(bucket).WithKey(key);
+
+    LOGT("Deleting {} object...", path);
+
+    // Delete the segment
+    auto delResponse = m_streamClient->DeleteObject(delRequest);
+    if (!delResponse.IsSuccess())
+        return errorFromS3Error(m_streamClient, _location,
+                                delResponse.GetError(), bucket);
+
+    LOGT("{} object removed", path);
+
+    return {};
+}
+}  // namespace engine::store::filter::baseObjectStore
