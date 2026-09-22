@@ -96,6 +96,7 @@ class IInstance(MediaInstance):
         keep = plan_lib.resolve_keep(spec)
         audio = plan_lib.normalize_audio(spec)
         outputs = plan_lib.normalize_outputs(spec, cfg, has_video)
+        self._render_outputs = outputs
         plan_lib.validate_output_paths({**spec, 'status_to': status_to}, outputs, cfg)
         captions = plan_lib.caption_plan(spec, keep['full_keep'])
         # the plan is timed from its own zero; the keep list is timed from the

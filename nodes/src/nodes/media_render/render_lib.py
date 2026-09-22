@@ -785,23 +785,14 @@ def render_clip_video(
             '[vout]',
             '-map',
             '1:a',
-            '-c:v',
-            'libx264',
-            '-preset',
-            preset,
-            '-crf',
-            str(crf),
+            *video_codec_args(out_path, crf, preset),
             '-r',
             str(fps),
             '-pix_fmt',
             'yuv420p',
             *VIDEO_COLOUR_ARGS,
-            '-c:a',
-            'aac',
-            '-b:a',
-            '192k',
-            '-movflags',
-            '+faststart',
+            *mux_audio_args(out_path),
+            *(['-movflags', '+faststart'] if out_path.suffix.lower() in ('.mp4', '.mov') else []),
             '-shortest',
             str(out_path),
         ]
@@ -1243,23 +1234,14 @@ def render_layout_video(
             '[vout]',
             '-map',
             '1:a',
-            '-c:v',
-            'libx264',
-            '-preset',
-            preset,
-            '-crf',
-            str(crf),
+            *video_codec_args(out_path, crf, preset),
             '-r',
             str(fps),
             '-pix_fmt',
             'yuv420p',
             *VIDEO_COLOUR_ARGS,
-            '-c:a',
-            'aac',
-            '-b:a',
-            '192k',
-            '-movflags',
-            '+faststart',
+            *mux_audio_args(out_path),
+            *(['-movflags', '+faststart'] if out_path.suffix.lower() in ('.mp4', '.mov') else []),
             '-shortest',
             str(out_path),
         ]
@@ -1748,11 +1730,46 @@ def assemble_programme_audio(pieces: list[dict], out_wav: str | Path, channels: 
     return out_wav
 
 
+def audio_codec_args(out_path: str | Path, mp3_bitrate: str = '192k') -> list[str]:
+    """Select a codec supported by the requested audio delivery container."""
+    extension = Path(out_path).suffix.lower()
+    if extension == '.mp3':
+        return ['-c:a', 'libmp3lame', '-b:a', mp3_bitrate]
+    if extension in ('.m4a', '.aac'):
+        return ['-c:a', 'aac', '-b:a', '192k']
+    if extension == '.flac':
+        return ['-c:a', 'flac']
+    return ['-c:a', 'pcm_s16le']
+
+
+def video_codec_args(out_path: str | Path, crf: int, preset: str) -> list[str]:
+    """Select compatible video encoding options without changing MP4 defaults."""
+    if Path(out_path).suffix.lower() == '.webm':
+        return [
+            '-c:v',
+            'libvpx-vp9',
+            '-b:v',
+            '0',
+            '-crf',
+            str(max(0, min(63, crf))),
+            '-deadline',
+            'good',
+            '-cpu-used',
+            '4',
+        ]
+    return ['-c:v', 'libx264', '-preset', preset, '-crf', str(crf)]
+
+
+def mux_audio_args(out_path: str | Path, bitrate: str = '192k') -> list[str]:
+    """Use Opus for WebM and AAC for the existing video containers."""
+    return ['-c:a', 'libopus' if Path(out_path).suffix.lower() == '.webm' else 'aac', '-b:a', bitrate]
+
+
 def encode_audio_deliverable(src_wav: str | Path, out_path: str | Path) -> Path:
-    """programme.mp3 (192 kbps) / programme.wav (48 kHz 16-bit) from the finished audio."""
+    """Encode finished audio as MP3, WAV, M4A, AAC or FLAC."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    codec = ['-c:a', 'libmp3lame', '-b:a', '192k'] if out_path.suffix.lower() == '.mp3' else ['-c:a', 'pcm_s16le']
+    codec = audio_codec_args(out_path)
     run_ffmpeg(['-y', '-i', str(src_wav), '-vn', '-ar', '48000', *codec, str(out_path)])
     return out_path
 
@@ -2329,14 +2346,9 @@ def mux_programme(
             '0:v:0',
             '-map',
             '1:a:0',
-            '-c:v',
-            'copy',
-            '-c:a',
-            'aac',
-            '-b:a',
-            audio_bitrate,
-            '-movflags',
-            '+faststart',
+            *(video_codec_args(out_path, 20, 'veryfast') if out_path.suffix.lower() == '.webm' else ['-c:v', 'copy']),
+            *mux_audio_args(out_path, audio_bitrate),
+            *(['-movflags', '+faststart'] if out_path.suffix.lower() in ('.mp4', '.mov') else []),
             '-shortest',
             str(out_path),
         ]
@@ -2373,23 +2385,14 @@ def transcode_aspect(
             '[vout]',
             '-map',
             '0:a?',
-            '-c:v',
-            'libx264',
-            '-preset',
-            preset,
-            '-crf',
-            str(crf),
+            *video_codec_args(out_path, crf, preset),
             '-r',
             str(fps),
             '-pix_fmt',
             'yuv420p',
             *VIDEO_COLOUR_ARGS,
-            '-c:a',
-            'aac',
-            '-b:a',
-            audio_bitrate,
-            '-movflags',
-            '+faststart',
+            *mux_audio_args(out_path, audio_bitrate),
+            *(['-movflags', '+faststart'] if out_path.suffix.lower() in ('.mp4', '.mov') else []),
             str(out_path),
         ]
     )

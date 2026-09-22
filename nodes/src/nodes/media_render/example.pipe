@@ -1,5 +1,5 @@
 {
-  "project_id": "9a486047-edd4-4f1a-b2f5-ed8f15743160",
+  "project_id": "a410492e-cac5-4963-b1c1-24f2bc368bac",
   "version": 1,
   "components": [
     {
@@ -34,14 +34,6 @@
         {
           "from": "parse",
           "lane": "video"
-        },
-        {
-          "from": "parse",
-          "lane": "audio"
-        },
-        {
-          "from": "parse",
-          "lane": "image"
         }
       ]
     },

@@ -459,7 +459,13 @@ def slice_audio(
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    codec = ['-c:a', 'libmp3lame', '-b:a', '128k'] if out_path.suffix == '.mp3' else ['-c:a', 'pcm_s16le']
+    codecs = {
+        '.mp3': ['-c:a', 'libmp3lame', '-b:a', '128k'],
+        '.m4a': ['-c:a', 'aac', '-b:a', '192k'],
+        '.aac': ['-c:a', 'aac', '-b:a', '192k'],
+        '.flac': ['-c:a', 'flac'],
+    }
+    codec = codecs.get(out_path.suffix.lower(), ['-c:a', 'pcm_s16le'])
     layout = ['-ac', str(int(channels))] if channels else []
     run_ffmpeg(
         [

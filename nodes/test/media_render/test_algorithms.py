@@ -506,7 +506,8 @@ class SourceColourTest(unittest.TestCase):
             pieces = layout_pieces([(0, 4_000)], plan['segments'])
             graph = build_layout_graph(pieces, plan, 3840, 2160, 30, None, work, source=self.EIGHT_BIT)
             self.assertEqual(graph, build_layout_graph(pieces, plan, 3840, 2160, 30, None, work, source=None))
-            cmd = (work / 'pan_0_p0a.cmd').as_posix().replace(':', chr(92) + ':')
+            # This test compares colour graphs; use the native platform's path escaping.
+            cmd = render_lib_module._escape_filter_path(work / 'pan_0_p0a.cmd')
             self.assertEqual(
                 graph.replace(',' + HOUSE_TAGS, ''),
                 '[0:v]fps=30,setpts=PTS-STARTPTS,split=1[b0];'

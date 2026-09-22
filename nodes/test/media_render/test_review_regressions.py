@@ -2,6 +2,7 @@
 
 import importlib
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 from .test_streams import NODE, node, feed, media as media_fixture
@@ -167,3 +168,116 @@ def test_layout_render_uses_probed_dimensions_when_plan_omits_them(tmp_path, mon
     assert captured == [(640, 360)]
     with pytest.raises(ValueError, match='framing plan does not say'):
         render_lib.render_layout_video(*args)
+
+
+def test_undeclared_stream_rejects_bytes_above_input_budget():
+    """Unknown-length streams cannot fill disk beyond the configured budget."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    root = instance._workspace.root
+    try:
+        deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4"}')
+        deliver(instance, 'video', AVI_ACTION.WRITE, b'123456')
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'video', AVI_ACTION.WRITE, b'7')
+        active = instance._active['video']
+        active['file'].flush()
+        assert (root / 'source.mp4').read_bytes() == b'123456'
+    finally:
+        instance.close()
+    assert not root.exists()
+
+
+def test_declared_input_above_budget_is_rejected_before_file_creation():
+    """Known oversized inputs fail immediately instead of consuming scratch disk."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    try:
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4","size":7}')
+        assert not list(instance._workspace.root.iterdir())
+    finally:
+        instance.close()
+
+
+def test_input_budget_is_cumulative_across_streams():
+    """Separate assets cannot each consume the entire per-object budget."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    try:
+        deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4","size":4}')
+        deliver(instance, 'video', AVI_ACTION.WRITE, b'1234')
+        deliver(instance, 'video', AVI_ACTION.END)
+        deliver(instance, 'audio', AVI_ACTION.BEGIN, b'{"name":"music.wav"}')
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'audio', AVI_ACTION.WRITE, b'abc')
+        assert instance._active['audio']['file'].tell() == 0
+    finally:
+        instance.close()
+
+
+def test_input_budget_resets_for_next_object(tmp_path):
+    """Reused instances receive a fresh input allowance for each object."""
+    from .test_streams import node, feed
+
+    instance = node({'spec': {}}, config={'max_input_bytes': 6})
+    instance._process = lambda *args: None
+    source = tmp_path / 'input.mp4'
+    source.write_bytes(b'123456')
+    feed(instance, source)
+    instance.closing()
+    instance.open(SimpleNamespace(name='source.mp4'))
+    feed(instance, source)
+    instance.closing()
+
+
+@pytest.mark.parametrize('pipeline', ['clip', 'programme'])
+@pytest.mark.parametrize(
+    'container,video',
+    [
+        ('mp4', True),
+        ('mov', True),
+        ('mkv', True),
+        ('webm', True),
+        ('mp3', False),
+        ('wav', False),
+        ('m4a', False),
+        ('aac', False),
+        ('flac', False),
+    ],
+)
+def test_all_declared_containers_render_without_system_mime_table(
+    media, tmp_path, monkeypatch, pipeline, container, video
+):
+    """Every accepted container must encode and stream on its intended lane."""
+    from .test_streams import node, feed
+
+    module = importlib.import_module(NODE + '._support.instance')
+    monkeypatch.setattr(module.mimetypes, 'guess_type', lambda name: (None, None))
+    filename = 'result.' + container
+    spec = {
+        'kind': 'media_render_spec',
+        'pipeline': pipeline,
+        'keep': [[0, 1000]],
+        'audio': {'master': False},
+        'thumbnail': False,
+        'subtitles': {'enabled': False, 'sidecars': False},
+        'outputs': [{'key': 'result', 'file': filename, 'container': container, 'width': 160, 'height': 90}],
+    }
+    instance = node({'mode': 'render', 'spec': spec})
+    feed(instance, media)
+    instance.closing()
+    assert filename in instance.instance.files
+    output = tmp_path / filename
+    output.write_bytes(instance.instance.files[filename])
+    measured = importlib.import_module(NODE + '._support.media').probe(output)
+    assert measured['has_audio'] and measured['has_video'] == video
+    artifact = next(a for a in instance.instance.answers[0]['artifacts'] if a['name'] == filename)
+    assert artifact['mime'].startswith('video/' if video else 'audio/')
+    assert 'text' not in artifact

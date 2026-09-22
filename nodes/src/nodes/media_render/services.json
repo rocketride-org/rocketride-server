@@ -52,7 +52,8 @@
         "sidecars": false,
         "part_ms": 300000,
         "title": "Default",
-        "request": "{}"
+        "request": "{}",
+        "max_input_mb": 16384
       },
       "export": {
         "event_type": "media_render",
@@ -65,7 +66,8 @@
         "sidecars": true,
         "part_ms": 300000,
         "title": "Export",
-        "request": "{}"
+        "request": "{}",
+        "max_input_mb": 16384
       }
     }
   },
@@ -145,7 +147,8 @@
         "media_render.captions",
         "media_render.sidecars",
         "media_render.part_ms",
-        "media_render.request"
+        "media_render.request",
+        "media_render.max_input_mb"
       ]
     },
     "media_render.export": {
@@ -160,7 +163,8 @@
         "media_render.captions",
         "media_render.sidecars",
         "media_render.part_ms",
-        "media_render.request"
+        "media_render.request",
+        "media_render.max_input_mb"
       ]
     },
     "media_render.profile": {
@@ -191,6 +195,12 @@
       "format": "textarea",
       "default": "{}",
       "description": "JSON request with mode render and a spec object. All referenced sources must arrive as named media streams."
+    },
+    "media_render.max_input_mb": {
+      "type": "number",
+      "title": "Maximum cumulative input per object (MiB)",
+      "default": 16384,
+      "description": "Total incoming media bytes, including all assets. Clamped to 1\u20131048576 MiB; enforced even when stream size is undeclared."
     }
   },
   "shape": [

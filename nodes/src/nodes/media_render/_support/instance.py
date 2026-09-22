@@ -35,6 +35,18 @@ from ai.common.schema import Answer
 from ai.common.avi.descriptor import audio_begin_payload, video_begin_payload, image_begin_payload
 from .workspace import Workspace, write_file
 
+MEDIA_MIMES = {
+    'mp4': 'video/mp4',
+    'mov': 'video/quicktime',
+    'mkv': 'video/x-matroska',
+    'webm': 'video/webm',
+    'mp3': 'audio/mpeg',
+    'wav': 'audio/wav',
+    'm4a': 'audio/mp4',
+    'aac': 'audio/aac',
+    'flac': 'audio/flac',
+}
+
 LEGACY_DESTINATIONS = {'write_to', 'probe_to', 'status_to', 'report_to'}
 
 
@@ -50,6 +62,8 @@ class MediaInstance(IInstanceBase):
         self._workspace = Workspace()
         self._active = {}
         self._inputs = {}
+        self._input_bytes = 0
+        self._input_limit = self.IGlobal.config.get('max_input_bytes', 16 * 1024**3)
         self._assets = []
         self._handled = False
         self._t0 = time.time()
@@ -57,6 +71,7 @@ class MediaInstance(IInstanceBase):
         self._ctx = {}
         self._question = ''
         self._spec = None
+        self._render_outputs = []
 
     def _request(self):
         raw = self.IGlobal.config.get('request') or '{}'
@@ -104,6 +119,8 @@ class MediaInstance(IInstanceBase):
             expected = descriptor.get('size')
             if expected is not None and (type(expected) is not int or expected < 0):
                 raise ValueError('Declared stream size must be a non-negative integer')
+            if expected is not None and expected > self._input_limit - self._input_bytes:
+                raise ValueError('Media input exceeds the configured max_input_mb limit')
             path.parent.mkdir(parents=True, exist_ok=True)
             self._active[lane] = {
                 'file': path.open('xb'),
@@ -118,10 +135,13 @@ class MediaInstance(IInstanceBase):
                 raise ValueError('Media bytes/end received without BEGIN')
             item = self._active[lane]
             if action == AVI_ACTION.WRITE:
+                if len(data) > self._input_limit - self._input_bytes:
+                    raise ValueError('Media input exceeds the configured max_input_mb limit')
                 if item['size'] is not None and item['received'] + len(data) > item['size']:
                     raise ValueError('Media stream exceeded its declared byte count')
                 item['file'].write(data)
                 item['received'] += len(data)
+                self._input_bytes += len(data)
             else:
                 item['file'].close()
                 del self._active[lane]
@@ -181,7 +201,7 @@ class MediaInstance(IInstanceBase):
         report = self._render(self._workspace)
         paths = sorted(path for path in (self._workspace.root / 'outputs').rglob('*') if path.is_file())
         for path in paths:
-            lane = (mimetypes.guess_type(path.name)[0] or '').split('/')[0]
+            lane, _ = self._output_type(path)
             if lane in ('video', 'audio', 'image') and not self.instance.hasListener(lane):
                 raise ValueError('Connect a ' + lane + ' sink for rendered output')
         artifacts = [self._stream_file(path) for path in paths]
@@ -193,11 +213,18 @@ class MediaInstance(IInstanceBase):
         report['storage'] = 'downstream'
         self._emit(report)
 
+    def _output_type(self, path):
+        name = path.relative_to(self._workspace.root / 'outputs').as_posix()
+        for output in self._render_outputs:
+            if output['file'] == name:
+                return ('video' if output['video'] else 'audio'), MEDIA_MIMES[output['container']]
+        mime = mimetypes.guess_type(name)[0] or 'application/octet-stream'
+        return mime.split('/')[0], mime
+
     def _stream_file(self, path):
         name = path.relative_to(self._workspace.root / 'outputs').as_posix()
-        mime = mimetypes.guess_type(name)[0] or 'application/octet-stream'
+        lane, mime = self._output_type(path)
         record = {'name': name, 'mime': mime, 'size': path.stat().st_size}
-        lane = mime.split('/')[0]
         if lane in ('video', 'audio', 'image'):
             emit = getattr(self.instance, 'write' + lane.title())
             payload = {'video': video_begin_payload, 'audio': audio_begin_payload, 'image': image_begin_payload}[lane]

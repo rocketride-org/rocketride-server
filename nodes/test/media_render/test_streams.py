@@ -87,10 +87,12 @@ class Output:
         self.media('image', *args)
 
 
-def node(request=None):
+def node(request=None, config=None):
     """Create an isolated node instance with a JSON request."""
     instance = IInstance()
-    instance.IGlobal = SimpleNamespace(config={**DEFAULTS, 'chunk_bytes': 65536, 'request': json.dumps(request or {})})
+    instance.IGlobal = SimpleNamespace(
+        config={**DEFAULTS, 'chunk_bytes': 65536, 'request': json.dumps(request or {}), **(config or {})}
+    )
     instance.instance = Output()
     instance.open(SimpleNamespace(name='source.mp4'))
     return instance
