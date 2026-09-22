@@ -28,7 +28,7 @@ import { VSCodeProvider, VSCodeContextType } from './hooks/useVSCode';
 import { ChatContainer } from './components/ChatContainer';
 import { API_CONFIG, setAPIConfig } from './config/apiConfig';
 import { startClient } from './hooks/clientSingleton';
-import { getSessionStorageItem, setSessionStorageItem } from 'shell/src/util/sessionStorage';
+import { getSessionStorageItem, setSessionStorageItem } from 'shell';
 
 const App: React.FC = () => {
 	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
