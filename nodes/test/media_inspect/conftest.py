@@ -5,14 +5,17 @@ import sys
 
 import pytest
 
+# Capture the real loader before sibling test modules are collected. Some stock
+# tests replace sys.modules['depends'] with a no-op mock during collection.
+# Keep this fixture independent of that mock without changing sibling tests.
+from depends import FileLock, engine_cache_dir, load_depends
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes'))
 
 
 @pytest.fixture(scope='session', autouse=True)
 def prepare_node_dependencies():
     """Serialize dependency setup before direct unit tests import native media libraries."""
-    from depends import FileLock, engine_cache_dir, load_depends
-
     # Engine-backed tests load dependencies in beginGlobal; direct unit tests
     # must do the same before another xdist worker starts a live pipeline.
     # load_depends uses RocketRide's cross-process install.lock.
