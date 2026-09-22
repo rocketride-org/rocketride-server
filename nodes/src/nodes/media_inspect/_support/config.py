@@ -24,6 +24,8 @@
 """Node configuration: profile values layered over the node's own defaults."""
 
 from __future__ import annotations
+import math
+
 from rocketlib import warning
 
 try:
@@ -69,7 +71,9 @@ def load_node_config(iglobal, defaults: dict, name: str) -> dict:
                 pass
         elif isinstance(default, float):
             try:
-                config[key] = float(value)
+                parsed = float(value)
+                if math.isfinite(parsed):
+                    config[key] = parsed
             except (TypeError, ValueError, OverflowError):
                 pass
         else:

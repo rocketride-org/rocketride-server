@@ -168,3 +168,16 @@ def test_input_budget_resets_for_next_object(tmp_path):
     instance.open(SimpleNamespace(name='source.mp4'))
     feed(instance, source)
     instance.closing()
+
+
+@pytest.mark.parametrize('value', ['nan', 'inf', '-inf', float('nan'), float('inf'), 'invalid', '-32.5'])
+def test_profile_float_values_stay_finite(monkeypatch, value):
+    """Keep safe defaults for non-finite inputs while preserving valid fractions."""
+    from ai.common.config import Config
+    from media_inspect._support.config import load_node_config
+
+    monkeypatch.setattr(Config, 'getNodeConfig', lambda *_: {'silence_db': value, 'scene_threshold': value})
+    state = SimpleNamespace(glb=SimpleNamespace(logicalType=NODE, connConfig={}))
+    defaults = {'silence_db': -35.0, 'scene_threshold': 0.35}
+    result = load_node_config(state, defaults, NODE)
+    assert result == ({'silence_db': -32.5, 'scene_threshold': -32.5} if value == '-32.5' else defaults)
