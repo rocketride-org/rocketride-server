@@ -23,6 +23,8 @@
 
 #include <engLib/eng.h>
 
+#include "indexer.hpp"
+
 namespace engine::store::filter::indexer {
 //-------------------------------------------------------------------------
 /// @details
