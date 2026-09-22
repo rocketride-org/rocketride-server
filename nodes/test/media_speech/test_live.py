@@ -24,17 +24,41 @@
 """Exercise streamed media through a live engine and stock persistence nodes."""
 
 import asyncio
+from collections import deque
 import json
 import time
 import uuid
 
 import pytest
+import pytest_asyncio
 
 from .test_streams import NODE, media as media_fixture
 
 media = media_fixture
 
 pytestmark = [pytest.mark.requires_server, pytest.mark.integration, pytest.mark.timeout(600)]
+
+
+@pytest_asyncio.fixture
+async def observed_client(server_available, test_config):  # noqa: ARG001
+    """Retain bounded worker diagnostics so native exits do not look like slow inference."""
+    from rocketride import RocketRideClient
+
+    events = deque(maxlen=30)
+
+    async def on_event(event):
+        body = event.get('body', {})
+        fields = ('state', 'status', 'exitCode', 'exitMessage', 'errors', 'final', 'action', 'reason', 'output')
+        detail = {key: body[key] for key in fields if key in body}
+        if detail:
+            events.append({'event': event.get('event'), **detail})
+
+    client = RocketRideClient(uri=test_config.uri, auth=test_config.auth, on_event=on_event)
+    await client.connect()
+    try:
+        yield client, events
+    finally:
+        await asyncio.wait_for(client.disconnect(), 10)
 
 
 def pipeline(request, output):
@@ -93,8 +117,9 @@ def requests():
 
 
 @pytest.mark.parametrize('operation', requests(), ids=lambda value: value['mode'])
-async def test_streamed_operations_through_engine(client, media, record_property, operation):
+async def test_streamed_operations_through_engine(observed_client, media, record_property, operation):
     """Verify streamed operations through engine."""
+    client, events = observed_client
     root = 'media-stream-test-' + uuid.uuid4().hex
     request = operation
     document = pipeline(request, root + '/' + request['mode'])
@@ -102,6 +127,7 @@ async def test_streamed_operations_through_engine(client, media, record_property
     assert not validation.get('errors'), validation.get('errors')
     token = (await client.use(pipeline=document, source='source', threads=1))['token']
     try:
+        await client.add_monitor({'token': token}, ['summary', 'task', 'debugger'])
         started = time.perf_counter()
         pipe = await client.pipe(
             token, objinfo={'name': media.name, 'size': media.stat().st_size}, mime_type='video/mp4'
@@ -130,5 +156,9 @@ async def test_streamed_operations_through_engine(client, media, record_property
             entries = (await client.fs_list_dir(root + '/' + request['mode'] + '/' + lane))['entries']
             assert any(entry['type'] == 'file' and entry['size'] > 0 for entry in entries)
     finally:
-        await client.terminate(token)
+        try:
+            await client.terminate(token)
+        except RuntimeError as exc:
+            if 'not running' not in str(exc):
+                raise
     # Preserve test outputs for inspection; each run uses a unique directory.
