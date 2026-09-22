@@ -92,34 +92,43 @@ def requests():
     ]
 
 
-async def test_streamed_operations_through_engine(client, media, record_property):
+@pytest.mark.parametrize('operation', requests(), ids=lambda value: value['mode'])
+async def test_streamed_operations_through_engine(client, media, record_property, operation):
     """Verify streamed operations through engine."""
     root = 'media-stream-test-' + uuid.uuid4().hex
-    for request in requests():
-        document = pipeline(request, root + '/' + request['mode'])
-        validation = await client.validate(document)
-        assert not validation.get('errors'), validation.get('errors')
-        token = (await client.use(pipeline=document, source='source', threads=1))['token']
+    request = operation
+    document = pipeline(request, root + '/' + request['mode'])
+    validation = await client.validate(document)
+    assert not validation.get('errors'), validation.get('errors')
+    token = (await client.use(pipeline=document, source='source', threads=1))['token']
+    try:
+        started = time.perf_counter()
+        pipe = await client.pipe(
+            token, objinfo={'name': media.name, 'size': media.stat().st_size}, mime_type='video/mp4'
+        )
+        await pipe.open()
+        with media.open('rb') as stream:
+            while chunk := stream.read(65536):
+                await pipe.write(chunk)
+        # A fresh CI runner also downloads the Whisper model and initializes
+        # its native runtime. Record that cold-start cost separately per mode;
+        # do not treat this timeout as a steady-state performance target.
+        timeout = 420 if request['mode'] == 'words' else 180
         try:
-            started = time.perf_counter()
-            pipe = await client.pipe(
-                token, objinfo={'name': media.name, 'size': media.stat().st_size}, mime_type='video/mp4'
-            )
-            await pipe.open()
-            with media.open('rb') as stream:
-                while chunk := stream.read(65536):
-                    await pipe.write(chunk)
-            result = await asyncio.wait_for(pipe.close(), 180)
-            record_property(request['mode'] + '_seconds', time.perf_counter() - started)
-            assert len(result.get('answers', [])) == 1, result
-            answer = result['answers'][0]
-            assert not answer.get('error'), answer
-            if request['mode'] == 'probe':
-                assert answer['width'] == 320 and answer['height'] == 180
-            if request['mode'] in ('stills', 'pieces', 'render'):
-                lane = {'stills': 'image', 'pieces': 'audio', 'render': 'video'}[request['mode']]
-                entries = (await client.fs_list_dir(root + '/' + request['mode'] + '/' + lane))['entries']
-                assert any(entry['type'] == 'file' and entry['size'] > 0 for entry in entries)
-        finally:
-            await client.terminate(token)
+            result = await asyncio.wait_for(pipe.close(), timeout)
+        except TimeoutError:
+            status = await asyncio.wait_for(client.get_task_status(token), 10)
+            pytest.fail(f'{request["mode"]} exceeded {timeout}s; task state: {status.get("state")}')
+        record_property(request['mode'] + '_seconds', time.perf_counter() - started)
+        assert len(result.get('answers', [])) == 1, result
+        answer = result['answers'][0]
+        assert not answer.get('error'), answer
+        if request['mode'] == 'probe':
+            assert answer['width'] == 320 and answer['height'] == 180
+        if request['mode'] in ('stills', 'pieces', 'render'):
+            lane = {'stills': 'image', 'pieces': 'audio', 'render': 'video'}[request['mode']]
+            entries = (await client.fs_list_dir(root + '/' + request['mode'] + '/' + lane))['entries']
+            assert any(entry['type'] == 'file' and entry['size'] > 0 for entry in entries)
+    finally:
+        await client.terminate(token)
     # Preserve test outputs for inspection; each run uses a unique directory.
