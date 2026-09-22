@@ -45,6 +45,7 @@ async def observed_client(server_available, test_config):  # noqa: ARG001
     from rocketride import RocketRideClient
 
     events = deque(maxlen=30)
+    ended = asyncio.Event()
 
     async def on_event(event):
         body = event.get('body', {})
@@ -52,13 +53,35 @@ async def observed_client(server_available, test_config):  # noqa: ARG001
         detail = {key: body[key] for key in fields if key in body}
         if detail:
             events.append({'event': event.get('event'), **detail})
+        if (
+            body.get('final')
+            or event.get('event') == 'exited'
+            or (event.get('event') == 'apaevt_task' and body.get('action') == 'end')
+        ):
+            ended.set()
 
     client = RocketRideClient(uri=test_config.uri, auth=test_config.auth, on_event=on_event)
     await client.connect()
     try:
-        yield client, events
+        yield client, events, ended
     finally:
         await asyncio.wait_for(client.disconnect(), 10)
+
+
+async def close_with_diagnostics(pipe, ended, events, timeout):
+    """Fail promptly with the captured exit event if a native worker disappears."""
+    closing = asyncio.create_task(pipe.close())
+    stopped = asyncio.create_task(ended.wait())
+    try:
+        completed, _ = await asyncio.wait((closing, stopped), timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+        if closing not in completed:
+            pytest.fail(f'Pipeline stopped or exceeded {timeout}s; worker diagnostics: {list(events)}')
+        return await closing
+    finally:
+        for task in (closing, stopped):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(closing, stopped, return_exceptions=True)
 
 
 def pipeline(request, output):
@@ -119,7 +142,7 @@ def requests():
 @pytest.mark.parametrize('operation', requests(), ids=lambda value: value['mode'])
 async def test_streamed_operations_through_engine(observed_client, media, record_property, operation):
     """Verify streamed operations through engine."""
-    client, events = observed_client
+    client, events, ended = observed_client
     root = 'media-stream-test-' + uuid.uuid4().hex
     request = operation
     document = pipeline(request, root + '/' + request['mode'])
@@ -140,11 +163,7 @@ async def test_streamed_operations_through_engine(observed_client, media, record
         # its native runtime. Record that cold-start cost separately per mode;
         # do not treat this timeout as a steady-state performance target.
         timeout = 420 if request['mode'] == 'words' else 180
-        try:
-            result = await asyncio.wait_for(pipe.close(), timeout)
-        except TimeoutError:
-            status = await asyncio.wait_for(client.get_task_status(token), 10)
-            pytest.fail(f'{request["mode"]} exceeded {timeout}s; task state: {status.get("state")}')
+        result = await close_with_diagnostics(pipe, ended, events, timeout)
         record_property(request['mode'] + '_seconds', time.perf_counter() - started)
         assert len(result.get('answers', [])) == 1, result
         answer = result['answers'][0]

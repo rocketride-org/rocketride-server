@@ -1,6 +1,7 @@
 """Regression cases for reviewed configuration and process-lifetime fixes."""
 
 import importlib
+import asyncio
 import subprocess
 from types import SimpleNamespace
 
@@ -8,6 +9,22 @@ import pytest
 from .test_streams import NODE, media as media_fixture
 
 media = media_fixture
+
+
+async def test_native_worker_exit_preserves_diagnostics():
+    """An exited worker must fail promptly without querying its vanished task."""
+    from .test_live import close_with_diagnostics
+
+    class PendingPipe:
+        async def close(self):
+            """Represent a request whose worker exited without answering."""
+            await asyncio.Event().wait()
+
+    ended = asyncio.Event()
+    ended.set()
+    events = [{'event': 'exited', 'exitCode': -11}]
+    with pytest.raises(pytest.fail.Exception, match='exitCode.*-11'):
+        await asyncio.wait_for(close_with_diagnostics(PendingPipe(), ended, events, 420), 1)
 
 
 @pytest.mark.parametrize('value', ['oops', '[1]', '[1,2,3]', '[false,4]', '[3,2]', '[0,"nan"]', '-1-3'])
