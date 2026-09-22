@@ -38,7 +38,8 @@
         "peak_ms": 100,
         "scene_threshold": 0.35,
         "title": "Default",
-        "request": "{}"
+        "request": "{}",
+        "max_input_mb": 16384
       }
     }
   },
@@ -82,7 +83,8 @@
         "media_inspect.silence_ms",
         "media_inspect.peak_ms",
         "media_inspect.scene_threshold",
-        "media_inspect.request"
+        "media_inspect.request",
+        "media_inspect.max_input_mb"
       ]
     },
     "media_inspect.profile": {
@@ -107,6 +109,12 @@
       "format": "textarea",
       "default": "{}",
       "description": "JSON request: probe, levels (range, ranges, scan, scan_scenes) or stills (stills array). Sources arrive as media streams."
+    },
+    "media_inspect.max_input_mb": {
+      "type": "number",
+      "title": "Maximum cumulative input per object (MiB)",
+      "default": 16384,
+      "description": "Total incoming media bytes, including all assets. Clamped to 1\u20131048576 MiB; enforced even when stream size is undeclared."
     }
   },
   "shape": [

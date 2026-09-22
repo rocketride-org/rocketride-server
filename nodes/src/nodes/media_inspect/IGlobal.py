@@ -31,6 +31,7 @@ DEFAULTS = {
     'request': '{}',
     'event_type': 'media_inspect',
     'chunk_kb': 1024,
+    'max_input_mb': 16384,
     'silence_db': -40.0,
     'silence_ms': 700,
     'peak_ms': 100,
@@ -49,6 +50,8 @@ class IGlobal(IGlobalBase):
 
         load_depends(__file__)
         self.config = load_node_config(self, DEFAULTS, 'media_inspect')
+        self.config['max_input_mb'] = max(1, min(1048576, int(self.config['max_input_mb'])))
+        self.config['max_input_bytes'] = self.config['max_input_mb'] * 1024 * 1024
         self.config['chunk_bytes'] = max(64, min(8192, int(self.config['chunk_kb']))) * 1024
         self.config['event_type'] = str(self.config['event_type'] or 'media_inspect').strip() or 'media_inspect'
         self.config['peak_ms'] = max(10, int(self.config['peak_ms']))

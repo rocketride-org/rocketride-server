@@ -101,3 +101,70 @@ def test_nonfinite_counts_fall_back(value):
     """Unbounded numeric options follow the existing invalid-value fallback."""
     module = importlib.import_module(NODE + '._support.media')
     assert module.parse_count(value, 7) == 7
+
+
+def test_undeclared_stream_rejects_bytes_above_input_budget():
+    """Unknown-length streams cannot fill disk beyond the configured budget."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    root = instance._workspace.root
+    try:
+        deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4"}')
+        deliver(instance, 'video', AVI_ACTION.WRITE, b'123456')
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'video', AVI_ACTION.WRITE, b'7')
+        active = instance._active['video']
+        active['file'].flush()
+        assert (root / 'source.mp4').read_bytes() == b'123456'
+    finally:
+        instance.close()
+    assert not root.exists()
+
+
+def test_declared_input_above_budget_is_rejected_before_file_creation():
+    """Known oversized inputs fail immediately instead of consuming scratch disk."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    try:
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4","size":7}')
+        assert not list(instance._workspace.root.iterdir())
+    finally:
+        instance.close()
+
+
+def test_input_budget_is_cumulative_across_streams():
+    """Separate assets cannot each consume the entire per-object budget."""
+    from .test_streams import node, deliver
+    from rocketlib import AVI_ACTION
+
+    instance = node(config={'max_input_bytes': 6})
+    try:
+        deliver(instance, 'video', AVI_ACTION.BEGIN, b'{"name":"source.mp4","size":4}')
+        deliver(instance, 'video', AVI_ACTION.WRITE, b'1234')
+        deliver(instance, 'video', AVI_ACTION.END)
+        deliver(instance, 'audio', AVI_ACTION.BEGIN, b'{"name":"music.wav"}')
+        with pytest.raises(ValueError, match='max_input_mb'):
+            deliver(instance, 'audio', AVI_ACTION.WRITE, b'abc')
+        assert instance._active['audio']['file'].tell() == 0
+    finally:
+        instance.close()
+
+
+def test_input_budget_resets_for_next_object(tmp_path):
+    """Reused instances receive a fresh input allowance for each object."""
+    from .test_streams import node, feed
+
+    instance = node({'spec': {}}, config={'max_input_bytes': 6})
+    instance._process = lambda *args: None
+    source = tmp_path / 'input.mp4'
+    source.write_bytes(b'123456')
+    feed(instance, source)
+    instance.closing()
+    instance.open(SimpleNamespace(name='source.mp4'))
+    feed(instance, source)
+    instance.closing()

@@ -37,7 +37,7 @@ Example: `{"mode":"stills","stills":[{"id":"poster","t_ms":1000,"width":320}]}`.
 
 `ROCKETRIDE_MEDIA_FFMPEG_TIMEOUT` bounds each FFmpeg encode (default 3600 seconds, configurable from above 0 to 86400). Metadata subprocesses have a maximum 60-second timeout. Invalid timeout values fail explicitly.
 
-Each descriptor should declare `size` and a unique `name`. Empty, truncated, oversized-relative-to-declaration and duplicate inputs fail. At most 128 streams are accepted per object. This processor accepts exactly one media stream per object. Media ingress uses bounded stream chunks. Decoders, analysis and speech models have additional memory requirements; temporary disk usage scales with input and intermediate outputs. Abrupt process termination may leave scratch files for host cleanup.
+Each descriptor should declare `size` and a unique `name`. `max_input_mb` limits cumulative incoming bytes across all streams in an object (default 16384 MiB / 16 GiB, clamped to 1–1048576 MiB). It is enforced before writing each chunk, including when `size` is absent; declared sizes above the remaining budget fail at BEGIN. This ingress limit does not bound decoded/intermediate output size. Empty, truncated, oversized-relative-to-declaration and duplicate inputs fail. At most 128 streams are accepted per object. This processor accepts exactly one media stream per object. Media ingress uses bounded stream chunks. Decoders, analysis and speech models have additional memory requirements; temporary disk usage scales with input and intermediate outputs. Abrupt process termination may leave scratch files for host cleanup.
 
 No browser download/re-upload relay is required by the node contract. The stock `filestore_source` currently rejects saved files above 100 MiB; direct webhook uploads avoid that source limit. These nodes do not change the stock source or sink. Durable progress, recovery and output naming belong to pipeline/application orchestration.
 
@@ -54,6 +54,7 @@ Tests are in `nodes/test/media_inspect`: stream lifecycle, isolation, path valid
 |---|---|---|---|
 | `media_inspect.chunk_kb` | `number` | **Stream chunk size (KB)** | `1024` |
 | `media_inspect.event_type` | `string` | **Name of the progress event this pipeline emits** | `"media_inspect"` |
+| `media_inspect.max_input_mb` | `number` | **Maximum cumulative input per object (MiB)**<br/>Total incoming media bytes, including all assets. Clamped to 1–1048576 MiB; enforced even when stream size is undeclared. | `16384` |
 | `media_inspect.peak_ms` | `number` | **Length of one loudness bucket (ms)** | `100` |
 | `media_inspect.profile` | `string` | **Profile** | `"default"` |
 | `media_inspect.request` | `string` | **Operation request (JSON)**<br/>JSON request: probe, levels (range, ranges, scan, scan_scenes) or stills (stills array). Sources arrive as media streams. | `"{}"` |
