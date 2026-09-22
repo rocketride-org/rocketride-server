@@ -34,7 +34,6 @@ from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
 from rocketlib import debug
 import uuid
-import numpy as np
 import json
 import sys
 import re
@@ -44,6 +43,11 @@ import re
 # tenant/database API the modern client requires landed in Chroma 0.6.0; older servers
 # (e.g. 0.5.18) fail cryptically (KeyError('_type')) instead of indexing. The project's
 # own test infra runs chromadb/chroma:0.6.3, which works.
+# Minimum rescaled [0, 1] similarity for a result to count as relevant; below
+# this it is dropped as noise regardless of the configured retrieval score.
+# Kept equal to the store_qdrant floor so both stores trim the same tail.
+MIN_RELEVANCE_SCORE = 0.20
+
 _MIN_CHROMA_VERSION = (0, 6)
 
 
@@ -73,7 +77,7 @@ class Store(DocumentStoreBase):
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
-    similarity: str = 'Cosine'
+    similarity: str = 'cosine'
     top_k: int | None = None
     client: chromadb.HttpClient
     collectionObj: chromadb.Collection | None = None
@@ -83,6 +87,39 @@ class Store(DocumentStoreBase):
     # own cap of 100) while keeping a fat-fingered value from turning a query
     # into a full-collection scan.
     MAX_TOP_K: int = 1000
+
+    @staticmethod
+    def _distanceToScore(distance: float, similarity: str) -> float:
+        """
+        Convert a Chroma query distance into the [0, 1] relevance score the rest
+        of the pipeline expects, where 1.0 is a perfect match.
+
+        Chroma reports a *distance* for every ``hnsw:space`` (lower is more
+        similar), never a similarity:
+
+        - ``cosine``: ``1 - cos(a, b)``, in ``[0, 2]``.
+        - ``ip``: ``1 - dot(a, b)``. For unit vectors that equals the cosine
+          distance; for others it is unbounded and goes negative for strong
+          matches.
+        - ``l2``: squared Euclidean distance ``|a - b|^2``. For unit vectors
+          that equals ``2 - 2 cos(a, b)``, in ``[0, 4]``.
+
+        Each branch is the affine map that turns the metric's distance into
+        ``(cos(a, b) + 1) / 2`` for unit-norm embeddings, so the three spaces
+        agree on the score of any given pair, a retrieval-score threshold means
+        the same thing in all of them, and the scale matches the cosine rescale
+        used by store_qdrant. Values are clamped to ``[0, 1]``: an ``ip``
+        distance below 0 (a match stronger than a unit-vector identity)
+        saturates at 1.0 instead of being discarded, and an ``l2`` distance past
+        4 (only reachable with non-normalized embeddings) saturates at 0.0.
+        """
+        if similarity in ('cosine', 'ip'):
+            score = 1.0 - float(distance) / 2.0
+        elif similarity == 'l2':
+            score = 1.0 - float(distance) / 4.0
+        else:
+            raise ValueError(f"Unsupported Chroma similarity '{similarity}'; expected one of cosine, l2, ip")
+        return min(1.0, max(0.0, score))
 
     @staticmethod
     def _coerceBool(value: Any) -> bool:
@@ -448,13 +485,10 @@ class Store(DocumentStoreBase):
             content = results['documents'][i]
 
             if results.get('distances', None) is not None:
-                if self.similarity == 'cosine':
-                    score = (results['distances'][i] + 1) / 2
-                else:
-                    score = float(1.0 / (1.0 + np.exp(results['distances'][i] / -100)))
+                score = self._distanceToScore(results['distances'][i], self.similarity)
 
-                # Ignore it if it doesn't have a high enough score
-                if score < 0.20:
+                # Drop the noise tail regardless of the configured retrieval score
+                if score < MIN_RELEVANCE_SCORE:
                     continue
             else:
                 score = 0.0
