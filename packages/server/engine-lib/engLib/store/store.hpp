@@ -68,7 +68,6 @@
 #include "./filters/pipe/pipe.hpp"
 #include "./python/python-base.hpp"
 
-#include "./endpoints/azure/azure.hpp"
 #include "./endpoints/filesys/filesys/filesys.hpp"
 #include "./endpoints/filesys/smb/smb.hpp"
 #include "./endpoints/null/null.hpp"

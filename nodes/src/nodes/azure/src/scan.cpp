@@ -29,6 +29,8 @@
 //
 //-----------------------------------------------------------------------------
 
+#include "azure.hpp"
+
 namespace engine::store::filter::azure {
 inline auto __transform(const StatInfo &prov, file::StatInfo &fs) noexcept {
     fs = _fj<file::StatInfo>(prov.internal);

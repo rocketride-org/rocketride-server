@@ -21,6 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
+#include "azure.hpp"
 #include <unicode/unistr.h>
 
 namespace engine::store::filter::azure {

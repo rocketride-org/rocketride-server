@@ -26,7 +26,7 @@
 //	Declares the object for working with Azure blob storage.
 //
 //-----------------------------------------------------------------------------
-#include <engLib/eng.h>
+#include "azure.hpp"
 
 namespace engine::store::filter::azure {
 
