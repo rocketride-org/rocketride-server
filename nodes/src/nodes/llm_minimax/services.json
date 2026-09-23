@@ -230,8 +230,11 @@
 				"title": "MiniMax: MiniMax M2.7 (free)",
 				"model": "minimax-m2.7:free",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 196608, // openrouter
-				"modelOutputTokens": 176947, // openrouter
+				"modelTotalTokens": 196608, // manual
+				"modelOutputTokens": 176947, // manual
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -252,8 +255,11 @@
 				"title": "MiniMax: MiniMax M3 (free)",
 				"model": "minimax-m3:free",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 943718, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 943718, // manual
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},

@@ -175,7 +175,7 @@
 				"model": "deepseek-chat-v3.1",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 144900, // openrouter
+				"modelOutputTokens": 32768, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -209,6 +209,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 8192, // openrouter
 				"modelOutputTokens": 7372, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-09-28). Please select a current model.",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -250,6 +253,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 163840, // openrouter
 				"modelOutputTokens": 32768, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-09-28). Please select a current model.",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -261,6 +267,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 163840, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-09-28). Please select a current model.",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -272,6 +281,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 163840, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-09-28). Please select a current model.",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -314,7 +326,7 @@
 				"model": "deepseek-v4-flash-0731",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1310720, // openrouter
-				"modelOutputTokens": 131072, // openrouter
+				"modelOutputTokens": 943718, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -336,7 +348,7 @@
 				"model": "deepseek-v4-flash-latest",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1310720, // openrouter
-				"modelOutputTokens": 393216, // openrouter
+				"modelOutputTokens": 943718, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -347,7 +359,7 @@
 				"model": "deepseek-v4-flash-vision-exp",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 384000, // openrouter
+				"modelOutputTokens": 943718, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -367,6 +379,50 @@
 			"deepseek-v4-pro-0813-batch": {
 				"title": "DeepSeek: DeepSeek V4 Pro 0813 (batch)",
 				"model": "deepseek-v4-pro-0813:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-flash-latest": {
+				"title": "DeepSeek: DeepSeek Flash Latest",
+				"model": "deepseek-flash-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 943718, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-pro-latest": {
+				"title": "DeepSeek: DeepSeek Pro Latest",
+				"model": "deepseek-pro-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 384000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-1-flash": {
+				"title": "DeepSeek: DeepSeek V4.1 Flash",
+				"model": "deepseek-v4.1-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 384000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-flash-vision-exp-batch": {
+				"title": "DeepSeek: DeepSeek V4 Flash Vision Exp (batch)",
+				"model": "deepseek-v4-flash-vision-exp:batch",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 943718, // openrouter
@@ -639,6 +695,30 @@
 					"properties": [
 						"deepseek.deepseek-v4-pro-0813-batch"
 					]
+				},
+				{
+					"value": "deepseek-flash-latest",
+					"properties": [
+						"deepseek.deepseek-flash-latest"
+					]
+				},
+				{
+					"value": "deepseek-pro-latest",
+					"properties": [
+						"deepseek.deepseek-pro-latest"
+					]
+				},
+				{
+					"value": "deepseek-v4-1-flash",
+					"properties": [
+						"deepseek.deepseek-v4-1-flash"
+					]
+				},
+				{
+					"value": "deepseek-v4-flash-vision-exp-batch",
+					"properties": [
+						"deepseek.deepseek-v4-flash-vision-exp-batch"
+					]
 				}
 			]
 		},
@@ -777,6 +857,34 @@
 		},
 		"deepseek.deepseek-v4-pro-0813-batch": {
 			"object": "deepseek-v4-pro-0813-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-flash-latest": {
+			"object": "deepseek-flash-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-pro-latest": {
+			"object": "deepseek-pro-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-v4-1-flash": {
+			"object": "deepseek-v4-1-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"deepseek.deepseek-v4-flash-vision-exp-batch": {
+			"object": "deepseek-v4-flash-vision-exp-batch",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
