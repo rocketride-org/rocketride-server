@@ -1,0 +1,85 @@
+{
+	//
+	// TEST ONLY: minimal definition so a task can reach the Outlook Enterprise endpoint.
+	// The shipped definitions were removed from OSS in 3cf3cf32 and referenced
+	// ms.* fields that went with them.
+	//
+	"title": "Outlook Enterprise",
+	"protocol": "outlook-enterprise://",
+	"node": "cpp",
+	//
+	// Required (for "node": "cpp"):
+	//		Base name of the node's shared library. All three services of this
+	//		node name it, so the library is loaded once.
+	//
+	"path": "msservices",
+	"classType": [],
+	"capabilities": [
+		"internal",
+		"network"
+	],
+	"prefix": "Outlook Enterprise",
+	"description": ["Outlook Enterprise source endpoint."],
+	"icon": "outlook.svg",
+	"lanes": {
+		"_source": [
+			"tags"
+		]
+	},
+	"input": [
+		{
+			"lane": "_source",
+			"output": [
+				{
+					"lane": "tags",
+					"description": "Outputs documents to be processed."
+				}
+			]
+		}
+	],
+	"fields": {
+		"ms.tenant": {
+			"type": "string",
+			"title": "Tenant",
+			"description": "Directory (tenant) id."
+		},
+		"ms.clientId": {
+			"type": "string",
+			"title": "Client id",
+			"description": "Application (client) id."
+		},
+		"ms.clientSecret": {
+			"type": "string",
+			"title": "Client secret",
+			"description": "Application client secret."
+		},
+		"ms.refreshToken": {
+			"type": "string",
+			"title": "Refresh token",
+			"description": "OAuth refresh token, for the personal account flow."
+		},
+		"outlook.source.parameters": {
+			"section": "parameters",
+			"title": "Parameters",
+			"properties": [
+				"ms.tenant",
+				"ms.clientId",
+				"ms.clientSecret",
+				"ms.refreshToken"
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Source",
+			"title": "Outlook Enterprise",
+			"properties": [
+				"type",
+				"source.mode",
+				"outlook.source.parameters",
+				"include",
+				"exclude"
+			]
+		}
+	]
+}

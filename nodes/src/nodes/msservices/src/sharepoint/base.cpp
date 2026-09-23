@@ -26,7 +26,7 @@
 //	Declares the object for working with Ms Email.
 //
 //-----------------------------------------------------------------------------
-#include <engLib/eng.h>
+#include "msservices.hpp"
 
 namespace engine::store::filter::sharepoint {
 using namespace utility;

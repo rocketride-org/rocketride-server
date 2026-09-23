@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-#include <engLib/eng.h>
+#include "msservices.hpp"
 
 namespace engine::store::filter::msNode::msEmailNode {
 
