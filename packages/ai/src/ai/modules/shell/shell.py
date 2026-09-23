@@ -428,7 +428,8 @@ async def _authorize_app(token: str, app_id: str) -> bool:
 # /apps/<appId>/v<N>/<rest> streams the registry version's built dist/ tree
 # from the STORE (deployed and seeded apps alike — bundles serve versioned
 # ONLY; the static tree below is for app ASSETS like icons/readmes). Bytes
-# are IMMUTABLE per version, so caching is aggressive; the entitlement
+# are IMMUTABLE per version, but the browser cache is capped at an hour so a
+# logged-out or revoked caller stops reusing a bundle without asking; the entitlement
 # VERDICT is cached with a HARD expiry — deliberately never slid — so a
 # pulled publish stops serving within minutes no matter how hot the traffic
 # is. The reverse move (a publish that ADDS a version — deploy, fleet bump)
@@ -437,7 +438,7 @@ async def _authorize_app(token: str, app_id: str) -> bool:
 
 _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
-_IMMUTABLE_CACHE = 'private, max-age=31536000, immutable'
+_BUNDLE_CACHE = 'private, max-age=3600'
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
 # 'resolvedAt', 'floor'} — HARD expiry (contrast _app_auth_cache's sliding
 # window).
@@ -541,7 +542,7 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
     media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
-    return Response(content=data, media_type=media_type, headers={'Cache-Control': _IMMUTABLE_CACHE})
+    return Response(content=data, media_type=media_type, headers={'Cache-Control': _BUNDLE_CACHE})
 
 
 async def apps_session(request: Request):
