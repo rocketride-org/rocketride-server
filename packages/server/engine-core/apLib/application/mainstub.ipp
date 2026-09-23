@@ -37,13 +37,10 @@ extern ErrorCode Main();
 
 }  // namespace ap::application
 
-// The main entry point for an rocketride based executable. The startup
-// sequence itself lives in application::bootstrap, shared with engine.dll
 #if ROCKETRIDE_PLAT_WIN
-int wmain(int argc, const ap::Utf16Chr **argv) noexcept
-#else
-int main(int argc, const char **argv) noexcept
+#include <apLib/application/win/winmain.ipp>
+#elif ROCKETRIDE_PLAT_LIN
+#include <apLib/application/lin/linmain.ipp>
+#elif ROCKETRIDE_PLAT_MAC
+#include <apLib/application/mac/macmain.ipp>
 #endif
-{
-    return ::ap::application::bootstrap(argc, argv, &::ap::application::Main);
-}

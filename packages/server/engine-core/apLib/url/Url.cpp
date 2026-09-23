@@ -24,32 +24,6 @@
 namespace ap::url {
 //-------------------------------------------------------------------------
 /// @details
-/// 	The protocol to mapper registry for the process
-//-------------------------------------------------------------------------
-UrlConfig::Mappers &UrlConfig::mappers() noexcept {
-    static Mappers registry;
-    return registry;
-}
-
-//-------------------------------------------------------------------------
-/// @details
-/// 	Adds a new protocol type - usually from a static declaration
-//-------------------------------------------------------------------------
-UrlConfig::UrlConfig(const Mapper &mapper) {
-    mappers()[mapper.protocol] = mapper;
-}
-
-//-------------------------------------------------------------------------
-/// @details
-/// 	Registers (or replaces) the mapper for a protocol
-//-------------------------------------------------------------------------
-Error UrlConfig::registerMapper(UrlConfig::Mapper &mapper) {
-    mappers()[mapper.protocol] = _mv(mapper);
-    return {};
-}
-
-//-------------------------------------------------------------------------
-/// @details
 /// 	Finds the mapper of the giver protocol
 ///	@param[in] type
 ///		The protocol to find
@@ -58,11 +32,10 @@ Error UrlConfig::registerMapper(UrlConfig::Mapper &mapper) {
 //-------------------------------------------------------------------------
 ErrorOr<UrlConfig::MapperPtr> UrlConfig::getMapper(const iTextView type) {
     // Find the mapper
-    auto &registry = mappers();
-    auto mapper = registry.find(type);
+    auto mapper = m_UrlConfig.find(type);
 
     // If we couldn't find it
-    if (mapper == registry.end())
+    if (mapper == m_UrlConfig.end())
         return APERR(Ec::InvalidSchema, "The url protocol", type,
                      "was not found");
 

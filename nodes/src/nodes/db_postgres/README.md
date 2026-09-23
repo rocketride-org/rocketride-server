@@ -4,11 +4,11 @@ A RocketRide database node that answers natural-language questions against a Pos
 
 ## What it does
 
-Plays two roles in a pipeline. As a pipeline node, it receives natural-language questions on the `questions` lane, asks a connected LLM to translate them into SQL, executes the query, and emits the results; it also accepts structured data on the `answers` lane and inserts it into the configured table. As a tool node, agents call it directly through nine functions: five that are always available (`get_data`, `get_schema`, `refresh_schema`, `get_sql`, `dialect`) and four raw-SQL ones gated behind `allow_execute` (`execute`, `begin`, `commit`, `rollback`).
+Plays two roles in a pipeline. As a pipeline node, it receives natural-language questions on the `questions` lane, asks a connected LLM to translate them into SQL, executes the query, and emits the results; it also accepts structured data on the `answers` lane and inserts it into the configured table. As a tool node, agents call it directly through three functions: `get_data`, `get_schema`, and `get_sql`.
 
 Uses SQLAlchemy with the psycopg2 driver (`psycopg2-binary`). The connection string is built as `postgresql+psycopg2://user:password@host/database`; user, password, and database are URL-encoded so reserved characters (`@`, `/`, `#`, `:`) are safe, and the host may carry an explicit port (e.g. `localhost:5433`).
 
-Safety defaults: only `SELECT` statements are permitted for queries (whitelist check, see Notes), generated SQL is validated with `EXPLAIN` against the live database before execution, and raw SQL execution is disabled by default via `allow_execute`.
+Safety defaults: only `SELECT` statements are permitted for queries (whitelist check, see Notes), generated SQL is validated with `EXPLAIN` against the live database before execution, and raw SQL execution (`QuestionType.EXECUTE`) is disabled by default via `allow_execute`.
 
 The same implementation also ships as a Supabase preset (`services.supabase.json`, protocol `db_supabase://`): Supabase is managed Postgres, so it is a branded configuration, not separate code.
 
@@ -61,36 +61,32 @@ answer questions — with the SELECT-only whitelist keeping it read-safe.
 
 If the LLM decides a question is not a database query, its text response is emitted instead of query results.
 
-The `questions` lane has one behaviour: every question takes the natural-language path above, and only SQL the LLM generates for a question it judges to be a database query is executed — when it reports the question is not one (`isValid: false`), the prose answer is emitted and nothing runs against the database. The lane does not branch on `Question.type` — there is no dialect or raw-SQL path on the lane, so a `QuestionType.DIALECT` or `QuestionType.EXECUTE` question is handled exactly like any other natural-language question. (The graph node `graph_neo4j` *does* dispatch on those two types; this node never has.) Reach the dialect and raw-SQL behaviours through the `dialect` and `execute` tool functions below instead.
+Two special question types are handled on the `questions` lane:
+
+- **`QuestionType.DIALECT`**: emits `{"dialect": "postgres"}` on the `answers` lane so SDK callers can branch on the underlying engine.
+- **`QuestionType.EXECUTE`**: runs the question text as raw SQL (read or write, no LLM, no safety check). Gated by `allow_execute`; when disabled the request is logged and dropped. `SELECT` results are capped at 25,000 rows; write statements report `affected_rows`.
 
 ## As a tool
 
-When connected to an agent, the node exposes nine functions: the five below, plus the four raw-SQL functions in **Raw SQL and transactions**. The registered tool names are the bare method names below; the services.json `prefix` is a URL/path prefix and never appears in a tool name. An agent catalog namespaces each tool by the pipeline component id (for example `<component-id>.get_data`).
+When connected to an agent, the node exposes three functions. The registered tool names are the bare method names below; the services.json `prefix` is a URL/path prefix and never appears in a tool name. An agent catalog namespaces each tool by the pipeline component id (for example `<component-id>.get_data`).
 
 | Tool         | Description                                                                                                       |
 | ------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `get_data`   | Natural language to SQL, executes it, returns rows plus the generated SQL (default 250 rows, max 25,000 via `limit`) |
 | `get_schema` | Returns tables, columns, types, primary keys, and foreign keys, for the full database or one table                |
-| `refresh_schema` | Re-reads the schema from the database and returns it, plus a `refreshed_at` UTC timestamp                     |
 | `get_sql`    | Natural language to SQL only, no execution                                                                        |
-| `dialect`    | Takes no arguments; returns `{"dialect": "postgres"}` so a caller can branch on the underlying engine              |
 
 `get_data` and `get_sql` return `valid: false` with an `error` (unsafe SQL) or an `answer` (the question was not a database query) when no executable query is produced.
 
-`get_schema` serves the snapshot the node currently holds — the reflection taken at start-up, replaced by each `refresh_schema` call — so a table created or altered since the last reflection is invisible to it until the next one. `refresh_schema` takes no arguments and re-reflects the database, updating both caches the node keeps, but not in the same way: it *replaces* the database-wide schema that the natural-language path describes to the LLM, and it *rebuilds* the configured table's column map that the `answers` lane builds its INSERTs from, out of the same walk rather than with a second reflection. That is when a column added by DDL starts being populated instead of dropped as unknown. A configured table the walk did not find leaves that map empty, and the next insert reflects the table itself if it has come back. If the database refuses the reflection — a revoked grant, a lock timeout, a table dropped mid-walk — the call fails with `Schema refresh failed:` followed by the database's own message (for a table that disappeared mid-walk, the name of that table) and leaves both cached schemas exactly as they were.
+### Transactions
 
-### Raw SQL and transactions
-
-Four more tool functions run raw SQL and explicit transactions. All four are gated on the node's **Allow direct query execution** setting (`allow_execute`); with it off, each call fails with an error rather than running. That gate is the node's only raw-SQL switch: it does not change what the `questions` lane does, because the lane never runs raw SQL in the first place.
+Three additional tool functions support explicit database transactions. All three require `allow_execute=true` on the node (the same gate as `QuestionType.EXECUTE`); requests are silently dropped when the gate is off.
 
 | Tool       | Input                     | Returns                    | Description                                                                                                   |
 | ---------- | ------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `execute`  | `{"sql": "<statement>"}`, optional `params` (positional `$1..$n`), `session_id` and `row_mode` (`object` or `array`) | `{"rows": [...], "affected_rows": N}` | Runs the statement as written — no LLM translation and no SELECT-only check. Without a `session_id` it runs on a fresh auto-commit connection, and a `SELECT` over the row cap (25,000 by default) fails and rolls back rather than returning a truncated result; inside a session that overflowing statement stays pending in the open transaction until the client rolls it back. A failed statement raises `SQL execution failed:` followed by PostgreSQL's own primary message (see the error contract below). |
 | `begin`    | _(none)_                  | `{"session_id": "<id>"}`   | Opens a new transaction and reserves a dedicated connection for it. Returns a `session_id` that callers must thread through subsequent `execute`, `commit`, and `rollback` calls. |
 | `commit`   | `{"session_id": "<id>"}` | `{"ok": true}`             | Commits all statements made on the given session, releases the held connection back to the pool, and removes the session entry. Errors if an earlier statement aborted the transaction (see below). |
 | `rollback` | `{"session_id": "<id>"}` | `{"ok": true}`             | Discards all statements made on the given session, releases the held connection, and removes the session entry. |
-
-A failed `execute` raises `SQL execution failed:` followed by PostgreSQL's own primary message, identically with and without a `session_id`. What is removed is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo, PostgreSQL's `LINE n:` quotation of the statement, and its DETAIL, HINT and CONTEXT blocks. The primary sentence itself is passed through as PostgreSQL wrote it, so it can name a value the statement carried or touched — `invalid input syntax for type integer: "..."` names the offending value even when an `INSERT ... SELECT` or a `CAST` read it from another table. That is deliberate rather than overlooked: reaching this tool at all requires **Allow direct query execution**, and a caller who has that can read the same data with a `SELECT`, so the error channel grants no access a query would not. The full text stays in the server log.
 
 To run a statement inside an open transaction, pass the `session_id` returned by `begin` as the `session_id` field of an `execute` tool call. Statements without a `session_id` run on a fresh auto-commit connection and are not part of any transaction. The `execute` tool also accepts an optional `row_mode` field: `'object'` (default) returns rows as objects keyed by column name; `'array'` returns rows as positional arrays (column order preserved, duplicate column names kept) — the shape ORM drivers such as Drizzle require.
 
@@ -126,7 +122,7 @@ database error back to the LLM, so attempts are not blind retries.
 
 ### Allow direct query execution
 
-Gates the raw-SQL tool functions (`execute`, `begin`, `commit`, `rollback`).
+Gates raw SQL execution (`QuestionType.EXECUTE` and the transaction tools).
 Off by default — leave it off unless a trusted application explicitly needs to
 issue SQL directly, because enabled callers bypass both the LLM translation
 and the SELECT-only safety check.
@@ -153,12 +149,9 @@ Insert operations never go through SQL generation; they use the `answers` lane.
 Rows arriving on the `answers` lane are inserted into the configured `table`:
 
 - The table is auto-created from the shape of the first batch if it does not exist (column types inferred from the data).
-- Incoming keys are matched to columns case-insensitively (`UserName` maps to `username`); a schema column the data does not carry is inserted as `NULL`.
-- Unless the database fills it in itself: a generated primary key (`SERIAL`, `IDENTITY`) or a column with a `DEFAULT` is left out of the statement when the row does not carry it, so PostgreSQL supplies the value instead of receiving an explicit `NULL` — which it would reject for a `NOT NULL` column and would use in place of the default elsewhere.
-- A `null` supplied for any column the database fills in itself — a generated primary key, a `DEFAULT`, an identity — counts as not carried, because the sender on this lane is an upstream node that may emit every schema key with `null` for the ones it has no value for. A `null` on a column with nothing behind it is inserted as `NULL` as given. (The `execute` tool is unaffected: a statement you write binds your `NULL`.)
-- A primary key PostgreSQL is not known to generate (a composite key, a text key with no default) that a row omits is left out of the statement too, and PostgreSQL decides. The node does not refuse the row: "generates it itself" is read from reflected metadata, which does not describe triggers, so a `uuid`/`CHAR(36)` key filled by a `BEFORE INSERT` trigger is indistinguishable from a key nobody supplies — omitting the column is what lets the trigger run. Where nothing fills it in, PostgreSQL rejects the row with `null value in column "..." violates not-null constraint` and the whole batch is rolled back. (SQLAlchemy emits a Python `SAWarning` — once per column per process under the default filter — for a statement that leaves a primary key unbound; it is expected here.)
+- Incoming keys are matched to columns case-insensitively (`UserName` maps to `username`); schema columns missing from the data are inserted as `NULL`.
 - Lists and dicts are serialised as JSON strings; booleans are stored as `0`/`1`.
-- Each batch is inserted in a single transaction: on failure every row of it is rolled back and the error is raised as `Insert into "<table>" failed:` followed by PostgreSQL's own primary message, with the statement echo stripped exactly as for `execute`. On the `answers` lane the error is logged, not returned, so check the server log when rows do not appear.
+- Each batch is inserted in a single transaction: on failure it is rolled back and the error re-raised.
 
 ### Supabase preset
 
@@ -180,7 +173,7 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `postgresdb.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
+| `postgresdb.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
 | `postgresdb.database` | `string` | **Database name**<br/>Name of database | `"postgres"` |
 | `postgresdb.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. | `""` |
 | `postgresdb.host` | `string` | **PostgreSQL host**<br/>Host name or IP address of the PostgreSQL server, optionally including a port (e.g. localhost:5433) | `"localhost"` |
@@ -194,7 +187,7 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `postgresdb.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
+| `postgresdb.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
 | `postgresdb.database` | `string` | **Database name**<br/>Name of database (Supabase default is 'postgres') | `"postgres"` |
 | `postgresdb.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. | `""` |
 | `postgresdb.host` | `string` | **Supabase host**<br/>From the Supabase dashboard (Connect button), including the port. Recommended: the Supavisor pooler (works over IPv4) -> aws-0-<region>.pooler.supabase.com:6543 (transaction) or :5432 (session). The Direct connection (db.<project-ref>.supabase.co:5432) is IPv6-only and will fail to resolve on networks without IPv6. |  |

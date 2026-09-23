@@ -34,9 +34,7 @@ Each document lists every constructor option, method, type, and usage example fo
 Both SDK packages also install the [`rocketride` CLI](/connect/cli) — the same
 operations from a terminal. The Python package additionally ships the
 [OpenTelemetry bridge](/clients/python/otel-bridge) (`rocketride otel`), which
-exports live pipeline traces and metrics over OTLP, and the
-[pipeline diff](/clients/python/pipe-diff) (`rocketride diff`), which reviews what
-changed between two `.pipe` revisions.
+exports live pipeline traces and metrics over OTLP.
 
 ---
 

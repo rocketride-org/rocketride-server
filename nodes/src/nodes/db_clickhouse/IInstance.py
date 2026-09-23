@@ -20,5 +20,5 @@ class IInstance(DatabaseInstanceBase):
         return 'ClickHouse'
 
     def _db_dialect(self) -> str:
-        """Return the machine-readable dialect identifier surfaced by the `dialect` tool function."""
+        """Return the machine-readable dialect identifier surfaced via QuestionType.DIALECT."""
         return 'clickhouse'

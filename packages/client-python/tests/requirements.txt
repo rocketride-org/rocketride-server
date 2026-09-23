@@ -18,11 +18,3 @@
 # from the constraints, as everywhere else.
 opentelemetry-sdk>=1.27.0
 opentelemetry-exporter-otlp-proto-http>=1.27.0
-
-# The GFM oracle for tests/test_pipediff_reporters.py: it wraps the same
-# cmark-gfm GitHub renders comments with, so the Markdown-escaping cross-check
-# runs in CI instead of skipping — the test that settles the backslash question
-# is not left optional. Floor matches the [test] extra in pyproject.toml and
-# stays at 2024.1.14 deliberately: 2024.11.20 publishes no macOS wheels, so a
-# tighter pin would make the macOS leg build cmark-gfm from source.
-cmarkgfm>=2024.1.14

@@ -53,7 +53,7 @@ function(rocketride_set_common_target_options target)
         set(TARGET_DEBUG_FILE ${TARGET_FILE_DIR}/${TARGET_NAME}.debug)
         get_target_property(target_type ${target} TYPE)
 
-        if(target_type STREQUAL "EXECUTABLE" OR target_type STREQUAL "SHARED_LIBRARY")
+        if(target_type STREQUAL "EXECUTABLE")
             # On *nix break out the debug info so we can store it separate from the release binary
             if("${CMAKE_BUILD_TYPE}" MATCHES "Release" OR "${CMAKE_BUILD_TYPE}" MATCHES "Sanitize")
                 if(ROCKETRIDE_PLAT_LIN)

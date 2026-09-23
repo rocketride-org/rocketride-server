@@ -24,7 +24,7 @@
 import json
 import os
 import threading
-from rocketlib import IEndpointBase, monitorOther, monitorStatus, debug, isCancelled
+from rocketlib import IEndpointBase, monitorOther, monitorStatus, debug
 from typing import Any, Dict, Callable
 
 
@@ -186,15 +186,9 @@ class IEndpoint(IEndpointBase):
         self._startup()
 
         self._shutdown_event = threading.Event()
-        try:
-            # SIGTERM sets the native engine's cancellation flag. A source
-            # that emits no scan callbacks must observe that flag itself,
-            # or the supervisor kills it before endGlobal can release resources.
-            while not isCancelled():
-                if self._shutdown_event.wait(timeout=0.1):
-                    break
-        finally:
-            self._shutdown()
+        self._shutdown_event.wait()
+
+        self._shutdown()
 
     def scanObjects(self, path: str, scanCallback: Callable[[Dict[str, Any]], None]):
         """

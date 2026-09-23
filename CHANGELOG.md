@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — since 2026-09-22
+## [Unreleased] — since 2026-09-23
 
-## [3.4.0] - 2026-09-22
+## [3.4.0] - 2026-09-23
 
 <!-- Everything below ships in the next release. There is deliberately no
      [3.4.0] section here: that release was cut on `stage` (#1654) and then
@@ -24,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ci**: on-demand + monthly multi-OS compile/test matrix (#1537)
 - **ci**: keep Discord forum tags live (re-apply on state/label change via bot) (#1722)
 - **cli**: rocketride validate subcommand (Python + TS) + validate-pipes composite action (#1573)
-- **client-python**: `rocketride diff` — semantic `.pipe` diff + pipe-diff composite action (#1607)
 - **client-python**: `rocketride otel` — OpenTelemetry bridge over the ingester protocol (#1612)
 - **database**: Sequelize ORM over pipes + server-side DB transactions (#1467)
 - **deploy-2**: teams-as-environments deploy, owner-scoped task identity, push-driven surfaces (#1764)

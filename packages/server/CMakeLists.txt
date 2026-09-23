@@ -20,11 +20,6 @@ get_filename_component(ROCKETRIDE_PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.."
 set(ROCKETRIDE_PACKAGES_DIR "${ROCKETRIDE_PROJECT_ROOT}/packages")
 
 # -----------------------------------------------------------------------------
-# IDE target grouping
-# -----------------------------------------------------------------------------
-set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-
-# -----------------------------------------------------------------------------
 # Display CMake configuration information
 # -----------------------------------------------------------------------------
 message(STATUS "========================================")
@@ -160,11 +155,8 @@ add_subdirectory(engine-core)
 # Engine library (engLib) - engine-specific functionality
 add_subdirectory(engine-lib)
 
-# Shared engine module (engineMod) - engine-lib provides its engLib target
-add_subdirectory(engine-mod)
-
-# Main engine executable
-add_subdirectory(engine)
+# Main engine executable (external to packages/server)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/packages/engine ${CMAKE_BINARY_DIR}/packages/engine)
 
 # -----------------------------------------------------------------------------
 # Testing configuration

@@ -39,7 +39,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ai.modules.task.commands import cmd_cprofile
 from ai.modules.task.commands.cmd_cprofile import CProfileCommands
 
 
@@ -125,11 +124,10 @@ async def test_proxy_cross_team_target_denied_before_forwarding():
         CProfileCommands.on_rrext_cprofile_status,
         CProfileCommands.on_rrext_cprofile_report,
         CProfileCommands.on_rrext_cprofile_report_tree,
-        CProfileCommands.on_rrext_cprofile_threads,
     ],
 )
 async def test_every_proxy_handler_authorizes_the_target(handler):
-    """All six cprofile handlers route proxy targets through the authorized
+    """All five cprofile handlers route proxy targets through the authorized
     lookup — none may keep the old unchecked get_task_control(target) form.
     """
     account = _account_info()
@@ -157,27 +155,3 @@ async def test_direct_mode_does_not_touch_task_lookup():
 
     server.get_task_control.assert_not_called()
     assert 'active' in (response['body'] or {})
-
-
-@pytest.mark.asyncio
-async def test_direct_threads_checks_permission_and_lists():
-    """The new verb is gated like the others and answers from the local profiler."""
-    conn = _make_conn(account_info=_account_info())
-
-    response = await CProfileCommands.on_rrext_cprofile_threads(conn, {'arguments': {}})
-
-    conn.verify_permission.assert_called_once_with('task.control')
-    assert 'threads' in (response['body'] or {})
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('arguments, expected', [({}, None), ({'thread': 0}, 0), ({'thread': 3}, 3)])
-async def test_direct_report_tree_forwards_the_thread(monkeypatch, arguments, expected):
-    """The thread argument reaches the profiler as sent, 0 included, else None."""
-    report_tree = MagicMock(return_value={'tree': None})
-    monkeypatch.setattr(cmd_cprofile.profiler, 'report_tree', report_tree)
-    conn = _make_conn(account_info=_account_info())
-
-    await CProfileCommands.on_rrext_cprofile_report_tree(conn, {'arguments': arguments})
-
-    assert report_tree.call_args.kwargs['thread'] == expected

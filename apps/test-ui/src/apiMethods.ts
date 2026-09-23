@@ -174,7 +174,6 @@ export const API_METHODS: ApiMethodDef[] = [
 	{ method: 'cprofileStatus', category: 'Profiling', mode: 'happy' },
 	{ method: 'cprofileReport', category: 'Profiling', mode: 'happy' },
 	{ method: 'cprofileReportTree', category: 'Profiling', mode: 'happy' },
-	{ method: 'cprofileThreads', category: 'Profiling', mode: 'happy' },
 
 	// =========================================================================
 	// DATABASE

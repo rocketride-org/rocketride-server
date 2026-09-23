@@ -402,7 +402,7 @@ Retrieve the unresolved pipeline for a running task. The pipeline is returned ex
 
 Validate a pipeline configuration server-side (structure, required fields, component references) without starting it. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.
 
-`pipeline` also accepts the single-component form `{'version': ..., 'component': {...}}` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs.
+`pipeline` also accepts the single-component form `{'version': ..., 'component': {...}}` — the shape a node editor sends when it validates one component on save. The server expands it into a one-item `components` list before validating.
 
 ```python
 result = await client.validate(pipeline, source='webhook_1')
@@ -1152,14 +1152,10 @@ tree = await client.cprofile_report_tree(target=token)  # call tree
 - `cprofile_report(target=None)` — the full pstats text report of the last
   completed session.
 - `cprofile_report_tree(target=None, max_depth=50, min_pct=0.1,
-  include_system=True, thread=None)` — the call tree with `total_time` and
+  include_system=False)` — the call tree with `total_time` and
   `total_calls`; raise `min_pct` or lower `max_depth` to shrink it. Read the
   tree top-down: the widest cumulative-time branch under the run loop is
-  the slow pipeline component. Pass `thread` to get one thread's tree
-  instead of all threads merged.
-- `cprofile_threads(target=None)` — the threads of the last session,
-  busiest first: `id` (the `thread` to pass above), `name`, system thread id `tid`,
-  `ttot`, `functions` and `calls`. Names are not unique; `tid` is.
+  the slow pipeline component.
 
 ## 17. Exceptions & Error Handling
 

@@ -350,61 +350,32 @@ void setupDebug() noexcept {
         }
     }
 
-    // Give the thread one name on both sides, if not done yet
-    syncThreadName();
-}
+    // If we have not named the thread for python yet, we will do so now.
+    if (!tls_thread_named) {
+        try {
+            // Get the name of this thread
+            std::string name = std::string(ap::async::getCurrentThreadName());
 
-//---------------------------------------------------------------------
-/// @details
-///		Gives the calling thread one name in the engine and in Python,
-///		once per thread.  Whoever started the thread named it: the
-///		engine its own threads, Python its own (asyncio_0 and the like).
-///		Each side knows a thread it did not start only by a placeholder,
-///		the engine by ThreadApi::ExternalName and Python by a
-///		_DummyThread's "Dummy-N", and takes the other side's name.
-///
-///		Called when the engine calls into Python (setupDebug) and when
-///		Python calls into the engine (UnlockPython), so the name is
-///		settled before either side logs or profiles the thread.  This
-///		MUST be called while the GIL is locked
-///--------------------------------------------------------------------
-void syncThreadName() noexcept {
-    // Only attempt this once per thread
-    if (tls_thread_named)
-        return;
-    tls_thread_named = true;
+            // Output a message
+            LOG(Python, "Updating thread name to", name);
 
-    try {
-        // Get the callers thread in python
-        py::module threading = py::module::import("threading");
-        py::object currentThread = threading.attr("current_thread")();
+            // Get the threading module
+            py::module threading = py::module::import("threading");
 
-        // Python started this thread and named it: the engine takes that
-        // name, unless it has a real one of its own (the main thread)
-        if (!py::isinstance(currentThread, threading.attr("_DummyThread"))) {
-            std::string name =
-                py::cast<std::string>(currentThread.attr("name"));
+            // Get the callers thread in python
+            py::object currentThread = threading.attr("current_thread")();
 
-            // A context made now is born with the name; one made earlier
-            // holds only the placeholder
-            auto ctx = ap::async::ThreadApi::thisCtx(name);
-            if (ctx->name() == ap::async::ThreadApi::ExternalName)
-                ctx->setName(ap::TextView{name});
-
-            if (ctx->name() == ap::TextView{name}) {
-                LOG(Python, "Engine thread name taken from Python:", name);
-                return;
-            }
+            // Set the name
+            currentThread.attr("name") = name;
+        } catch (const py::error_already_set &e) {
+            LOG(Python, "Python error during debug set thread name {}",
+                e.what());
+        } catch (...) {
+            LOG(Python, "Error setting up thread name");
         }
 
-        // Python knows this thread only as Dummy-N: it takes the engine's
-        std::string name = std::string(ap::async::getCurrentThreadName());
-        LOG(Python, "Updating thread name to", name);
-        currentThread.attr("name") = name;
-    } catch (const py::error_already_set &e) {
-        LOG(Python, "Python error during set thread name {}", e.what());
-    } catch (...) {
-        LOG(Python, "Error setting up thread name");
+        // Only attempt this once
+        tls_thread_named = true;
     }
 }
 

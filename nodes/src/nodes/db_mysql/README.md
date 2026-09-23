@@ -11,10 +11,9 @@ SQLAlchemy with the PyMySQL driver to connect and reflect MySQL table schemas.
 
 ## What it does
 
-On the `questions` lane, the node gives a connected LLM its cached schema
-snapshot (the start-up reflection until `refresh_schema` replaces it) and
-optional database description, validates generated `SELECT` queries with
-`EXPLAIN`, and emits results as a table, text, or answer. On the `answers`
+On the `questions` lane, the node gives a connected LLM its startup-reflected
+schema and optional database description, validates generated `SELECT` queries
+with `EXPLAIN`, and emits results as a table, text, or answer. On the `answers`
 lane, it inserts structured rows into the configured table, creating that table
 from the first incoming data shape when necessary. It is also an agent tool
 node, making it a better fit than a pipeline-only SQL destination when an agent
@@ -43,8 +42,7 @@ configurable server-name prefix.
 | Function | Description |
 | --- | --- |
 | `get_data` | Generate a safe `SELECT` from a question and execute it. |
-| `get_schema` | Return the schema snapshot the node currently holds. |
-| `refresh_schema` | Re-read the schema, replace the cache, and return it. |
+| `get_schema` | Return the schema reflected when the node started. |
 | `get_sql` | Generate a safe `SELECT` without executing it. |
 | `execute` | Run raw SQL, bypassing LLM translation and the safety check. |
 | `begin` | Open a transaction and return its session ID. |
@@ -55,43 +53,20 @@ configurable server-name prefix.
 `get_data` and `get_sql` require a non-empty `question`; `get_data` accepts an
 optional `limit`, defaulting to 250 and clamped to 1–25,000. `get_schema`
 accepts an optional `table`; an unknown table returns an `error` field, while
-omitting it returns all reflected tables. `get_schema` serves the snapshot the
-node currently holds — the reflection taken at start-up, replaced by each
-`refresh_schema` call — so DDL run since the last reflection is invisible to
-it until the next one. `refresh_schema` takes no arguments, re-reflects the
-database, replaces that database-wide cache, and returns the `get_schema`
-shape plus a `refreshed_at` UTC timestamp. It also rebuilds the configured
-table's cached column map from the same walk, which is how the next
-`answers`-lane insert picks up added or dropped columns instead of continuing
-against the start-up shape; no second reflection is needed. A configured table
-the walk did not find leaves that map empty, and the next insert reflects the
-table itself if it has come back. If the database refuses the reflection — a revoked grant, a lock
-timeout, a table dropped mid-walk — the call fails with `Schema refresh
-failed:` followed by the database's own message (for a table that disappeared
-mid-walk, the name of that table) and leaves both cached schemas exactly as
-they were. `get_data` returns
-`{valid, rows, sql, row_limit}` on success; a non-database question returns
-`{valid: false, answer}`, and a query execution failure returns
-`{valid: false, error, sql, rows: []}`.
+omitting it returns all reflected tables. `get_data` returns `{valid, rows,
+sql, row_limit}` on success; a non-database question returns `{valid: false,
+answer}`, and a query execution failure returns `{valid: false, error, sql,
+rows: []}`.
 
 `execute` requires non-empty `sql` and optionally accepts a transaction
 `session_id`, positional values for `$1`, `$2`, and so on, and a `row_mode`:
 `object` (default) keys rows by column name, while `array` returns positional
 arrays that preserve column order and keep duplicate column names — the shape
-ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`. A
-failed statement raises `SQL execution failed:` followed by the database's own
-primary message, identically with and without a `session_id`. What is removed
-is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo. The primary
-sentence itself is passed through as MySQL wrote it, so a syntax error quotes
-the fragment it stopped on (the driver interpolates bound values client-side,
-so that fragment can contain one) and a constraint error names the value that
-collided. That is deliberate: reaching this tool at all requires **Allow
-direct query execution**, and a caller who has it can read the same data with
-a `SELECT`. The full text stays in the server log. `begin` takes no arguments
-and returns `{session_id}`; `commit` and `rollback` require that ID and return
-`{ok: true}`. These four write-capable operations fail when **Allow direct
-query execution** is off; unknown or expired session IDs also fail. Invalid
-tool input raises an error.
+ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`.
+`begin` takes no arguments and returns `{session_id}`;
+`commit` and `rollback` require that ID and return `{ok: true}`. These four
+write-capable operations fail when **Allow direct query execution** is off;
+unknown or expired session IDs also fail. Invalid tool input raises an error.
 
 A failed statement does **not** roll the session back. The session stays open
 and MySQL leaves its transaction usable, so a later `commit` persists the work
@@ -164,47 +139,12 @@ answer is emitted instead of executing SQL.
 
 ### Inserting answers
 
-Incoming JSON rows are matched to the target schema case-insensitively; unknown
-incoming keys are ignored. A schema column a row does not carry becomes `NULL`,
-unless the database fills it in itself: an `AUTO_INCREMENT` primary key or a
-column with a `DEFAULT` is left out of the statement so the server supplies
-the value rather than receiving an explicit `NULL`, which would override the
-default. A `null` supplied for any column the database fills in itself -- a
-generated primary key, a `DEFAULT` -- counts as not carried, because on this
-lane the sender is an upstream node that may emit every schema key with `null`
-for the ones it has no value for, while a `null` on a column with nothing
-behind it is inserted as `NULL` as given. A primary key MySQL is not known to
-generate (a composite key, a text key with no default) that a row omits is left
-out of the statement as well, and MySQL decides what to do with it. Lists and
+Incoming JSON rows are matched to the target schema case-insensitively; missing
+schema columns become `NULL`, and unknown incoming keys are ignored. Lists and
 dictionaries are serialized as JSON strings and booleans as `0` or `1`. For a
 new table, the node adds an auto-increment `id` primary key and infers integer,
 float, datetime, or text columns; short text becomes `VARCHAR(255)` and longer
 text becomes `TEXT`.
-
-Why the node does not refuse such a row: whether the database generates a key
-is read from reflected metadata, which does not describe triggers. A `CHAR(36)`
-primary key filled by a `BEFORE INSERT` trigger -- the usual UUID idiom before
-MySQL 8.0.13 -- looks exactly like a text key with no default, so refusing the
-row meant the trigger never ran. Leaving the column out of the statement is
-what lets it run. Binding `NULL` is not the alternative: a `BEFORE INSERT`
-trigger fires before the not-null check and would fill a bound `NULL`, but an
-explicit `NULL` overrides a column default, and where no trigger exists it is a
-not-null violation -- omitting the column is the one shape that works for a
-default, a trigger and a generated key alike. Where nothing fills the key in,
-MySQL refuses the row itself (`Field '<name>' doesn't have a default value`, or
-a not-null error) in strict mode -- `STRICT_TRANS_TABLES`, the default since
-MySQL 5.7 -- and every row of the batch is rolled back. Under a non-strict
-`sql_mode` MySQL stores the implicit default instead, so an omitted `CHAR` key
-lands as an empty string and the next such row collides with a duplicate-key
-error. SQLAlchemy emits a Python `SAWarning` (once per column per process under
-the default filter) for a statement that leaves a primary key unbound; that is
-expected here.
-
-A failed insert raises `Insert into "<table>" failed:` followed by MySQL's own
-primary message, with SQLAlchemy's statement and parameter echo stripped the
-same way `execute` strips it. The `answers` lane logs that error rather than
-returning it, so the server log is where a batch that did not land is
-explained.
 
 ### Connection checks and transactions
 
@@ -227,7 +167,7 @@ and rolls all open sessions back when the pipeline closes.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `mysql.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
+| `mysql.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly. | `false` |
 | `mysql.database` | `string` | **Database name**<br/>Name of database | `"database"` |
 | `mysql.db_description` | `string` | **Database description**<br/>What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries. | `""` |
 | `mysql.host` | `string` | **MySQL host**<br/>Host name or IP address of the MySQL server | `"localhost"` |

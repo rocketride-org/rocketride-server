@@ -334,15 +334,6 @@ def getTask() -> 'Optional[dict]':
 getTask = engLib.getTask  # noqa
 
 
-def isCancelled() -> bool:
-    """Return whether the engine or the calling engine thread is cancelled.
-
-    Long-running sources should poll this between bounded waits and return
-    from scanObjects when it becomes true, allowing node teardown to run.
-    """
-    return engLib.isCancelled()
-
-
 # -----------------------------------------------------------------------------
 # Additional functionality
 # -----------------------------------------------------------------------------

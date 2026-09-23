@@ -21,26 +21,42 @@
 // SOFTWARE.
 // =============================================================================
 
+#include <engLib/eng.h>
 
-#include <apLib/ap.h>
+#include <apLib/application/mainstub.ipp>
 
 namespace ap::application {
+    ErrorCode Main() {
+		Error ccode;
 
-// Resolves the executable path from /proc/self/exe
-// @returns
-// Zero, or the errno that stopped us
-int detectExecPath() noexcept {
-    std::array<char, 4 * Size::kKilobyte> execPath = {};
+		// NOTE: Temporary handle --verify option to workaround CI/CD failure (see OPS-6087)
+		// TODO: Remove this once OPS-6087 is fixed.
+		if (cmdline().argc() == 2 && cmdline().argv()[1] == "--verify"_tv)
+            return engine::TaskEc::COMPLETED;
 
-    // readlink doesn't terminate, so leave the last byte zeroed from the init
-    if (::readlink("/proc/self/exe", &execPath[0], execPath.size() - 1) < 0) {
-        const auto error = errno;
-        log::write(_location, "Failed to determine app path: {}", ::strerror(error));
-        return error;
+		// Init the engine
+        ccode = engine::init();
+
+		// Run it if we inited it
+        if (!ccode)
+            ccode = engine::task::Main();
+
+		// Output the exit code
+		if (engine::config::monitor()) {
+			MONCCODE(exit, ccode);
+		} else {
+			std::string message = _ts(ccode);
+			std::cout << "Error: " << message << std::endl;
+		}
+
+		// Deinit the engine
+		engine::deinit();
+
+		// Get the exit status
+	    if (ccode)
+            return engine::TaskEc::END_CODE_ERROR;
+        else
+            return engine::TaskEc::COMPLETED;
     }
-
-    cmdline().setExecPath(&execPath[0]);
-    return 0;
-}
 
 }  // namespace ap::application

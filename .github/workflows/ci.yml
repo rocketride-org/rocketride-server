@@ -129,7 +129,7 @@ jobs:
     name: Build
     needs: [init, changes]
     if: >-
-      !cancelled() &&
+      always() &&
       needs.init.result == 'success' &&
       github.event_name != 'schedule' &&
       (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
@@ -151,7 +151,7 @@ jobs:
     name: Build / ${{ matrix.label }}
     needs: [init, changes]
     if: >-
-      !cancelled() &&
+      always() &&
       needs.init.result == 'success' &&
       github.event_name == 'pull_request' &&
       needs.changes.outputs.code != 'true'
@@ -281,7 +281,7 @@ jobs:
     permissions:
       contents: read
     if: >-
-      !cancelled() &&
+      always() &&
       github.event_name != 'schedule' &&
       (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     runs-on: ubuntu-latest

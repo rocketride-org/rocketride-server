@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import sys
 import threading
-import time
 import types
 from pathlib import Path
 
@@ -181,34 +180,25 @@ def test_repeated_end_after_empty_stream_is_safe():
     assert results == ['completed'], f'results={results} errors={errors}'
 
 
-def _player_with_queued_audio():
+def test_begin_write_end_still_drains_normally():
     """
-    Build a Player that went through BEGIN and WRITE, with one audio chunk and
-    the decoder's end-of-stream sentinel already queued.
-
-    _start_decoder is stubbed at the instance level: a real ffmpeg subprocess
-    isn't needed to prove Player's own queue/flag bookkeeping.
-
-    Returns:
-        Player: the player, ready for END.
+    The fix must only skip the wait when nothing was ever written - real
+    queued audio must still drain exactly as before. _start_decoder is
+    stubbed at the instance level (a real ffmpeg subprocess isn't needed to
+    prove Player's own queue/flag bookkeeping) and the sounddevice hardware
+    callback thread is simulated manually, since our fake OutputStream never
+    calls it on its own.
     """
     from rocketlib import AVI_ACTION
 
     class _FakeProcess:
-        """Stand-in for the ffmpeg subprocess; it has always already exited."""
-
         def wait(self, timeout=None):
-            """Return the exit code at once.
-
-            Args:
-                timeout: Ignored.
-
-            Returns:
-                int: 0.
-            """
             return 0
 
     player = _new_player()
+    # Reference whatever this test actually installed, not a fresh import
+    # that may resolve to a different (or absent) real sounddevice.
+    callback_stop = sys.modules['sounddevice'].CallbackStop
     player._start_decoder = lambda: setattr(player, '_ffmpeg_process', _FakeProcess())
 
     player.writeAVI(AVI_ACTION.BEGIN, 'audio/wav', b'')
@@ -218,28 +208,11 @@ def _player_with_queued_audio():
     # Simulate what the real ffmpeg data thread would deliver via onData.
     player.onData(b'\x00' * 4096)
     player.onData(None)
-    return player
 
-
-def _start_simulated_hardware(player):
-    """
-    Run the sounddevice callback in a thread, since our fake OutputStream never calls it.
-
-    Args:
-        player: The Player whose _audio_callback the thread drives.
-
-    Returns:
-        tuple: (thread, stop_event, errors). Set stop_event before joining the
-        thread; errors collects anything the callback raised besides CallbackStop.
-    """
-    # Reference whatever this test actually installed, not a fresh import
-    # that may resolve to a different (or absent) real sounddevice.
-    callback_stop = sys.modules['sounddevice'].CallbackStop
     stop_hw = threading.Event()
-    errors = []
+    callback_errors = []
 
     def _drain_like_real_hardware():
-        """Call the audio callback until it raises CallbackStop or stop_hw is set."""
         outdata = np.zeros((256, player.CHANNELS), dtype=np.int16)
         while not stop_hw.is_set():
             try:
@@ -247,23 +220,11 @@ def _start_simulated_hardware(player):
             except callback_stop:
                 break  # normal termination: playback finished
             except Exception as e:  # noqa: BLE001 - recorded, not swallowed; asserted on below
-                errors.append(e)
+                callback_errors.append(e)
                 break
 
     hw = threading.Thread(target=_drain_like_real_hardware, daemon=True)
     hw.start()
-    return hw, stop_hw, errors
-
-
-def test_begin_write_end_still_drains_normally():
-    """
-    The fix must only skip the wait when nothing was ever written - real
-    queued audio must still drain exactly as before.
-    """
-    from rocketlib import AVI_ACTION
-
-    player = _player_with_queued_audio()
-    hw, stop_hw, callback_errors = _start_simulated_hardware(player)
 
     t = threading.Thread(target=lambda: player.writeAVI(AVI_ACTION.END, 'audio/wav', b''), daemon=True)
     t.start()
@@ -274,45 +235,7 @@ def test_begin_write_end_still_drains_normally():
     assert not callback_errors, f'callback thread raised unexpectedly: {callback_errors!r}'
     assert not t.is_alive(), 'stop() did not return once real queued audio finished draining'
     assert player._playback_finished is True, 'the wait must not have been skipped for real data'
-    # stop() queues its own sentinel if it starts waiting before the callback reached the
-    # decoder's; the callback stops at the first one, so that one may be left unread.
-    leftover = list(player._play_queue.queue)
-    assert leftover in ([], [None]), f'unplayed items left in the queue: {leftover!r}'
+    assert player._play_queue.empty()
     assert len(player._play_callback_buffer) == 0
     # Teardown is unchanged on the populated path too - same explicit check.
-    assert sys.modules['sounddevice'].stream_calls == ['stop', 'close']
-
-
-def test_stop_waiting_before_the_callback_leaves_only_its_own_sentinel():
-    """
-    Force the order a loaded machine can produce: stop() enters its drain loop
-    and queues its sentinel before the callback has consumed anything. The
-    callback stops at the decoder's sentinel, so stop()'s is never read. All
-    audio must still play, stop() must still return, and that one sentinel is
-    the only thing left behind.
-    """
-    from rocketlib import AVI_ACTION
-
-    player = _player_with_queued_audio()
-
-    t = threading.Thread(target=lambda: player.writeAVI(AVI_ACTION.END, 'audio/wav', b''), daemon=True)
-    t.start()
-
-    # stop() is inside its wait once its sentinel sits behind the decoder's.
-    deadline = time.monotonic() + 5
-    while player._play_queue.qsize() < 3 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    queued = list(player._play_queue.queue)
-    assert len(queued) == 3 and queued[1:] == [None, None], f'stop() did not queue its sentinel first: {queued!r}'
-
-    hw, stop_hw, callback_errors = _start_simulated_hardware(player)
-    t.join(timeout=5)
-    stop_hw.set()
-    hw.join(timeout=2)
-
-    assert not callback_errors, f'callback thread raised unexpectedly: {callback_errors!r}'
-    assert not t.is_alive(), 'stop() did not return once real queued audio finished draining'
-    assert player._playback_finished is True
-    assert len(player._play_callback_buffer) == 0
-    assert list(player._play_queue.queue) == [None], "only stop()'s sentinel may be left unread"
     assert sys.modules['sounddevice'].stream_calls == ['stop', 'close']

@@ -8,7 +8,6 @@ on:
 permissions:
   issues: write
   pull-requests: write
-  contents: write
 
 jobs:
   stale:
@@ -38,5 +37,3 @@ jobs:
             Feel free to reopen if this is still relevant.
           exempt-issue-labels: pinned,security,help wanted,good first issue
           exempt-pr-labels: pinned,security
-          exempt-draft-pr: true
-          delete-branch: true

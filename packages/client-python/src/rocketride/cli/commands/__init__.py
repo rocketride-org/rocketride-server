@@ -35,13 +35,11 @@ Modules:
     deploy: ``deploy`` subcommands
     validate: ``validate`` (pipeline files, CI-friendly exit codes)
     otel: ``otel`` (OpenTelemetry bridge: pipeline traces + metrics over OTLP)
-    diff: ``diff`` (semantic ``.pipe`` diff, entirely local — no server)
 """
 
 from .app import run_app
 from .auth import run_init, run_login
 from .deploy import run_deploy
-from .diff import run_diff
 from .otel import run_otel
 from .store import run_store
 from .tasks import run_list, run_start, run_stop, run_upload
@@ -50,7 +48,6 @@ from .validate import run_validate
 __all__ = [
     'run_app',
     'run_deploy',
-    'run_diff',
     'run_init',
     'run_list',
     'run_login',

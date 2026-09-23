@@ -90,7 +90,7 @@ inline std::filesystem::path computeCrashDbDir() noexcept {
         // pid: the next startup has to find the previous run's dumps.
         //
         // Read /proc/self/exe rather than application::execPath(): we run from
-        // plat::init(), and bootstrap only resolves the real exec path *after*
+        // plat::init(), and linmain only resolves the real exec path *after*
         // that, so execPath() would still be argv[0] -- which varies with how
         // the engine was launched and would send each run to a different
         // database. Empty on macOS (no /proc), whose temp is per-user anyway.

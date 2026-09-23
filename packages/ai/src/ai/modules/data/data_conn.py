@@ -1168,8 +1168,6 @@ class DataConn(DAPConn):
             request (Dict[str, Any]): DAP request containing:
                 - arguments.max_depth (int, optional): Max tree depth (default 50)
                 - arguments.min_pct (float, optional): Min cumtime % threshold (default 0.1)
-                - arguments.thread (int, optional): Thread id from rrext_cprofile_threads;
-                  all threads when omitted
 
         Returns:
             Dict[str, Any]: DAP response with tree, total_time, total_calls
@@ -1182,21 +1180,5 @@ class DataConn(DAPConn):
             max_depth=max_depth,
             min_pct=min_pct,
             include_system=include_system,
-            thread=args.get('thread'),
         )
-        return self.build_response(request, body=result)
-
-    async def on_rrext_cprofile_threads(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        List the threads profiled in the last completed session.
-
-        Any connection can call this regardless of ownership.
-
-        Args:
-            request (Dict[str, Any]): DAP request (no arguments required)
-
-        Returns:
-            Dict[str, Any]: DAP response with threads
-        """
-        result = profiler.threads()
         return self.build_response(request, body=result)

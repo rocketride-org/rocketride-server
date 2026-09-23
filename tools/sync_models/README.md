@@ -323,7 +323,7 @@ manual dispatch. It:
 
 1. Runs a dry-run first (`python tools/sync_models/src/sync_models.py --all --enable-discovery`), fails fast if the script errors.
 2. Runs with `--apply --pr-body` to write changes and capture the report.
-3. Opens a PR via `peter-evans/create-pull-request` with the report as the body. The PR is opened with a release-bot GitHub App token (`RELEASE_BOT_APP_ID` / `RELEASE_BOT_PRIVATE_KEY`), not `GITHUB_TOKEN`, so its CI starts without a manual "Approve workflows to run". The App needs Contents and Pull requests write access on this repo.
+3. Opens a PR via `peter-evans/create-pull-request` with the report as the body.
 
 The workflow uses `--enable-discovery` (so model lists grow over time) but **does NOT** use `--allow-fallback-discovery`. This is intentional: when a provider's secret is missing from the GitHub Actions environment, the resulting PR body shows a `Discovery skipped — set the provider API key` note for that provider. A reviewer sees the gap and can decide whether to add the secret rather than silently shipping fallback-discovered profiles to production.
 

@@ -34,16 +34,6 @@ const char **argv() noexcept;
 const std::vector<Text> &args() noexcept;
 bool elevated() noexcept;
 
-int detectExecPath() noexcept;
-
-#if ROCKETRIDE_PLAT_WIN
-void installCrashHandlers() noexcept;
-
-int bootstrap(int argc, const Utf16Chr **argv, ErrorCode (*entry)()) noexcept;
-#else
-int bootstrap(int argc, const char **argv, ErrorCode (*entry)()) noexcept;
-#endif
-
 file::Path execPath(bool stripExec = false) noexcept;
 inline auto execDir() noexcept { return execPath(true); }
 const file::Path &projectDir() noexcept;
