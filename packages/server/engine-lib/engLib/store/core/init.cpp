@@ -41,10 +41,6 @@ void deinit() noexcept {
         filter::filesys::smb::IFilterInstance::Factory,
         filter::zip::IFilterInstance::Factory,
         filter::python::IFilterInstance::Factory,
-        filter::sharepoint::IFilterInstance::Factory,
-        // Outlook - enterprise and personal variants
-        filter::outlook::IFilterInstance::FactoryEnterprise,
-        filter::outlook::IFilterInstance::FactoryPersonal,
 
         // Global data
         filter::bottom::IFilterGlobal::Factory,
@@ -55,21 +51,13 @@ void deinit() noexcept {
         filter::filesys::smb::IFilterGlobal::Factory,
         filter::zip::IFilterGlobal::Factory,
         filter::python::IFilterGlobal::Factory,
-        filter::sharepoint::IFilterGlobal::Factory,
-        // Outlook - enterprise and personal variants
-        filter::outlook::IFilterGlobal::FactoryEnterprise,
-        filter::outlook::IFilterGlobal::FactoryPersonal,
 
         // Endpoints
         filter::null::IFilterEndpoint::Factory,
         filter::filesys::filesys::IFilterEndpoint::Factory,
         filter::filesys::smb::IFilterEndpoint::Factory,
         filter::zip::IFilterEndpoint::Factory,
-        filter::python::IFilterEndpoint::Factory,
-        filter::sharepoint::IFilterEndpoint::Factory,
-        // Outlook - enterprise and personal variants
-        filter::outlook::IFilterEndpoint::FactoryEnterprise,
-        filter::outlook::IFilterEndpoint::FactoryPersonal);
+        filter::python::IFilterEndpoint::Factory);
 
     // Deinit the services controllers
     IServices::deinit();
@@ -95,10 +83,6 @@ Error init() noexcept {
             filter::filesys::smb::IFilterInstance::Factory,
             filter::zip::IFilterInstance::Factory,
             filter::python::IFilterInstance::Factory,
-            filter::sharepoint::IFilterInstance::Factory,
-            // Outlook - enterprise and personal variants
-            filter::outlook::IFilterInstance::FactoryEnterprise,
-            filter::outlook::IFilterInstance::FactoryPersonal,
 
             // Global data
             filter::bottom::IFilterGlobal::Factory,
@@ -109,21 +93,13 @@ Error init() noexcept {
             filter::filesys::smb::IFilterGlobal::Factory,
             filter::zip::IFilterGlobal::Factory,
             filter::python::IFilterGlobal::Factory,
-            filter::sharepoint::IFilterGlobal::Factory,
-            // Outlook - enterprise and personal variants
-            filter::outlook::IFilterGlobal::FactoryEnterprise,
-            filter::outlook::IFilterGlobal::FactoryPersonal,
 
             // Endpoints
             filter::null::IFilterEndpoint::Factory,
             filter::filesys::filesys::IFilterEndpoint::Factory,
             filter::filesys::smb::IFilterEndpoint::Factory,
             filter::zip::IFilterEndpoint::Factory,
-            filter::python::IFilterEndpoint::Factory,
-            filter::sharepoint::IFilterEndpoint::Factory,
-            // Outlook - enterprise and personal variants
-            filter::outlook::IFilterEndpoint::FactoryEnterprise,
-            filter::outlook::IFilterEndpoint::FactoryPersonal)) {
+            filter::python::IFilterEndpoint::Factory)) {
         store::deinit();
         return ccode;
     }

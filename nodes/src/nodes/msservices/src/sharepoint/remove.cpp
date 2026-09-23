@@ -21,6 +21,29 @@
 // SOFTWARE.
 // =============================================================================
 
-#include <engLib/eng.h>
+#include "msservices.hpp"
 
-namespace engine::store::filter::sharepoint {};
+namespace engine::store::filter::sharepoint {
+using namespace utility;
+
+//-------------------------------------------------------------------------
+/// @details
+///     Remove the entry object
+/// @param[in]  object
+///     The name to remove
+/// @returns
+///     Error
+//-------------------------------------------------------------------------
+Error IFilterInstance::removeObject(Entry &object) noexcept {
+    LOGT("Removing object: {}", object.path());
+    if (auto ccode = getClient()) {
+        object.completionCode(ccode);
+        return {};
+    }
+
+    if (auto ccode = m_msSharepointNode->deleteItem(object)) {
+        object.completionCode(ccode);
+    }
+    return {};
+}
+}  // namespace engine::store::filter::sharepoint
