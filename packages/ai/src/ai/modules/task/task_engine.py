@@ -38,7 +38,7 @@ import socket
 import hashlib
 import shlex
 import shutil
-from typing import TYPE_CHECKING, Dict, Any, List, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, args as startup_args
@@ -134,6 +134,174 @@ if TYPE_CHECKING:
 
 # Development environment optimization
 copied_python_shim = False
+
+
+# Environment the task subprocess inherits from the engine. The engine process
+# holds deployment-level credentials (object store, identity provider, database,
+# encryption) next to the pipeline-facing ROCKETRIDE_* namespace, and pipeline
+# code — plus anything it launches, e.g. a stdio MCP server — reads its
+# environment freely. So the child gets an allowlist, never a copy of the whole
+# environment: the process-runtime baseline below, the ROCKETRIDE_* namespace,
+# and whatever the operator opts in through ROCKETRIDE_SUBPROCESS_ENV.
+#
+# ROCKETRIDE_SUBPROCESS_ENV is a comma- or space-separated list of extra names;
+# a trailing '*' passes a prefix ('NOTION_API_KEY,AWS_*'). A bare '*' hands the
+# child the entire environment, which is the pre-allowlist behaviour — only
+# sensible on a single-user install.
+CONST_SUBPROCESS_ENV_OPT_IN = 'ROCKETRIDE_SUBPROCESS_ENV'
+
+CONST_SUBPROCESS_ENV_NAMES = frozenset(
+    {
+        # Process basics (POSIX)
+        'PATH',
+        'HOME',
+        'USER',
+        'LOGNAME',
+        'SHELL',
+        'PWD',
+        'TERM',
+        'TZ',
+        'LANG',
+        'LANGUAGE',
+        'TMPDIR',
+        'TMP',
+        'TEMP',
+        # Shared-library lookup
+        'LD_LIBRARY_PATH',
+        'DYLD_LIBRARY_PATH',
+        'DYLD_FALLBACK_LIBRARY_PATH',
+        'DYLD_FRAMEWORK_PATH',
+        # TLS trust and proxies (requests/httpx/curl read these; the proxy
+        # names are conventionally lowercase on POSIX — matching is
+        # case-insensitive, see filter_subprocess_env)
+        'SSL_CERT_FILE',
+        'SSL_CERT_DIR',
+        'REQUESTS_CA_BUNDLE',
+        'CURL_CA_BUNDLE',
+        'HTTP_PROXY',
+        'HTTPS_PROXY',
+        'ALL_PROXY',
+        'NO_PROXY',
+        'FTP_PROXY',
+        # Windows process basics
+        'SYSTEMROOT',
+        'WINDIR',
+        'SYSTEMDRIVE',
+        'COMSPEC',
+        'PATHEXT',
+        'USERPROFILE',
+        'USERNAME',
+        'HOMEDRIVE',
+        'HOMEPATH',
+        'APPDATA',
+        'LOCALAPPDATA',
+        'PROGRAMDATA',
+        'PROGRAMFILES',
+        'PROGRAMFILES(X86)',
+        'PROGRAMW6432',
+        'COMMONPROGRAMFILES',
+        'COMMONPROGRAMFILES(X86)',
+        'ALLUSERSPROFILE',
+        'PUBLIC',
+        'OS',
+        'NUMBER_OF_PROCESSORS',
+        'PROCESSOR_ARCHITECTURE',
+        'PROCESSOR_IDENTIFIER',
+        'PROCESSOR_LEVEL',
+        'PROCESSOR_REVISION',
+        # RocketRide services the child reaches itself: the object store
+        # behind tool_filesystem (Store.create reads the URL and secret), the
+        # public address + signing key FileStore.get_url needs to mint fetch
+        # URLs the engine will accept, the child's own web server CORS policy,
+        # and the OAuth broker the Google/Microsoft nodes dial directly.
+        'RR_STORE_URL',
+        'RR_STORE_SECRET_KEY',
+        'RR_BASE_URL',
+        'RR_SIGNING_KEY',
+        'RR_CORS_ORIGINS',
+        'RR_OAUTH_BROKER_URL',
+        # Executable override for the media toolkit nodes
+        'MEDIA_TOOLKIT_FFMPEG',
+        # Bare names individual node READMEs document as engine-host fallbacks
+        # for their API keys. New nodes should read ROCKETRIDE_* instead.
+        'NOTION_API_KEY',
+        'EXA_API_KEY',
+        'MEM0_API_KEY',
+        'COGNEE_API_KEY',
+        'CRUSTDATA_API_KEY',
+        'HYDRA_DB_API_KEY',
+        'HYDRA_DB_BASE_URL',
+        'HOTDATA_API_KEY',
+        'HOTDATA_WORKSPACE',
+        'HOTDATA_DATABASE_ID',
+        'LASER_CONNECTION_STRING',
+        'XTRACE_API_KEY',
+        'XTRACE_ORG_ID',
+    }
+)
+
+CONST_SUBPROCESS_ENV_PREFIXES = (
+    # The pipeline-facing namespace (same rule as ${VAR} expansion, see
+    # pipeline.ALLOWED_ENV_PREFIX)
+    'ROCKETRIDE_',
+    # Interpreter and package tooling
+    'PYTHON',
+    'UV_',
+    'PIP_',
+    'VIRTUAL_ENV',
+    # Locale and XDG base dirs
+    'LC_',
+    'XDG_',
+    # The S3 store backend authenticates through boto3's environment chain —
+    # static keys, or the web-identity role Kubernetes injects — and the
+    # child opens the store itself (tool_filesystem), so it needs the same
+    # AWS identity the engine has.
+    'AWS_',
+    # ML runtime caches and thread tuning
+    'HF_',
+    'HUGGINGFACE_',
+    'TRANSFORMERS_',
+    'TOKENIZERS_',
+    'TORCH_',
+    'PYTORCH_',
+    'CUDA_',
+    'NVIDIA_',
+    'OMP_',
+    'MKL_',
+    'OPENBLAS_',
+    'TIKTOKEN_',
+    'NLTK_',
+)
+
+
+def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple[str, ...]]:
+    """Parse ROCKETRIDE_SUBPROCESS_ENV into (exact names, prefixes), upper-cased."""
+    names = set()
+    prefixes = []
+    for item in environ.get(CONST_SUBPROCESS_ENV_OPT_IN, '').replace(',', ' ').split():
+        item = item.upper()
+        if item.endswith('*'):
+            prefixes.append(item[:-1])  # '*' alone → '' → matches everything
+        else:
+            names.add(item)
+    return frozenset(names), tuple(prefixes)
+
+
+def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
+    """Return the subset of ``environ`` a task subprocess may inherit.
+
+    Names are matched case-insensitively: Windows treats them that way, and the
+    POSIX proxy variables are conventionally lowercase. Original spelling is
+    kept in the result.
+    """
+    opt_names, opt_prefixes = _subprocess_env_opt_in(environ)
+    prefixes = CONST_SUBPROCESS_ENV_PREFIXES + opt_prefixes
+    allowed: Dict[str, str] = {}
+    for name, value in environ.items():
+        key = name.upper()
+        if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
+            allowed[name] = value
+    return allowed
 
 
 class Task(DAPBase):
@@ -448,7 +616,15 @@ class Task(DAPBase):
     async def _build_subprocess_env(self) -> Dict[str, str]:
         """Build the environment for the task subprocess.
 
-        Credential hygiene for the RocketRide cloud DB path:
+        The child never gets a copy of the engine's environment: it runs user
+        pipeline code, so it only inherits the allowlist in
+        :func:`filter_subprocess_env` (runtime baseline + ROCKETRIDE_* +
+        operator opt-ins). Everything else the engine process was started
+        with — store, identity provider, database and encryption credentials —
+        stays behind.
+
+        Credential hygiene for the RocketRide cloud DB path (these live in the
+        ROCKETRIDE_* namespace, so the allowlist alone does not cover them):
 
         - The broker credential can resolve ANY tenant's DSN — it must never
           reach node subprocesses, which run user pipeline code.
@@ -461,7 +637,7 @@ class Task(DAPBase):
         through the environment (it rides the task file's 'identity' block —
         the ROCKETRIDE_* env namespace is caller-influenced by design).
         """
-        subprocess_env = os.environ.copy()
+        subprocess_env = filter_subprocess_env(os.environ)
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)

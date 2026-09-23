@@ -137,6 +137,27 @@ def test_setup_constructs_WebServer_with_parsed_host_and_port(monkeypatch):
     assert captured['config']['port'] == 12345
 
 
+def test_setup_does_not_reload_the_engine_dotenv(monkeypatch):
+    """The subprocess runs on the allowlisted env the engine handed it; the
+    shared WebServer must not read the engine's .env and put excluded names back.
+    """
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_port=12345'])
+
+    captured = {}
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        captured.update(kwargs)
+        _fire_startup_callback_async(on_startup)
+        return MagicMock(name='WebServer-instance')
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: MagicMock(name='future'))
+
+    node._setup_shared_web_server()
+
+    assert captured['load_env'] is False
+
+
 def test_setup_defaults_host_to_localhost_when_only_data_port_provided(monkeypatch):
     """--data_port alone → host defaults to localhost (cloud-safe default)."""
     monkeypatch.setattr(sys, 'argv', ['node.py', '--data_port=20001'])

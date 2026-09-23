@@ -33,7 +33,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
-from ai.modules.task.task_engine import CONST_TRACE_PAYLOAD_CAP, CONST_TRACE_PREVIEW_BYTES, Task, cap_trace_payload
+from ai.modules.task.task_engine import (
+    CONST_TRACE_PAYLOAD_CAP,
+    CONST_TRACE_PREVIEW_BYTES,
+    Task,
+    cap_trace_payload,
+    filter_subprocess_env,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -894,6 +900,113 @@ async def test_subprocess_env_unconfigured_account_is_nonfatal(monkeypatch):
     env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
     assert 'ROCKETRIDE_DB_DSN' not in env
     assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+
+
+# ---------------------------------------------------------------------------
+# filter_subprocess_env — the child inherits an allowlist, never the whole env
+# ---------------------------------------------------------------------------
+
+
+def test_filter_subprocess_env_is_an_allowlist():
+    """Engine-tier configuration never reaches pipeline code: only the runtime
+    baseline, the ROCKETRIDE_* namespace, the services the child reaches
+    itself (store, fetch URLs, OAuth broker) and README-documented node
+    fallbacks pass.
+    """
+    env = filter_subprocess_env(
+        {
+            'PATH': '/usr/bin',
+            'HOME': '/home/rocketride',
+            'http_proxy': 'http://proxy:3128',
+            'PYTHONPATH': '/opt/rocketride/ai',
+            'HF_HOME': '/cache/hf',
+            'ROCKETRIDE_OPENAI_KEY': 'sk-pipe',
+            'RR_STORE_URL': 's3://bucket',
+            'RR_STORE_SECRET_KEY': 'store',
+            'RR_BASE_URL': 'https://engine.example',
+            'RR_SIGNING_KEY': 'sign',
+            'RR_OAUTH_BROKER_URL': 'https://broker.example',
+            'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
+            'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
+            'NOTION_API_KEY': 'notion',
+            # engine-only: deployment credentials and server-side settings
+            'RR_DB_URL': 'postgresql://platform',
+            'RR_MASTER_KEY': 'fernet',
+            'RR_IDP_SERVICE_TOKEN': 'jwt',
+            'RR_APP_URL': 'https://app.example',
+            'ENGINE_API_KEY': 'engine',
+            'DATABASE_URL': 'postgresql://other',
+            'SLACK_BOT_TOKEN': 'xoxb',
+        }
+    )
+    assert env == {
+        'PATH': '/usr/bin',
+        'HOME': '/home/rocketride',
+        'http_proxy': 'http://proxy:3128',
+        'PYTHONPATH': '/opt/rocketride/ai',
+        'HF_HOME': '/cache/hf',
+        'ROCKETRIDE_OPENAI_KEY': 'sk-pipe',
+        'RR_STORE_URL': 's3://bucket',
+        'RR_STORE_SECRET_KEY': 'store',
+        'RR_BASE_URL': 'https://engine.example',
+        'RR_SIGNING_KEY': 'sign',
+        'RR_OAUTH_BROKER_URL': 'https://broker.example',
+        'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
+        'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
+        'NOTION_API_KEY': 'notion',
+    }
+
+
+def test_filter_subprocess_env_opt_in_names_and_prefixes():
+    """ROCKETRIDE_SUBPROCESS_ENV adds exact names and '*'-suffixed prefixes,
+    separated by commas or spaces; the list itself rides along (ROCKETRIDE_*).
+    """
+    env = filter_subprocess_env(
+        {
+            'ROCKETRIDE_SUBPROCESS_ENV': 'SLACK_BOT_TOKEN, gh_*',
+            'SLACK_BOT_TOKEN': 'xoxb',
+            'GH_TOKEN': 'ghp',
+            'GH_HOST': 'github.example',
+            'RR_MASTER_KEY': 'fernet',
+        }
+    )
+    assert env == {
+        'ROCKETRIDE_SUBPROCESS_ENV': 'SLACK_BOT_TOKEN, gh_*',
+        'SLACK_BOT_TOKEN': 'xoxb',
+        'GH_TOKEN': 'ghp',
+        'GH_HOST': 'github.example',
+    }
+
+
+def test_filter_subprocess_env_star_passes_everything():
+    """A bare '*' is the explicit opt-out back to full inheritance."""
+    src = {'ROCKETRIDE_SUBPROCESS_ENV': '*', 'RR_MASTER_KEY': 'fernet', 'PATH': '/usr/bin'}
+    assert filter_subprocess_env(src) == src
+
+
+def test_filter_subprocess_env_matches_names_case_insensitively():
+    """Windows env names are case-insensitive; the child sees the original spelling."""
+    env = filter_subprocess_env({'Path': 'C:\\Windows', 'SystemRoot': 'C:\\Windows', 'Rr_Master_Key': 'fernet'})
+    assert env == {'Path': 'C:\\Windows', 'SystemRoot': 'C:\\Windows'}
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_drops_engine_credentials(monkeypatch):
+    """The built env is the allowlisted view of os.environ: deployment
+    credentials stay in the engine, the pipeline namespace comes through.
+    """
+    monkeypatch.setenv('RR_MASTER_KEY', 'fernet')
+    monkeypatch.setenv('RR_DB_URL', 'postgresql://platform')
+    monkeypatch.setenv('ROCKETRIDE_OPENAI_KEY', 'sk-pipe')
+    monkeypatch.setenv('PATH', '/usr/bin')
+    monkeypatch.delenv('ROCKETRIDE_SUBPROCESS_ENV', raising=False)
+
+    env = await Task._build_subprocess_env(_env_task())  # no DB nodes
+
+    assert 'RR_MASTER_KEY' not in env
+    assert 'RR_DB_URL' not in env
+    assert env['ROCKETRIDE_OPENAI_KEY'] == 'sk-pipe'
+    assert env['PATH'] == '/usr/bin'
 
 
 # ---------------------------------------------------------------------------

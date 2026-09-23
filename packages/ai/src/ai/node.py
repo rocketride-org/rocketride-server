@@ -131,9 +131,13 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     async def _on_startup() -> None:
         startup_ready.set()
 
+    # load_env=False: this process runs pipeline code on the allowlisted
+    # environment the engine handed it; reading the engine's .env here would
+    # put the excluded names straight back.
     server = WebServer(
         config={'host': data_host, 'port': data_port},
         on_startup=_on_startup,
+        load_env=False,
     )
     # Mount `/task/data` — the WebSocket EaaS uses to send DAP traffic
     # (data ops, cprofile, future trace control).

@@ -208,8 +208,12 @@ class WebServer:
         # Directory containing engine.exe
         exec_dir = os.path.dirname(sys.executable)
 
-        # Do this early on to read the .env file and put it in the environment
-        load_dotenv(dotenv_path=exec_dir + '/.env')
+        # Do this early on to read the .env file and put it in the environment.
+        # Task subprocesses pass load_env=False: they inherit an allowlisted
+        # environment from the engine (task_engine.filter_subprocess_env) and
+        # must not pull the excluded names back in from the file.
+        if kwargs.get('load_env', True):
+            load_dotenv(dotenv_path=exec_dir + '/.env')
 
         # Authenticators, given an authorization string, return a structure of the decode key info
         self._authenticators: List[Callable[[str], Awaitable[Optional[AccountInfo]]]] = []

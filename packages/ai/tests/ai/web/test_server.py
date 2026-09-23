@@ -73,6 +73,22 @@ from ai.web.server import WebServer, _build_signal_safe_capture
 from ai.modules import ALL as ALLOWED_MODULES
 
 
+class TestDotenvLoading:
+    """The engine reads its .env on construction; a task subprocess must not."""
+
+    def test_loads_dotenv_by_default(self, monkeypatch):
+        load = MagicMock(name='load_dotenv')
+        monkeypatch.setattr('ai.web.server.load_dotenv', load)
+        WebServer(config={'host': '127.0.0.1', 'port': 0})
+        load.assert_called_once()
+
+    def test_load_env_false_skips_dotenv(self, monkeypatch):
+        load = MagicMock(name='load_dotenv')
+        monkeypatch.setattr('ai.web.server.load_dotenv', load)
+        WebServer(config={'host': '127.0.0.1', 'port': 0}, load_env=False)
+        load.assert_not_called()
+
+
 def teardown_module() -> None:
     """Remove injected mocks from sys.modules to avoid leaking into other tests."""
     for name in _INJECTED_MODULES:
