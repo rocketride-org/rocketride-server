@@ -1494,8 +1494,8 @@ class SpecValidationTest(unittest.TestCase):
         self.refuse('is empty', write_to='')
         self.refuse('file name', source='https://example.com/a.mp4')
 
-    def test_r12_a_path_may_not_carry_filter_syntax(self):
-        self.refuse('file name', source="a'; rm -rf /.mp4")
+    def test_r12_output_paths_may_not_carry_filter_syntax(self):
+        self.refuse('file name', outputs=[{'key': 'v', 'file': "a'; rm -rf /.mp4"}])
         self.refuse('file name', outputs=[{'key': 'v', 'file': 'c01:1.mp4'}])
         self.refuse('file name', report_to='out/a=b.json')
 
@@ -1730,11 +1730,8 @@ class CameraSourceSmokeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.work = Path(tempfile.mkdtemp(prefix='camera_colour_'))
+        cls.addClassCleanup(shutil.rmtree, cls.work, ignore_errors=True)
         cls.source = cls._camera_file(cls.work / 'camera')
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.work, ignore_errors=True)
 
     @staticmethod
     def _camera_file(stem: Path) -> Path:

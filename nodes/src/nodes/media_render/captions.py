@@ -47,6 +47,8 @@ The legacy preset names (`classic`, `yellow-bold`, `white-outline`, `minimal`,
 
 from __future__ import annotations
 
+import re
+
 MAX_WORDS_PER_LINE = 4
 MAX_LINE_SPAN_MS = 2_500
 MAX_GAP_MS = 700
@@ -307,8 +309,11 @@ def resolve_caption_style(value=None) -> dict:
             return
         style[field] = raw
 
-    if isinstance(overrides.get('font'), str) and overrides['font'].strip():
-        style['font'] = overrides['font'].strip()
+    if isinstance(overrides.get('font'), str):
+        # Fontname is one field in an ASS Style CSV record.
+        font = overrides['font'].translate(str.maketrans({',': ' ', '\r': ' ', '\n': ' '})).strip()
+        if font:
+            style['font'] = font
     take('weight', WEIGHTS, str)
     take('case', CASES, lambda v: str(v).lower())
     take('position', POSITIONS, lambda v: {'center': 'middle'}.get(str(v).lower(), str(v).lower()))
@@ -369,8 +374,8 @@ def resolve_caption_style(value=None) -> dict:
     elif isinstance(keywords, str) and keywords.strip():
         style['keywords'] = [k.strip() for k in keywords.split(',') if k.strip()]
     back = overrides.get('back')
-    if isinstance(back, str) and back.startswith('&H'):
-        style['back'] = back
+    if isinstance(back, str) and re.fullmatch(r'&H[0-9A-Fa-f]{8}', back):
+        style['back'] = back.upper()
     return style
 
 
@@ -407,7 +412,7 @@ def _clean(word: str) -> str:
     ASS writes a line break, so neither survives: the text is data, never
     markup.
     """
-    return word.replace('{', '(').replace('}', ')').replace('\\', '/').replace('\n', ' ').strip()
+    return word.replace('{', '(').replace('}', ')').replace('\\', '/').replace('\n', ' ').replace('\r', ' ').strip()
 
 
 def _number(value) -> str:
@@ -592,6 +597,7 @@ def build_ass(
 
 
 def build_srt(groups: list[list[dict]]) -> str:
+    """Serialize cleaned caption groups as numbered SRT cues."""
     blocks = []
     for i, group in enumerate(groups, start=1):
         text = ' '.join(_clean(w['word']) for w in group)
@@ -600,6 +606,7 @@ def build_srt(groups: list[list[dict]]) -> str:
 
 
 def build_vtt(groups: list[list[dict]]) -> str:
+    """Serialize cleaned caption groups on their output clock as WebVTT cues."""
     blocks = ['WEBVTT', '']
     for group in groups:
         text = ' '.join(_clean(w['word']) for w in group)

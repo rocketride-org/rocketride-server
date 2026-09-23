@@ -67,6 +67,16 @@ class IGlobal(IGlobalBase):
         from .IInstance import MODES  # IInstance imports this module; resolved once both are loaded
 
         self.request, self.mode = parse_request(self.config.get('request'), MODES)
+        from . import plan as plan_lib
+
+        # Input bytes/name arrive later, but edit boundaries are static config.
+        spec = {
+            **self.request['spec'],
+            'source': self.request.get('input_name') or self.request['spec'].get('source') or '__input__',
+            'write_to': 'outputs',
+        }
+        plan_lib.validate_spec(spec)
+        plan_lib.resolve_keep(spec)
 
     def endGlobal(self):
         """No persistent media or storage binding is retained by the global."""

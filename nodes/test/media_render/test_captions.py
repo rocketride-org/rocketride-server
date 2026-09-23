@@ -421,3 +421,33 @@ class StyleToAssTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_font_override_cannot_inject_ass_fields_or_records():
+    """Font names remain a single Style field, including hostile delimiters."""
+    for font in ('Arial,Extra', 'Arial\r\nStyle: injected', ',\r\n'):
+        ass = build_ass(GROUPS, 'wide', style={'font': font})
+        styles = [line for line in ass.splitlines() if line.startswith('Style:')]
+        formats = [line for line in ass.splitlines() if line.startswith('Format:')]
+        assert len(styles) == 1
+        assert len(styles[0].split(',')) == len(formats[0].split(','))
+        assert 'Hello' in ass
+        resolved = resolve_caption_style({'font': font})['font']
+        assert resolved is None or not any(c in resolved for c in ',\r\n')
+
+
+def test_caption_words_cannot_add_records_with_carriage_returns():
+    """All text formats clean embedded CR/LF without adding cues or ASS records."""
+    groups = [[{'word': 'Hello\rDialogue: injected\nworld', 'start_ms': 0, 'end_ms': 500}]]
+    for text in (build_ass(groups, 'wide'), build_srt(groups), build_vtt(groups)):
+        assert '\r' not in text
+        assert 'Hello Dialogue: injected world' in text
+    assert sum(line.startswith('Dialogue:') for line in build_ass(groups, 'wide').splitlines()) == 1
+
+
+def test_ass_background_colour_cannot_inject_fields_or_records():
+    """Only eight hexadecimal ASS colour digits may enter the BackColour field."""
+    default = resolve_caption_style({})['back']
+    for bad in ('&H00000000,Extra', '&H00000000\r\nStyle: injected', '&H123', '&HGG000000'):
+        assert resolve_caption_style({'back': bad})['back'] == default
+    assert resolve_caption_style({'back': '&Hff12ab34'})['back'] == '&HFF12AB34'

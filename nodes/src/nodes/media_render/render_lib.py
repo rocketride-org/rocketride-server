@@ -1103,6 +1103,39 @@ def panel_rects(segment: dict, out_w: int, out_h: int) -> list[dict]:
     return rects
 
 
+def resize_layout(layout: dict, out_w: int, out_h: int) -> dict:
+    """Scale destination panels together with their canvas; source crops stay unchanged."""
+    shaped = {**layout, 'canvas': {'width': out_w, 'height': out_h}}
+    canvas = layout.get('canvas') or {}
+    try:
+        width, height = int(canvas['width']), int(canvas['height'])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return shaped  # Legacy plans may already use output coordinates.
+    if width <= 0 or height <= 0 or (width, height) == (out_w, out_h):
+        return shaped
+
+    def edge(value, target, original):
+        return min(target, round(value * target / original / 2) * 2)
+
+    segments = []
+    for segment in layout.get('segments') or []:
+        resized = dict(segment)
+        if segment.get('panels'):
+            panels = []
+            for panel in panel_rects(segment, width, height):
+                x, y = edge(panel['x'], out_w, width), edge(panel['y'], out_h, height)
+                right = edge(panel['x'] + panel['w'], out_w, width)
+                bottom = edge(panel['y'] + panel['h'], out_h, height)
+                if right - x < 2 or bottom - y < 2:
+                    panels = []  # Too small at this output size: use the legacy layout.
+                    break
+                panels.append({**panel, 'x': x, 'y': y, 'w': right - x, 'h': bottom - y})
+            resized['panels'] = panels
+        segments.append(resized)
+    shaped['segments'] = segments
+    return shaped
+
+
 def _panel_chains(
     i: int,
     base: str,
@@ -1530,6 +1563,7 @@ def card_font_file() -> str | None:
 
 
 def parse_aspect(aspect: str | None) -> tuple[int, int]:
+    """Parse a positive aspect ratio, defaulting malformed values to 16:9."""
     if isinstance(aspect, str) and aspect in ASPECTS:
         return ASPECTS[aspect]
     text = str(aspect or '16:9').replace('x', ':').strip()
@@ -1818,6 +1852,7 @@ def render_programme_audio(
     keep: list[tuple[int, int]],
     out_wav: str | Path,
     *,
+    source_has_audio: bool = True,
     mutes: list[tuple[int, int]] | None = None,
     bleeps: list[tuple[int, int]] | None = None,
     noise_reduction: bool = True,
@@ -1839,6 +1874,15 @@ def render_programme_audio(
     out_wav = Path(out_wav)
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     music_cfg = music if (music and music_path) else None
+    inputs = ['-i', str(src_media)]
+    if not source_has_audio:
+        # Generate only the relevant window; keep effects on the same clock.
+        start = min(s for s, _ in keep)
+        end = max(e for _, e in keep)
+        keep = [(s - start, e - start) for s, e in keep]
+        mutes = [(max(s, start) - start, min(e, end) - start) for s, e in (mutes or []) if e > start and s < end]
+        bleeps = [(max(s, start) - start, min(e, end) - start) for s, e in (bleeps or []) if e > start and s < end]
+        inputs = ['-f', 'lavfi', '-t', f'{(end - start) / 1000:.3f}', '-i', 'anullsrc=r=48000:cl=stereo']
     graph = programme_audio_graph(
         keep,
         mutes,
@@ -1849,7 +1893,6 @@ def render_programme_audio(
         music=music_cfg,
         music_input=1,
     )
-    inputs = ['-i', str(src_media)]
     if music_cfg:
         inputs += ['-i', str(music_path)]
 
@@ -2554,7 +2597,9 @@ def concat_parts(paths: list[str | Path], out_path: str | Path, work: Path) -> P
         shutil_copy(paths[0], out_path)
         return out_path
     listing = Path(work) / 'parts.txt'
-    listing.write_text('\n'.join(f"file '{Path(p).as_posix()}'" for p in paths) + '\n', encoding='utf-8')
+    # The concat demuxer has its own quoting (not shell/filtergraph quoting).
+    quoted = [Path(p).as_posix().replace("'", "'\\''") for p in paths]
+    listing.write_text('\n'.join(f"file '{path}'" for path in quoted) + '\n', encoding='utf-8')
     try:
         run_ffmpeg(
             [
@@ -2572,7 +2617,9 @@ def concat_parts(paths: list[str | Path], out_path: str | Path, work: Path) -> P
                 str(out_path),
             ]
         )
-    except RuntimeError:
+    except RuntimeError as exc:
+        if isinstance(exc.__cause__, subprocess.TimeoutExpired):
+            raise
         run_ffmpeg(
             [
                 '-y',
@@ -2600,6 +2647,7 @@ def concat_parts(paths: list[str | Path], out_path: str | Path, work: Path) -> P
 
 
 def shutil_copy(src: str | Path, dst: str | Path) -> Path:
+    """Copy a local deliverable and return its destination path."""
     import shutil
 
     shutil.copyfile(str(src), str(dst))

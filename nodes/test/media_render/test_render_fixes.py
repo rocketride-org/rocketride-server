@@ -115,7 +115,9 @@ def _ffmpeg_available() -> bool:
 
 
 def _ffmpeg(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([ffmpeg_exe(), '-hide_banner', '-nostdin', '-y', *args], capture_output=True, text=True)
+    return subprocess.run(
+        [ffmpeg_exe(), '-hide_banner', '-nostdin', '-y', *args], capture_output=True, text=True, timeout=300
+    )
 
 
 def _first_pass(stats: dict):
@@ -422,11 +424,19 @@ class RenderFixesSmokeTest(unittest.TestCase):
 
     @unittest.skipUnless(card_font_file(), 'no font file on this machine for drawtext')
     def test_a_title_with_an_apostrophe_or_a_percent_is_drawn(self):
+        filters = _ffmpeg('-filters')
+        self.assertEqual(filters.returncode, 0, filters.stderr)
+        draws_text = bool(re.search(r'\bdrawtext\s+V->V\b', filters.stdout))
         for title in ("Don't Panic", '100% Real', 'A:B', 'back\\slash'):
             warnings: list[str] = []
             card = render_card(title, 'sub', 0.5, self.work / 'card.mp4', 320, 180, fps=10, warnings=warnings)
-            self.assertEqual(warnings, [], title)  # the drawtext graph itself ran (rc=0), no blank fallback
-            self.assertGreater(self._ymax(card), 200, title)  # and there is white text on it
+            if draws_text:
+                self.assertEqual(warnings, [], title)
+                self.assertGreater(self._ymax(card), 200, title)
+            else:
+                self.assertEqual(len(warnings), 1, title)
+                self.assertIn('cannot draw text', warnings[0])
+                self.assertLess(self._ymax(card), 80, title)
 
     def test_a_subtitle_file_in_a_folder_with_an_apostrophe_is_found(self):
         folder = self.work / "o'brien"
@@ -482,8 +492,8 @@ class RenderFixesSmokeTest(unittest.TestCase):
         short = self.work / 'short.mp4'
         _ffmpeg('-f', 'lavfi', '-i', 'testsrc2=size=64x36:rate=10:duration=2', '-pix_fmt', 'yuv420p', str(short))
         info = probe(short)
-        with self.assertRaises(RuntimeError):  # why the clamp exists
-            thumbnail(short, self.work / 'late.jpg', at_ms=10_000)
+        # Beyond-EOF seeks differ by FFmpeg version: validate the clamped
+        # output itself rather than expecting an unclamped seek to fail.
         at_ms = thumbnail_at_ms(10_000, info['duration_ms'], info['fps'])
         self.assertLess(at_ms, info['duration_ms'])
         poster = thumbnail(short, self.work / 'poster.jpg', at_ms=at_ms)

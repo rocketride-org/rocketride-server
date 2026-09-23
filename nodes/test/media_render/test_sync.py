@@ -36,6 +36,8 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+from .conftest import av_open
+
 from media_render import plan as plan_lib
 from media_render.render_lib import (
     build_layout_graph,
@@ -262,6 +264,7 @@ def _ffmpeg_available() -> bool:
 
 
 @unittest.skipUnless(_ffmpeg_available(), 'no ffmpeg binary reachable')
+@unittest.skipUnless(av_open, 'PyAV decoder is not installed')
 @unittest.skipIf(os.environ.get('MEDIA_TOOLKIT_SKIP_FFMPEG'), 'ffmpeg smoke test disabled')
 class RenderedSyncTest(unittest.TestCase):
     """Measured on real renders: the streams' own durations, forty cuts apart."""
@@ -271,6 +274,7 @@ class RenderedSyncTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.work = Path(tempfile.mkdtemp(prefix='sync_render_'))
+        cls.addClassCleanup(shutil.rmtree, cls.work, ignore_errors=True)
         cls.source = cls.work / 'source.mp4'
         subprocess.run(
             [
@@ -300,17 +304,12 @@ class RenderedSyncTest(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            timeout=300,
         )
-
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(cls.work, ignore_errors=True)
 
     @staticmethod
     def _seconds(path: Path, kind: str) -> float:
-        import av
-
-        with av.open(str(path)) as container:
+        with av_open(str(path)) as container:
             stream = container.streams.video[0] if kind == 'video' else container.streams.audio[0]
             return float(stream.duration * stream.time_base)
 
@@ -347,6 +346,7 @@ class RenderedSyncTest(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            timeout=300,
         )
         return out
 
@@ -421,6 +421,7 @@ class RenderedSyncTest(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            timeout=300,
         )
         self.assertLess(abs(self._seconds(video, 'video') - self._seconds(audio, 'audio')), 1 / FPS)  # was +0.533 s
 

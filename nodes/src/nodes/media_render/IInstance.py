@@ -60,6 +60,7 @@ from .render_lib import (
     render_clip_video,
     render_layout_part,
     render_layout_video,
+    resize_layout,
     render_programme_audio,
     render_programme_part,
     shift_groups,
@@ -147,7 +148,7 @@ class IInstance(MediaInstance):
         reframes = bool(ctx['reframes'])
         audio, mode, status_to = ctx['audio'], ctx['mode'], ctx['status_to']
         keep = keep_plan['keep']
-        source_range = keep_plan['source_range'] or [0, max(e for _, e in keep)]
+        source_range = keep_plan['source_range'] or [min(s for s, _ in keep), max(e for _, e in keep)]
         start, end = int(source_range[0]), int(source_range[1])
         mutes = plan_lib.as_ranges(spec.get('mutes'))
         warnings_out: list[str] = list(spec.get('warnings') or [])
@@ -172,7 +173,13 @@ class IInstance(MediaInstance):
                 # the audio is cut from the same source window the picture is, and
                 # mastered in the layout it ships in (a mono master played as dual
                 # mono is 3 LU louder than its own meter says)
-                source_wav = slice_audio(local, start, end, work / 'source.wav')
+                source_wav = slice_audio(
+                    local,
+                    start,
+                    end,
+                    work / 'source.wav',
+                    has_audio=source_info.get('has_audio', True),
+                )
                 mastered = render_audio(
                     source_wav,
                     [(s - start, e - start) for s, e in keep],
@@ -192,14 +199,12 @@ class IInstance(MediaInstance):
 
                 # caption placement follows the framing plan on the RENDERED
                 # timeline (a stacked segment puts the line on the seam)
-                placement = None
                 if reframes:
                     if any(p.get('fallback') for p in layout_pieces(keep, framing.get('segments') or [])):
                         warnings_out.append(
                             'The framing plan does not cover what was rendered; it was rendered full frame.'
                         )
                         warning(f'{NODE}: the framing plan does not cover the keep list')
-                    placement = self._seam_placement(framing, keep, (framing.get('canvas') or {}).get('height'))
 
                 first_media = None
                 first_picture = None  # the poster comes off a video deliverable, never an audio one
@@ -211,6 +216,12 @@ class IInstance(MediaInstance):
                         files[output['key']] = write_file(store, f'{ctx["write_to"]}/{output["file"]}', piece)
                         first_media = first_media or piece
                         continue
+                    shaped = (
+                        resize_layout(framing, output['width'], output['height'])
+                        if reframes and output['framing']
+                        else None
+                    )
+                    placement = self._seam_placement(shaped, keep, output['height']) if shaped else None
                     ass_path = None
                     if output['captions'] and captions['enabled']:
                         # named by position: a key may be an aspect alias (`9:16`)
@@ -228,9 +239,7 @@ class IInstance(MediaInstance):
                             encoding='utf-8',
                         )
                     self._status(store, status_to, 'encoding', mode=mode, layout=output['key'])
-                    if reframes and output['framing']:
-                        shaped = dict(framing)
-                        shaped['canvas'] = {'width': output['width'], 'height': output['height']}
+                    if shaped:
                         mp4 = render_layout_video(
                             local,
                             start,
@@ -276,21 +285,21 @@ class IInstance(MediaInstance):
                     first_picture = first_picture or mp4
 
                 self._write_sidecars(store, ctx, groups, files, work, 0)
-                check = probe(first_media)
+                measured_media = first_picture or first_media
+                check = probe(measured_media)
                 if first_picture is not None and ctx['thumbnail']:
                     # the poster comes off a finished video deliverable: square pixels already
-                    poster_check = check if first_picture is first_media else probe(first_picture)
                     files['thumbnail'] = self._write_thumbnail(
                         store,
                         ctx,
                         first_picture,
                         work,
                         min(1000, max(0, timeline.total_ms // 3)),
-                        poster_check,
+                        check,
                         warnings_out,
                     )
 
-                loudness = measure_loudness(first_media)
+                loudness = measure_loudness(measured_media)
                 self._note_silence(loudness, warnings_out)
             finally:
                 shutil.rmtree(work, ignore_errors=True)
@@ -332,6 +341,13 @@ class IInstance(MediaInstance):
         if primary is None:
             primary = next((o for o in outputs if not o['from']), outputs[0])
         derived = [o for o in outputs if o is not primary]
+        for output in derived:
+            if output['video'] and not output['from']:
+                warnings_out.append(
+                    f'Programme output {output["key"]!r} is transcoded from {primary["key"]!r}; '
+                    'its independent framing and captions are not applied. '
+                    f'Set from to {primary["key"]!r} to request this derivative explicitly.'
+                )
         out_w, out_h = primary['width'], primary['height']
         fps, crf, x264 = primary['fps'], primary['crf'], primary['preset']
         channels = audio['channels']
@@ -410,8 +426,7 @@ class IInstance(MediaInstance):
                         warning(f'{NODE}: the framing plan does not cover the keep list')
                     shaped = None
                     if framing:
-                        shaped = dict(framing)
-                        shaped['canvas'] = {'width': out_w, 'height': out_h}
+                        shaped = resize_layout(framing, out_w, out_h)
                         framing_applied = bool(parts)
                     for part in parts:
                         started = time.time()
@@ -433,6 +448,7 @@ class IInstance(MediaInstance):
                                 out_w,
                                 out_h,
                                 placement=self._seam_placement(shaped, slices, out_h),
+                                layout=primary['caption_layout'],
                             )
                         if shaped:
                             render_layout_part(
@@ -529,6 +545,7 @@ class IInstance(MediaInstance):
                     local,
                     keep,
                     work / 'body.wav',
+                    source_has_audio=source_info.get('has_audio', True),
                     mutes=mutes,
                     bleeps=bleeps,
                     noise_reduction=audio['denoise'],
@@ -801,7 +818,9 @@ class IInstance(MediaInstance):
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
-    def _captions_file(self, path: Path, groups: list, ctx: dict, out_w: int, out_h: int, placement=None):
+    def _captions_file(
+        self, path: Path, groups: list, ctx: dict, out_w: int, out_h: int, placement=None, layout: str | None = None
+    ):
         """One part's burned-in captions, in the spec's own style."""
         if not groups:
             return None
@@ -809,7 +828,7 @@ class IInstance(MediaInstance):
         style = captions['style']
         text = build_ass(
             groups,
-            plan_lib.caption_layout_for(out_w, out_h),
+            layout or plan_lib.caption_layout_for(out_w, out_h),
             style=style,
             placement=placement,
             speaker_colors=captions['speaker_colors'] if style.get('speaker_colors') else None,

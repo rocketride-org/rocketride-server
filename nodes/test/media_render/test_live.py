@@ -35,7 +35,14 @@ from .test_streams import NODE, media as media_fixture
 
 media = media_fixture
 
-pytestmark = [pytest.mark.requires_server, pytest.mark.integration, pytest.mark.timeout(600)]
+# Profiles share the engine dependency environment; keep their live cold starts
+# on one worker under the builder's --dist=loadgroup setting.
+pytestmark = [
+    pytest.mark.requires_server,
+    pytest.mark.integration,
+    pytest.mark.timeout(600),
+    pytest.mark.xdist_group('media_render_live'),
+]
 
 
 def pipeline(request, output, profile='default'):

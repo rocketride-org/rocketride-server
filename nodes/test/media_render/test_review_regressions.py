@@ -314,3 +314,438 @@ def test_all_declared_containers_render_without_system_mime_table(
     artifact = next(a for a in instance.instance.answers[0]['artifacts'] if a['name'] == filename)
     assert artifact['mime'].startswith('video/' if video else 'audio/')
     assert 'text' not in artifact
+
+
+@pytest.mark.parametrize('layout,width,height', [('4:5', 160, 200), ('1:1', 160, 160)])
+def test_programme_preserves_explicit_caption_layout(media, monkeypatch, layout, width, height):
+    """Exercise the programme caller and actual ASS builder on feed-shaped outputs."""
+    module = importlib.import_module(NODE + '.IInstance')
+    from media_render.captions import CAPTION_LAYOUTS
+
+    original = module.build_ass
+    scripts = []
+
+    def capture(groups, selected, **kwargs):
+        assert selected == layout
+        text = original(groups, selected, **kwargs)
+        scripts.append(text)
+        return text
+
+    monkeypatch.setattr(module, 'build_ass', capture)
+    spec = {
+        'pipeline': 'programme',
+        'keep': [[0, 1500]],
+        'audio': {'master': False},
+        'thumbnail': False,
+        'outputs': [{'key': 'feed', 'file': 'feed.mp4', 'width': width, 'height': height, 'caption_layout': layout}],
+        'subtitles': {'words': [{'w': 'Hello', 's': 100, 'e': 800}], 'sidecars': False},
+    }
+    instance = node({'mode': 'render', 'spec': spec})
+    feed(instance, media)
+    instance.closing()
+    assert scripts
+    play_w, play_h, *_ = CAPTION_LAYOUTS[layout]
+    assert all(f'PlayResX: {play_w}' in script and f'PlayResY: {play_h}' in script for script in scripts)
+    assert instance.instance.files['feed.mp4']
+
+
+@pytest.mark.parametrize('force_reencode', [False, True])
+def test_concat_parts_accepts_apostrophes_in_temporary_paths(media, tmp_path, monkeypatch, force_reencode):
+    """Both concat attempts consume the same correctly quoted real input paths."""
+    from media_render import render_lib
+    from media_render._support.media import probe
+
+    folder = tmp_path / "user's workspace"
+    folder.mkdir()
+    source = folder / "part's video.mp4"
+    source.write_bytes(media.read_bytes())
+    original = render_lib.run_ffmpeg
+    attempts = []
+
+    def run(args):
+        attempts.append(args)
+        if force_reencode and len(attempts) == 1:
+            raise RuntimeError('force stream-copy failure')
+        return original(args)
+
+    monkeypatch.setattr(render_lib, 'run_ffmpeg', run)
+    out = render_lib.concat_parts([source, source], folder / 'joined.mp4', folder)
+    measured = probe(out)
+    assert measured['has_video'] and measured['has_audio']
+    assert 3900 <= measured['duration_ms'] <= 4200
+    assert len(attempts) == (2 if force_reencode else 1)
+
+
+def test_audio_first_output_still_reports_and_measures_primary_video(media, monkeypatch):
+    """Output ordering must not make a valid audiovisual render look audio-only."""
+    module = importlib.import_module(NODE + '.IInstance')
+    original = module.measure_loudness
+    measured = []
+
+    def capture(path, *args, **kwargs):
+        measured.append(path.suffix)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(module, 'measure_loudness', capture)
+    spec = {
+        'keep': [[0, 1500]],
+        'audio': {'master': False},
+        'thumbnail': True,
+        'subtitles': {'enabled': False, 'sidecars': False},
+        'outputs': [
+            {'key': 'audio', 'file': 'sound.wav', 'container': 'wav'},
+            {'key': 'picture', 'file': 'video.mp4', 'width': 160, 'height': 90},
+        ],
+    }
+    instance = node({'mode': 'render', 'spec': spec})
+    feed(instance, media)
+    instance.closing()
+    report = instance.instance.answers[-1]
+    assert report['has_video'] and report['has_audio']
+    assert (report['width'], report['height']) == (160, 90)
+    assert measured == ['.mp4']
+    assert 'picture' in report['measurements']
+    assert 'thumbnail' in report['files']
+
+
+@pytest.mark.parametrize('field', ['source', 'overlays', 'concat', 'music'])
+@pytest.mark.parametrize('filename', ["user's [take];1=ok.mp4", '../escape.mp4', '/root.mp4', 'C:/video.mp4'])
+def test_input_path_validation_matches_received_names(field, filename):
+    """Accept literal stream names while still refusing workspace escapes."""
+    from media_render import plan
+
+    spec = {**SPEC, 'source': 'source.mp4', 'write_to': 'outputs'}
+    if field == 'source':
+        spec[field] = filename
+    elif field == 'music':
+        spec[field] = {'source': filename}
+    else:
+        spec[field] = [{'path': filename}]
+    if filename.startswith('user'):
+        plan.validate_spec(spec)
+    else:
+        with pytest.raises(plan.SpecError):
+            plan.validate_spec(spec)
+
+
+def test_render_accepts_a_literal_stream_name_with_filter_characters(media, tmp_path):
+    """The streamed filename is copied to a safe local decode path before FFmpeg."""
+    source = tmp_path / "user's [take];1=ok.mp4"
+    source.write_bytes(media.read_bytes())
+    instance = node({'mode': 'render', 'spec': {**SPEC, 'source': source.name}})
+    feed(instance, source)
+    instance.closing()
+    assert instance.instance.files['wide.mp4']
+
+
+@pytest.mark.parametrize('decoder', [None, SimpleNamespace()])
+def test_probe_falls_back_when_pyav_decoder_cannot_be_imported(media, monkeypatch, decoder):
+    """An absent or partially installed optional decoder still permits FFmpeg probing."""
+    import sys
+    from media_render._support.media import probe
+
+    monkeypatch.setitem(sys.modules, 'av', decoder)
+    result = probe(media)
+    assert result['has_video'] and result['has_audio']
+    assert (result['width'], result['height']) == (320, 180)
+    assert 1900 <= result['duration_ms'] <= 2100
+
+
+@pytest.mark.parametrize('explicit', [None, [500, 1900]])
+def test_late_clip_only_decodes_required_source_window(media, monkeypatch, explicit):
+    """Avoid decoding the prefix of a long recording, preserving explicit bounds."""
+    module = importlib.import_module(NODE + '.IInstance')
+    original = module.slice_audio
+    decoded = []
+
+    def capture(source, start, end, *args, **kwargs):
+        decoded.append((start, end))
+        return original(source, start, end, *args, **kwargs)
+
+    monkeypatch.setattr(module, 'slice_audio', capture)
+    spec = {**SPEC, 'keep': [[1000, 1800]], 'audio': {'master': False}}
+    if explicit:
+        spec['source_range'] = explicit
+    instance = node({'spec': spec})
+    feed(instance, media)
+    instance.closing()
+    assert decoded[0] == tuple(explicit or [1000, 1800])
+    assert instance.instance.answers[-1]['output_duration_ms'] == 800
+
+
+@pytest.mark.parametrize('pipeline', ['clip', 'programme'])
+def test_resized_panels_and_caption_seam_use_output_coordinates(media, tmp_path, monkeypatch, pipeline):
+    """Real renders preserve a one-quarter/three-quarter split after canvas resize."""
+    import copy
+    from media_render._support.media import run_ffmpeg, probe
+    from media_render import IInstance
+
+    module = importlib.import_module(NODE + '.IInstance')
+    plan = {
+        'canvas': {'width': 640, 'height': 640},
+        'source': {'width': 320, 'height': 180},
+        'segments': [
+            {
+                'start_ms': 0,
+                'end_ms': 1500,
+                'layout': 'stacked_two',
+                'subjects': ['a', 'b'],
+                'panels': [
+                    {'subject': 'a', 'x': 0, 'y': 0, 'w': 640, 'h': 160},
+                    {'subject': 'b', 'x': 0, 'y': 160, 'w': 640, 'h': 480},
+                ],
+            }
+        ],
+        'paths': [
+            {
+                'segment': 0,
+                'subject': subject,
+                'panel': subject,
+                'w': 160,
+                'h': 180,
+                'keyframes': [[0, x, 0], [1500, x, 0]],
+            }
+            for subject, x in [('a', 0), ('b', 160)]
+        ],
+    }
+    before = copy.deepcopy(plan)
+    source = tmp_path / 'red-blue.mp4'
+    run_ffmpeg(
+        [
+            '-f',
+            'lavfi',
+            '-i',
+            'color=red:size=320x180:rate=30,drawbox=x=160:y=0:w=160:h=180:color=blue:t=fill',
+            '-f',
+            'lavfi',
+            '-i',
+            'sine=frequency=440:sample_rate=48000',
+            '-t',
+            '1.5',
+            '-c:v',
+            'libx264',
+            '-pix_fmt',
+            'yuv420p',
+            '-c:a',
+            'aac',
+            '-y',
+            str(source),
+        ]
+    )
+    original = module.build_ass
+    placements = []
+
+    def capture(groups, layout, **kwargs):
+        placements.append(kwargs['placement'](500))
+        return original(groups, layout, **kwargs)
+
+    monkeypatch.setattr(module, 'build_ass', capture)
+    spec = {
+        'pipeline': pipeline,
+        'keep': [[0, 1500]],
+        'framing_plan': plan,
+        'audio': {'master': False},
+        'thumbnail': False,
+        'subtitles': {'words': [{'w': 'Hello', 's': 100, 'e': 700}], 'sidecars': False},
+        'outputs': [
+            {
+                'key': 'square',
+                'file': 'square.mp4',
+                'width': 160,
+                'height': 160,
+                'caption_layout': '1:1',
+                'framing': True,
+            }
+        ],
+    }
+    instance = node({'spec': spec})
+    feed(instance, source)
+    instance.closing()
+    output = tmp_path / (pipeline + '.mp4')
+    output.write_bytes(instance.instance.files['square.mp4'])
+    assert (probe(output)['width'], probe(output)['height']) == (160, 160)
+    # Read a frame after the caption has disappeared, so text cannot mask geometry.
+    frame = tmp_path / 'frame.rgb'
+    run_ffmpeg(
+        ['-ss', '1', '-i', str(output), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-y', str(frame)]
+    )
+    pixels = frame.read_bytes()
+
+    def pixel(x, y):
+        return pixels[(y * 160 + x) * 3 : (y * 160 + x) * 3 + 3]
+
+    red, green, blue = pixel(80, 20)
+    assert red > 180 and blue < 60
+    red, green, blue = pixel(80, 60)
+    assert blue > 180 and red < 60
+    assert placements and set(placements) == {'seam:0.2500'}
+    shaped = module.resize_layout(plan, 160, 160)
+    assert shaped['paths'] == plan['paths']
+    assert IInstance._seam_placement(shaped, [(0, 1500)], 160)(500) == 'seam:0.2500'
+    assert plan == before  # Resizing must never alter crop coordinates or the caller's plan.
+
+
+@pytest.mark.parametrize('keep', [[[0, 1000], [500, 1500]], [[1000, 500]], []])
+def test_invalid_static_edit_fails_before_input(monkeypatch, keep):
+    """Pipeline startup rejects an edit every uploaded object would fail to render."""
+    import depends
+    import json
+    from media_render.IGlobal import IGlobal, DEFAULTS
+
+    module = importlib.import_module(NODE + '.IGlobal')
+    monkeypatch.setattr(depends, 'load_depends', lambda *_: None)
+    request = {'spec': {**SPEC, 'keep': keep}}
+    monkeypatch.setattr(module, 'load_node_config', lambda *_: {**DEFAULTS, 'request': json.dumps(request)})
+    state = IGlobal()
+    state.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=None))
+    with pytest.raises(ValueError):
+        state.beginGlobal()
+
+
+@pytest.mark.parametrize('pipeline', ['clip', 'programme'])
+@pytest.mark.parametrize('audio_only', [False, True])
+def test_video_without_audio_gets_a_synchronized_silent_track(media, tmp_path, pipeline, audio_only):
+    """A missing source track can still produce video or audio-only deliverables."""
+    from media_render._support.media import probe, run_ffmpeg
+
+    source = tmp_path / 'silent-source.mp4'
+    run_ffmpeg(['-i', str(media), '-an', '-c:v', 'copy', '-y', str(source)])
+    filename = 'audio.wav' if audio_only else 'video.mp4'
+    output = {
+        'key': 'result',
+        'file': filename,
+        'container': 'wav' if audio_only else 'mp4',
+        'width': 160,
+        'height': 90,
+    }
+    spec = {
+        'pipeline': pipeline,
+        'keep': [[500, 1000], [1200, 1800]],
+        'thumbnail': False,
+        'outputs': [output],
+        'subtitles': {'enabled': False, 'sidecars': False},
+    }
+    instance = node({'spec': spec})
+    feed(instance, source)
+    instance.closing()
+    target = tmp_path / filename
+    target.write_bytes(instance.instance.files[filename])
+    info = probe(target)
+    assert info['has_audio'] and info['has_video'] is not audio_only
+    assert abs(info['duration_ms'] - 1100) <= 34
+    assert any('silent' in warning.lower() for warning in instance.instance.answers[-1]['warnings'])
+
+
+@pytest.mark.parametrize('bleep', [(650, 850), (0, 100), (1900, 1950)])
+def test_missing_audio_keeps_programme_bleeps_on_the_edited_clock(media, tmp_path, bleep):
+    """The silent source still passes through edit effects after its window is shifted."""
+    import array
+    import wave
+    from media_render._support.media import run_ffmpeg
+
+    source = tmp_path / 'silent.mp4'
+    run_ffmpeg(['-i', str(media), '-an', '-c:v', 'copy', '-y', str(source)])
+    spec = {
+        'pipeline': 'programme',
+        'keep': [[500, 1000], [1200, 1800]],
+        'bleeps': [bleep],
+        'audio': {'master': False},
+        'thumbnail': False,
+        'outputs': [{'key': 'sound', 'file': 'sound.wav', 'container': 'wav'}],
+    }
+    instance = node({'spec': spec})
+    feed(instance, source)
+    instance.closing()
+    target = tmp_path / 'sound.wav'
+    target.write_bytes(instance.instance.files['sound.wav'])
+    with wave.open(str(target), 'rb') as wav:
+        assert wav.getsampwidth() == 2
+
+        def peak(at):
+            wav.setpos(int(at * wav.getframerate()))
+            data = array.array('h', wav.readframes(int(0.05 * wav.getframerate())))
+            if __import__('sys').byteorder != 'little':
+                data.byteswap()
+            return max(abs(value) for value in data)
+
+        if bleep == (650, 850):
+            assert peak(0.22) > 300  # source 720 ms -> output 220 ms
+        else:
+            assert peak(0.22) < 10  # Effects outside the kept source window are discarded.
+        assert peak(0.8) < 10  # outside the bleep, the generated source is silent
+
+
+@pytest.mark.parametrize('keep', [[[0, 700]], [[700, 1700]]])
+def test_keep_cannot_extend_beyond_explicit_source_range(keep):
+    """The decoder window must contain every interval actually rendered."""
+    from media_render.plan import resolve_keep, SpecError
+
+    with pytest.raises(SpecError, match='inside source_range'):
+        resolve_keep({'keep': keep, 'source_range': [500, 1500]})
+    assert resolve_keep({'keep': [[600, 1400]], 'source_range': [500, 1500]})['keep'] == [(600, 1400)]
+    # A preview window may select a valid subset of a larger edit plan.
+    assert resolve_keep({'keep': [[0, 2000]], 'window': [500, 1500], 'source_range': [500, 1500]})['keep'] == [
+        (500, 1500)
+    ]
+
+
+@pytest.mark.parametrize(
+    'overrides',
+    [
+        {'meta': []},
+        {'status_meta': 'bad'},
+        {'warnings': 'bad'},
+        {'framing_plan': []},
+        {'framing_plan': {'segments': 'bad'}},
+        {'framing_plan': {'segments': [None]}},
+        {'framing_plan': {'segments': [{'layout': 1, 'start_ms': 0, 'end_ms': 1000}]}},
+        {'framing_plan': {'segments': [{'layout': 'stacked_two', 'start_ms': 0.5, 'end_ms': 1000}]}},
+        {'framing_plan': {'segments': [{'layout': 'stacked_two', 'start_ms': False, 'end_ms': 1000}]}},
+    ],
+)
+def test_malformed_metadata_and_framing_fail_validation(overrides):
+    """Reject invalid shapes before a stream is uploaded, with the offending field named."""
+    from media_render.plan import validate_spec, SpecError
+
+    with pytest.raises(SpecError, match=next(iter(overrides))):
+        validate_spec({**SPEC, 'source': 'in.mp4', 'write_to': 'outputs', **overrides})
+
+
+def test_concat_timeout_does_not_launch_a_second_encode(tmp_path, monkeypatch):
+    """A timed-out copy has spent its budget; only format failures may re-encode."""
+    from media_render import render_lib
+    from media_render._support.media import FFmpegError
+
+    calls = []
+
+    def timed_out(args):
+        calls.append(args)
+        try:
+            raise subprocess.TimeoutExpired('ffmpeg', 1)
+        except subprocess.TimeoutExpired as exc:
+            raise FFmpegError('ffmpeg timed out after 1 seconds', ['ffmpeg']) from exc
+
+    monkeypatch.setattr(render_lib, 'run_ffmpeg', timed_out)
+    with pytest.raises(FFmpegError, match='timed out'):
+        render_lib.concat_parts(['a.mp4', 'b.mp4'], tmp_path / 'out.mp4', tmp_path)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('explicit', [False, True])
+def test_secondary_programme_video_reports_its_inherited_render(media, explicit):
+    """Never claim independently applied captions/framing on a programme transcode."""
+    secondary = {'key': 'square', 'file': 'square.mp4', 'width': 160, 'height': 160}
+    if explicit:
+        secondary['from'] = 'wide'
+    spec = {
+        **SPEC,
+        'pipeline': 'programme',
+        'audio': {'master': False},
+        'outputs': [{'key': 'wide', 'file': 'wide.mp4', 'width': 160, 'height': 90}, secondary],
+    }
+    instance = node({'spec': spec})
+    feed(instance, media)
+    instance.closing()
+    assert {'wide.mp4', 'square.mp4'} <= instance.instance.files.keys()
+    notes = [w for w in instance.instance.answers[-1]['warnings'] if 'independent framing and captions' in w]
+    assert bool(notes) is not explicit

@@ -81,7 +81,7 @@ Nothing in here (or anywhere else in the node) knows what the files are for.
 """
 
 from __future__ import annotations
-from ._support.paths import SpecError, check_store_path, check_destination, FILTER_CHARS
+from ._support.paths import SpecError, check_store_path, check_input_path, check_destination, FILTER_CHARS
 from .captions import (
     CAPTION_LAYOUTS,
     group_words,
@@ -234,7 +234,29 @@ def validate_spec(spec: dict) -> dict:
                 f'{" and ".join(str(v) for v in SPEC_SCHEMA_VERSIONS)}.'
             )
 
-    source = check_store_path(spec.get('source'), 'source')
+    for field in ('meta', 'status_meta'):
+        if spec.get(field) is not None and not isinstance(spec[field], dict):
+            raise SpecError(f'{field} must be an object.')
+    if spec.get('warnings') is not None and not isinstance(spec['warnings'], list):
+        raise SpecError('warnings must be a list.')
+    if spec.get('framing_plan') is not None and not isinstance(spec['framing_plan'], dict):
+        raise SpecError('framing_plan must be an object.')
+    framing = framing_plan(spec)
+    segments = (framing or {}).get('segments')
+    if segments is not None:
+        if not isinstance(segments, list):
+            raise SpecError('framing_plan.segments must be a list.')
+        for i, segment in enumerate(segments):
+            field = f'framing_plan.segments[{i}]'
+            if not isinstance(segment, dict) or not isinstance(segment.get('layout'), str):
+                raise SpecError(f'{field} must be an object with a string layout.')
+            for key in ('start_ms', 'end_ms'):
+                value = segment.get(key)
+                if not (type(value) is int or isinstance(value, float) and value.is_integer()):
+                    raise SpecError(f'{field}.{key} must be a whole number of milliseconds.')
+            _check_ranges([segment], field)
+
+    source = check_input_path(spec.get('source'), 'source')
     write_to = check_store_path(spec.get('write_to'), 'write_to').rstrip('/')
     check_store_path(spec.get('report_to'), 'report_to', allow_empty=True)
     check_store_path(spec.get('status_to'), 'status_to', allow_empty=True)
@@ -283,12 +305,12 @@ def validate_spec(spec: dict) -> dict:
     for field in ('overlays', 'concat'):
         for item in spec.get(field) or []:
             if isinstance(item, dict):
-                check_store_path(
+                check_input_path(
                     item.get('image') or item.get('path') or item.get('source'), f'a file named in {field}'
                 )
     music = spec.get('music')
     if isinstance(music, dict) and music.get('source'):
-        check_store_path(music.get('source'), 'the music file')
+        check_input_path(music.get('source'), 'the music file')
     thumb = spec.get('thumbnail')
     if isinstance(thumb, dict) and (thumb.get('file') or thumb.get('name')):
         check_store_path(thumb.get('file') or f'{thumb.get("name")}.jpg', 'the thumbnail file name')
@@ -383,6 +405,10 @@ def resolve_keep(spec: dict) -> dict:
         keep = [(s, e) for s, e in range_to_keep(rows, offset_ms, int(window[1])) if e > s]
         if not keep:
             raise ValueError('the requested window falls entirely inside a cut')
+    if source_range:
+        lower, upper = _check_ranges([source_range], 'source_range')[0]
+        if any(start < lower or end > upper for start, end in keep):
+            raise SpecError('Rendered keep intervals must stay inside source_range.')
     return {
         'full_keep': full,
         'keep': keep,
@@ -535,6 +561,7 @@ def check_output_key(value, index: int) -> str:
 
 
 def normalize_outputs(spec: dict, config: dict | None = None, has_video: bool = True) -> list[dict]:
+    """Normalize output definitions and resolve their dependency order."""
     config = {**DEFAULTS, **(config or {})}
     entries = spec.get('outputs')
     if isinstance(entries, (str, dict)):
@@ -760,6 +787,7 @@ def spec_identity(spec: dict) -> str:
 
 
 def part_ms_for(spec: dict, config: dict | None = None) -> int:
+    """Return the configured programme part duration, clamped to at least one second."""
     chunking = spec.get('chunking') if isinstance(spec.get('chunking'), dict) else {}
     config = {**DEFAULTS, **(config or {})}
     return max(1000, int(chunking.get('part_ms') or config['part_ms']))
@@ -779,10 +807,12 @@ def overlay_for(spec: dict) -> dict | None:
 
 
 def cards_for(spec: dict, at: str) -> list[dict]:
+    """Return caller-supplied title cards for the requested programme position."""
     return [c for c in (spec.get('cards') or []) if isinstance(c, dict) and str(c.get('at') or 'start').lower() == at]
 
 
 def concat_for(spec: dict, at: str) -> list[dict]:
+    """Return received media attachments for the requested programme position."""
     return [
         c
         for c in (spec.get('concat') or [])

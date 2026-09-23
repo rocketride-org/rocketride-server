@@ -320,8 +320,24 @@ def test_failed_open_leaves_nothing_to_clean():
 
 def test_emitted_names_are_posix_even_where_paths_are_not(monkeypatch):
     """`files` and `artifacts[].name` agree, with forward slashes, whatever the host's Path does."""
-    module = importlib.import_module(NODE + '._support.instance')
     instance = node({'mode': 'render', 'spec': SPEC})
+    original_stream_file = instance._stream_file
+
+    def windows_stream_file(real_path):
+        class WindowsFile(PureWindowsPath):
+            def stat(self):
+                return real_path.stat()
+
+            def open(self, mode):
+                return real_path.open(mode)
+
+        root = PureWindowsPath('C:/scratch')
+        relative = real_path.relative_to(instance._workspace.root).as_posix()
+        with monkeypatch.context() as scoped:
+            scoped.setattr(instance._workspace, 'root', root)
+            return original_stream_file(WindowsFile(root / relative))
+
+    monkeypatch.setattr(instance, '_stream_file', windows_stream_file)
 
     def render(workspace):
         target = workspace.root / 'outputs' / 'nested' / 'wide.mp4'
@@ -331,8 +347,6 @@ def test_emitted_names_are_posix_even_where_paths_are_not(monkeypatch):
 
     instance._render = render
     stream(instance, 'video', 'episode.mp4', b'episode')
-    # a Windows host's Path renders a nested name with backslashes
-    monkeypatch.setattr(module, 'Path', PureWindowsPath)
     instance.closing()
     answer = instance.instance.answers[-1]
     assert answer['files'] == {'wide': 'nested/wide.mp4'}

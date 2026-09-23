@@ -44,6 +44,14 @@ def _text(value) -> str:
     return value if isinstance(value, str) else ('' if value is None else str(value))
 
 
+def check_input_path(value, field: str) -> str:
+    """Validate a received stream name without treating it as filtergraph code."""
+    problem = store_path_problem(value)
+    if problem:
+        raise SpecError(f'{field} is not a path inside the temporary workspace: {problem} ({value!r}).')
+    return value
+
+
 def check_store_path(value, field: str, *, allow_empty: bool = False) -> str:
     """
     One path inside the temporary workspace. What "inside the store" MEANS has a

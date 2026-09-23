@@ -98,6 +98,7 @@ def download_to(workspace, name, local):
 
 @contextmanager
 def local_copy(workspace, name):
+    """Yield the received input workspace path without copying; raise FileNotFoundError if missing."""
     path = workspace.resolve(name)
     if not path.is_file():
         raise FileNotFoundError('Required input stream is missing: ' + name)

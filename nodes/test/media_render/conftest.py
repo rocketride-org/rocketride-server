@@ -31,3 +31,10 @@ from pathlib import Path
 _NODES_DIR = str(Path(__file__).resolve().parents[2] / 'src' / 'nodes')
 if _NODES_DIR not in sys.path:
     sys.path.insert(0, _NODES_DIR)
+
+# Import native PyAV before individual tests patch process/import helpers.
+# A missing optional decoder must not prevent pure algorithm/FFmpeg tests.
+try:
+    from av import open as av_open
+except ImportError:
+    av_open = None

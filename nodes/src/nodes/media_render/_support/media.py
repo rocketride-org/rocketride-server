@@ -369,11 +369,11 @@ def probe(path: str | Path) -> dict:
     `scale=width:height,setsar=1` before anything else.
     """
     try:
-        import av
+        from av import open as av_open
     except ImportError:
         return _probe_ffmpeg(path)
 
-    with av.open(str(path)) as container:
+    with av_open(str(path)) as container:
         duration_ms = int(container.duration / 1000) if container.duration else 0
         video, fps = None, 0.0
         for stream in container.streams.video:
@@ -486,6 +486,8 @@ def slice_audio(
     out_path: str | Path,
     sample_rate: int = SLICE_RATE,
     channels: int | None = None,
+    *,
+    has_audio: bool = True,
 ) -> Path:
     """
     Sample-accurate audio slice; the codec follows the extension (.wav / .mp3).
@@ -505,15 +507,13 @@ def slice_audio(
     }
     codec = codecs.get(out_path.suffix.lower(), ['-c:a', 'pcm_s16le'])
     layout = ['-ac', str(int(channels))] if channels else []
+    inputs = ['-ss', f'{start_ms / 1000:.3f}', '-t', f'{(end_ms - start_ms) / 1000:.3f}', '-i', str(src)]
+    if not has_audio:
+        inputs = ['-f', 'lavfi', '-t', f'{(end_ms - start_ms) / 1000:.3f}', '-i', f'anullsrc=r={sample_rate}:cl=stereo']
     run_ffmpeg(
         [
             '-y',
-            '-ss',
-            f'{start_ms / 1000:.3f}',
-            '-t',
-            f'{(end_ms - start_ms) / 1000:.3f}',
-            '-i',
-            str(src),
+            *inputs,
             '-vn',
             *layout,
             '-ar',
