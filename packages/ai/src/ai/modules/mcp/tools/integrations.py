@@ -18,7 +18,11 @@ from ._common import engine_call
 
 
 async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
-    catalog = credentials_mod.load_catalog()
+    services, err = await engine_call(client.get_services(), 'list_integrations')
+    if err:
+        return err
+    definitions = (services or {}).get('services') or {}
+    catalog = credentials_mod.catalog_from_definitions(definitions)
     name = args.get('name')
 
     if name is not None:
@@ -47,18 +51,13 @@ async def _list_integrations(client, tasks, args: Dict[str, Any]) -> dict:
         result.update(credentials_mod.describe_state(spec, state))
         return result
 
-    services, err = await engine_call(client.get_services(), 'list_integrations')
-    if err:
-        return err
-    definitions = (services or {}).get('services') or {}
-    # Only catalog entries this engine actually has a matching node for --
-    # an integration nobody here can use is noise, not a readiness signal.
-    relevant = {n: catalog[n] for n in definitions if n in catalog}
-    env_keys = await credentials_mod.fetch_env_keys(client) if relevant else None
+    # The catalog is built from this engine's own definitions, so every entry
+    # already has a matching node here.
+    env_keys = await credentials_mod.fetch_env_keys(client) if catalog else None
 
     integrations = []
-    for n in sorted(relevant):
-        spec = relevant[n]
+    for n in sorted(catalog):
+        spec = catalog[n]
         state = credentials_mod.evaluate(spec, env_keys)
         integrations.append(
             {

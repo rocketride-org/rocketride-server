@@ -38,7 +38,7 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
     if err:
         return err
     definitions = (services or {}).get('services') or {}
-    catalog = credentials_mod.load_catalog()
+    catalog = credentials_mod.catalog_from_definitions(definitions)
     # Only pay for the env-keys round trip when a credentialed node is
     # actually present in this engine's definitions; a catalog entry with no
     # matching node here is irrelevant to this call.
@@ -92,7 +92,7 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
     # ever did, this ordering deliberately shadows it with the readiness
     # block -- consistent with how 'ok' already shadows any same-named key.
     result = {**service, 'ok': True}
-    spec = credentials_mod.load_catalog().get(name)
+    spec = credentials_mod.catalog_from_definitions({name: service}).get(name)
     if spec is not None:
         env_keys = await credentials_mod.fetch_env_keys(client)
         state = credentials_mod.evaluate(spec, env_keys)
