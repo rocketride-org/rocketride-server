@@ -958,12 +958,13 @@ def test_filter_subprocess_env_is_an_allowlist():
 
 
 def test_filter_subprocess_env_opt_in_names_and_prefixes():
-    """ROCKETRIDE_SUBPROCESS_ENV adds exact names and '*'-suffixed prefixes,
-    separated by commas or spaces; the list itself rides along (ROCKETRIDE_*).
+    """RR_SUBPROCESS_ENV adds exact names and '*'-suffixed prefixes, separated
+    by commas or spaces. The knob itself is operator-tier (RR_*) and is not
+    handed to the child.
     """
     env = filter_subprocess_env(
         {
-            'ROCKETRIDE_SUBPROCESS_ENV': 'SLACK_BOT_TOKEN, gh_*',
+            'RR_SUBPROCESS_ENV': 'SLACK_BOT_TOKEN, gh_*',
             'SLACK_BOT_TOKEN': 'xoxb',
             'GH_TOKEN': 'ghp',
             'GH_HOST': 'github.example',
@@ -971,16 +972,23 @@ def test_filter_subprocess_env_opt_in_names_and_prefixes():
         }
     )
     assert env == {
-        'ROCKETRIDE_SUBPROCESS_ENV': 'SLACK_BOT_TOKEN, gh_*',
         'SLACK_BOT_TOKEN': 'xoxb',
         'GH_TOKEN': 'ghp',
         'GH_HOST': 'github.example',
     }
 
 
+def test_filter_subprocess_env_ignores_caller_writable_opt_in():
+    """ROCKETRIDE_* is writable by any authenticated client (account set_env),
+    so an opt-in spelled there must have no effect.
+    """
+    env = filter_subprocess_env({'ROCKETRIDE_SUBPROCESS_ENV': '*', 'RR_MASTER_KEY': 'fernet', 'PATH': '/usr/bin'})
+    assert env == {'ROCKETRIDE_SUBPROCESS_ENV': '*', 'PATH': '/usr/bin'}
+
+
 def test_filter_subprocess_env_star_passes_everything():
     """A bare '*' is the explicit opt-out back to full inheritance."""
-    src = {'ROCKETRIDE_SUBPROCESS_ENV': '*', 'RR_MASTER_KEY': 'fernet', 'PATH': '/usr/bin'}
+    src = {'RR_SUBPROCESS_ENV': '*', 'RR_MASTER_KEY': 'fernet', 'PATH': '/usr/bin'}
     assert filter_subprocess_env(src) == src
 
 
@@ -999,7 +1007,7 @@ async def test_subprocess_env_drops_engine_credentials(monkeypatch):
     monkeypatch.setenv('RR_DB_URL', 'postgresql://platform')
     monkeypatch.setenv('ROCKETRIDE_OPENAI_KEY', 'sk-pipe')
     monkeypatch.setenv('PATH', '/usr/bin')
-    monkeypatch.delenv('ROCKETRIDE_SUBPROCESS_ENV', raising=False)
+    monkeypatch.delenv('RR_SUBPROCESS_ENV', raising=False)
 
     env = await Task._build_subprocess_env(_env_task())  # no DB nodes
 

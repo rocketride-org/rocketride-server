@@ -142,13 +142,15 @@ copied_python_shim = False
 # code — plus anything it launches, e.g. a stdio MCP server — reads its
 # environment freely. So the child gets an allowlist, never a copy of the whole
 # environment: the process-runtime baseline below, the ROCKETRIDE_* namespace,
-# and whatever the operator opts in through ROCKETRIDE_SUBPROCESS_ENV.
+# and whatever the operator opts in through RR_SUBPROCESS_ENV.
 #
-# ROCKETRIDE_SUBPROCESS_ENV is a comma- or space-separated list of extra names;
-# a trailing '*' passes a prefix ('NOTION_API_KEY,AWS_*'). A bare '*' hands the
+# RR_SUBPROCESS_ENV is a comma- or space-separated list of extra names; a
+# trailing '*' passes a prefix ('SLACK_BOT_TOKEN,GH_*'). A bare '*' hands the
 # child the entire environment, which is the pre-allowlist behaviour — only
-# sensible on a single-user install.
-CONST_SUBPROCESS_ENV_OPT_IN = 'ROCKETRIDE_SUBPROCESS_ENV'
+# sensible on a single-user install. It lives in the operator-only RR_* tier
+# on purpose: ROCKETRIDE_* is writable by any authenticated client through the
+# account set_env command, so an opt-in there could be flipped by a user.
+CONST_SUBPROCESS_ENV_OPT_IN = 'RR_SUBPROCESS_ENV'
 
 CONST_SUBPROCESS_ENV_NAMES = frozenset(
     {
@@ -223,7 +225,11 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         # Executable override for the media toolkit nodes
         'MEDIA_TOOLKIT_FFMPEG',
         # Bare names individual node READMEs document as engine-host fallbacks
-        # for their API keys. New nodes should read ROCKETRIDE_* instead.
+        # for their API keys (directly, or through the vendor SDK's own
+        # default). New nodes should read ROCKETRIDE_* instead.
+        'OPENAI_API_KEY',
+        'ELEVENLABS_API_KEY',
+        'RIME_API_KEY',
         'NOTION_API_KEY',
         'EXA_API_KEY',
         'MEM0_API_KEY',
@@ -275,7 +281,7 @@ CONST_SUBPROCESS_ENV_PREFIXES = (
 
 
 def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple[str, ...]]:
-    """Parse ROCKETRIDE_SUBPROCESS_ENV into (exact names, prefixes), upper-cased."""
+    """Parse RR_SUBPROCESS_ENV into (exact names, prefixes), upper-cased."""
     names = set()
     prefixes = []
     for item in environ.get(CONST_SUBPROCESS_ENV_OPT_IN, '').replace(',', ' ').split():
@@ -618,10 +624,13 @@ class Task(DAPBase):
 
         The child never gets a copy of the engine's environment: it runs user
         pipeline code, so it only inherits the allowlist in
-        :func:`filter_subprocess_env` (runtime baseline + ROCKETRIDE_* +
-        operator opt-ins). Everything else the engine process was started
-        with — store, identity provider, database and encryption credentials —
-        stays behind.
+        :func:`filter_subprocess_env` (runtime baseline + ROCKETRIDE_* + the
+        services the child reaches itself + operator opt-ins). Anything the
+        engine process was started with that the allowlist does not name —
+        identity provider, platform database, encryption keys — stays behind.
+        Note the allowlist deliberately includes RR_STORE_SECRET_KEY,
+        RR_SIGNING_KEY and AWS_*: the child opens the object store and mints
+        fetch URLs itself, so pipeline code can read those values.
 
         Credential hygiene for the RocketRide cloud DB path (these live in the
         ROCKETRIDE_* namespace, so the allowlist alone does not cover them):
