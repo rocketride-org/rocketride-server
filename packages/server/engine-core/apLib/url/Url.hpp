@@ -106,9 +106,12 @@ public:
     /// @details
     /// 	Adds a new protocol type - usually a static declaration
     //-----------------------------------------------------------------
-    UrlConfig(const Mapper &mapper);
+    UrlConfig(const Mapper &mapper) { m_UrlConfig[mapper.protocol] = mapper; }
 
-    static Error registerMapper(UrlConfig::Mapper &mapper);
+    static Error registerMapper(UrlConfig::Mapper &mapper) {
+        m_UrlConfig[mapper.protocol] = _mv(mapper);
+        return {};
+    }
 
     //-----------------------------------------------------------------
     // Public API
@@ -126,7 +129,7 @@ private:
     /// @details
     ///		Our list of mapping providers
     //-----------------------------------------------------------------
-    static Mappers &mappers() noexcept;
+    inline static Mappers m_UrlConfig{};
 };
 
 //-------------------------------------------------------------------------

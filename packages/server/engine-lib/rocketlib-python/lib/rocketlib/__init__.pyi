@@ -838,10 +838,6 @@ def processArguments(args: List[str]) -> None:
     """Process engine command-line arguments."""
     ...
 
-def isCancelled() -> bool:
-    """Return whether the engine or the calling engine thread is cancelled."""
-    ...
-
 def getTask() -> Optional[Dict[str, Any]]:
     """Return the complete task-file JSON of the task currently executing
     in this process, or None when no task is running.

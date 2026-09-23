@@ -12,26 +12,14 @@ async def pipe_Validate(request: Request, pipeline: Dict[str, Any], source: Opti
     2. ``source`` field inside the pipeline config
     3. Implied source: the single component whose config.mode == 'Source'
 
-    The single-component form ``{'version', 'component'}`` is passed through
-    unwrapped — the engine dispatches on a root-level ``component`` key
-    (#2263). Full pipelines are wrapped in the ``{'pipeline': ...}`` envelope.
-
     Args:
-        pipeline (Dict[str, Any]): The configuration for the pipeline to validate,
-            or the single-component form ``{'version', 'component'}``.
+        pipeline (Dict[str, Any]): The configuration for the pipeline to validate.
         source (str, optional): Override source component ID.
 
     Returns:
         ResultBase: A standardized response indicating success or failure.
     """
     try:
-        # Single-component form (node config panel / IComponentValidatePayload).
-        # The engine dispatches on a root-level 'component'; wrapping it hides
-        # that key and the engine answers "'pipeline.components' must be an array".
-        if 'component' in pipeline and 'components' not in pipeline:
-            data = validatePipeline(pipeline)
-            return response(data)
-
         # Resolve source: explicit param > pipeline field > implied from components
         resolved_source = source or pipeline.get('source', None)
         if not resolved_source:

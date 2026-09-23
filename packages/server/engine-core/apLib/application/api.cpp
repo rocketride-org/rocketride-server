@@ -110,26 +110,4 @@ Text projectVersion() noexcept {
     return string::concat(versionComponents, "."_tv);
 }
 
-// One startup sequence for every entry point, over the platform's argv type
-#if ROCKETRIDE_PLAT_WIN
-int bootstrap(int argc, const Utf16Chr **argv, ErrorCode (*entry)()) noexcept
-#else
-int bootstrap(int argc, const char **argv, ErrorCode (*entry)()) noexcept
-#endif
-{
-    // Set the global commandline
-    cmdline() = {argc, argv};
-
-    // Ready the core, which resolves the exec path and installs the crash
-    // handlers on the way up
-    auto initScope = ::ap::init();
-    if (!initScope) return initScope.check().plat();
-
-    // Call the entry with blocking and translation of exceptions to errors
-    auto res = error::call(_location, [&] { return entry().value(); });
-
-    if (!res) return res.ccode().plat();
-    return *res;
-}
-
 }  // namespace ap::application

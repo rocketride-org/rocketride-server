@@ -47,8 +47,6 @@ On startup, Webhook, Chat, and Dropper publish an interface URL plus a public au
 
 ### Shared server lifecycle
 
-The source observes engine cancellation on explicit termination and idle-TTL expiry, so the task can run connected nodes' `endGlobal()` cleanup even when no request has arrived. Cleanup must finish within the supervisor's graceful-stop deadline; forced termination cannot guarantee resource release.
-
 The endpoint registers its target with the shared web server initialized by `ai.node` and waits until shutdown. It does not create a server itself. If that shared server is unavailable, startup raises an explanatory error; run these services through the RocketRide pipeline process that provides it. The published interface is reachable only where deployment networking, firewalls, and reverse proxies permit access.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->

@@ -38,9 +38,6 @@ Everything else — schema reflection, type inference, table auto-creation,
 session lifecycle — is handled here and is dialect-agnostic.
 """
 
-import re
-import threading
-
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -65,127 +62,6 @@ from ai.common.config import Config
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
 
-# Everything a driver or SQLAlchemy appends to its primary message that can
-# echo the executed statement or the values bound into it back to the caller:
-#
-#   * SQLAlchemy's StatementError repr ends in "[SQL: ...]" / "[parameters: ...]"
-#     / "[cached since ...]" / the sqlalche.me background link.
-#   * psycopg2 quotes the offending line of the statement as "LINE n: ..."
-#     followed by a caret marker, and psycopg2 interpolates bind values
-#     client-side, so that line can contain the parameters verbatim.
-#   * PostgreSQL DETAIL/HINT/CONTEXT/QUERY/STATEMENT blocks routinely restate
-#     the offending key values ("Key (email)=(a@b.com) already exists.").
-#   * ClickHouse appends a symbolised server stack trace ("Stack trace:\n\n0.
-#     DB::Exception::Exception(...) @ 0x...") the caller cannot act on, and
-#     quotes the failing statement fragment after "failed at position N".
-#   * ClickHouse also splices the WHOLE statement into the middle of a
-#     sentence rather than after it. Code 47 (UNKNOWN_IDENTIFIER) reads
-#     "Missing columns: 'x' while processing query: '<sql>', required columns:
-#     'x'" on the old parser and "Unknown expression identifier 'x' in scope
-#     <sql>" on the analyzer. This is the dialect where that echo matters
-#     most: clickhouse-driver sends no server-side parameters by default, so
-#     it interpolates binds client-side and the repeated statement carries the
-#     caller's literal, not a placeholder.
-#
-# The primary message alone -- "no such column: foo", "duplicate key value
-# violates unique constraint users_email_key" -- is what a caller needs in
-# order to fix their statement, and it carries no user data.
-#
-# Two alternation groups, because the two kinds of marker cannot be matched
-# the same way:
-#
-#   * The tails a library APPENDS can begin anywhere, mid-line included, so
-#     they stay bare substrings.
-#   * PostgreSQL's five context blocks are separate LINES of the server
-#     message. As bare substrings they also fired inside an application's own
-#     text: a PL/pgSQL `RAISE EXCEPTION 'Order rejected. HINT: contact
-#     billing'` was cut to "Order rejected.", and a MySQL message reading
-#     "Invalid QUERY: missing tenant filter" to "Invalid". So they are
-#     anchored to a preceding newline. The anchor is `\n` and not `(?m)^`
-#     deliberately: `^` also matches at position 0, which would make a message
-#     whose first token is one of the five all-detail and degrade it to the
-#     fallback constant.
-#
-# `[Ii]n scope ` carries a lookahead for the same reason: ClickHouse formats
-# the echoed query back out of its AST, so the phrase is followed by an
-# uppercase statement keyword there, while in prose ("not in scope for this
-# trigger") it is not. The optional `\(` in front of the keyword is not
-# cosmetic: a scope that is itself a subquery or a CTE body is formatted
-# through `ASTSubquery`, which parenthesises it, so the analyzer prints
-# `in scope (SELECT ...)` -- the same echo, one character further along, and it
-# carries the caller's inlined bind values just as the bare form does.
-#
-# The capital `I` is not cosmetic either, and is in fact the common case. The
-# analyzer has two ways of appending the scope: a few messages splice a
-# lowercase ` in scope {}` into the middle of a sentence ("Unknown expression
-# identifier '{}' in scope {}"), but dozens per release end the sentence first
-# and start a new one -- "There are no table sources. In scope {}", "Compound
-# identifier '{}' cannot be resolved as {}. In scope {}", "Multiple expressions
-# with the same alias {}. In scope {}". Both substitute the same
-# `formatASTForErrorMessage` output, so both carry the caller's inlined binds;
-# matching only the lowercase form left the majority of the analyzer's
-# messages echoing the statement. The other two ClickHouse phrases are
-# distinctive enough on their own.
-_DB_ERROR_DETAIL = re.compile(
-    r"""(?:
-        \s*(?:
-              \[SQL:
-            | \[parameters:
-            | \[cached\ since
-            | \[generated\ in
-            | \(Background\ on\ this\ error
-            | LINE\ \d+:
-            | Stack\ trace:
-            | failed\ at\ position
-            | while\ processing\ query:
-            | ,\ required\ columns:
-            | [Ii]n\ scope\ (?=\(?(?:SELECT|INSERT|WITH|CREATE|ALTER|DROP|DELETE|UPDATE|EXPLAIN)\b)
-        )
-      | \n[ \t]*(?:
-              DETAIL:
-            | HINT:
-            | CONTEXT:
-            | QUERY:
-            | STATEMENT:
-        )
-    )""",
-    re.VERBOSE,
-)
-
-
-# Returned when a message carries no primary sentence at all, so the caller
-# always gets a non-empty string and never the statement echo.
-_DB_ERROR_FALLBACK = 'Database error'
-
-# A SQLSTATE as the standard defines it: five characters, digits and capitals.
-# ODBC-backed drivers (pyodbc and friends) report `(sqlstate, message)` where
-# pymysql reports `(errno, message)`, so the integer branch in
-# `_format_db_error` misses them. Matched strictly so that a driver which
-# merely happens to put two strings in `args` keeps the old behaviour.
-_SQLSTATE = re.compile(r'\A[0-9A-Z]{5}\Z')
-
-
-def _strip_statement_detail(message: str) -> str:
-    """Cut a driver/SQLAlchemy message down to its primary sentence.
-
-    Everything from the first ``_DB_ERROR_DETAIL`` marker onwards is dropped,
-    because that tail is where the executed statement and its bind parameters
-    live. Returns the input unchanged when there is no marker.
-
-    When the message is nothing but detail there is no primary sentence to
-    keep, so the fallback is a neutral constant rather than the first line:
-    that line would be the ``[SQL: ...]`` echo this function exists to remove,
-    and handing it back would defeat the whole point on the one input where it
-    matters most.
-
-    Module-level rather than a method so ``_format_db_error`` stays usable
-    when it is bound onto a stub IGlobal (see tests/database/test_execute_session.py).
-    """
-    match = _DB_ERROR_DETAIL.search(message)
-    trimmed = message[: match.start()] if match else message
-    trimmed = trimmed.strip()
-    return trimmed or _DB_ERROR_FALLBACK
-
 
 class DatabaseGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any relational database node."""
@@ -200,21 +76,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     max_validation_attempts: int = 5
     allow_execute: bool = False
     max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
-
-    # Serialises this node's schema re-reflection: `refresh_schema`'s full
-    # table walk against `_insertData`'s lazy rebuild of `schema`, and either
-    # of those against another copy of itself. Both writers rebind `schema` and
-    # `db_schema` wholesale, and neither is read by any other IGlobal, so the
-    # state this protects is exactly one node's -- hence one lock per IGlobal,
-    # created in `beginGlobal`. A module-level lock covered the same races but
-    # also made them cross-node: a refresh walking a wide database (no
-    # statement timeout on the engine) stalled the answers lane of every DB
-    # node in the engine process, which the pre-refresh_schema code never did.
-    # `None` here rather than a real lock so that a global which never ran
-    # `beginGlobal` fails loudly instead of silently sharing class state:
-    # `DatabaseInstanceBase._reflectLock` turns that into a named RuntimeError
-    # before either caller enters its `with`.
-    reflect_lock: Optional[threading.Lock] = None
 
     # ------------------------------------------------------------------
     # Abstract interface — derived classes MUST implement these two methods
@@ -262,158 +123,23 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # ------------------------------------------------------------------
 
     def _format_db_error(self, exc: Exception) -> str:
-        """Return the driver's own message, cut at the first statement echo.
+        """Return a user-facing error string using DB/driver payload when present.
 
-        This string is user-facing: ``_executeRawQuery`` re-raises it as a
-        ``RuntimeError`` that reaches the ``execute`` tool caller, so it must
-        say what went wrong without echoing back what was run.
-
-        Read "never the statement or its parameters" as "never the statement
-        the caller sent, nor a value they bound, as a repeated block" -- the
-        exact promise is spelled out under REMOVED / PASSED THROUGH below,
-        because a driver's own primary sentence can still quote the token it
-        stopped on, and overclaiming here is how the ClickHouse leak dylan
-        found in review 5215826786 stayed invisible.
-
-        ``str(exc)`` is the wrong answer for a SQLAlchemy ``StatementError``:
-        its repr appends ``[SQL: ...]`` and ``[parameters: ...]``, which is
-        exactly the data that must stay in the server log. So each driver
-        shape is unwrapped explicitly and only the primary message is kept:
-
-        * pymysql puts ``(errno, message)`` in ``.orig.args``
-          -> ``Error <code>: <message>``.
-        * clickhouse-driver does NOT: its ``ServerException`` carries the code
-          on ``.code`` and the text on ``.message``, so those attributes are
-          read directly -> ``Error <code>: <message>``. The message itself
-          carries the server stack trace and, for a syntax error, the
-          statement fragment after ``failed at position``; for an unknown
-          identifier it repeats the whole statement mid-sentence, after
-          ``while processing query:`` or ``in scope`` (bare, or parenthesised
-          when the scope is a subquery or a CTE body). All of those are cut by
-          the stripper's markers. That last pair is not cosmetic: the driver
-          sends no server-side parameters by default, so the statement it
-          echoes back has the caller's bind values already interpolated into
-          it. Note the two layers differ:
-          ``clickhouse_driver.dbapi`` raises ``OperationalError(ServerException)``,
-          while ``clickhouse+native://`` -- what the db_clickhouse node uses --
-          is clickhouse-sqlalchemy's connector and raises its own
-          ``DatabaseException``, a plain ``Exception`` carrying the same
-          ``ServerException`` in ``.orig``. Both unwrap to the same place.
-        * psycopg2 exposes the server's primary message on ``.orig.diag``;
-          its ``str()`` also carries the ``LINE n:`` echo of the statement,
-          which psycopg2 has already interpolated the bind values into.
-          ``diag.message_primary`` is returned WITHOUT the stripper, because
-          the server has already split DETAIL / HINT / CONTEXT / QUERY /
-          STATEMENT and the ``LINE n:`` echo onto ``diag`` fields of their
-          own: there is no tail left in it, so a marker firing there could
-          only be truncating the application's own wording.
-        * ODBC-backed drivers (pyodbc and friends) report
-          ``(sqlstate, message)`` where pymysql reports ``(errno, message)``,
-          so a five-character SQLSTATE in ``args[0]`` is prefixed the same way
-          an integer errno is -> ``Error <sqlstate>: <message>``. No node in
-          this repo uses such a driver today; the branch is here so the
-          generic one below cannot return the bare code.
-        * sqlite3 (and anything else) puts the bare message in ``.orig.args[0]``.
-
-        Every branch runs through ``_strip_statement_detail`` as a backstop,
-        so a driver shape not enumerated here still cannot leak the tail --
-        every branch except the ``diag.message_primary`` one above, which the
-        server has already separated from its context blocks and which
-        therefore has no tail for the stripper to find.
-
-        What this does and does not promise, stated exactly, because the
-        difference matters and is easy to overclaim:
-
-        * REMOVED: SQLAlchemy's ``[SQL: ...]`` / ``[parameters: ...]`` /
-          ``[cached since ...]`` tail, and the drivers' trailing blocks --
-          psycopg2's ``LINE n:`` echo, PostgreSQL's DETAIL / HINT / CONTEXT /
-          QUERY / STATEMENT *as lines of the message* (the five words are
-          left alone in the middle of a sentence, where they belong to the
-          application, not to the server), ClickHouse's server stack trace,
-          its ``failed at position`` echo, and the statement it repeats after
-          ``while processing query:`` / ``in scope`` together with the
-          ``, required columns:`` list that follows.
-        * PASSED THROUGH: the driver's own primary sentence, as the database
-          wrote it. It can quote the fragment of the statement the parser
-          stopped on (sqlite3 ``near "'hunter2'": syntax error``, MySQL 1064
-          ``near '...' at line 1``, psycopg2 ``syntax error at or near ...``),
-          and because pymysql and psycopg2 interpolate bind values
-          client-side, such a fragment can contain a bound value. It can also
-          quote a value the statement merely TOUCHED rather than carried:
-          PostgreSQL's ``invalid input syntax for type integer: "<value>"``
-          names the offending row value for an ``INSERT ... SELECT`` or a
-          ``CAST``, which may come from another table.
-
-        That is accepted, not overlooked. The recipient holds
-        ``allow_execute``, so they can already read anything the database user
-        can read by writing a ``SELECT``; passing the message through does not
-        widen their read access, it only tells them why their own statement
-        failed. Blanking quoted tokens generically is not the answer either,
-        because MySQL quotes identifiers with single quotes too ("Unknown
-        column 'foo' in 'field list'"), so the redaction would delete the one
-        thing the caller needs. The full exception, statement and binds
-        included, stays in the server log.
+        Prefer numeric code and provider message when available, otherwise
+        fallback to the exception string.
         """
         try:
             # SQLAlchemy wraps driver exceptions in DBAPIError; the original
-            # driver exception lives in .orig.
-            orig = getattr(exc, 'orig', None)
-            if orig is None:
-                orig = exc
-
+            # driver exception lives in .orig, which carries (code, message)
+            # in its .args tuple.
+            orig = getattr(exc, 'orig', exc)
             args = getattr(orig, 'args', ())
-            is_seq = isinstance(args, (list, tuple))
-
-            if is_seq and len(args) >= 2 and isinstance(args[0], int):
-                return _strip_statement_detail(f'Error {args[0]}: {args[1]}')
-
-            # psycopg2: diag.message_primary is the server message with the
-            # LINE/DETAIL/HINT context already split off.
-            diag = getattr(orig, 'diag', None)
-            primary = getattr(diag, 'message_primary', None) if diag is not None else None
-            if isinstance(primary, str) and primary.strip():
-                code = getattr(orig, 'pgcode', None)
-                primary = primary.strip()
-                # Returned WITHOUT the stripper. `message_primary` is the one
-                # field the server has already separated from its own context
-                # blocks -- psycopg2 puts DETAIL / HINT / CONTEXT / QUERY /
-                # STATEMENT and the `LINE n:` echo on `diag` fields of their
-                # own -- so there is no tail here to cut, and running the
-                # markers over it could only truncate an application's text
-                # (`RAISE EXCEPTION 'Order rejected. HINT: contact billing'`).
-                return f'Error {code}: {primary}' if isinstance(code, str) and code else primary
-
-            # clickhouse-driver's ServerException carries the code on `.code`
-            # and the text on `.message`, not as an (int, str) pair in args, so
-            # the numeric branch above misses it and args[0] alone would drop
-            # the code that identifies the failure.
-            code = getattr(orig, 'code', None)
-            message = getattr(orig, 'message', None)
-            if isinstance(code, int) and isinstance(message, str) and message.strip():
-                return _strip_statement_detail(f'Error {code}: {message}')
-
-            # ODBC-backed drivers report `(sqlstate, message)`. Without this
-            # branch the generic one below returned the five-character code
-            # alone -- the half of the pair a caller cannot act on.
-            if (
-                is_seq
-                and len(args) >= 2
-                and isinstance(args[0], str)
-                and _SQLSTATE.match(args[0])
-                and isinstance(args[1], str)
-                and args[1].strip()
-            ):
-                return _strip_statement_detail(f'Error {args[0]}: {args[1]}')
-
-            # sqlite3 and the generic DBAPI shape: args[0] is the message.
-            if is_seq and args and isinstance(args[0], str) and args[0].strip():
-                return _strip_statement_detail(args[0])
-
-            if orig is not exc:
-                return _strip_statement_detail(str(orig))
+            if isinstance(args, (list, tuple)) and len(args) >= 2 and isinstance(args[0], int):
+                code, msg = args[0], args[1]
+                return f'Error {code}: {str(msg)}'.strip()
         except Exception:
             pass
-        return _strip_statement_detail(str(exc))
+        return str(exc).strip()
 
     def validateConfig(self):
         """Quick save-time validation: probe the database with SELECT 1.
@@ -615,15 +341,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             # Populate the schema cache with data columns only.  The 'id' PK
             # is auto-generated by the DB and must not appear in insert
             # value mappings.
-            #
-            # Built locally and published in a single assignment, for the same
-            # reason `_getTableSchema` is: this runs outside `reflect_lock`,
-            # and the table already exists by the time the loop starts, so a
-            # second first-batch can be in `_insertData` right now. Filling
-            # `self.schema` key by key let it snapshot a truthy but incomplete
-            # map and silently drop the columns not yet added.
-            schema = {col.name: (str(col.type), '') for col in columns}
-            self.schema = schema
+            self.schema = {}
+            for col in columns:
+                self.schema[col.name] = (str(col.type), '')
 
             return True
 
@@ -645,23 +365,14 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
                 return None
 
             columns = inspector.get_columns(table)
-            schema: Dict[str, Tuple[str, str]] = {}
+            self.schema = {}
             for column in columns:
                 col_name = column['name']
                 col_type = column['type']  # renamed to avoid shadowing the 'type' builtin
                 comment = column.get('comment', '')
-                schema[col_name] = (str(col_type), comment)
+                self.schema[col_name] = (str(col_type), comment)
 
-            # Publish in a single assignment. Building into `self.schema` and
-            # filling it column by column made every intermediate state visible:
-            # `_insertData` reads this map to decide which columns to bind, so a
-            # reader arriving mid-rebuild saw a truthy but incomplete map and
-            # silently dropped the columns not yet added. Assigning at the end
-            # also means a reflection that fails above leaves the previous map
-            # in place instead of a half-built one.
-            self.schema = schema
-
-            return [(col_name, str(col_type)) for col_name, (col_type, _comment) in schema.items()]
+            return [(col_name, str(col_type)) for col_name, (col_type, _comment) in self.schema.items()]
 
         except Exception as e:
             warning(f'Unable to retrieve database schema for "{table}": {e}')
@@ -713,15 +424,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         ``EXPLAIN`` is standard SQL supported by MySQL and PostgreSQL; both
         engines raise an exception for syntactically or semantically invalid
         queries, which is exactly the signal we need.
-
-        The failure message goes through ``_format_db_error`` rather than
-        ``str(e)``. This error does not stop at the retry loop: it is carried
-        out through ``_buildSQLQuery`` into ``get_sql``'s ``error`` field and
-        from there into ``get_data``'s, and NEITHER of those tools is gated on
-        ``allow_execute`` the way ``execute`` is. ``str()`` of a SQLAlchemy
-        ``StatementError`` appends ``[SQL: ...]`` / ``[parameters: ...]``, so
-        the raw string handed the full ``EXPLAIN`` statement to a caller who
-        was never granted raw SQL. The full exception still goes to the log.
         """
         if not self.engine:
             return False, 'Database engine not initialized'
@@ -730,18 +432,13 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
                 conn.execute(text(f'EXPLAIN {query}'))
             return True, ''
         except Exception as e:
-            warning(f'EXPLAIN validation failed for the generated query: {e}')
-            return False, self._format_db_error(e)
+            return False, str(e)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def beginGlobal(self) -> None:
-        # One reflection lock per node. Created before anything can reflect, so
-        # `refresh_schema` and `_insertData` always find a real lock here.
-        self.reflect_lock = threading.Lock()
-
         # Resolve connection parameters via the subclass-provided mapping.
         raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         params = self._connection_params(raw)
@@ -798,17 +495,15 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         # Reflect the target table schema; it may not exist yet if this
         # pipeline is configured to write to a brand-new table.
-        #
-        # `_getTableSchema` publishes `self.schema` itself when the reflection
-        # succeeds, so there is nothing to assign on that branch: rebuilding
-        # the same map from the pairs it returns only blanked the reflected
-        # column comment, and `_insertData`, the sole reader, indexes this map
-        # by key. The missing-table branch is the one case it leaves untouched.
-        if self._getTableSchema(self.table) is None:
+        table_schema = self._getTableSchema(self.table)
+        if table_schema is None:
             warning(
                 f'Table "{self.table}" does not exist in database "{self.database}". It will be created automatically when data is received. If you prefer to create it manually, please do so before running the pipeline.'
             )
             self.schema = {}
+        else:
+            # Store as {col_name: (type_str, comment)} to match the schema cache format.
+            self.schema = {name: (col_type, '') for name, col_type in table_schema}
 
     def endGlobal(self) -> None:
         if self.tx_registry:

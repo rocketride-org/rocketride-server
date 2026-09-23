@@ -33,7 +33,6 @@ from .engine import expand
 from .engine import getServiceDefinition
 from .engine import getServiceDefinitions
 from .engine import getTask
-from .engine import isCancelled
 from .engine import getVersion
 from .engine import isAppMonitor
 from .engine import isLevelEnabled
@@ -111,7 +110,6 @@ __all__ = [
     'getServiceDefinition',
     'getServiceDefinitions',
     'getTask',
-    'isCancelled',
     'getVersion',
     'IControl',
     'IDict',

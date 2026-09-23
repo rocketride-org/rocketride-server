@@ -22,13 +22,63 @@
 // SOFTWARE.
 // =============================================================================
 
-#include <apLib/ap.h>
-
+#pragma once
 #include <csignal>
 
-namespace ap::application {
+// Forward declarations of exception handlers
+LONG WINAPI
+unhandledExceptionFilter(::PEXCEPTION_POINTERS pExceptionInfo) noexcept;
+void abortHandler(int signal) noexcept;
 
-namespace {
+// The main entry point for an rocketride based executable, in the windows
+// case the strings are ucs2 which we convert to utf8 inline
+int wmain(int argc, const WCHAR **argv) noexcept {
+    using namespace ap;
+
+    // On exit check the heap
+#if ROCKETRIDE_BUILD_DEBUG
+    // We know there are leaks, for now this just gets in the way so disable it
+    // std::atexit(reinterpret_cast<void(__cdecl
+    // *)(void)>(::_CrtDumpMemoryLeaks));
+#endif
+
+    // Set the global commandline
+    ::ap::application::cmdline() = {argc, argv};
+
+    // Initialize apLib
+    auto initScope = ::ap::init();
+
+    // Determine our app path, in a frame so we don't park the stack
+    // allocation for the duration of the apps run
+    {
+        std::array<Utf16Chr, MAX_PATH> execPath = {};
+
+        if (!::GetModuleFileNameW(NULL, &execPath[0], MAX_PATH))
+            return ::ap::log::write(_location,
+                                    "Failed to determine app path: {,x0}",
+                                    ::GetLastError());
+
+        // Set this as the exec path
+        ::ap::application::cmdline().setExecPath(&execPath[0]);
+    }
+
+    // Don't set the unhandled exception filter if there's a debugger attached--
+    // if a crash occurs while debugging, you want to be taken to the site of
+    // the crash, not to the unhandled exception filter
+    if (!::IsDebuggerPresent()) {
+        ::SetUnhandledExceptionFilter(unhandledExceptionFilter);
+        std::signal(SIGABRT, abortHandler);
+    }
+
+    // Call main with blocking and translation of exceptions to errors
+    auto res = ::ap::error::call(
+        _location, [&] { return ::ap::application::Main().value(); });
+
+    // Return the error code if one was returned
+    if (!res) return res.ccode().plat();
+
+    return *res;
+}
 
 LONG WINAPI
 unhandledExceptionFilter(::PEXCEPTION_POINTERS pExceptionInfo) noexcept {
@@ -76,15 +126,3 @@ void abortHandler(int signal) noexcept {
     // Report the error and exit
     dev::fatality(_location, APERR(Ec::Fatality, errorStr));
 }
-
-}  // namespace
-
-// Skipped under a debugger so a crash breaks at the fault site, not here
-void installCrashHandlers() noexcept {
-    if (!::IsDebuggerPresent()) {
-        ::SetUnhandledExceptionFilter(unhandledExceptionFilter);
-        std::signal(SIGABRT, abortHandler);
-    }
-}
-
-}  // namespace ap::application

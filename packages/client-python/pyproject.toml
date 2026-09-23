@@ -69,14 +69,6 @@ test = [
     "pytest-cov>=4.0.0",
     "python-dotenv>=1.0.0",
     "rocketride[otel]",
-    # The cmark-gfm oracle for the pipediff Markdown-escaping tests: it wraps
-    # the same renderer GitHub uses for comments. CI does not install this
-    # extra — it runs pytest through the bundled engine — so it gets the same
-    # wheel from tests/requirements.txt via the client-python:setup-test-deps
-    # step, and the cross-check runs there rather than skipping. The escaping
-    # rules are also asserted without it (see tests/test_pipediff_reporters.py)
-    # for an interpreter that has neither.
-    "cmarkgfm>=2024.1.14",
 ]
 
 otel = [
@@ -93,18 +85,8 @@ Repository = "https://github.com/rocketride-ai/rocketride-server.git"
 [project.scripts]
 rocketride = "rocketride.cli.main:main"
 
-# `rocketride_common` is a source library shared with the TypeScript client, not
-# a separate distribution: `rocketride.cli.main` imports it at module scope (via
-# `cli/utils/env.py`), so the CLI cannot start without it. The builder stages it
-# into `src/` before building the released wheel, but the checked-out source tree
-# is the one layout where the two packages sit apart — which is exactly the
-# layout `pip install ./packages/client-python` (and the pipe-diff action's
-# `install-from`) builds from. Listing the sibling source root here makes both
-# find the shared package; the entry is simply skipped when the directory is
-# absent, so the builder's staged layout is unaffected and the released
-# wheel/sdist still carry `rocketride_common` from `src/` exactly as before.
 [tool.setuptools.packages.find]
-where = ["src", "../client-common/python/src"]
+where = ["src"]
 include = ["rocketride*"]
 
 [tool.setuptools.package-data]

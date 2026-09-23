@@ -1188,10 +1188,6 @@ export function createTestEngine(): TestEngine {
 				await client.cprofileReportTree(ctx.pipelineToken || null);
 				return;
 			}
-			case 'cprofileThreads': {
-				await client.cprofileThreads(ctx.pipelineToken || null);
-				return;
-			}
 
 			// Database
 			case 'database.query':

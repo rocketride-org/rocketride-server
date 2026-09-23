@@ -173,28 +173,57 @@ public:
                                 TextView name, Args &&...args) noexcept;
 
     // Accessor for the global factory set
-    static Set &factories() noexcept;
+    static Set &factories() noexcept {
+        static Set factorySet;
+        return factorySet;
+    }
 
     // Register a factory in the factory set
     template <typename... Args>
     static Error registerFactory(Args &&...args) noexcept {
+        auto registerEntry = [&](const FACTORY &factory) {
+            auto expansions = expand(factory);
+            if (expansions.empty())
+                return APERRL(Error, Ec::InvalidParam, "Invalid factory",
+                              factory);
+
+            for (auto &expanded : expand(factory)) {
+                auto [iter, inserted] = factories().insert(expanded);
+                if (!inserted)
+                    return APERRL(Error, Ec::InvalidParam,
+                                  "Factory already registered", factory);
+                LOG(Factory, "Register", expanded);
+            }
+
+            return Error{};
+        };
+
         // Use error's || operator here, through the fold expression, will
         // call all factory registrations but return the first error
-        return (registerFactoryEntry(args) || ...);
+        return (registerEntry(args) || ...);
     }
 
     // De-register a factory
     template <typename... Args>
     static void deregisterFactory(const Args &...args) noexcept {
-        (deregisterFactoryEntry(args), ...);
+        auto deregisterEntry = [&](const FACTORY &arg) {
+            for (auto &expanded : expand(arg))
+                Factory::factories().erase(expanded);
+        };
+        (deregisterEntry(args), ...);
     }
 
-    // Register/de-register a single factory
-    static Error registerFactoryEntry(const FACTORY &factory) noexcept;
-    static void deregisterFactoryEntry(const FACTORY &factory) noexcept;
-
 private:
-    static std::vector<FACTORY> expand(const FACTORY &factory) noexcept;
+    static std::vector<FACTORY> expand(const FACTORY &factory) noexcept {
+        std::vector<FACTORY> result;
+        auto fields = string::view::tokenizeArray<10>(factory.name, ',');
+        for (auto &&name : fields) {
+            if (!name) break;
+            result.push_back(
+                {factory.type, name, factory.flags, factory.method});
+        }
+        return result;
+    }
 #if defined(ROCKETRIDE_FACTORY_DEBUG)
     // Declare our instance structure, it contains callbacks to render
     // the type information and live string conversion for live stats

@@ -57,9 +57,8 @@ pinned to journey order with `sidebar_position`:
 
 Single-language extras are allowed for surface that exists in one SDK
 (currently `database-sequelize` (13) and `database-drizzle` (14) for
-TypeScript, and `otel-bridge` (13) and `pipe-diff` (14) for Python); they must
-be declared in `scripts/validate-client-docs.py` (`TS_ONLY_PAGES` /
-`PY_ONLY_PAGES`).
+TypeScript, and `otel-bridge` (13) for Python); they must be declared in `scripts/validate-client-docs.py`
+(`TS_ONLY_PAGES` / `PY_ONLY_PAGES`).
 
 Method **tables live only in `reference.md`** (plus the constructor/env tables
 on `configuration.md`). Guides carry workflow prose and examples and link into

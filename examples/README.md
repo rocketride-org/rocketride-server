@@ -196,7 +196,3 @@ const result = await client.use({ filepath: 'rag-pipeline.pipe' });
 ```
 
 See the [Pipelines guide](../docs/agents/context/ROCKETRIDE_PIPELINES.md) and [Component Reference](../docs/agents/context/ROCKETRIDE_COMPONENT_REFERENCE.md) for detailed documentation.
-
-## Guides
-
-- [Semantic pipeline diff](pipe-diff-example.md) — a raw `git diff` next to `rocketride diff` on the same edit to `rag-pipeline.pipe`, plus the PR-comment recipe.

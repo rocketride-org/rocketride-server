@@ -99,40 +99,10 @@ export interface CProfileTreeNode {
 export interface CProfileReportTreeResponse {
 	/** Root node of the call tree (synthetic '<root>' wrapper). */
 	tree: CProfileTreeNode | null;
-	/** How long the profiled threads ran — the selected thread, or all of them summed. */
+	/** Total cumulative time across all profiled functions. */
 	total_time: number;
 	/** Total number of function calls recorded. */
 	total_calls: number;
-	/** Error message if no data is available. */
-	error?: string;
-}
-
-// =============================================================================
-// CPROFILE THREAD TYPES
-// =============================================================================
-
-/** One profiled thread, as listed by rrext_cprofile_threads. */
-export interface CProfileThreadInfo {
-	/** Thread id within the session; pass it to rrext_cprofile_report_tree as `thread`. */
-	id: number;
-	/** Thread name, or null if the profiler never resolved one. Not unique. */
-	name: string | null;
-	/** System thread id (Python's threading.get_ident()) — tells apart threads that share a name. */
-	tid: number;
-	/** Time the profiler attributed to this thread, in seconds. */
-	ttot: number;
-	/** Number of times the thread was scheduled while profiled. */
-	sched_count: number;
-	/** Number of distinct functions recorded on this thread. */
-	functions: number;
-	/** Total number of calls recorded on this thread. */
-	calls: number;
-}
-
-/** Response from rrext_cprofile_threads. */
-export interface CProfileThreadsResponse {
-	/** Threads of the last completed session, busiest first. */
-	threads: CProfileThreadInfo[];
 	/** Error message if no data is available. */
 	error?: string;
 }

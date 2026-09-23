@@ -873,22 +873,11 @@ function makeCompileEngineAction(options = {}) {
 
 			// Copy engine to dist
 			await mkdir(DIST_DIR);
-			const engineDir = path.join(BUILD_ROOT, 'engine');
 			const exeExt = isWindows() ? '.exe' : '';
-			await syncFile(path.join(engineDir, 'engine' + exeExt), path.join(DIST_DIR, 'engine' + exeExt), { package: true });
-
-			// Copy the shared engine module the executable loads
-			const engineModName = isWindows() ? 'engine.dll' : isMac() ? 'libengine.dylib' : 'libengine.so';
-			const engineModSrc = path.join(BUILD_ROOT, 'engine-mod', engineModName);
-			if (await exists(engineModSrc)) {
-				await syncFile(engineModSrc, path.join(DIST_DIR, engineModName), { package: true });
-			} else {
-				throw new Error(`Engine shared module not found: ${engineModSrc}`);
-			}
+			await syncFile(path.join(BUILD_ROOT, 'packages', 'engine', 'engine' + exeExt), path.join(DIST_DIR, 'engine' + exeExt), { package: true });
 
 			if (isWindows()) {
-				await syncFile(path.join(engineDir, 'engine.exe.pdb'), path.join(DIST_DIR, 'engine.exe.pdb'));
-				await syncFile(path.join(BUILD_ROOT, 'engine-mod', 'engine.dll.pdb'), path.join(DIST_DIR, 'engine.dll.pdb'));
+				await syncFile(path.join(BUILD_ROOT, 'packages', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
 			} else {
 				// crashpad_handler must ship next to the engine (runtime finds it via
 				// execDir()). Windows keeps its native MiniDumpWriteDump path.
@@ -901,12 +890,9 @@ function makeCompileEngineAction(options = {}) {
 				}
 
 				// Retain generated symbols (if dump_syms ran) for later symbolication.
-				// engineMod carries the engine's code, the launcher is a stub
-				for (const symbolsSrc of [path.join(engineDir, 'symbols'),
-				                          path.join(BUILD_ROOT, 'engine-mod', 'symbols')]) {
-					if (await exists(symbolsSrc)) {
-						await syncDir(symbolsSrc, path.join(DIST_DIR, 'symbols'), { mirror: false, package: true });
-					}
+				const symbolsSrc = path.join(BUILD_ROOT, 'packages', 'engine', 'symbols');
+				if (await exists(symbolsSrc)) {
+					await syncDir(symbolsSrc, path.join(DIST_DIR, 'symbols'), { mirror: false, package: true });
 				}
 			}
 
@@ -1285,7 +1271,7 @@ function makePackageAction(options = {}) {
 		description: 'Packaging server',
 		run: async (_ctx, _task) => {
 			const { manifestFilename, distFilename, symDistFilename, distFile, symDistFile } = await getPackageInfo(options);
-			const symFilenames = isWindows() ? ['engine.exe.pdb', 'engine.dll.pdb'] : null;
+			const symFilename = isWindows() ? 'engine.pdb' : null;
 
 			const sourceHash = await getState('server.buildHash');
 			const packageHash = await getState('server.packageHash');
@@ -1314,7 +1300,7 @@ function makePackageAction(options = {}) {
 				if (symDistFile) {
 					_task.output = `Packaging ${symDistFilename}...`;
 					await removeFile(symDistFile);
-					await createArchive(symDistFile, DIST_DIR, symFilenames);
+					await createArchive(symDistFile, DIST_DIR, [symFilename]);
 					_task.output = `Packaged ${symDistFilename}`;
 				}
 
