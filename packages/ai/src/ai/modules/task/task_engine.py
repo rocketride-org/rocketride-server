@@ -312,11 +312,18 @@ def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
 
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
 # `nosaas` services, but a pipeline can reach the engine without the canvas,
-# so the engine enforces the same rule itself. The MCP client is refused only
-# in stdio mode: that transport launches a command inside the engine's
-# container. Its HTTP transports are fine.
+# so the engine enforces the same rule itself. Any service built on the MCP
+# client node is refused in stdio mode: that transport launches a command
+# inside the engine's container. Its HTTP transports are fine. Matching is on
+# the node module, not the provider name: several services share the node
+# (tool_butterbase is one) and provider lookup is case-insensitive.
 CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
-CONST_MCP_CLIENT_PROVIDER = 'mcp_client'
+CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
+
+# Task subprocesses of a hosted engine get this flag on their command line.
+# Pipeline-supplied args can add flags but not remove this one, so nodes can
+# rely on it (the MCP stdio client refuses to start when it is present).
+CONST_HOSTED_CHILD_FLAG = '--hosted'
 
 
 def _service_capabilities(service: Any) -> List[str]:
@@ -348,7 +355,7 @@ def saas_pipeline_violation(
         if CONST_SAAS_BLOCKED_CAPABILITY in _service_capabilities(service):
             return f'Node "{label}" ({provider}) is not available on RocketRide Cloud.'
 
-        if provider == CONST_MCP_CLIENT_PROVIDER:
+        if str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
             try:
                 transport = str(get_node_config(provider, component.get('config') or {}).get('transport') or 'stdio')
             except Exception:
@@ -2289,6 +2296,10 @@ class Task(DAPBase):
                     '--data_host=127.0.0.1',
                 ]
             )
+            # Tell the task it runs under a hosted engine (see CONST_HOSTED_CHILD_FLAG)
+            if _is_saas_engine():
+                child_args.append(CONST_HOSTED_CHILD_FLAG)
+
             # Pass model server address if configured
             modelserver = self._server._config.get('modelserver')
             if modelserver:

@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -94,6 +95,15 @@ class McpStdioClient:
     def start(self) -> None:
         if self._proc is not None:
             raise RuntimeError('MCP stdio client already started')
+
+        # A hosted engine starts its tasks with --hosted (task_engine
+        # CONST_HOSTED_CHILD_FLAG). There, pipelines must not launch processes
+        # in the engine's container. The engine also refuses these pipelines
+        # before launch; this is the second layer.
+        if '--hosted' in sys.argv:
+            raise RuntimeError(
+                'The stdio MCP transport is not available on RocketRide Cloud. Use streamable-http or sse.'
+            )
 
         env = dict(os.environ)
         env['PYTHONUNBUFFERED'] = '1'
