@@ -131,18 +131,16 @@ floors) and on an added export that was never `shell:freeze`d. The second step
 regenerates the floors from the immutable frozen versions and fails on any diff,
 so a floor cannot be hand-edited to launder a removed export past tsc.
 
-The job runs two more gates:
+The job runs one more gate:
 
 ```bash
 node scripts/build.js client-typescript:regen && git diff --exit-code -- \
   packages/client-typescript/src/contract-check.generated.ts \
   packages/client-typescript/contract/index.ts \
   packages/client-typescript/contract/latest.ts
-node nodes/scripts/gen-credentials.mjs --check   # ./builder nodes:credentials-check
 ```
 
-The first regen-checks the client-typescript SDK contract floors the same way;
-the second fails if the generated credentials catalog has drifted.
+It regen-checks the client-typescript SDK contract floors the same way.
 
 ### Helm — `helm-lint` (blocking, `deploy/helm/**` PRs only)
 
