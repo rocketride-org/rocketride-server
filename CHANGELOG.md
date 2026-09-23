@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — since 2026-09-22
+
+## [3.4.0] - 2026-09-22
 
 <!-- Everything below ships in the next release. There is deliberately no
      [3.4.0] section here: that release was cut on `stage` (#1654) and then
