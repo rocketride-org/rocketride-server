@@ -1,8 +1,12 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 """Credential catalog + per-caller readiness for the integrations surface.
 
-The catalog (credentials.json, sibling file) describes the config *fields*
-credentialed nodes need; ROCKETRIDE_* names are curated *suggestions*.
+The catalog is derived from the service definitions the engine already hands
+us: a property carrying an "env" member declares which account variable
+supplies it, and "secret" marks it as a credential rather than a plain
+setting. There is no second source of truth to keep in sync — the node's own
+services.json is the only place a credential is described.
+
 Exact suggested-name match => configured. A boundary-aware token match (an
 underscore-separated part of the env-var name starting with a node token) only
 *surfaces* candidates for the agent to confirm — it never confers readiness.
@@ -10,16 +14,12 @@ An env-keys read failure yields 'unconfirmed' for everything, never
 'available': a read error must not look like "nothing is set up".
 """
 
-import json
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
-
-_CATALOG_PATH = Path(__file__).parent / 'credentials.json'
 _GENERIC_TOKENS = frozenset(
     {
         'store',
@@ -64,48 +64,72 @@ class Integration:
     fields: tuple
 
 
-def catalog_from_dict(raw: dict) -> Dict[str, Integration]:
-    out: Dict[str, Integration] = {}
-    for name, entry in raw.items():
-        if not isinstance(entry, dict):
+def _walk_properties(properties: Any, out: List[CredField]) -> None:
+    """Collect every `env`-carrying property, however deeply it is nested.
+
+    A credential is not always a plain top-level property: it can sit inside
+    an enum branch (one auth mode needs a token, another does not), inside a
+    group, or be the item of an array. Walking every shape means a node's
+    credentials are found wherever the author put them, instead of only in
+    the places a flat scan would look.
+    """
+    if not isinstance(properties, list):
+        return
+    for prop in properties:
+        if not isinstance(prop, dict):
             continue
-        fields = tuple(
-            CredField(
-                path=f['path'],
-                title=f.get('title', f['path']),
-                kind=f.get('kind', 'secret'),
-                required=bool(f.get('required', True)),
-                suggests=f['suggests'],
-                review=bool(f.get('review', False)),
+
+        env = prop.get('env')
+        name = prop.get('name')
+        if env and name:
+            out.append(
+                CredField(
+                    path=name,
+                    title=prop.get('title') or name,
+                    kind='secret' if prop.get('secret') else 'text',
+                    required=bool(prop.get('required', True)),
+                    suggests=env,
+                )
             )
-            for f in entry.get('fields', [])
-            if isinstance(f, dict) and f.get('path') and f.get('suggests')
-        )
+
+        # An object-form enum keys its branches by value; each branch may
+        # expose its own properties.
+        branches = prop.get('enum')
+        if isinstance(branches, dict):
+            for branch in branches.values():
+                if isinstance(branch, dict):
+                    _walk_properties(branch.get('properties'), out)
+
+        _walk_properties(prop.get('properties'), out)
+        item = prop.get('item')
+        if isinstance(item, dict):
+            _walk_properties([item], out)
+
+
+def catalog_from_definitions(definitions: Any) -> Dict[str, Integration]:
+    """Build the credential catalog from `getServices` definitions.
+
+    Only nodes that actually declare a credential appear: a node with no
+    `env` property needs no setup, so listing it as an "integration" would be
+    noise.
+    """
+    out: Dict[str, Integration] = {}
+    if not isinstance(definitions, dict):
+        return out
+    for name, definition in definitions.items():
+        if not isinstance(definition, dict):
+            continue
+        fields: List[CredField] = []
+        _walk_properties(definition.get('properties'), fields)
+        if not fields:
+            continue
         out[name] = Integration(
             name=name,
-            title=entry.get('title', name),
-            docs=entry.get('docs', ''),
-            fields=fields,
+            title=definition.get('title') or name,
+            docs=definition.get('documentation') or '',
+            fields=tuple(fields),
         )
     return out
-
-
-_cache: Optional[Dict[str, Integration]] = None
-
-
-def load_catalog(path: Optional[Path] = None) -> Dict[str, Integration]:
-    global _cache
-    if path is not None:  # test seam - never cached
-        return catalog_from_dict(json.loads(path.read_text(encoding='utf-8')))
-    if _cache is None:
-        try:
-            _cache = catalog_from_dict(json.loads(_CATALOG_PATH.read_text(encoding='utf-8')))
-        except (OSError, ValueError) as exc:
-            # A broken catalog must not take down the tool surface - degrade
-            # to "no credentialed nodes known" and log loudly.
-            logger.error('credentials.json unreadable: %s', exc)
-            _cache = {}
-    return _cache
 
 
 def node_tokens(name: str) -> frozenset:

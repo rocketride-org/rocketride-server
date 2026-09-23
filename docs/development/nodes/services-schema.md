@@ -128,13 +128,17 @@ group/branch — see below).
   `scopes`.
 - **`type: "upload"`** — a file upload; `"options": {"accept": "..."}`
   restricts the accepted file type.
+- **`env`** — names the account variable that supplies the value, e.g.
+  `"env": "ROCKETRIDE_DEEPL_APIKEY"`. Independent of `secret`: it is what lets
+  an agent wire the node up without handling the value itself. Set it on the
+  node's own definition (a shared one describes the field's shape, the
+  variable is per-node): `{"use": "vector.apikey", "env": "ROCKETRIDE_QDRANT_APIKEY"}`.
 
 ---
 
 ## Full example
 
-`examples/services.example.json` demonstrates every notation above in one
-file. `nodes/src/nodes/store_qdrant/services.json` is a complete real-world
+`nodes/src/nodes/store_qdrant/services.json` is a complete real-world
 example: metadata + `lanes` + local `propertyDefinitions` that alias global
 `vector.*` properties under node-specific names + a `properties` list built
 around an enum-with-property-sets profile selector.

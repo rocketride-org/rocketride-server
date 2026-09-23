@@ -41,19 +41,20 @@ or `http://localhost:5565` is kept whatever the bind, because that credential
 never reaches a wire anyone can tap (and the shipped `dist/server/.env` carries
 exactly such a value into the engine image).
 
-## The credentials catalog and its builder gates
+## The credentials catalog
 
-`credentials.json` (sibling to the module code) maps credential-shaped node
-config fields to suggested `ROCKETRIDE_*` variable names; it powers the
-integration-readiness tools. Two builder actions maintain it:
+The catalog behind the integration-readiness tools is derived, at call time,
+from the service definitions the engine already returns — there is no second
+file to keep in sync and no generator to run.
 
-- `nodes:credentials-generate` — scans every node's `services*.json` for
-  credential-shaped fields and reconciles them into the catalog (runs inside
-  `nodes:build`, right after `nodes:docs-generate`). Human-curated entries are
-  never overwritten; newly detected fields get a `review: true` stub.
-- `nodes:credentials-check` — the drift gate. **A node with new credential
-  fields fails this gate until the catalog covers them**; a `review: true` stub
-  still awaiting curation only warns.
+A node declares a credential on the property itself: `env` names the account
+variable that supplies it, and `secret` marks it as a credential rather than a
+plain setting (see
+[services.json](../nodes/services-schema.md#credentials-and-account-variables)).
+`credentials.catalog_from_definitions` walks each definition — including enum
+branches, groups and array items — and collects every `env`-carrying property.
+A node with no such property is not an integration and is never listed as
+needing setup.
 
 Variable *names* are all the catalog and the tools ever handle — values never
 transit MCP.

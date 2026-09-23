@@ -1,24 +1,25 @@
 # Copyright 2026 Aparavi Software AG. MIT License.
 from ai.modules.mcp import credentials as creds
 
-RAW = {
+# A service definition as `getServices` emits it: the credential is declared
+# by the property itself, via "env".
+DEFINITIONS = {
     'store_qdrant': {
         'title': 'Qdrant',
-        'docs': 'https://qdrant.tech/documentation/',
-        'fields': [
+        'documentation': 'https://qdrant.tech/documentation/',
+        'properties': [
             {
-                'path': 'qdrant.url',
+                'name': 'url',
                 'title': 'Cluster URL',
-                'kind': 'endpoint',
-                'required': True,
-                'suggests': 'ROCKETRIDE_QDRANT_URL',
+                'type': 'string',
+                'env': 'ROCKETRIDE_QDRANT_URL',
             },
             {
-                'path': 'qdrant.apikey',
+                'name': 'apikey',
                 'title': 'API key',
-                'kind': 'secret',
-                'required': True,
-                'suggests': 'ROCKETRIDE_QDRANT_APIKEY',
+                'type': 'string',
+                'secret': True,
+                'env': 'ROCKETRIDE_QDRANT_APIKEY',
             },
         ],
     },
@@ -26,15 +27,15 @@ RAW = {
 
 
 def _spec():
-    return creds.catalog_from_dict(RAW)['store_qdrant']
+    return creds.catalog_from_definitions(DEFINITIONS)['store_qdrant']
 
 
 def test_exact_match_is_configured_with_wiring():
     state = creds.evaluate(_spec(), ['ROCKETRIDE_QDRANT_URL', 'ROCKETRIDE_QDRANT_APIKEY'])
     assert state['status'] == 'configured'
     assert state['wiring'] == {
-        'qdrant.url': '${ROCKETRIDE_QDRANT_URL}',
-        'qdrant.apikey': '${ROCKETRIDE_QDRANT_APIKEY}',
+        'url': '${ROCKETRIDE_QDRANT_URL}',
+        'apikey': '${ROCKETRIDE_QDRANT_APIKEY}',
     }
     assert state['missing'] == []
 
@@ -63,15 +64,15 @@ def test_candidate_match_requires_part_boundary():
     DIGITALOCEAN_TOKEN (DI**GIT**ALOCEAN is a mid-part substring) — a wrong
     candidate is worse than none, because it gets proposed as a binding.
     """
-    raw = {
+    definitions = {
         'tool_git': {
             'title': 'tool_git',
-            'fields': [
-                {'path': 'git.token', 'kind': 'secret', 'required': True, 'suggests': 'ROCKETRIDE_GIT_TOKEN'},
+            'properties': [
+                {'name': 'token', 'type': 'string', 'secret': True, 'env': 'ROCKETRIDE_GIT_TOKEN'},
             ],
         },
     }
-    spec = creds.catalog_from_dict(raw)['tool_git']
+    spec = creds.catalog_from_definitions(definitions)['tool_git']
 
     state = creds.evaluate(spec, ['GITHUB_TOKEN', 'GIT_PAT', 'DIGITALOCEAN_TOKEN'])
     assert state['status'] == 'unconfirmed'
@@ -109,10 +110,53 @@ def test_setup_block_names_variables_and_how():
     assert block['docs'] == 'https://qdrant.tech/documentation/'
 
 
-def test_shipped_catalog_loads():
-    catalog = creds.load_catalog()
-    assert 'llm_anthropic' in catalog
-    for integration in catalog.values():
-        for field in integration.fields:
-            assert field.suggests
-            assert field.suggests.startswith('ROCKETRIDE_')
+def test_node_without_env_is_not_an_integration():
+    """A node with no credential needs no setup, so it must not show up as an
+    integration the caller has to configure.
+    """
+    catalog = creds.catalog_from_definitions(
+        {'tool_chartjs': {'title': 'Chart.js', 'properties': [{'name': 'theme', 'type': 'string'}]}}
+    )
+    assert catalog == {}
+
+
+def test_env_found_inside_enum_branch_group_and_array():
+    """Credentials are collected wherever the author put them: an enum branch
+    (one auth mode needs a token, another does not), a group, or an array
+    item. A flat scan of top-level properties alone would miss all three.
+    """
+    catalog = creds.catalog_from_definitions(
+        {
+            'tool_thing': {
+                'title': 'Thing',
+                'properties': [
+                    {
+                        'name': 'authType',
+                        'type': 'string',
+                        'enum': {
+                            'cloud': {
+                                'title': 'Cloud',
+                                'properties': [{'name': 'pat', 'secret': True, 'env': 'ROCKETRIDE_THING_PAT'}],
+                            },
+                            'local': {'title': 'Local', 'properties': [{'name': 'endpoint'}]},
+                        },
+                    },
+                    {'name': 'advanced', 'properties': [{'name': 'seed', 'env': 'ROCKETRIDE_THING_SEED'}]},
+                    {
+                        'name': 'hosts',
+                        'type': 'array',
+                        'item': {'name': 'hostKey', 'secret': True, 'env': 'ROCKETRIDE_THING_HOST_KEY'},
+                    },
+                ],
+            }
+        }
+    )
+    fields = catalog['tool_thing'].fields
+    assert {f.path for f in fields} == {'pat', 'seed', 'hostKey'}
+    assert {f.suggests for f in fields} == {
+        'ROCKETRIDE_THING_PAT',
+        'ROCKETRIDE_THING_SEED',
+        'ROCKETRIDE_THING_HOST_KEY',
+    }
+    # `secret` decides kind; an env-carrying plain setting is not a secret.
+    assert {f.path: f.kind for f in fields} == {'pat': 'secret', 'seed': 'text', 'hostKey': 'secret'}
