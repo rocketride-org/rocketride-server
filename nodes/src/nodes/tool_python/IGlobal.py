@@ -30,6 +30,7 @@ for IInstance tool methods.
 
 from __future__ import annotations
 
+import sys
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE
@@ -46,7 +47,8 @@ class IGlobal(IGlobalBase):
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.allowed_modules = _parse_allowed_modules(cfg)
+        # Extra modules are not offered under a hosted engine (see ai.common.sandbox)
+        self.allowed_modules = None if '--hosted' in sys.argv else _parse_allowed_modules(cfg)
         self.timeout = _parse_timeout(cfg)
 
     def endGlobal(self) -> None:

@@ -216,7 +216,12 @@ def execute_sandboxed(
             'timed_out': False,
         }
 
-    allowlist = _DEFAULT_ALLOWED_MODULES | (allowed_modules or set())
+    # A hosted engine starts its tasks with --hosted (task_engine
+    # CONST_HOSTED_CHILD_FLAG). There, only the default modules are allowed:
+    # an extra module (os, boto3, ...) or a package installed on demand runs
+    # with the engine container's own access, not the user's.
+    hosted = '--hosted' in sys.argv
+    allowlist = _DEFAULT_ALLOWED_MODULES | (set() if hosted else (allowed_modules or set()))
 
     # ── 1. Build safe builtins ─────────────────────────────────────────
     # RestrictedPython's safe_builtins is very minimal — it omits common
@@ -234,7 +239,10 @@ def execute_sandboxed(
     def restricted_import(name: str, *args: Any, **kwargs: Any) -> Any:
         top_level = name.split('.')[0]
         if top_level not in allowlist:
-            raise ImportError(f"Import of '{name}' is not allowed. Allowed modules: {', '.join(sorted(allowlist))}")
+            where = ' on RocketRide Cloud' if hosted else ''
+            raise ImportError(
+                f"Import of '{name}' is not allowed{where}. Allowed modules: {', '.join(sorted(allowlist))}"
+            )
         try:
             return original_import(name, *args, **kwargs)
         except ModuleNotFoundError:
