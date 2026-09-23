@@ -1364,11 +1364,17 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
     - The BUILT gate applies everywhere: an unbuilt version has no
       servable bytes.
 
+    - A binding whose manifest declares ``requiredPermissions`` entitles
+      only a caller who holds ALL of them, or ``sys.admin``. This is the
+      catalog's own gate (``_catalog_entries``); without it here the catalog
+      hid such an app while this route served its bytes to anyone.
+
     ``info`` None = anonymous: public rows only (the pre-auth landing).
     """
     from ai.account import account
 
     user_id = str(getattr(info, 'userId', '') or '') if info is not None else ''
+    sys_perms = set(getattr(info, 'sysPermissions', None) or []) if info is not None else set()
     org = getattr(info, 'organization', None) if info is not None else None
     org_id = ''
     team_ids: List[str] = []
@@ -1393,6 +1399,12 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
         rows = []
     for row in rows:
         if row.get('appId') != app_id or row.get('state') != 'enabled':
+            continue
+        # Same rule the catalog applies: ALL declared permissions, and
+        # sys.admin as the platform superuser passes. Anonymous holds none,
+        # so a gated app never serves pre-auth.
+        required = (row.get('snapshot') or {}).get('requiredPermissions') or []
+        if required and 'sys.admin' not in sys_perms and not all(p in sys_perms for p in required):
             continue
         if (
             account.review_ladder

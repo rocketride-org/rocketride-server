@@ -1293,6 +1293,53 @@ async def test_entitled_developer_org_before_any_publish(registry):
     assert await entitled_version_dirs(_info(user_id='u3', org_id='org2', teams=[]), 'acme.brandy') == {}
 
 
+def _gate_public(registry, required):
+    """A ready public binding whose manifest declares ``required`` perms."""
+    registry.add_version(1, '1.0.0', publisher_id='someone-else', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', registry._key(AUD_PUBLIC))]['snapshot']['requiredPermissions'] = required
+
+
+def _outsider(perms):
+    """An authenticated caller from ANOTHER org, so the developer rail never applies."""
+    return SimpleNamespace(userId='u9', organization={'id': 'org2', 'teams': []}, sysPermissions=perms)
+
+
+@pytest.mark.asyncio
+async def test_entitled_requires_declared_permissions(registry):
+    """rocketride-server#2401: an app declaring requiredPermissions must not
+    serve its bundle to a caller the catalog hides it from. Anonymous and a
+    permissionless caller get nothing; a holder of the permission does.
+    """
+    _gate_public(registry, ['sys.app'])
+
+    assert await entitled_version_dirs(None, 'acme.brandy') == {}
+    assert await entitled_version_dirs(_outsider([]), 'acme.brandy') == {}
+    assert await entitled_version_dirs(_outsider(['sys.app']), 'acme.brandy') == {1: _V1_DIST}
+
+
+@pytest.mark.asyncio
+async def test_entitled_permissions_all_required_and_admin_bypasses(registry):
+    """ALL declared permissions are required, and sys.admin passes every
+    gate, matching the catalog's _catalog_entries rule exactly.
+    """
+    _gate_public(registry, ['sys.app', 'sys.billing'])
+
+    assert await entitled_version_dirs(_outsider(['sys.app']), 'acme.brandy') == {}
+    assert await entitled_version_dirs(_outsider(['sys.app', 'sys.billing']), 'acme.brandy') == {1: _V1_DIST}
+    assert await entitled_version_dirs(_outsider(['sys.admin']), 'acme.brandy') == {1: _V1_DIST}
+
+
+@pytest.mark.asyncio
+async def test_entitled_ungated_public_app_still_serves_anonymous(registry):
+    """No requiredPermissions: the public app keeps serving pre-auth (the
+    landing/home path must not regress).
+    """
+    _gate_public(registry, [])
+
+    assert await entitled_version_dirs(None, 'acme.brandy') == {1: _V1_DIST}
+
+
 # =============================================================================
 # BUILT GATE — a version serves/submits/publishes only once its build is ok
 # =============================================================================
