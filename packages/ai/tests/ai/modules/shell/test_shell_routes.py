@@ -61,6 +61,18 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def _shell_client() -> TestClient:
+    """
+    Build an app with only the shell asset route, as ``initModule`` registers it.
+
+    Returns:
+        TestClient: client for ``GET /shell/{file_path:path}``.
+    """
+    app = FastAPI()
+    app.get('/shell/{file_path:path}')(shell_static)
+    return TestClient(app)
+
+
 @pytest.fixture
 def shell_root(tmp_path, monkeypatch):
     """
@@ -326,18 +338,37 @@ def test_missing_shell_static_asset_404s(shell_root):
     HTML-under-a-JS-URL and poisons every viewer, breaking app boot. Regression
     guard: content-hashed asset misses must be a real 404.
     """
-    app = FastAPI()
-    app.get('/shell/{file_path:path}')(shell_static)
-    client = TestClient(app)
-    r = client.get('/shell/static/js/does-not-exist.deadbeef.js')
+    r = _shell_client().get('/shell/static/js/does-not-exist.deadbeef.js')
     assert r.status_code == 404
 
 
 def test_shell_navigation_route_still_serves_index(shell_root):
     """A non-static /shell/* route still gets the SPA index.html fallback."""
-    app = FastAPI()
-    app.get('/shell/{file_path:path}')(shell_static)
-    client = TestClient(app)
-    r = client.get('/shell/some/client/route')
+    r = _shell_client().get('/shell/some/client/route')
     assert r.status_code == 200
     assert '<title>shell</title>' in r.text
+
+
+def test_existing_shell_static_asset_is_served(shell_root):
+    """A present /shell/static/* bundle is still served as a file.
+
+    Guards the ordering fix: the 404 check now runs before the serve step, so
+    a check that rejected every /shell/static/* path would otherwise pass.
+    """
+    asset = shell_root / 'static' / 'js' / 'main.abc123.js'
+    asset.parent.mkdir(parents=True)
+    asset.write_text('console.log(1)')
+    r = _shell_client().get('/shell/static/js/main.abc123.js')
+    assert r.status_code == 200
+    assert 'console.log(1)' in r.text
+
+
+def test_shell_static_traversal_does_not_serve_index(shell_root):
+    """A traversal-shaped /shell/static/* URL must 404, never index.html.
+
+    Percent-encoded on purpose: httpx resolves a literal ``../`` before sending,
+    so only ``%2e%2e`` reaches the handler decoded, as a real client's would.
+    """
+    r = _shell_client().get('/shell/static/js/%2e%2e/%2e%2e/%2e%2e/etc/passwd.js')
+    assert r.status_code == 404
+    assert '<title>shell</title>' not in r.text
