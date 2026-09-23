@@ -1,58 +1,43 @@
 # yaml-language-server: $schema=https://json.schemastore.org/pull-request-labeler-5.json
 module:server:
-  - all:
-      - changed-files:
-          - any-glob-to-any-file:
-              - "packages/server/**"
-              - "packages/vcpkg/**"
-              - "packages/tika/**"
-              - "packages/engine/**"
-          - all-globs-to-all-files: "!**/scripts/**"
+  - changed-files:
+      - all-globs-to-any-file: ["packages/server/**", "!**/scripts/**", "!**/docs/**"]
+  - changed-files:
+      - all-globs-to-any-file: ["packages/vcpkg/**", "!**/scripts/**", "!**/docs/**"]
+  - changed-files:
+      - all-globs-to-any-file: ["packages/tika/**", "!**/scripts/**", "!**/docs/**"]
 
 module:nodes:
-  - all:
-      - changed-files:
-          - any-glob-to-any-file: "nodes/**"
-          - all-globs-to-all-files: "!**/scripts/**"
+  - changed-files:
+      - all-globs-to-any-file: ["nodes/**", "!**/scripts/**", "!**/docs/**"]
 
 module:client-typescript:
-  - all:
-      - changed-files:
-          - any-glob-to-any-file: "packages/client-typescript/**"
-          - all-globs-to-all-files: "!**/scripts/**"
+  - changed-files:
+      - all-globs-to-any-file: ["packages/client-typescript/**", "!**/scripts/**", "!**/docs/**"]
 
 module:client-python:
-  - all:
-      - changed-files:
-          - any-glob-to-any-file: "packages/client-python/**"
-          - all-globs-to-all-files: "!**/scripts/**"
+  - changed-files:
+      - all-globs-to-any-file: ["packages/client-python/**", "!**/scripts/**", "!**/docs/**"]
 
 module:client-mcp:
-  - all:
-      - changed-files:
-          - any-glob-to-any-file: "packages/client-mcp/**"
-          - all-globs-to-all-files: "!**/scripts/**"
+  - changed-files:
+      - all-globs-to-any-file: ["packages/client-mcp/**", "!**/scripts/**", "!**/docs/**"]
 
 module:ai:
-  - all:
-      - changed-files:
-          - any-glob-to-any-file: "packages/ai/**"
-          - all-globs-to-all-files: "!**/scripts/**"
+  - changed-files:
+      - all-globs-to-any-file: ["packages/ai/**", "!**/scripts/**", "!**/docs/**"]
 
 module:ui:
-  - all:
-      - changed-files:
-          - any-glob-to-any-file:
-              - "apps/chat-ui/**"
-              - "apps/dropper-ui/**"
-              - "packages/shared-ui/**"
-          - all-globs-to-all-files: "!**/scripts/**"
+  - changed-files:
+      - all-globs-to-any-file: ["apps/chat-ui/**", "!**/scripts/**", "!**/docs/**"]
+  - changed-files:
+      - all-globs-to-any-file: ["apps/dropper-ui/**", "!**/scripts/**", "!**/docs/**"]
+  - changed-files:
+      - all-globs-to-any-file: ["packages/shared-ui/**", "!**/scripts/**", "!**/docs/**"]
 
 module:vscode:
-  - all:
-      - changed-files:
-          - any-glob-to-any-file: "apps/vscode/**"
-          - all-globs-to-all-files: "!**/scripts/**"
+  - changed-files:
+      - all-globs-to-any-file: ["apps/vscode/**", "!**/scripts/**", "!**/docs/**"]
 
 ci/cd:
   - changed-files:

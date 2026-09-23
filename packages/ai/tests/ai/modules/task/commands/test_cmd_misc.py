@@ -331,13 +331,13 @@ async def test_on_rrext_validate_does_not_double_wrap_enveloped_config(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_validate_accepts_a_single_component_payload(monkeypatch):
+async def test_on_rrext_validate_does_not_wrap_single_component_payload(monkeypatch):
     """The node config panel validates one component at a time.
 
     It sends IComponentValidatePayload — {version, component} — the shape the
     shell contract declares this endpoint accepts (shell/src/types/project.ts).
-    The engine validates pipelines: without turning that into a one-item
-    ``components`` list, every save comes back with
+    The engine dispatches on a root-level ``component`` (#2263); wrapping that
+    payload as {'pipeline': ...} hides the key and every save comes back with
     "'pipeline.components' must be an array", whatever the node.
     """
     captured = {}
@@ -352,22 +352,31 @@ async def test_on_rrext_validate_accepts_a_single_component_payload(monkeypatch)
     component = {'id': 'llm_gemini_1', 'provider': 'llm_gemini', 'config': {}}
     await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'version': 1, 'component': component}}})
 
-    assert captured['pipeline']['components'] == [component]
-    assert 'component' not in captured['pipeline']
+    assert set(captured.keys()) == {'version', 'component'}
+    assert captured['component'] == component
+    assert 'pipeline' not in captured
+    assert 'components' not in captured
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_validate_infers_the_source_of_a_single_component(monkeypatch):
-    """The component list is built before the source is inferred, not after."""
-    seen = {}
-    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: seen.update(p) or 'webhook_1')
-    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'ok': True})
+async def test_on_rrext_validate_does_not_infer_source_for_a_single_component(monkeypatch):
+    """Source inference is a full-pipeline concern; a lone component is passed through."""
+    seen = []
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: seen.append(p) or 'webhook_1')
+    captured = {}
+    monkeypatch.setattr(
+        cmd_misc,
+        'validatePipeline',
+        lambda payload: captured.update(payload) or {'ok': True},
+    )
 
     conn = _make_conn()
     component = {'id': 'webhook_1', 'provider': 'webhook', 'config': {'mode': 'Source'}}
     await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'version': 1, 'component': component}}})
 
-    assert seen['components'] == [component]
+    assert seen == []
+    assert captured['component'] == component
+    assert 'source' not in captured
 
 
 @pytest.mark.asyncio

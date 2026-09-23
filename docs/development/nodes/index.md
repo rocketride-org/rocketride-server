@@ -168,7 +168,15 @@ standalone catalog nodes.
    - **`IGlobal` is optional.** `IPythonGlobalBase` guards it with
      `py::hasattr(m_pyModule, "IGlobal")`. When present the engine instantiates it
      once per pipeline, injects `IEndpoint` and `glb`, and calls `beginGlobal()` /
-     `endGlobal()` around the run (`python-global.cpp`).
+     `endGlobal()` around the run (`python-global.cpp`). After a successful
+     task initialization, teardown runs even when execution fails or is
+     cancelled; an execution error takes precedence over a teardown error.
+     Long-running Python sources must return from `scanObjects` on cancellation:
+     poll `rocketlib.isCancelled()` between bounded waits when no scan callbacks
+     are being emitted. It reports the native engine's global or calling-thread
+     cancellation flag. Chat, Webhook, Dropper, and Tools do this automatically.
+     Cleanup is bounded by the supervisor's graceful-stop deadline, so external
+     resources should still have vendor-side timeouts for crashes or forced kills.
 
    Because the imported module is the package itself, `__init__.py` **must
    re-export both symbols** — a class sitting in `my_node.py` that `__init__.py`

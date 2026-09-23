@@ -74,14 +74,24 @@ public:
 
 //-------------------------------------------------------------------------
 /// @details
+///		Gives the calling thread one name in the engine and in Python,
+///		once per thread.  Defined in init.cpp.  MUST be called with the
+///		GIL held.
+//-------------------------------------------------------------------------
+void syncThreadName() noexcept;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		This class manages the GIL state and ensures that
 ///		1.	We release python to other threads when we are busy
 ///		2.	No matter what happens (exception, error, etc) the GIL is
 ///			relocked when we leave
+///		3.	A thread Python started, entering the engine here, is named
+///			in the engine before the engine works on it
 //-------------------------------------------------------------------------
-class UnlockPython : public py::gil_scoped_release {
+class UnlockPython {
 public:
-    UnlockPython() : py::gil_scoped_release() {
+    UnlockPython() {
         if (ap::log::isLevelEnabled(Lvl::GIL)) {
             // Get the current thread ID
             std::thread::id threadId = std::this_thread::get_id();
@@ -100,5 +110,14 @@ public:
             LOG(GIL, "UnlockPython: Re-acquiring GIL on thread ", threadId);
         }
     }
+
+private:
+    // Members, not a base: they initialize in declaration order, so the name
+    // is synced while the GIL is still held, before m_release lets it go
+    struct SyncName {
+        SyncName() noexcept { syncThreadName(); }
+    } m_syncName;
+
+    py::gil_scoped_release m_release;
 };
 }  // namespace engine::python

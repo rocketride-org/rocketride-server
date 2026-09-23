@@ -11,6 +11,11 @@ Documentation written for AI coding assistants, not people.
   the installer writes next to a workspace's code.
 - **`skills/`** — hand-curated pipeline-building skills. Not part of the bundle;
   installed only by an explicit skill install.
+- **`task-battery.md`** — the acceptance test for `context/`: 256 tasks a user
+  would hand a coding agent, grouped by category, with the latest doc-coverage
+  scoring pass. Run a category against an agent that has only `context/` loaded
+  when you change a doc; items it cannot complete are the gaps. Not part of the
+  bundle.
 
 The site does not render this folder. Edit `context/` and rebuild any client
 (`./builder client-typescript:build`, `client-python:build`, `vscode:build`)

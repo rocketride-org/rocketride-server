@@ -108,7 +108,9 @@ Error IPythonEndpointBase::scanObjects(Path &path,
 
         // And call it
         m_pyEndpoint.attr("scanObjects")(strPath, pythonCallback);
-        return pendingError;
+        // A long-running source can observe cancellation without ever
+        // emitting an object (and therefore without calling pythonCallback).
+        return pendingError || ap::async::cancelled(_location);
     };
 
     // Call the python code

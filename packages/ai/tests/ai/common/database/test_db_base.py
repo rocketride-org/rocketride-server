@@ -7,7 +7,7 @@ The base classes are ABCs with two abstract methods (``_connection_params``,
 subclass that supplies SQLite-compatible stubs, then exercise:
 
 - Pure-logic helpers (no engine needed):
-  - ``_format_db_error`` — extracts (code, message) from DBAPI errors
+  - ``_format_db_error`` — driver message only, never the statement/parameters
   - ``_is_datetime_string`` — strptime two formats
   - ``_inferColumnType`` — Python type → SQLAlchemy type
   - ``_sanitize_value`` / ``_sanitize_row`` (db_instance_base) — JSON-safe coercion
@@ -32,6 +32,8 @@ from sqlalchemy import (
     create_engine,
     inspect,
 )
+
+from sqlalchemy.exc import DBAPIError
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.db_instance_base import DatabaseInstanceBase
@@ -84,19 +86,634 @@ def test_format_db_error_extracts_numeric_code_and_message(base):
     assert result == "Error 1146: Table 'x' doesn't exist"
 
 
-def test_format_db_error_falls_back_to_str_when_args_not_int_first(base):
-    """If args[0] is not an int, the function returns str(exc) instead."""
-    orig = SimpleNamespace(args=('not-a-code', 'msg'))
+def test_format_db_error_uses_the_driver_message_when_args_not_int_first(base):
+    """A string-args driver (sqlite3, psycopg2) yields its own message.
+
+    It must NOT fall through to ``str(exc)``: on a real SQLAlchemy
+    StatementError that repr carries the statement and its bind parameters.
+    """
+    orig = SimpleNamespace(args=('no such column: foo',))
     exc = RuntimeError('outer message')
     exc.orig = orig
-    result = base._format_db_error(exc)
-    assert result == 'outer message'
+    assert base._format_db_error(exc) == 'no such column: foo'
 
 
 def test_format_db_error_handles_exception_without_orig(base):
     """An exception without .orig falls through to str(exc)."""
     exc = RuntimeError('plain error')
     assert base._format_db_error(exc) == 'plain error'
+
+
+def test_format_db_error_drops_the_sqlalchemy_statement_and_parameters(base):
+    """The ``[SQL: ...]`` / ``[parameters: ...]`` tail must never reach a caller.
+
+    This is the shape ``str(exc)`` produces for any SQLAlchemy
+    ``StatementError``; ``_executeRawQuery`` re-raises the formatted string
+    as a RuntimeError that the ``execute`` tool returns to whoever called it.
+    """
+    exc = RuntimeError(
+        '(sqlite3.OperationalError) no such column: foo\n'
+        '[SQL: SELECT foo FROM users WHERE email = ?]\n'
+        "[parameters: ('ada@example.com',)]\n"
+        '(Background on this error at: https://sqlalche.me/e/20/e3q8)'
+    )
+    result = base._format_db_error(exc)
+    assert result == '(sqlite3.OperationalError) no such column: foo'
+    assert 'SELECT foo' not in result
+    assert 'ada@example.com' not in result
+
+
+def test_format_db_error_sqlite3_shape_keeps_only_the_driver_message(base):
+    """sqlite3 puts the bare message in ``.orig.args[0]``."""
+    orig = SimpleNamespace(args=('no such table: widgets',))
+    exc = RuntimeError(
+        '(sqlite3.OperationalError) no such table: widgets\n'
+        '[SQL: INSERT INTO widgets (secret) VALUES (?)]\n'
+        "[parameters: ('hunter2',)]"
+    )
+    exc.orig = orig
+    result = base._format_db_error(exc)
+    assert result == 'no such table: widgets'
+    assert 'hunter2' not in result
+    assert 'INSERT INTO' not in result
+
+
+def test_format_db_error_psycopg2_shape_uses_diag_and_drops_the_line_echo(base):
+    """psycopg2 interpolates binds client-side, so its ``LINE n:`` echo leaks them."""
+    orig = SimpleNamespace(
+        args=(
+            'column "foo" does not exist\nLINE 1: SELECT foo FROM users WHERE email = \'ada@example.com\'\n        ^\n',
+        ),
+        diag=SimpleNamespace(message_primary='column "foo" does not exist'),
+        pgcode='42703',
+    )
+    exc = RuntimeError('(psycopg2.errors.UndefinedColumn) ... [SQL: ...] [parameters: ...]')
+    exc.orig = orig
+    result = base._format_db_error(exc)
+    assert result == 'Error 42703: column "foo" does not exist'
+    assert 'ada@example.com' not in result
+    assert 'LINE 1' not in result
+
+
+def test_format_db_error_psycopg2_without_diag_still_trims_the_line_echo(base):
+    """Falling back to ``args[0]`` must not carry the interpolated statement."""
+    orig = SimpleNamespace(
+        args=(
+            'duplicate key value violates unique constraint "users_email_key"\n'
+            'DETAIL:  Key (email)=(ada@example.com) already exists.\n',
+        )
+    )
+    exc = RuntimeError('outer')
+    exc.orig = orig
+    result = base._format_db_error(exc)
+    assert result == 'duplicate key value violates unique constraint "users_email_key"'
+    assert 'ada@example.com' not in result
+
+
+def test_format_db_error_pymysql_shape_is_unchanged(base):
+    """The numeric-code branch keeps its existing ``Error <code>: <msg>`` output."""
+    orig = SimpleNamespace(args=(1054, "Unknown column 'foo' in 'field list'"))
+    exc = RuntimeError('outer')
+    exc.orig = orig
+    assert base._format_db_error(exc) == "Error 1054: Unknown column 'foo' in 'field list'"
+
+
+# ---------------------------------------------------------------------------
+# _format_db_error against real DBAPIError wrappers (PostgreSQL / MySQL)
+#
+# The tests above hand _format_db_error a hand-built exception. These build the
+# real SQLAlchemy wrapper with DBAPIError.instance, so str(exc) genuinely ends
+# in the `[SQL: ...]` / `[parameters: ...]` tail, and pin the caller-facing
+# policy for the two drivers whose messages quote literals. Mock-based by
+# necessity: there is no live PostgreSQL or MySQL in this suite, so the driver
+# exception shapes are reproduced rather than provoked.
+# ---------------------------------------------------------------------------
+
+
+class _FakeDriverError(Exception):
+    """Stand-in for a DBAPI driver exception (psycopg2 / pymysql shapes)."""
+
+
+def _wrapped(orig, statement, params):
+    """Wrap a driver exception the way SQLAlchemy wraps one it catches."""
+    return DBAPIError.instance(statement, params, orig, dbapi_base_err=Exception)
+
+
+def test_format_db_error_postgres_duplicate_key_keeps_only_the_primary_sentence(base):
+    """PostgreSQL restates the offending key in DETAIL; only the primary line survives.
+
+    The DETAIL block is where another row's values would appear
+    ("Key (email)=(ada@example.com) already exists."), so it is dropped along
+    with the statement and its binds.
+    """
+    orig = _FakeDriverError(
+        'duplicate key value violates unique constraint "users_email_key"\n'
+        'DETAIL:  Key (email)=(ada@example.com) already exists.\n'
+    )
+    orig.diag = SimpleNamespace(message_primary='duplicate key value violates unique constraint "users_email_key"')
+    orig.pgcode = '23505'
+    exc = _wrapped(orig, 'INSERT INTO users (email) VALUES (%(email)s)', {'email': 'ada@example.com'})
+
+    # The wrapper really does carry the tail, so the assertions below bite.
+    assert '[SQL:' in str(exc)
+    assert '[parameters:' in str(exc)
+
+    message = base._format_db_error(exc)
+    assert message == 'Error 23505: duplicate key value violates unique constraint "users_email_key"'
+    assert 'ada@example.com' not in message
+    assert 'DETAIL' not in message
+    assert '[SQL:' not in message
+    assert '[parameters:' not in message
+
+
+def test_format_db_error_postgres_without_diag_drops_the_line_echo(base):
+    """Without .diag the fallback is args[0], which psycopg2 fills with the statement.
+
+    psycopg2 interpolates bind values client-side, so its ``LINE n:`` echo
+    reproduces them verbatim -- the reason that marker is stripped too.
+    """
+    orig = _FakeDriverError(
+        'invalid input syntax for type integer: "abc"\n'
+        "LINE 1: SELECT * FROM users WHERE id = 'abc' AND email = 'ada@example.com'\n"
+        '                                       ^\n'
+    )
+    exc = _wrapped(orig, 'SELECT * FROM users WHERE id = %(id)s', {'id': 'abc'})
+
+    message = base._format_db_error(exc)
+    assert message == 'invalid input syntax for type integer: "abc"'
+    assert 'LINE 1' not in message
+    assert 'ada@example.com' not in message
+    assert '[SQL:' not in message
+
+
+def test_format_db_error_mysql_duplicate_entry_keeps_the_value_the_caller_sent(base):
+    """The accepted residual, stated as a test rather than left implicit.
+
+    MySQL's primary sentence quotes the value that collided -- a value this
+    caller submitted in the statement being reported, not another row's. The
+    statement and the full bind list still never leave the server log.
+    """
+    orig = _FakeDriverError(1062, "Duplicate entry 'ada@example.com' for key 'users.email'")
+    exc = _wrapped(orig, 'INSERT INTO users (email) VALUES (%s)', ('ada@example.com',))
+
+    message = base._format_db_error(exc)
+    assert message == "Error 1062: Duplicate entry 'ada@example.com' for key 'users.email'"
+    assert '[SQL:' not in message
+    assert '[parameters:' not in message
+    assert 'sqlalche.me' not in message
+
+
+class _FakeServerException(Exception):
+    """Stand-in for clickhouse_driver.errors.ServerException.
+
+    Its ``str()`` is what the driver's DBAPI wrapper ends up rendering: a code
+    line, the message, and a symbolised server stack trace.
+    """
+
+    def __init__(self, code, message, trailer=''):
+        super().__init__(code, message)
+        self._code = code
+        self._message = message
+        self._trailer = trailer
+
+    def __str__(self):
+        """Render the driver's documented ``Code: N.\nDB::Exception: …`` form."""
+        return (
+            f'Code: {self._code}.\nDB::Exception: {self._message}{self._trailer}. '
+            'Stack trace:\n\n0. DB::Exception::Exception(...) @ 0x1a2b3c\n'
+            '1. DB::throwAtAssertionFailed(...) @ 0x4d5e6f\n'
+        )
+
+
+def test_format_db_error_clickhouse_dbapi_shape_is_cut_at_the_stack_trace(base):
+    """clickhouse-driver's OWN DBAPI shape: ``.orig.args`` is not ``(errno, message)``.
+
+    Constructed shape; driver not installed. This is the layer
+    ``clickhouse_driver.dbapi`` exposes — ``OperationalError(ServerException)``,
+    so ``args`` holds one exception object rather than an ``(int, str)`` pair
+    and every earlier branch falls through to ``str(orig)``, which carries a
+    symbolised server stack trace the caller cannot act on.
+
+    Note the db_clickhouse node does NOT go through this DBAPI: it connects
+    with ``clickhouse+native://``, i.e. clickhouse-sqlalchemy's own connector,
+    whose exception shape is covered by
+    ``test_format_db_error_clickhouse_native_connector_shape_keeps_the_code``.
+    """
+    orig = _FakeDriverError(_FakeServerException(60, "Table default.widgets doesn't exist"))
+    assert len(orig.args) == 1 and not isinstance(orig.args[0], str)
+    exc = _wrapped(orig, 'SELECT * FROM widgets', {})
+
+    message = base._format_db_error(exc)
+    assert message == "Code: 60.\nDB::Exception: Table default.widgets doesn't exist."
+    assert 'Stack trace' not in message
+    assert '0x1a2b3c' not in message
+    assert '[SQL:' not in message
+    assert '[parameters:' not in message
+
+
+def test_format_db_error_clickhouse_syntax_error_drops_the_position_echo(base):
+    """ClickHouse quotes the failing statement fragment after ``failed at position``.
+
+    Constructed shape; driver not installed. The fragment is the same class of
+    statement echo as psycopg2's ``LINE n:``, so it is cut at the same kind of
+    marker.
+    """
+    orig = _FakeDriverError(
+        _FakeServerException(62, 'Syntax error', trailer=": failed at position 21 ('hunter2') (line 1, col 21)")
+    )
+    exc = _wrapped(orig, "INSERT INTO t VALUES 'hunter2'", {})
+
+    message = base._format_db_error(exc)
+    assert message == 'Code: 62.\nDB::Exception: Syntax error:'
+    assert 'hunter2' not in message
+    assert 'Stack trace' not in message
+
+
+class _StandInClickHouseServerException(Exception):
+    """Stand-in for clickhouse_driver.errors.ServerException.
+
+    Carries the ClickHouse error code on ``.code`` and the text on ``.message``
+    (and in ``args``), which is where the code lives for this driver — not in
+    ``args[0]`` as an int, the way pymysql reports it.
+    """
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+    def __str__(self):
+        """Render the driver's ``Code: N.`` form."""
+        return f'Code: {self.code}.\n{self.message}'
+
+
+class _StandInClickHouseDatabaseException(Exception):
+    """Stand-in for clickhouse_sqlalchemy.exceptions.DatabaseException.
+
+    A plain ``Exception`` subclass — not a DBAPI error — carrying the driver's
+    exception on ``.orig``. This is what ``clickhouse+native://`` raises, so it
+    is the shape the db_clickhouse node actually produces.
+    """
+
+    def __init__(self, orig):
+        super().__init__(orig)
+        self.orig = orig
+
+    def __str__(self):
+        """Prefix the wrapped driver error, as the real class does."""
+        return f'Orig exception: {self.orig}'
+
+
+def test_format_db_error_clickhouse_native_connector_shape_keeps_the_code(base):
+    """The shape `clickhouse+native://` really raises, formatted like pymysql's.
+
+    Constructed shape; clickhouse-sqlalchemy is not installed here. Its
+    ``ServerException`` puts the code on ``.code`` rather than in ``args``, so
+    without a branch for it the caller saw the bare message and lost the code
+    that identifies the failure.
+    """
+    orig = _StandInClickHouseServerException(60, "Table default.widgets doesn't exist")
+    exc = _StandInClickHouseDatabaseException(orig)
+
+    assert base._format_db_error(exc) == "Error 60: Table default.widgets doesn't exist"
+
+
+def test_format_db_error_clickhouse_native_connector_trims_the_message_tail(base):
+    """The code branch still runs through the stripper, so tails inside it go.
+
+    ClickHouse builds its ``message`` from the server payload, which carries
+    both the statement fragment at the error position and the server stack
+    trace; the markers cut them here as they do anywhere else.
+    """
+    orig = _StandInClickHouseServerException(
+        62,
+        "Syntax error: failed at position 21 ('hunter2') (line 1, col 21). "
+        'Stack trace:\n\n0. DB::Exception::Exception(...) @ 0x1a2b3c\n',
+    )
+    exc = _StandInClickHouseDatabaseException(orig)
+
+    message = base._format_db_error(exc)
+    assert message == 'Error 62: Syntax error:'
+    assert 'hunter2' not in message
+    assert 'Stack trace' not in message
+
+
+# ---------------------------------------------------------------------------
+# _format_db_error — ClickHouse echoes the statement INSIDE its message
+#
+# The other drivers append their statement echo after the primary sentence;
+# ClickHouse splices it into the middle of one. Code 47 (UNKNOWN_IDENTIFIER)
+# reads "Missing columns: 'x' while processing query: '<sql>', required
+# columns: 'x'" on the old parser and "Unknown expression identifier 'x' in
+# scope <sql>" on the analyzer, so without markers for those three phrases the
+# whole statement survived the strip.
+#
+# No live ClickHouse server is available in this suite — neither
+# clickhouse-driver nor clickhouse-sqlalchemy is installed — so both connector
+# shapes below are constructed from the message forms the server documents,
+# the same way the PostgreSQL and MySQL cases above are. This is the dialect
+# where the echo matters most: clickhouse-driver interpolates bind values
+# client-side (it sends no server-side parameters by default), so the echoed
+# statement carries the literal a caller bound rather than a placeholder.
+# ---------------------------------------------------------------------------
+
+
+def test_format_db_error_clickhouse_dbapi_cuts_the_while_processing_query_echo(base):
+    """Code 47 through ``clickhouse_driver.dbapi``: the inlined literal must not survive.
+
+    Constructed shape; driver not installed. ``str(orig)`` is the only thing
+    this layer offers (``args`` holds an exception object, not an
+    ``(int, str)`` pair), and the query ClickHouse repeats has ``hunter2``
+    already interpolated into it by the client, so the marker has to fire
+    mid-sentence — the identifier list before it is the part the caller needs.
+    """
+    orig = _FakeDriverError(
+        _FakeServerException(
+            47,
+            "Missing columns: 'secret'",
+            trailer=(
+                " while processing query: 'SELECT secret FROM users "
+                "WHERE token = ''hunter2''', required columns: 'secret'"
+            ),
+        )
+    )
+    exc = _wrapped(orig, 'SELECT secret FROM users WHERE token = %(token)s', {'token': 'hunter2'})
+
+    message = base._format_db_error(exc)
+    assert message == "Code: 47.\nDB::Exception: Missing columns: 'secret'"
+    assert 'hunter2' not in message
+    assert 'while processing query' not in message
+    assert 'required columns' not in message
+    assert 'Stack trace' not in message
+
+
+def test_format_db_error_clickhouse_native_connector_cuts_the_in_scope_echo(base):
+    """The analyzer's ``in scope <sql>`` form, on the connector db_clickhouse uses.
+
+    Constructed shape; clickhouse-sqlalchemy is not installed. ClickHouse's
+    analyzer prints the resolved query back after "in scope" instead of after
+    "while processing query:", and formats it from the AST — which is why the
+    marker below requires an uppercase statement keyword after the phrase.
+    """
+    orig = _StandInClickHouseServerException(
+        47,
+        "Unknown expression identifier 'secret' in scope SELECT secret FROM users WHERE token = 'hunter2'",
+    )
+    exc = _StandInClickHouseDatabaseException(orig)
+
+    message = base._format_db_error(exc)
+    assert message == "Error 47: Unknown expression identifier 'secret'"
+    assert 'hunter2' not in message
+    assert 'in scope' not in message
+
+
+def test_format_db_error_clickhouse_cuts_a_parenthesised_subquery_scope(base):
+    """A scope that is itself a subquery is echoed in parentheses; it must still be cut.
+
+    Constructed shape; clickhouse-sqlalchemy is not installed and no live
+    ClickHouse server is available in this suite. ClickHouse's analyzer
+    formats a scope that is a subquery or a CTE body through ``ASTSubquery``,
+    which parenthesises it, so the echo reads ``in scope (SELECT ...)``
+    instead of ``in scope SELECT ...``. The client has already inlined the
+    caller's bind value into it either way, which is what the lookahead's
+    optional ``(`` is there to catch.
+    """
+    orig = _StandInClickHouseServerException(
+        47,
+        "Unknown expression identifier 'token' in scope (SELECT token FROM users WHERE token = 'hunter2') AS filtered",
+    )
+    exc = _StandInClickHouseDatabaseException(orig)
+
+    message = base._format_db_error(exc)
+    assert message == "Error 47: Unknown expression identifier 'token'"
+    assert 'hunter2' not in message
+    assert 'in scope' not in message
+
+
+def test_format_db_error_clickhouse_cuts_a_sentence_initial_in_scope_echo(base):
+    """The analyzer's other echo form: a new sentence starting ``In scope <sql>``.
+
+    Constructed shape; clickhouse-sqlalchemy is not installed and no live
+    ClickHouse server is available in this suite. The message text is the
+    released ``There are no table sources. In scope {}`` format string with a
+    query substituted for ``{}``. This capitalised form is the analyzer's
+    common one — it appears in dozens of messages per release, against the two
+    or three that splice a lowercase ``in scope`` into the middle of a
+    sentence — and it carries the same client-inlined bind value, so the
+    marker matches either case.
+    """
+    orig = _StandInClickHouseServerException(
+        47,
+        "There are no table sources. In scope SELECT token FROM users WHERE token = 'hunter2'",
+    )
+    exc = _StandInClickHouseDatabaseException(orig)
+
+    message = base._format_db_error(exc)
+    assert message == 'Error 47: There are no table sources.'
+    assert 'hunter2' not in message
+    assert 'In scope' not in message
+
+
+def test_format_db_error_clickhouse_cuts_a_lone_required_columns_tail(base):
+    """``, required columns:`` is a marker in its own right, not only a suffix.
+
+    Constructed shape. In the code-47 message the two echoes travel together,
+    so cutting at "while processing query:" already removes this tail; the
+    marker is carried separately so a shape that lists the required columns
+    without repeating the query does not leak the list either.
+    """
+    orig = _StandInClickHouseServerException(
+        47,
+        "Not found column secret in block, required columns: 'secret', 'token'",
+    )
+    exc = _StandInClickHouseDatabaseException(orig)
+
+    assert base._format_db_error(exc) == 'Error 47: Not found column secret in block'
+
+
+def test_format_db_error_keeps_the_words_in_scope_inside_an_application_message(base):
+    """The prose "in scope" is not a ClickHouse echo and must not truncate.
+
+    Constructed psycopg2 shape; no live PostgreSQL here. The phrase only marks
+    a statement echo when ClickHouse's AST formatter follows it with an
+    uppercase statement keyword, so the marker is written to require one — the
+    same lesson the DETAIL/HINT anchoring above came from.
+    """
+    orig = _FakeDriverError('temp table is not in scope for this trigger')
+    exc = _wrapped(orig, 'CALL audit()', {})
+
+    assert base._format_db_error(exc) == 'temp table is not in scope for this trigger'
+
+
+def test_format_db_error_mysql_keeps_a_quoted_identifier_intact(base):
+    """Why quoted tokens are not redacted wholesale.
+
+    MySQL quotes IDENTIFIERS with single quotes as well as values, so a rule
+    that blanked every quoted token would delete "which column" from the one
+    message a caller most needs it in.
+    """
+    orig = _FakeDriverError(1054, "Unknown column 'foo' in 'field list'")
+    exc = _wrapped(orig, 'SELECT foo FROM users', {})
+
+    assert base._format_db_error(exc) == "Error 1054: Unknown column 'foo' in 'field list'"
+
+
+# ---------------------------------------------------------------------------
+# _format_db_error — the block markers must not fire mid-sentence
+#
+# PostgreSQL writes DETAIL / HINT / CONTEXT / QUERY / STATEMENT as separate
+# LINES of the server message, so a bare substring search also matched those
+# five words inside an application's own error text and truncated it. No live
+# PostgreSQL or MySQL server is available in this suite, so each case below is
+# a constructed exception shape reproducing what the driver hands SQLAlchemy.
+# ---------------------------------------------------------------------------
+
+
+def test_format_db_error_keeps_an_inline_hint_word_in_an_application_message(base):
+    """``RAISE EXCEPTION 'Order rejected. HINT: contact billing'`` survives whole.
+
+    Constructed psycopg2 shape; no live PostgreSQL here. A PL/pgSQL ``RAISE``
+    puts the author's whole sentence in ``diag.message_primary``, where the
+    server has already split its own context blocks off — so nothing in it is
+    a marker, and truncating at the word "HINT:" would delete the half of the
+    message that says what to do about the failure.
+    """
+    orig = _FakeDriverError('Order rejected. HINT: contact billing')
+    orig.diag = SimpleNamespace(message_primary='Order rejected. HINT: contact billing')
+    orig.pgcode = 'P0001'
+    exc = _wrapped(orig, 'SELECT place_order(%(id)s)', {'id': 7})
+
+    message = base._format_db_error(exc)
+    assert message == 'Error P0001: Order rejected. HINT: contact billing'
+    assert '[SQL:' not in message
+    assert '[parameters:' not in message
+
+
+def test_format_db_error_keeps_an_inline_hint_word_without_diag(base):
+    """The same sentence via the ``args[0]`` fallback, where the blocks are real lines.
+
+    Constructed psycopg2 shape. Here the message carries a genuine trailing
+    ``DETAIL:`` block on its own line: that one is still cut, while the word
+    "HINT:" in the middle of the primary sentence is not.
+    """
+    orig = _FakeDriverError('Order rejected. HINT: contact billing\nDETAIL:  Key (id)=(7) is on hold.\n')
+    exc = _wrapped(orig, 'SELECT place_order(%(id)s)', {'id': 7})
+
+    message = base._format_db_error(exc)
+    assert message == 'Order rejected. HINT: contact billing'
+    assert 'Key (id)=(7)' not in message
+
+
+def test_format_db_error_keeps_a_mysql_message_containing_the_word_query(base):
+    """A pymysql 1644 from a ``SIGNAL SQLSTATE`` whose text contains "QUERY:".
+
+    Constructed pymysql shape; no live MySQL here. MySQL has no DETAIL/HINT/
+    CONTEXT block structure at all, so any of those words in a MySQL message
+    is part of the message.
+    """
+    orig = _FakeDriverError(1644, 'Invalid QUERY: missing tenant filter')
+    exc = _wrapped(orig, 'SELECT * FROM orders', {})
+
+    assert base._format_db_error(exc) == 'Error 1644: Invalid QUERY: missing tenant filter'
+
+
+def test_format_db_error_keeps_a_message_that_begins_with_a_block_word(base):
+    """A message whose FIRST token is "HINT:" must not degrade to the fallback.
+
+    Constructed shape. Anchoring the block markers to the start of the STRING
+    as well as to a line start would make the whole message detail, and the
+    caller would get the neutral 'Database error' constant instead of the one
+    sentence that tells them what went wrong.
+    """
+    orig = _FakeDriverError('HINT: use a smaller value for the batch size')
+    exc = _wrapped(orig, 'INSERT INTO t VALUES (%(n)s)', {'n': 10**9})
+
+    assert base._format_db_error(exc) == 'HINT: use a smaller value for the batch size'
+
+
+def test_format_db_error_still_cuts_a_real_postgres_detail_block(base):
+    """The anchoring must not reopen the leak: a real DETAIL line is still cut.
+
+    Constructed psycopg2 shape. This is the ``args[0]`` path (no ``.diag``),
+    where the server's DETAIL block — the one that restates another row's key
+    values — arrives as its own line and must still go.
+    """
+    orig = _FakeDriverError(
+        'duplicate key value violates unique constraint "users_email_key"\n'
+        'DETAIL:  Key (email)=(ada@example.com) already exists.\n'
+    )
+    exc = _wrapped(orig, 'INSERT INTO users (email) VALUES (%(email)s)', {'email': 'ada@example.com'})
+
+    message = base._format_db_error(exc)
+    assert message == 'duplicate key value violates unique constraint "users_email_key"'
+    assert 'ada@example.com' not in message
+
+
+# ---------------------------------------------------------------------------
+# _format_db_error — the generic (sqlstate, message) DBAPI shape
+#
+# No node in this repo uses a driver of this family today (there is no pyodbc
+# dialect under nodes/src/nodes), so these are constructed from the shape the
+# DBAPI specifies rather than provoked from a live server.
+# ---------------------------------------------------------------------------
+
+
+def test_format_db_error_keeps_the_sqlstate_with_its_message(base):
+    """``('42S02', '…not found')`` must not degrade to just ``42S02``.
+
+    pyodbc and other ODBC-backed drivers put a five-character SQLSTATE where
+    pymysql puts an integer errno, so the numeric branch misses them and the
+    generic ``args[0]`` branch returned the code ALONE -- the one part of the
+    pair a caller cannot act on.
+    """
+    orig = _FakeDriverError('42S02', "[42S02] [ODBC Driver] Base table or view not found: 'widgets'")
+    exc = _wrapped(orig, 'SELECT * FROM widgets', {})
+
+    message = base._format_db_error(exc)
+    assert message == "Error 42S02: [42S02] [ODBC Driver] Base table or view not found: 'widgets'"
+    assert '[SQL:' not in message
+
+
+def test_format_db_error_sqlstate_branch_still_strips_the_tail(base):
+    """The new branch is not an escape hatch around the stripper."""
+    orig = _FakeDriverError('42000', 'Syntax error\nSTATEMENT:  SELECT secret FROM users')
+    exc = _wrapped(orig, 'SELECT secret FROM users', {})
+
+    message = base._format_db_error(exc)
+    assert message == 'Error 42000: Syntax error'
+    assert 'secret' not in message
+
+
+def test_format_db_error_does_not_read_any_first_string_as_a_sqlstate(base):
+    """Only a real SQLSTATE shape (five chars, digits and capitals) qualifies.
+
+    A driver that happens to put two strings in ``args`` keeps the old
+    behaviour: the first one is the message, not a code to prefix.
+    """
+    orig = _FakeDriverError('syntax error at or near "FROM"', 'position 14')
+    exc = _wrapped(orig, 'SELECT FROM users', {})
+
+    assert base._format_db_error(exc) == 'syntax error at or near "FROM"'
+
+
+def test_format_db_error_keeps_a_single_argument_message_unprefixed(base):
+    """The sqlite3 shape -- one string in ``args`` -- is untouched by the branch."""
+    orig = _FakeDriverError('no such table: widgets')
+    exc = _wrapped(orig, 'SELECT * FROM widgets', {})
+
+    assert base._format_db_error(exc) == 'no such table: widgets'
+
+
+def test_format_db_error_returns_a_neutral_string_when_the_message_is_only_detail(base):
+    """A message that is nothing but detail must not fall back to the statement.
+
+    There is no primary sentence to keep here, and the first line is the
+    ``[SQL: ...]`` echo the stripper exists to remove -- so the fallback is a
+    neutral constant. Narrow (it needs a DBAPI error with an empty message),
+    but it is the one input where leaking the statement would be silent.
+    """
+    exc = RuntimeError('[SQL: SELECT 1]')
+    assert base._format_db_error(exc) == 'Database error'
 
 
 # ---------------------------------------------------------------------------

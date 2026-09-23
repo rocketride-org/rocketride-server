@@ -1,0 +1,148 @@
+{
+  "title": "Media Toolkit: Inspect",
+  "protocol": "media_inspect://",
+  "classType": [
+    "video"
+  ],
+  "capabilities": [],
+  "node": "python",
+  "path": "nodes.media_inspect",
+  "prefix": "media_inspect",
+  "register": "filter",
+  "description": [
+    "Measure streamed media and extract selected images.",
+    " Outputs are returned through lanes; persistence belongs to downstream nodes."
+  ],
+  "icon": "media_inspect.svg",
+  "documentation": "https://docs.rocketride.org/nodes/media_inspect",
+  "lanes": {
+    "video": [
+      "text",
+      "answers",
+      "image"
+    ],
+    "audio": [
+      "text",
+      "answers",
+      "image"
+    ]
+  },
+  "preconfig": {
+    "default": "default",
+    "profiles": {
+      "default": {
+        "event_type": "media_inspect",
+        "chunk_kb": 1024,
+        "silence_db": -40,
+        "silence_ms": 700,
+        "peak_ms": 100,
+        "scene_threshold": 0.35,
+        "title": "Default",
+        "request": "{}",
+        "max_input_mb": 16384
+      }
+    }
+  },
+  "fields": {
+    "media_inspect.event_type": {
+      "type": "string",
+      "title": "Name of the progress event this pipeline emits",
+      "default": "media_inspect"
+    },
+    "media_inspect.chunk_kb": {
+      "type": "number",
+      "title": "Stream chunk size (KB)",
+      "default": 1024
+    },
+    "media_inspect.silence_db": {
+      "type": "number",
+      "title": "Silence threshold (dB)",
+      "default": -40
+    },
+    "media_inspect.silence_ms": {
+      "type": "number",
+      "title": "Shortest silence worth reporting (ms)",
+      "default": 700
+    },
+    "media_inspect.peak_ms": {
+      "type": "number",
+      "title": "Length of one loudness bucket (ms)",
+      "default": 100
+    },
+    "media_inspect.scene_threshold": {
+      "type": "number",
+      "title": "Scene score a shot change has to cross",
+      "default": 0.35
+    },
+    "media_inspect.default": {
+      "object": "default",
+      "properties": [
+        "media_inspect.event_type",
+        "media_inspect.chunk_kb",
+        "media_inspect.silence_db",
+        "media_inspect.silence_ms",
+        "media_inspect.peak_ms",
+        "media_inspect.scene_threshold",
+        "media_inspect.request",
+        "media_inspect.max_input_mb"
+      ]
+    },
+    "media_inspect.profile": {
+      "type": "string",
+      "title": "Profile",
+      "default": "default",
+      "enum": [
+        "*>preconfig.profiles.*.title"
+      ],
+      "conditional": [
+        {
+          "value": "default",
+          "properties": [
+            "media_inspect.default"
+          ]
+        }
+      ]
+    },
+    "media_inspect.request": {
+      "type": "string",
+      "title": "Operation request (JSON)",
+      "format": "textarea",
+      "default": "{}",
+      "description": "JSON request: probe, levels (range, ranges, scan, scan_scenes) or stills (stills array). Sources arrive as media streams."
+    },
+    "media_inspect.max_input_mb": {
+      "type": "number",
+      "title": "Maximum cumulative input per object (MiB)",
+      "default": 16384,
+      "description": "Total incoming media bytes, including all assets. Clamped to 1\u20131048576 MiB; enforced even when stream size is undeclared."
+    }
+  },
+  "shape": [
+    {
+      "section": "Pipe",
+      "title": "Media Toolkit: Inspect",
+      "properties": [
+        "media_inspect.profile"
+      ]
+    }
+  ],
+  "test": {
+    "profiles": [
+      "default"
+    ],
+    "outputs": [
+      "text"
+    ],
+    "cases": [
+      {
+        "name": "Streamed media smoke",
+        "video": "video/Number Song _ No Music _ Vocal.mp4",
+        "expect": {
+          "text": {
+            "contains": "media_"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -77,8 +77,12 @@ public:
 #endif
     }
 
+    // Name of a context implicitly made for a thread the engine did not start,
+    // until something better is known (engine::python::syncThreadName)
+    static constexpr TextView ExternalName = "External";
+
     // This function returns a pointer to the this thread context
-    static auto thisCtx(TextView name = "External",
+    static auto thisCtx(TextView name = ExternalName,
                         bool markReady = false) noexcept {
         return _visit(
             overloaded{// Caller of the thread supplied a context ptr on start

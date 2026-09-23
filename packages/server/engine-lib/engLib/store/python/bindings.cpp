@@ -271,6 +271,15 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
+    ///         Let long-running Python sources observe native cancellation
+    ///         even when they have no objects to send to the scan callback.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(isCancelled, []() {
+        return ap::async::cancelled();
+    });
+
+    //-------------------------------------------------------------
+    /// @details
     ///		Returns the complete task-file JSON of the task currently
     ///		executing in this process, or None when no task is
     ///		running. This is how subprocess python reads trusted

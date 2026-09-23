@@ -4,7 +4,7 @@ sidebar_position: 0
 sidebar_label: Overview
 ---
 
-import { LuSettings, LuPlug, LuPlay, LuRocket, LuSend, LuFolderOpen, LuMessageSquare, LuActivity, LuShieldAlert, LuBookOpen, LuFlaskConical, LuChartLine, LuRadar } from 'react-icons/lu';
+import { LuSettings, LuPlug, LuPlay, LuRocket, LuSend, LuFolderOpen, LuMessageSquare, LuActivity, LuShieldAlert, LuBookOpen, LuFlaskConical, LuChartLine, LuRadar, LuGitCompare } from 'react-icons/lu';
 
 # Python SDK
 
@@ -113,6 +113,11 @@ asyncio.run(main())
 <a className="rr-side-card" href="/clients/python/otel-bridge">
   <span className="rr-side-card__head"><LuRadar className="rr-card-icon" /><span className="rr-side-card__title">OpenTelemetry Bridge</span></span>
   <span className="rr-side-card__body">Export live pipeline traces and metrics over OTLP with <code>rocketride otel</code>.</span>
+</a>
+
+<a className="rr-side-card" href="/clients/python/pipe-diff">
+  <span className="rr-side-card__head"><LuGitCompare className="rr-card-icon" /><span className="rr-side-card__title">Pipeline Diff</span></span>
+  <span className="rr-side-card__body">Review what changed between two <code>.pipe</code> revisions with <code>rocketride diff</code>.</span>
 </a>
 
 </div>

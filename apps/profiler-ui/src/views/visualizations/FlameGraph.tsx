@@ -168,8 +168,9 @@ const FlameGraph: React.FC<FlameGraphProps> = ({
 		const svg = svgRef.current;
 		if (!svg || !vizRoot) return;
 
-		// Apply client-side depth limiting and cutoff pruning
-		const processedRoot = pruneTree(limitDepth(vizRoot, maxDepthProp), cutoff);
+		// Apply client-side cutoff pruning, then depth limiting — pruning
+		// weighs whole subtrees, so it must see the levels the limit drops
+		const processedRoot = limitDepth(pruneTree(vizRoot, cutoff), maxDepthProp);
 
 		// D3 ordinal colour scale by function name (matches sunburst)
 		const color = d3.scaleOrdinal(CATEGORY20C);
