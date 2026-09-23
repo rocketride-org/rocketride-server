@@ -20,7 +20,10 @@ const { token } = await client.use({ filepath: './pipeline.pipe', ttl: 3600 });
 ```
 
 Beyond `filepath`/`pipeline`, the options accept `source`, `threads`,
-`useExisting`, `args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
+`torchThreads` (the BLAS/OMP thread count pinned into the engine process for
+this task; unset uses the server default from `ROCKETRIDE_TORCH_THREADS`, `0`
+disables pinning for this task), `useExisting`, `args`, `ttl`,
+`pipelineTraceLevel` (trace verbosity for the
 [run log](/clients/typescript/logs)), `name` (a display name for the task), and
 `env` (per-run variable overrides). Pass the pipeline config **as-is** — do not
 wrap it in `{ pipeline: ... }`; the client sends it to the server, which resolves

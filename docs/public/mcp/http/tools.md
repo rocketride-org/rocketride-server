@@ -157,7 +157,10 @@ Load a previously saved pipeline template.
 The three start/send tools share these optional start parameters: `ttl`
 (integer — task TTL in seconds, 0 = no timeout), `use_existing` (boolean —
 reuse an already-running task), `source` (string — source label), `threads`
-(integer), and `pipelineTraceLevel` (`none | metadata | summary | full`).
+(integer), `torch_threads` (integer — BLAS/OMP threads pinned into the engine
+process for this task; omit it to use the server default from
+`ROCKETRIDE_TORCH_THREADS`, pass 0 to disable pinning), and
+`pipelineTraceLevel` (`none | metadata | summary | full`).
 Runs default to `summary` tracing so the [replay tools](#replay-past-runs)
 have content.
 

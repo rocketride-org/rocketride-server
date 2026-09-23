@@ -98,6 +98,17 @@ the engine spawns an independent execution context for each incoming task. A
 slow request (a large document going through OCR, embedding, and an LLM call)
 does not block a fast one (a short question answered directly by the LLM).
 
+Worker threads — the `threads` option on `use()` — decide how many pipes a task
+runs at once, not how fast one node is. Each vision model component holds its
+own device lock, so that component's inference runs one call at a time across
+all of the task's worker threads: raising `threads` does not speed up a single
+`detect` node on CPU. For `detect`, `caption`, `detect_segment`,
+`depth_estimate`, `pose_estimation` and `background_removal`, that lock becomes
+a no-op once a model server is configured, since the model server batches and
+multiplexes the requests itself. The separate `torchThreads` option
+(`torch_threads` in Python) pins the BLAS/OMP pool inside the task, so several
+tasks on one box do not each try to claim every core.
+
 ### Streaming execution
 
 Nodes process data **as it arrives**, not after the full upstream output is

@@ -26,6 +26,8 @@ RocketRide AI Configuration Constants.
 Global configuration values for metrics, billing, and system tuning.
 """
 
+import os
+
 # =============================================================================
 # Metrics Sampling and Reporting Intervals
 # =============================================================================
@@ -55,6 +57,31 @@ CONST_STATUS_UPDATE_CANCEL_TIMEOUT = 2.0  # seconds to wait for status update ta
 CONST_STATUS_HISTORY_LIMIT = 1000  # max error/warning messages retained per task in memory (was 50; see #1414)
 CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (15 minutes)
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
+
+# =============================================================================
+# Per-Task BLAS/OMP Thread Pinning
+# =============================================================================
+# Every BLAS/OMP stack the engine subprocess may load reads its own variable,
+# so they are pinned together: capping OMP alone still lets MKL or OpenBLAS
+# start one thread per core, and a few tasks on one box then oversubscribe it.
+CONST_TORCH_THREAD_ENV_VARS = (
+    'OMP_NUM_THREADS',
+    'MKL_NUM_THREADS',
+    'OPENBLAS_NUM_THREADS',
+    'VECLIB_MAXIMUM_THREADS',
+    'NUMEXPR_NUM_THREADS',
+    'TORCH_NUM_THREADS',
+)
+
+# Server-wide default, overridden per request by `torchThreads`. Kept as the
+# raw string: resolve_torch_threads() in task_server.py parses it, so a typo
+# in the operator's environment warns on each launch instead of failing one.
+# Read at import time — patch this attribute, not the env, to change it.
+CONST_DEFAULT_TORCH_THREADS = os.environ.get('ROCKETRIDE_TORCH_THREADS')
+
+# Assumed core count when os.cpu_count() cannot tell us. Only used as the
+# ceiling a requested thread count is checked against.
+CONST_TORCH_THREADS_CPU_FALLBACK = 64
 
 # =============================================================================
 # Run Logging (per-task JSONL event continuum) Configuration
