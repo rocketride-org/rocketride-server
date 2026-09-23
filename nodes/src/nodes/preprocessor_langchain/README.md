@@ -1,95 +1,104 @@
 # preprocessor_langchain
 
-A RocketRide preprocessor node ("General Text") that splits incoming text into chunks for downstream embedding or LLM processing.
+A RocketRide preprocessor node that splits general text into documents for
+embedding or LLM processing. Choose it over the code preprocessor for prose and
+over the LLM preprocessor when deterministic, local splitter behavior is enough.
+
+## About LangChain
+
+LangChain provides the `langchain_text_splitters` classes used by this node.
+The node selects one of those classes from its profile and supplies the chunk
+size and length function it uses for splitting.
 
 ## What it does
 
-Splits text into chunks using **LangChain text splitters** (`langchain_text_splitters`). Choose a profile tuned for the content type: general prose, markdown, LaTeX, sentence-based NLP, or any custom splitter class the library exports. No LLM is required.
+Splits incoming `text` and `table` content on the `documents` lane. It offers
+general, Markdown, LaTeX, sentence-oriented, and fixed-separator splitters,
+whereas the code preprocessor extracts code syntax and the LLM preprocessor
+asks a connected model to make chunking decisions. Text is accumulated until an
+object closes; tables are split as they arrive.
 
-The splitter class is loaded dynamically by name from `langchain_text_splitters`, so the `custom` profile can target any class that library exports. Constructor kwargs are filtered against the target class signature, preventing "unexpected keyword argument" errors across splitters. Chunk overlap is fixed at `0`.
+## Lanes
 
-Incoming text is accumulated per file and split once when the file closes. Each incoming table is split immediately as its own unit. Every chunk is emitted as a document with a sequential `chunkId` (reset per file); tables additionally carry a `tableId`.
-
-By default chunks are measured by **string length** with a maximum of **512** characters. Token mode uses a conservative byte-length estimator instead of a real tokenizer (no transformers model is loaded). See [Token mode](#token-mode) below.
-
----
-
-## Configuration
-
-### Lanes
-
-| Lane in | Lane out    | Description                              |
-|---------|-------------|------------------------------------------|
-| `text`  | `documents` | Split plain text into document chunks    |
-| `table` | `documents` | Split table content into document chunks |
-
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `strlen` | number | Default 512.  |
-| `tokens` | number | Default 512.  |
-| `mode` | string | Default "strlen".  |
-| `splitter` | string | Default "RecursiveCharacterTextSplitter".  |
-| `separators` | string | Default "'\n\n', '\n', ' ', ''".  |
-| `separator` | string | Default ""\n"".  |
-| `model` | string | Default "en_core_web_sm".  |
-| `profile` | string | Default "default".  |
-
-### Separator syntax
-
-`separators` and `separator` are parsed as comma-separated Python string literals (e.g. `'\n\n', '\n', ' ', ''`). Escape sequences such as `\n` are interpreted. Every element must be a string. The `character` profile accepts exactly one element. An invalid format raises an error at startup.
-
-### Advanced token-mode options
-
-These keys are read from the node config but are not exposed in the UI shape:
-
-| Field                 | Type / Default   | Description                                                                      |
-|-----------------------|------------------|----------------------------------------------------------------------------------|
-| `bytes_per_token`     | float, `3.0`     | Bytes-per-token ratio used by the estimator. Lower values estimate more tokens (safer). |
-| `max_model_tokens`    | int, unset       | Hard cap for the model's max token context. When set, caps the chunk size and enables the post-split safety net. |
-| `token_safety_margin` | int, `32`        | Subtracted from `max_model_tokens` to leave headroom for special tokens.         |
-
----
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `text` | `documents` | Split accumulated text when the object closes. |
+| `table` | `documents` | Split each incoming table immediately. |
 
 ## Profiles
 
-| Profile             | Splitter                         | Best for                                                               |
-|---------------------|----------------------------------|------------------------------------------------------------------------|
-| `default` (default) | `RecursiveCharacterTextSplitter` | General-purpose prose                                                  |
-| `recursive`         | `RecursiveCharacterTextSplitter` | General-purpose prose with custom separators                           |
-| `character`         | `CharacterTextSplitter`          | Simple splitting on a fixed separator                                  |
-| `markdown`          | `MarkdownTextSplitter`           | Structured Markdown documents (separators kept in chunks)              |
-| `latex`             | `LatexTextSplitter`              | Scientific and academic documents (separators kept in chunks)          |
-| `nltk`              | `NLTKTextSplitter`               | Sentence-based splitting                                               |
-| `spacy`             | `SpacyTextSplitter`              | NLP-based sentence splitting (English, German, French, Spanish models) |
-| `custom`            | `RecursiveCharacterTextSplitter` | User-defined splitter class from `langchain_text_splitters`            |
+Default: `default`, the recursive character splitter.
 
-### NLTK
+| Profile | Splitter |
+| --- | --- |
+| `default` *(default)* | `RecursiveCharacterTextSplitter` |
+| `recursive` | `RecursiveCharacterTextSplitter` |
+| `character` | `CharacterTextSplitter` |
+| `markdown` | `MarkdownTextSplitter` |
+| `latex` | `LatexTextSplitter` |
+| `nltk` | `NLTKTextSplitter` |
+| `spacy` | `SpacyTextSplitter` |
+| `custom` | `RecursiveCharacterTextSplitter` |
 
-Dependencies (`nltk`) are installed lazily the first time this profile is used. The `punkt` tokenizer data (and `punkt_tab`, required by NLTK 3.9+) is downloaded automatically if missing. Pass a `language` key in the node config (e.g. `"english"`, `"spanish"`) to forward it to the splitter.
+## Configuration
 
-### spaCy
+Start with the default profile and string-length mode for ordinary prose. Pick
+a content-specific profile when its boundaries matter, then set the size in
+characters or estimated tokens. The generated schema lists the profile-owned
+fields; the choices below explain their operational effects.
 
-Dependencies (`spacy`) are installed lazily the first time this profile is used. The configured pipeline model (default `en_core_web_sm`) is downloaded automatically if not already installed. Small, medium, and large models are available for English, German, French, and Spanish; an English transformer model (`en_core_web_trf`) is also supported (best accuracy, slower).
+### Text splitter
 
-### Custom
+The profile fixes the splitter class; changing the class field to another
+value fails configuration validation. Use `markdown` for Markdown, `latex` for
+LaTeX, `character` for one fixed separator, `nltk` for the NLTK splitter, or
+`spacy` for the spaCy splitter. The `custom` selector is present in the
+configuration but is also fixed to `RecursiveCharacterTextSplitter`, so it
+currently behaves like `default`.
 
-Set `splitter` to the class name of any splitter exported by `langchain_text_splitters`. An unknown class name raises `Splitter '<name>' not found in LangChain` at startup. Only kwargs accepted by the chosen class's constructor are forwarded; unrecognized kwargs are silently dropped.
+### Split by and chunk size
 
----
+String-length mode uses the configured string length, 512 by default. Token
+mode estimates tokens as UTF-8 byte length divided by 3, rounded up; this is a
+conservative estimate rather than a tokenizer's count. Choose token mode when
+a downstream model or embedding service has a token budget, and lower the size
+when chunks are rejected for being too long.
 
-## Token mode
+### Split separators
 
-With `mode: tokens`, chunk size is measured by an estimated token count. No tokenizer or transformers model is loaded. The estimate is the UTF-8 byte length of the text divided by `bytes_per_token` (default `3.0`), rounded up. This is conservative by design, so real token counts should come in at or under the estimate.
+For the recursive profile, write a comma-separated sequence of quoted Python
+string literals, such as `'\n\n', '\n', ' ', ''`. The node parses that
+sequence with `ast.literal_eval`; every item must be a string or startup fails.
+For the character profile, supply exactly one such literal. Change recursive
+separators to prefer domain boundaries before falling back to shorter ones.
 
-When `max_model_tokens` is set:
+### Model
 
-- The effective token budget is `max_model_tokens - token_safety_margin`.
-- The requested chunk size (`tokens`) is capped to that budget.
-- After splitting, any chunk that still exceeds the budget is force-subdivided by proportional character cuts until every piece fits.
+The spaCy profile uses the selected spaCy pipeline, defaulting to
+`en_core_web_sm`. Choose one of the listed English, German, French, or Spanish
+models for text in that language. If the pipeline is absent, the node downloads
+it before creating the splitter; this may delay the first run.
 
-This guarantees no emitted chunk exceeds the model's context budget even without an exact tokenizer.
+## Notes
+
+### Downloads and output
+
+The NLTK profile installs its extra dependencies when selected and downloads
+`punkt` when it cannot find it; it also attempts to download `punkt_tab` when
+needed. All splitters use zero chunk overlap. Every emitted document receives a
+sequential `chunkId` per object; table documents also receive a `tableId`.
+
+### Token-budget safety net
+
+When token mode also has a positive `max_model_tokens` configuration value,
+the node subtracts `token_safety_margin` (32 by default), caps the requested
+chunk size to the result, and force-splits any remaining oversized output. The
+byte-per-token estimate defaults to 3.0 and can be changed through
+`bytes_per_token`; lowering it estimates more tokens and is the safer choice.
+
+## Upstream docs
+
+- [LangChain text splitters](https://python.langchain.com/docs/how_to/recursive_text_splitter/)
 
 ---
 
@@ -101,18 +110,18 @@ This guarantees no emitted chunk exceeds the model's context budget even without
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `langchain.splitter.character.separator` | `string` | **Split separator** | `"\"\\n\""` |
-| `langchain.splitter.character.splitter` | `string` |  | const: `"CharacterTextSplitter"` |
-| `langchain.splitter.custom.splitter` | `string` | **Splitter class name** | const: `"RecursiveCharacterTextSplitter"` |
-| `langchain.splitter.default.splitter` | `string` |  | const: `"RecursiveCharacterTextSplitter"` |
-| `langchain.splitter.latex.splitter` | `string` |  | const: `"LatexTextSplitter"` |
-| `langchain.splitter.markdown.splitter` | `string` |  | const: `"MarkdownTextSplitter"` |
+| `langchain.splitter.character.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to CharacterTextSplitter by the 'Character Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"CharacterTextSplitter"` |
+| `langchain.splitter.custom.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to RecursiveCharacterTextSplitter by the 'Custom' text-splitter profile and cannot be changed here; the custom profile currently behaves like default. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"RecursiveCharacterTextSplitter"` |
+| `langchain.splitter.default.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to RecursiveCharacterTextSplitter by the 'Default' text-splitter profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile (for example Markdown for MarkdownTextSplitter). Editing this to another class fails validation with 'must be equal to constant'. | const: `"RecursiveCharacterTextSplitter"` |
+| `langchain.splitter.latex.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to LatexTextSplitter by the 'Latex Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"LatexTextSplitter"` |
+| `langchain.splitter.markdown.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to MarkdownTextSplitter by the 'Markdown Text Splitter' profile and cannot be changed here. To use MarkdownTextSplitter, select 'Markdown Text Splitter' in the 'Text splitter' selector above rather than editing this field. Editing this to another class fails validation with 'must be equal to constant'. | const: `"MarkdownTextSplitter"` |
 | `langchain.splitter.mode` | `string` | **Split by** | `"strlen"` |
-| `langchain.splitter.nltk.splitter` | `string` |  | const: `"NLTKTextSplitter"` |
-| `langchain.splitter.profile` | `string` | **Text splitter** | `"default"` |
+| `langchain.splitter.nltk.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to NLTKTextSplitter by the 'NLTK Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"NLTKTextSplitter"` |
+| `langchain.splitter.profile` | `string` | **Text splitter**<br/>Selects the splitter profile. Each profile locks one LangChain splitter class and shows only that splitter's options, so the splitter class is not chosen independently of the profile. Pick the profile that matches your content: Markdown for .md, Latex for LaTeX, Character/NLTK/Spacy as needed. Editing a profile's splitter field to a different class fails schema validation with a 'must be equal to constant' error; change this selector instead. | `"default"` |
 | `langchain.splitter.recursive.separators` | `string` | **Split separators** | `"'\\n\\n', '\\n', ' ', ''"` |
-| `langchain.splitter.recursive.splitter` | `string` |  | const: `"RecursiveCharacterTextSplitter"` |
+| `langchain.splitter.recursive.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to RecursiveCharacterTextSplitter by the 'Recursive Character Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"RecursiveCharacterTextSplitter"` |
 | `langchain.splitter.spacy.model` | `string` | **Model** | `"en_core_web_sm"` |
-| `langchain.splitter.spacy.splitter` | `string` |  | const: `"SpacyTextSplitter"` |
+| `langchain.splitter.spacy.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to SpacyTextSplitter by the 'Spacy Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"SpacyTextSplitter"` |
 | `langchain.splitter.strlen` | `number` | **String length** | `512` |
 | `langchain.splitter.tokens` | `number` | **Number of tokens** | `512` |
 

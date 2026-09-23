@@ -30,18 +30,19 @@ task execution, debugging sessions, and resource management.
 
 Primary Responsibilities:
 --------------------------
-1. Handles DAP protocol commands for task lifecycle management (launch, execute, attach, terminate)
-2. Manages debugging session initialization and capabilities negotiation
-3. Provides task execution control (pause, continue, disconnect)
-4. Coordinates with a TaskServer to orchestrate backend task engines
-5. Maintains DAP-compliant communication with debugging clients
+1. Handles DAP protocol commands for task lifecycle management (launch, execute,
+   terminate, restart)
+2. Coordinates with a TaskServer to orchestrate backend task engines
+3. Resolves the run team and its owning org before any task is started
+4. Maintains DAP-compliant communication with clients
 
 Architecture:
 -------------
 - Inherits from DAPConn to leverage DAP protocol handling
 - Works in conjunction with TaskServer for actual task management
-- Supports both debugging-enabled ('launch') and debug-free ('execute') task execution
-- Handles attachment to existing task sessions for collaborative debugging
+- Two entry points start a task: 'launch' (the cloud REST path, via the SaaS
+  ALB) and 'execute' (the SDK path). They are deliberately separate — see
+  on_launch's docstring for the three ways they differ
 
 Usage Context:
 --------------
@@ -54,7 +55,7 @@ import os
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
-from ai.account.models import resolve_task_permissions
+from ai.account.models import resolve_run_permissions
 from rocketride import TASK_STATE
 
 # Only import for type checking to avoid circular import errors
@@ -104,21 +105,7 @@ class TaskCommands(DAPConn):
             transport (TransportBase): Communication transport layer for DAP messages
             **kwargs: Additional arguments passed to parent DAPConn constructor
         """
-        # Map of store subcommand names to handler methods.
-        # Populated here so new subcommands can be added without touching the
-        # dispatcher logic in on_rrext_store.
-        self._store_subcommand_handlers = {
-            'fs_open': self._store_fs_open,
-            'fs_read': self._store_fs_read,
-            'fs_write': self._store_fs_write,
-            'fs_close': self._store_fs_close,
-            'fs_delete': self._store_fs_delete,
-            'fs_list_dir': self._store_fs_list_dir,
-            'fs_mkdir': self._store_fs_mkdir,
-            'fs_rmdir': self._store_fs_rmdir,
-            'fs_stat': self._store_fs_stat,
-            'fs_rename': self._store_fs_rename,
-        }
+        pass
 
     async def on_execute(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -139,27 +126,37 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Verify permission
-            self.verify_permission('task.control')
+            # The run team is ALWAYS the session's DEV TEAM: the team a
+            # development-mode run is billed to and whose environment layer
+            # applies — the user's profile-assigned team for client
+            # connections, or the deployment's team for the trusted
+            # in-process dispatch (which synthesizes an AccountInfo with
+            # devTeam = the run's team). A client-supplied teamId is
+            # IGNORED, never honored — the caller must not be able to pick
+            # the team a run is billed/authorized/secret-resolved under
+            # (same doctrine as the org IDOR fixes).
+            args = request.get('arguments') or {}
+            team_id = self._account_info.devTeam
+            # Billing must never guess: no dev team = no dev run.
+            if not team_id:
+                raise PermissionError('No development team is set — pick one in your profile before running pipelines')
+
+            # Verify task.control on the run team BEFORE any secret handling,
+            # since the env merge below pulls that team's secrets.
+            self.verify_team_permission(team_id, 'task.control')
 
             # Verify required pipeline plans
-            args = request.get('arguments') or {}
             pipeline = args.get('pipeline')
             if pipeline is not None:
                 # Check that the pipeline's required plan is available for this account.
                 self.verify_plans(self._account_info, pipeline)
 
-            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
-            team_id = args.get('teamId') or self._account_info.defaultTeam
-
-            # Resolve org_id from the user's single organization.
-            org_id = ''
-            org = self._account_info.organization
-            if org:
-                for team in org.get('teams', []):
-                    if team.get('id') == team_id:
-                        org_id = org.get('id', '')
-                        break
+            # Resolve the org that owns the TARGET team (same resolution as
+            # on_launch): members via their own org, sys.admin/internal via
+            # the account backend — the task file must never carry an empty
+            # orgId as trusted identity, and the secret merge below must pull
+            # the TARGET team's real org layer.
+            org_id = await self.resolve_org_for_team(team_id)
 
             # Build merged environment for pipeline variable resolution.
             # Combines .env → org → team → user secrets (SaaS) or just .env (OSS).
@@ -175,10 +172,26 @@ class TaskCommands(DAPConn):
             else:
                 merged_env = {}
 
-            # Layer org → team → user secrets on top
+            # Run classification comes ONLY from the trusted in-process
+            # dispatch (start_server_task_as_team sets these attributes on
+            # its connection) — never from DAP arguments, so remote clients
+            # cannot spoof a deploy run into the team continuum.
+            run_kind = getattr(self, '_trusted_run_kind', 'dev')
+            trigger = getattr(self, '_trusted_trigger', '') or ''
+            # Owner scope rides the same trusted channel: a TEAM-owned deploy
+            # (@team) or a USER-owned run (an interactive .use, or a personal
+            # @me deploy). Defaults from run_kind when the dispatch didn't set
+            # it (an ordinary .use is user-owned).
+            owner_kind = getattr(self, '_trusted_owner_kind', '') or ('team' if run_kind == 'deploy' else 'user')
+
+            # Layer org → team → user secrets on top. A TEAM-owned run skips the
+            # USER layer deliberately (a @team deployment's config must not
+            # depend on which human deployed it); a USER-owned run — an
+            # interactive .use OR a personal @me deploy — applies its owner's
+            # user layer.
             merged_env.update(
                 await account.get_merged_env(
-                    user_id=self._account_info.userId,
+                    user_id='' if owner_kind == 'team' else self._account_info.userId,
                     org_id=org_id,
                     team_id=team_id,
                 )
@@ -196,6 +209,9 @@ class TaskCommands(DAPConn):
                 team_id=team_id,
                 org_id=org_id,
                 env=merged_env,
+                run_kind=run_kind,
+                owner_kind=owner_kind,
+                trigger=trigger,
             )
 
             # Confirm successful task execution startup
@@ -204,6 +220,116 @@ class TaskCommands(DAPConn):
         except Exception as e:
             # Log execution failure and re-raise
             self.debug_message(f'Failed to execute task: {str(e)}')
+            raise
+
+    async def on_launch(self, request: Dict[str, Any]) -> None:
+        """
+        Handle DAP 'launch' command to start a new task.
+
+        This is the cloud pipeline-launch path: the SaaS ALB forwards a
+        'launch' request here (REST ``PUT /task``), which resolves the run
+        team and its owning org, then delegates to TaskServer.start_task.
+
+        Deliberately NOT a wrapper over on_execute — the two differ in three
+        ways that must not converge silently: on_launch resolves no
+        org/team/user secrets, does not wait for the task to reach RUNNING,
+        and does not classify the run. See the module history before merging
+        them.
+
+        Args:
+            request (Dict[str, Any]): Launch request containing:
+                - arguments: Task configuration and launch parameters
+
+        Returns:
+            None: the reply is sent directly via send_response.
+
+        Raises:
+            Exception: If task creation fails
+        """
+        try:
+            # Launch runs are development runs: they ALWAYS execute under the
+            # user's profile-assigned development team. Clients do not choose
+            # a team at launch; a stray teamId is rejected rather than
+            # silently ignored so the caller is never surprised by which team
+            # the run was billed/authorized under.
+            args = request.get('arguments') or {}
+            team_id = self._account_info.devTeam
+            # Billing must never guess: no dev team = no dev run.
+            if not team_id:
+                raise PermissionError('No development team is set — pick one in your profile before running pipelines')
+            requested_team = args.get('teamId')
+            if requested_team and requested_team != team_id:
+                raise PermissionError('Tasks run in your assigned development team; change it in your profile')
+
+            # Verify task.debug on the development team.
+            self.verify_team_permission(team_id, 'task.debug')
+
+            # Resolve the org that owns the TARGET team. Members resolve via
+            # their own org; callers passing the permission check without
+            # membership (sys.admin, internal) resolve via the account backend
+            # so the task file never carries an empty orgId as trusted
+            # identity (rejected if the team's org cannot be determined).
+            org_id = await self.resolve_org_for_team(team_id)
+
+            # Create and start the new task, obtaining a unique token
+            response = await self._server.start_task(
+                request,
+                self,
+                client_id=self._account_info.userId,
+                user_id=self._account_info.userId,
+                team_id=team_id,
+                org_id=org_id,
+            )
+
+            # Send successful launch response with task token
+            await self.send_response(request, body=response)
+
+        except Exception as e:
+            # Log the error for diagnostics and re-raise
+            self.debug_message(f'Failed to launch task: {str(e)}')
+            raise
+
+    async def on_terminate(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'terminate' command to stop task execution and cleanup.
+
+        Forcibly terminates the target task and cleans up associated resources.
+        This is a graceful shutdown that may not always be called if clients
+        disconnect abruptly, so cleanup logic should also be handled in
+        disconnect.
+
+        Args:
+            request (Dict[str, Any]): Terminate request carrying the task token
+
+        Returns:
+            Dict[str, Any]: Acknowledgment of successful termination
+
+        Raises:
+            Exception: If task termination or cleanup fails
+        """
+        # Bound before the try so the failure log below can reference it even
+        # when get_task_token itself raises — otherwise the UnboundLocalError
+        # would replace the real error.
+        token = '<unresolved>'
+
+        try:
+            token = self.get_task_token(request)
+
+            # Validate ownership and permissions via get_task
+            self.get_task(request, 'task.control')
+
+            # Log the termination request
+            self.debug_message('Terminating task and cleaning up resources')
+
+            # Stop the task and perform resource cleanup
+            await self._server.stop_task(token)
+
+            # Acknowledge successful termination
+            return self.build_response(request)
+
+        except Exception as e:
+            # Log termination failure with task context
+            self.debug_message(f'Failed to terminate task "{token}": {str(e)}')
             raise
 
     async def on_restart(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -224,8 +350,12 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Verify permission
-            self.verify_permission('task.control')
+            # Authorize against the TASK'S team, not the dev team: get_task
+            # resolves the token to its control entry and requires
+            # task.control on that team (sys.admin bypasses). A dev-team
+            # check alone let any task.control holder restart other teams'
+            # token-addressed tasks.
+            self.get_task(request, 'task.control')
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(
@@ -335,6 +465,11 @@ class TaskCommands(DAPConn):
                 - args (Dict[str, Any]): Additional arguments for the request
                     - projectId (str)): The project id
                     - source (str): The source id
+                    - teamId (str, optional): Address the team's DEPLOY run;
+                      absent addresses the caller's own run
+                    - runKind (str, optional): Teamless continuum selector —
+                      absent/'dev' = the caller's dev run, 'deploy' = the
+                      caller's personal @me deploy run
 
         Returns:
             Dict[str, Any]: DAP response with token
@@ -343,17 +478,24 @@ class TaskCommands(DAPConn):
             Exception: If task does not exist
         """
         try:
-            # Verify permission
-            self.verify_permission('task.monitor')
-
             # Get the arguments
             args = request.get('arguments', {})
             project_id = args.get('projectId', None)
             source = args.get('source', None)
+            team_id = args.get('teamId') or ''
+            run_kind = args.get('runKind') or ''
 
-            # Get the task control (ownership + permission check inside)
+            # Verify permission against the requested scope: the named team
+            # for a deploy lookup, the caller's default context otherwise
+            # (prior art: cmd_log._verify_log_access).
+            if team_id:
+                self.verify_team_permission(team_id, 'task.monitor')
+            else:
+                self.verify_permission('task.monitor')
+
+            # Get the task control (owner scoping + permission check inside)
             control = self._server.get_task_control_by_project(
-                project_id, source, self._account_info, require='task.monitor'
+                project_id, source, self._account_info, require='task.monitor', team_id=team_id, run_kind=run_kind
             )
 
             # Return successful response with status data
@@ -387,14 +529,18 @@ class TaskCommands(DAPConn):
                     - pipeline: Full pipeline configuration dict
         """
         try:
-            # Require monitor permission to list tasks
-            self.verify_permission('task.monitor')
-
             tasks = []
 
-            # Iterate all tasks the caller has access to (own, teammate, or org admin).
+            # Iterate all tasks the caller may see: user-owned runs (dev and
+            # @me deploys) are OWNER-ONLY — the caller's own runs stay
+            # visible across an org switch (identity, not team, is the key)
+            # and a teammate's personal runs never appear; team-owned deploy
+            # runs list for anyone with permissions on the run's team.
+            # Authorization is PER RUN — a global verify_permission here
+            # would evaluate the caller's current dev-team context and hide
+            # their own private runs after an org or dev-team switch.
             for control in self._server._task_control.values():
-                if not resolve_task_permissions(self._account_info, control.teamId):
+                if 'task.monitor' not in resolve_run_permissions(self._account_info, control):
                     continue
 
                 # Get current status for name and status string
@@ -423,6 +569,19 @@ class TaskCommands(DAPConn):
                             'source': control.source,
                             'token': control.token,
                             'status': status.status,
+                            # Owning team — lets clients attribute a task to a
+                            # TEAM deployment vs a dev run of the same project.
+                            'teamId': control.teamId,
+                            # Run classification straight from the control —
+                            # clients must not infer deploy-ness from teamId
+                            # (dev runs carry an attribution team too).
+                            'runKind': control.run_kind,
+                            # Trusted owner scope: a personal (@me) deploy's
+                            # teamId is only billing attribution — clients
+                            # match personal deployments by ownerKind='user'
+                            # + ownerId, never by the billing team.
+                            'ownerKind': control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user'),
+                            'ownerId': control.owner_id,
                             'pipeline': control.pipeline,
                         }
                     )
@@ -433,310 +592,3 @@ class TaskCommands(DAPConn):
             # Log and re-raise for standard error handling
             self.debug_message(f'Failed to list tasks: {str(e)}')
             raise
-
-    async def on_rrext_store(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle DAP 'rrext_store' command - unified project and template storage operations.
-
-        Central dispatcher for all storage subcommands. Verifies permissions once
-        and routes to appropriate subcommand handler.
-
-        Args:
-            request (Dict[str, Any]): DAP request containing:
-                - arguments: Dict with:
-                    - subcommand: One of 'save_project', 'get_project', 'delete_project', 'get_all_projects',
-                                  'save_template', 'get_template', 'delete_template', 'get_all_templates'
-                    - ...: Additional arguments specific to subcommand
-
-        Returns:
-            Dict[str, Any]: DAP response (format depends on subcommand)
-
-        Raises:
-            ValueError: If subcommand is missing or unknown
-            Exception: If subcommand execution fails
-        """
-        try:
-            # Require store permission (once for all subcommands)
-            self.verify_permission('task.store')
-
-            # Extract subcommand
-            args = request.get('arguments', {})
-            subcommand = args.get('subcommand')
-
-            if not subcommand:
-                raise ValueError('Subcommand is required')
-
-            # Dispatch to appropriate handler using the pre-built lookup dict.
-            # The walrus operator assigns the handler if found; None triggers else.
-            if handler := self._store_subcommand_handlers.get(subcommand):
-                return await handler(request, args)
-            else:
-                raise ValueError(f'Unknown subcommand: {subcommand}')
-
-        except Exception as e:
-            self.debug_message(f'Store operation failed: {str(e)}')
-            raise
-
-    def _get_file_store(self):
-        """
-        Get a FileStore scoped to the authenticated user.
-
-        Returns:
-            FileStore: A file-store instance that isolates all paths under
-                the current user's storage namespace.
-        """
-        # Scope the file store to the calling user so users cannot access each
-        # other's files through the store API.
-        return self._server.store.get_file_store(self._account_info.userId)
-
-    # =========================================================================
-    # Generic File Store Handlers
-    # =========================================================================
-
-    async def _store_fs_open(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Open a file handle for reading or writing.
-
-        For write mode (``mode='w'``) the backend creates a new write handle and
-        returns its ID.  For read mode (default) the backend opens the file,
-        validates it exists, and returns metadata alongside the handle ID.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``path``.  Optional ``mode``
-                (``'r'`` or ``'w'``, defaults to ``'r'``).
-
-        Returns:
-            Dict[str, Any]: DAP response.
-                Write mode: ``body.handle`` — the new write handle ID.
-                Read mode:  result from ``fs.open_read`` (includes handle + metadata).
-        """
-        fs = self._get_file_store()
-        path = args.get('path')
-        mode = args.get('mode', 'r')
-
-        if mode == 'w':
-            # Create a write handle; the connection_id is used to tie the handle
-            # lifetime to this connection so it is cleaned up on disconnect.
-            handle_id = await fs.open_write(path, self._connection_id)
-            return self.build_response(request, body={'handle': handle_id})
-        else:
-            # Open for reading; returns handle ID plus file metadata (size, etc.).
-            result = await fs.open_read(path, self._connection_id)
-            return self.build_response(request, body=result)
-
-    async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Read data from an open read handle.
-
-        Clamps ``offset`` and ``length`` to safe values before forwarding to the
-        backend so that a misbehaving client cannot request an unbounded read.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``handle``.  Optional ``offset``
-                (default 0) and ``length`` (default and max 4 MiB).
-
-        Returns:
-            Dict[str, Any]: DAP response with ``body.size`` (bytes read) and
-                ``arguments.data`` (the raw bytes).
-        """
-        fs = self._get_file_store()
-        handle = args.get('handle')
-        offset = args.get('offset', 0)
-        length = args.get('length', 4_194_304)
-
-        # Clamp client-supplied values to safe defaults.
-        # Negative or non-integer offsets are reset to 0.
-        if not isinstance(offset, int) or offset < 0:
-            offset = 0
-        # Non-positive or non-integer lengths are reset to the default chunk size.
-        if not isinstance(length, int) or length <= 0:
-            length = 4_194_304
-        # Cap the length at 4 MiB to prevent memory exhaustion from large reads.
-        length = min(length, 4_194_304)
-
-        # Read the chunk from the file store backend.
-        data = await fs.read_chunk(handle, offset, length, connection_id=self._connection_id)
-
-        # Build the response: body carries the byte count; arguments carries the
-        # raw data separately so the protocol can handle binary payloads correctly.
-        response = self.build_response(request, body={'size': len(data)})
-        response['arguments'] = {'data': data}
-        return response
-
-    async def _store_fs_write(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Write data to an open write handle.
-
-        Accepts both ``bytes`` and ``str`` data; strings are UTF-8 encoded before
-        being forwarded to the backend.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``handle``.  Optional ``data``
-                (bytes or str, defaults to empty bytes).
-
-        Returns:
-            Dict[str, Any]: DAP response with ``body.bytesWritten`` containing the
-                number of bytes actually written.
-        """
-        fs = self._get_file_store()
-        handle = args.get('handle')
-        data = args.get('data', b'')
-
-        # Normalise string data to bytes so the backend always receives bytes.
-        if isinstance(data, str):
-            data = data.encode('utf-8')
-
-        # Write the chunk and return the actual byte count confirmed by the backend.
-        written = await fs.write_chunk(handle, data, connection_id=self._connection_id)
-        return self.build_response(request, body={'bytesWritten': written})
-
-    async def _store_fs_close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Close a file handle.
-
-        Dispatches to the correct close method based on the handle mode so that
-        the backend can flush write buffers for write handles.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``handle``.  Optional ``mode``
-                (``'r'`` or ``'w'``, defaults to ``'r'``).
-
-        Returns:
-            Dict[str, Any]: Empty success DAP response.
-        """
-        fs = self._get_file_store()
-        handle = args.get('handle')
-        mode = args.get('mode', 'r')
-
-        if mode == 'w':
-            # Flush and close a write handle; triggers any finalisation (e.g. S3 upload).
-            await fs.close_write(handle, connection_id=self._connection_id)
-        else:
-            # Release a read handle and free associated resources.
-            await fs.close_read(handle, connection_id=self._connection_id)
-        return self.build_response(request)
-
-    async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Delete file from file store.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``path`` — the file to delete.
-
-        Returns:
-            Dict[str, Any]: Empty success DAP response.
-        """
-        # Delegate deletion to the user-scoped file store.
-        await self._get_file_store().delete(args.get('path'))
-        return self.build_response(request)
-
-    async def _store_fs_list_dir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        List directory contents.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Optional ``path`` — directory to list
-                (defaults to the root of the user's store, i.e. ``''``).
-
-        Returns:
-            Dict[str, Any]: DAP response with directory listing as the body.
-        """
-        # Delegate to the file store; default to the root path if not specified.
-        result = await self._get_file_store().list_dir(args.get('path', ''))
-        return self.build_response(request, body=result)
-
-    async def _store_fs_mkdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Create directory.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``path`` — the directory to create.
-
-        Returns:
-            Dict[str, Any]: Empty success DAP response.
-        """
-        # Create the directory in the user-scoped file store.
-        await self._get_file_store().mkdir(args.get('path'))
-        return self.build_response(request)
-
-    async def _store_fs_rmdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Remove directory.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``path`` (non-empty string). Optional
-                ``recursive`` (strict bool; any non-bool value is rejected rather than
-                coerced). If ``True`` the directory and all its contents are removed;
-                if ``False`` the call fails when the directory is non-empty.
-
-        Returns:
-            Dict[str, Any]: Empty success DAP response, or a DAP error response if
-                ``path`` is missing/empty or ``recursive`` is not a bool.
-        """
-        # Validate path is a non-empty string before touching the store — the
-        # FileStore layer rejects empty paths, but an early error here produces
-        # a cleaner DAP-level message.
-        path = args.get('path')
-        if not isinstance(path, str) or not path:
-            return self.build_error(request, 'rmdir requires a non-empty "path" string')
-
-        # Accept only an explicit bool for ``recursive`` — avoid silently enabling
-        # recursive deletion when the client sends a non-bool truthy value (e.g.
-        # a string or a dict).
-        recursive = args.get('recursive', False)
-        if not isinstance(recursive, bool):
-            return self.build_error(request, 'rmdir "recursive" must be a boolean')
-
-        # Remove the directory; pass the recursive flag from the client.
-        await self._get_file_store().rmdir(path, recursive=recursive)
-        return self.build_response(request)
-
-    async def _store_fs_stat(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get file/directory metadata.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``path`` — the path to stat.
-
-        Returns:
-            Dict[str, Any]: DAP response with metadata (size, modified time, type,
-                etc.) as the body.
-        """
-        # Retrieve metadata for the given path from the user-scoped store.
-        result = await self._get_file_store().stat(args.get('path'))
-        return self.build_response(request, body=result)
-
-    async def _store_fs_rename(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Rename a file or directory.
-
-        Args:
-            request (Dict[str, Any]): Original DAP request.
-            args (Dict[str, Any]): Must contain ``old_path`` (current path) and
-                ``new_path`` (desired path). Both are required non-empty strings.
-
-        Returns:
-            Dict[str, Any]: Empty success DAP response, or a DAP error response if
-                either argument is missing or not a non-empty string.
-        """
-        # Validate both paths up front so FileStore.rename does not receive None
-        # and fail with a less actionable error further down the stack.
-        old_path = args.get('old_path')
-        new_path = args.get('new_path')
-        if not isinstance(old_path, str) or not old_path:
-            return self.build_error(request, 'rename requires a non-empty "old_path" string')
-        if not isinstance(new_path, str) or not new_path:
-            return self.build_error(request, 'rename requires a non-empty "new_path" string')
-
-        # Delegate the rename operation to the user-scoped file store backend.
-        await self._get_file_store().rename(old_path, new_path)
-        return self.build_response(request)

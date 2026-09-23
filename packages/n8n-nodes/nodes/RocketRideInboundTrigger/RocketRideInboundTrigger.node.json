@@ -1,0 +1,14 @@
+{
+	"node": "n8n-nodes-rocketride.rocketRideInboundTrigger",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["AI", "Development", "Utility"],
+	"alias": ["RocketRide", "Webhook", "Receive", "Inbound", "Listen", "Callback"],
+	"resources": {
+		"primaryDocumentation": [
+			{
+				"url": "https://www.npmjs.com/package/n8n-nodes-rocketride"
+			}
+		]
+	}
+}

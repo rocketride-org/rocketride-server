@@ -28,6 +28,7 @@ import time
 from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 from ai.common.image import Image, ImageProcessor
 from ai.common.image.dense_resize import resize_for_inference, restore_dense_output
+from ai.common.avi.descriptor import descriptor_from_payload, forward_enriched_image
 from .IGlobal import IGlobal
 
 
@@ -49,6 +50,7 @@ class IInstance(IInstanceBase):
         """Initialize per-instance image-accumulation state."""
         super().__init__(*args, **kwargs)
         self._image_data = None
+        self._source_descriptor = None  # stream descriptor parsed on the image BEGIN
 
     def _emit(self, image):
         """Remove background for one image; write JSON stats (text) and an RGBA cutout (image).
@@ -87,9 +89,7 @@ class IInstance(IInstanceBase):
             # Fast zlib level: ~5-6x faster encode on big RGBA cutouts, slightly larger file.
             image_bytes = ImageProcessor.get_bytes(rgba, compress_level=1)
             debug(f'bg_removal: encode={(time.perf_counter() - t0) * 1000:.0f}ms out={len(image_bytes) / 1e6:.1f}MB')
-            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
-            self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image_bytes)
-            self.instance.writeImage(AVI_ACTION.END, 'image/png')
+            forward_enriched_image(self.instance, self._source_descriptor, 'image/png', image_bytes)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Accumulate an inbound image stream and run background removal on END.
@@ -103,6 +103,8 @@ class IInstance(IInstanceBase):
             preventDefault() on END to suppress default forwarding; None otherwise.
         """
         if action == AVI_ACTION.BEGIN:
+            # BEGIN carries the source stream descriptor (provenance), not image bytes.
+            self._source_descriptor = descriptor_from_payload(buffer)
             self._image_data = bytearray()
         elif action == AVI_ACTION.WRITE:
             self._image_data += buffer

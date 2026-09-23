@@ -118,6 +118,22 @@ public:
     virtual Error execute() noexcept;
     static Text buildType(json::Value &cmd) noexcept;
 
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The complete task-file JSON of the task currently executing
+    ///		in this process — null when no task is running. Published
+    ///		for the python binding rocketlib.getTask() so subprocess
+    ///		python (e.g. the storage layer reading identity and the
+    ///		storage anchor) needs no per-endpoint plumbing.
+    ///
+    ///		MAIN-TASK-THREAD ONLY: publish (before beginTask), every
+    ///		read (endpoint/node-global construction inside the publish
+    ///		window), and clear (task exit) all run sequentially on the
+    ///		single main task thread — the value is unsynchronized by
+    ///		design. Do not call from worker threads.
+    //-----------------------------------------------------------------
+    static json::Value currentTask() noexcept;
+
 protected:
     //-----------------------------------------------------------------
     // Protected interfaces which can/must be implemented
@@ -133,6 +149,12 @@ protected:
     file::Path taskPath;
 
 private:
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Publish/clear the currently-executing task (see currentTask).
+    //-----------------------------------------------------------------
+    static void setCurrentTask(const json::Value &task) noexcept;
+
     //-----------------------------------------------------------------
     /// @details
     ///		Contains the arguments passed to our constructor which

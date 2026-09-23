@@ -1,0 +1,7 @@
+#
+# No package is named here on purpose.
+#
+# cv2 arrives through ai.common.opencv and numpy is a base engine dependency, so the detector
+# costs nothing beyond the model file itself. That is the whole reason YuNet was chosen over
+# MediaPipe BlazeFace, which would have pulled in mediapipe.
+#

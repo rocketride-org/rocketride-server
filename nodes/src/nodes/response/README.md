@@ -12,25 +12,26 @@ Data handling per lane:
 
 - **text** - chunks are accumulated (joined with blank lines) and appended as one string per object.
 - **table**, **documents**, **questions** - appended as-is; documents and questions are serialized to plain dicts.
+- **json** - appended as-is (one entry per write).
 - **answers** - appended as parsed JSON when the answer is JSON, otherwise as plain text.
-- **image** - streamed chunks are buffered via AVI_ACTION signals (BEGIN / WRITE / END), then the complete image is base64-encoded and appended as `{"mime_type": ..., "image": ...}`.
-- **audio**, **video** - the raw bytes are not returned; only tracking metadata is appended: `{"url", "aviAction", "mimeType", "size"}`.
+- **image**, **audio**, **video** - the three multimedia lanes are handled identically: streamed chunks are buffered via AVI_ACTION signals (BEGIN / WRITE / END), then the complete stream is base64-encoded and appended as `{"mime_type": ..., "<lane>": ...}`, where `<lane>` is the payload key (`image` / `audio` / `video`). When the stream's BEGIN carries a stream descriptor, a sanitized projection of it is added as a `metadata` object (source provenance: mime, size, dimensions/duration, codec, and any nested `source` chain; the identity/security backlink is stripped). The `metadata` key is omitted when no descriptor arrived.
 
 The node has no Python dependencies of its own (`requirements.txt` is empty); it relies on the separately installed AI module for document, question, and answer schemas and for image processing.
 
 ---
 
-## Service variants
+### Service variants
 
-The same implementation is registered as nine services. The generic **HTTP Results** service (`response://`) accepts all eight lane types and lets you map each lane to its own result key. Eight single-lane variants accept exactly one lane each and expose a single `laneName` field:
+The same implementation is registered as ten services. The generic **HTTP Results** service (`response://`) accepts all nine lane types and lets you map each lane to its own result key. Nine single-lane variants accept exactly one lane each and expose a single `laneName` field:
 
 | Service title    | Protocol                  | Lane        | Default result key |
 |------------------|---------------------------|-------------|--------------------|
-| HTTP Results     | `response://`             | all eight   | the lane type name |
+| HTTP Results     | `response://`             | all nine    | the lane type name |
 | Return Answers   | `response_answers://`     | `answers`   | `answers`          |
 | Return Audio     | `response_audio://`       | `audio`     | `audio`            |
 | Return Documents | `response_documents://`   | `documents` | `documents`        |
 | Return Image     | `response_image://`       | `image`     | `image`            |
+| Return JSON      | `response_json://`        | `json`      | `json`             |
 | Return Questions | `response_questions://`   | `questions` | `questions`        |
 | Return Table     | `response_table://`       | `table`     | `table`            |
 | Return Text      | `response_text://`        | `text`      | `text`             |
@@ -40,9 +41,7 @@ All variants are `classType: infrastructure` and register as a `filter`. The gen
 
 ---
 
-## Configuration
-
-### Lanes
+## Lanes
 
 All lanes are inputs; the node produces no output lanes.
 
@@ -50,34 +49,27 @@ All lanes are inputs; the node produces no output lanes.
 |-------------|----------|-------------|
 | `text`      | -        | Captured under the configured key |
 | `table`     | -        | Captured under the configured key |
+| `json`      | -        | Captured under the configured key |
 | `documents` | -        | Captured under the configured key |
 | `questions` | -        | Captured under the configured key |
 | `answers`   | -        | Captured under the configured key |
-| `audio`     | -        | Captured under the configured key (tracking metadata only, not raw bytes) |
-| `video`     | -        | Captured under the configured key (tracking metadata only, not raw bytes) |
-| `image`     | -        | Captured under the configured key (base64-encoded) |
+| `audio`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
+| `video`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
+| `image`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
 
-### HTTP Results (generic service)
+## Configuration
 
-| Field | Type | Description |
-|---|---|---|
-| `laneId` | string |  |
-| `laneName` | string |  |
-| `lanes` | array | Each lane maps pipeline data to a custom JSON key in the response. Select the data type (text, documents, answers, etc.) for Lane Name, and enter a custom JSON key name (1-32 characters) for Result Key. |
+Choose the generic HTTP Results service when one response needs several lane types, and use a single-lane variant when a pipeline has one terminal output. The generated schema contains the field definitions; the guidance below covers the effect of the result-key setting.
 
-Multiple lane-to-key mappings can be added to return several outputs in a single response. When no mapping is configured for a lane, its data is stored under the lane type name as the default key.
+### Lane name and result key
 
-### Single-lane variants (Return Answers, Return Text, ...)
-
-| Field      | Type / Default                    | Description |
-|------------|-----------------------------------|-------------|
-| `laneName` | string, defaults to the lane type | The JSON key under which this lane's data appears in the response body (1-32 characters). |
-
-When `laneName` is set at the top level of the node config (the style used by all single-lane variants), it overrides the `lanes` array and every lane type arriving at the node is written under that one key. The per-lane `lanes` mapping only applies when no top-level `laneName` is configured.
+For HTTP Results, each `lanes` entry maps a lane identifier to a result key of one to 32 characters. Use distinct keys when a client needs to distinguish returned types without consulting `result_types`; leave a lane unmapped to use its lane type as the key. In a single-lane service, the top-level `laneName` takes precedence over the `lanes` mapping, so set it only when every arriving result should use the same key.
 
 ---
 
-## Response format
+## Notes
+
+### Response format
 
 The JSON object returned to the client has the following structure:
 
@@ -92,6 +84,25 @@ The JSON object returned to the client has the following structure:
 ```
 
 Each configured result key holds an array: one element per result produced for the object. `result_types` maps each configured key back to its original lane type, so clients can identify the kind of data each key contains even when custom key names are used. The `name`, `path`, and `metadata` fields are only present when the processed object carries those attributes; `metadata` excludes all Tika-derived keys.
+
+For the multimedia lanes (`image`, `audio`, `video`) each array element is a media entry with the same shape — the base64 stream under the lane key plus the stream descriptor:
+
+```json
+{
+  "mime_type": "image/png",
+  "image": "<base64-encoded bytes>",
+  "metadata": {
+    "source_mime": "image/png",
+    "size": 583006,
+    "width": 1280,
+    "height": 720,
+    "name": "clip.frame0.png",
+    "source": { "source_mime": "video/mp4", "duration": 74.05, "...": "...(nested origin chain)" }
+  }
+}
+```
+
+The `metadata` object is the **sanitized provenance projection** of the stream descriptor parsed from the media BEGIN — the media detail (mime, size, dimensions/duration, codec) plus the nested `source` chain, which chains back through each transform hop to the original media (nested to any depth). The identity/security backlink (`objectId`, `parent`, `permissionId`, `signature`, `nodeId`) is intentionally stripped and never reaches the client. `metadata` is omitted entirely when the stream arrives without a descriptor.
 
 ---
 
@@ -131,6 +142,12 @@ Each configured result key holds an array: one element per result produced for t
 | `laneId` | `string` | **Lane name** |  |
 | `laneName` | `string` | **Result key** |  |
 | `lanes` | `array` | **Lanes**<br/>Each lane maps pipeline data to a custom JSON key in the response. Select the data type (text, documents, answers, etc.) for Lane Name, and enter a custom JSON key name (1-32 characters) for Result Key. |  |
+
+### Return JSON (`services.json.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `laneName` | `string` | **Identifier key within result** | `"json"` |
 
 ### Return Questions (`services.questions.json`)
 

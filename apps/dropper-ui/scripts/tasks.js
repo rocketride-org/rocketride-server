@@ -23,8 +23,8 @@ const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'dropper');
 
 // Build inputs: own src + MF host + shared package + package.json
 const SRC_DIR       = path.join(APP_ROOT, 'src');
-const SHELL_UI_SRC  = path.join(PROJECT_ROOT, 'apps', 'shell-ui', 'src');
-const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
+const SHELL_UI_SRC  = path.join(PROJECT_ROOT, 'apps', 'shell', 'src');
+const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared', 'src');
 const PKG_JSON      = path.join(APP_ROOT, 'package.json');
 const BUILD_HASH_KEY = 'dropper-ui.buildHash';
 
@@ -78,7 +78,7 @@ module.exports = {
 	actions: [
 		{ name: 'dropper-ui:bundle',   action: makeBundleAction },
 		{ name: 'dropper-ui:copy',     action: makeCopyAction },
-		// No-op: dropper-ui is a standalone page, not a shell-ui MF remote — no apps.json registration needed.
+		// No-op: dropper-ui is a standalone page, not a shell MF remote — no apps.json registration needed.
 		{ name: 'dropper-ui:register', action: () => ({ run: async () => {} }) },
 
 		{

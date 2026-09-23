@@ -1,0 +1,16 @@
+# Docusaurus
+/.docusaurus
+/build
+
+# Assembled content tree (produced by docs:gather)
+/content
+
+# Generated static artifacts (.md siblings, llms.txt, llms-full.txt).
+# Keep committed assets (img/, robots.txt) and the placeholder.
+/static/*
+!/static/.gitkeep
+!/static/img/
+!/static/robots.txt
+
+node_modules
+*.log

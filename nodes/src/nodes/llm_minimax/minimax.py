@@ -29,6 +29,7 @@ import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_adapter import report_usage_metadata
 from langchain_openai import ChatOpenAI
 
 # MiniMax M2-series models return chain-of-thought wrapped in <think>...</think>
@@ -84,4 +85,7 @@ class Chat(ChatBase):
     def _chat(self, prompt: str) -> str:
         """Invoke the LLM and strip any <think>...</think> reasoning block from the response."""
         results = self._llm.invoke(prompt)
+        # This override bypasses LangChainAdapter.collect(), the capture point that
+        # meters every other non-streaming call, so report from here or the call bills zero.
+        report_usage_metadata(getattr(results, 'usage_metadata', None), self._llm)
         return _THINK_BLOCK_RE.sub('', results.content)

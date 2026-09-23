@@ -5,6 +5,6 @@
 rtmlib>=0.0.13
 # onnxruntime is an indirect dep (via rtmlib), not imported here.
 # Pin 1.20.1 — the version rtmlib needs.
-onnxruntime-gpu==1.20.1; platform_system != 'Darwin'
-onnxruntime==1.20.1; platform_system == 'Darwin'
+onnxruntime-gpu==1.22.0; platform_system != 'Darwin'
+onnxruntime==1.22.0; platform_system == 'Darwin'
 Pillow

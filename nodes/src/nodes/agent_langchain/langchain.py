@@ -99,7 +99,15 @@ def _build_langchain_llm(agent_base: AgentBase, context: AgentContext) -> Any:
                         + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
                     )
 
-            return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
+            return ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(
+                            content='[agent_langchain] The language model produced unparseable output after 3 attempts. The task may be incomplete.'
+                        )
+                    )
+                ]
+            )
 
     return RocketRideToolCallingChatModel()
 
@@ -336,8 +344,12 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
 
 
 def _parse_tool_call_envelope(raw: str) -> Any:
+    # Find the first '{' so preamble text and markdown fences are skipped.
+    start = raw.find('{')
+    if start < 0:
+        return None
     try:
-        obj = json.loads(raw)
+        obj, _ = json.JSONDecoder().raw_decode(raw, start)
     except Exception:
         return None
     if not isinstance(obj, dict):

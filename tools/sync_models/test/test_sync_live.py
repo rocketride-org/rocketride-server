@@ -32,6 +32,7 @@ from markers import (
     requires_qwen,
     requires_minimax,
     requires_baidu_qianfan,
+    requires_glm,
 )
 from core.patcher import get_profiles
 
@@ -171,6 +172,36 @@ def test_gemini_profiles_exist_in_api():
     _check_missing_models(profiles, live_ids, 'llm_gemini')
 
 
+@requires_gemini
+def test_gemini_profiles_can_actually_be_called():
+    """
+    Every non-deprecated llm_gemini profile must answer a real generateContent call.
+
+    The listing check above cannot fail for a retired model: Google keeps returning
+    those from models.list(), with generateContent among their supportedGenerationMethods,
+    and only refuses when the model is actually called. Being listed and being usable
+    are different questions, and this asks the second one.
+
+    One minimal call per profile, so it is slower than the listing check by design.
+    """
+    from google import genai  # type: ignore[import]
+
+    from core.smoke import classify_failure
+
+    client = genai.Client(api_key=os.environ['ROCKETRIDE_GEMINI_KEY'])
+    retired = []
+    for profile_key, profile in _load_profiles('llm_gemini').items():
+        model_id = profile.get('model')
+        if not model_id or profile.get('deprecated'):
+            continue
+        try:
+            client.models.generate_content(model=model_id, contents='Reply with the word OK only.')
+        except Exception as exc:  # noqa: BLE001 — the classifier decides what the failure means
+            if classify_failure(exc).retired():
+                retired.append(f'{profile_key} ({model_id}): {str(exc)[:160]}')
+    assert not retired, 'llm_gemini profiles the API says are retired:\n' + '\n'.join(retired)
+
+
 # ---------------------------------------------------------------------------
 # Mistral
 # ---------------------------------------------------------------------------
@@ -277,3 +308,20 @@ def test_baidu_qianfan_profiles_exist_in_api():
         base_url='https://qianfan.baidubce.com/v2',
     )
     _check_missing_models(profiles, live_ids, 'llm_baidu_qianfan')
+
+
+# ---------------------------------------------------------------------------
+# Zhipu AI GLM
+# ---------------------------------------------------------------------------
+
+
+@requires_glm
+def test_glm_profiles_exist_in_api():
+    """Every non-deprecated llm_glm profile model ID must be in the live API."""
+    api_key = os.environ['ROCKETRIDE_GLM_KEY']
+    profiles = _load_profiles('llm_glm')
+    live_ids = _fetch_openai_model_ids(
+        api_key,
+        base_url='https://api.z.ai/api/paas/v4',
+    )
+    _check_missing_models(profiles, live_ids, 'llm_glm')

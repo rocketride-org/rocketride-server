@@ -1,54 +1,63 @@
 # embedding_openai
 
-A RocketRide embedding node that converts document chunks and search queries into vectors using OpenAI's embedding API.
+A RocketRide embedding node that turns document chunks and questions into OpenAI API vectors; choose it when both ingestion and retrieval should use the same hosted text embedding model.
+
+## About OpenAI
+
+OpenAI develops AI services and APIs. This node uses its embedding API through the `langchain-openai` integration to represent text as numeric vectors.
 
 ## What it does
 
-Generates text embeddings using OpenAI's embedding API. Documents arriving on the `documents` lane have an `embedding` vector (and the `embedding_model` name) attached to each chunk, ready for ingestion into a vector store. Questions arriving on the `questions` lane are embedded with the same model so they can be matched against a stored index.
+The node adds an `embedding` and `embedding_model` to documents and questions. Choose it over `embedding_transformer` when the selected embedding model should be called through OpenAI rather than loaded as a local sentence transformer. Documents in one write are sent to `embed_documents` as a batch; questions use `embed_query`.
 
-Uses **langchain-openai** (`OpenAIEmbeddings`) under the hood. Document chunks are embedded in a single batched `embed_documents` call per write; questions are embedded one at a time with `embed_query`. An empty document list is a no-op.
+## Lanes
 
-At pipeline startup the node makes one small probe call (embedding the string `"dummy"`) to discover the model's vector size, since the API does not report it directly: expect one extra tiny request when the pipeline starts. The maximum token count per request is read from the model's context length (`embedding_ctx_length`).
+| Lane in | Lane out | Description |
+|---|---|---|
+| `documents` | `documents` | Embeds document chunks for storage. |
+| `questions` | `questions` | Embeds questions for matching against stored vectors. |
 
-Requires an OpenAI API key.
+## Profiles
 
----
+Default: **Text Small - A highly efficient model** (`text-embedding-3-small`).
+
+| Profile | Model | Context tokens |
+|---|---|---|
+| `text-embedding-3-small` *(default)* | `text-embedding-3-small` | 8,191 |
+| `text-embedding-3-large` | `text-embedding-3-large` | 8,191 |
+| `text-embedding-ada-002` | `text-embedding-ada-002` | 8,191 |
+| `text-embedding-004` | `text-embedding-004` | 2,048 |
+| `text-embedding-005` | `text-embedding-005` | 2,048 |
+| `text-embedding-3-small-inference` | `text-embedding-3-small-inference` | 8,191 |
+| `text-embedding-ada-002-v2` | `text-embedding-ada-002-v2` | 8,191 |
+| `text-embedding-large-exp-03-07` | `text-embedding-large-exp-03-07` | 8,192 |
+| `text-embedding-preview-0409` | `text-embedding-preview-0409` | 3,072 |
+
+This node currently supports `text-embedding-3-small`, `text-embedding-3-large`,
+and `text-embedding-ada-002`. The other declared profiles require LiteLLM
+routing, which this node does not currently implement; selecting one sends its
+model name to the OpenAI endpoint and fails during the startup probe.
 
 ## Configuration
 
-### Lanes
+Select the profile used for both document ingestion and question embedding. The wrapper reads the profile’s configured model and token limit, and probes the selected model with `dummy` at startup to discover the vector size; account for that small startup request.
 
-| Lane        | Direction | Description                                                       |
-| ----------- | --------- | ----------------------------------------------------------------- |
-| `documents` | in / out  | Embed document text; attach vector to each chunk for vector store ingestion |
-| `questions` | in / out  | Embed a query string; attach vector for similarity search against a stored index |
+### Model
 
-### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `model` | string | OpenAI model to use for embedding |
-| `profile` | string | Default "text-embedding-3-small". OpenAI embedding model |
-
-Each profile resolves to a `model` name and token limit that the wrapper passes to `OpenAIEmbeddings`.
-
-### Profiles
-
-| Profile                | Model                    | Notes                                         |
-| ---------------------- | ------------------------ | --------------------------------------------- |
-| Text Small _(default)_ | `text-embedding-3-small` | Efficient, good general-purpose performance   |
-| Text Large             | `text-embedding-3-large` | Higher accuracy, larger vector representation |
-| Text Ada               | `text-embedding-ada-002` | Legacy model (first OpenAI embeddings model)  |
-
-All three models accept up to 8,191 tokens per input.
-
----
+The model value is passed to `OpenAIEmbeddings`. Keep the same profile for ingestion and querying the same vector index; changing it can change the vector representation and makes previously stored vectors unsuitable for new questions.
 
 ## Authentication
 
-Set the `apikey` field to your OpenAI API key. The key is resolved per profile, so if you switch profiles you may supply a different key for each. There is no support for organization-scoped keys or Azure OpenAI endpoints in this node.
+Set the secure `llm.cloud.apikey` field for the selected profile. RocketRide
+resolves this field as `apikey` and passes it to `OpenAIEmbeddings`. If no
+configured key is available, `langchain-openai` can fall back to the engine
+process's `OPENAI_API_KEY` environment variable. The startup probe fails when
+neither source provides a usable key.
 
----
+## Upstream docs
+
+- [OpenAI API documentation](https://platform.openai.com/docs)
+- [langchain-openai documentation](https://python.langchain.com/docs/integrations/text_embedding/openai/)
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

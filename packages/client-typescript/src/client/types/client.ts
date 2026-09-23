@@ -179,23 +179,24 @@ export interface RocketRideClientConfig {
 
 	/**
 	 * Environment variables dictionary for configuration and variable substitution.
-	 * If not provided, will load from .env file (Node.js only), then fall back to process.env
+	 * If provided, it is copied and used instead of process.env. If omitted in
+	 * Node.js, string values are copied from process.env. The SDK does not load .env files.
 	 */
 	env?: Record<string, string>;
 
-	/** Callback for handling real-time events from server */
+	/** Called for events owned by the current transport epoch; stale async event publication is suppressed. */
 	onEvent?: EventCallback;
 
-	/** Callback for connection establishment */
+	/** Called once after an accepted authentication and best-effort monitor restoration completes. */
 	onConnected?: ConnectCallback;
 
-	/** Callback for disconnection events */
+	/** Called at most once for an accepted generation that previously published onConnected. */
 	onDisconnected?: DisconnectCallback;
 
-	/** Callback when a connection attempt fails (persist mode: called on each failure while retrying) */
+	/** Called for each accepted automatic reconnect failure; foreground methods reject their own promises. */
 	onConnectError?: ConnectErrorCallback;
 
-	/** Optional function to output a protocol message */
+	/** Optional function to output a credential-redacted protocol message. */
 	onProtocolMessage?: (message: string) => void;
 
 	/** Optional function to output a debug message */
@@ -214,7 +215,10 @@ export interface RocketRideClientConfig {
 	/** Default timeout in ms for individual requests. Default: no timeout. */
 	requestTimeout?: number;
 
-	/** Max total time in ms to keep retrying connections. Default: undefined (forever). */
+	/**
+	 * @deprecated Accepted for backward compatibility but currently ignored;
+	 * persistent retry continues until stopped.
+	 */
 	maxRetryTime?: number;
 
 	/** Custom WebSocket path override (default: '/task/service'). Use '/models' for the model server. */
@@ -231,7 +235,8 @@ export interface RocketRideClientConfig {
 
 	/**
 	 * Optional trace callback invoked at the start and end of every `call()`.
-	 * Use for logging, debugging, or telemetry.
+	 * Credential-bearing fields are redacted from the callback copy. Use for
+	 * logging, debugging, or telemetry.
 	 *
 	 * @param traceType - 0 = request (before send), 1 = success (response), 2 = error
 	 * @param payload   - The trace data: command, args, and (for success/error) the result or error message.
@@ -291,6 +296,14 @@ export interface OrgInfo {
 
 	/** Display name of the organisation */
 	name: string;
+
+	/**
+	 * Public developer slug — the organisation's app publisher identity, the
+	 * first segment of app linkage names ('<developerId>.<appName>').
+	 * Null/absent until the organisation registers as a marketplace developer
+	 * (and always absent on OSS servers).
+	 */
+	developerId?: string | null;
 
 	/**
 	 * Organisation-level permission strings granted to the authenticated user.
@@ -353,10 +366,12 @@ export interface ConnectResult {
 	locale: string;
 
 	/**
-	 * ID of the team that should be used by default for operations that do not
-	 * explicitly specify a team context.
+	 * ID of the user's development team. It carries NO authorization meaning:
+	 * it is the billing and environment-layer context for dev runs and for
+	 * `@me` publishes. Team-scoped operations always name their team
+	 * explicitly — there is no default-team fallback.
 	 */
-	defaultTeam: string;
+	devTeam: string;
 
 	/**
 	 * The organisation the authenticated user belongs to, with its own
@@ -377,6 +392,13 @@ export interface ConnectResult {
 	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
 	 */
 	capabilities: string[];
+
+	/**
+	 * Version string of the server that handled the auth handshake.
+	 * Sent by newer servers alongside the identity payload; older servers
+	 * omit it, hence optional.
+	 */
+	serverVersion?: string;
 
 	/**
 	 * Platform-level permission strings (e.g. ``['sys.admin']``).
@@ -434,8 +456,16 @@ export interface AppManifestEntry {
 	/** App-specific setting definitions. */
 	settings?: unknown[];
 
-	/** URL to the app's Module Federation remote entry file. */
-	entry: string;
+	/**
+	 * URL to the app's Module Federation remote entry file — present ONLY
+	 * for dev-overlay entries (a localhost dev server is not constructible
+	 * from a number). Published versions carry `registryVersion` instead and
+	 * clients construct `/apps/<appId>/v<N>/remoteEntry.js` themselves.
+	 */
+	entry?: string;
+
+	/** Registry version number the entry resolves to (the scope-walk winner). */
+	registryVersion?: number;
 
 	/** App version string (semver). */
 	version?: string;
@@ -501,8 +531,8 @@ export interface StripePriceEntry {
  * Server metadata returned by the pre-auth info probe.
  *
  * Obtained via {@link RocketRideClient.getServerInfo} which sends an
- * `auth` request with `infoOnly: true`. The server responds without
- * requiring credentials.
+ * `rrext_public_probe` command on a public connection. The server
+ * responds without requiring credentials.
  */
 export interface ServerInfoResult {
 	/** Server engine version string. */
@@ -521,4 +551,31 @@ export interface ServerInfoResult {
 	 * public apps (e.g. landing page) before login.
 	 */
 	apps?: AppManifestEntry[];
+
+	/**
+	 * Stripe publishable key (`pk_*`) configured on this server.
+	 *
+	 * Lets clients initialise Stripe Elements with the key matching the
+	 * server's Stripe account (test vs live) instead of a build-time value.
+	 * Absent on servers without billing (OSS).
+	 */
+	stripePublishableKey?: string;
+
+	/**
+	 * The server's public addresses, RESOLVED to absolute URLs.
+	 *
+	 * `getServerInfo` substitutes the server's `'origin'` sentinel ("the
+	 * address you probed me at") with the probed URI before returning, and
+	 * manufactures the block when probing a pre-endpoints server — so
+	 * consumers ALWAYS receive both keys as absolute URLs and never branch
+	 * on presence. `api` is where clients open the WebSocket; `ui` is the
+	 * environment's public web address (browser links, OAuth returns).
+	 * They differ only on split deployments (e.g. CDN-served UI).
+	 */
+	endpoints: {
+		/** Absolute URL clients connect the DAP WebSocket to. */
+		api: string;
+		/** Absolute URL of the environment's web UI. */
+		ui: string;
+	};
 }

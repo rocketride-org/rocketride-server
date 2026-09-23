@@ -50,6 +50,19 @@ except ImportError:
     pass  # dotenv is optional
 
 
+# The sys.modules isolation guard (see #1640) lives in _sys_modules_guard so it is
+# unit-testable in isolation; importing the hooks registers them with pytest.
+# Imported package-relative on purpose: putting this directory on sys.path would let
+# its node-named subpackages (text_output/, response/, telegram/, ...) shadow the real
+# node packages under src/nodes (see #1687).
+from ._sys_modules_guard import (  # noqa: E402,F401
+    pytest_collectreport,
+    pytest_collectstart,
+    pytest_sessionfinish,
+    pytest_terminal_summary,
+)
+
+
 # =============================================================================
 # Test Configuration
 # =============================================================================
@@ -306,10 +319,13 @@ def pytest_generate_tests(metafunc):
             'pose_estimation',
             'face_detection',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
-            'index_search',
+            'store_elasticsearch',
             # Require live third-party API credentials (no live calls in default CI):
             'tool_xtrace_memory',
             'tool_mem0',
+            # Hits data.sec.gov from the services.json test block; opt in via
+            # ROCKETRIDE_INCLUDE_SKIP=authoritative_overlay.
+            'authoritative_overlay',
         }
         include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
 

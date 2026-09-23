@@ -58,3 +58,8 @@ requires_baidu_qianfan = pytest.mark.skipif(
     not os.environ.get('ROCKETRIDE_BAIDU_QIANFAN_KEY'),
     reason='ROCKETRIDE_BAIDU_QIANFAN_KEY not set',
 )
+
+requires_glm = pytest.mark.skipif(
+    not os.environ.get('ROCKETRIDE_GLM_KEY'),
+    reason='ROCKETRIDE_GLM_KEY not set',
+)

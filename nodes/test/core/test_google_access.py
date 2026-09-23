@@ -148,9 +148,30 @@ def test_gmail_modify_is_writeable():
     assert resolve_google_access({'access': 'modify'}, GMAIL).can_write is True
 
 
-def test_gmail_declares_no_capability_flags():
-    # Permanent delete needs the full mail scope (no tier grants it), so Gmail has no gates.
-    assert GMAIL.flags == ()
+def test_gmail_declares_allow_hard_delete_flag():
+    # The 'full' tier grants the full mail scope, so permanent delete is gated by allowHardDelete.
+    assert 'allowHardDelete' in GMAIL.flags
+
+
+def test_gmail_hard_delete_flag_flows_from_full_config():
+    # IGlobal passes the whole node config; the flag must resolve alongside the tier.
+    access = resolve_google_access({'access': 'full', 'allowHardDelete': True}, GMAIL)
+    assert access.flags['allowHardDelete'] is True
+    access.require_flag('allowHardDelete', 'message_delete')  # must not raise
+
+
+def test_gmail_hard_delete_flag_defaults_off_at_full_tier():
+    # Full tier alone is not consent: the gate stays closed until enabled.
+    access = resolve_google_access({'access': 'full'}, GMAIL)
+    assert access.flags['allowHardDelete'] is False
+    with pytest.raises(GoogleAccessError):
+        access.require_flag('allowHardDelete', 'message_delete')
+
+
+def test_gmail_full_tier_grants_full_mail_scope_and_writes():
+    access = resolve_google_access({'access': 'full'}, GMAIL)
+    assert access.scopes == ['https://mail.google.com/']
+    assert access.can_write is True
 
 
 def test_drive_declares_public_sharing_and_hard_delete_flags():
@@ -250,6 +271,7 @@ _CAN_WRITE_CASES = [
     (GMAIL, 'readonly', False),
     (GMAIL, 'modify', True),
     (GMAIL, 'send', True),
+    (GMAIL, 'full', True),
     (DRIVE, 'readonly', False),
     (DRIVE, 'write', True),
     (SHEETS, 'readonly', False),

@@ -10,6 +10,8 @@ import { TabType, ProcessedResults } from '../types/dropper.types';
 import { TextView } from './Views/TextView';
 import { TablesView } from './Views/TablesView';
 import { ImagesView } from './Views/ImagesView';
+import { AudioView } from './Views/AudioView';
+import { VideoView } from './Views/VideoView';
 import { JsonView } from './Views/JsonView';
 import { DocumentsView } from './Views/DocumentsView';
 import { QuestionsView } from './Views/QuestionsView';
@@ -90,6 +92,24 @@ export const ResultsContent: React.FC<ResultsContentProps> = ({
 			return (
 				<ImagesView
 					images={results.images}
+					compareMode={compareMode}
+					setRef={setRef}
+				/>
+			);
+
+		case 'audio':
+			return (
+				<AudioView
+					audio={results.audio}
+					compareMode={compareMode}
+					setRef={setRef}
+				/>
+			);
+
+		case 'video':
+			return (
+				<VideoView
+					video={results.video}
 					compareMode={compareMode}
 					setRef={setRef}
 				/>

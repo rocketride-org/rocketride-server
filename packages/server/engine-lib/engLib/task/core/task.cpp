@@ -24,6 +24,19 @@
 #include <engLib/eng.h>
 
 namespace engine::task {
+namespace {
+//-------------------------------------------------------------------------
+/// @details
+///		The task-file JSON of the task currently executing in this
+///		process (null when none). Set/cleared and read on the main task
+///		thread only (the getTask() binding is consumed at endpoint
+///		construction, inside the publish window) — publish, reads, and
+///		clear are strictly sequential on that one thread, so no
+///		synchronization is needed.
+//-------------------------------------------------------------------------
+json::Value g_currentTask;
+}  // namespace
+
 //-------------------------------------------------------------------------
 /// @details
 ///		Signal the the task is beginning
@@ -72,6 +85,13 @@ Error ITask::execute() noexcept {
     // Debug
     LOGT("Started", type());
 
+    // Publish this task for rocketlib.getTask(). Set BEFORE beginTask —
+    // endpoint construction (and the python nodes' global initialization)
+    // happens inside it — and cleared by the guard on EVERY exit path, so
+    // an errored task never leaves a stale publication behind.
+    util::Guard taskScope{[&] { setCurrentTask(m_args.cmd); },
+                          [&] { setCurrentTask({}); }};
+
     // Allow the task to read any configuration it needs
     if (auto ccode = beginTask()) return ccode;
 
@@ -91,6 +111,24 @@ Error ITask::execute() noexcept {
 ///		Return a reference to the job configuration
 //-------------------------------------------------------------------------
 json::Value &ITask::jobConfig() noexcept { return m_args.cmd; }
+
+//-------------------------------------------------------------------------
+/// @details
+///		Return a copy of the currently-executing task's file JSON —
+///		null when no task is running. Main-task-thread only (see
+///		g_currentTask above): publish, read, and clear are sequential
+///		on that one thread.
+//-------------------------------------------------------------------------
+json::Value ITask::currentTask() noexcept { return g_currentTask; }
+
+//-------------------------------------------------------------------------
+/// @details
+///		Publish (or, with a null value, clear) the currently-executing
+///		task for currentTask() readers
+//-------------------------------------------------------------------------
+void ITask::setCurrentTask(const json::Value &task) noexcept {
+    g_currentTask = task;
+}
 
 //-------------------------------------------------------------------------
 /// @details

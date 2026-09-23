@@ -37,14 +37,14 @@
 import React, { useState, CSSProperties } from 'react';
 import { useMessaging } from '../hooks/useMessaging';
 import { useTheme } from '../hooks/useTheme';
-import { commonStyles } from 'shared/themes/styles';
+import { commonStyles } from 'shell';
 import { ConnectionConfig } from '../components/ConnectionConfig';
 import { MessageDisplay } from '../Settings/MessageDisplay';
 import type { SettingsData, ConnectionMode, EngineVersionItem, MessageData } from '../Settings/SettingsWebview';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
 // =============================================================================
@@ -53,7 +53,7 @@ import '../../styles/root.css';
 
 interface WelcomeExtraSettings {}
 
-type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string } | { type: 'teamsLoaded'; teams: Array<{ id: string; name: string }> } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
+type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string; signedInUrl?: string; waitlisted?: boolean; waitlistedName?: string; pendingSignIn?: boolean; pendingSignOut?: boolean; pendingUserName?: string; pendingUrl?: string } | { type: 'serverInfo'; hostUrl?: string; capabilities?: string[]; version?: string; unreachable?: boolean } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
 
 type OutgoingMessage = { type: string; [key: string]: unknown };
 
@@ -131,21 +131,29 @@ const DEFAULT_SETTINGS: SettingsData = {
 	development: {
 		connectionMode: 'local',
 		hostUrl: 'http://localhost:5565',
+		useCustomServer: false,
+		cloudUrl: '',
+		defaultCloudUrl: '',
 		apiKey: '',
 		hasApiKey: false,
-		teamId: '',
-		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+		local: { engineVersion: 'latest' },
 	},
 	deployment: {
 		connectionMode: null,
 		hostUrl: '',
+		useCustomServer: false,
+		cloudUrl: '',
+		defaultCloudUrl: '',
 		hasApiKey: false,
 		apiKey: '',
-		teamId: '',
-		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+		local: { engineVersion: 'latest' },
 	},
 	defaultPipelinePath: 'pipelines',
 	pipelineRestartBehavior: 'prompt',
+	pipelineTtl: 900,
+	pipelineTraceLevel: 'summary',
+	taskArguments: '',
+	pipelineDebugOutput: false,
 	envVars: {},
 	autoAgentIntegration: true,
 	integrationCopilot: false,
@@ -178,14 +186,18 @@ export const Welcome: React.FC = () => {
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
-	// Server capabilities
-	const [serverCapabilities, setServerCapabilities] = useState<string[]>([]);
-	const [isSaasProbed, setIsSaasProbed] = useState<boolean | undefined>(undefined);
+	// Cloud probe result — `isSaas` keeps its last value during a re-probe
+	// (no flicker); undefined = never probed ("Checking...").
+	const [probe, setProbe] = useState<{ isSaas?: boolean; unreachable: boolean }>({ unreachable: false });
 
 	// Cloud auth
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
-	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
+	const [cloudSignedInUrl, setCloudSignedInUrl] = useState('');
+	const [cloudWaitlisted, setCloudWaitlisted] = useState(false);
+	const [cloudWaitlistedName, setCloudWaitlistedName] = useState('');
+	// Staged (uncommitted) cloud auth change — applies on Save & Connect.
+	const [cloudPending, setCloudPending] = useState<{ signIn: boolean; signOut: boolean; userName: string; url: string }>({ signIn: false, signOut: false, userName: '', url: '' });
 
 	// Docker state
 	const [dockerStatus, setDockerStatus] = useState<DockerStatus>({ state: 'not-installed', version: null, publishedAt: null, imageTag: null });
@@ -236,12 +248,17 @@ export const Welcome: React.FC = () => {
 					break;
 
 				case 'cloud:status':
-					setCloudSignedIn((msg as any).signedIn);
-					setCloudUserName((msg as any).userName || '');
-					break;
-
-				case 'teamsLoaded':
-					setTeams((msg as any).teams || []);
+					setCloudSignedIn(msg.signedIn);
+					setCloudUserName(msg.userName || '');
+					setCloudSignedInUrl(msg.signedInUrl || '');
+					setCloudWaitlisted(Boolean(msg.waitlisted));
+					setCloudWaitlistedName(msg.waitlistedName || '');
+					setCloudPending({
+						signIn: Boolean(msg.pendingSignIn),
+						signOut: Boolean(msg.pendingSignOut),
+						userName: msg.pendingUserName || '',
+						url: msg.pendingUrl || '',
+					});
 					break;
 
 				// Status polling — actual OS/Docker daemon state
@@ -307,10 +324,10 @@ export const Welcome: React.FC = () => {
 					break;
 				}
 
-				case 'serverInfo' as string: {
-					const caps = (msg as any).capabilities || [];
-					setServerCapabilities(caps);
-					setIsSaasProbed(caps.includes('saas'));
+				case 'serverInfo': {
+					const caps: string[] = msg.capabilities || [];
+					const unreachable = Boolean(msg.unreachable);
+					setProbe({ isSaas: unreachable ? undefined : caps.includes('saas'), unreachable });
 					break;
 				}
 			}
@@ -362,7 +379,6 @@ export const Welcome: React.FC = () => {
 			}
 			if (devMode === 'cloud' && prev.development.connectionMode !== 'cloud') {
 				sendMessage({ type: 'cloud:getStatus' });
-				// Teams are fetched by CloudPanel after it confirms the server is SaaS
 			}
 
 			return next;
@@ -385,12 +401,8 @@ export const Welcome: React.FC = () => {
 	};
 
 	const handleProbeCloudServer = (cloudUrl: string) => {
-		setIsSaasProbed(undefined);
+		// The previous result stays on screen until the fresh one arrives.
 		sendMessage({ type: 'probeServerInfo', hostUrl: cloudUrl } as any);
-	};
-
-	const handleFetchTeams = (cloudUrl: string) => {
-		sendMessage({ type: 'fetchTeams', hostUrl: cloudUrl } as any);
 	};
 
 	/**
@@ -459,7 +471,7 @@ export const Welcome: React.FC = () => {
 					</div>
 
 					<ul style={{ listStyle: 'none', width: '100%', margin: '0 0 30px', padding: 0 }}>
-						{['Visual pipeline editor', 'High-performance C++ engine', '50+ pipeline nodes with AI/ML', 'Multi-agent workflows', 'Tool and model agnostic', 'TypeScript, Python & MCP SDKs'].map((feat) => (
+						{['Visual pipeline editor', 'High-performance C++ engine', '100+ pipeline nodes with AI/ML', 'Multi-agent workflows', 'Tool and model agnostic', 'TypeScript, Python & MCP SDKs'].map((feat) => (
 							<li key={feat} style={styles.featureItem}>
 								<span style={styles.featureIcon}>&#9670;</span> {feat}
 							</li>
@@ -504,18 +516,24 @@ export const Welcome: React.FC = () => {
 						simplified
 						idPrefix="welcome"
 						group="development"
-						serverCapabilities={serverCapabilities}
 						onConnectionModeChange={handleConnectionModeChange}
 						settings={settings}
 						onSettingsChange={handleSettingsChange}
 						cloudSignedIn={cloudSignedIn}
 						cloudUserName={cloudUserName}
-						onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' })}
+						cloudSignedInUrl={cloudSignedInUrl}
+						cloudWaitlisted={cloudWaitlisted}
+						cloudWaitlistedName={cloudWaitlistedName}
+						// Sign-in targets the form's CURRENT effective server, same as
+						// the Settings page — the simplified panel exposes no custom
+						// server UI, so this is normally the default cloud.
+						onCloudSignIn={() => sendMessage({ type: 'cloud:signIn', cloudUrl: (settings.development.useCustomServer && settings.development.cloudUrl) || settings.development.defaultCloudUrl })}
 						onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' })}
+						cloudPending={cloudPending}
+						onCloudUndoPending={() => sendMessage({ type: 'cloud:clearPending' })}
 						onProbeCloudServer={handleProbeCloudServer}
-						onFetchTeams={handleFetchTeams}
-						isSaas={isSaasProbed}
-						teams={teams}
+						isSaas={probe.isSaas}
+						probeUnreachable={probe.unreachable}
 						onClearCredentials={() => {
 							setSettings((prev) => ({
 								...prev,

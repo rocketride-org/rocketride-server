@@ -29,8 +29,8 @@
 // All documents are static (profiler sessions per connection) — no VFS needed.
 // =============================================================================
 
-import { Documents } from 'shell-ui';
-import type { WorkspaceBinding } from 'shell-ui';
+import { Documents } from 'shell';
+import type { WorkspaceBinding } from 'shell';
 
 /** The app's Documents instance. Set by ProfilerApp on mount. */
 let _docs: Documents | null = null;

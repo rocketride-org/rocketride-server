@@ -1,0 +1,10 @@
+# uv resolution overrides (discovered by depends.py OVERRIDES_GLOBS).
+# Unlike constraints, overrides REPLACE what packages declare. Only list a
+# package here when we deliberately know better than a dependency's metadata.
+#
+# crewai (nodes/agent_crewai) caps mcp at <1.29 while our MCP server implements
+# the 2026-07-28 spec (mcp>=2). agent_crewai never uses crewai's MCP-tool
+# features, and crewai imports the mcp lib lazily (only when an agent config
+# declares MCP tools), so forcing mcp v2 is safe for our usage.
+# Remove this line once crewai releases mcp>=2 support.
+mcp>=2.0.0,<3

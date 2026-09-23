@@ -55,13 +55,51 @@ hub that respects access permissions and client preferences.
 import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
-from ai.account.models import resolve_task_permissions
+from ai.account.models import resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from ..task_server import TaskServer, TASK_CONTROL
+
+
+def owner_key(run_kind: str, owner_id: str, project_id: str, source: str) -> str:
+    """
+    Build the owner-scoped monitor subscription key for a run.
+
+    Monitor keys are ALWAYS owner-scoped — there is no unscoped project
+    key: a deploy run's owner is its team OR its user (@me), a dev run's
+    owner is its user, so two teams' deploys, two users' dev runs, and a
+    dev-vs-deploy pair of the same pipeline all land on distinct keys and
+    never alias. The run_kind SEGMENT is what separates a user's dev run
+    from that same user's personal (@me) deploy of the same pipeline —
+    both are user-owned, so owner_id alone would alias them.
+
+    run_kind is a REQUIRED leading argument (mirroring the key layout) so
+    a call site can never silently omit it and collapse the continua.
+
+    Args:
+        run_kind (str): 'dev' | 'deploy' — the run's continuum
+        owner_id (str): The run's owner — teamId for @team deploys, userId
+            for dev runs and @me deploys
+        project_id (str): Project identity of the run
+        source (str): Source component id of the run
+
+    Returns:
+        str: The subscription key ``p.{runKind}.{ownerId}.{projectId}.{source}``
+    """
+    return f'p.{run_kind}.{owner_id}.{project_id}.{source}'
+
+
+def owner_wildcard_key(run_kind: str, owner_id: str, project_id: str) -> str:
+    """The project-wildcard subscription key (all sources of one project).
+
+    ``owner_key(run_kind, owner_id, project_id, '*')`` in spirit; kept as its
+    own helper so every site that builds ``p.{runKind}.{ownerId}.{projectId}.*``
+    shares ONE layout definition and cannot drift from ``owner_key``.
+    """
+    return f'p.{run_kind}.{owner_id}.{project_id}.*'
 
 
 class MonitorCommands(DAPConn):
@@ -197,12 +235,12 @@ class MonitorCommands(DAPConn):
             evt_name = event.get('event', 'unknown')
             body = event.get('body', None)
 
-            # Send the event to the subscribed client using DAP protocol
-            await self.send_event(
-                evt_name,
-                id=control.id,
-                body=body,
-            )
+            # Send the event to the subscribed client using plain DAP. The
+            # continuum stamps (eventTime + logSeq) ride INSIDE the shared
+            # body, stamped once by the task — every monitor sees the SAME
+            # stamps the run log recorded, and the DAP envelope stays pure
+            # protocol (each connection mints its own header seq).
+            await self.send_event(evt_name, id=control.id, body=body)
 
         # Get the task by token
         control = self._server.get_task_control(token)
@@ -214,12 +252,16 @@ class MonitorCommands(DAPConn):
         else:
             self.verify_permission('task.monitor')
 
-        # Verify the caller has access to this task's team
-        if not resolve_task_permissions(self._account_info, control.teamId):
+        # Verify the caller may see this run (run-scoped: a user-owned run
+        # delivers only to its owner; a team-owned run to team members)
+        if not resolve_run_permissions(self._account_info, control):
             return
 
-        # Build the base project-scoped key
-        project_key = f'p.{control.project_id}.{control.source}'
+        # Build the base owner-scoped key: events land on the key of the
+        # run's OWNER (team for @team deploys, user for dev and @me), so a
+        # dev run, an @me deploy, and a @team deploy of the same pipeline
+        # never alias in the keyspace.
+        project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
 
         # Gather all matching subscription keys and merge their preferences
         # so each subscriber receives the event at most once.
@@ -236,8 +278,9 @@ class MonitorCommands(DAPConn):
         if project_key in self._monitors:
             merged_preference |= self._monitors[project_key]
 
-        # Project-wildcard check (all sources within a project: p.{projectId}.*)
-        project_wildcard_key = f'p.{control.project_id}.*'
+        # Project-wildcard check (all sources of the owner's project:
+        # p.{runKind}.{ownerId}.{projectId}.*)
+        project_wildcard_key = owner_wildcard_key(control.run_kind, control.owner_id, control.project_id)
         if project_wildcard_key != project_key and project_wildcard_key in self._monitors:
             merged_preference |= self._monitors[project_wildcard_key]
 
@@ -320,8 +363,9 @@ class MonitorCommands(DAPConn):
                 # Loop through all active tasks the caller has access to
                 tasks: List[Dict[str, Any]] = []
                 for token, target in self._server._task_control.items():
-                    # Skip tasks the caller has no team membership for
-                    if not resolve_task_permissions(self._account_info, target.teamId):
+                    # Skip runs the caller may not see (run-scoped: user-owned
+                    # runs are owner-only; team runs need team membership)
+                    if not resolve_run_permissions(self._account_info, target):
                         continue
 
                     # Get the task status once
@@ -342,6 +386,15 @@ class MonitorCommands(DAPConn):
                                 'name': status.name,
                                 'projectId': target.project_id,
                                 'source': target.source,
+                                # Identity stamps (parity with the per-event
+                                # _forward_task_event stamp): clients attribute
+                                # deploy runs to DEPLOYMENTS, never ad-hoc.
+                                # Read from the CONTROL — the previous getattr
+                                # fallbacks targeted fields that never existed
+                                # on TASK_CONTROL, so every row reported a dev
+                                # run with no team.
+                                'runKind': target.run_kind,
+                                'teamId': target.teamId if target.run_kind == 'deploy' else '',
                             }
                         )
 
@@ -366,6 +419,8 @@ class MonitorCommands(DAPConn):
         source: str = None,
         pipe_id: int = None,
         type: EVENT_TYPE = EVENT_TYPE.NONE,
+        team_id: str = '',
+        run_kind: str = '',
     ) -> Dict[str, Any]:
         """
         Configure event monitoring subscription for a specific task.
@@ -374,9 +429,26 @@ class MonitorCommands(DAPConn):
         for a given task. This allows clients to dynamically control which events
         they receive from specific tasks.
 
+        Subscription keys are owner-scoped (see :func:`owner_key`).
+        ``team_id`` set addresses the team's deploy run; absent, the
+        caller's OWN runs — the dev continuum by default, or the caller's
+        personal (@me) deploy continuum when ``run_kind='deploy'``. A
+        project/source subscription therefore only ever receives the
+        caller's own events — a teammate's dev run is watchable only via
+        its task token.
+
         Args:
             token (str): Unique identifier for the task to monitor
+            project_id (str): Project scope (with source, instead of token)
+            source (str): Source scope; '*' subscribes all sources
+            pipe_id (int): Optional pipe narrowing
             type (EVENT_TYPE): Subscription bits
+            team_id (str): Owner team — subscribe to that team's deploy run;
+                empty subscribes the caller's own runs
+            run_kind (str): Teamless scope selector: '' / 'dev' = the
+                caller's dev runs; 'deploy' = the caller's personal @me
+                deploy runs. Ignored when team_id is set (a team scope is
+                always the deploy continuum).
 
         Returns:
             Dict[str, Any]: Status information about the subscription change
@@ -407,25 +479,57 @@ class MonitorCommands(DAPConn):
             # Resolve the token to a project key
             control = self._server.get_task_control(token)
 
-            # Verify the caller has access to this task's team
-            if not resolve_task_permissions(self._account_info, control.teamId):
+            # Verify the caller may reach this run (run-scoped: a user-owned
+            # run is subscribable only by its owner; a team-owned run by
+            # anyone with permissions on the run's team)
+            if not resolve_run_permissions(self._account_info, control):
                 raise PermissionError('Access denied: no permissions for this task')
 
-            # Use the project key so subscribe/unsubscribe by token or project_id/source use the same key
-            event_key = f'p.{control.project_id}.{control.source}'
+            # Build the key from the resolved run's OWNER so subscribe and
+            # delivery agree regardless of how the subscription was addressed
+            event_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
             event_id = control.id
             filter_name = control.id
 
         # If project/source we specified
         elif project_id and source:
-            # Get the project key
-            event_key = f'p.{project_id}.{source}'
+            # A team-scoped (deploy-run) subscription requires task.monitor on
+            # THAT team, checked HERE. Subscribe-before-launch must not register
+            # under a foreign team's key: the get_task_control_by_project check
+            # below only fires when a run is LIVE; for a not-running foreign
+            # scope it raises RuntimeError, which the except-Exception swallow
+            # would let through, leaving the subscription registered under the
+            # foreign key. (OSS-safe: the synthetic 'local' team grants monitor.)
+            if team_id and 'task.monitor' not in resolve_task_permissions(self._account_info, team_id):
+                raise PermissionError('Access denied: no permissions for this team')
+
+            # run_kind, when supplied, must name a real continuum — but ONLY on
+            # the teamless path. A team scope is always the deploy continuum
+            # (teamId wins below), so run_kind is ignored there and must not
+            # reject an otherwise valid team subscription. On the teamless path
+            # a bogus run_kind would key under a 'p.<garbage>.' slot no run ever
+            # matches, and invalid casing ('Deploy', 'DEV') silently forks a
+            # dead subscription instead of aliasing the intended one. Absent =
+            # the caller's dev continuum.
+            if not team_id and run_kind and run_kind not in ('dev', 'deploy'):
+                raise ValueError(f"invalid runKind {run_kind!r} — expected 'dev' or 'deploy'")
+
+            # Resolve the requested scope's owner: the named team's deploy
+            # run, or (no team) the CALLER's own runs — dev by default, or
+            # the caller's personal @me deploy when runKind says so. teamId
+            # WINS over runKind (a team scope is always the deploy
+            # continuum) so an existing team subscription can never be
+            # accidentally re-keyed into the dev continuum. The key is
+            # derivable without the control so subscribe-before-launch works.
+            owner_id = team_id if team_id else self._account_info.userId
+            key_kind = 'deploy' if team_id else (run_kind or 'dev')
+            event_key = owner_key(key_kind, owner_id, project_id, source)
 
             # If is ok if the task doesn't exist at this point in time...
             try:
-                # Get the task (ownership check inside)
+                # Get the task (owner scoping + permission check inside)
                 control = self._server.get_task_control_by_project(
-                    project_id, source, self._account_info, require='task.monitor'
+                    project_id, source, self._account_info, require='task.monitor', team_id=team_id, run_kind=run_kind
                 )
 
                 # The task is running, we can fill it in
@@ -567,10 +671,17 @@ class MonitorCommands(DAPConn):
         # Parse monitoring configuration from request arguments
         args = request.get('arguments', {})
 
-        # Get the project_id/source/pipeId if specified
+        # Get the project_id/source/pipeId if specified. Optional teamId
+        # selects the team scope (that team's deploy run). Absent teamId is
+        # the caller's OWN runs, where optional runKind picks the continuum:
+        # absent/'dev' = dev runs (today's behavior), 'deploy' = the
+        # caller's personal @me deploy runs — the ONE case teamId-presence
+        # cannot express.
         project_id = args.get('projectId', None)
         source = args.get('source', None)
         pipe_id = args.get('pipeId', None)
+        team_id = args.get('teamId') or ''
+        run_kind = args.get('runKind') or ''
 
         # Determine the desired event subscription level
         types = args.get('types', None)
@@ -597,6 +708,8 @@ class MonitorCommands(DAPConn):
             source=source,
             pipe_id=pipe_id,
             type=event_type,
+            team_id=team_id,
+            run_kind=run_kind,
         )
 
         # Acknowledge successful subscription setup

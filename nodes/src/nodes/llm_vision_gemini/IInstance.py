@@ -25,6 +25,7 @@ from .IGlobal import IGlobal
 from ai.common.llm_base import LLMBase
 from rocketlib import AVI_ACTION, warning
 from ai.common.schema import Doc
+from ai.common.avi.descriptor import rename_ext
 
 
 class IInstance(LLMBase):
@@ -124,7 +125,9 @@ class IInstance(LLMBase):
                 self._cached_answer = answer_text
                 # _cache_from_image stays False — writeImage checks for this.
 
-            self.instance.writeDocuments([Doc(type='Text', page_content=answer_text, metadata=doc.metadata)])
+            self.instance.writeDocuments(
+                [Doc(type='Text', page_content=answer_text, metadata=rename_ext(doc.metadata, 'txt'))]
+            )
 
         # Prevent the original Image docs from flowing downstream.
         self.preventDefault()

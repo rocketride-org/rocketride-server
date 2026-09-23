@@ -1,0 +1,14 @@
+authlib
+grpcio
+grpcio-health-checking
+grpcio-tools
+httpx
+pydantic
+requests
+validators
+# 4.20.0 is the first version with the hfresh vector index config, which
+# new-generation Weaviate Cloud clusters require. Its own metadata carries the
+# grpcio ceiling it needs, so the grpc packages stay unpinned here and the
+# universal solve in constraints.lock resolves them for every node at once.
+weaviate-client>=4.20.0
+numpy

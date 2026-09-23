@@ -9,8 +9,8 @@ Public surface:
 Schemas and contracts remain importable from `ai.common.agent.types`.
 """
 
-from .agent import AgentBase
+from .agent import AgentBase, ToolCallRequiredError
 from ._internal.host import AgentContext
 from ._internal.utils import extract_text
 
-__all__ = ['AgentBase', 'AgentContext', 'extract_text']
+__all__ = ['AgentBase', 'AgentContext', 'ToolCallRequiredError', 'extract_text']

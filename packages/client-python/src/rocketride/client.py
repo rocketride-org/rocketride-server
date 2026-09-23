@@ -48,6 +48,7 @@ from .account import AccountApi
 from .billing import BillingApi
 from .database import DatabaseApi
 from .deploy import DeployApi
+from .log import LogApi
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -58,6 +59,7 @@ from .mixins.services import ServicesMixin
 from .mixins.dashboard import DashboardMixin
 from .mixins.cprofile import CProfileMixin
 from .mixins.store import StoreMixin
+from .mixins.apps import AppsMixin
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -84,6 +86,7 @@ class RocketRideClient(
     DashboardMixin,
     CProfileMixin,
     StoreMixin,
+    AppsMixin,
     DAPClient,
 ):
     """
@@ -379,11 +382,16 @@ class RocketRideClient(
         """Deployment management operations (add, remove, list, status, update)."""
         return DeployApi(self)
 
+    @cached_property
+    def log(self) -> LogApi:
+        """Run-log continuum operations (chapters, ranged reads, delete)."""
+        return LogApi(self)
+
     # =========================================================================
     # TASK METHODS
     # =========================================================================
 
-    async def get_task_token(self, project_id: str, source: str) -> 'str | None':
+    async def get_task_token(self, project_id: str, source: str, *, team_id: str = '') -> 'str | None':
         """
         Resolve a running task's token from its project ID and source component.
 
@@ -391,14 +399,21 @@ class RocketRideClient(
         get_task_pipeline. Returns None if no task is currently running for
         the given project/source pair.
 
+        The scope IS the kind: pass ``team_id`` to resolve the team's
+        DEPLOYED run; omit it to resolve your own dev run.
+
         Args:
             project_id: The project identifier.
             source: The source component identifier.
+            team_id: Address the team's deploy run; empty for your own dev run.
 
         Returns:
             Task token string, or None if no matching task is running.
         """
-        body = await self.call('rrext_get_token', projectId=project_id, source=source)
+        args = {'projectId': project_id, 'source': source}
+        if team_id:
+            args['teamId'] = team_id
+        body = await self.call('rrext_get_token', **args)
         return body.get('token')
 
     async def get_task_pipeline(self, token: str) -> 'dict | None':
@@ -437,7 +452,10 @@ class RocketRideClient(
 
         Returns:
             A :class:`~rocketride.types.ServerInfoResult` dict with ``version``,
-            ``capabilities``, ``platform``, and ``apps`` keys.
+            ``capabilities``, ``platform``, and ``apps`` keys, plus
+            ``stripePublishableKey`` when the server has billing configured.
+            ``endpoints`` is always present with both keys resolved to
+            absolute URLs (see :meth:`resolve_endpoints`).
 
         Raises:
             RuntimeError: If the server is unreachable or does not support probes.
@@ -462,6 +480,42 @@ class RocketRideClient(
             if client.did_fail(response):
                 raise RuntimeError(response.get('message', 'Server info request failed'))
 
-            return response.get('body', {})
+            # `or {}` (not a default) — a present-but-None body must also
+            # normalize, exactly like call() and the TS SDK's `?? {}`.
+            body = response.get('body') or {}
+            # Resolve the endpoints HERE, where the probed URI is known, so
+            # consumers always receive absolute URLs and never branch on
+            # presence — a pre-endpoints server or an 'origin' sentinel both
+            # resolve to the address this probe was made to.
+            body['endpoints'] = RocketRideClient.resolve_endpoints(body.get('endpoints'), uri)
+            return body
         finally:
             await client.disconnect()
+
+    @staticmethod
+    def resolve_endpoints(endpoints: 'dict | None', probed_uri: str) -> 'dict':
+        """
+        Resolve a probe's ``endpoints`` block against the URI that was probed.
+
+        The wire value for each key is an absolute URL or the literal
+        ``'origin'`` — the server's way of saying "wherever you reached me"
+        (a server behind a proxy cannot know its public name). Absent keys
+        and a missing block (pre-endpoints servers) mean ``'origin'`` too,
+        so the ONE conditional in the whole scheme lives here and callers
+        get a complete ``{api, ui}`` of absolute URLs unconditionally.
+
+        Args:
+            endpoints: The raw ``endpoints`` value from the probe body, if any.
+            probed_uri: The URI :meth:`get_server_info` connected to.
+
+        Returns:
+            Dict with ``api`` and ``ui`` resolved to absolute URLs.
+        """
+        origin = RocketRideClient.normalize_uri(probed_uri)
+        raw = endpoints or {}
+
+        def _resolve(value: 'str | None') -> str:
+            # Step: absent or the 'origin' sentinel -> the probed address.
+            return origin if not value or value == 'origin' else value
+
+        return {'api': _resolve(raw.get('api')), 'ui': _resolve(raw.get('ui'))}

@@ -10,9 +10,18 @@ pytest-cov
 # Mocking and time control
 time_machine
 
+# Direct third-party imports in test modules. These are declared by the
+# source packages they cover, but only installed lazily via depends() when
+# the source module is first imported. Test modules import them at the top
+# (collection time), before any depends() runs, so they must be pre-installed
+# here. Unpinned to track the source packages' own (unpinned) declarations.
+#   pillow -> from PIL import Image (tests/ai/common/image, .../models/vision)
+pillow
+
 # AI module dependencies — each sub-package declares its own deps and
 # installs them via depends() at import time. Listing them here pre-installs
 # them so test runs do not pay the depends() pip cost on first import.
 -r ../src/ai/requirements.txt
 -r ../src/ai/common/requirements.txt
+-r ../src/ai/common/image/requirements.txt
 -r ../src/ai/web/requirements.txt

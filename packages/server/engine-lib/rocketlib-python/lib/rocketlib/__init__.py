@@ -32,6 +32,7 @@ from .engine import error
 from .engine import expand
 from .engine import getServiceDefinition
 from .engine import getServiceDefinitions
+from .engine import getTask
 from .engine import getVersion
 from .engine import isAppMonitor
 from .engine import isLevelEnabled
@@ -81,6 +82,10 @@ from .types import OPEN_MODE
 from .types import PROTOCOL_CAPS
 from .types import SERVICE_MODE
 from .types import TAG, TAG_ID
+from .paths import DEFAULT_MAX_COMPONENT
+from .paths import extended_length_path
+from .paths import shorten_path_component
+from .paths import shorten_path_components
 
 from engLib import Filters
 
@@ -91,17 +96,20 @@ __all__ = [
     'AVI_ACTION',
     'configureLogger',
     'debug',
+    'DEFAULT_MAX_COMPONENT',
     'Ec',
     'error',
     'Entry',
     'ENDPOINT_MODE',
     'error',
     'expand',
+    'extended_length_path',
     'Filters',
     'FLAGS',
     'getObject',
     'getServiceDefinition',
     'getServiceDefinitions',
+    'getTask',
     'getVersion',
     'IControl',
     'IDict',
@@ -139,6 +147,8 @@ __all__ = [
     'readLine',
     'PROTOCOL_CAPS',
     'SERVICE_MODE',
+    'shorten_path_component',
+    'shorten_path_components',
     'TAG',
     'TAG_ID',
     'tool_function',

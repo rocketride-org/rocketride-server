@@ -24,11 +24,16 @@
 // MONITOR-UI — App Descriptor
 // =============================================================================
 
+// HMR anchor: keeps the shared jsx runtime referenced even when the app's
+// root component fails to compile — an error build otherwise orphans it, the
+// hot runtime tombstones its factory, and every later fix-apply dies
+// silently (the frozen-preview bug).
+import 'react/jsx-dev-runtime';
+
 import React from 'react';
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import MonitorApp from './MonitorApp';
-import MonitorSidebar from './MonitorSidebar';
-import RocketRideMark from './RocketRideMark';
+import { RocketRideMark } from 'shell';
 
 /**
  * AppDescriptor for the Server Monitor app.
@@ -41,13 +46,14 @@ const MONITOR_APP: AppDescriptor = {
 	name: 'Server Monitor',
 	branding: {
 		appName: 'Server Monitor',
-		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0' }),
-		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34' }),
+		// style fills the shell's sized icon wrapper (the shared mark defaults to a
+		// fixed 24px; width/height:100% preserves the prior fill-to-slot behaviour).
+		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0', style: { width: '100%', height: '100%' } }),
+		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34', style: { width: '100%', height: '100%' } }),
 	},
-	components: {
-		App: MonitorApp,
-		Sidebar: MonitorSidebar,
-	},
+	// Frame-only app: MonitorApp's root AppLayout keeps the branded sidebar
+	// frame (empty slot) and the status bar.
+	app: MonitorApp,
 };
 
 export default MONITOR_APP;

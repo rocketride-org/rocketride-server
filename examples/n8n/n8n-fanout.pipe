@@ -1,0 +1,78 @@
+{
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" },
+			"ui": { "position": { "x": 20, "y": 320 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "n8n_sync",
+			"provider": "tool_n8n",
+			"config": {
+				"profile": "default",
+				"default": { "baseUrl": "${ROCKETRIDE_N8N_URL}", "apiKey": "${ROCKETRIDE_N8N_KEY}", "workflow": "rr-echo", "mode": "sync" },
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 260, "y": 120 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "n8n_async",
+			"provider": "tool_n8n",
+			"config": {
+				"profile": "default",
+				"default": { "baseUrl": "${ROCKETRIDE_N8N_URL}", "apiKey": "${ROCKETRIDE_N8N_KEY}", "workflow": "rr-slow", "mode": "async" },
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 260, "y": 320 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "n8n_seq1",
+			"provider": "tool_n8n",
+			"config": {
+				"profile": "default",
+				"default": { "baseUrl": "${ROCKETRIDE_N8N_URL}", "apiKey": "${ROCKETRIDE_N8N_KEY}", "workflow": "rr-echo", "mode": "sync" },
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 260, "y": 520 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "n8n_seq2",
+			"provider": "tool_n8n",
+			"config": {
+				"profile": "default",
+				"default": { "baseUrl": "${ROCKETRIDE_N8N_URL}", "apiKey": "${ROCKETRIDE_N8N_KEY}", "workflow": "rr-upper", "mode": "sync" },
+				"parameters": {}
+			},
+			"input": [{ "lane": "text", "from": "n8n_seq1" }],
+			"ui": { "position": { "x": 480, "y": 520 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_sync",
+			"provider": "response_text",
+			"config": { "laneName": "sync" },
+			"input": [{ "lane": "text", "from": "n8n_sync" }],
+			"ui": { "position": { "x": 700, "y": 120 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_async",
+			"provider": "response_text",
+			"config": { "laneName": "async" },
+			"input": [{ "lane": "text", "from": "n8n_async" }],
+			"ui": { "position": { "x": 700, "y": 320 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_sequential",
+			"provider": "response_text",
+			"config": { "laneName": "sequential" },
+			"input": [{ "lane": "text", "from": "n8n_seq2" }],
+			"ui": { "position": { "x": 700, "y": 520 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "a1f0c0de-0001-4a01-8b01-0123456789ab",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

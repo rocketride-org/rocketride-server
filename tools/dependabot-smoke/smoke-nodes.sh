@@ -28,7 +28,7 @@ cd "$REPO_ROOT"
 declare -A NODE_IMPORTS=(
   [nodes/src/nodes/db_mysql]="pymysql"
   [nodes/src/nodes/db_postgres]="psycopg2"
-  [nodes/src/nodes/index_search]="opensearchpy"
+  [nodes/src/nodes/store_elasticsearch]="opensearchpy"
   [nodes/src/nodes/preprocessor_langchain]="nltk spacy"
 )
 

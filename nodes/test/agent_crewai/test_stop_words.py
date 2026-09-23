@@ -46,34 +46,37 @@ import types
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Load the REAL truncate_at_stop_words from packages/ai, stubbing only its one
-# dependency (ai.common.utils.safe_str) so no engine modules are required.
+# Load the REAL truncate_at_stop_words from packages/ai, stubbing only the
+# ai.common.utils names it imports so no engine modules are required.
+#
+# `safe_str` is trivial enough to stub inline. `flatten_content_blocks` is not —
+# it owns the provider block vocabulary, and a hand-copied stub here would drift
+# from the real one. It has no imports beyond `typing`, so load it from source by
+# path instead and keep exactly one implementation.
 # ---------------------------------------------------------------------------
-_UTILS_PATH = (
-    Path(__file__).resolve().parents[3]
-    / 'packages'
-    / 'ai'
-    / 'src'
-    / 'ai'
-    / 'common'
-    / 'agent'
-    / '_internal'
-    / 'utils.py'
-)
+_AI_SRC = Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common'
+_UTILS_PATH = _AI_SRC / 'agent' / '_internal' / 'utils.py'
+_CONTENT_BLOCKS_PATH = _AI_SRC / 'utils' / 'content_blocks.py'
+
+
+def _load_by_path(module_name: str, path: Path):
+    """Import a dependency-free module from source, bypassing the package."""
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _load_real_truncate():
     saved = {k: sys.modules.get(k) for k in ('ai', 'ai.common', 'ai.common.utils')}
     acu = types.ModuleType('ai.common.utils')
     acu.safe_str = lambda x: '' if x is None else str(x)
+    acu.flatten_content_blocks = _load_by_path('rr_real_content_blocks', _CONTENT_BLOCKS_PATH).flatten_content_blocks
     sys.modules['ai'] = types.ModuleType('ai')
     sys.modules['ai.common'] = types.ModuleType('ai.common')
     sys.modules['ai.common.utils'] = acu
     try:
-        spec = importlib.util.spec_from_file_location('rr_real_agent_utils', _UTILS_PATH)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod.truncate_at_stop_words
+        return _load_by_path('rr_real_agent_utils', _UTILS_PATH).truncate_at_stop_words
     finally:
         for k, v in saved.items():
             if v is None:
@@ -239,7 +242,7 @@ def _load_native_stream():
 
 
 def _run_native_capture(ns, stop_value):
-    """Drive _stream_anthropic_messages_api with fakes; return the stop the payload got."""
+    """Drive the native Anthropic adapter with fakes; return the stop the payload got."""
     captured: dict = {}
 
     class _FakeLLM:
@@ -255,11 +258,8 @@ def _run_native_capture(ns, stop_value):
     ns._open_raw_message_stream = lambda client, payload: iter(())  # no events -> no text
     token = ns.STOP_SEQUENCES_VAR.set(stop_value)
     try:
-        # Produces no text, so the function raises after building the payload — we only
-        # assert the payload wiring, which happens before any streaming.
-        ns._stream_anthropic_messages_api(_FakeChat(), 'prompt', lambda t: None, None, None)
-    except RuntimeError:
-        pass
+        # Drain the adapter; the payload (with the stop) is built before any streaming.
+        list(ns.NativeAnthropicAdapter(_FakeChat()).stream('prompt'))
     finally:
         ns.STOP_SEQUENCES_VAR.reset(token)
     return captured.get('stop', 'UNSET')

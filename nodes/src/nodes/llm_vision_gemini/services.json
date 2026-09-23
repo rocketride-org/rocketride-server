@@ -9,7 +9,7 @@
 	"prefix": "image_vision_gemini",
 	"description": ["A component that connects to Google Gemini's vision-capable models for image analysis, ", "OCR, visual understanding, and scene description. Supports Gemini 2.5 and 3.x models ", "with multimodal capabilities. Features robust error handling, automatic image processing, ", "and flexible prompt configuration for a wide range of vision use cases."],
 	"icon": "gemini.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/llm_vision_gemini",
 	"tile": ["Model: ${parameters.image_vision_gemini.profile}"],
 	"lanes": {
 		"image": ["text"],

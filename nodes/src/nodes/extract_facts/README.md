@@ -1,0 +1,72 @@
+# extract_facts
+
+A RocketRide text-processing node that extracts configured records from documents or tables, with optional LLM validation and source provenance. Choose it over `extract_data` when each emitted value needs a traceable source location or a second extraction check.
+
+## What it does
+
+The node buffers document and table context for an input object, then extracts one JSON record per logical record when that object closes. Its prompt includes the configured target fields and requires a `_provenance` object for every record. By default it sends the results through a second LLM prompt that rechecks the cited source, corrects or drops unsupported records, and attaches validation information. It emits the reconciled list as an answer and/or as one document per record. Use `extract_data` when a consolidated table is sufficient and there is no need to preserve per-record provenance or run a validator pass.
+
+## Connections
+
+| Connection | Required | Description |
+| --- | --- | --- |
+| `llm` | yes | LLM used for fact extraction and, when enabled, validation. |
+
+## Lanes
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `table` | `answers` | Emits the reconciled fact list as one JSON answer. |
+| `table` | `documents` | Emits one JSON document for each reconciled fact. |
+| `documents` | `answers` | Extracts from incoming documents and emits the reconciled fact list as one JSON answer. |
+| `documents` | `documents` | Extracts from incoming documents and emits one JSON document for each reconciled fact. |
+
+## Configuration
+
+Configure the target fields, then decide whether the second validation pass and provenance should be included. The node has one hidden `default` profile, so these choices apply directly to its extraction behavior.
+
+### Fields
+
+Provide between one and 32 target fields. Each field has a name, a type selected from the declared values, and an optional default value; the node places these in the LLM prompt. The extractor is instructed to infer a value from context when an exact field label is absent, so use names that express the facts you need rather than merely copying source headers. A field with a blank name or type is skipped at startup with a warning and is not available to the extractor or validator.
+
+### Field types and defaults
+
+The type tells the LLM how to interpret the target value. Use `text` for unconstrained values, numeric and date/time types for values that should be recognized in those forms, and specialized types such as `email`, `url`, `phone`, or `json` when their structure matters. The default value is prompt context, not a post-processing guarantee, so select one only when it is a sensible fallback for a missing fact. Keep types and defaults consistent with the source you expect to validate; the validator checks the extraction result against the same configured fields.
+
+### Validate
+
+Validation is on by default. With it enabled, the node runs a second prompt on the same LLM connection against the candidate records and source context. The validator can correct a value, repair its cited table location, lower its confidence, or remove a record that the source does not support. Turn it off when the extra prompt cost and latency are not worth the second check; in that mode the first-pass records are emitted without `_validation` annotations. If the validator returns no usable records, the node retains the first-pass candidates instead of discarding them.
+
+### Include Provenance
+
+This setting defaults to on. The extraction prompt asks for `page`, `table_id`, `row`, `col`, `source_text`, and `confidence` in `_provenance`; table records use the node's `[TABLE <id>]` fences and document inputs can carry `[Page N]` markers. Turn it off only when downstream consumers do not need source traceability, because the node removes `_provenance` from the final records after validation. It does not disable validation itself.
+
+## Notes
+
+### Buffered input and output
+
+The node consumes incoming content with `preventDefault` and emits derived facts only on close, so downstream lanes never see its original input or partial LLM output. Table input is fenced with sequential table IDs. On the `documents` lane, documents marked `metadata.isTable` are sent to the table buffer; other content is buffered as free text, and a `page` metadata value is preserved in a page marker for the LLM. Document output serializes each fact as JSON; its `isTable` metadata is true when the fact's provenance has a table ID.
+
+### Record shape
+
+The built-in prompts request one object for each logical record, not a separate object for every target field. For table data, the extractor is told to treat the first row as a header and use a zero-based data-row index in provenance. The LLM supplies provenance on a best-effort basis, so it may return `null` for a source location that the provided context cannot establish.
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `facts.column` | `string` | **Field**<br/>Name of the target fact field | `"field"` |
+| `facts.defval` | `string` | **Default Value** | `""` |
+| `facts.fields` | `array` |  |  |
+| `facts.include_provenance` | `boolean` | **Include Provenance**<br/>Auto-attach provenance (page, table id, row, column, source text, confidence) to every emitted fact. | `true` |
+| `facts.profile` | `string` |  | `"default"` |
+| `facts.type` | `string` | **Type** | `"text"` |
+| `facts.validate` | `boolean` | **Validate**<br/>Run a second validator prompt pass that double-checks extracted facts and reconciles on disagreement. | `true` |
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/extract_facts)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

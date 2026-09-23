@@ -89,7 +89,7 @@ class CProfileMixin(DAPClient):
             args['target'] = target
         if session:
             args['session'] = session
-        return await self.call('rrext_cprofile_start', args)
+        return await self.call('rrext_cprofile_start', **args)
 
     async def cprofile_stop(self, target: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -111,7 +111,7 @@ class CProfileMixin(DAPClient):
         args: Dict[str, Any] = {}
         if target:
             args['target'] = target
-        return await self.call('rrext_cprofile_stop', args)
+        return await self.call('rrext_cprofile_stop', **args)
 
     async def cprofile_status(self, target: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -131,7 +131,7 @@ class CProfileMixin(DAPClient):
         args: Dict[str, Any] = {}
         if target:
             args['target'] = target
-        return await self.call('rrext_cprofile_status', args)
+        return await self.call('rrext_cprofile_status', **args)
 
     async def cprofile_report(self, target: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -150,7 +150,7 @@ class CProfileMixin(DAPClient):
         args: Dict[str, Any] = {}
         if target:
             args['target'] = target
-        return await self.call('rrext_cprofile_report', args)
+        return await self.call('rrext_cprofile_report', **args)
 
     async def cprofile_report_tree(
         self,
@@ -190,4 +190,4 @@ class CProfileMixin(DAPClient):
         }
         if target:
             args['target'] = target
-        return await self.call('rrext_cprofile_report_tree', args)
+        return await self.call('rrext_cprofile_report_tree', **args)

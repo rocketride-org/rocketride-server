@@ -48,3 +48,17 @@ export * from './client.js';
 
 // Export the database API namespace (DatabaseApi class, DatabaseDialect enum)
 export * from './database.js';
+
+// Sequelize factory and related types (frozen SDK contract surface — deprecated
+// in favor of `rocketride/drizzle`, retained until a coordinated major release)
+export { createSequelize } from './database/sequelize/create-sequelize.js';
+export type { CreateSequelizeOptions, SequelizeConstructor } from './database/sequelize/create-sequelize.js';
+
+// Export the run-log DVR session class (the codec stays internal — only the
+// session and its user-facing types are public surface)
+export { LogEventStream } from './log-stream.js';
+
+// Deploy's app verbs (createApp/verifyApp) return these app-pack report
+// types on the MAIN entry — re-export them type-only so callers can name
+// what deploy returns without reaching into the app-pack subpath.
+export type { AppVerifyCheck, AppVerifyReport, CreatedApp } from '../app-pack/index.js';

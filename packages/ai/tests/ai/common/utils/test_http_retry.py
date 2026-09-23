@@ -18,7 +18,7 @@ import pytest
 import requests
 
 import ai.common.utils.http_retry as hr
-from ai.common.utils import post_with_retry
+from ai.common.utils import get_with_retry, post_with_retry
 
 
 class _FakeResp:
@@ -100,6 +100,19 @@ def test_does_not_retry_4xx(monkeypatch):
     assert calls['n'] == 1  # no retry on a non-429 4xx
 
 
+def test_post_forwards_files_for_multipart(monkeypatch):
+    seen = {}
+
+    def fake_post(url, **kwargs):
+        seen.update(kwargs)
+        return _FakeResp(200, {})
+
+    _patch_post(monkeypatch, fake_post)
+    post_with_retry('https://api.example.com', files={'field': (None, 'value')}, base_delay=0)
+    assert seen['files'] == {'field': (None, 'value')}
+    assert seen['json'] is None  # json and files are independent passthroughs
+
+
 def test_reraises_after_exhausting_attempts(monkeypatch):
     calls = {'n': 0}
 
@@ -111,3 +124,55 @@ def test_reraises_after_exhausting_attempts(monkeypatch):
     with pytest.raises(requests.exceptions.ConnectionError):
         post_with_retry('https://api.example.com', max_attempts=3, base_delay=0)
     assert calls['n'] == 3
+
+
+# --- get_with_retry (shares _retrying / _is_retryable with post_with_retry) ---
+
+
+def _patch_get(monkeypatch, fn):
+    monkeypatch.setattr(hr.requests, 'get', fn)
+
+
+def test_get_returns_response_on_success(monkeypatch):
+    ok = _FakeResp(200, {'ok': True})
+    _patch_get(monkeypatch, lambda *a, **k: ok)
+    assert get_with_retry('https://api.example.com', base_delay=0) is ok
+
+
+def test_get_retries_429_then_succeeds(monkeypatch):
+    calls = {'n': 0}
+    ok = _FakeResp(200, {})
+
+    def fake_get(*a, **k):
+        calls['n'] += 1
+        return _FakeResp(429) if calls['n'] == 1 else ok
+
+    _patch_get(monkeypatch, fake_get)
+    assert get_with_retry('https://api.example.com', base_delay=0) is ok
+    assert calls['n'] == 2
+
+
+def test_get_retries_5xx_then_succeeds(monkeypatch):
+    calls = {'n': 0}
+    ok = _FakeResp(200, {})
+
+    def fake_get(*a, **k):
+        calls['n'] += 1
+        return _FakeResp(503) if calls['n'] == 1 else ok
+
+    _patch_get(monkeypatch, fake_get)
+    assert get_with_retry('https://api.example.com', base_delay=0) is ok
+    assert calls['n'] == 2
+
+
+def test_get_does_not_retry_4xx(monkeypatch):
+    calls = {'n': 0}
+
+    def fake_get(*a, **k):
+        calls['n'] += 1
+        return _FakeResp(404)
+
+    _patch_get(monkeypatch, fake_get)
+    with pytest.raises(requests.exceptions.HTTPError):
+        get_with_retry('https://api.example.com', base_delay=0)
+    assert calls['n'] == 1  # no retry on a non-429 4xx

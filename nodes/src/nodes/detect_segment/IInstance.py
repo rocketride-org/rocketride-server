@@ -29,6 +29,7 @@ import time
 from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 
 from ai.common.image import ImageProcessor
+from ai.common.avi.descriptor import descriptor_from_payload, forward_enriched_image
 
 from .IGlobal import IGlobal
 
@@ -70,6 +71,7 @@ class IInstance(IInstanceBase):
         """Initialize per-instance image-accumulation state."""
         super().__init__(*args, **kwargs)
         self._image_data = None
+        self._source_descriptor = None  # stream descriptor parsed on the image BEGIN
 
     def _annotate_instances(self, image, instances):
         """Overlay translucent per-instance colored masks + bbox + label on a copy of ``image``.
@@ -197,9 +199,7 @@ class IInstance(IInstanceBase):
 
         if self.instance.hasListener('image'):
             image_bytes = ImageProcessor.get_bytes(annotated, fmt='JPEG')
-            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/jpeg')
-            self.instance.writeImage(AVI_ACTION.WRITE, 'image/jpeg', image_bytes)
-            self.instance.writeImage(AVI_ACTION.END, 'image/jpeg')
+            forward_enriched_image(self.instance, self._source_descriptor, 'image/jpeg', image_bytes)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Accumulate an inbound image stream and run segmentation on END.
@@ -213,6 +213,8 @@ class IInstance(IInstanceBase):
             preventDefault() on END to suppress default forwarding; None otherwise.
         """
         if action == AVI_ACTION.BEGIN:
+            # BEGIN carries the source stream descriptor (provenance), not image bytes.
+            self._source_descriptor = descriptor_from_payload(buffer)
             self._image_data = bytearray()
         elif action == AVI_ACTION.WRITE:
             self._image_data += buffer

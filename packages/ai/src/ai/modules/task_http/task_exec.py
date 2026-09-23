@@ -1,4 +1,5 @@
 from typing import Any, Dict
+from ai.constants import CONST_DEFAULT_WEB_HOST
 from ai.web import WebServer, exception, Request, ResultBase, Header, Query, response
 from rocketride import RocketRideClient
 
@@ -64,10 +65,21 @@ async def task_Execute(
         # Get the port we are serving
         port = server.get_port()
 
+        # Only a loopback-bound (local) engine forwards this process's SDK env.
+        # Without env the SDK sends every ROCKETRIDE_* var from os.environ and
+        # ./.env on use(), and the engine applies that caller env over the
+        # org/team/user secrets -- so on a deployed engine the server's own
+        # vars would override a user's same-named secrets. Same rule as MCP.
+        # Deferred import: keeps the MCP package off the /task module load.
+        from ai.modules.mcp.auth import is_loopback_bind
+
+        local_engine = is_loopback_bind(str(server.config.get('host', CONST_DEFAULT_WEB_HOST)))
+
         # Create the client
         client = RocketRideClient(
             uri=f'http://localhost:{port}',
             auth=request.state.account.auth,
+            env=None if local_engine else {},
         )
 
         # Connect to the socket interface

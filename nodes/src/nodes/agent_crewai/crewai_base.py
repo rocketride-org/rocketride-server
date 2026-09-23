@@ -294,6 +294,26 @@ class CrewBase(AgentBase):
                     **kwargs,
                 )
 
+            def supports_function_calling(self) -> bool:
+                # The host channel is text-in / text-out: `call` ignores `tools`,
+                # `available_functions` and `response_model` and always returns a
+                # string, so claiming native tool support would send CrewAI down a
+                # path this wrapper cannot honour. Returning False keeps every
+                # tool call on the ReAct path that `_build_crew_tools` targets.
+                #
+                # This override is REQUIRED, not just a preference. CrewAI defines
+                # supports_function_calling() on crewai.llm.LLM and on each provider
+                # completion class, but NOT on BaseLLM. Most callers probe it with
+                # hasattr(), yet several do not -- crewai/utilities/converter.py
+                # to_pydantic/ato_pydantic/to_json, crewai/tools/tool_usage.py
+                # _function_calling, reasoning_handler, task_evaluator. Without this
+                # method those raise AttributeError, which converter.py swallows in a
+                # broad `except Exception` and re-reports as the misleading
+                # "Failed to convert text into a Pydantic model due to error: ...".
+                # The hierarchical manager hits that path on every kickoff, because
+                # Crew(planning=True) runs a planner task with output_pydantic set.
+                return False
+
         return HostInvokeLLM()
 
     def _build_crew_tools(
@@ -304,9 +324,10 @@ class CrewBase(AgentBase):
         """
         Convert host tool descriptors into CrewAI BaseTool instances.
 
-        Each tool's JSON Schema is embedded in the description so CrewAI can
-        pass structured arguments. A dynamic Pydantic args_schema is built per
-        tool to preserve real parameter names through CrewAI's argument filter.
+        A dynamic Pydantic args_schema is built per tool to preserve real
+        parameter names through CrewAI's argument filter. The JSON Schema is not
+        copied into the description: CrewAI renders args_schema into the prompt
+        itself, so a second copy would give the model two contracts to reconcile.
 
         The inner `HostTool` subclass captures `self` and `context` via closure
         on this method so its `_run` / `_arun` methods can call
@@ -318,29 +339,81 @@ class CrewBase(AgentBase):
         outer_self = self
         outer_context = context
 
-        class _ToolInput(BaseModel):
-            input: Any = Field(default=None, description='Tool input payload')
-            model_config = ConfigDict(extra='allow')
+        # JSON Schema type -> Python annotation. CrewAI renders the generated model's
+        # JSON schema straight into the ReAct prompt as the "Tool Arguments:" block
+        # (crewai/tools/structured_tool.py format_description_for_llm), so an
+        # untyped model shows the LLM argument names with no types at all. Typing the
+        # fields also lets pydantic coerce "123" -> 123 instead of rejecting it.
+        # Nesting stays shallow on purpose: CrewAI only renders and filters the top
+        # level, and a deep model would reject payloads the host tool accepts through
+        # its own `extra` passthrough.
+        _JSON_TYPE_MAP: Dict[str, Any] = {
+            'string': str,
+            'integer': int,
+            'number': float,
+            'boolean': bool,
+            'array': List[Any],
+            'object': Dict[str, Any],
+        }
+
+        class _NoArgsInput(BaseModel):
+            """Schema for tools that declare no parameters."""
+
+            model_config = ConfigDict(extra='ignore')
+
+        def _annotation_for(prop: Dict[str, Any]) -> Any:
+            """Map a JSON Schema property to a Python annotation, defaulting to Any.
+
+            `Any` is the deliberate fallback for unions, `null`, and anything the map
+            does not cover — a wrong guess here would reject valid tool calls, which
+            is worse than leaving the field untyped.
+
+            The non-`str` check is what makes that fallback reachable for unions:
+            JSON Schema spells a nullable field as `"type": ["string", "null"]`, and
+            handing that list to `dict.get` raises TypeError on the unhashable key
+            rather than returning the default — one nullable property would abort the
+            whole `_build_crew_tools` loop.
+            """
+            prop_type = prop.get('type')
+            return _JSON_TYPE_MAP.get(prop_type, Any) if isinstance(prop_type, str) else Any
 
         def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
             """
             Build a dynamic Pydantic model from a JSON Schema so that
             CrewAI's argument filter preserves real tool parameters.
+
+            The filter matters: crewai/tools/tool_usage.py intersects the model's
+            emitted argument keys with this schema's property names and silently drops
+            everything else. A name the schema does not declare is lost before
+            validation, which then reports every required field as missing.
             """
             if not isinstance(input_schema, dict):
-                return _ToolInput
-            props = input_schema.get('properties', {})
-            if not props:
-                return _ToolInput
-            required_keys = set(input_schema.get('required', []))
+                return _NoArgsInput
+            props = input_schema.get('properties')
+            if not isinstance(props, dict) or not props:
+                return _NoArgsInput
+            required = input_schema.get('required') or []
+            required_keys = set(required) if isinstance(required, (list, tuple, set)) else set()
+
             field_defs: Dict[str, Any] = {}
             for key, prop in props.items():
+                if not isinstance(key, str) or not key:
+                    continue
+                if not isinstance(prop, dict):
+                    prop = {}
                 desc = prop.get('description', '')
+                annotation = _annotation_for(prop)
                 if key in required_keys:
-                    field_defs[key] = (Any, Field(..., description=desc))
+                    field_defs[key] = (annotation, Field(..., description=desc))
                 else:
-                    default = prop.get('default', None)
-                    field_defs[key] = (Any, Field(default=default, description=desc))
+                    # Optional args accept an explicit null as well as omission —
+                    # models routinely send "field": null for "not applicable".
+                    field_defs[key] = (
+                        Optional[annotation],
+                        Field(default=prop.get('default', None), description=desc),
+                    )
+            if not field_defs:
+                return _NoArgsInput
             try:
                 return create_model(
                     '_DynToolInput',
@@ -348,19 +421,19 @@ class CrewBase(AgentBase):
                     **field_defs,
                 )
             except Exception:
-                return _ToolInput
+                return _NoArgsInput
 
         class HostTool(BaseTool):
             name: str
             description: str
-            args_schema: type[BaseModel] = _ToolInput
+            args_schema: type[BaseModel] = _NoArgsInput
 
             def __repr__(self) -> str:
-                # Strip JSON schema suffix and CrewAI-reformatted header so planning
-                # prompts see a clean one-liner — same as native CrewAI tool reprs.
-                desc = self.description.split('\n\nTool input schema (JSON):')[0]
-                if '\nTool Description: ' in desc:
-                    desc = desc.split('\nTool Description: ', 1)[1].split('\n')[0]
+                # Keep planning prompts to a clean one-liner, same as native CrewAI
+                # tool reprs. CrewAI composes its own "Tool Name / Tool Arguments /
+                # Tool Description" block on demand via `formatted_description` and no
+                # longer rewrites `description`, so only the first line is needed.
+                desc = self.description.split('\n')[0]
                 return f'Tool(name={self.name!r}, description={desc!r})'
 
             __str__ = __repr__
@@ -377,18 +450,12 @@ class CrewBase(AgentBase):
                     return safe_str(out)
 
             async def _arun(self, **framework_args: Any) -> str:
-                # The ReAct tool path goes tool.ainvoke -> _arun, so this is what
-                # gets called when the LLM does NOT use native function calling.
-                # Wraps the existing sync _run via to_thread to avoid blocking
-                # the shared kickoff loop.
-                #
-                # NOTE: the native tools path (used by GPT-4 / Claude / any LLM
-                # with supports_function_calling()==True) bypasses _arun entirely
-                # and calls _run synchronously via available_functions[name].
-                # See the "Known Limitations" section of the plan -- tool calls
-                # serialize on the loop in that path.  Override
-                # supports_function_calling()->False on HostInvokeLLM to force
-                # the ReAct path if full tool concurrency is required.
+                # Kept for callers that reach BaseTool.arun directly. CrewAI's own
+                # ReAct path does NOT come through here: to_structured_tool() binds
+                # func=self._run (the sync method), and CrewStructuredTool.ainvoke
+                # sees a non-coroutine and dispatches it via run_in_executor. The
+                # off-loop behaviour this wrapper was written for is therefore already
+                # provided by CrewAI; this override only matters if that changes back.
                 return await asyncio.to_thread(self._run, **framework_args)
 
         tools = []
@@ -399,15 +466,12 @@ class CrewBase(AgentBase):
                 continue
             if not desc:
                 desc = f'Invoke host tool: {name}'
+            # The schema is NOT appended to the description. CrewAI renders the
+            # args_schema into the prompt itself as a "Tool Arguments:" JSON Schema
+            # block, so a second copy here gives the model two contracts to reconcile
+            # for the same tool — and the two disagree, because CrewAI's copy is run
+            # through its strict-mode normaliser first.
             input_schema = td.get('inputSchema') if isinstance(td, dict) else None
-            if isinstance(input_schema, dict):
-                try:
-                    schema_text = json.dumps(input_schema, ensure_ascii=False)
-                except Exception:
-                    schema_text = ''
-                if schema_text:
-                    desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
-
             schema_cls = _make_args_schema(input_schema)
             tools.append(HostTool(name=name, description=desc, args_schema=schema_cls))
         return tools

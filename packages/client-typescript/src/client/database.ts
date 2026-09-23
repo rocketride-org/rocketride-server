@@ -31,6 +31,53 @@
  */
 
 import type { RocketRideClient } from './client.js';
+import { createSequelize } from './database/sequelize/create-sequelize.js';
+import type { SequelizeConstructor } from './database/sequelize/create-sequelize.js';
+
+// =============================================================================
+// DATABASE-LIKE INTERFACES (structural subsets used by the ORM drivers)
+// =============================================================================
+
+/**
+ * Structural interface satisfied by `DatabaseApi` (and test doubles) for the
+ * Sequelize pg-compatible shim.  Only the four methods the shim needs are
+ * required, so the interface remains stable across future `DatabaseApi`
+ * additions without forcing shim changes.
+ *
+ * This shape is part of the frozen SDK contract: consumers implement it, so
+ * its requirements must never be strengthened. Drivers that need positional
+ * rows consume {@link DrizzleDatabaseLike} instead.
+ */
+export interface DatabaseLike {
+	/** Execute a raw SQL statement. */
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
+	/** Begin a database transaction. */
+	beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>;
+	/** Commit an open transaction. */
+	commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>;
+	/** Roll back an open transaction. */
+	rollback(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>;
+}
+
+/**
+ * Structural interface satisfied by `DatabaseApi` (and test doubles),
+ * consumed by the Drizzle-over-pipes driver (`rocketride/drizzle`).  Extends
+ * the {@link DatabaseLike} transport with `rowMode: 'array'`, which Drizzle's
+ * positional result mappers require (dict rows would silently collapse
+ * duplicate column names in joins).
+ */
+export interface DrizzleDatabaseLike {
+	/** Execute a raw SQL statement. `rowMode: 'array'` returns positional rows. */
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
+	/** Begin a database transaction. */
+	beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>;
+	/** Commit an open transaction. */
+	commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>;
+	/** Roll back an open transaction. */
+	rollback(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>;
+}
 
 // =============================================================================
 // DIALECT ENUM
@@ -73,13 +120,20 @@ export class DatabaseApi {
 	 * @param options.sql - Raw SQL or Cypher statement to execute.
 	 * @param options.nodeId - Target database node ID.  When empty the call
 	 *   broadcasts to all tool-lane nodes; the first database node handles it.
-	 * @returns Object with `rows` (array of row objects) and `affected_rows` (number).
+	 * @param options.sessionId - Optional transaction session ID returned by
+	 *   `beginTransaction`.  When provided the statement runs within that session.
+	 * @param options.params - Optional positional parameters bound to the statement
+	 *   (e.g. `[1, 'foo']` for `$1`, `$2` placeholders).
+	 * @param options.rowMode - Row shape: `'object'` (default) returns rows as
+	 *   objects keyed by column name; `'array'` returns positional arrays
+	 *   (column order preserved, duplicate column names kept) — the shape ORM
+	 *   drivers such as Drizzle require.
+	 * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number).
 	 */
-	async query(options: {
-		token: string;
-		sql: string;
-		nodeId?: string;
-	}): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }> {
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
 		}
@@ -87,11 +141,76 @@ export class DatabaseApi {
 			throw new Error('sql must be a non-empty string');
 		}
 
+		const input: Record<string, unknown> = { sql: options.sql };
+		if (options.sessionId) input.session_id = options.sessionId;
+		if (options.params) input.params = options.params;
+		if (options.rowMode === 'array') input.row_mode = 'array';
+
 		return this.client.tool({
 			token: options.token,
 			tool: 'execute',
 			nodeId: options.nodeId,
-			input: { sql: options.sql },
+			input,
+		});
+	}
+
+	/**
+	 * Begin a database transaction on a pipeline node.
+	 *
+	 * Returns a `session_id` that must be threaded through subsequent
+	 * `query`, `commit`, and `rollback` calls to keep them within the
+	 * same transaction.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access.
+	 * @param options.nodeId - Target database node ID.
+	 * @returns Object containing the `session_id` string for the new transaction.
+	 */
+	async beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }> {
+		if (typeof options.token !== 'string' || options.token.trim() === '') {
+			throw new Error('token must be a non-empty string');
+		}
+		return this.client.tool({ token: options.token, tool: 'begin', nodeId: options.nodeId, input: {} });
+	}
+
+	/**
+	 * Commit an open transaction session, making all its changes permanent.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access.
+	 * @param options.sessionId - Transaction session ID returned by `beginTransaction`.
+	 * @param options.nodeId - Target database node ID.
+	 * @returns Object with `ok: true` on success.
+	 */
+	async commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }> {
+		if (typeof options.token !== 'string' || options.token.trim() === '') {
+			throw new Error('token must be a non-empty string');
+		}
+		if (!options.sessionId) throw new Error('sessionId must be a non-empty string');
+		return this.client.tool({
+			token: options.token,
+			tool: 'commit',
+			nodeId: options.nodeId,
+			input: { session_id: options.sessionId },
+		});
+	}
+
+	/**
+	 * Roll back an open transaction session, discarding all its changes.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access.
+	 * @param options.sessionId - Transaction session ID returned by `beginTransaction`.
+	 * @param options.nodeId - Target database node ID.
+	 * @returns Object with `ok: true` on success.
+	 */
+	async rollback(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }> {
+		if (typeof options.token !== 'string' || options.token.trim() === '') {
+			throw new Error('token must be a non-empty string');
+		}
+		if (!options.sessionId) throw new Error('sessionId must be a non-empty string');
+		return this.client.tool({
+			token: options.token,
+			tool: 'rollback',
+			nodeId: options.nodeId,
+			input: { session_id: options.sessionId },
 		});
 	}
 
@@ -122,5 +241,28 @@ export class DatabaseApi {
 			throw new Error(`Unexpected dialect response from pipeline: ${JSON.stringify(result)}`);
 		}
 		return result.dialect as DatabaseDialect;
+	}
+
+	/**
+	 * Build a Sequelize ORM instance that transports its SQL over this RocketRide
+	 * pipe (via `query`/`beginTransaction`/`commit`/`rollback`) instead of a TCP socket.
+	 *
+	 * @deprecated Prefer the Drizzle driver (`import { drizzle } from 'rocketride/drizzle'`),
+	 * which has no Node built-in requirements and is browser-bundle safe. This surface is
+	 * retained because it is part of the frozen SDK contract; it will be removed only with
+	 * a coordinated major release.
+	 *
+	 * The `sequelize` package is a peer dependency, not a hard dependency: it pulls
+	 * in Node built-ins (`util`, `debug`) that cannot be bundled for browser targets.
+	 * Callers must import `Sequelize` themselves and pass the class in.
+	 *
+	 * @param options.Sequelize - The `Sequelize` class (`import { Sequelize } from 'sequelize'`).
+	 * @param options.token - Pipeline token for authentication.
+	 * @param options.nodeId - Target database node id (pins transactions to one node).
+	 * @param options.sequelizeOptions - Extra Sequelize options merged over the defaults.
+	 * @returns A configured `Sequelize` instance ready for model definition and queries.
+	 */
+	sequelize(options: { Sequelize: SequelizeConstructor; token: string; nodeId?: string; sequelizeOptions?: import('sequelize').Options }): import('sequelize').Sequelize {
+		return createSequelize({ Sequelize: options.Sequelize, db: this, token: options.token, nodeId: options.nodeId, sequelizeOptions: options.sequelizeOptions });
 	}
 }

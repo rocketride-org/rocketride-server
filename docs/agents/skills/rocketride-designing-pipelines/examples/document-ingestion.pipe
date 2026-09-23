@@ -1,0 +1,12 @@
+{
+  "components": [
+    { "id": "webhook_1", "provider": "webhook", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" } },
+    { "id": "parse_1", "provider": "parse", "config": { "parameters": {} }, "input": [{ "lane": "tags", "from": "webhook_1" }] },
+    { "id": "preprocessor_1", "provider": "preprocessor_langchain", "config": { "profile": "recursive", "parameters": {} }, "input": [{ "lane": "text", "from": "parse_1" }] },
+    { "id": "embedding_1", "provider": "embedding_transformer", "config": { "profile": "miniAll", "parameters": {} }, "input": [{ "lane": "documents", "from": "preprocessor_1" }] },
+    { "id": "qdrant_1", "provider": "qdrant", "config": { "profile": "local", "local": { "collection": "docs" }, "parameters": {} }, "input": [{ "lane": "documents", "from": "embedding_1" }] }
+  ],
+  "project_id": "b8e4d3f2-1c5e-4f9a-9d2e-6c7f8a9b0c1d",
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "version": 1
+}

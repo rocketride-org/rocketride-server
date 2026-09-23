@@ -26,8 +26,13 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
+import type { ShellAppProps } from 'shell';
+import { AppLayout } from 'shell';
 import heroSrc from './hello-world.webp';
+
+// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
+// (header + account footer) present with an empty middle slot.
+const SIDEBAR_FRAME_ONLY = <></>;
 
 // =============================================================================
 // STYLES
@@ -50,6 +55,8 @@ const styles = {
 		fontSize: 48,
 		fontWeight: 800,
 		letterSpacing: -1,
+		marginTop: 'auto',
+		paddingBottom: 8,
 	} as CSSProperties,
 	subtitle: {
 		fontSize: 16,
@@ -61,7 +68,7 @@ const styles = {
 		height: 'auto',
 		borderRadius: 12,
 		border: '1px solid var(--rr-border)',
-		boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+		boxShadow: '0 8px 32px var(--rr-shadow-widget)',
 	} as CSSProperties,
 };
 
@@ -76,20 +83,22 @@ const styles = {
  */
 const HelloApp: React.FC<ShellAppProps> = ({ identity }) => {
 	return (
-		<div style={styles.container}>
-			<img
-				src={heroSrc}
-				alt="An astronaut waving by a campfire on the moon, with Earth rising in the sky"
-				style={styles.hero}
-			/>
-			<div style={styles.title}>Hello World!</div>
-			<div style={styles.subtitle}>
-				{identity
-					? `Welcome, ${identity.displayName ?? 'user'}!`
-					: 'Not authenticated — running as a public app.'
-				}
+		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
+			<div style={styles.container}>
+				<img
+					src={heroSrc}
+					alt="An astronaut waving by a campfire on the moon, with Earth rising in the sky"
+					style={styles.hero}
+				/>
+				<div style={styles.subtitle}>
+					{identity
+						? `Welcome, ${identity.displayName ?? 'user'}!`
+						: 'Not authenticated — running as a public app.'
+					}
+				</div>
+				<div style={styles.title}>Hello World!</div>
 			</div>
-		</div>
+		</AppLayout>
 	);
 };
 

@@ -6,3 +6,7 @@ json5
 RestrictedPython
 SQLAlchemy>=2.0,<2.1
 yappi
+# graph/age translation layer: runtime for the vendored ANTLR-generated
+# openCypher + agtype parsers (range, not ==: depends() compiles all
+# requirement files into one constraint set)
+antlr4-python3-runtime>=4.13.2,<4.14

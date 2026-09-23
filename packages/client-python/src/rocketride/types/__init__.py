@@ -74,6 +74,7 @@ from .client import (
     ConnectResult,
     ServerInfoResult,
     AppManifestEntry,
+    DevEntry,
 )
 
 # Pipeline types: the structures that describe a pipeline's topology — its
@@ -90,6 +91,8 @@ from .pipeline import (
 from .task import (
     TASK_STATUS,
     TASK_STATE,
+    TASK_STATUS_COMPONENT_STAT,
+    TASK_STATUS_SLOWEST_DOC,
     TASK_STATUS_FLOW,
     TASK_TOKENS,
     TASK_METRICS,
@@ -115,6 +118,10 @@ from .dashboard import (
     DASHBOARD_CONNECTION,
     DASHBOARD_TASK,
     DASHBOARD_RESPONSE,
+    LIST_SORT_SPEC,
+    LIST_PAGE_REQUEST,
+    LIST_CONNECTIONS_RESPONSE,
+    LIST_TASKS_RESPONSE,
     DASHBOARD_EVENT,
     DASHBOARD_EVENT_CONNECTION_ADDED,
     DASHBOARD_EVENT_CONNECTION_REMOVED,
@@ -150,8 +157,35 @@ from .account import (
     TeamMemberParams,
 )
 
-# Deploy types: deployment records.
-from .deploy import DeploymentRecord
+# Deploy types: teams-as-environments deployment records.
+from .deploy import (
+    DeployActor,
+    DeployArtifact,
+    DeployHistoryEntry,
+    DeployHistoryResult,
+    DeployListResult,
+    Deployment,
+    DeploymentSchedule,
+    DeployVersionsResult,
+    PublishResult,
+    SchedulePreview,
+)
+
+# Run-log types: the per-task event continuum (chapters, reads, deletes).
+from .log import (
+    LogRunKind,
+    LogChapter,
+    LogActivitySpan,
+    LogChaptersResult,
+    LogEvent,
+    LogReadResult,
+    LogSegmentResult,
+    LogDeleteResult,
+    LogTraceSummary,
+    LogTracesResult,
+    LogTraceDetail,
+    LogPlayItem,
+)
 
 # Billing types: subscriptions, Stripe plans, compute credits, promo codes.
 from .billing import (
@@ -181,6 +215,10 @@ from .service import (
     PROTOCOL_CAPS,
 )
 
+# App pre-deploy verification report — the shapes client.deploy.verify_app
+# returns, exported so callers never annotate against a private module.
+from .deploy import AppVerifyCheck, AppVerifyReport
+
 __all__ = [
     # Client types
     'RocketRideClientConfig',
@@ -197,12 +235,15 @@ __all__ = [
     'ConnectResult',
     'ServerInfoResult',
     'AppManifestEntry',
+    'DevEntry',
     # Pipeline types
     'PipelineInputConnection',
     'PipelineControlConnection',
     'PipelineComponent',
     'PipelineConfig',
     # Task types
+    'TASK_STATUS_COMPONENT_STAT',
+    'TASK_STATUS_SLOWEST_DOC',
     'TASK_STATUS',
     'TASK_STATE',
     'TASK_STATUS_FLOW',
@@ -222,6 +263,10 @@ __all__ = [
     'DASHBOARD_CONNECTION',
     'DASHBOARD_TASK',
     'DASHBOARD_RESPONSE',
+    'LIST_SORT_SPEC',
+    'LIST_PAGE_REQUEST',
+    'LIST_CONNECTIONS_RESPONSE',
+    'LIST_TASKS_RESPONSE',
     'DASHBOARD_EVENT',
     'DASHBOARD_EVENT_CONNECTION_ADDED',
     'DASHBOARD_EVENT_CONNECTION_REMOVED',
@@ -259,7 +304,31 @@ __all__ = [
     'InviteMemberParams',
     'TeamMemberParams',
     # Deploy types
-    'DeploymentRecord',
+    'AppVerifyCheck',
+    'AppVerifyReport',
+    'DeployActor',
+    'DeployArtifact',
+    'DeployHistoryEntry',
+    'DeployHistoryResult',
+    'DeployListResult',
+    'Deployment',
+    'DeploymentSchedule',
+    'DeployVersionsResult',
+    'PublishResult',
+    'SchedulePreview',
+    # Run-log types
+    'LogRunKind',
+    'LogChapter',
+    'LogActivitySpan',
+    'LogChaptersResult',
+    'LogEvent',
+    'LogReadResult',
+    'LogSegmentResult',
+    'LogDeleteResult',
+    'LogTraceSummary',
+    'LogTracesResult',
+    'LogTraceDetail',
+    'LogPlayItem',
     # Billing types
     'AppPrice',
     'BillingDetail',

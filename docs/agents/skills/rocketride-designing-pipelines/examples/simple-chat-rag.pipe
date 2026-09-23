@@ -1,0 +1,12 @@
+{
+  "components": [
+    { "id": "chat_1", "provider": "chat", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" } },
+    { "id": "embedding_1", "provider": "embedding_transformer", "config": { "profile": "miniAll", "parameters": {} }, "input": [{ "lane": "questions", "from": "chat_1" }] },
+    { "id": "qdrant_1", "provider": "qdrant", "config": { "profile": "local", "local": { "collection": "docs" }, "parameters": {} }, "input": [{ "lane": "questions", "from": "embedding_1" }] },
+    { "id": "llm_1", "provider": "llm_openai", "config": { "profile": "openai-4o", "openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }, "parameters": {} }, "input": [{ "lane": "questions", "from": "qdrant_1" }] },
+    { "id": "response_1", "provider": "response_answers", "config": { "laneName": "answers" }, "input": [{ "lane": "answers", "from": "llm_1" }] }
+  ],
+  "project_id": "a7f3c2e1-9b4d-4a8e-b1c5-7d6e9f2a8b3c",
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "version": 1
+}

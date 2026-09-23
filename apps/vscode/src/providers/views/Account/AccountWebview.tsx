@@ -16,11 +16,15 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { AccountView, CheckoutModal } from 'shared';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan, PromoRedemption, PromoValidation } from 'shared';
-import type { ConnectResult } from 'rocketride';
+import { AccountView } from 'shell';
+import { CheckoutModal } from 'shell';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from 'shell';
+import type { CheckoutPlan, PromoRedemption, PromoValidation } from 'shell';
+import type { ConnectResult } from 'shell';
 import { useMessaging } from '../hooks/useMessaging';
-import type { AccountHostToWebview, AccountWebviewToHost } from '../types';
+import { useStripeKey } from '../hooks/useStripeKey';
+import { CheckoutUnavailableNotice } from '../components';
+import type { AccountHostToWebview, AccountWebviewToHost } from '../../types/accountTypes';
 
 // =============================================================================
 // COMPONENT
@@ -38,6 +42,10 @@ const AccountWebview: React.FC = () => {
 
 	const [ready, setReady] = useState(false);
 	const [isConnected, setIsConnected] = useState(false);
+	// Server-supplied Stripe publishable key — matches the connected server's
+	// Stripe account instead of a build-time value. The reason explains an
+	// empty key so a Subscribe click can say why checkout will not open.
+	const { key: stripeKey, reason: stripeKeyReason } = useStripeKey();
 	const [profile, setProfile] = useState<ConnectResult | null>(null);
 	const [authUser, setAuthUser] = useState<ConnectResult | null>(null);
 	const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
@@ -259,9 +267,9 @@ const AccountWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'account:saveProfile', fields });
 	}, []);
 
-	/** Sets the user's preferred default team. */
-	const handleSetDefaultTeam = useCallback(async (teamId: string): Promise<void> => {
-		sendMessageRef.current({ type: 'account:setDefaultTeam', teamId });
+	/** Sets the user's dev team (dev-run billing + env layer). */
+	const handleSetDevTeam = useCallback(async (teamId: string): Promise<void> => {
+		sendMessageRef.current({ type: 'account:setDevTeam', teamId });
 	}, []);
 
 	/** Switches the user's active organization. */
@@ -288,7 +296,7 @@ const AccountWebview: React.FC = () => {
 	 * Creates a new API key. Returns a promise that resolves when the host
 	 * posts `account:keyCreated` with the raw key string.
 	 */
-	const handleCreateKey = useCallback(async (params: { name: string; teamId: string; permissions: string[]; expiresAt?: string }): Promise<{ key: string }> => {
+	const handleCreateKey = useCallback(async (params: { name: string; teamId?: string; permissions: string[]; expiresAt?: string }): Promise<{ key: string }> => {
 		return new Promise<{ key: string }>((resolve) => {
 			// Step 1: stash the resolver so the message handler can fulfil it.
 			createKeyResolverRef.current = resolve;
@@ -432,8 +440,6 @@ const AccountWebview: React.FC = () => {
 	// "disconnected" flash while the provider fetches data.
 	if (!ready) return null;
 
-	const stripeKey = process.env.RR_STRIPE_PUBLISHABLE_KEY || '';
-
 	return (
 		<>
 			<AccountView
@@ -474,8 +480,6 @@ const AccountWebview: React.FC = () => {
 						sendMessageRef.current({ type: 'billing:upgrade', appId, newPriceId } as any);
 					});
 				}}
-				memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}
-				teamNames={Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id]))}
 				section={section}
 				onSectionChange={(s) => {
 					setSection(s);
@@ -485,7 +489,7 @@ const AccountWebview: React.FC = () => {
 				activeTeamId={activeTeamId}
 				onActiveTeamIdChange={setActiveTeamId}
 				onSaveProfile={handleSaveProfile}
-				onSetDefaultTeam={handleSetDefaultTeam}
+				onSetDevTeam={handleSetDevTeam}
 				onSetDefaultOrg={handleSetDefaultOrg}
 				onLogout={handleLogout}
 				onDeleteAccount={handleDeleteAccount}
@@ -517,6 +521,7 @@ const AccountWebview: React.FC = () => {
 					onClose={() => setShowCheckout(false)}
 				/>
 			)}
+			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setShowCheckout(false)} />}
 		</>
 	);
 };

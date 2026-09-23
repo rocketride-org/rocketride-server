@@ -165,11 +165,9 @@ class OutputLogger {
 	private readonly outputChannel: vscode.OutputChannel;
 
 	/** Console channel: plain server output (stdout/stderr from pipelines) */
-	private readonly consoleChannel: vscode.OutputChannel;
 
 	private constructor() {
 		this.outputChannel = vscode.window.createOutputChannel('Rocket Ride: Extension');
-		this.consoleChannel = vscode.window.createOutputChannel('Rocket Ride: Console');
 	}
 
 	/**
@@ -210,13 +208,6 @@ class OutputLogger {
 	 */
 	public output(message: string): void {
 		this.outputChannel.appendLine(message);
-	}
-
-	/**
-	 * Logs plain text to the "Rocket Ride: Console" output channel.
-	 */
-	public console(message: string): void {
-		this.consoleChannel.appendLine(message);
 	}
 
 	public error(message: string): void {

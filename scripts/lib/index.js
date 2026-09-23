@@ -35,6 +35,9 @@ module.exports = {
 	// Platform utilities (platform.js)
 	...require('./platform'),
 
+	// Markdown utilities (markdown.js)
+	...require('./markdown'),
+
 	// Server utilities (server.js)
 	...require('./server'),
 

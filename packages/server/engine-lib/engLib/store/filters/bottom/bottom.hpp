@@ -155,6 +155,10 @@ public:
                             const Utf16View &text) noexcept override {
         return target->writeTable(text);
     }
+    virtual Error sendJson(ServicePipe &target,
+                           const json::Value &jsonData) noexcept override {
+        return target->writeJson(jsonData);
+    }
     virtual Error sendAudio(
         ServicePipe &target, const AVI_ACTION action, Text &mimeType,
         const pybind11::bytes &streamData) noexcept override {
@@ -214,6 +218,9 @@ public:
         return {};
     }
     virtual Error writeWords(const WordVector &textWords) noexcept override {
+        return {};
+    }
+    virtual Error writeJson(const json::Value &jsonData) noexcept override {
         return {};
     }
     virtual Error writeAudio(

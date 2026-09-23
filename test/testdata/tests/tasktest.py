@@ -253,7 +253,7 @@ def init(args):  # noqa: D103
 
     global ENGINE_DIR, ENGINE_FILE
     if args.engine == 'auto':
-        for engine_subdir in ['', join('build', 'apps', 'engine')]:
+        for engine_subdir in ['', join('build', 'packages', 'engine')]:
             ENGINE_DIR = join(ROOT_DIR, engine_subdir) if engine_subdir else ROOT_DIR
             ENGINE_FILE = join(ENGINE_DIR, ENGINE_NAME)
             if exists(ENGINE_FILE) and isfile(ENGINE_FILE):

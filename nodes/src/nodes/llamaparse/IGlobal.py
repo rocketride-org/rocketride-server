@@ -222,6 +222,17 @@ class IGlobal(IGlobalBase):
         if self._llama_parse:
             bag['llama_parse'] = self._llama_parse
             debug('LlamaParse Global: LlamaParse initialized successfully')
+
+            # Provenance advisory (issue #1406): this node emits flattened Markdown and
+            # does not preserve cell-level provenance. Warn once at init so pipeline
+            # authors building audit-grade extraction see it in the run logs. The
+            # structure-preserving alternative is the datalab_parse node (#1425).
+            warning(
+                'LlamaParse Global: this node flattens documents to Markdown and does not preserve '
+                'cell-level provenance (page boundaries, bbox coordinates, or the table-HTML cell grid). '
+                'It is not suitable for audit-grade or provenance-bearing extraction. For structure-preserving '
+                'parsing (HTML + tables with page/coordinates), use the datalab_parse node.'
+            )
         else:
             error_msg = 'LlamaParse Global: Critical error - failed to initialize LlamaParse instance'
             warning(error_msg)

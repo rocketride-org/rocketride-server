@@ -490,7 +490,7 @@ def test_requirements_parser_extracts_basic_names(tmp_path):
 
     req = tmp_path / 'requirements.txt'
     req.write_text(
-        'requests\npymysql==1.2.0\ncryptography>=46,<47\nnumpy~=1.24\n',
+        'requests\npymysql==1.2.0\ncryptography>=46.0.7\nnumpy~=1.24\n',
         encoding='utf-8',
     )
     assert parse_requirements_distributions(req) == {

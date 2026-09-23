@@ -55,6 +55,14 @@ export interface DashboardConnection {
 	authenticated: boolean;
 	/** AccountInfo.clientid (account identifier). */
 	clientId: string | null;
+	/** Stable user identifier resolved server-side from the connection's account (null until the connection authenticates). */
+	userId?: string | null;
+	/** Human display name of the authenticated user — displayName falling back to email (null when unauthenticated or nameless). */
+	userName?: string | null;
+	/** Organization id of the authenticated user (null when unauthenticated or without org membership). */
+	orgId?: string | null;
+	/** Organization display name of the authenticated user (null when unauthenticated or without org membership). */
+	orgName?: string | null;
 	/** Masked API key (first 4 + last 4 chars). */
 	apikey: string;
 	/** Client name/version from auth handshake. */
@@ -117,6 +125,56 @@ export interface DashboardResponse {
 	connections: DashboardConnection[];
 	tasks: DashboardTask[];
 }
+
+/** One sort instruction for a list command: a row key and a direction. */
+export interface ListSortSpec {
+	/** The row key to sort by (e.g. 'startTime', 'connectedAt'). */
+	field: string;
+	/** Sort direction. */
+	dir: 'asc' | 'desc';
+}
+
+/**
+ * Request arguments shared by the rrext_list_* commands (platform list-API
+ * convention). Field names are the wire argument names — page_size stays
+ * snake_case so a grid fetcher forwards {page, page_size, sort, filters,
+ * search} verbatim.
+ */
+export interface ListPageRequest {
+	/** 1-based page number (default 1). */
+	page?: number;
+	/** Rows per page (server-clamped 1..100, default 50). */
+	page_size?: number;
+	/** Free text matched case-insensitively over the command's searchable keys. */
+	search?: string;
+	/** Sort instructions, most significant first; unknown fields are ignored. */
+	sort?: ListSortSpec[];
+	/**
+	 * Flat {key: value} filters. A string value means contains (strings) or
+	 * coerced equality (booleans/numbers); an array means set membership.
+	 * Range bounds ride as separate string entries under `${field}__gte` /
+	 * `${field}__lte` keys (a date-only upper bound is end-of-day inclusive).
+	 */
+	filters?: Record<string, string | string[]>;
+}
+
+/** Standard list envelope returned by the rrext_list_* commands. */
+export interface ListPageResponse<TRow> {
+	/** The rows of the requested page. */
+	rows: TRow[];
+	/** Total row count after search/filters, across all pages. */
+	total: number;
+	/** The (clamped) 1-based page that was returned. */
+	page: number;
+	/** The (clamped) page size that was applied. */
+	pageSize: number;
+}
+
+/** Response from the rrext_list_connections command. */
+export type ListConnectionsResponse = ListPageResponse<DashboardConnection>;
+
+/** Response from the rrext_list_tasks command. */
+export type ListTasksResponse = ListPageResponse<DashboardTask>;
 
 /** Base fields shared by all dashboard events. */
 interface DashboardEventBase {

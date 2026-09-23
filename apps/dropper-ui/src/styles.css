@@ -1055,6 +1055,27 @@ body {
 	font-size: 12px;
 }
 
+/* Audio / video player grid */
+.media-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 12px;
+}
+
+.processed-audio {
+	width: 100%;
+	display: block;
+}
+
+.processed-video {
+	width: 100%;
+	height: auto;
+	max-height: 360px;
+	display: block;
+	background: var(--bg-secondary);
+	border-radius: 4px;
+}
+
 .image-wrapper {
 	display: flex;
 	justify-content: center;

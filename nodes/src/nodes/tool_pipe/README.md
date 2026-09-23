@@ -2,6 +2,12 @@
 
 A RocketRide tool node that turns a whole inline pipeline into a single agent tool.
 
+## About RocketRide
+
+RocketRide is a pipeline system for connecting sources, processors, models,
+and responses. This node packages a connected portion of that same pipeline
+as a callable tool for an agent.
+
 ## What it does
 
 Exposes one tool, `run_pipe`, to an AI agent. When the agent calls it, the input text
@@ -14,28 +20,84 @@ the same canvas to shape the tool's behavior, and cap each connected branch with
 response node so results can flow back. As always, the agent binds through the `invoke`
 capability.
 
-The sub-pipeline run is fully isolated: the lane write is synchronous, so by the time it
-returns the downstream response nodes have already populated their response values. Those
-response entries are snapshotted and then removed so they don't leak into the parent
-pipeline. The node has no external Python dependencies (`requirements.txt` is empty).
+The sub-pipeline run is fully isolated. After the input is routed, the sub-pipeline is
+flushed (`closing`) and closed in **dependency order** — a join is flushed only after all
+of its upstream branches, so a diamond sub-pipeline (two branches feeding one join)
+returns the merged output of both branches, not just the first. The flush completes before
+the response value is read. Those response entries are snapshotted and then removed so
+they don't leak into the parent pipeline. The node has no external Python dependencies
+(`requirements.txt` is empty).
+
+---
+
+## Lanes
+
+| Lane in | Lane out | Description |
+|---|---|---|
+| `_source` | `text` | Sends the agent input as text to connected nodes |
+| `_source` | `questions` | Sends the input as a Question to connected nodes |
+| `_source` | `documents` | Sends the input as a Doc to connected nodes |
+| `_source` | `table` | Sends the raw input to connected nodes |
+| `_source` | `answers` | Sends the input as an Answer to connected nodes |
+
+## As a tool
+
+| Function | Description |
+|---|---|
+| `tool_pipe.run_pipe` | Runs the connected inline pipeline with required non-empty `data` and returns `result` |
+
+`tool_pipe` is the default server-name prefix. The response is a string from
+the configured return lane; missing input raises an error, while a pipeline
+that produces no selected response returns an empty result.
+
+### Sub-pipeline ownership
+
+Because `tool_pipe` opens, flushes, and closes its sub-pipeline on every invocation, each
+node it reaches must have no other lifecycle owner. Three wirings break that and are
+**rejected when the pipeline opens**:
+
+- **Shared with the main flow or a second start.** If a sub-pipeline node is also
+  reachable from the source — the main flow feeds into it, or the sub-pipeline flows back
+  into a main-flow node — the main flow owns it and flushes it at end-of-object, not
+  during the invocation, so the tool reads an incomplete result. Keep each branch
+  self-contained and end it in its own response node.
+- **Shared between two `tool_pipe`s.** A node reached by two invoke nodes has ambiguous
+  ownership. Give each its own sub-pipeline.
+- **A data input on the invoke node itself.** `tool_pipe` has no input lane — it is driven
+  only through the tool control seam.
+
+Invoking the *same* `tool_pipe` from two agents is fine: that is one sub-pipeline with one
+owner, run once per invocation. Nesting is fine too — a sub-pipeline may contain an agent
+that invokes another `tool_pipe`, and each level flushes its own sub-pipeline in order.
+See `examples/incorrect/` for a runnable example of each rejection.
 
 ---
 
 ## Configuration
 
+The single default profile uses an empty description and returns the `text`
+response lane. Configure the description before attaching this node to an
+agent, then make the return type match a response lane that the sub-pipeline
+actually produces.
 
-| Field | Type | Description |
-|---|---|---|
-| `tool_description` | string | Default empty. Natural-language description the agent uses to decide when to call this tool |
-| `return_type` | string | Default "text". Which response lane value to return to the agent |
+### Tool Description
 
+Describe the connected sub-pipeline in the language an agent can use to decide
+when to call it. An empty default makes the tool harder for the agent to select;
+for example, use “Summarize a supplied support ticket” for a summarization
+branch.
 
-The single `default` profile ships with an empty `tool_description` and
-`return_type: "text"`.
+### Return Type
+
+Use `text` for a normal textual response. Choose `answers`, `documents`, or
+`table` only when the connected response node writes that lane: a mismatch
+returns an empty result, which can look like a successful but unhelpful call.
 
 ---
 
-## Output lanes
+## Notes
+
+### Lane payloads
 
 The input string the agent passes is written to **every** connected output lane, lanes
 without a listener are skipped:
@@ -50,9 +112,9 @@ without a listener are skipped:
 
 ---
 
-## Available tools
+### Agent tool details
 
-### Pipeline
+#### Pipeline
 
 
 | Tool | Description |
@@ -66,7 +128,7 @@ single `result` string.
 
 ---
 
-## Return value extraction
+### Return value extraction
 
 After the sub-pipeline completes, the node reads the response value named by
 `return_type`:
@@ -80,6 +142,10 @@ After the sub-pipeline completes, the node reads the response value named by
 > **Gotcha:** if the sub-pipeline returns no data at all, the tool returns an empty
 > `result`. Make sure each connected branch ends with a response node, and that the
 > branch feeding the lane named by `return_type` actually produces a response.
+
+## Upstream docs
+
+- [RocketRide documentation](https://docs.rocketride.org)
 
 ---
 

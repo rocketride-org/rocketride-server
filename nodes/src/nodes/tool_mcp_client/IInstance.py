@@ -37,6 +37,7 @@ from typing import Any, Dict
 from rocketlib import IInstanceBase
 
 from .IGlobal import IGlobal
+from .mcp_schema import strip_synthesized_args
 
 _FRAMEWORK_KEYS = frozenset({'security_context'})
 
@@ -54,7 +55,13 @@ class IInstance(IInstanceBase):
         if input_obj is None:
             arguments: Dict[str, Any] = {}
         elif isinstance(input_obj, dict):
+            # Drop framework-injected keys. A placeholder is removed only for a
+            # cached tool whose schema normalization actually synthesized it;
+            # ``rr_no_args`` remains a valid real MCP argument otherwise.
             arguments = {k: v for k, v in input_obj.items() if k not in _FRAMEWORK_KEYS}
+            tool = self.IGlobal.get_tool(server_name=server_name, tool_name=bare_tool)
+            if tool is not None and getattr(tool, 'has_synthesized_noop_arg', False):
+                arguments = strip_synthesized_args(arguments)
         else:
             raise ValueError('Tool input must be a JSON object (dict)')
         return self.IGlobal.call_tool(server_name=server_name, tool_name=bare_tool, arguments=arguments)

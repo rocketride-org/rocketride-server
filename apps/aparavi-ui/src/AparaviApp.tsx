@@ -35,16 +35,17 @@
 
 import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
-import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
-import { commonStyles } from 'shared/themes/styles';
-import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout } from 'shell-ui';
-import type { Documents } from 'shell-ui';
-import { ChatView, useChatMessages } from 'shared';
-import type { ChatMessage } from 'shared';
+import type { ShellAppProps } from 'shell';
+import type { IVirtualFileSystem } from 'shell';
+import { commonStyles } from 'shell';
+import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout, AppLayout } from 'shell';
+import type { Documents } from 'shell';
+import { ChatView, useChatMessages } from 'shell';
+import type { ChatMessage } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { loadChat, saveChat, listChatDir, renameChat, deleteChat } from './chatStore';
 import pipeline from './aparavi.pipe';
+import AparaviSidebar from './AparaviSidebar';
 
 // =============================================================================
 // STYLES
@@ -78,6 +79,25 @@ const styles = {
 		fontSize: 14,
 		flexDirection: 'column',
 		gap: 12,
+	} as CSSProperties,
+	/** Title line inside the empty-group welcome message. */
+	welcomeTitle: {
+		fontSize: 16,
+		fontWeight: 600,
+	} as CSSProperties,
+	/** Per-tab editor pane — kept mounted so chat history survives tab switches. */
+	tabPane: {
+		flex: 1,
+		minHeight: 0,
+		flexDirection: 'column',
+	} as CSSProperties,
+	/** Active tab pane (visible). */
+	tabPaneVisible: {
+		display: 'flex',
+	} as CSSProperties,
+	/** Inactive tab pane (hidden but mounted). */
+	tabPaneHidden: {
+		display: 'none',
 	} as CSSProperties,
 };
 
@@ -165,8 +185,18 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 			});
 	}, [isConnected, client, identity]);
 
-	if (!ready) return <div style={styles.welcome}>Initialising...</div>;
-	return <AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />;
+	// Sidebar node keyed on readiness: the docs subscription binds on mount,
+	// so remount the sidebar when Documents appears.
+	const sidebar = useMemo(() => <AparaviSidebar key={ready ? 'docs' : 'init'} />, [ready]);
+
+	// Two-column app: the chat-file Explorer sidebar mounts once Documents is
+	// ready (it shares the singleton with the editor surface).
+	if (!ready) return <AppLayout sidebar={sidebar} showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	return (
+		<AppLayout sidebar={sidebar} showStatus>
+			<AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />
+		</AppLayout>
+	);
 };
 
 // =============================================================================
@@ -233,7 +263,7 @@ const AparaviAppReady: React.FC<{
 							<div style={styles.content}>
 								{group.editorIds.length === 0 ? (
 									<div style={styles.welcome}>
-										<div style={{ fontSize: 16, fontWeight: 600 }}>Aparavi AQL</div>
+										<div style={styles.welcomeTitle}>Aparavi AQL</div>
 										<div>Create a new chat from the sidebar.</div>
 									</div>
 								) : (
@@ -244,12 +274,7 @@ const AparaviAppReady: React.FC<{
 										return (
 											<div
 												key={editorId}
-												style={{
-													display: isActive ? 'flex' : 'none',
-													flex: 1,
-													minHeight: 0,
-													flexDirection: 'column',
-												}}
+												style={{ ...styles.tabPane, ...(isActive ? styles.tabPaneVisible : styles.tabPaneHidden) }}
 											>
 												<ChatTab
 													uri={editor.documentUri}

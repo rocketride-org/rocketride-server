@@ -25,6 +25,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+
 import pytest
 
 from ai.modules.task.task_conn import TaskConn
@@ -91,17 +92,20 @@ def _make_conn(
     return conn
 
 
-def _make_account_info(*, auth: str = 'ak_user_token', user_id: str = 'user-1', default_team: str = 'team-1'):
+def _make_account_info(*, auth: str = 'ak_user_token', user_id: str = 'user-1', dev_team: str = 'team-1', teams=None):
     """
     Build a minimal AccountInfo-shaped object covering the attributes
     TaskConn touches: ``auth`` (the credential string), ``userId``,
-    ``userToken``, ``defaultTeam``.
+    ``userToken``, ``devTeam``, and ``organization`` (whose membership
+    teams feed ``has_permission``'s union walk — devTeam itself carries
+    no authorization meaning).
 
     Args:
         auth: credential string. Tests use ``pk_``, ``tk_``, ``ak_`` prefixes
             to exercise the different code paths in ``get_task_token``.
         user_id: opaque user identifier.
-        default_team: team id used by ``has_permission``.
+        dev_team: the dev team id (billing/env only — never permissions).
+        teams: membership team dicts; defaults to one entry for ``dev_team``.
 
     Returns:
         SimpleNamespace: a stand-in object with the expected attributes.
@@ -110,7 +114,13 @@ def _make_account_info(*, auth: str = 'ak_user_token', user_id: str = 'user-1', 
         auth=auth,
         userId=user_id,
         userToken='token-' + user_id,
-        defaultTeam=default_team,
+        devTeam=dev_team,
+        organization={
+            'id': 'org-1',
+            'name': 'Acme',
+            'permissions': [],
+            'teams': teams if teams is not None else [{'id': dev_team, 'name': 'Development', 'permissions': []}],
+        },
         sysPermissions=[],
         waitlisted=False,
     )
@@ -284,6 +294,51 @@ def test_has_permission_swallows_permission_error(monkeypatch):
     assert conn.has_permission('task.control') is False
 
 
+def test_has_permission_unions_membership_teams(monkeypatch):
+    """The perm may come from ANY membership team — devTeam is irrelevant.
+
+    The visibility model: what a session may do ambiently is the union of
+    its memberships. A grant on the SECOND team suffices even though the
+    dev team (billing/env only) holds nothing.
+    """
+    from ai.modules.task import task_conn as tc_mod
+
+    grants = {'team-1': set(), 'team-2': {'task.control'}}
+    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: grants[team])
+
+    teams = [{'id': 'team-1', 'name': 'A', 'permissions': []}, {'id': 'team-2', 'name': 'B', 'permissions': []}]
+    conn = _make_conn(account_info=_make_account_info(dev_team='team-1', teams=teams))
+    assert conn.has_permission('task.control') is True
+
+
+def test_has_permission_ignores_stale_dev_team(monkeypatch):
+    """A stale devTeam (no membership) cannot affect the answer either way.
+
+    The #373 class — a devTeam pointing outside the membership list — is
+    structurally impossible now: the union walks memberships only, so the
+    stale pointer neither denies (the old flood) nor grants.
+    """
+    from ai.modules.task import task_conn as tc_mod
+
+    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: {'task.monitor'})
+
+    teams = [{'id': 'team-2', 'name': 'B', 'permissions': []}]
+    conn = _make_conn(account_info=_make_account_info(dev_team='team-gone', teams=teams))
+    assert conn.has_permission('task.monitor') is True
+
+    # No memberships at all: denied quietly, never raising.
+    conn = _make_conn(account_info=_make_account_info(dev_team='team-gone', teams=[]))
+    assert conn.has_permission('task.monitor') is False
+
+
+def test_has_permission_superusers_pass_without_memberships(monkeypatch):
+    """sys.admin/internal hold everything even with zero membership rows."""
+    info = _make_account_info(teams=[])
+    info.sysPermissions = ['sys.admin']
+    conn = _make_conn(account_info=info)
+    assert conn.has_permission('task.control') is True
+
+
 def test_verify_permission_raises_on_missing(monkeypatch):
     """verify_permission turns a missing permission into a PermissionError."""
     from ai.modules.task import task_conn as tc_mod
@@ -301,6 +356,81 @@ def test_verify_permission_passes_when_present(monkeypatch):
     monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: {'task.control'})
     conn = _make_conn(account_info=_make_account_info())
     conn.verify_permission('task.control')  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# verify_team_permission — real resolver, real org shapes
+# ---------------------------------------------------------------------------
+
+
+def _org(team_perms, *, team_id='team-1', org_perms=()):
+    """One-org/one-team organization dict in the AccountInfo session shape."""
+    return {
+        'id': 'org-1',
+        'permissions': list(org_perms),
+        'teams': [{'id': team_id, 'name': 'Team One', 'permissions': list(team_perms)}],
+    }
+
+
+def test_verify_team_permission_grants_on_that_team():
+    """The permission is resolved against the ADDRESSED team, not devTeam."""
+    account = _make_account_info(dev_team='team-other')
+    account.organization = _org(['task.control'], team_id='team-1')
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-1', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_denies_missing_permission():
+    """Membership without the required permission is denied."""
+    account = _make_account_info()
+    account.organization = _org(['task.monitor'])
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match="'task.control' denied"):
+        conn.verify_team_permission('team-1', 'task.control')
+
+
+def test_verify_team_permission_denies_foreign_team_uniformly():
+    """A team outside the caller's org denies exactly like a no-permission team
+    (no existence leak).
+    """
+    account = _make_account_info()
+    account.organization = _org(['task.control'])
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match='no permissions for team'):
+        conn.verify_team_permission('team-foreign', 'task.control')
+
+
+def test_verify_team_permission_denies_without_org():
+    """A no-org session holds no team permissions at all."""
+    account = _make_account_info()
+    account.organization = None
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match='no permissions for team'):
+        conn.verify_team_permission('team-1', 'task.control')
+
+
+def test_verify_team_permission_org_admin_expands():
+    """org.admin implies the full team permission set (resolver expansion)."""
+    account = _make_account_info()
+    account.organization = _org([], org_perms=['org.admin'])
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-1', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_sys_admin_bypasses():
+    """sys.admin bypasses team scoping entirely, even for foreign teams."""
+    account = _make_account_info()
+    account.organization = None
+    account.sysPermissions = ['sys.admin']
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-anything', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_requires_authentication():
+    """No account info -> PermissionError before any resolution."""
+    conn = _make_conn(authenticated=False, account_info=None)
+    with pytest.raises(PermissionError, match='Not authenticated'):
+        conn.verify_team_permission('team-1', 'task.control')
 
 
 # ---------------------------------------------------------------------------
@@ -401,10 +531,10 @@ def test_get_task_apikey_rejects_task_in_team_caller_cannot_access(monkeypatch):
     from ai.modules.task import task_conn as tc_mod
 
     # Caller has no team membership for this task's team → empty permission list.
-    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: [])
+    monkeypatch.setattr(tc_mod, 'resolve_run_permissions', lambda info, control: [])
 
     server = MagicMock()
-    fake_control = SimpleNamespace(teamId='team-other', task=SimpleNamespace(name='target'))
+    fake_control = SimpleNamespace(teamId='team-other', owner_id='team-other', task=SimpleNamespace(name='target'))
     server.get_task_control = MagicMock(return_value=fake_control)
 
     conn = _make_conn(
@@ -420,11 +550,13 @@ def test_get_task_apikey_returns_task_when_team_grants_access(monkeypatch):
     """API-key auth with the requested team permission returns the underlying task."""
     from ai.modules.task import task_conn as tc_mod
 
-    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: ['task.control'])
+    monkeypatch.setattr(tc_mod, 'resolve_run_permissions', lambda info, control: ['task.control'])
 
     target_task = SimpleNamespace(name='target')
     server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-1', task=target_task))
+    server.get_task_control = MagicMock(
+        return_value=SimpleNamespace(teamId='team-1', owner_id='team-1', task=target_task)
+    )
 
     conn = _make_conn(
         account_info=_make_account_info(auth='ak_user-1', user_id='user-1'),
@@ -483,44 +615,54 @@ async def test_on_rrext_ping_returns_pong():
 # ---------------------------------------------------------------------------
 
 
+def test_debug_handlers_are_gone():
+    """The VSCode debugger surface is no longer reachable on TaskConn.
+
+    Both the debugpy forwarding path (``request`` / ``on_command``) and every
+    DebugCommands handler were removed with the pipeline debugger; nothing may
+    resurrect them via the mixin chain.
+    """
+    for name in (
+        'request',
+        'on_initialize',
+        'on_attach',
+        'on_pause',
+        'on_continue',
+        'on_configurationDone',
+        'on_threads',
+        'on_disconnect',
+    ):
+        assert not hasattr(TaskConn, name), f'TaskConn still exposes {name}'
+
+
 @pytest.mark.asyncio
-async def test_request_rejects_internal_rrext_command():
-    """Any command starting with ``rrext_`` is rejected as internal-only."""
+async def test_unhandled_command_is_refused_not_silently_accepted():
+    """A command with no handler must come back as an explicit failure.
+
+    DAPConn's own fallback builds a default SUCCESS response, so without
+    on_command a misspelled rrext_* — or a stale client still sending the
+    removed debugger commands — would read as "it worked".
+    """
     conn = _make_conn()
-    response = await TaskConn.request(conn, {'command': 'rrext_internal'})
-    assert response['success'] is False
-    assert 'Invalid command' in response['message']
+
+    for command in ('setBreakpoints', 'pause', 'rrext_bogus_xyz'):
+        response = await TaskConn.on_command(conn, {'command': command})
+        assert response['success'] is False, f'{command} was not refused'
+        assert command in response['message']
 
 
-@pytest.mark.asyncio
-async def test_request_rejects_empty_command():
-    """An empty / missing ``command`` field is rejected."""
-    conn = _make_conn()
-    response = await TaskConn.request(conn, {})
-    assert response['success'] is False
+def test_rrext_handlers_still_dispatch_by_name():
+    """Deleting request()/on_command() also dropped their ``rrext_`` guard.
 
-
-@pytest.mark.asyncio
-async def test_request_errors_when_debug_interface_missing(monkeypatch):
-    """If the underlying task has no `_debug_python`, an error response is built."""
-    from ai.modules.task import task_conn as tc_mod
-
-    # Caller has task.debug on the task's team — get_task() returns the task.
-    monkeypatch.setattr(tc_mod, 'resolve_task_permissions', lambda info, team_id: ['task.debug'])
-
-    fake_task = SimpleNamespace(_debug_python=None)
-    server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-1', task=fake_task))
-    conn = _make_conn(account_info=_make_account_info(auth='ak_user-1', user_id='user-1'), server=server)
-
-    response = await TaskConn.request(conn, {'command': 'continue', 'arguments': {'token': 'tk_x'}})
-    assert response['success'] is False
-    assert 'Debug interface not available' in response['message']
-
-
-@pytest.mark.asyncio
-async def test_on_command_rejects_internal_rrext():
-    """on_command also rejects rrext_ commands at the dispatcher level."""
-    conn = _make_conn()
-    response = await TaskConn.on_command(conn, {'command': 'rrext_evil'})
-    assert response['success'] is False
+    That guard only ever rejected *unknown* rrext_ commands on their way to
+    debugpy — every real one dispatches by name via ``on_{command}`` and never
+    reached it. Assert the real handlers all still resolve, so the guard's
+    removal is provably not a loss of admin surface.
+    """
+    # A floor, not a census: the exact count moves with unrelated work (the
+    # app handlers were consolidated 6-into-1 upstream), so pin only that the
+    # surface is still wholesale present.
+    handlers = [n for n in dir(TaskConn) if n.startswith('on_rrext_')]
+    assert len(handlers) >= 30, f'rrext surface shrank to {len(handlers)}'
+    for name in ('on_rrext_dashboard', 'on_rrext_deploy', 'on_rrext_store', 'on_rrext_account_me'):
+        assert callable(getattr(TaskConn, name, None)), f'{name} no longer dispatches'

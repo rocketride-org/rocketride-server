@@ -1,8 +1,11 @@
-# Stripe publishable key (pk_test_*) is a public client-side key, not a secret.
-.config:generic-api-key:58
-
 # False positive: placeholder API key in node test config template.
 # Comment on line 137 of services.json: "apikey" is intentionally set to a placeholder.
 # Originally added in #509 (Exa search node, April 21); orphaned SHA after develop
 # force-push at end of April resurfaced the finding on this dot release PR.
 fd6b61d56b0671f7a3d24d0314d060a3d0d61b8c:nodes/src/nodes/tool_exa_search/services.json:pipe-file-api-key:138
+
+# False positive: Stripe TEST publishable key (pk_test_), public by design. It
+# was committed to .config in 5d9963f7 (2026-05-01) and has been on main since
+# then; develop later removed it. It resurfaced on the v3.4.0 stage -> main PR
+# because gitleaks scans main..HEAD across the whole promoted history.
+5d9963f7e0da46ed1f8fdb7c0fae9f399c343614:.config:generic-api-key:58

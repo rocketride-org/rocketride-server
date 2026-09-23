@@ -1,0 +1,654 @@
+[
+ {
+  "event": "apaevt_task",
+  "body": {
+   "action": "running",
+   "tasks": [],
+   "__id": ""
+  }
+ },
+ {
+  "event": "apaevt_status_update",
+  "body": {
+   "name": "otel-scout-echo.My webhook",
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "completed": false,
+   "state": 1,
+   "startTime": 1784207709.2029505,
+   "endTime": 0.0,
+   "debuggerAttached": false,
+   "status": "",
+   "warnings": [],
+   "errors": [],
+   "currentObject": "",
+   "currentSize": 0,
+   "notes": [],
+   "totalSize": 0,
+   "totalCount": 0,
+   "completedSize": 0,
+   "completedCount": 0,
+   "failedSize": 0,
+   "failedCount": 0,
+   "wordsSize": 0,
+   "wordsCount": 0,
+   "rateSize": 0,
+   "rateCount": 0,
+   "serviceUp": false,
+   "exitCode": 0,
+   "exitMessage": "",
+   "pipeflow": {
+    "totalPipes": 0,
+    "byPipe": {}
+   },
+   "metrics": {
+    "cpu_percent": 0.0,
+    "cpu_memory_mb": 0.0,
+    "gpu_memory_mb": 0.0,
+    "peak_cpu_percent": 0.0,
+    "peak_cpu_memory_mb": 0.0,
+    "peak_gpu_memory_mb": 0.0,
+    "avg_cpu_percent": 0.0,
+    "avg_cpu_memory_mb": 0.0,
+    "avg_gpu_memory_mb": 0.0
+   },
+   "tokens": {
+    "cpu_utilization": 0.0,
+    "cpu_memory": 0.0,
+    "gpu_memory": 0.0,
+    "gpu_inference": 0.0,
+    "custom": {},
+    "total": 0.0
+   },
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_task",
+  "body": {
+   "action": "begin",
+   "name": "otel-scout-echo.My webhook",
+   "projectId": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_status_update",
+  "body": {
+   "name": "otel-scout-echo.My webhook",
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "completed": false,
+   "state": 2,
+   "startTime": 1784207709.2029505,
+   "endTime": 0.0,
+   "debuggerAttached": false,
+   "status": "",
+   "warnings": [],
+   "errors": [],
+   "currentObject": "",
+   "currentSize": 0,
+   "notes": [],
+   "totalSize": 0,
+   "totalCount": 0,
+   "completedSize": 0,
+   "completedCount": 0,
+   "failedSize": 0,
+   "failedCount": 0,
+   "wordsSize": 0,
+   "wordsCount": 0,
+   "rateSize": 0,
+   "rateCount": 0,
+   "serviceUp": false,
+   "exitCode": 0,
+   "exitMessage": "",
+   "pipeflow": {
+    "totalPipes": 0,
+    "byPipe": {}
+   },
+   "metrics": {
+    "cpu_percent": 0.0,
+    "cpu_memory_mb": 0.0,
+    "gpu_memory_mb": 0.0,
+    "peak_cpu_percent": 0.0,
+    "peak_cpu_memory_mb": 0.0,
+    "peak_gpu_memory_mb": 0.0,
+    "avg_cpu_percent": 0.0,
+    "avg_cpu_memory_mb": 0.0,
+    "avg_gpu_memory_mb": 0.0
+   },
+   "tokens": {
+    "cpu_utilization": 0.0,
+    "cpu_memory": 0.0,
+    "gpu_memory": 0.0,
+    "gpu_inference": 0.0,
+    "custom": {},
+    "total": 0.0
+   },
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_status_update",
+  "body": {
+   "name": "otel-scout-echo.My webhook",
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "completed": false,
+   "state": 3,
+   "startTime": 1784207709.2029505,
+   "endTime": 0.0,
+   "debuggerAttached": false,
+   "status": " + versioneer==0.29",
+   "warnings": [],
+   "errors": [],
+   "currentObject": "",
+   "currentSize": 0,
+   "notes": [],
+   "totalSize": 0,
+   "totalCount": 0,
+   "completedSize": 0,
+   "completedCount": 0,
+   "failedSize": 0,
+   "failedCount": 0,
+   "wordsSize": 0,
+   "wordsCount": 0,
+   "rateSize": 0,
+   "rateCount": 0,
+   "serviceUp": true,
+   "exitCode": 0,
+   "exitMessage": "",
+   "pipeflow": {
+    "totalPipes": 0,
+    "byPipe": {}
+   },
+   "metrics": {
+    "cpu_percent": 3.9,
+    "cpu_memory_mb": 203.28515625,
+    "gpu_memory_mb": 0.0,
+    "peak_cpu_percent": 61.45,
+    "peak_cpu_memory_mb": 322.24609375,
+    "peak_gpu_memory_mb": 0.0,
+    "avg_cpu_percent": 0.0,
+    "avg_cpu_memory_mb": 0.0,
+    "avg_gpu_memory_mb": 0.0
+   },
+   "tokens": {
+    "cpu_utilization": 0.0,
+    "cpu_memory": 0.0,
+    "gpu_memory": 0.0,
+    "gpu_inference": 0.0,
+    "custom": {},
+    "total": 0.0
+   },
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "begin",
+   "pipes": [
+    "probe.txt"
+   ],
+   "component": "probe.txt",
+   "trace": {},
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "enter",
+   "pipes": [
+    "probe.txt",
+    "response_1"
+   ],
+   "component": "response_1",
+   "trace": {
+    "data": null,
+    "lane": "open"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "leave",
+   "pipes": [
+    "probe.txt"
+   ],
+   "component": "response_1",
+   "trace": {
+    "data": null,
+    "lane": "open",
+    "result": "continue"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "enter",
+   "pipes": [
+    "probe.txt",
+    "response_1"
+   ],
+   "component": "response_1",
+   "trace": {
+    "data": {
+     "length": 17
+    },
+    "lane": "text"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "leave",
+   "pipes": [
+    "probe.txt"
+   ],
+   "component": "response_1",
+   "trace": {
+    "data": {
+     "length": 17
+    },
+    "lane": "text",
+    "result": "continue"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "enter",
+   "pipes": [
+    "probe.txt",
+    "response_1"
+   ],
+   "component": "response_1",
+   "trace": {
+    "data": null,
+    "lane": "closing"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "leave",
+   "pipes": [
+    "probe.txt"
+   ],
+   "component": "response_1",
+   "trace": {
+    "data": null,
+    "lane": "closing",
+    "result": "continue"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "enter",
+   "pipes": [
+    "probe.txt",
+    "response_1"
+   ],
+   "component": "response_1",
+   "trace": {
+    "data": null,
+    "lane": "close"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "leave",
+   "pipes": [
+    "probe.txt"
+   ],
+   "component": "response_1",
+   "trace": {
+    "data": null,
+    "lane": "close",
+    "result": "continue"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "end",
+   "pipes": [],
+   "component": "probe.txt",
+   "trace": {
+    "name": "probe.txt",
+    "path": "",
+    "result_types": {
+     "text": "text"
+    },
+    "text": [
+     "hello otel bridge\n\n"
+    ]
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_status_update",
+  "body": {
+   "name": "otel-scout-echo.My webhook",
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "completed": false,
+   "state": 3,
+   "startTime": 1784207709.2029505,
+   "endTime": 0.0,
+   "debuggerAttached": false,
+   "status": "Webhook ready - system is ready to accept requests",
+   "warnings": [],
+   "errors": [],
+   "currentObject": "webhook://WebHook",
+   "currentSize": 0,
+   "notes": [
+    {
+     "url-text": "Webhook interface URL",
+     "url-link": "{host}/webhook",
+     "auth-text": "Public Authorization Key",
+     "auth-key": "pk_EXAMPLEPUBLICKEYEXAMPLEPUBLICKEY",
+     "token-text": "Private Token",
+     "token-key": "tk_EXAMPLEPRIVATETOKENEXAMPLETOKEN"
+    }
+   ],
+   "totalSize": 17,
+   "totalCount": 1,
+   "completedSize": 17,
+   "completedCount": 1,
+   "failedSize": 0,
+   "failedCount": 0,
+   "wordsSize": 0,
+   "wordsCount": 0,
+   "rateSize": 0,
+   "rateCount": 0,
+   "serviceUp": true,
+   "exitCode": 0,
+   "exitMessage": "",
+   "pipeflow": {
+    "totalPipes": 1,
+    "byPipe": {
+     "0": []
+    }
+   },
+   "metrics": {
+    "cpu_percent": 0.0,
+    "cpu_memory_mb": 301.2265625,
+    "gpu_memory_mb": 0.0,
+    "peak_cpu_percent": 61.45,
+    "peak_cpu_memory_mb": 322.24609375,
+    "peak_gpu_memory_mb": 0.0,
+    "avg_cpu_percent": 34.43921109881824,
+    "avg_cpu_memory_mb": 299.94935548579383,
+    "avg_gpu_memory_mb": 0.0
+   },
+   "tokens": {
+    "cpu_utilization": 0.0,
+    "cpu_memory": 0.0,
+    "gpu_memory": 0.0,
+    "gpu_inference": 0.0,
+    "custom": {},
+    "total": 0.0
+   },
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_status_update",
+  "body": {
+   "name": "otel-scout-echo.My webhook",
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "completed": false,
+   "state": 4,
+   "startTime": 1784207709.2029505,
+   "endTime": 0.0,
+   "debuggerAttached": false,
+   "status": "Stopping",
+   "warnings": [],
+   "errors": [],
+   "currentObject": "webhook://WebHook",
+   "currentSize": 0,
+   "notes": [],
+   "totalSize": 17,
+   "totalCount": 1,
+   "completedSize": 17,
+   "completedCount": 1,
+   "failedSize": 0,
+   "failedCount": 0,
+   "wordsSize": 0,
+   "wordsCount": 0,
+   "rateSize": 0,
+   "rateCount": 0,
+   "serviceUp": false,
+   "exitCode": 0,
+   "exitMessage": "",
+   "pipeflow": {
+    "totalPipes": 1,
+    "byPipe": {
+     "0": []
+    }
+   },
+   "metrics": {
+    "cpu_percent": 0.0,
+    "cpu_memory_mb": 302.08203125,
+    "gpu_memory_mb": 0.0,
+    "peak_cpu_percent": 61.45,
+    "peak_cpu_memory_mb": 322.24609375,
+    "peak_gpu_memory_mb": 0.0,
+    "avg_cpu_percent": 19.712562463845757,
+    "avg_cpu_memory_mb": 301.23662025002017,
+    "avg_gpu_memory_mb": 0.0
+   },
+   "tokens": {
+    "cpu_utilization": 0.0,
+    "cpu_memory": 0.0,
+    "gpu_memory": 0.0,
+    "gpu_inference": 0.0,
+    "custom": {},
+    "total": 0.0
+   },
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_task",
+  "body": {
+   "action": "end",
+   "name": "otel-scout-echo.My webhook",
+   "projectId": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_status_update",
+  "body": {
+   "name": "otel-scout-echo.My webhook",
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "completed": true,
+   "state": 6,
+   "startTime": 1784207709.2029505,
+   "endTime": 1784207736.5963075,
+   "debuggerAttached": false,
+   "status": "Stopped",
+   "warnings": [],
+   "errors": [],
+   "currentObject": "webhook://WebHook",
+   "currentSize": 0,
+   "notes": [],
+   "totalSize": 17,
+   "totalCount": 1,
+   "completedSize": 17,
+   "completedCount": 1,
+   "failedSize": 0,
+   "failedCount": 0,
+   "wordsSize": 0,
+   "wordsCount": 0,
+   "rateSize": 0,
+   "rateCount": 0,
+   "serviceUp": false,
+   "exitCode": 0,
+   "exitMessage": "",
+   "pipeflow": {
+    "totalPipes": 1,
+    "byPipe": {
+     "0": []
+    }
+   },
+   "metrics": {
+    "cpu_percent": 0.0,
+    "cpu_memory_mb": 302.08203125,
+    "gpu_memory_mb": 0.0,
+    "peak_cpu_percent": 61.45,
+    "peak_cpu_memory_mb": 322.24609375,
+    "peak_gpu_memory_mb": 0.0,
+    "avg_cpu_percent": 19.712562463845757,
+    "avg_cpu_memory_mb": 301.23662025002017,
+    "avg_gpu_memory_mb": 0.0
+   },
+   "tokens": {
+    "cpu_utilization": 0.0,
+    "cpu_memory": 0.0,
+    "gpu_memory": 0.0,
+    "gpu_inference": 0.0,
+    "custom": {},
+    "total": 0.0
+   },
+   "__id": "1b4bbac0.webhook_1"
+  }
+ },
+ {
+  "event": "apaevt_task",
+  "body": {
+   "action": "running",
+   "tasks": [
+    {
+     "id": "29d98820.webhook_1",
+     "name": "otel-scout-running.My webhook",
+     "projectId": "7f1c2ab0-1234-4c3d-9a8b-aaaaaaaaaaaa",
+     "source": "webhook_1"
+    }
+   ],
+   "__id": ""
+  }
+ },
+ {
+  "event": "apaevt_sse",
+  "body": {
+   "pipe_id": 0,
+   "type": "thinking",
+   "data": {
+    "message": "Analyzing your request..."
+   },
+   "__id": "1b4bbac0.webhook_1"
+  },
+  "_synthesized": true
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "enter",
+   "pipes": [
+    "probe.txt",
+    "llm_openai_1"
+   ],
+   "component": "llm_openai_1",
+   "trace": {
+    "data": {
+     "length": 17
+    },
+    "lane": "questions"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  },
+  "_synthesized": true
+ },
+ {
+  "event": "apaevt_flow",
+  "body": {
+   "id": 0,
+   "op": "leave",
+   "pipes": [
+    "probe.txt"
+   ],
+   "component": "llm_openai_1",
+   "trace": {
+    "data": null,
+    "lane": "questions",
+    "error": "OpenAI API error: 401 Unauthorized"
+   },
+   "project_id": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  },
+  "_synthesized": true
+ },
+ {
+  "event": "apaevt_task",
+  "body": {
+   "action": "restart",
+   "name": "otel-scout-echo.My webhook",
+   "projectId": "e612b741-748c-4b35-a8b7-186797a8ea42",
+   "source": "webhook_1",
+   "__id": "1b4bbac0.webhook_1"
+  },
+  "_synthesized": true
+ }
+]

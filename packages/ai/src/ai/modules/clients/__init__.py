@@ -1,13 +1,21 @@
 """
 Clients module for serving downloadable client packages.
 
-This module provides HTTP endpoints to download client SDKs (Python, TypeScript, and VSCode)
-from the build/Engine/clients directory.
+This module provides HTTP endpoints to download client SDKs (Python, TypeScript, and
+VSCode) and the installable shell platform package, all served from the static clients
+directory beside the engine binary (where build tasks stage them).
 """
 
 from typing import Any, Dict
 from ai.web import WebServer
-from .clients import client_python_file, client_typescript, client_vscode
+from .clients import (
+    client_docs,
+    client_python_file,
+    client_shell,
+    client_typescript,
+    client_typescript_init,
+    client_vscode,
+)
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -28,6 +36,9 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         - GET /client/python/{filename}: Serves Python wheel file (use "latest" for latest version)
         - GET /client/typescript: Serves latest TypeScript tarball
         - GET /client/vscode: Serves latest VSCode extension file
+        - GET /client/shell: Serves the installable shell platform package (shell.tgz)
+        - GET /client/docs: Serves the agent documentation bundle (docs.zip)
+        - GET /client/typescript-init: Serves the workspace bootstrap shim
 
     Note:
         These routes are marked as public since they serve downloadable packages
@@ -53,6 +64,30 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     server.add_route(
         path='/client/vscode',
         routeHandler=client_vscode,
+        methods=['GET'],
+        public=True,
+    )
+
+    # Register the shell platform package route handler
+    server.add_route(
+        path='/client/shell',
+        routeHandler=client_shell,
+        methods=['GET'],
+        public=True,
+    )
+
+    # Register the agent documentation bundle route handler
+    server.add_route(
+        path='/client/docs',
+        routeHandler=client_docs,
+        methods=['GET'],
+        public=True,
+    )
+
+    # Register the workspace bootstrap shim route handler
+    server.add_route(
+        path='/client/typescript-init',
+        routeHandler=client_typescript_init,
         methods=['GET'],
         public=True,
     )

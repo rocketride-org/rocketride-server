@@ -47,13 +47,13 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A document parsing component that uses LlamaParse to extract text and structured data ", "from various document formats including PDFs, images, Word documents, Excel spreadsheets, ", "and other formats. It provides high-quality text extraction with support for tables, ", "layout preservation, and markdown output formatting."],
+	"description": ["A document parsing component that uses LlamaParse to extract text and structured data ", "from various document formats including PDFs, images, Word documents, Excel spreadsheets, ", "and other formats. It provides high-quality text extraction with support for tables, ", "layout preservation, and markdown output formatting. ", "Note: output is flattened to Markdown and does not preserve cell-level provenance ", "(page boundaries, bbox coordinates, or the table-HTML cell grid), so it is not suitable ", "for audit-grade or provenance-bearing extraction; use the datalab_parse node for ", "structure-preserving parsing with page and coordinate data."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "llamaindex_icon.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/llamaparse",
 
 	//
 	//  Optional:
@@ -191,7 +191,7 @@
 		"llamaparse.advanced_config": {
 			"type": "string",
 			"title": "Advanced Configuration (JSON)",
-			"description": "Enter configuration options in JSON format. For more information, see: <a href='https://docs.cloud.llamaindex.ai/llamaparse/presets_and_modes/advance_parsing_modes' target='_blank'>LlamaParse Documentation</a>",
+			"description": "Enter configuration options in JSON format. For more information, see: <a href='https://developers.llamaindex.ai/llamaparse/parse/v1/presets_and_modes/advance_parsing_modes/' target='_blank'>LlamaParse Documentation</a>",
 			"format": "textarea",
 			"default": "{\n  \"parse_mode\": \"parse_page_with_llm\",\n  \"spreadsheet_extract_sub_tables\": false,\n  \"system_prompt_append\": \"\",\n  \"lvm_model\": \"anthropic-sonnet-4.0\"\n}",
 			"ui": {

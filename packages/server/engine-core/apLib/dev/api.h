@@ -38,15 +38,10 @@ template <typename... DebugInfo>
 
 using FatalityHandler =
     Function<void(Location location, std::string_view reason)>;
-using CrashDumpLocationChangeHandler = Function<void(const file::Path&)>;
 
 [[nodiscard]] size_t registerFatalityHandler(
     FatalityHandler&& handler) noexcept;
 void deRegisterFatalityHandler(size_t slot) noexcept;
-
-[[nodiscard]] size_t registerCrashDumpLocationChangedHandler(
-    CrashDumpLocationChangeHandler&& handler) noexcept;
-void deRegisterCrashDumpLocationChangedHandler(size_t slot) noexcept;
 
 void onFatality(Location location, std::string_view reason) noexcept;
 bool& bugCheck() noexcept;

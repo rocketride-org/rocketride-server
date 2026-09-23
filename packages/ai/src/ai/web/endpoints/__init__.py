@@ -34,6 +34,8 @@ Endpoints provided:
     shutdown     — POST /shutdown: gracefully stop the server process
     status       — GET  /status: return aggregated server health and metrics
     auth_callback — GET /auth/callback: OAuth PKCE safety-net redirect handler
+    vscode_oauth_bounce — GET /auth/vscode/google: forward the user-OAuth
+        broker's redirect (tokens/state) to the VS Code extension deep link
 """
 
 # Import each handler from its own sibling module so callers can do:
@@ -44,5 +46,6 @@ from .version import version
 from .shutdown import shutdown
 from .status import status
 from .auth_callback import auth_callback
+from .vscode_oauth_bounce import vscode_oauth_bounce
 
-__all__ = ['use', 'ping', 'version', 'shutdown', 'status', 'auth_callback']
+__all__ = ['use', 'ping', 'version', 'shutdown', 'status', 'auth_callback', 'vscode_oauth_bounce']

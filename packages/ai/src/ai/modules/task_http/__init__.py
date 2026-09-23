@@ -23,11 +23,13 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # Preferred routes (POST)
     server.add_route('/task', task_Execute, methods=['POST'])
     server.add_route('/task/data', task_Data, methods=['POST'])
+    server.add_route('/task/data/{project_id}/{source}', task_Data, methods=['POST'])
     server.add_route('/task', task_Status, methods=['GET'])
     server.add_route('/task', task_Cancel, methods=['DELETE'])
 
     # Alias to /task/data
     server.add_route('/webhook', task_Data, methods=['POST'])
+    server.add_route('/webhook/{project_id}/{source}', task_Data, methods=['POST'])
 
     # Deprecated routes (PUT) - kept for backward compatibility
     server.add_route('/task', task_Execute, methods=['PUT'], deprecated=True)

@@ -28,6 +28,11 @@ from ai.common.config import Config
 
 class IGlobal(IGlobalBase):
     def beginGlobal(self):
+        # Load dependencies
+        from depends import load_depends
+
+        load_depends(__file__)
+
         # Mutex if this driver requires physical devices
         self.device_lock = threading.Lock()
 

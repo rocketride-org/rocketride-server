@@ -5,6 +5,7 @@ ALL = frozenset(
         'clients',
         'data',
         'dropper',
+        'mcp',
         'pipe',
         'remote',
         'services',

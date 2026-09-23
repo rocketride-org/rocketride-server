@@ -32,11 +32,35 @@
 export class DAPException extends Error {
 	public readonly dapResult: Record<string, unknown>;
 
+	/**
+	 * Machine-readable error code sent by the server, when the failure has one.
+	 *
+	 * Task failures carry one (`TASK_NOT_REGISTERED`, `TASK_AMBIGUOUS`,
+	 * `TASK_COMPLETED`, `TASK_STOPPED`); classify on it rather than on the
+	 * message text, which is written for people and may be reworded.
+	 */
+	public readonly code?: string;
+
+	/**
+	 * Troubleshooting text the SDK attached for a developer, when there is any.
+	 *
+	 * Kept out of `message` so an application can show the message to an end
+	 * user without the developer checklist.
+	 */
+	public readonly hint?: string;
+
 	constructor(dapResult: Record<string, unknown>) {
 		const errorMessage = String(dapResult.message || 'Unknown DAP error');
 		super(errorMessage);
 		this.name = 'DAPException';
 		this.dapResult = dapResult || {};
+
+		// Optional so a frozen contract floor, whose ConnectionException predates
+		// these fields, stays assignable where a callback takes one as a parameter.
+		const code = this.dapResult.code;
+		if (typeof code === 'string') this.code = code;
+		const hint = this.dapResult.hint;
+		if (typeof hint === 'string') this.hint = hint;
 	}
 }
 
@@ -74,6 +98,31 @@ export class AuthenticationException extends ConnectionException {
 	constructor(dapResult: Record<string, unknown>) {
 		super(dapResult);
 		this.name = 'AuthenticationException';
+	}
+}
+
+/**
+ * Terminal reason for a public login or connect attempt cancelled by later
+ * user intent: replacement credentials (`superseded`), `logout`, or `detach`
+ * (`detached`).
+ */
+export type LoginAttemptCancellationReason = 'superseded' | 'logout' | 'detached';
+
+/**
+ * Raised when a public `login()` or `connect()` attempt is cancelled by newer
+ * user intent. Callers may inspect `reason` to distinguish replacement,
+ * logout, and detachment from transport or server failures.
+ *
+ * This deliberately extends Error directly: cancellation is control flow, not a
+ * RocketRide server or protocol failure.
+ */
+export class LoginAttemptCancelledError extends Error {
+	public readonly reason: LoginAttemptCancellationReason;
+
+	constructor(reason: LoginAttemptCancellationReason) {
+		super(reason);
+		this.name = 'LoginAttemptCancelledError';
+		this.reason = reason;
 	}
 }
 

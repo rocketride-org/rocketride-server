@@ -1,0 +1,111 @@
+# graph_falkordb
+
+A RocketRide graph node that translates questions or agent calls into Cypher for FalkorDB; choose it when a FalkorDB graph is the data source rather than an ArangoDB database.
+
+## About FalkorDB
+
+FalkorDB is a graph database that uses Cypher queries and the Redis protocol. A server can host multiple named graphs, which this node can list and select.
+
+## What it does
+
+The node uses the required LLM connection to translate natural-language questions to Cypher, validates the result with `EXPLAIN`, and returns graph data through a pipeline or tools. It also provides a direct Cypher tool for callers that already have a query. Choose it over `graph_arango` for FalkorDB and Cypher; normal queries use the server’s read-only operation until writes are explicitly enabled.
+
+## Connections
+
+| Connection | Required | Description |
+|---|---|---|
+| `llm` | yes | LLM used to craft Cypher from a question. |
+
+## Lanes
+
+| Lane in | Lane out | Description |
+|---|---|---|
+| `questions` | `table` | Emits a table result. |
+| `questions` | `text` | Emits a text result. |
+| `questions` | `answers` | Emits the answer result. |
+
+## As a tool
+
+The registered tool names are the bare method names below (an agent catalog namespaces them by the pipeline component id, not by the services.json `prefix`). It registers its FalkorDB-specific tools plus the inherited graph-tool surface.
+
+| Function | Description |
+|---|---|
+| `get_data` | Requires a non-empty `question`; optional `limit` is clamped to the graph row cap. Returns sanitized rows, generated query, applied limit, and truncation state; generation/execution failure returns `error`, `valid: false`, and no rows. |
+| `get_schema` | Takes no meaningful arguments and returns reflected `labels`, node properties, and relationships. |
+| `get_query` | Requires a non-empty `question`, with optional `limit`; returns validated read-only Cypher and `valid: true`, or an `error`/off-topic `answer` with `valid: false`. |
+| `execute` | Requires raw `query` and runs it without LLM translation; it raises an error unless `allow_execute` is enabled, and fails when the result exceeds the execute row cap. |
+| `dialect` | Takes no meaningful arguments and returns `{dialect: "falkordb"}`. |
+| `query` | Requires non-empty `cypher`; accepts optional object `params` and optional `graph`. Returns columns, serialized rows, count, and truncation state; Redis failures return `error` with empty rows. |
+| `list_graphs` | Takes no arguments and returns graph names, or `error` with an empty graph list on a Redis failure. |
+
+## Profiles
+
+Default: **Manual configuration (host and port)** (`default`).
+
+| Profile | Model | Context |
+|---|---|---|
+| `default` *(default)* | Manual configuration | Uses host and port fields. |
+| `url` | FalkorDB URL | Uses the supplied connection string. |
+
+## Configuration
+
+Select Manual configuration for host and port fields, or the URL profile for a connection string. Both profiles include graph, LLM context, query safety, result caps, and timeout settings; begin with the defaults and adjust only for the actual graph and workload.
+
+### Connection and credentials
+
+The manual profile passes host, port, optional username/password, and TLS to the FalkorDB client. The URL profile requires a `falkor://`, `falkors://`, `redis://`, `rediss://`, or `unix://` URL. If a Password field is set with a URL, the node removes an embedded password and uses the field value, so the two cannot silently disagree.
+
+### Graph description and retries
+
+`graph` selects the named graph when a tool caller does not supply one. `db_description` is supplied to the LLM when it writes Cypher; add labels, relationships, and domain language when generation targets the wrong shape. `max_attempts` defaults to five and controls how often a rejected `EXPLAIN` result is repaired.
+
+### Write access, row caps, and timeout
+
+`allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` truncates ordinary results and marks them truncated; `max_execute_rows` makes oversized direct-execute results fail. `query_timeout_ms` bounds a single server query.
+
+## Authentication
+
+Manual connections can omit credentials or provide the configured username and password. URL connections may carry credentials, but the separate Password field takes precedence when present. The node probes the connection at startup, so malformed connection settings or an unavailable server fail before a tool call.
+
+## Notes
+
+### Result representation
+
+The direct query tool serializes graph nodes, relationships, paths, maps, lists, and temporal values into JSON-safe values. It returns no more than the configured row cap, allowing agents to recognize broad results through the `truncated` flag.
+
+## Upstream docs
+
+- [FalkorDB documentation](https://docs.falkordb.com/)
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `graph_falkordb.allow_execute` | `boolean` | **Allow Execute**<br/>Enable the execute tool, which runs raw Cypher with no LLM translation and no read-only gate. Leave OFF unless a trusted application explicitly needs to issue Cypher directly. | `false` |
+| `graph_falkordb.allow_writes` | `boolean` | **Allow Writes**<br/>Permit CREATE/MERGE/SET/DELETE in the query tool. When off, queries run via GRAPH.RO_QUERY and the server itself rejects write clauses. | `false` |
+| `graph_falkordb.db_description` | `string` | **Graph Description**<br/>What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries. | `""` |
+| `graph_falkordb.graph` | `string` | **Default Graph**<br/>A FalkorDB server hosts many graphs. This is the one queried when the caller does not name another. | `"agent"` |
+| `graph_falkordb.host` | `string` | **Host**<br/>FalkorDB host, e.g. localhost or your-instance.falkordb.cloud. | `"localhost"` |
+| `graph_falkordb.max_attempts` | `integer` | **Max Validation Attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query. | `5` |
+| `graph_falkordb.max_execute_rows` | `integer` | **Max Execute Rows**<br/>Upper cap on rows returned by the execute tool. The query fails if exceeded, so one statement cannot exhaust worker memory. | `25000` |
+| `graph_falkordb.max_rows` | `integer` | **Max Rows**<br/>Upper cap on rows returned per query. Results beyond it are cut and flagged as truncated. | `250` |
+| `graph_falkordb.password` | `string` | **Password**<br/>Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries. | `""` |
+| `graph_falkordb.port` | `integer` | **Port**<br/>FalkorDB port (Redis protocol). FalkorDB Cloud assigns a per-instance port. | `6379` |
+| `graph_falkordb.profile` | `string` | **Connection**<br/>How this node connects to FalkorDB | `"default"` |
+| `graph_falkordb.query_timeout_ms` | `integer` | **Query Timeout (ms)**<br/>Server-side timeout for a single query. | `30000` |
+| `graph_falkordb.tls` | `boolean` | **TLS**<br/>Connect with TLS. Required by FalkorDB Cloud TLS endpoints. | `false` |
+| `graph_falkordb.url` | `string` | **FalkorDB URL**<br/>Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. The URL may carry credentials, so it is stored encrypted; the password can also be left out of it and typed in the Password field below, which then replaces whatever the URL embeds. | `""` |
+| `graph_falkordb.username` | `string` | **Username**<br/>Username, e.g. "default" for FalkorDB Cloud. Leave empty for no auth. | `""` |
+
+## Dependencies
+
+- `falkordb` `>=1.6,<2`
+- `redis` `>=7.1,<8`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/graph_falkordb)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

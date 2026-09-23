@@ -47,6 +47,7 @@ from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
 
 from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
+from ai.common.utils import parse_bool
 from rocketlib.types import IInvokeLLM
 
 from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
@@ -237,13 +238,18 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         limit = args.get('limit', 250)
         result = self._buildSQLQuery(question, limit=limit)
 
-        is_valid = result.get('isValid', '').lower() == 'true'
+        is_valid = parse_bool(result.get('isValid', False))
         sql_query = result.get('query', '')
 
         if is_valid and sql_query and is_sql_safe(sql_query):
             return {'sql': sql_query, 'valid': True}
         elif is_valid and sql_query:
             return {'error': 'Generated query contains unsafe SQL', 'sql': sql_query, 'valid': False}
+        elif result.get('error'):
+            # EXPLAIN rejected the query on every attempt -- surface the real
+            # database error instead of the rejected SQL, so callers can tell
+            # this apart from a genuinely off-topic question.
+            return {'error': result['error'], 'valid': False}
         else:
             return {'answer': sql_query, 'valid': False}
 
@@ -253,12 +259,19 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'required': ['sql'],
             'properties': {
                 'sql': {'type': 'string', 'description': 'Raw SQL statement to execute.'},
+                'session_id': {'type': 'string', 'description': 'Optional transaction session id from begin.'},
+                'params': {'type': 'array', 'description': 'Optional positional bind values for $1..$n.'},
+                'row_mode': {
+                    'type': 'string',
+                    'enum': ['object', 'array'],
+                    'description': "Row shape: 'object' (default) returns dict rows; 'array' returns positional lists (column order preserved, duplicate names kept).",
+                },
             },
         },
         output_schema={
             'type': 'object',
             'properties': {
-                'rows': {'type': 'array', 'items': {'type': 'object'}},
+                'rows': {'type': 'array', 'items': {'type': ['object', 'array']}},
                 'affected_rows': {'type': 'integer'},
             },
         },
@@ -278,13 +291,80 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         if not self.IGlobal.allow_execute:
             raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
 
-        result = self._executeRawQuery(sql.strip())
-        if result is None:
-            raise RuntimeError('SQL execution failed (check server logs for details)')
+        session_id = args.get('session_id')
+        params = args.get('params')
+        row_mode = args.get('row_mode', 'object')
+        if row_mode not in ('object', 'array'):
+            raise ValueError("\"row_mode\" must be 'object' or 'array'")
+        if session_id:
+            try:
+                result = self.IGlobal.tx_registry.execute(session_id, sql.strip(), params, row_mode)
+            except KeyError:
+                raise ValueError(f'unknown or expired transaction session: {session_id}')
+            # A failed statement leaves the session OPEN: Postgres marks the
+            # transaction aborted, MySQL leaves it usable. The client owns
+            # recovery — `rollback`, or `rollback to savepoint` for nested
+            # transactions — and the idle reaper is the backstop for abandoned
+            # sessions. Committing an aborted transaction would degrade to a
+            # silent ROLLBACK, so the registry refuses it and raises instead.
+        else:
+            result = self._executeRawQuery(sql.strip(), params, row_mode)
+            if result is None:
+                raise RuntimeError('SQL execution failed (check server logs for details)')
 
-        # Sanitize rows for JSON serialization
         rows = [self._sanitize_row(row) for row in result['rows']]
         return {'rows': rows, 'affected_rows': result['affected_rows']}
+
+    @tool_function(
+        input_schema={'type': 'object', 'properties': {}},
+        output_schema={'type': 'object', 'properties': {'session_id': {'type': 'string'}}},
+        description=lambda self: (
+            f'Begin a transaction on this {self._db_display_name()} database; returns a session_id.'
+        ),
+    )
+    def begin(self, args):
+        """Begin a transaction and return a session_id."""
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+        return {'session_id': self.IGlobal.tx_registry.begin()}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['session_id'],
+            'properties': {'session_id': {'type': 'string'}},
+        },
+        output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
+        description=lambda self: 'Commit an open transaction session.',
+    )
+    def commit(self, args):
+        """Commit an open transaction session."""
+        return self._finishTx(args, commit=True)
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['session_id'],
+            'properties': {'session_id': {'type': 'string'}},
+        },
+        output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
+        description=lambda self: 'Roll back an open transaction session.',
+    )
+    def rollback(self, args):
+        """Roll back an open transaction session."""
+        return self._finishTx(args, commit=False)
+
+    def _finishTx(self, args, *, commit: bool):
+        """Shared commit/rollback implementation enforcing the allow_execute gate."""
+        if not isinstance(args, dict) or not args.get('session_id'):
+            raise ValueError('"session_id" is required')
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+        try:
+            (self.IGlobal.tx_registry.commit if commit else self.IGlobal.tx_registry.rollback)(args['session_id'])
+        except KeyError:
+            raise ValueError(f'unknown or expired transaction session: {args["session_id"]}')
+        return {'ok': True}
 
     @tool_function(
         input_schema={
@@ -312,6 +392,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         """Convert a single database value to a JSON-serializable type."""
         if val is None or isinstance(val, (str, int, float, bool)):
             return val
+        if isinstance(val, (dict, list, tuple)):
+            # psycopg2 parses json/jsonb into dict/list (and composites into
+            # tuples); repr() is not JSON and silently corrupts ORM clients
+            # that JSON.parse driver values.
+            return json.dumps(val, default=str)
         if hasattr(val, '__float__'):
             return float(val)
         if hasattr(val, 'isoformat'):
@@ -339,8 +424,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         Calls ``_buildSQLQueryOnce`` to ask the LLM, then runs ``EXPLAIN`` on
         the result.  If EXPLAIN rejects the query the error is fed back to the
         LLM and another attempt is made, up to ``IGlobal.max_validation_attempts``
-        times.  Returns the last LLM response regardless of whether validation
-        ultimately succeeded.
+        times.  Returns the last LLM response if EXPLAIN eventually accepts it;
+        if every attempt is rejected, the result is forced to ``isValid: False``
+        with the last EXPLAIN error carried in ``error``.
         """
         previous_sql: str | None = None
         last_error: str | None = None
@@ -349,7 +435,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         for attempt in range(self.IGlobal.max_validation_attempts):
             result = self._buildSQLQueryOnce(question_text, limit=limit, previous_sql=previous_sql, error=last_error)
 
-            is_valid = result.get('isValid', '').lower() == 'true'
+            is_valid = parse_bool(result.get('isValid', False))
             sql_query = result.get('query', '')
 
             # If the LLM decided the question isn't a DB query, or the safety
@@ -370,9 +456,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             previous_sql = sql_query
             last_error = explain_error
 
-        warning(
-            f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.'
-        )
+        warning(f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); rejecting the query.')
+        # Every EXPLAIN attempt failed. Force isValid False so callers (get_sql,
+        # get_data, writeQuestions) don't execute a query the database already
+        # refused; keep the last query for context and carry the EXPLAIN error
+        # so callers can tell this apart from a non-SQL question.
+        result['isValid'] = False
+        result['error'] = last_error or 'SQL validation failed'
         return result
 
     def _buildSQLQueryOnce(
@@ -492,34 +582,32 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             error(f'Error executing SQL query: {e}')
             return None
 
-    def _executeRawQuery(self, query: str) -> dict | None:
+    def _executeRawQuery(self, query: str, params: list | None = None, row_mode: str = 'object') -> dict | None:
         """Execute a raw SQL statement (read or write) without LLM or safety gating.
 
         Uses ``engine.begin()`` so writes auto-commit. Returns
-        ``{'rows': [...], 'affected_rows': N}`` on success or ``None`` on error
-        (logged via ``error()`` to match the ``_executeSQLQuery`` precedent).
+        ``{'rows': [...], 'affected_rows': N}`` on success, or ``None`` on a
+        SQLAlchemy error (logged via ``error()``). A ``max_execute_rows``
+        overflow raises ``RuntimeError`` from *inside* the transaction so
+        ``engine.begin()`` rolls back — otherwise a write (e.g. ``INSERT ...
+        RETURNING``) would commit even though ``execute()`` reports failure.
 
         SELECT results are bounded by ``IGlobal.max_execute_rows`` to keep a
-        large query from exhausting worker memory. ``rowcount`` is normalized
-        to a non-negative int — some dialects return -1 when unknown.
+        large query from exhausting worker memory.
         """
+        from ai.common.database.tx_registry import shape_execute_result, to_sqlalchemy_text
+
         try:
             with self.IGlobal.engine.begin() as conn:
-                result = conn.execute(text(query))
-                if result.returns_rows:
-                    max_rows = self.IGlobal.max_execute_rows
-                    rows = result.fetchmany(max_rows + 1)
-                    if len(rows) > max_rows:
-                        error(f'EXECUTE query exceeded max_execute_rows={max_rows}')
-                        return None
-                    column_names = result.keys()
-                    return {
-                        'rows': [dict(zip(column_names, row)) for row in rows],
-                        'affected_rows': 0,
-                    }
-                rowcount = result.rowcount
-                affected = rowcount if isinstance(rowcount, int) and rowcount >= 0 else 0
-                return {'rows': [], 'affected_rows': affected}
+                clause, binds = to_sqlalchemy_text(query, params)
+                result = conn.execute(clause, binds)
+                shaped = shape_execute_result(result, self.IGlobal.max_execute_rows, row_mode)
+                if shaped is None:
+                    # Raise inside the transaction so it rolls back; returning
+                    # None here would let an overflowing write commit anyway.
+                    error(f'EXECUTE query exceeded max_execute_rows={self.IGlobal.max_execute_rows}')
+                    raise RuntimeError(f'EXECUTE query exceeded max_execute_rows={self.IGlobal.max_execute_rows}')
+                return shaped
 
         except SQLAlchemyError as e:
             error(f'Error executing raw SQL query: {e}')
@@ -564,32 +652,62 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             # Ask the LLM to translate the natural-language question into SQL.
             query_json = self._buildSQLQuery(question_text)
-            is_valid_query = query_json.get('isValid', '').lower() == 'true'
             sql_query = query_json.get('query')
+            is_valid_query = parse_bool(query_json.get('isValid', False))
 
-            # Execute the query only when the LLM flagged it as valid SQL and
-            # the safety check passes; otherwise return the LLM's text response.
-            if is_valid_query and sql_query and is_sql_safe(sql_query):
-                result = self._executeSQLQuery(sql_query)
-            else:
-                result = sql_query
+            # The EXPLAIN repair loop gave up: `query` still holds the rejected
+            # SQL, not an answer. Emit the error instead of printing it as prose.
+            if query_json.get('error'):
+                self._emitError(query_json['error'], lanes)
+                return
+            # The LLM claimed valid SQL but it fails the safety gate: same rule
+            # -- surface the rejection, never emit the unsafe SQL as prose/data.
+            if is_valid_query and sql_query and not is_sql_safe(sql_query):
+                self._emitError('Generated query contains unsafe SQL', lanes)
+                return
 
-            if 'text' in lanes:
-                self.instance.writeText(str(result))
+            executed = is_valid_query and bool(sql_query)
+            # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
+            result = self._executeSQLQuery(sql_query) if executed else sql_query
 
-            if 'table' in lanes and is_valid_query and result:
-                self.instance.writeTable(self._formatResultAsMarkdown(result))
-
-            if 'answers' in lanes:
-                answer = Answer()
-                if is_valid_query and result:
-                    answer.setAnswer(self._formatResultAsMarkdown(result))
-                else:
-                    answer.setAnswer(str(result))
-                self.instance.writeAnswers(answer)
+            self._emit(result, lanes, executed=executed)
 
         except Exception as e:
             error(f'Error handling question: {e}')
+
+    def _emitError(self, message: str, lanes) -> None:
+        """Emit a validation/safety error to the wired lanes, never a rejected query as prose.
+
+        The answers lane wraps the message as ``{'error': message}`` JSON (matching
+        graph_instance_base.py), so a real prose answer and an error are structurally
+        distinguishable one lane down -- both would otherwise be indistinguishable
+        plain strings.
+        """
+        if 'text' in lanes:
+            self.instance.writeText(message)
+        if 'answers' in lanes:
+            answer = Answer()
+            answer.setAnswer(json.dumps({'error': message}))
+            self.instance.writeAnswers(answer)
+
+    def _emit(self, result, lanes, *, executed: bool) -> None:
+        """Write a query result to whichever of the text/table/answers lanes are wired.
+
+        ``executed`` distinguishes real query results from a rejected/prose
+        fallback -- the table lane and the answers lane's markdown formatting
+        must key off whether the query actually ran, not just whether the LLM
+        claimed the SQL was valid.
+        """
+        if 'text' in lanes:
+            self.instance.writeText(str(result))
+
+        if 'table' in lanes and executed and result:
+            self.instance.writeTable(self._formatResultAsMarkdown(result))
+
+        if 'answers' in lanes:
+            answer = Answer()
+            answer.setAnswer(self._formatResultAsMarkdown(result) if executed and result else str(result))
+            self.instance.writeAnswers(answer)
 
     def writeTable(self, markdown: str) -> None:
         """Handle incoming markdown table data — parse and insert into the database."""

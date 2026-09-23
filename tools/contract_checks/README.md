@@ -42,7 +42,7 @@ There are two ways to invoke the framework: via `builder` (recommended; handles 
 
 | Flag | Applies to | What it does |
 | ---- | ---------- | ------------ |
-| `--rebuild-cache` | `:run` | Deletes `<engine>/cache/constraints.txt` AND `<engine>/cache/requirements.hash`, forcing `ensure_constraints()` to recompile via `uv pip compile` from scratch. Used by the nightly cron lane to catch fresh upstream releases. |
+| `--rebuild-cache` | `:run` | Deletes `<engine>/cache/constraints.txt`, `<engine>/cache/requirements.hash` AND `<engine>/cache/satisfied/`, forcing `ensure_constraints()` to recompile via `uv pip compile` from scratch and every requirements file to be resolved again. Used by the nightly cron lane to catch fresh upstream releases. |
 | `--pattern=SUBSTR` | `:run`, `:test` | Generic substring filter passed to the underlying invocation. For `:run` it filters triple ids (`<tree>/<component>/<package>`). For `:test` it maps to pytest's `-k` expression. **Repeatable**, multiple `--pattern=` values combine with OR semantics for `:run` (forwarded as separate `--pattern` flags to the CLI), and are joined with ` or ` into a single `-k` expression for `:test` (pytest only accepts one `-k`). |
 | `--pytest-pattern=EXPR` | `:run`, `:test` | Back-compat alias. Single-value (overwrites on repeat). Same behavior as `--pattern` for `:run`; reaches pytest's `-k` for `:test`. Prefer `--pattern` going forward, especially when you want repeat semantics. |
 
@@ -139,19 +139,25 @@ Real examples from this repo:
 # nodes/src/nodes/llm_anthropic/anthropic.py — optional monkey-patch
 try:
     import langchain_core.utils.tokenization as _tok  # contract-check: ignore  optional monkey-patch path; outer except handles absence
+
     ...
 except Exception:
     pass
 
 # nodes/src/nodes/llm_mistral/IGlobal.py — falls back to built-in Exception
 try:
-    from mistralai.exceptions import MistralException  # contract-check: ignore  optional, falls back to built-in Exception
+    from mistralai.exceptions import (
+        MistralException,
+    )  # contract-check: ignore  optional, falls back to built-in Exception
 except Exception:
     MistralException = Exception
 
 # nodes/src/nodes/pinecone/IGlobal.py — moved between pinecone versions
 try:
-    from pinecone.core.client.exceptions import ApiException as _ApiException  # contract-check: ignore  optional, path moved between pinecone versions; outer handler covers absence
+    from pinecone.core.client.exceptions import (
+        ApiException as _ApiException,
+    )  # contract-check: ignore  optional, path moved between pinecone versions; outer handler covers absence
+
     ...
 except Exception:
     pass
@@ -282,7 +288,7 @@ MANIFEST = ComponentManifest(
     heavy_classes=(
         HeavyClass(
             qualname='somesdk.Client',
-            construct='Client(api_key="x")',     # MUST be side-effect-free
+            construct='Client(api_key="x")',  # MUST be side-effect-free
             attr_chains=(
                 'users.list',
                 'users.get',
@@ -372,11 +378,13 @@ For single imports, the inline `# contract-check: ignore` comment is usually a b
 Edit [`tools/contract_checks/src/contract_checks/trees.py`](src/contract_checks/trees.py) and append one `Tree` entry to `SCANNED_TREES`:
 
 ```python
-Tree(
-    name='my-new-tree',
-    root=REPO_ROOT / 'path' / 'to' / 'python' / 'source',
-    internal_packages=frozenset({'my_internal_package'}),
-),
+(
+    Tree(
+        name='my-new-tree',
+        root=REPO_ROOT / 'path' / 'to' / 'python' / 'source',
+        internal_packages=frozenset({'my_internal_package'}),
+    ),
+)
 ```
 
 No other change is needed, the CLI's tree iteration loop picks up the new entry automatically on the next run, and the install hook recursively finds every `requirement*.txt` under `root` on its own (no per-tree requirements config).

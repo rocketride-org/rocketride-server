@@ -20,583 +20,480 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""
-Scenario-based tests for ai.modules.task.task_scheduler.TaskScheduler.
+"""TaskScheduler unit tests — teams-as-environments scheduling.
 
-Tests exercise combinations of public methods (schedule, unschedule, start,
-shutdown) and inspect private state only for result assertions. Loop and
-dispatch behaviour is driven via frozen-clock tests that use time_machine so
-overdue conditions are created deterministically without touching the heap
-directly. The TaskServer interaction is mocked at the start_server_task
-boundary (the facade), so these tests stay focused on scheduling logic.
-"""
+Covers the heap/sync lifecycle keyed (team, project, source), the fire-time
+re-read (store state always beats the in-memory heap), sha-verified artifact
+dispatch through the trusted team path, per-source pipeline targeting, the
+overlap guard, and errored-marking on permanent (permission-shaped) failures.
 
-from __future__ import annotations
+The account module and the dispatch facade are monkeypatched at the
+scheduler's module scope — these are unit tests of scheduling behavior, not
+of the backend (covered by test_deployment_backend) or dispatch (covered by
+cmd/task tests).
+"""
 
 import asyncio
-from contextlib import contextmanager
-from datetime import datetime
+import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import time_machine
 
-
-from ai.account.deployment_store import DeploymentStore
-from ai.account.models import DeploymentRecord
-from ai.account.store_providers.memory import MemoryStore
+import ai.modules.task.task_scheduler as sched_mod
 from ai.modules.task.task_scheduler import TaskScheduler
-from ai.modules.task.task_server_facade import ServerTaskAuthError
 
 
-# =============================================================================
+# ============================================================================
 # Helpers
-# =============================================================================
+# ============================================================================
 
 
-def make_record(
-    project_id: str = 'proj-1',
-    schedule: str = '*/15 * * * *',
-    state: str = 'active',
-    userId: str = 'user-1',
-    userToken: str = 'rr_test',
-    **kwargs,
-) -> DeploymentRecord:
-    return DeploymentRecord(
-        pipeline={'project_id': project_id, 'components': []},
-        userId=userId,
-        userToken=userToken,
-        schedule=schedule,
-        state=state,
-        **kwargs,
+def _dep(
+    *,
+    team='team-1',
+    project='proj-1',
+    state='enabled',
+    version=1,
+    schedules=None,
+    updated_by=None,
+):
+    """An account-module deployment dict as deployments_get returns it."""
+    return {
+        'teamId': team,
+        'projectId': project,
+        'state': state,
+        'version': version,
+        'schedules': schedules if schedules is not None else {'src-1': {'cron': '* * * * *', 'paused': False}},
+        'updatedBy': updated_by or {'userId': 'user-1', 'display': 'Rod', 'email': ''},
+    }
+
+
+@pytest.fixture
+def scheduler():
+    """A TaskScheduler over a stub server (no loop started)."""
+    server = MagicMock()
+    server._task_control = {}
+    # broadcast_server_event is AWAITED by the deploy-change notifier; a
+    # plain MagicMock attribute returns a non-awaitable, the await raises,
+    # and the notifier's best-effort catch swallows it — the apaevt_deploy
+    # contract would then have zero coverage here.
+    server.broadcast_server_event = AsyncMock()
+    return TaskScheduler(server)
+
+
+@pytest.fixture
+def account_stub(monkeypatch):
+    """Replace the scheduler's account module with controllable stubs."""
+    stub = SimpleNamespace(
+        deployments_get=AsyncMock(return_value=_dep()),
+        deployments_artifact=AsyncMock(return_value={'project_id': 'proj-1', 'source': 'orig', 'components': []}),
+        deployments_set_state=AsyncMock(return_value=_dep(state='errored', schedules={})),
+        deployments_mark_run=AsyncMock(),
+        deployments_iter_enabled=MagicMock(),
     )
+    monkeypatch.setattr(sched_mod, 'account', stub)
+    return stub
 
 
-def _make_server(task_control=None) -> SimpleNamespace:
-    return SimpleNamespace(
-        _task_control=task_control if task_control is not None else {},
-        deployments=DeploymentStore(MemoryStore()),
+@pytest.fixture
+def dispatch(monkeypatch):
+    """Replace the trusted dispatch with a capture mock."""
+    mock = AsyncMock(return_value='tk_dispatched')
+    monkeypatch.setattr(sched_mod, 'start_server_task_as_team', mock)
+    return mock
+
+
+# ============================================================================
+# sync — heap reconciliation
+# ============================================================================
+
+
+class TestSync:
+    def test_enabled_deployment_adds_one_entry_per_unpaused_schedule(self, scheduler):
+        scheduler.sync(
+            'org-1',
+            _dep(
+                schedules={
+                    'src-a': {'cron': '* * * * *', 'paused': False},
+                    'src-b': {'cron': '@hourly', 'paused': False},
+                    'src-off': {'cron': '@hourly', 'paused': True},
+                }
+            ),
+        )
+        assert ('team-1', 'proj-1', 'src-a') in scheduler._entries
+        assert ('team-1', 'proj-1', 'src-b') in scheduler._entries
+        assert ('team-1', 'proj-1', 'src-off') not in scheduler._entries
+
+    def test_disabled_or_removed_drops_all_entries(self, scheduler):
+        scheduler.sync('org-1', _dep())
+        assert scheduler._entries
+        scheduler.sync('org-1', _dep(state='disabled', schedules={}))
+        assert not scheduler._entries
+
+    def test_resync_replaces_prior_entries(self, scheduler):
+        scheduler.sync('org-1', _dep())
+        first = scheduler._entries[('team-1', 'proj-1', 'src-1')]
+        scheduler.sync('org-1', _dep(schedules={'src-1': {'cron': '@daily', 'paused': False}}))
+        second = scheduler._entries[('team-1', 'proj-1', 'src-1')]
+        assert first.cancelled is True
+        assert second.cron == '@daily'
+
+    def test_same_project_two_teams_coexist(self, scheduler):
+        scheduler.sync('org-1', _dep(team='team-stag'))
+        scheduler.sync('org-1', _dep(team='team-prod'))
+        assert ('team-stag', 'proj-1', 'src-1') in scheduler._entries
+        assert ('team-prod', 'proj-1', 'src-1') in scheduler._entries
+
+    def test_bad_cron_is_skipped_not_fatal(self, scheduler):
+        scheduler.sync('org-1', _dep(schedules={'src-1': {'cron': 'not a cron', 'paused': False}}))
+        assert not scheduler._entries
+
+
+# ============================================================================
+# _start_run — fire-time behavior
+# ============================================================================
+
+
+def _entry(scheduler, org='org-1', team='team-1', project='proj-1', source='src-1'):
+    """A due entry as the loop would pop it."""
+    scheduler.sync(org, _dep(team=team, project=project, schedules={source: {'cron': '* * * * *', 'paused': False}}))
+    return scheduler._entries[(team, project, source)]
+
+
+class TestStartRun:
+    @pytest.mark.asyncio
+    async def test_happy_path_dispatches_as_team_with_source_override(self, scheduler, account_stub, dispatch):
+        entry = _entry(scheduler)
+        await scheduler._start_run(entry)
+
+        dispatch.assert_awaited_once()
+        kwargs = dispatch.await_args.kwargs
+        pipeline = dispatch.await_args.args[1]
+        # Per-source execution: the schedule's source becomes the entry point.
+        assert pipeline['source'] == 'src-1'
+        assert kwargs['org_id'] == 'org-1'
+        assert kwargs['team_id'] == 'team-1'
+        assert kwargs['trigger'] == 'schedule'
+        # Execution settings ride the dispatch; unset trace defaults to FULL.
+        assert kwargs['trace_level'] == 'full'
+        assert kwargs['debug_out'] is False
+        # No actor rides the dispatch — the run is owned by the team alone;
+        # who deployed lives in the deployment history, not on the run.
+        assert 'actor' not in kwargs
+        # Overlap guard armed + lastRunAt stamped.
+        assert scheduler._active_tokens[entry.key] == 'tk_dispatched'
+        account_stub.deployments_mark_run.assert_awaited_once()
+        # The apaevt_deploy push replaces the deploy surfaces' polling — pin
+        # the org-scoped envelope and the identity-only body.
+        from rocketride import EVENT_TYPE
+
+        scheduler._server.broadcast_server_event.assert_awaited_once_with(
+            EVENT_TYPE.DEPLOY,
+            {
+                'event': 'apaevt_deploy',
+                'body': {'orgId': 'org-1', 'teamId': 'team-1', 'projectId': 'proj-1', 'action': 'run'},
+            },
+            org_id='org-1',
+        )
+
+    @pytest.mark.asyncio
+    async def test_fire_time_reread_beats_the_heap(self, scheduler, account_stub, dispatch):
+        # Deployment was disabled between ticks: the heap says fire, the
+        # store
+        # says no — the store must win, and the stale entries must drop.
+        entry = _entry(scheduler)
+        account_stub.deployments_get.return_value = _dep(state='disabled', schedules={})
+        await scheduler._start_run(entry)
+        dispatch.assert_not_awaited()
+        assert not scheduler._entries
+
+    @pytest.mark.asyncio
+    async def test_schedule_removed_between_ticks_skips(self, scheduler, account_stub, dispatch):
+        entry = _entry(scheduler)
+        account_stub.deployments_get.return_value = _dep(schedules={})
+        await scheduler._start_run(entry)
+        dispatch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_schedule_paused_between_ticks_skips(self, scheduler, account_stub, dispatch):
+        # The per-source pause must win at fire time even when the heap
+        # entry predates it.
+        entry = _entry(scheduler)
+        account_stub.deployments_get.return_value = _dep(schedules={'src-1': {'cron': '* * * * *', 'paused': True}})
+        await scheduler._start_run(entry)
+        dispatch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unusable_artifact_marks_errored(self, scheduler, account_stub, dispatch):
+        from ai.account.store import StorageError
+
+        entry = _entry(scheduler)
+        account_stub.deployments_artifact.side_effect = StorageError('sha256 mismatch')
+        await scheduler._start_run(entry)
+        dispatch.assert_not_awaited()
+        account_stub.deployments_set_state.assert_awaited_once()
+        assert account_stub.deployments_set_state.await_args.args[3] == 'errored'
+
+    @pytest.mark.asyncio
+    async def test_permission_failure_marks_errored(self, scheduler, account_stub, dispatch):
+        entry = _entry(scheduler)
+        dispatch.side_effect = PermissionError('denied')
+        await scheduler._start_run(entry)
+        account_stub.deployments_set_state.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_transient_failure_does_not_mark_errored(self, scheduler, account_stub, dispatch):
+        entry = _entry(scheduler)
+        dispatch.side_effect = RuntimeError('subprocess died')
+        await scheduler._start_run(entry)
+        account_stub.deployments_set_state.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_deployment_gone_drops_entries(self, scheduler, account_stub, dispatch):
+        entry = _entry(scheduler)
+        account_stub.deployments_get.return_value = None
+        await scheduler._start_run(entry)
+        dispatch.assert_not_awaited()
+        assert not scheduler._entries
+
+
+# ============================================================================
+# Overlap guard (loop-level state exercised directly)
+# ============================================================================
+
+
+class TestOverlapGuard:
+    @pytest.mark.asyncio
+    async def test_active_previous_run_is_detectable(self, scheduler, account_stub, dispatch):
+        entry = _entry(scheduler)
+        await scheduler._start_run(entry)
+
+        # Simulate the previous task still running in the registry.
+        running = MagicMock()
+        running.task.is_task_complete.return_value = False
+        scheduler._server._task_control['tk_dispatched'] = running
+
+        # Assert the scheduler's OWN predicate — the exact guard the tick
+        # loop and the manual run path evaluate.
+        assert scheduler._is_previous_run_active(entry.key)
+
+        # And it reopens once the task completes.
+        running.task.is_task_complete.return_value = True
+        assert not scheduler._is_previous_run_active(entry.key)
+
+    @pytest.mark.asyncio
+    async def test_inflight_dispatch_closes_the_guard(self, scheduler):
+        # The tick loop marks the key BEFORE the dispatch task exists; the
+        # guard must already be closed in that window.
+        key = ('team-1', 'proj-1', 'src-1')
+        scheduler._active_tokens[key] = sched_mod._DISPATCHING
+        assert scheduler._is_previous_run_active(key)
+
+    def test_manual_run_registers_under_the_guard(self, scheduler):
+        # A registered manual token with a live control entry closes the
+        # guard for the next cron tick.
+        running = MagicMock()
+        running.task.is_task_complete.return_value = False
+        scheduler._server._task_control['tk_manual'] = running
+        scheduler.register_manual_run('team-1', 'proj-1', 'src-1', 'tk_manual')
+        assert scheduler.is_run_active('team-1', 'proj-1', 'src-1')
+
+
+# ============================================================================
+# Skip visibility (issue #1838) — a non-terminating source closes the
+# overlap guard forever, so the schedule stops firing while still reporting
+# itself active. These pin the added consecutive-skip counter and its
+# threshold warnings; the guard's own skip/dispatch decision is untouched
+# and stays covered by TestOverlapGuard/TestStartRun above.
+# ============================================================================
+
+
+class TestSkipVisibility:
+    KEY = ('team-1', 'proj-1', 'src-1')
+
+    def test_sync_drops_skip_counts_when_disabled(self, scheduler):
+        """Disabling/removing a deployment drops its skip counts, not just its schedule entries."""
+        scheduler.sync('org-1', _dep())
+        scheduler._skip_counts[self.KEY] = 5
+
+        scheduler.sync('org-1', _dep(state='disabled', schedules={}))
+
+        assert self.KEY not in scheduler._skip_counts
+
+    @pytest.mark.parametrize(
+        'remaining_schedules',
+        [
+            pytest.param({'src-2': {'cron': '* * * * *', 'paused': False}}, id='removed'),
+            pytest.param(
+                {
+                    'src-1': {'cron': '* * * * *', 'paused': True},
+                    'src-2': {'cron': '* * * * *', 'paused': False},
+                },
+                id='paused',
+            ),
+        ],
     )
-
-
-def _make_scheduler(task_control=None) -> TaskScheduler:
-    """Build a TaskScheduler with __init__ bypassed."""
-    s = TaskScheduler.__new__(TaskScheduler)
-    s._schedule = []
-    s._tasks = {}
-    s._active_tokens = {}
-    s._scheduling = None
-    s._inflight_starts = set()
-    s._server = _make_server(task_control)
-    return s
-
-
-async def _run_loop_once(scheduler: TaskScheduler) -> None:
-    """Drive the scheduling loop (_run) through exactly one iteration, then stop."""
-
-    async def _cancel(_: float) -> None:
-        raise asyncio.CancelledError()
-
-    with pytest.raises(asyncio.CancelledError), patch('asyncio.sleep', _cancel):
-        await scheduler._run()
-
-
-async def _drain() -> None:
-    """Yield repeatedly so a background _start_task can run to completion."""
-    for _ in range(50):
-        await asyncio.sleep(0)
-
-
-@contextmanager
-def _patch_start_server_task(*, token='tk_new', exc=None):
-    """Patch start_server_task in the scheduler module; yield the AsyncMock.
-
-    With ``exc`` set, the mock raises it (e.g. ServerTaskAuthError); otherwise it
-    returns ``token`` as the new task token.
-    """
-
-    def impl(server, user_token, pipeline):
-        if exc is not None:
-            raise exc
-        return token
-
-    mock = AsyncMock(side_effect=impl)
-    with patch('ai.modules.task.task_scheduler.start_server_task', mock):
-        yield mock
-
-
-# =============================================================================
-# Scheduling scenarios
-# =============================================================================
-
-
-def test_scheduling_active_deployment_creates_future_task():
-    s = _make_scheduler()
-    rec = make_record()
-    s.schedule(rec)
-    assert rec.pipeline['project_id'] in s._tasks
-    task = s._tasks[rec.pipeline['project_id']]
-    assert task.next_run > datetime.now().timestamp()
-    assert task.client_id == rec.userId
-    assert not task.cancelled
-
-
-def test_scheduling_manual_deployment_is_ignored():
-    s = _make_scheduler()
-    s.schedule(make_record(schedule='manual'))
-    assert 'proj-1' not in s._tasks
-
-
-def test_switching_active_to_manual_cancels_task():
-    s = _make_scheduler()
-    rec = make_record()
-    s.schedule(rec)
-    old_task = s._tasks[rec.pipeline['project_id']]
-
-    s.schedule(make_record(schedule='manual'))
-    assert old_task.cancelled
-    assert rec.pipeline['project_id'] not in s._tasks
-
-
-def test_switching_active_to_paused_cancels_task():
-    s = _make_scheduler()
-    rec = make_record()
-    s.schedule(rec)
-    old_task = s._tasks[rec.pipeline['project_id']]
-
-    s.schedule(make_record(state='paused'))
-    assert old_task.cancelled
-    assert rec.pipeline['project_id'] not in s._tasks
-
-
-def test_switching_active_to_errored_cancels_task():
-    s = _make_scheduler()
-    rec = make_record()
-    s.schedule(rec)
-    old_task = s._tasks[rec.pipeline['project_id']]
-
-    s.schedule(make_record(state='errored'))
-    assert old_task.cancelled
-    assert rec.pipeline['project_id'] not in s._tasks
-
-
-def test_rescheduling_replaces_existing_task():
-    s = _make_scheduler()
-    rec = make_record()
-    s.schedule(rec)
-    first_task = s._tasks[rec.pipeline['project_id']]
-
-    s.schedule(rec)
-    assert first_task.cancelled
-    assert len(s._tasks) == 1
-    new_task = s._tasks[rec.pipeline['project_id']]
-    assert new_task is not first_task
-    assert new_task.next_run > datetime.now().timestamp()
-
-
-# =============================================================================
-# Unschedule scenarios
-# =============================================================================
-
-
-def test_unschedule_cancels_and_removes_scheduled_task():
-    s = _make_scheduler()
-    rec = make_record()
-    s.schedule(rec)
-    task = s._tasks[rec.pipeline['project_id']]
-
-    s.unschedule(rec.pipeline['project_id'])
-    assert rec.pipeline['project_id'] not in s._tasks
-    assert task.cancelled
-
-
-def test_unschedule_removes_active_token():
-    s = _make_scheduler()
-    s._active_tokens['proj-1'] = 'tk_old'
-    s.unschedule('proj-1')
-    assert 'proj-1' not in s._active_tokens
-
-
-def test_unschedule_unknown_deployment_is_noop():
-    s = _make_scheduler()
-    s.unschedule('nonexistent')  # must not raise
-
-
-# =============================================================================
-# Load scenarios (startup scan)
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_load_schedules_active_deployments():
-    s = _make_scheduler()
-    rec = make_record(schedule='@hourly', state='active')
-    await s._server.deployments.save(rec.userId, rec)
-    await s._load()
-    assert rec.pipeline['project_id'] in s._tasks
-
-
-@pytest.mark.asyncio
-async def test_load_skips_manual_deployments():
-    s = _make_scheduler()
-    rec = make_record(schedule='manual')
-    await s._server.deployments.save(rec.userId, rec)
-    await s._load()
-    assert rec.pipeline['project_id'] not in s._tasks
-
-
-@pytest.mark.asyncio
-async def test_load_loads_multiple_deployments():
-    s = _make_scheduler()
-    records = [make_record('proj-1'), make_record('proj-2'), make_record('proj-3')]
-    for r in records:
-        await s._server.deployments.save(r.userId, r)
-    await s._load()
-    assert set(s._tasks) == {'proj-1', 'proj-2', 'proj-3'}
-
-
-@pytest.mark.asyncio
-async def test_load_skips_bad_record_and_continues():
-    """One unschedulable record (e.g. corrupt cron expression on disk) must not
-    abort loading the records after it.
-    """
-    s = _make_scheduler()
-    bad = make_record('proj-bad', schedule='not-a-cron')  # store does not validate cron
-    good = make_record('proj-good')
-    await s._server.deployments.save(bad.userId, bad)
-    await s._server.deployments.save(good.userId, good)
-
-    await s._load()  # must not raise
-
-    assert 'proj-good' in s._tasks
-    assert 'proj-bad' not in s._tasks
-
-
-@pytest.mark.asyncio
-async def test_load_survives_store_error():
-    s = _make_scheduler()
-    failing_iter = MagicMock()
-    failing_iter.__aiter__ = MagicMock(return_value=failing_iter)
-    failing_iter.__anext__ = AsyncMock(side_effect=OSError('storage unavailable'))
-    with patch.object(s._server.deployments, 'iter_all', return_value=failing_iter):
-        await s._load()  # must not raise
-    assert s._tasks == {}
-
-
-# =============================================================================
-# Dispatch and loop scenarios
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_overdue_task_triggers_dispatch():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)
-
-    with _patch_start_server_task() as start, time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
-        await _run_loop_once(s)
-        await _drain()
-
-    start.assert_awaited_once_with(s._server, rec.userToken, rec.pipeline)
-    assert s._active_tokens[rec.pipeline['project_id']] == 'tk_new'
-    assert s._inflight_starts == set()  # completed task starts discard themselves
-
-
-@pytest.mark.asyncio
-async def test_future_task_not_dispatched():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with _patch_start_server_task() as start, time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)
-        await _run_loop_once(s)
-        await _drain()
-
-    start.assert_not_awaited()
-    assert s._active_tokens == {}
-
-
-@pytest.mark.asyncio
-async def test_loop_skips_when_previous_run_still_active():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)
-
-    s._active_tokens[rec.pipeline['project_id']] = 'tk_old'
-    s._server._task_control['tk_old'] = SimpleNamespace(task=SimpleNamespace(is_task_complete=lambda: False))
-
-    with _patch_start_server_task() as start, time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
-        await _run_loop_once(s)
-        await _drain()
-
-    start.assert_not_awaited()
-    assert s._active_tokens[rec.pipeline['project_id']] == 'tk_old'
-
-
-@pytest.mark.asyncio
-async def test_loop_dispatches_when_previous_run_complete():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)
-
-    s._active_tokens[rec.pipeline['project_id']] = 'tk_old'
-    s._server._task_control['tk_old'] = SimpleNamespace(task=SimpleNamespace(is_task_complete=lambda: True))
-
-    with _patch_start_server_task() as start, time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
-        await _run_loop_once(s)
-        await _drain()
-
-    start.assert_awaited_once()
-    assert s._active_tokens[rec.pipeline['project_id']] == 'tk_new'
-
-
-@pytest.mark.asyncio
-async def test_loop_dispatches_when_previous_token_cleaned_up():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)
-
-    # token present but not in _task_control — already cleaned up
-    s._active_tokens[rec.pipeline['project_id']] = 'tk_old'
-
-    with _patch_start_server_task() as start, time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
-        await _run_loop_once(s)
-        await _drain()
-
-    start.assert_awaited_once()
-    assert s._active_tokens[rec.pipeline['project_id']] == 'tk_new'
-
-
-@pytest.mark.asyncio
-async def test_dispatch_calls_start_server_task_and_stores_token():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with _patch_start_server_task(token='tk_abc') as start:
-        await s._start_task(rec.userId, rec.pipeline['project_id'])
-
-    start.assert_awaited_once_with(s._server, rec.userToken, rec.pipeline)
-    assert s._active_tokens[rec.pipeline['project_id']] == 'tk_abc'
-
-
-@pytest.mark.asyncio
-async def test_dispatch_survives_execute_failure():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with _patch_start_server_task(exc=RuntimeError('execute failed: boom')):
-        await s._start_task(rec.userId, rec.pipeline['project_id'])  # must not raise
-
-    assert rec.pipeline['project_id'] not in s._active_tokens
-
-
-@pytest.mark.asyncio
-async def test_dispatch_auth_failure_marks_errored_and_unschedules():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-    s.schedule(rec)
-
-    with _patch_start_server_task(exc=ServerTaskAuthError('bad token')):
-        await s._start_task(rec.userId, rec.pipeline['project_id'])
-
-    saved = await s._server.deployments.get(rec.userId, rec.pipeline['project_id'])
-    assert saved.state == 'errored'
-    assert rec.pipeline['project_id'] not in s._active_tokens
-    assert rec.pipeline['project_id'] not in s._tasks
-
-
-@pytest.mark.asyncio
-async def test_dispatch_skips_when_no_user_token():
-    s = _make_scheduler()
-    rec = make_record(userToken='')
-    await s._server.deployments.save(rec.userId, rec)
-
-    with _patch_start_server_task() as start:
-        await s._start_task(rec.userId, rec.pipeline['project_id'])
-
-    start.assert_not_awaited()
-    assert rec.pipeline['project_id'] not in s._active_tokens
-
-
-@pytest.mark.asyncio
-async def test_dispatch_noop_for_missing_deployment():
-    s = _make_scheduler()
-    with _patch_start_server_task() as start:
-        await s._start_task('user-1', 'nonexistent')
-    start.assert_not_awaited()
-    assert 'nonexistent' not in s._active_tokens
-
-
-# =============================================================================
-# _run loop — time-machine variant
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_future_task_not_dispatched_before_due_time():
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with _patch_start_server_task() as start, time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)  # next_run = 12:15:00, still future
-        await _run_loop_once(s)
-        await _drain()
-
-    start.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_task_dispatched_after_time_advances():
-    """The main value of time-machine: future task → advance clock → now due."""
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with _patch_start_server_task() as start:
-        with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-            s.schedule(rec)  # next_run = 12:15:00
-            await _run_loop_once(s)
-            await _drain()
-        start.assert_not_awaited()
-
-        with time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
-            await _run_loop_once(s)
-            await _drain()  # drain background dispatch task
-        start.assert_awaited_once()
-        assert s._active_tokens[rec.pipeline['project_id']] == 'tk_new'
-
-
-@pytest.mark.asyncio
-async def test_sleep_delay_matches_time_until_next_task():
-    """_run must request a sleep of ~10 s when the next task is 10 s away."""
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    sleep_calls: list[float] = []
-
-    # Frozen at :14:50 — next */15 tick is :15:00, exactly 10 s away.
-    with time_machine.travel(datetime(2026, 1, 1, 12, 14, 50), tick=False):
-        s.schedule(rec)
-
-        async def _capture(delay: float) -> None:
-            sleep_calls.append(delay)
-            raise asyncio.CancelledError()
-
-        with patch('asyncio.sleep', _capture), pytest.raises(asyncio.CancelledError):
-            await s._run()
-
-    assert sleep_calls == [pytest.approx(10.0, abs=0.01)]
-
-
-# =============================================================================
-# _run loop — robustness
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_run_survives_record_deleted_while_due():
-    """deploy_remove deletes the record from the store before calling unschedule;
-    a task due inside that window must not kill the scheduling loop.
-    """
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)
-
-    await s._server.deployments.delete(rec.userId, rec.pipeline['project_id'])
-
-    with _patch_start_server_task() as start, time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
-        await _run_loop_once(s)  # must not raise
-        await _drain()
-
-    # Dispatch aborted (record gone), but the loop stayed alive and rescheduled
-    # from the in-memory cron expression without touching the store.
-    start.assert_not_awaited()
-    assert rec.pipeline['project_id'] in s._tasks
-    assert rec.pipeline['project_id'] not in s._active_tokens
-
-
-@pytest.mark.asyncio
-async def test_run_survives_tick_error():
-    """An unexpected exception while processing one task is logged and skipped;
-    it must not propagate out of _run and stop scheduling for everyone.
-    """
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)
-
-    # Poison the overlap guard: the task-control lookup explodes.
-    s._active_tokens[rec.pipeline['project_id']] = 'tk_old'
-    s._server._task_control = MagicMock()
-    s._server._task_control.get.side_effect = RuntimeError('boom')
-
-    with _patch_start_server_task() as start, time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
-        await _run_loop_once(s)  # must not raise
-        await _drain()
-
-    start.assert_not_awaited()
-    # Rescheduling happens before the failing guard, so the deployment survives.
-    assert rec.pipeline['project_id'] in s._tasks
-
-
-# =============================================================================
-# Shutdown
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_shutdown_drains_inflight_starts():
-    """shutdown() must wait for task starts that already left the loop, not abandon them."""
-    s = _make_scheduler()
-    rec = make_record()
-    await s._server.deployments.save(rec.userId, rec)
-
-    release = asyncio.Event()
-
-    async def slow_start(server, user_token, pipeline):
-        await release.wait()
-        return 'tk_slow'
-
-    with time_machine.travel(datetime(2026, 1, 1, 12, 0, 0), tick=False):
-        s.schedule(rec)
-
-    with patch('ai.modules.task.task_scheduler.start_server_task', AsyncMock(side_effect=slow_start)):
-        with time_machine.travel(datetime(2026, 1, 1, 12, 16, 0), tick=False):
-            await _run_loop_once(s)
-            await _drain()
-        assert len(s._inflight_starts) == 1
-
-        shutdown = asyncio.create_task(s.shutdown())
-        await _drain()
-        assert not shutdown.done()  # blocked on the in-flight dispatch
-
-        release.set()
-        await asyncio.wait_for(shutdown, timeout=5)
-
-    assert s._inflight_starts == set()
-    assert s._active_tokens[rec.pipeline['project_id']] == 'tk_slow'
+    def test_sync_prunes_only_the_affected_sources_skip_count(self, scheduler, remaining_schedules):
+        """Removing or pausing one source prunes only its own skip count - a sibling source stays untouched."""
+        scheduler.sync(
+            'org-1',
+            _dep(
+                schedules={
+                    'src-1': {'cron': '* * * * *', 'paused': False},
+                    'src-2': {'cron': '* * * * *', 'paused': False},
+                }
+            ),
+        )
+        key1 = ('team-1', 'proj-1', 'src-1')
+        key2 = ('team-1', 'proj-1', 'src-2')
+        scheduler._skip_counts[key1] = 5
+        scheduler._skip_counts[key2] = 7
+
+        scheduler.sync('org-1', _dep(schedules=remaining_schedules))
+
+        assert key1 not in scheduler._skip_counts
+        assert scheduler._skip_counts[key2] == 7  # the blanket-wipe failure mode this guards against
+
+    @pytest.mark.parametrize('threshold', sched_mod._SKIP_WARN_THRESHOLDS)
+    def test_warns_at_threshold_not_before(self, scheduler, monkeypatch, threshold):
+        """A warning fires exactly at each configured threshold, never before it."""
+        warn = MagicMock()
+        monkeypatch.setattr(sched_mod, 'warning', warn)
+
+        # Seed one skip short of the threshold directly, rather than looping
+        # _note_skip from zero - a loop would cross any SMALLER threshold on
+        # the way (e.g. 3, on the way to 10), firing a warning that has
+        # nothing to do with the one under test here.
+        scheduler._skip_counts[self.KEY] = threshold - 2
+
+        scheduler._note_skip(self.KEY)  # count == threshold - 1
+        warn.assert_not_called()
+
+        scheduler._note_skip(self.KEY)  # count == threshold
+        warn.assert_called_once()
+        message = warn.call_args.args[0]
+        assert 'src-1' in message
+        assert str(threshold) in message
+
+    def test_no_repeat_warning_between_thresholds(self, scheduler, monkeypatch):
+        """No warning repeats on every skip between two thresholds."""
+        warn = MagicMock()
+        monkeypatch.setattr(sched_mod, 'warning', warn)
+
+        for _ in range(9):  # consecutive skips 1-9; next threshold is 10
+            scheduler._note_skip(self.KEY)
+        assert warn.call_count == 1  # only the 3rd skip warned
+
+    def test_dispatch_resets_the_counter(self, scheduler, monkeypatch):
+        """Resetting the counter (as a dispatch does) breaks a skip streak."""
+        warn = MagicMock()
+        monkeypatch.setattr(sched_mod, 'warning', warn)
+
+        scheduler._note_skip(self.KEY)
+        scheduler._note_skip(self.KEY)
+        # Mirrors the tick loop's reset line exactly: a tick that dispatches
+        # clears the counter before the next skip streak can accumulate.
+        scheduler._skip_counts.pop(self.KEY, None)
+
+        scheduler._note_skip(self.KEY)
+        scheduler._note_skip(self.KEY)
+        warn.assert_not_called()  # only 2 consecutive skips since the reset
+
+    @staticmethod
+    async def _run_one_tick(scheduler, monkeypatch):
+        """
+        Drive _run() itself through exactly one batch of due entries, with
+        no real waiting: _run()'s tick-processing is fully synchronous up to
+        its trailing `await asyncio.sleep(delay)`, so patching that one call
+        to raise immediately stops the loop right after the batch - no
+        restructuring of _run(), no real elapsed time, nothing timing-
+        dependent to flake.
+        """
+
+        async def _stop(_delay):
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(sched_mod.asyncio, 'sleep', _stop)
+        with pytest.raises(asyncio.CancelledError):
+            await scheduler._run()
+
+    @pytest.mark.asyncio
+    async def test_run_loop_increments_skip_count_on_skip(self, scheduler, account_stub, dispatch, monkeypatch):
+        """
+        Exercises the _note_skip call added inside _run() itself, not a
+        reimplementation of it.
+        """
+        entry = _entry(scheduler)
+        entry.next_run = time.time() - 1  # due now, no real wait
+
+        running = MagicMock()
+        running.task.is_task_complete.return_value = False
+        scheduler._active_tokens[entry.key] = 'tk_running'
+        scheduler._server._task_control['tk_running'] = running
+
+        await self._run_one_tick(scheduler, monkeypatch)
+
+        assert scheduler._skip_counts[entry.key] == 1
+        # The count alone doesn't prove a skip caused it. dispatch not being
+        # awaited plus _active_tokens left untouched (the dispatch branch's
+        # own distinguishing side effect, `_active_tokens[key] = _DISPATCHING`)
+        # together rule out the dispatch branch having run at all.
+        dispatch.assert_not_awaited()
+        assert scheduler._active_tokens[entry.key] == 'tk_running'
+
+    @pytest.mark.asyncio
+    async def test_run_loop_clears_skip_count_on_dispatch(self, scheduler, account_stub, dispatch, monkeypatch):
+        """
+        Exercises the reset pop added inside _run() itself, not a
+        reimplementation of it.
+        """
+        entry = _entry(scheduler)
+        entry.next_run = time.time() - 1  # due now, no real wait
+        scheduler._skip_counts[entry.key] = 5  # a prior skip streak
+
+        await self._run_one_tick(scheduler, monkeypatch)
+
+        assert entry.key not in scheduler._skip_counts
+        # Let the dispatch task this tick created finish before the test ends.
+        await asyncio.gather(*scheduler._inflight_starts, return_exceptions=True)
+        # The count being gone isn't enough on its own - a change that cleared
+        # counters without dispatching would pass that alone. Pin that a
+        # dispatch is what happened, not merely that the count is absent.
+        dispatch.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_skip_and_dispatch_decisions_are_unchanged(self, scheduler, account_stub, dispatch):
+        """
+        The fix must be purely additive: the same ticks skip and the same
+        ticks dispatch, with or without it. This drives the pre-existing
+        tick-loop decision (_is_previous_run_active -> skip, else
+        _start_run -> dispatch) over a short sequence and pins the exact
+        outcome. It references no symbol this change added, so it must
+        pass against unmodified source too — that is what proves additive.
+        """
+        entry = _entry(scheduler)
+        decisions = []
+
+        async def _tick():
+            if scheduler._is_previous_run_active(entry.key):
+                decisions.append('skip')
+            else:
+                await scheduler._start_run(entry)
+                decisions.append('dispatch')
+
+        await _tick()  # nothing active yet -> dispatch
+
+        running = MagicMock()
+        running.task.is_task_complete.return_value = False
+        scheduler._server._task_control['tk_dispatched'] = running
+
+        await _tick()  # previous run still going -> skip
+        await _tick()  # still going -> skip
+
+        running.task.is_task_complete.return_value = True
+
+        await _tick()  # previous run finished -> guard reopens -> dispatch
+
+        assert decisions == ['dispatch', 'skip', 'skip', 'dispatch']
+        assert dispatch.await_count == 2

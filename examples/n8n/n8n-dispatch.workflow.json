@@ -1,0 +1,48 @@
+{
+	"name": "RocketRide dispatcher (reach a non-webhook workflow)",
+	"nodes": [
+		{
+			"parameters": {
+				"httpMethod": "POST",
+				"path": "my-dispatch",
+				"responseMode": "responseNode",
+				"options": {}
+			},
+			"id": "bb000000-0000-4000-8000-000000000001",
+			"name": "Webhook",
+			"type": "n8n-nodes-base.webhook",
+			"typeVersion": 2,
+			"position": [0, 0],
+			"webhookId": "bb000000-0000-4000-8000-000000000001"
+		},
+		{
+			"parameters": {
+				"source": "database",
+				"workflowId": { "__rl": true, "value": "PASTE_TARGET_WORKFLOW_ID", "mode": "id" },
+				"options": {}
+			},
+			"id": "bb000000-0000-4000-8000-000000000002",
+			"name": "Execute Workflow",
+			"type": "n8n-nodes-base.executeWorkflow",
+			"typeVersion": 1.1,
+			"position": [220, 0]
+		},
+		{
+			"parameters": {
+				"respondWith": "json",
+				"responseBody": "={{ JSON.stringify($json) }}",
+				"options": {}
+			},
+			"id": "bb000000-0000-4000-8000-000000000003",
+			"name": "Respond to Webhook",
+			"type": "n8n-nodes-base.respondToWebhook",
+			"typeVersion": 1.1,
+			"position": [440, 0]
+		}
+	],
+	"connections": {
+		"Webhook": { "main": [[{ "node": "Execute Workflow", "type": "main", "index": 0 }]] },
+		"Execute Workflow": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+	},
+	"settings": {}
+}

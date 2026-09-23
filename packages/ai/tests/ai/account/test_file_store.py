@@ -15,6 +15,7 @@ import shutil
 
 from ai.account.store import Store, StorageError
 from ai.account.file_store import FileStore, DIR_MARKER
+from ai.account.models import RequestContext
 from ai.account.store_providers.filesystem import FilesystemStore
 
 
@@ -39,21 +40,25 @@ def istore(temp_dir):
 
 
 @pytest.fixture
-def fs(istore):
-    """Create a FileStore for test-user-1."""
-    return FileStore(istore, 'test-user-1')
-
-
-@pytest.fixture
-def fs2(istore):
-    """Create a FileStore for test-user-2 (isolation tests)."""
-    return FileStore(istore, 'test-user-2')
-
-
-@pytest.fixture
 def store(istore):
-    """Create a Store wrapper (for get_file_store tests)."""
+    """Create a Store wrapper (owner of the shared registries)."""
     return Store(istore)
+
+
+@pytest.fixture
+def fs(store):
+    """Create a FileStore for test-user-1.
+
+    Internal identity: these suites pin the I/O and path semantics that
+    predate authorization; the permission matrix lives in test_store_auth.py.
+    """
+    return FileStore(store, 'test-user-1', RequestContext.internal('test'))
+
+
+@pytest.fixture
+def fs2(store):
+    """Create a FileStore for test-user-2 (isolation tests)."""
+    return FileStore(store, 'test-user-2', RequestContext.internal('test'))
 
 
 # ============================================================================
@@ -64,25 +69,34 @@ def store(istore):
 class TestFileStoreInit:
     """Test FileStore initialization."""
 
-    def test_requires_client_id(self, istore):
+    def test_requires_client_id(self, store):
         """FileStore requires a non-empty client_id."""
         with pytest.raises(ValueError, match='client_id is required'):
-            FileStore(istore, '')
+            FileStore(store, '', RequestContext.internal('test'))
 
-    def test_creates_with_valid_client_id(self, istore):
+    def test_creates_with_valid_client_id(self, store):
         """FileStore creates successfully with a valid client_id."""
-        fs = FileStore(istore, 'user-123')
+        fs = FileStore(store, 'user-123', RequestContext.internal('test'))
         assert fs._client_id == 'user-123'
 
-    def test_rejects_client_id_with_slash(self, istore):
+    def test_rejects_client_id_with_slash(self, store):
         """client_id with path separators is rejected."""
         with pytest.raises(ValueError, match='path separators'):
-            FileStore(istore, 'user/evil')
+            FileStore(store, 'user/evil', RequestContext.internal('test'))
 
-    def test_rejects_client_id_dotdot(self, istore):
+    def test_rejects_client_id_dotdot(self, store):
         """client_id of '..' is rejected."""
         with pytest.raises(ValueError, match=r'\.\.'):
-            FileStore(istore, '..')
+            FileStore(store, '..', RequestContext.internal('test'))
+
+    def test_requires_request_context(self, store):
+        """Omitting or mistyping the ctx is a TypeError — never an
+        unauthorized-by-accident store.
+        """
+        with pytest.raises(TypeError):
+            FileStore(store, 'user-123')  # auth deliberately omitted
+        with pytest.raises(TypeError, match='RequestContext'):
+            FileStore(store, 'user-123', 'not-an-auth')
 
 
 # ============================================================================
@@ -90,25 +104,30 @@ class TestFileStoreInit:
 # ============================================================================
 
 
-class TestGetFileStore:
-    """Test Store.get_file_store() factory method."""
+class TestFileStoreFactory:
+    """Test Store.file_store() factory method."""
 
     def test_returns_file_store(self, store):
-        """get_file_store returns a FileStore instance."""
-        fs = store.get_file_store('user-123')
+        """file_store returns a FileStore instance."""
+        fs = store._file_store(RequestContext.internal('test'), client_id='user-123')
         assert isinstance(fs, FileStore)
 
-    def test_caches_per_client_id(self, store):
-        """get_file_store returns the same instance for the same client_id."""
-        fs1 = store.get_file_store('user-123')
-        fs2 = store.get_file_store('user-123')
-        assert fs1 is fs2
-
-    def test_different_client_ids(self, store):
-        """get_file_store returns different instances for different client_ids."""
-        fs1 = store.get_file_store('user-1')
-        fs2 = store.get_file_store('user-2')
+    def test_instances_are_not_cached(self, store):
+        """Identity is bound per instance, so instances are never cached —
+        two calls yield two wrappers over the SAME shared registries.
+        """
+        fs1 = store._file_store(RequestContext.internal('test'), client_id='user-123')
+        fs2 = store._file_store(RequestContext.internal('test'), client_id='user-123')
         assert fs1 is not fs2
+        assert fs1._handles is fs2._handles
+        assert fs1._write_locks is fs2._write_locks
+
+    def test_different_client_ids_share_registries(self, store):
+        """Different users' instances still coordinate on one registry."""
+        fs1 = store._file_store(RequestContext.internal('test'), client_id='user-1')
+        fs2 = store._file_store(RequestContext.internal('test'), client_id='user-2')
+        assert fs1 is not fs2
+        assert fs1._write_locks is fs2._write_locks
 
 
 # ============================================================================
@@ -391,7 +410,7 @@ class TestHandleIO:
     @pytest.mark.asyncio
     async def test_write_chunks_and_read(self, fs):
         """Write multiple chunks via handle, then read back."""
-        handle_id = await fs.open_write('chunked.bin', connection_id=1)
+        handle_id = await fs.open_write('chunked.bin')
         await fs.write_chunk(handle_id, b'part-1-')
         await fs.write_chunk(handle_id, b'part-2-')
         await fs.write_chunk(handle_id, b'part-3')
@@ -405,7 +424,7 @@ class TestHandleIO:
         """Read a file in chunks via handle with explicit offsets."""
         await fs.write('big.bin', b'A' * 100)
 
-        info = await fs.open_read('big.bin', connection_id=1)
+        info = await fs.open_read('big.bin')
         assert info['size'] == 100
 
         chunk = await fs.read_chunk(info['handle'], offset=0, length=40)
@@ -423,33 +442,36 @@ class TestHandleIO:
         await fs.close_read(info['handle'])
 
     @pytest.mark.asyncio
-    async def test_write_lock(self, fs):
-        """Cannot open the same file for writing twice."""
-        handle_id = await fs.open_write('locked.bin', connection_id=1)
+    async def test_write_lock(self, fs, store):
+        """Cannot open the same file for writing twice — even from another
+        connection's view (the lock registry is store-wide).
+        """
+        other = FileStore(store, 'test-user-1', RequestContext.internal('conn2'))
+        handle_id = await fs.open_write('locked.bin')
 
         with pytest.raises(StorageError, match='already open for writing'):
-            await fs.open_write('locked.bin', connection_id=2)
+            await other.open_write('locked.bin')
 
         await fs.close_write(handle_id)
 
         # After close, can open again
-        handle_id2 = await fs.open_write('locked.bin', connection_id=2)
-        await fs.close_write(handle_id2)
+        handle_id2 = await other.open_write('locked.bin')
+        await other.close_write(handle_id2)
 
     @pytest.mark.asyncio
     async def test_close_all_handles(self, fs):
-        """close_all_handles commits data and releases locks."""
-        handle_id = await fs.open_write('orphan.bin', connection_id=99)
+        """close_all_handles() commits this connection's data and releases locks."""
+        handle_id = await fs.open_write('orphan.bin')
         await fs.write_chunk(handle_id, b'orphan-data')
 
-        await fs.close_all_handles(connection_id=99)
+        await fs.close_all_handles()
 
         # Data should be committed
         data = await fs.read('orphan.bin')
         assert data == b'orphan-data'
 
         # Lock should be released
-        handle_id2 = await fs.open_write('orphan.bin', connection_id=1)
+        handle_id2 = await fs.open_write('orphan.bin')
         await fs.close_write(handle_id2)
 
     @pytest.mark.asyncio
@@ -465,7 +487,7 @@ class TestHandleIO:
     async def test_wrong_mode(self, fs):
         """Using a read handle for writing (or vice versa) raises StorageError."""
         await fs.write('mode-test.bin', b'data')
-        info = await fs.open_read('mode-test.bin', connection_id=1)
+        info = await fs.open_read('mode-test.bin')
 
         with pytest.raises(StorageError, match='Wrong handle mode'):
             await fs.write_chunk(info['handle'], b'nope')
@@ -501,23 +523,23 @@ class TestRmdirGuards:
     @pytest.mark.asyncio
     async def test_rmdir_refuses_when_writer_open(self, fs):
         """Open writer under the prefix must block rmdir."""
-        handle_id = await fs.open_write('project/data.bin', connection_id=1)
+        handle_id = await fs.open_write('project/data.bin')
         try:
             with pytest.raises(StorageError, match='open for writing'):
                 await fs.rmdir('project', recursive=True)
         finally:
-            await fs.close_write(handle_id, connection_id=1)
+            await fs.close_write(handle_id)
 
     @pytest.mark.asyncio
     async def test_rmdir_refuses_when_reader_open(self, fs):
         """Open reader under the prefix must block rmdir."""
         await fs.write('project/data.bin', b'x')
-        info = await fs.open_read('project/data.bin', connection_id=1)
+        info = await fs.open_read('project/data.bin')
         try:
             with pytest.raises(StorageError, match='handle open under'):
                 await fs.rmdir('project', recursive=True)
         finally:
-            await fs.close_read(info['handle'], connection_id=1)
+            await fs.close_read(info['handle'])
 
 
 class TestRenameGuards:
@@ -564,34 +586,34 @@ class TestRenameGuards:
     @pytest.mark.asyncio
     async def test_rename_file_refuses_when_source_open(self, fs):
         """Refuse rename if the source file is open for writing."""
-        handle_id = await fs.open_write('src.bin', connection_id=1)
+        handle_id = await fs.open_write('src.bin')
         try:
             with pytest.raises(StorageError, match='open for writing'):
                 await fs.rename('src.bin', 'dest.bin')
         finally:
-            await fs.close_write(handle_id, connection_id=1)
+            await fs.close_write(handle_id)
 
     @pytest.mark.asyncio
     async def test_rename_file_refuses_when_destination_locked(self, fs):
         """Refuse rename if the destination file is open for writing."""
         await fs.write('src.bin', b'source')
-        handle_id = await fs.open_write('dest.bin', connection_id=1)
+        handle_id = await fs.open_write('dest.bin')
         try:
             with pytest.raises(StorageError, match='open for writing'):
                 await fs.rename('src.bin', 'dest.bin', overwrite=True)
         finally:
-            await fs.close_write(handle_id, connection_id=1)
+            await fs.close_write(handle_id)
 
     @pytest.mark.asyncio
     async def test_rename_dir_refuses_when_subtree_writer_open(self, fs):
         """Directory rename refuses if any file under the source prefix is open."""
         await fs.write('src_dir/a.bin', b'a')
-        handle_id = await fs.open_write('src_dir/b.bin', connection_id=1)
+        handle_id = await fs.open_write('src_dir/b.bin')
         try:
             with pytest.raises(StorageError, match='open for writing'):
                 await fs.rename('src_dir', 'dest_dir')
         finally:
-            await fs.close_write(handle_id, connection_id=1)
+            await fs.close_write(handle_id)
 
 
 class TestHandleCap:
@@ -599,30 +621,35 @@ class TestHandleCap:
 
     @pytest.mark.asyncio
     async def test_write_handle_cap_enforced(self, fs):
-        """Opening beyond the cap on a real connection_id raises StorageError."""
+        """Opening beyond the cap on an owned connection raises StorageError."""
         from ai.account.file_store import MAX_HANDLES_PER_CONNECTION
 
         handles = []
         for i in range(MAX_HANDLES_PER_CONNECTION):
-            handles.append(await fs.open_write(f'file-{i}.bin', connection_id=7))
+            handles.append(await fs.open_write(f'file-{i}.bin'))
 
         with pytest.raises(StorageError, match='Too many open handles'):
-            await fs.open_write('overflow.bin', connection_id=7)
+            await fs.open_write('overflow.bin')
 
         # Cleanup
         for h in handles:
-            await fs.close_write(h, connection_id=7)
+            await fs.close_write(h)
 
     @pytest.mark.asyncio
-    async def test_handle_cap_not_enforced_for_connection_zero(self, fs):
-        """connection_id=0 ('unowned', used by tests) bypasses the cap."""
+    async def test_handle_cap_not_enforced_for_unowned_context(self, store):
+        """A ctx without a conn_id ('' = unowned) bypasses the cap."""
         from ai.account.file_store import MAX_HANDLES_PER_CONNECTION
 
+        # RequestContext with no account is unauthenticated for user auth —
+        # use an internal identity with an empty conn_id instead.
+        ctx = RequestContext.internal('cap')
+        ctx.conn_id = ''
+        unowned = FileStore(store, 'test-user-1', ctx)
         handles = []
-        for i in range(MAX_HANDLES_PER_CONNECTION + 5):
-            handles.append(await fs.open_write(f'nocap-{i}.bin', connection_id=0))
+        for i in range(MAX_HANDLES_PER_CONNECTION + 2):
+            handles.append(await unowned.open_write(f'nocap-{i}.bin'))
         for h in handles:
-            await fs.close_write(h)
+            await unowned.close_write(h)
 
 
 class TestPathValidationColon:

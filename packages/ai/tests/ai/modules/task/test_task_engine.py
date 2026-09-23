@@ -13,8 +13,7 @@ Focus areas:
 - ``_file_checksum`` — SHA-256 of a real temp file
 - ``_is_debugging`` / ``_get_attach_subprocesses`` — sys.modules probes
 - ``is_task_complete`` / ``is_attached`` / ``has_attached_debugger`` /
-  ``get_connection_count`` / ``is_debug_available`` / ``get_status`` —
-  accessors
+  ``get_connection_count`` / ``get_status`` — accessors
 - ``reset_idle_timer`` / ``send_scheduled_updates`` — state setters
 
 Two methods are already exercised by separate, security-focused tests:
@@ -33,7 +32,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai.modules.task.task_engine import Task
+from ai.constants import CONST_STATUS_HISTORY_LIMIT
+from ai.modules.task.task_engine import CONST_TRACE_PAYLOAD_CAP, CONST_TRACE_PREVIEW_BYTES, Task, cap_trace_payload
 
 
 # ---------------------------------------------------------------------------
@@ -62,18 +62,29 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t = Task.__new__(Task)
     t.id = 'task-test'
     t.token = 'tk_test'
+    t.client_id = 'user-1'
+    t.team_id = 'team-1'
+    t.org_id = 'org-1'
     t.source = source
+    # Real tasks always carry their project id; _forward_task_event stamps
+    # it into every forwarded body (identity safety net).
+    t.project_id = 'proj-test'
     t._task_name = task_name
     t._pipeline = pipeline if pipeline is not None else {}
     t._threads = 4
     t._pipelineTraceLevel = None
+    t._run_kind = 'dev'
+    t._owner_kind = 'user'
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
-    t._debug_port = None
     t._idle_time = 5
     t._status_updated = False
     t.public_auth = 'pk_test'
     t.info = {}
+    # Run-log continuum state consulted by _forward_task_event's stamping
+    # safety net (see Task.stamp_log_event): fresh-stream counter + no writer.
+    t._log_seq_next = 1
+    t._run_log = None
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
@@ -183,6 +194,55 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
         'components': [{'id': 'src'}],
     }
     assert config['config']['keystore'] == 'kvsfile://data/keystore.json'
+    # Trusted identity travels IN THE TASK FILE (never the environment).
+    assert config['identity'] == {'userId': 'user-1', 'teamId': 'team-1', 'orgId': 'org-1'}
+    # Dev runs anchor node storage at the owner's whole tree.
+    assert config['storage'] == {'root': 'users/user-1/files'}
+
+
+def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
+    """Deploy runs anchor node storage at a task-specific TEAM subtree —
+    no user dependency, and concurrent deployments never share storage.
+    """
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    pipeline = {'source': 'src', 'components': []}
+    t = _task(pipeline=pipeline)
+    t._run_kind = 'deploy'
+    t._owner_kind = 'team'
+    config = Task._build_task(t, pipeline)
+    assert config['storage'] == {'root': 'teams/team-1/files/tasks/proj-test'}
+
+
+def test_build_task_deploy_without_team_refuses(monkeypatch, tmp_path):
+    """A deploy run with no team has no valid anchor — fail loudly."""
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    t = _task(pipeline={'components': []})
+    t._run_kind = 'deploy'
+    t._owner_kind = 'team'
+    t.team_id = ''
+    with pytest.raises(ValueError, match='team_id'):
+        Task._build_task(t, {'components': []})
+
+
+def test_build_task_dev_without_client_gets_no_anchor(monkeypatch, tmp_path):
+    """An anonymous dev run (client_id='' — OSS/standalone launch) carries NO
+    anchor rather than failing the launch: identity.userId rides empty too,
+    so the subprocess's engine_file_store() yields None and the storage
+    tools disable themselves. The pin: the shared 'users//files' prefix must
+    never be composed as an anchor.
+    """
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    pipeline = {'source': 'src', 'components': []}
+    t = _task(pipeline=pipeline)
+    t.client_id = ''
+    config = Task._build_task(t, pipeline)
+    assert config['storage'] == {'root': ''}
 
 
 def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):
@@ -340,14 +400,6 @@ def test_get_connection_count_is_zero_or_one():
     assert Task.get_connection_count(t) == 1
 
 
-def test_is_debug_available_requires_debug_port():
-    """is_debug_available is True iff ``_debug_port`` is non-None."""
-    t = _task()
-    assert Task.is_debug_available(t) is False
-    t._debug_port = 5566
-    assert Task.is_debug_available(t) is True
-
-
 def test_get_status_returns_the_status_object():
     """get_status returns the same TASK_STATUS instance that was attached."""
     status = SimpleNamespace(state=3)
@@ -470,10 +522,10 @@ def test_update_status_error_event_appends_to_errors():
     assert t._status.errors == ['disk full']
 
 
-def test_update_status_errors_buffer_trims_to_50():
-    """Error buffer keeps only the most recent 50 entries."""
+def test_update_status_errors_buffer_trims_to_limit():
+    """Error buffer keeps only the most recent CONST_STATUS_HISTORY_LIMIT entries."""
     t = _task(status=_make_status_for_update())
-    t._status.errors = [f'err-{i}' for i in range(50)]
+    t._status.errors = [f'err-{i}' for i in range(CONST_STATUS_HISTORY_LIMIT)]
     Task._update_status(
         t,
         {
@@ -481,13 +533,13 @@ def test_update_status_errors_buffer_trims_to_50():
             'body': {'message': 'err-new'},
         },
     )
-    assert len(t._status.errors) == 50
+    assert len(t._status.errors) == CONST_STATUS_HISTORY_LIMIT
     assert t._status.errors[-1] == 'err-new'
     assert 'err-0' not in t._status.errors  # oldest evicted
 
 
-def test_update_status_warning_event_appends_and_trims():
-    """An ``apaevt_status_warning`` event appends to warnings with the same 50-cap."""
+def test_update_status_warning_event_appends_to_warnings():
+    """An ``apaevt_status_warning`` event appends to ``status.warnings``."""
     t = _task(status=_make_status_for_update())
     Task._update_status(
         t,
@@ -497,6 +549,22 @@ def test_update_status_warning_event_appends_and_trims():
         },
     )
     assert t._status.warnings == ['memory pressure']
+
+
+def test_update_status_warnings_buffer_trims_to_limit():
+    """Warning buffer keeps only the most recent CONST_STATUS_HISTORY_LIMIT entries."""
+    t = _task(status=_make_status_for_update())
+    t._status.warnings = [f'warn-{i}' for i in range(CONST_STATUS_HISTORY_LIMIT)]
+    Task._update_status(
+        t,
+        {
+            'event': 'apaevt_status_warning',
+            'body': {'message': 'warn-new'},
+        },
+    )
+    assert len(t._status.warnings) == CONST_STATUS_HISTORY_LIMIT
+    assert t._status.warnings[-1] == 'warn-new'
+    assert 'warn-0' not in t._status.warnings  # oldest evicted
 
 
 def test_update_status_download_event_sets_status_string():
@@ -676,3 +744,618 @@ async def test_forward_task_event_debugger_swallows_send_failure():
 
     # Should not raise.
     await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
+
+
+# ---------------------------------------------------------------------------
+# _pipeline_uses_rocketride_db
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_uses_rocketride_db_detects_each_provider():
+    """Any of the three RocketRide cloud DB providers triggers DSN injection."""
+    for provider in ('rocketride_sql', 'rocketride_vector', 'rocketride_graph'):
+        t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]})
+        assert Task._pipeline_uses_rocketride_db(t), provider
+
+
+def test_pipeline_uses_rocketride_db_false_without_db_nodes():
+    """Ordinary pipelines never trigger provisioning."""
+    t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': 'db_postgres'}]})
+    assert not Task._pipeline_uses_rocketride_db(t)
+
+
+def test_pipeline_uses_rocketride_db_tolerates_malformed_components():
+    """Missing components / non-dict entries must not raise at task start."""
+    assert not Task._pipeline_uses_rocketride_db(_task(pipeline={}))
+    t = _task(pipeline={'components': ['not-a-dict', {'no-provider': True}]})
+    assert not Task._pipeline_uses_rocketride_db(t)
+
+
+# ---------------------------------------------------------------------------
+# _build_subprocess_env — RocketRide DB credential hygiene
+# ---------------------------------------------------------------------------
+
+_DB_PIPELINE = {'components': [{'id': 'db', 'provider': 'rocketride_sql'}]}
+
+
+def _env_task(pipeline=None):
+    t = _task(pipeline=pipeline if pipeline is not None else {})
+    t.client_id = 'client-env-test'
+    return t
+
+
+def _patch_resolve(monkeypatch, fake):
+    import ai.account
+
+    monkeypatch.setattr(ai.account.account, 'resolve_db_dsn', fake)
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_scrubs_broker_credentials(monkeypatch):
+    """The broker credential can mint ANY tenant's DSN — it must never reach
+    node subprocesses, and neither may a parent-level DSN or stale error.
+    """
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'https://broker.example')
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'super-secret')
+    monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/db')
+    monkeypatch.setenv('ROCKETRIDE_DB_RESOLVE_ERROR', 'stale reason')
+
+    env = await Task._build_subprocess_env(_env_task())  # no DB nodes
+
+    assert 'ROCKETRIDE_DB_BROKER_URL' not in env
+    assert 'ROCKETRIDE_DB_BROKER_TOKEN' not in env
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+    # Identity rides the task file (#1686), never the environment.
+    assert 'ROCKETRIDE_CLIENT_ID' not in env
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_injects_resolved_dsn(monkeypatch):
+    # Capture the tenant OUTSIDE the stub and assert after: _build_subprocess_env
+    # converts resolver exceptions into ROCKETRIDE_DB_RESOLVE_ERROR, so an
+    # AssertionError raised inside fake_resolve would be swallowed and surface
+    # as a missing DSN key here instead of the real tenant mismatch.
+    seen = {}
+
+    async def fake_resolve(tenant_id):
+        # The tenant is the ORG (B6) — the user is only the OSS fallback.
+        seen['tenant'] = tenant_id
+        return 'postgresql://tenant@pooler/db?sslmode=require'
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
+    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db?sslmode=require'
+    assert seen['tenant'] == 'org-1'
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_dsn_tenant_is_the_org(monkeypatch):
+    """The DB tenant is the ORG, not the user: a deploy run (client_id='')
+    still resolves, and an org switch cannot silently re-point a user's DB
+    nodes at another database.
+    """
+    seen = {}
+
+    async def fake_resolve(tenant_id):
+        seen['tenant'] = tenant_id
+        return 'postgresql://tenant@pooler/db'
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    # A deploy-shaped task: no client identity at all, org present.
+    t = _env_task(pipeline=_DB_PIPELINE)
+    t.client_id = ''
+    env = await Task._build_subprocess_env(t)
+    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db'
+    assert seen['tenant'] == 'org-1'
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_dsn_falls_back_to_client_without_an_org(monkeypatch):
+    """OSS/single-user (no org concept): the user stays the tenant."""
+    seen = {}
+
+    async def fake_resolve(tenant_id):
+        seen['tenant'] = tenant_id
+        return 'postgresql://tenant@pooler/db'
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    t = _env_task(pipeline=_DB_PIPELINE)
+    t.org_id = ''
+    await Task._build_subprocess_env(t)
+    assert seen['tenant'] == 'client-env-test'
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_stale_dsn_does_not_survive_broker_failure(monkeypatch):
+    """A parent-env DSN must not become the node's DSN when resolution fails —
+    it could point at another tenant. The failure reason is passed down instead.
+    """
+    monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/other-tenant')
+
+    async def fake_resolve(client_id):
+        raise RuntimeError('DB broker request failed: HTTP 503')
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    t = _env_task(pipeline=_DB_PIPELINE)
+    env = await Task._build_subprocess_env(t)
+
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == 'DB broker request failed: HTTP 503'
+    t.debug_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_unconfigured_account_is_nonfatal(monkeypatch):
+    async def fake_resolve(client_id):
+        raise NotImplementedError('sign in')
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+
+
+# ---------------------------------------------------------------------------
+# _accumulate_analytics — run analytics in the status body
+# ---------------------------------------------------------------------------
+
+
+def _analytics_task():
+    """A task with a REAL status model and fresh analytics state."""
+    from rocketride import TASK_STATUS
+
+    t = _task(status=TASK_STATUS())
+    t._an_open_by_pipe = {}
+    t._an_component_open = {}
+    t._an_idle_total = 0.0
+    t._an_idle_longest = 0.0
+    t._an_idle_longest_at = 0.0
+    t._an_idle_since = 0.0
+    return t
+
+
+def test_analytics_interleaved_pipes_correlate_by_pipe():
+    """
+    The pipe id is the correlation key: BEGIN[parse]:0, BEGIN[parse]:32,
+    END[parse]:0, END[parse]:32 must yield two DISTINCT durations — a
+    component-keyed accumulator would clobber pipe 0's begin with pipe 32's.
+    """
+    t = _analytics_task()
+    t0 = 1_000.0
+
+    Task._accumulate_analytics(t, 'begin', 0, 'parse', ['a.txt'], {'eventTime': t0, 'logSeq': 100})
+    Task._accumulate_analytics(t, 'begin', 32, 'parse', ['b.txt'], {'eventTime': t0 + 0.5, 'logSeq': 101})
+    Task._accumulate_analytics(t, 'end', 0, 'parse', ['a.txt'], {'eventTime': t0 + 1.0})
+    Task._accumulate_analytics(t, 'end', 32, 'parse', ['b.txt'], {'eventTime': t0 + 3.0})
+
+    docs = t._status.slowestDocs
+    assert [(d.name, d.elapsed, d.beginSeq) for d in docs] == [('b.txt', 2.5, 101), ('a.txt', 1.0, 100)]
+    assert t._status.completionSeconds == 3.5
+    # Correlation state fully consumed.
+    assert t._an_open_by_pipe == {}
+
+
+def test_analytics_component_stats_key_by_pipe_and_reenter():
+    """Enter/leave pairs interleave across pipes and reenter within one."""
+    t = _analytics_task()
+    t0 = 2_000.0
+
+    # Interleaved across pipes: each leave must pair with ITS pipe's enter.
+    Task._accumulate_analytics(t, 'enter', 0, 'parse', [], {'eventTime': t0})
+    Task._accumulate_analytics(t, 'enter', 32, 'parse', [], {'eventTime': t0 + 1.0})
+    Task._accumulate_analytics(t, 'leave', 0, 'parse', [], {'eventTime': t0 + 2.0})
+    Task._accumulate_analytics(t, 'leave', 32, 'parse', [], {'eventTime': t0 + 2.5})
+
+    stat = t._status.componentStats['parse']
+    assert stat.calls == 2
+    assert stat.totalSeconds == 3.5  # 2.0 + 1.5
+    assert stat.maxSeconds == 2.0
+
+    # Reentrancy within ONE pipe: LIFO within the (pipe, component) stack.
+    Task._accumulate_analytics(t, 'enter', 0, 'llm', [], {'eventTime': t0})
+    Task._accumulate_analytics(t, 'enter', 0, 'llm', [], {'eventTime': t0 + 1.0})
+    Task._accumulate_analytics(t, 'leave', 0, 'llm', [], {'eventTime': t0 + 1.5})
+    Task._accumulate_analytics(t, 'leave', 0, 'llm', [], {'eventTime': t0 + 4.0})
+    llm = t._status.componentStats['llm']
+    assert llm.calls == 2
+    assert llm.totalSeconds == 4.5  # inner 0.5 + outer 4.0
+    assert llm.maxSeconds == 4.0
+
+
+def test_analytics_slowest_list_bounded_and_sorted():
+    """The slowest list keeps the configured cap, slowest first."""
+    from ai.constants import CONST_ANALYTICS_SLOWEST_DOCS
+
+    t = _analytics_task()
+    for i in range(CONST_ANALYTICS_SLOWEST_DOCS + 5):
+        Task._accumulate_analytics(t, 'begin', i, 'p', [f'doc-{i}'], {'eventTime': 100.0, 'logSeq': i})
+        Task._accumulate_analytics(t, 'end', i, 'p', [], {'eventTime': 100.0 + float(i + 1)})
+
+    docs = t._status.slowestDocs
+    assert len(docs) == CONST_ANALYTICS_SLOWEST_DOCS
+    elapsed = [d.elapsed for d in docs]
+    assert elapsed == sorted(elapsed, reverse=True)
+    # The fastest completions fell off the bounded list.
+    assert min(elapsed) > 1.0
+
+
+def test_analytics_reset_clears_state():
+    """_reset_status clears analytics fields AND correlation state."""
+    t = _analytics_task()
+    t._status_trace = []
+    t.info = {}
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['x'], {'eventTime': 1.0, 'logSeq': 1})
+    Task._accumulate_analytics(t, 'enter', 0, 'p', [], {'eventTime': 1.0})
+    Task._accumulate_analytics(t, 'leave', 0, 'p', [], {'eventTime': 2.0})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 3.0})
+    assert t._status.componentStats and t._status.slowestDocs
+
+    Task._reset_status(t)
+    assert t._status.componentStats == {}
+    assert t._status.slowestDocs == []
+    assert t._status.completionSeconds == 0.0
+    assert t._an_open_by_pipe == {} and t._an_component_open == {}
+
+
+def test_analytics_idle_between_completions():
+    """
+    Pipe-unused time: quiet stretches BETWEEN completions accumulate (total
+    + longest + when the longest began); overlapping completions never
+    count as quiet. All published numbers are server-computed.
+    """
+    t = _analytics_task()
+    t0 = 3_000.0
+
+    # First completion — nothing before it counts (never went quiet).
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': t0, 'logSeq': 1})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 1.0})
+    assert t._an_idle_since == t0 + 1.0
+    assert t._status.idleSeconds == 0.0
+
+    # 4s quiet closes at the next begin; the marker clears while busy. The
+    # longest stretch remembers WHEN it began.
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': t0 + 5.0, 'logSeq': 2})
+    assert t._status.idleSeconds == 4.0
+    assert t._status.idleLongestSeconds == 4.0
+    assert t._status.idleLongestAt == t0 + 1.0
+    assert t._an_idle_since == 0.0
+
+    # Overlap: pipe 1 begins before pipe 0 ends — no quiet in between.
+    Task._accumulate_analytics(t, 'begin', 1, 'p', ['c'], {'eventTime': t0 + 6.0, 'logSeq': 3})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 7.0})
+    assert t._an_idle_since == 0.0  # pipe 1 still busy
+    Task._accumulate_analytics(t, 'end', 1, 'p', [], {'eventTime': t0 + 8.0})
+    assert t._an_idle_since == t0 + 8.0
+
+    # A shorter 1s gap grows the total but not the longest (or its stamp).
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['d'], {'eventTime': t0 + 9.0, 'logSeq': 4})
+    assert t._status.idleSeconds == 5.0
+    assert t._status.idleLongestSeconds == 4.0
+    assert t._status.idleLongestAt == t0 + 1.0
+
+
+def test_analytics_idle_refresh_extends_open_stretch():
+    """
+    The periodic publish path folds the STILL-OPEN quiet stretch into the
+    status: total grows, and once the open stretch beats the recorded
+    longest it becomes the longest — with ITS start as the stamp. Trace
+    events never arrive during silence, so this is what keeps a quiet
+    pipe's numbers current.
+    """
+    t = _analytics_task()
+    t0 = 4_000.0
+
+    # One closed 2s gap, then quiet from t0+5.
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': t0, 'logSeq': 1})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 1.0})
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': t0 + 3.0, 'logSeq': 2})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 5.0})
+
+    # 1s into the silence: total extends, closed 2s gap is still longest.
+    Task._refresh_idle_status(t, t0 + 6.0)
+    assert t._status.idleSeconds == 3.0
+    assert t._status.idleLongestSeconds == 2.0
+    assert t._status.idleLongestAt == t0 + 1.0
+
+    # 10s in: the open stretch is now the longest, stamped at ITS start.
+    Task._refresh_idle_status(t, t0 + 15.0)
+    assert t._status.idleSeconds == 12.0
+    assert t._status.idleLongestSeconds == 10.0
+    assert t._status.idleLongestAt == t0 + 5.0
+
+    # The provisional publishes never double-count: closing the gap at the
+    # next begin lands on the same numbers a fresh reader would compute.
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['c'], {'eventTime': t0 + 20.0, 'logSeq': 3})
+    assert t._status.idleSeconds == 17.0
+    assert t._status.idleLongestSeconds == 15.0
+    assert t._status.idleLongestAt == t0 + 5.0
+
+    # While busy, refresh republishes the closed totals unchanged.
+    Task._refresh_idle_status(t, t0 + 60.0)
+    assert t._status.idleSeconds == 17.0
+
+
+def test_analytics_idle_reset():
+    """_reset_status clears the pipe-unused counters with the rest."""
+    t = _analytics_task()
+    t._status_trace = []
+    t.info = {}
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': 1.0, 'logSeq': 1})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 2.0})
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': 5.0, 'logSeq': 2})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 6.0})
+    assert t._status.idleSeconds == 3.0 and t._an_idle_since == 6.0
+
+    Task._reset_status(t)
+    assert t._status.idleSeconds == 0.0
+    assert t._status.idleLongestSeconds == 0.0
+    assert t._status.idleLongestAt == 0.0
+    assert t._an_idle_total == 0.0 and t._an_idle_since == 0.0
+
+
+# ---------------------------------------------------------------------------
+# cap_trace_payload — the 1MB trace/flow payload clamp
+# ---------------------------------------------------------------------------
+
+
+def test_task_rejects_unknown_run_classifications():
+    """run_kind/trigger are a CLOSED vocabulary, validated at construction.
+
+    Both gate storage anchors, run-log scoping, and token ownership — a
+    value outside the vocabulary must fail before it can pick a scope.
+    ('' trigger is the interactive-dev spelling and stays valid.)
+    """
+    from unittest.mock import MagicMock
+
+    common = dict(
+        server=MagicMock(), id='t-1', project_id='p-1', source='s-1', token='tk', public_auth='pk', pipeline={}
+    )
+    with pytest.raises(ValueError, match='run_kind'):
+        Task(**common, run_kind='prod')
+    with pytest.raises(ValueError, match='trigger'):
+        Task(**common, trigger='cron')
+
+
+def test_cap_trace_payload_passes_small_payloads_through():
+    """Payloads under the cap pass through IDENTICALLY (same object)."""
+    payload = {'op': 'x', 'data': 'y' * 1000}
+    assert cap_trace_payload(payload) is payload
+    # Falsy payloads are untouched too (no marker for nothing).
+    assert cap_trace_payload({}) == {}
+    assert cap_trace_payload(None) is None
+
+
+def test_cap_trace_payload_truncates_oversized_payloads():
+    """An over-cap payload becomes the honest marker with a bounded preview."""
+    blob = {'data': 'z' * (CONST_TRACE_PAYLOAD_CAP + 100)}
+    capped = cap_trace_payload(blob)
+    assert capped['truncated'] is True
+    assert capped['originalBytes'] > CONST_TRACE_PAYLOAD_CAP
+    assert len(capped['preview']) == CONST_TRACE_PREVIEW_BYTES
+    # The marker CLIPS to the cap — consumers still get (just under) the
+    # full megabyte, and the marker never exceeds the cap itself.
+    import json as _json
+
+    assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
+
+
+def test_cap_trace_payload_bound_holds_for_escape_heavy_payloads():
+    """The cap must hold for the marker AS SERIALIZED, not the raw slice.
+
+    `preview` holds already-serialized JSON text; re-serializing escapes
+    every quote and backslash in it, so an object-heavy payload (unlike the
+    plain-'z' fixture above, which needs no escaping) inflates the marker.
+    The clamp must size the SERIALIZED marker under the cap.
+    """
+    import json as _json
+
+    # Thousands of tiny dicts full of quotes and backslashes — every one
+    # of the preview's structural characters re-escapes on serialization.
+    blob = {'data': [{'k': 'v"\\'}] * (CONST_TRACE_PAYLOAD_CAP // 12)}
+    assert len(_json.dumps(blob)) > CONST_TRACE_PAYLOAD_CAP
+    capped = cap_trace_payload(blob)
+    assert capped['truncated'] is True
+    assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
+    # The trimmed preview still carries real content, not an empty husk.
+    assert len(capped['preview']) > CONST_TRACE_PAYLOAD_CAP // 4
+
+
+def test_cap_trace_payload_leaves_unserializable_payloads_alone():
+    """Unserializable payloads pass through — the transport owns that error."""
+    payload = {'bad': object()}
+    assert cap_trace_payload(payload) is payload
+
+
+# ---------------------------------------------------------------------------
+# on_event: idle-timer reset
+# ---------------------------------------------------------------------------
+
+
+def _event_task(run_kind='dev'):
+    """A Task wired far enough to run on_event, with the handlers stubbed."""
+    from unittest.mock import AsyncMock
+
+    t = _task()
+    t._run_kind = run_kind
+    t._idle_time = 600
+    t._status_trace = []
+    # The trace branch walks the per-pipe execution stack before anything else.
+    t._status.pipeflow = SimpleNamespace(byPipe={})
+    t._update_status = MagicMock()
+    t._forward_task_event = AsyncMock()
+    t._send_status_update = AsyncMock()
+    return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'event_type',
+    [
+        'apaevt_status_counts',
+        'apaevt_status_object',
+        'apaevt_status_message',
+        'apaevt_status_metrics',
+        'apaevt_sse',
+        'apaevt_trace',
+    ],
+)
+async def test_on_event_engine_event_resets_idle_timer_for_a_dev_task(event_type):
+    """Pipeline work is activity: a dev task mid-turn is not idle."""
+    t = _event_task()
+
+    await Task.on_event(t, {'event': event_type, 'body': {}})
+
+    assert t._idle_time == 0
+
+
+@pytest.mark.asyncio
+async def test_on_event_stdout_does_not_reset_idle_timer():
+    """Raw node output must not count as idle-timer activity."""
+    t = _event_task()
+
+    await Task.on_event(t, {'event': 'output', 'body': {'output': 'still here'}})
+
+    assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+async def test_on_event_debugger_passthrough_does_not_reset_idle_timer():
+    """Debugger traffic is not pipeline work and its cadence is not ours to reason about."""
+    t = _event_task()
+
+    await Task.on_event(t, {'event': 'stopped', 'body': {}})
+
+    assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('event_type', ['apaevt_status_counts', 'apaevt_sse', 'apaevt_trace'])
+async def test_on_event_never_resets_idle_timer_for_a_deploy_run(event_type):
+    """A deploy run's ttl is a wall-clock window, not an idle timeout."""
+    t = _event_task(run_kind='deploy')
+
+    await Task.on_event(t, {'event': event_type, 'body': {}})
+
+    assert t._idle_time == 600
+
+
+@pytest.mark.asyncio
+async def test_on_event_exit_reads_the_key_the_emitters_write():
+    """A clean exit must record code 0, not the fallback."""
+    t = _event_task()
+    t._status.exitCode = None
+    t._status.exitMessage = ''
+    t._status.state = 0
+    t._is_restarting = False
+    t._update_completion_status = MagicMock()
+    t._close_run_log = MagicMock()
+
+    await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': 'COMPLETED'}})
+
+    assert t._status.exitCode == 0
+    assert t._status.exitMessage == 'COMPLETED'
+
+
+@pytest.mark.asyncio
+async def test_on_event_exit_still_defaults_when_no_code_is_sent():
+    """A malformed exit with no code keeps the pessimistic default."""
+    t = _event_task()
+    t._status.exitCode = None
+    t._status.exitMessage = ''
+    t._status.state = 0
+    t._is_restarting = False
+    t._update_completion_status = MagicMock()
+    t._close_run_log = MagicMock()
+
+    await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'message': 'Malformed exit message'}})
+
+    assert t._status.exitCode == 1
+
+
+# ---------------------------------------------------------------------------
+# on_event / apaevt_trace — the trace level that means "no traces"
+# ---------------------------------------------------------------------------
+
+
+def _trace_task(level):
+    """A task ready to take one apaevt_trace, with the fan-out captured."""
+    from unittest.mock import AsyncMock
+
+    from rocketride import TASK_STATUS
+
+    t = _task(status=TASK_STATUS())
+    t._last_event_time = 0.0
+    t._status_updated = False
+    t._pipelineTraceLevel = level
+    t.build_event = MagicMock(
+        side_effect=lambda name, body=None, event_time=None: {
+            'event': name,
+            'body': dict(body or {}, eventTime=event_time),
+        }
+    )
+    t._accumulate_analytics = MagicMock()
+    t._forward_task_event = AsyncMock()
+    return t
+
+
+_TRACE_MESSAGE = {
+    'event': 'apaevt_trace',
+    'body': {
+        'op': 'enter',
+        'id': 0,
+        'pipe_id': 'parse',
+        'total_pipes': 1,
+        'trace': {'text': 'hello'},
+        'eventTime': 1_000.0,
+    },
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('level', ['metadata', 'summary', 'full'])
+async def test_a_real_trace_level_still_derives_a_flow_event(level):
+    """The levels that ask for tracing keep every part of the fan-out."""
+    t = _trace_task(level)
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_awaited_once()
+    t._accumulate_analytics.assert_called_once()
+    assert t.build_event.call_args.kwargs['body']['trace'] == {'text': 'hello'}
+
+
+@pytest.mark.asyncio
+async def test_the_none_level_emits_no_flow_at_all():
+    """
+    `'none'` IS A LEVEL, NOT AN ABSENCE — and a non-empty string is truthy.
+    Read as "tracing on with the payload suppressed", every enter/leave was
+    still derived, seq-stamped, broadcast and written to the run log: a flow
+    event carrying `trace: {}`, roughly 379 bytes of envelope for no signal,
+    one pair per component per request. A settings stream kept deliberately out
+    of the Runs timeline had accumulated 325 MB that way.
+
+    Nothing else about the event changes: the pipe stack is still tracked and
+    the status is still marked for update.
+    """
+    t = _trace_task('none')
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_not_awaited()
+    t._accumulate_analytics.assert_not_called()
+    t.build_event.assert_not_called()
+    # The parts that are NOT gated on the trace level.
+    assert t._status_updated is True
+    assert t._status.pipeflow.totalPipes == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('level', ['', None])
+async def test_an_absent_trace_level_still_emits_nothing(level):
+    """The original behaviour, unchanged: no level means no flow."""
+    t = _trace_task(level)
+
+    await Task.on_event(t, dict(_TRACE_MESSAGE))
+
+    t._forward_task_event.assert_not_awaited()

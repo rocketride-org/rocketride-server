@@ -4,6 +4,10 @@ build/
 node_modules/
 coverage/
 
+# Self-contained verified n8n community node — manages its own prettier/eslint
+# config (must stay byte-identical to the @n8n/node-cli default for verification)
+packages/n8n-nodes/
+
 # Generated files
 *.min.js
 *.min.css

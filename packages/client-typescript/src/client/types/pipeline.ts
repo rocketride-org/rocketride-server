@@ -85,6 +85,10 @@ export interface PipelineComponent {
  * of connected components that transform, analyze, or route information.
  */
 export interface PipelineConfig {
+	/** Human-readable pipeline name — the registry's pipelineName renders it
+	    on every deploy surface, and publish requires it. */
+	name?: string;
+
 	/** Pipeline description */
 	description?: string;
 

@@ -1,0 +1,74 @@
+diff --git a/Release/include/cpprest/astreambuf.h b/Release/include/cpprest/astreambuf.h
+index 1dcb285..c5e126b 100644
+--- a/Release/include/cpprest/astreambuf.h
++++ b/Release/include/cpprest/astreambuf.h
+@@ -22,6 +22,69 @@
+ #include <math.h>
+ #include <memory>
+ 
++// libc++ >= 16 removed the non-standard std::char_traits<unsigned char>
++// specialization (see https://reviews.llvm.org/D157058). cpprestsdk's
++// Value2StringFormatter<uint8_t> in streams.h uses std::basic_string<uint8_t>
++// (uint8_t == unsigned char), which requires it, so the engine link fails on
++// any modern-libc++ host. Reintroduce a minimal, standard-conforming
++// specialization, but only on affected libc++: libstdc++ and libc++ < 16 still
++// provide the extension, so the guard avoids a redefinition there. The <string>
++// include precedes the guard so _LIBCPP_VERSION is defined when it is evaluated.
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <string>
++#if defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 160000
++namespace std
++{
++template<>
++struct char_traits<unsigned char>
++{
++    using char_type = unsigned char;
++    using int_type = int;
++    using off_type = streamoff;
++    using pos_type = streampos;
++    using state_type = mbstate_t;
++
++    // Not constexpr: a constexpr function returning void is ill-formed pre-C++14,
++    // and macOS builds cpprestsdk as -std=gnu++11. CharTraits does not require
++    // assign to be constexpr (libc++ only makes it so since C++17), so we omit it.
++    static void assign(char_type& a, const char_type& b) noexcept { a = b; }
++    static constexpr bool eq(char_type a, char_type b) noexcept { return a == b; }
++    static constexpr bool lt(char_type a, char_type b) noexcept { return a < b; }
++    static int compare(const char_type* a, const char_type* b, size_t n) { return n == 0 ? 0 : memcmp(a, b, n); }
++    static size_t length(const char_type* s)
++    {
++        size_t i = 0;
++        while (s[i])
++            ++i;
++        return i;
++    }
++    static const char_type* find(const char_type* s, size_t n, const char_type& c)
++    {
++        return static_cast<const char_type*>(memchr(s, c, n));
++    }
++    static char_type* move(char_type* d, const char_type* s, size_t n)
++    {
++        return n == 0 ? d : static_cast<char_type*>(memmove(d, s, n));
++    }
++    static char_type* copy(char_type* d, const char_type* s, size_t n)
++    {
++        return n == 0 ? d : static_cast<char_type*>(memcpy(d, s, n));
++    }
++    static char_type* assign(char_type* s, size_t n, char_type c)
++    {
++        return n == 0 ? s : static_cast<char_type*>(memset(s, c, n));
++    }
++    static constexpr int_type not_eof(int_type c) noexcept { return eq_int_type(c, eof()) ? ~eof() : c; }
++    static constexpr char_type to_char_type(int_type c) noexcept { return char_type(c); }
++    static constexpr int_type to_int_type(char_type c) noexcept { return int_type(c); }
++    static constexpr bool eq_int_type(int_type a, int_type b) noexcept { return a == b; }
++    static constexpr int_type eof() noexcept { return int_type(EOF); }
++};
++} // namespace std
++#endif
++
+ #if (defined(_MSC_VER) && (_MSC_VER >= 1800)) && !CPPREST_FORCE_PPLX
+ namespace Concurrency // since namespace pplx = Concurrency
+ #else

@@ -23,9 +23,11 @@ from uuid import uuid4
 import pytest
 
 from ai.account.file_store import FileStore
+from ai.account.models import RequestContext
 from ai.account.store import STORE_MAX_RETRY_ATTEMPTS, Store, StorageError
 from ai.account.store_providers.azure import AzureBlobStore
 from ai.account.store_providers.filesystem import FilesystemStore
+from ai.account.store_providers.filesystem.filesystem import _os_path
 from ai.account.store_providers.memory import MemoryStore
 from ai.account.store_providers.s3 import S3Store
 
@@ -361,6 +363,40 @@ class TestFilesystemStore(BaseStoreTest):
         assert full_path.exists()
         assert full_path.read_text() == data
 
+    @pytest.mark.asyncio
+    async def test_paths_past_windows_max_path(self, store, temp_dir):
+        r"""Deployment-style trees must round-trip past Windows' 260-char
+        MAX_PATH. The store's canonical internal spelling is the
+        extended-length (``\\?\``) form — the root is prefixed once, every
+        derived path inherits it — so write/read/stat/delete work where a
+        plain path fails with a misleading ENOENT (the include-packing
+        lesson: org guid + .deployments + version + source/<workspace tree>
+        crossed the ceiling on a real deploy). The read-back specifically
+        exercises the re-canonicalization after resolve(). On POSIX the
+        same key is just a deep tree.
+        """
+        # A store key whose FULL resolved path clearly exceeds 260 chars
+        # regardless of how long the temp root itself is.
+        segment = 'component-directory-with-a-real-world-name'
+        depth = max((300 - len(temp_dir)) // (len(segment) + 1) + 1, 3)
+        key = '/'.join([segment] * depth) + '/GoogleDrivePickerWidget.tsx'
+        assert len(str(Path(temp_dir) / key)) > 260
+
+        payload = b'x' * 4096
+        await store.write_bytes(key, payload)
+        assert await store.read_bytes(key) == payload
+        info = await store.get_file_info(key)
+        assert info['size'] == len(payload)
+
+        await store.delete_file(key)
+        with pytest.raises(StorageError):
+            await store.read_bytes(key)
+
+        # Tidy the deep tree explicitly — the fixture's plain rmtree cannot
+        # reach past MAX_PATH on Windows.
+        deep_root = Path(temp_dir) / segment
+        shutil.rmtree(f'\\\\?\\{deep_root}' if os.name == 'nt' else str(deep_root), ignore_errors=True)
+
 
 # ============================================================================
 # Memory Tests
@@ -557,12 +593,17 @@ class TestStoreFactory:
 
         assert isinstance(store, Store)
         assert isinstance(store._store, FilesystemStore)
-        assert store._store._root_path == tmp_path
+        # The root is stored in the CANONICAL spelling (Windows: \\?\).
+        assert store._store._root_path == _os_path(tmp_path.resolve())
 
-    def test_create_with_default_url(self):
+    def test_create_with_default_url(self, monkeypatch):
         """Test creating store with default URL."""
-        # Clear environment
-        os.environ.pop('STORE_URL', None)
+        # Clear BOTH names: with a lingering legacy STORE_URL and no
+        # RR_STORE_URL, create() hard-fails by design (stale-deployment
+        # guard) — this test asserts the default, not that migration error.
+        # monkeypatch restores the caller's environment afterwards.
+        monkeypatch.delenv('RR_STORE_URL', raising=False)
+        monkeypatch.delenv('STORE_URL', raising=False)
 
         store = Store.create()
 
@@ -573,16 +614,17 @@ class TestStoreFactory:
 
     def test_create_with_env_var(self, tmp_path):
         """Test creating store from STORE_URL environment variable."""
-        os.environ['STORE_URL'] = f'filesystem://{tmp_path}'
+        os.environ['RR_STORE_URL'] = f'filesystem://{tmp_path}'
 
         store = Store.create()
 
         assert isinstance(store, Store)
         assert isinstance(store._store, FilesystemStore)
-        assert store._store._root_path == tmp_path
+        # The root is stored in the CANONICAL spelling (Windows: \\?\).
+        assert store._store._root_path == _os_path(tmp_path.resolve())
 
         # Cleanup
-        os.environ.pop('STORE_URL', None)
+        os.environ.pop('RR_STORE_URL', None)
 
     def test_env_var_expansion_windows(self, tmp_path):
         """Test environment variable expansion (Windows style)."""
@@ -955,7 +997,7 @@ class TestS3StoreMocked:
         python rocketlib-ai/tests/ai/account/check_aws_credentials.py
         """
         # Temporarily remove STORE_SECRET_KEY if set
-        original_store_secret = os.environ.pop('STORE_SECRET_KEY', None)
+        original_store_secret = os.environ.pop('RR_STORE_SECRET_KEY', None)
         original_aws_key = os.environ.pop('AWS_ACCESS_KEY_ID', None)
         original_aws_secret = os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
 
@@ -1033,7 +1075,7 @@ class TestS3StoreMocked:
         finally:
             # Restore environment variables
             if original_store_secret:
-                os.environ['STORE_SECRET_KEY'] = original_store_secret
+                os.environ['RR_STORE_SECRET_KEY'] = original_store_secret
             if original_aws_key:
                 os.environ['AWS_ACCESS_KEY_ID'] = original_aws_key
             if original_aws_secret:
@@ -1068,7 +1110,7 @@ class TestS3StoreMocked:
         # Remove any existing AWS env vars
         original_aws_key = os.environ.pop('AWS_ACCESS_KEY_ID', None)
         original_aws_secret = os.environ.pop('AWS_SECRET_ACCESS_KEY', None)
-        original_store_secret = os.environ.pop('STORE_SECRET_KEY', None)
+        original_store_secret = os.environ.pop('RR_STORE_SECRET_KEY', None)
 
         try:
             # Create store without secret_key - should use credentials file
@@ -1109,7 +1151,7 @@ class TestS3StoreMocked:
             if original_aws_secret:
                 os.environ['AWS_SECRET_ACCESS_KEY'] = original_aws_secret
             if original_store_secret:
-                os.environ['STORE_SECRET_KEY'] = original_store_secret
+                os.environ['RR_STORE_SECRET_KEY'] = original_store_secret
 
 
 # ============================================================================
@@ -1243,24 +1285,27 @@ class TestStoreFileStore:
         url = f'filesystem://{temp_dir}'
         return Store.create(url=url)
 
-    def test_get_file_store_returns_file_store(self, store):
-        """Test that get_file_store returns a FileStore instance."""
-        fs = store.get_file_store('test-user')
+    def test_file_store_returns_file_store(self, store):
+        """Test that file_store returns a FileStore instance."""
+        fs = store._file_store(RequestContext.internal('test'), client_id='test-user')
         assert isinstance(fs, FileStore)
 
-    def test_get_file_store_caches_by_client_id(self, store):
-        """Test that the same FileStore is returned for the same client_id."""
-        fs1 = store.get_file_store('user-1')
-        fs2 = store.get_file_store('user-1')
-        fs3 = store.get_file_store('user-2')
+    def test_file_store_instances_share_registries(self, store):
+        """Instances are never cached (identity is per-session), but all of
+        them coordinate on the Store's shared write-lock/handle registries.
+        """
+        fs1 = store._file_store(RequestContext.internal('test'), client_id='user-1')
+        fs2 = store._file_store(RequestContext.internal('test'), client_id='user-1')
+        fs3 = store._file_store(RequestContext.internal('test'), client_id='user-2')
 
-        assert fs1 is fs2
-        assert fs1 is not fs3
+        assert fs1 is not fs2
+        assert fs1._write_locks is fs2._write_locks is fs3._write_locks
+        assert fs1._handles is fs2._handles is fs3._handles
 
     @pytest.mark.asyncio
     async def test_file_store_write_and_read(self, store):
         """Test writing and reading via FileStore."""
-        fs = store.get_file_store('test-user')
+        fs = store._file_store(RequestContext.internal('test'), client_id='test-user')
 
         await fs.write('test.txt', b'Hello, World!')
         data = await fs.read('test.txt')
@@ -1270,14 +1315,28 @@ class TestStoreFileStore:
     @pytest.mark.asyncio
     async def test_file_store_isolation(self, store):
         """Test that different client_ids have isolated storage."""
-        fs1 = store.get_file_store('user-1')
-        fs2 = store.get_file_store('user-2')
+        fs1 = store._file_store(RequestContext.internal('test'), client_id='user-1')
+        fs2 = store._file_store(RequestContext.internal('test'), client_id='user-2')
 
         await fs1.write('shared-name.txt', b'user-1 data')
         await fs2.write('shared-name.txt', b'user-2 data')
 
         assert await fs1.read('shared-name.txt') == b'user-1 data'
         assert await fs2.read('shared-name.txt') == b'user-2 data'
+
+    def test_internal_context_rejects_empty_client_id(self, store):
+        """An internal-context view with NO anchor raises loudly.
+
+        Regression pin: actor-free deploy runs carry an empty userId — a
+        subsystem that anchors its store view at the run's user identity
+        (instead of the run's OWNER, e.g. the team for a deploy run) hits
+        this guard, and callers that swallow the error run WITHOUT their
+        storage (the run-log writer did exactly that, leaving deploy runs
+        unrecorded). The guard must stay loud so the anchor choice is made
+        deliberately at every call site.
+        """
+        with pytest.raises(ValueError, match='explicit client_id'):
+            store._file_store(RequestContext.internal('run-log'), client_id='')
 
 
 class TestStoreIntegration:
@@ -1295,7 +1354,7 @@ class TestStoreIntegration:
         """Test complete workflow: create store, get FileStore, write, read."""
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
-        fs = store.get_file_store('test-user')
+        fs = store._file_store(RequestContext.internal('test'), client_id='test-user')
 
         # Write multiple files
         await fs.write('logs/app.log', b'Application started\n')
@@ -1314,7 +1373,7 @@ class TestStoreIntegration:
         """Test concurrent file operations."""
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
-        fs = store.get_file_store('test-user')
+        fs = store._file_store(RequestContext.internal('test'), client_id='test-user')
 
         # Write multiple files concurrently
         tasks = [fs.write(f'file{i}.txt', f'Content {i}'.encode()) for i in range(10)]
@@ -1333,17 +1392,17 @@ class TestStoreIntegration:
         """Test handle-based streaming write and read."""
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
-        fs = store.get_file_store('test-user')
+        fs = store._file_store(RequestContext.internal('test'), client_id='test-user')
 
         # Write in chunks via handles
-        handle_id = await fs.open_write('chunked.bin', connection_id=1)
+        handle_id = await fs.open_write('chunked.bin')
         await fs.write_chunk(handle_id, b'chunk-1-')
         await fs.write_chunk(handle_id, b'chunk-2-')
         await fs.write_chunk(handle_id, b'chunk-3')
         await fs.close_write(handle_id)
 
         # Read back via handles
-        info = await fs.open_read('chunked.bin', connection_id=1)
+        info = await fs.open_read('chunked.bin')
         assert info['size'] == 23  # len('chunk-1-chunk-2-chunk-3')
         data = await fs.read_chunk(info['handle'], offset=0)
         await fs.close_read(info['handle'])
@@ -1355,21 +1414,21 @@ class TestStoreIntegration:
         """Test that close_all_handles commits and cleans up."""
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
-        fs = store.get_file_store('test-user')
+        fs = store._file_store(RequestContext.internal('test'), client_id='test-user')
 
         # Open a write handle and write some data
-        handle_id = await fs.open_write('disconnect.bin', connection_id=42)
+        handle_id = await fs.open_write('disconnect.bin')
         await fs.write_chunk(handle_id, b'partial-data')
 
-        # Simulate disconnect — should commit what was written
-        await fs.close_all_handles(connection_id=42)
+        # Simulate disconnect — Store-wide cleanup by connection id
+        await store.close_all_handles(fs._ctx.conn_id)
 
         # Data should be committed and readable
         data = await fs.read('disconnect.bin')
         assert data == b'partial-data'
 
         # Write lock should be released — a new write must succeed
-        handle_id2 = await fs.open_write('disconnect.bin', connection_id=43)
+        handle_id2 = await fs.open_write('disconnect.bin')
         await fs.close_write(handle_id2)
 
     @pytest.mark.asyncio
@@ -1377,12 +1436,12 @@ class TestStoreIntegration:
         """Test that opening the same file for writing twice raises an error."""
         url = f'filesystem://{temp_dir}'
         store = Store.create(url=url)
-        fs = store.get_file_store('test-user')
+        fs = store._file_store(RequestContext.internal('test'), client_id='test-user')
 
-        handle_id = await fs.open_write('locked.bin', connection_id=1)
+        handle_id = await fs.open_write('locked.bin')
 
         with pytest.raises(StorageError) as exc_info:
-            await fs.open_write('locked.bin', connection_id=2)
+            await fs.open_write('locked.bin')
         assert 'already open for writing' in str(exc_info.value)
 
         # Clean up

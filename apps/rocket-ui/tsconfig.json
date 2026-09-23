@@ -1,0 +1,95 @@
+{
+	"compilerOptions": {
+		/* Language and Environment */
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+
+		/* Bundler mode */
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"noEmit": true,
+		"jsx": "react-jsx",
+
+		/* Type Checking — the platform baseline (strict, like the vscode app
+		   and the app-template scaffold). exactOptionalPropertyTypes and
+		   noUncheckedIndexedAccess were never enforced anywhere (no tsc ran
+		   this config before the server deploy verifier) and re-litigate the
+		   included shared library source, which is proven under the baseline
+		   only — they stay off by design. */
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitReturns": true,
+		"noImplicitOverride": true,
+
+		/* Module Resolution */
+		"paths": {
+			"shared": ["../shared/src"],
+			"shared/*": ["../shared/src/*"],
+			"@/*": ["./src/*"],
+			"@components/*": ["./src/components/*"],
+			"@pages/*": ["./src/pages/*"],
+			"@apptypes/*": ["./src/types/*"],
+			"@utils/*": ["./src/utils/*"],
+			"@hooks/*": ["./src/hooks/*"],
+			"@services/*": ["./src/services/*"],
+			"@assets/*": ["./src/assets/*"]
+		},
+
+		/* Emit — noEmit app: declaration flags stay off (they add TS2742-class
+		   portability diagnostics while emitting nothing; the template
+		   scaffold sets none). */
+		"sourceMap": true,
+		"outDir": "./dist",
+		"removeComments": true,
+		"importHelpers": true,
+
+		/* Interop Constraints */
+		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true,
+		"forceConsistentCasingInFileNames": true,
+
+		/* Skip Lib Check */
+		"skipLibCheck": true,
+
+		/* Additional Options for React */
+		"allowJs": true,
+		"checkJs": false,
+
+	},
+
+	"include": [
+		"src/**/*",
+		"src/**/*.ts",
+		"src/**/*.tsx",
+		"src/**/*.js",
+		"src/**/*.jsx",
+		"src/types/global.d.ts",
+		"public/**/*",
+		"*.ts",
+		"*.tsx",
+    "rsbuild.config.mts"
+	],
+
+	"exclude": [
+		"node_modules",
+		"dist",
+		"build",
+		"coverage",
+		"**/*.test.ts",
+		"**/*.test.tsx",
+		"**/*.spec.ts",
+		"**/*.spec.tsx"
+	],
+
+	"ts-node": {
+		"esm": true,
+		"compilerOptions": {
+			"module": "ESNext"
+		}
+	}
+}

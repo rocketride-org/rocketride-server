@@ -26,7 +26,19 @@ from typing import Literal
 from core.util import is_retryable_error
 
 
-SmokeOutcome = Literal['pass', 'skip', 'error']
+SmokeOutcome = Literal['pass', 'skip', 'error', 'retired', 'missing']
+
+# Phrases a provider uses when it says a model is gone for good, rather than
+# absent for reasons that may be about this key. Only these deprecate anything.
+_RETIRED_PHRASES = (
+    'no longer available',
+    'no longer supported',
+    'has been retired',
+    'has been deprecated',
+    'is retired',
+    'was retired',
+    'sunset',
+)
 
 _MAX_RETRIES = 3
 _BASE_DELAY = 2.0
@@ -42,8 +54,8 @@ class SmokeResult:
     Result of a single smoke test call.
 
     Attributes:
-        outcome: 'pass', 'skip', or 'error'
-        reason: Human-readable reason for skip/error outcomes
+        outcome: 'pass', 'retired', 'missing', 'skip', or 'error'
+        reason: Human-readable reason for every non-passing outcome
     """
 
     outcome: SmokeOutcome
@@ -51,6 +63,55 @@ class SmokeResult:
 
     def passed(self) -> bool:
         return self.outcome == 'pass'
+
+    def retired(self) -> bool:
+        """True when the provider stated the model is gone for good."""
+        return self.outcome == 'retired'
+
+
+def _is_not_found(error: Exception) -> bool:
+    """
+    True when the SDK raised a 404 for the model, whatever SDK it was.
+
+    Read off the typed exception rather than its message: openai and anthropic
+    raise NotFoundError with .status_code, google-genai raises ClientError with
+    .code. Matching '404' in text catches transient failures that merely mention
+    it, which is how a busy service becomes a retired model.
+    """
+    if getattr(error, 'status_code', None) == 404 or getattr(error, 'code', None) == 404:
+        return True
+    return 'notfound' in type(error).__name__.lower()
+
+
+def classify_failure(error: Exception) -> SmokeResult:
+    """
+    Turn a failed smoke call into an outcome.
+
+    Three answers, because a 404 alone does not settle the question:
+
+      'error'   — transient. Retry territory, never evidence about a model.
+      'retired' — the provider said the model is gone: "no longer available",
+                  "has been retired". Only this deprecates a profile.
+      'missing' — a bare 404. Could be retired, could be a model this key has no
+                  access to: OpenAI answers "does not exist or you do not have
+                  access to it" for both, and Anthropic returns not_found_error
+                  for org-restricted models. Reported, never acted on.
+      'skip'    — anything else (auth, permission, a malformed request).
+
+    Args:
+        error: The exception the provider SDK raised.
+
+    Returns:
+        A SmokeResult carrying the outcome and the provider's own words.
+    """
+    if is_retryable_error(error):
+        return SmokeResult('error', str(error))
+    text = str(error).lower()
+    if _is_not_found(error):
+        if any(phrase in text for phrase in _RETIRED_PHRASES):
+            return SmokeResult('retired', str(error))
+        return SmokeResult('missing', str(error))
+    return SmokeResult('skip', str(error))
 
 
 def _smoke_chat_openai_compat(client: object, model_id: str) -> SmokeResult:
@@ -111,10 +172,10 @@ def _smoke_chat_openai_compat(client: object, model_id: str) -> SmokeResult:
                 if is_retryable_error(e):
                     return SmokeResult('error', f'Transient error after {_MAX_RETRIES} attempts: {e}')
 
-                return SmokeResult('skip', str(e))
+                return classify_failure(e)
 
     # Both variants exhausted
-    return SmokeResult('skip', str(last_error))
+    return classify_failure(last_error) if isinstance(last_error, Exception) else SmokeResult('skip', str(last_error))
 
 
 def _smoke_chat_anthropic(client: object, model_id: str) -> SmokeResult:
@@ -143,7 +204,7 @@ def _smoke_chat_anthropic(client: object, model_id: str) -> SmokeResult:
                 continue
             if is_retryable_error(e):
                 return SmokeResult('error', f'Transient error after {_MAX_RETRIES} attempts: {e}')
-            return SmokeResult('skip', str(e))
+            return classify_failure(e)
 
     return SmokeResult('error', 'Unexpected exit from retry loop')
 
@@ -173,7 +234,7 @@ def _smoke_chat_gemini(client: object, model_id: str) -> SmokeResult:
                 continue
             if is_retryable_error(e):
                 return SmokeResult('error', f'Transient error after {_MAX_RETRIES} attempts: {e}')
-            return SmokeResult('skip', str(e))
+            return classify_failure(e)
 
     return SmokeResult('error', 'Unexpected exit from retry loop')
 
@@ -206,7 +267,7 @@ def _smoke_embed_openai(client: object, model_id: str) -> SmokeResult:
                 continue
             if is_retryable_error(e):
                 return SmokeResult('error', f'Transient error after {_MAX_RETRIES} attempts: {e}')
-            return SmokeResult('skip', str(e))
+            return classify_failure(e)
 
     return SmokeResult('error', 'Unexpected exit from retry loop')
 

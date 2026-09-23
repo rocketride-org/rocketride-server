@@ -25,12 +25,31 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
-import type { ShellSidebarProps } from 'shell-ui';
-import { useShellConnection, NavButton, BxPlus } from 'shell-ui';
-import { Explorer } from 'shared';
-import type { ExplorerEntry, ExplorerConfig, IVirtualFileSystem } from 'shared';
+import type { CSSProperties } from 'react';
+import { useShellConnection, BxPlus } from 'shell';
+import { Explorer } from 'shell';
+import { SidebarMenu, SidebarCollapsedGate } from 'shell';
+import type { ExplorerEntry, ExplorerConfig } from 'shell';
+import type { IVirtualFileSystem, ViewMenu } from 'shell';
 import { getDocs } from './docs';
 import { listChatDir, saveChat, deleteChat, renameChat } from './chatStore';
+
+// =============================================================================
+// STYLES
+// =============================================================================
+
+const styles = {
+	/** Sidebar content wrapper — fills the shell frame's scrolling slot. */
+	sidebar: {
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+	} as CSSProperties,
+	/** Padding around the "New Chat" action row above the file tree. */
+	newChatRow: {
+		padding: '4px 4px 0',
+	} as CSSProperties,
+};
 
 // =============================================================================
 // CONFIG
@@ -63,17 +82,31 @@ const NOOP_VFS: IVirtualFileSystem = {
 };
 
 // =============================================================================
+// NAV MENU
+// =============================================================================
+
+/**
+ * The "New Chat" action rendered above the file tree as a stock SidebarMenu
+ * (a single entry with no persistent selection). The sidebar content is hidden
+ * while collapsed by the gate below, so this menu always renders expanded.
+ */
+const NEW_CHAT_MENU: ViewMenu = {
+	entries: [{ id: 'new', label: 'New Chat', icon: <BxPlus size={16} /> }],
+};
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
 /**
  * Sidebar for the Aparavi AQL Chat app.
  *
- * Uses the shared Explorer component for the chat file list with built-in
- * rename, delete, and create support. New chats are created as .chat files
- * in the .chats/ workspace directory.
+ * The app's AppLayout sidebar node: builds the chat-file Explorer — the
+ * shared Explorer plus a "New Chat" action — and renders it behind a
+ * SidebarCollapsedGate (this free-form content has no icon-rail form).
+ * AparaviApp passes this component as its root layout's `sidebar` prop.
  */
-const AparaviSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
+const AparaviSidebar: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
 	const [entries, setEntries] = useState<ExplorerEntry[]>([]);
 
@@ -188,23 +221,18 @@ const AparaviSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 		}
 	}, [client, refresh]);
 
-	// --- Collapsed mode -------------------------------------------------------
+	// --- Register sidebar content ---------------------------------------------
 
-	if (collapsed) {
-		return (
-			<div style={{ padding: '4px 8px' }}>
-				<NavButton icon={BxPlus} label="New Chat" collapsed onClick={handleNewChat} />
-			</div>
-		);
-	}
-
-	// --- Expanded mode --------------------------------------------------------
-
-	return (
-		<div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-			{/* New Chat button */}
-			<div style={{ padding: '4px 4px 0' }}>
-				<NavButton icon={BxPlus} label="New Chat" collapsed={false} onClick={handleNewChat} />
+	// Build the sidebar node — a "New Chat" action above the shared Explorer file
+	// tree — and publish it to the shell sidebar's scrolling slot. The shell frame
+	// owns the collapse behaviour and hides free-form content while collapsed, so
+	// no collapsed icon rail is drawn here (models-ui / rocket-ui pattern).
+	const content = (
+		<div style={styles.sidebar}>
+			{/* New Chat action (stock SidebarMenu, single entry). activeId='' —
+			    no persistent selection; the id guard keeps the handler typed. */}
+			<div style={styles.newChatRow}>
+				<SidebarMenu menu={NEW_CHAT_MENU} activeId="" onSelect={(id) => { if (id === 'new') handleNewChat(); }} />
 			</div>
 
 			{/* Chat file tree (shared Explorer component) */}
@@ -220,6 +248,10 @@ const AparaviSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 			/>
 		</div>
 	);
+
+	// Render behind the collapse gate — this free-form content has no
+	// icon-rail form, so it hides while the sidebar is collapsed.
+	return <SidebarCollapsedGate>{content}</SidebarCollapsedGate>;
 };
 
 export default AparaviSidebar;

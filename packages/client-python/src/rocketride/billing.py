@@ -340,9 +340,20 @@ class BillingApi:
         page: int = 1,
         page_size: int = 50,
         since: str | None = None,
+        sort: list[dict] | None = None,
+        filters: dict | None = None,
+        search: str | None = None,
     ) -> TransactionsResult:
         """
         Fetch paginated transaction detail from the credit ledger.
+
+        Sort / filters / search follow the platform list-API convention:
+        sorters name camelCase row keys; filter values are a string
+        (type-driven match) or a list (set membership), with
+        ``field__gte`` / ``field__lte`` string entries for ranges; search
+        matches case-insensitively across the ledger's string columns.
+        Unknown keys are dropped server-side, and the caller's org/scope
+        restriction always applies first.
 
         Args:
             org_id: Organisation UUID.
@@ -351,6 +362,9 @@ class BillingApi:
             page: 1-based page number.
             page_size: Rows per page (max 100).
             since: ISO datetime string -- only return rows at or after this time.
+            sort: ``[{'field': wire key, 'dir': 'asc'|'desc'}]`` or None.
+            filters: ``{wire key: str | list}`` per the list convention.
+            search: Free-text term over the ledger's string columns.
 
         Returns:
             Paginated transaction result.
@@ -366,7 +380,33 @@ class BillingApi:
             kwargs['scopeId'] = scope_id
         if since:
             kwargs['since'] = since
+        if sort:
+            kwargs['sort'] = sort
+        if filters:
+            kwargs['filters'] = filters
+        if search:
+            kwargs['search'] = search
         return await self._client.call('rrext_account_billing', **kwargs)
+
+    async def get_transaction_distinct(self, org_id: str, field: str) -> list:
+        """
+        Fetch distinct values of one ledger column (org-scoped server-side)
+        for checklist-style filters.
+
+        Args:
+            org_id: Organisation UUID.
+            field: camelCase wire key (e.g. ``type``, ``resource``).
+
+        Returns:
+            Sorted distinct values ([] for unknown/excluded fields).
+        """
+        body = await self._client.call(
+            'rrext_account_billing',
+            subcommand='transactions_distinct',
+            orgId=org_id,
+            field=field,
+        )
+        return body.get('values', []) if isinstance(body, dict) else []
 
     async def get_usage_by_user(self, org_id: str) -> list[UsageRollup]:
         """

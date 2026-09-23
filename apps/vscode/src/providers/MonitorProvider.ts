@@ -17,6 +17,7 @@ import { readFileSync } from 'fs';
 import { getLogger } from '../shared/util/output';
 import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState, GenericEvent } from '../shared/types';
+import { GridConfigStore } from './GridConfigStore';
 import type { DashboardResponse } from 'rocketride';
 
 const POLL_INTERVAL_MS = 5_000;
@@ -30,8 +31,11 @@ export class MonitorProvider {
 	private hasWildcardMonitor = false;
 	private fetchInProgress = false;
 	private fetchPending = false;
+	/** Project-local DataGrid layout store (the grid config channel's host side). */
+	private gridConfigStore: GridConfigStore;
 
 	constructor(private context: vscode.ExtensionContext) {
+		this.gridConfigStore = new GridConfigStore(context);
 		this.setupEventListeners();
 		this.registerCommands();
 	}
@@ -78,6 +82,13 @@ export class MonitorProvider {
 							theme: {},
 							isConnected: this.connectionManager.isConnected(),
 						});
+						// Seed the webview's grid config bridge BEFORE the first
+						// dashboard snapshot: grids mount once data arrives, and
+						// their layout reads are synchronous against the cache.
+						await panel.webview.postMessage({
+							type: 'grid:config:init',
+							layouts: this.gridConfigStore.getAll(),
+						});
 						await this.fetchAndPost();
 						this.subscribeDashboardEvents().catch((err) => {
 							this.logger.error(`[MonitorProvider] Event subscription error: ${err}`);
@@ -86,6 +97,15 @@ export class MonitorProvider {
 						break;
 					case 'monitor:refresh':
 						await this.fetchAndPost();
+						break;
+					case 'grid:config:set':
+						// Persist one layout blob (Tabulator persistence type) in
+						// the project's workspaceState.
+						this.gridConfigStore.set(message.tableId, message.blobType, message.blob);
+						break;
+					case 'grid:config:clear':
+						// Reset layout: drop every stored blob for the table.
+						this.gridConfigStore.clear(message.tableId);
 						break;
 				}
 			} catch (error) {

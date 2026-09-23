@@ -72,6 +72,8 @@ class DatabaseApi:
         token: str,
         sql: str,
         node_id: str = '',
+        session_id: str = '',
+        params: list | None = None,
     ) -> Dict[str, Any]:
         """
         Execute a raw SQL or Cypher statement against a database pipeline node.
@@ -84,6 +86,11 @@ class DatabaseApi:
             sql: Raw SQL or Cypher statement to execute.
             node_id: Target database node ID.  When empty the call broadcasts
                 to all tool-lane nodes; the first database node handles it.
+            session_id: Optional transaction session ID returned by
+                ``begin_transaction``.  When provided the statement runs within
+                that transaction.
+            params: Optional positional parameters bound to the statement
+                (e.g. ``[1, 'foo']`` for ``$1``, ``$2`` placeholders).
 
         Returns:
             Dict with ``rows`` (list of row dicts) and ``affected_rows`` (int).
@@ -97,11 +104,124 @@ class DatabaseApi:
         if not isinstance(sql, str) or not sql.strip():
             raise ValueError('sql must be a non-empty string')
 
+        input_: Dict[str, Any] = {'sql': sql}
+        if session_id:
+            input_['session_id'] = session_id
+        if params:
+            input_['params'] = params
+
         return await self._client.tool(
             token=token,
             tool='execute',
             node_id=node_id,
-            input={'sql': sql},
+            input=input_,
+        )
+
+    async def begin_transaction(
+        self,
+        *,
+        token: str,
+        node_id: str = '',
+    ) -> Dict[str, Any]:
+        """
+        Begin a database transaction on a pipeline node.
+
+        Returns a ``session_id`` that must be threaded through subsequent
+        ``query``, ``commit``, and ``rollback`` calls to keep them within
+        the same transaction.
+
+        Args:
+            token: Pipeline token for authentication and resource access.
+            node_id: Target database node ID.  When empty the call broadcasts
+                to all tool-lane nodes; the first database node handles it.
+
+        Returns:
+            Dict containing the ``session_id`` string for the new transaction.
+
+        Raises:
+            ValueError: If ``token`` is empty or whitespace-only.
+            RuntimeError: If the server signals failure.
+        """
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError('token must be a non-empty string')
+
+        return await self._client.tool(
+            token=token,
+            tool='begin',
+            node_id=node_id,
+            input={},
+        )
+
+    async def commit(
+        self,
+        *,
+        token: str,
+        session_id: str,
+        node_id: str = '',
+    ) -> Dict[str, Any]:
+        """
+        Commit an open transaction session, making all its changes permanent.
+
+        Args:
+            token: Pipeline token for authentication and resource access.
+            session_id: Transaction session ID returned by ``begin_transaction``.
+            node_id: Target database node ID.  When empty the call broadcasts
+                to all tool-lane nodes; the first database node handles it.
+
+        Returns:
+            Dict with ``ok: True`` on success.
+
+        Raises:
+            ValueError: If ``token`` or ``session_id`` is empty or
+                whitespace-only.
+            RuntimeError: If the server signals failure.
+        """
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError('token must be a non-empty string')
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError('session_id must be a non-empty string')
+
+        return await self._client.tool(
+            token=token,
+            tool='commit',
+            node_id=node_id,
+            input={'session_id': session_id},
+        )
+
+    async def rollback(
+        self,
+        *,
+        token: str,
+        session_id: str,
+        node_id: str = '',
+    ) -> Dict[str, Any]:
+        """
+        Roll back an open transaction session, discarding all its changes.
+
+        Args:
+            token: Pipeline token for authentication and resource access.
+            session_id: Transaction session ID returned by ``begin_transaction``.
+            node_id: Target database node ID.  When empty the call broadcasts
+                to all tool-lane nodes; the first database node handles it.
+
+        Returns:
+            Dict with ``ok: True`` on success.
+
+        Raises:
+            ValueError: If ``token`` or ``session_id`` is empty or
+                whitespace-only.
+            RuntimeError: If the server signals failure.
+        """
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError('token must be a non-empty string')
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError('session_id must be a non-empty string')
+
+        return await self._client.tool(
+            token=token,
+            tool='rollback',
+            node_id=node_id,
+            input={'session_id': session_id},
         )
 
     async def dialect(self, *, token: str, node_id: str = '') -> DatabaseDialect:

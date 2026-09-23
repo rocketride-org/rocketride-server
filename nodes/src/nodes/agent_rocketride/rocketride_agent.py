@@ -106,6 +106,10 @@ class RocketRideDriver(AgentBase):
         # can inject all prior results into the prompt as context.
         waves: List[Dict[str, Any]] = []
 
+        # Fingerprint of each stored result mapped to the key holding it, so a later
+        # identical result can name it. Rebuilt per run, never shared across runs.
+        self.seen_results: Dict[str, str] = {}
+
         # trace is returned to the caller and recorded for observability.
         # waves is shared by reference — appending to it here also updates trace.
         trace: Dict[str, Any] = {'waves': waves, 'run_id': run_id}
@@ -163,6 +167,9 @@ class RocketRideDriver(AgentBase):
                     w['results'] = [r for r in w.get('results', []) if r.get('key') not in remove_keys]
                 # Drop wave entries that are now completely empty (all results pruned)
                 waves[:] = [w for w in waves if w.get('results')]
+                # Forget fingerprints for cleared keys, or a later note would point at
+                # a key that no longer resolves.
+                self.seen_results = {f: k for f, k in self.seen_results.items() if k not in remove_keys}
 
             # Surface the LLM's thought to the UI — one-sentence description of
             # what the agent is doing this turn.  Shown in the "thinking" panel.

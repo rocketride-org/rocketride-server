@@ -1,0 +1,113 @@
+{
+	"project_id": "a7f3c2e1-4b8d-4e6a-9c1f-2d5e8b3a6f04",
+	"source": "chat_1",
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": {}
+		},
+		{
+			"id": "agent_1",
+			"provider": "agent_crewai",
+			"config": {
+				"instructions": [
+					"You are a helpful assistant. For every user message you MUST call the run_pipe tool exactly once, passing the user's text as the `data` argument, and then return the tool's result as your answer."
+				]
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }]
+		},
+		{
+			"id": "agent_llm_1",
+			"provider": "llm_openai_api",
+			"config": {
+				"profile": "custom",
+				"custom": {
+					"model": "${ROCKETRIDE_OLLAMA_MODEL}",
+					"base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}",
+					"apikey": "ollama",
+					"modelTotalTokens": 32768
+				}
+			},
+			"control": [{ "classType": "llm", "from": "agent_1" }]
+		},
+		{
+			"id": "agent_memory_1",
+			"provider": "memory_internal",
+			"config": {},
+			"control": [{ "classType": "memory", "from": "agent_1" }]
+		},
+
+		{
+			"id": "pipe_tool_1",
+			"provider": "tool_pipe",
+			"config": {
+				"profile": "default",
+				"default": {
+					"tool_description": "Runs the user's text through a two-branch (diamond) sub-pipeline and returns a single merged answer. Call this for every user message.",
+					"return_type": "answers"
+				}
+			},
+			"control": [{ "classType": "tool", "from": "agent_1" }]
+		},
+
+		{
+			"id": "branch_a_1",
+			"provider": "prompt",
+			"config": {
+				"instructions": ["Branch A of the diamond saw the input."]
+			},
+			"input": [{ "lane": "text", "from": "pipe_tool_1" }]
+		},
+		{
+			"id": "branch_b_1",
+			"provider": "prompt",
+			"config": {
+				"instructions": ["Branch B of the diamond saw the input."]
+			},
+			"input": [{ "lane": "text", "from": "pipe_tool_1" }]
+		},
+
+		{
+			"id": "join_1",
+			"provider": "prompt",
+			"config": {
+				"instructions": [
+					"Combine both branch contributions. Confirm that BOTH 'Branch A' and 'Branch B' are present, then answer the original question."
+				]
+			},
+			"input": [
+				{ "lane": "questions", "from": "branch_a_1" },
+				{ "lane": "questions", "from": "branch_b_1" }
+			]
+		},
+
+		{
+			"id": "sub_llm_1",
+			"provider": "llm_openai_api",
+			"config": {
+				"profile": "custom",
+				"custom": {
+					"model": "${ROCKETRIDE_OLLAMA_MODEL}",
+					"base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}",
+					"apikey": "ollama",
+					"modelTotalTokens": 32768
+				}
+			},
+			"input": [{ "lane": "questions", "from": "join_1" }]
+		},
+		{
+			"id": "sub_response_1",
+			"provider": "response_answers",
+			"config": {},
+			"input": [{ "lane": "answers", "from": "sub_llm_1" }]
+		},
+
+		{
+			"id": "response_1",
+			"provider": "response_answers",
+			"config": {},
+			"input": [{ "lane": "answers", "from": "agent_1" }]
+		}
+	]
+}

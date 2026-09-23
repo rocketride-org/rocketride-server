@@ -27,10 +27,10 @@
 tool_pipe node instance.
 
 Exposes a configurable tool to agents. When invoked, routes the input to all
-connected output lanes. The write call is synchronous — by the time it returns,
-all the downstream response nodes have already populated currentObject.response.
-The new response entries are snapshotted and then removed so they don't leak
-into the parent pipeline.
+connected output lanes, then flushes (closing) and closes the sub-pipeline in
+dependency order so buffer-and-flush nodes (e.g. a join) emit their accumulated
+output into currentObject.response before it is read. The new response entries
+are snapshotted and then removed so they don't leak into the parent pipeline.
 """
 
 from __future__ import annotations
@@ -103,7 +103,10 @@ class IInstance(IInstanceBase):
             raise
         finally:
             if opened:
-                self.instance.close()
+                try:
+                    self.instance.closing()
+                finally:
+                    self.instance.close()
 
         response = _to_python_dict(entry.response)
 

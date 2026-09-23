@@ -1,1 +1,4 @@
-crewai>=1.14.1
+# Upper-bounded: crewai moves the BaseLLM contract in minor releases. 1.15.x ships
+# a BaseLLM without supports_function_calling() while several call sites still
+# invoke it unguarded, which broke HostInvokeLLM (see crewai_base._build_crew_llm).
+crewai>=1.14.1,<2

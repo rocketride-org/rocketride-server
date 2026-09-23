@@ -31,7 +31,7 @@ from pathlib import PurePosixPath
 import re
 import sys
 import traceback
-from typing import Dict, List
+from typing import Dict, List, Optional
 from urllib.parse import urlparse, unquote
 
 from .filters import IEndpointBase
@@ -319,6 +319,19 @@ def processArguments(args: List[str]):
 
 
 processArguments = engLib.processArguments  # noqa
+
+
+def getTask() -> 'Optional[dict]':
+    """
+    Return the complete task-file JSON of the task currently executing in
+    this process, or None when no task is running. Trusted point-to-point
+    task data (identity, storage anchor) — published by the engine around
+    the task's begin/end window, never sourced from the environment.
+    """
+    ...
+
+
+getTask = engLib.getTask  # noqa
 
 
 # -----------------------------------------------------------------------------

@@ -59,6 +59,80 @@ using IPipeFilters = std::vector<IPipeFilterType>;
 
 //-------------------------------------------------------------------------
 /// @details
+///		Compute the deterministic lifecycle (open/closing/close) walk order
+///		for one region of a pipeline's data connections. A region is the set
+///		of nodes a single `root` drives: the pipe head drives the source (-1)
+///		region, and each control/invoke node drives the sub-pipeline it
+///		reaches. Returns that region's pipeStack indices in topological order
+///		(upstream-first, deterministic first-seen tie-break). `barriers` are
+///		the other lifecycle roots - one reached by this region joins it but is
+///		not expanded past; `claimed` nodes are already owned by an earlier
+///		region and excluded. The defaults reproduce the single source-region
+///		behavior (root -1, no barriers, nothing claimed).
+///	@param[in]	connections
+///		The endpoint's data connection table (fromIndex == -1 is the source).
+///	@param[in]	root
+///		The lifecycle root that seeds this region.
+///	@param[in]	barriers
+///		The other lifecycle roots (joined as members, not expanded past).
+///	@param[in]	claimed
+///		Nodes already owned by an earlier region; excluded from this one.
+///	@returns
+///		The region's ordered pipeStack indices, or Ec::InvalidParam if the
+///		region contains a cycle.
+//-------------------------------------------------------------------------
+ErrorOr<std::vector<int>> computeLifecycleOrder(
+    const std::vector<std::tuple<int, int, std::string>> &connections,
+    int root = -1, const std::unordered_set<int> &barriers = {},
+    const std::unordered_set<int> &claimed = {}) noexcept;
+
+//-------------------------------------------------------------------------
+/// @details
+///		The full lifecycle partition of a pipeline: the head's region plus
+///		one region per control root. `head` is the source (-1) region;
+///		`control` pairs each control root's pipeStack index with the
+///		topological order of the nodes it owns. Regions are disjoint.
+//-------------------------------------------------------------------------
+struct LifecycleRegions {
+    std::vector<int> head;
+    std::vector<std::pair<int, std::vector<int>>> control;
+};
+
+//-------------------------------------------------------------------------
+/// @details
+///		Partition a pipeline's connections into lifecycle regions - the head
+///		region and one per control root (an invoked node) - and validate
+///		ownership. `invokedNodes` is the list of controls-table targets (the
+///		invoked nodes; duplicates and first-seen order are handled here). The
+///		head claims first; each control root then claims what it reaches,
+///		against the head's claim only so overlaps stay visible. Rejects:
+///		  - a node reachable from two control roots (ambiguous owner),
+///		  - a control root that owns a sub-pipeline AND is itself data-fed
+///		    (its owning region would double-drive that sub-pipeline; a
+///		    data-fed invoked node with NO sub-pipeline is allowed), and
+///		  - a control root that data-reaches a node the main flow owns (its
+///		    sub-pipeline must be exclusively its own, not shared with the
+///		    main pipeline or a second start).
+///	@param[in]	connections
+///		The (fromIndex, toIndex, lane) data-connection table.
+///	@param[in]	invokedNodes
+///		The controls-table target indices (the invoked nodes).
+///	@param[in]	nodeLabels
+///		Display labels indexed by pipeStack index - the service title plus the
+///		component id, e.g. `"Pipeline Tool" (pipe_tool_1)` - used to name nodes
+///		in rejection messages. Optional: an index with no label falls back to
+///		its number.
+///	@returns
+///		The lifecycle partition, or Ec::InvalidParam on a cycle in any region
+///		or a rejected ownership shape.
+//-------------------------------------------------------------------------
+ErrorOr<LifecycleRegions> computeLifecycleRegions(
+    const std::vector<std::tuple<int, int, std::string>> &connections,
+    const std::vector<int> &invokedNodes,
+    const std::vector<std::string> &nodeLabels = {}) noexcept;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Define the pipe stack we build
 //-------------------------------------------------------------------------
 struct IPipeType {
@@ -273,6 +347,34 @@ public:
     //		for the control/invoke function
     //-----------------------------------------------------------------
     std::vector<std::tuple<int, int, std::string>> controls;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The head's lifecycle region: the deterministic order in which the
+    ///		source-reachable components receive their lifecycle
+    ///		(open/closing/close). Each entry is a pipeStack index, ordered
+    ///		upstream-first (topological) so a node is flushed/closed only after
+    ///		all of its upstream data parents. `bindFilters` binds these onto the
+    ///		pipe head: closing/close forward, open reversed. Computed once in
+    ///		`buildConnections`; the control roots' regions live in
+    ///		`controlLifecycleOrders`.
+    //-----------------------------------------------------------------
+    std::vector<int> lifecycleOrder;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Lifecycle regions owned by control roots (invoked nodes). Each
+    ///		entry is (rootIndex, the topological order of the nodes that root
+    ///		owns). `bindFilters` binds each region's open/closing/close flat
+    ///		onto its root's binder - closing/close forward, open reversed -
+    ///		exactly as `lifecycleOrder` is bound onto the pipe head, so a
+    ///		control node (e.g. tool_pipe) flushes and closes its sub-pipeline
+    ///		in dependency order. Regions are disjoint from each other and from
+    ///		`lifecycleOrder` (first claim wins: head, then controls-table
+    ///		order). Stored as a vector, not a map, so binding iterates in that
+    ///		deterministic order. Computed once in `buildConnections`.
+    //-----------------------------------------------------------------
+    std::vector<std::pair<int, std::vector<int>>> controlLifecycleOrders;
 
     //-----------------------------------------------------------------
     /// @details

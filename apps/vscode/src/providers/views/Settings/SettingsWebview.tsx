@@ -25,19 +25,19 @@ import React, { useState, useRef, useMemo, useCallback, CSSProperties } from 're
 import { useMessaging } from '../hooks/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
-import { DebuggingSettings } from './DebuggingSettings';
 // EnvVariablesSettings removed — env is now managed in the Account page
 import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
-import { commonStyles } from 'shared/themes/styles';
-import type { CheckoutPlan } from 'shared';
-import { TabPanel } from 'shared/components/tab-panel/TabPanel';
-import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
+import { commonStyles } from 'shell';
+import type { CheckoutPlan } from 'shell';
+import type { ViewMenu } from 'shell';
+import { TabPanel } from 'shell';
+import type { ITabPanelPanel } from 'shell';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
 // ============================================================================
@@ -46,6 +46,13 @@ import '../../styles/root.css';
 
 /** Available connection modes for dev/deploy targets. */
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
+
+const SETTINGS_TAB_IDS = ['development', 'deployment', 'pipeline', 'integrations'] as const;
+type SettingsTabId = typeof SETTINGS_TAB_IDS[number];
+
+function isSettingsTabId(value: unknown): value is SettingsTabId {
+	return typeof value === 'string' && (SETTINGS_TAB_IDS as readonly string[]).includes(value);
+}
 
 /**
  * Per-group (development or deployment) connection configuration.
@@ -56,17 +63,20 @@ export interface ConnectionGroupSettings {
 	connectionMode: ConnectionMode | null;
 	/** Server URL for cloud/onprem modes. */
 	hostUrl: string;
+	/** Cloud mode: connect to `cloudUrl` instead of the default cloud. */
+	useCustomServer: boolean;
+	/** Cloud mode: the custom server address (used when useCustomServer). */
+	cloudUrl: string;
+	/** Cloud mode: the default cloud server (the setting's package.json
+	 * default, sent by the host — the webview bakes no address). */
+	defaultCloudUrl: string;
 	/** Whether the secret store already has an API key for this group. */
 	hasApiKey: boolean;
 	/** User-entered API key (cleared after save to secret storage). */
 	apiKey: string;
-	/** Selected team ID for cloud mode multi-tenant deployments. */
-	teamId: string;
 	/** Local engine settings (applies to local mode only). */
 	local: {
 		engineVersion: string;
-		debugOutput: boolean;
-		engineArgs: string;
 	};
 }
 
@@ -78,6 +88,14 @@ export interface SettingsData {
 	defaultPipelinePath: string;
 	/** How pipelines behave after file changes: auto-restart, manual, or prompt the user. */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	/** Default idle-timeout (seconds) for runs without a per-pipeline override; 0 = no timeout. */
+	pipelineTtl: number;
+	/** Default trace verbosity for runs without a per-pipeline override. */
+	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
+	/** Additional command-line arguments passed to each pipeline task via `.use`. */
+	taskArguments: string;
+	/** Enable full debug output for pipeline tasks (--trace=debugOut via `.use` args). */
+	pipelineDebugOutput: boolean;
 	envVars?: Record<string, string>;
 	/** Auto-install RocketRide docs for detected coding agents. */
 	autoAgentIntegration: boolean;
@@ -127,6 +145,21 @@ export type SettingsIncomingMessage =
 	| {
 			type: 'subscriptionStatus';
 			isSubscribed: boolean;
+	  }
+	// Declared, not cast: WelcomeWebview carries the identical variant, and
+	// the two surfaces read ONE host payload — a typed shape is what keeps
+	// them from drifting apart field by field.
+	| {
+			type: 'cloud:status';
+			signedIn: boolean;
+			userName: string;
+			signedInUrl?: string;
+			waitlisted?: boolean;
+			waitlistedName?: string;
+			pendingSignIn?: boolean;
+			pendingSignOut?: boolean;
+			pendingUserName?: string;
+			pendingUrl?: string;
 	  };
 
 /** Messages this webview sends **to** the extension host. */
@@ -139,21 +172,32 @@ export type SettingsOutgoingMessage =
 			settings: SettingsData;
 	  }
 	| {
-			type: 'testConnection';
-			hostUrl: string;
-			apiKey: string;
-	  }
-	| {
 			type: 'clearCredentials';
 	  }
 	| {
 			type: 'fetchVersions';
 	  }
 	| {
-			type: 'fetchTeams';
+			/** Ask the host for the current cloud auth state (a cloud:status reply). */
+			type: 'cloud:getStatus';
 	  }
 	| {
-			type: 'openSubscribe';
+			/**
+			 * Start the OAuth sign-in. `cloudUrl` carries the FORM's current
+			 * effective server (the custom-server checkbox + URL may be unsaved)
+			 * — the host exchanges the OAuth code against exactly this server.
+			 * Form-less senders (sidebar, welcome) omit it and the host falls
+			 * back to the saved configuration.
+			 */
+			type: 'cloud:signIn';
+			cloudUrl?: string;
+	  }
+	| {
+			type: 'cloud:signOut';
+	  }
+	| {
+			/** Discard any staged (uncommitted) cloud sign-in/sign-out. */
+			type: 'cloud:clearPending';
 	  };
 
 // ============================================================================
@@ -240,39 +284,135 @@ export const settingsStyles = {
 		marginBottom: 8,
 		lineHeight: 1.4,
 	} as CSSProperties,
+	// Per-page header — names the page the user is on (matches the browser
+	// settings page's section head). Sits at the top of each flat page body.
+	pageHeader: {
+		display: 'flex',
+		alignItems: 'baseline',
+		gap: 8,
+	} as CSSProperties,
+	pageTitle: {
+		margin: 0,
+		fontSize: 17,
+		fontWeight: 500,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	// Flat page column — stacks header, description, and controls with a uniform
+	// gap (replaces the old card body now that pages are card-less).
+	pageBody: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 16,
+	} as CSSProperties,
 };
 
 // ============================================================================
-// SUBSCRIBE BANNER STYLES
+// PAGE BODY STYLE
 // ============================================================================
 
-const subscribeBannerStyles = {
-	container: {
-		background: 'var(--rr-color-warning-bg, rgba(255, 193, 7, 0.1))',
-		borderBottom: '1px solid var(--rr-color-warning, #ffc107)',
-		padding: '10px 16px',
+/**
+ * Fills the space to the right of the left settings nav; TabPanel's
+ * 100%-height wrapper resolves against this definite flex box.
+ */
+const pageBodyStyle: CSSProperties = {
+	display: 'flex',
+	flexDirection: 'column',
+	flex: 1,
+	minWidth: 0,
+	minHeight: 0,
+};
+
+// ============================================================================
+// SETTINGS NAV STYLES — left-hand section menu (replaces the top pill strip)
+// ============================================================================
+
+/**
+ * Left-hand settings navigation, matching the browser settings page
+ * (shell SettingsProvider): a fixed-width rail of `listRow` pills, one per
+ * section, with the page bodies rendered to its right. The pages themselves
+ * are unchanged — only the section selector moved from a top strip to here.
+ */
+const settingsNavStyles = {
+	// Horizontal split: fixed nav column on the left, page bodies on the right.
+	body: {
+		display: 'flex',
+		flex: 1,
+		minWidth: 0,
+		minHeight: 0,
+		overflow: 'hidden',
 	} as CSSProperties,
-	content: {
+	// Fixed-width nav rail with its own scroll and a right divider.
+	sidebar: {
+		width: 200,
+		flexShrink: 0,
+		borderRight: '1px solid var(--rr-border)',
+		overflowY: 'auto',
+		padding: '12px 8px',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
+	} as CSSProperties,
+	// One nav row — the shared listRow pill plus the button reset + active weight.
+	navItem: (active: boolean): CSSProperties => ({
+		...commonStyles.listRow(active),
+		width: '100%',
+		margin: '1px 0',
+		border: 'none',
+		textAlign: 'left',
+		fontWeight: active ? 600 : 400,
+		fontFamily: 'var(--rr-font-family)',
+	}),
+};
+
+// ============================================================================
+// TITLE BAR STYLES — page title + one-line description at the very top
+// ============================================================================
+
+/**
+ * Top-of-page title bar, mirroring the browser settings page's ContentHeader
+ * (24px title + 14px muted subtitle). Fixed height above the nav/body split.
+ */
+const settingsHeaderStyles = {
+	container: {
+		flex: 'none',
+		padding: '24px 24px 16px',
+	} as CSSProperties,
+	title: {
+		margin: 0,
+		fontSize: 24,
+		fontWeight: 700,
+		letterSpacing: '-0.01em',
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	subtitle: {
+		marginTop: 4,
+		fontSize: 14,
+		fontWeight: 400,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+};
+
+// ============================================================================
+// FOOTER STYLES — Save/Cancel action row (mirrors DetailPanel's footer)
+// ============================================================================
+
+/**
+ * Bottom action row, matching DetailPanel's footer: a top-divided, right-
+ * aligned Save/Cancel pair. Rendered only while there are unsaved edits — the
+ * settings surface is "always editing", so the footer is the change affordance.
+ */
+const settingsFooterStyles = {
+	bar: {
+		flex: 'none',
 		display: 'flex',
 		alignItems: 'center',
-		justifyContent: 'space-between',
-		gap: 12,
+		justifyContent: 'flex-end',
+		gap: 8,
+		padding: '12px 20px',
+		borderTop: '1px solid var(--rr-border)',
+		background: 'var(--rr-bg-default)',
 	} as CSSProperties,
-	text: {
-		fontSize: 13,
-		color: 'var(--rr-text-primary)',
-		flex: 1,
-	} as CSSProperties,
-	button: {
-		...commonStyles.buttonPrimary,
-		whiteSpace: 'nowrap',
-		flexShrink: 0,
-	} as CSSProperties,
+	cancel: { ...commonStyles.buttonSecondary } as CSSProperties,
+	save: { ...commonStyles.buttonPrimary } as CSSProperties,
 };
-
-// ============================================================================
-// AUTH ERROR BANNER STYLES
-// ============================================================================
 
 const authErrorBannerStyles = {
 	container: {
@@ -302,42 +442,6 @@ const authErrorBannerStyles = {
 };
 
 // ============================================================================
-// SHARED CARD HEADER WITH SAVE BUTTON
-// ============================================================================
-
-/**
- * Card header with title + conditional Save/Cancel buttons.
- * Buttons only render when `dirty` is true (user has unsaved edits).
- * A brief "Saved" confirmation appears after a successful save.
- */
-export const SettingsCardHeader: React.FC<{
-	title: string;
-	onSave: () => void;
-	onCancel?: () => void;
-	dirty?: boolean;
-	saved?: boolean;
-}> = ({ title, onSave, onCancel, dirty, saved }) => (
-	<div style={settingsStyles.cardHeader}>
-		{title}
-		<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-			{saved && <span style={{ fontSize: 11, color: 'var(--rr-color-success)' }}>Saved</span>}
-			{dirty && (
-				<>
-					{onCancel && (
-						<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onCancel}>
-							Cancel
-						</button>
-					)}
-					<button style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onSave}>
-						Save All Settings
-					</button>
-				</>
-			)}
-		</div>
-	</div>
-);
-
-// ============================================================================
 // MAIN SETTINGS VIEW COMPONENT
 // ============================================================================
 
@@ -351,7 +455,7 @@ export const SettingsCardHeader: React.FC<{
  * - Connection settings with cloud/local mode support
  * - Pipeline configuration with default paths
  * - Local engine settings for self-hosted instances
- * - Debugging configuration options
+ * - Pipeline execution defaults (restart behavior, idle timeout, trace level)
  * - Real-time validation and feedback messaging
  */
 export const Settings: React.FC = () => {
@@ -363,21 +467,30 @@ export const Settings: React.FC = () => {
 		development: {
 			connectionMode: 'local',
 			hostUrl: 'http://localhost:5565',
+			useCustomServer: false,
+			cloudUrl: '',
+			defaultCloudUrl: '',
 			hasApiKey: false,
 			apiKey: '',
-			teamId: '',
-			local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+			local: { engineVersion: 'latest' },
 		},
 		deployment: {
 			connectionMode: null,
 			hostUrl: '',
+			useCustomServer: false,
+			cloudUrl: '',
+			defaultCloudUrl: '',
 			hasApiKey: false,
 			apiKey: '',
-			teamId: '',
-			local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+			local: { engineVersion: 'latest' },
 		},
 		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
+		pipelineTtl: 900,
+		// Must match package.json's rocketride.pipelineTraceLevel default.
+		pipelineTraceLevel: 'full',
+		taskArguments: '',
+		pipelineDebugOutput: false,
 		envVars: {},
 		autoAgentIntegration: true,
 		integrationCopilot: false,
@@ -392,16 +505,31 @@ export const Settings: React.FC = () => {
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
-	// Server capabilities (from probe)
-	const [serverCapabilities, setServerCapabilities] = useState<string[]>([]);
-	const [isSaasProbed, setIsSaasProbed] = useState<boolean | undefined>(undefined);
+	// Per-group cloud probe results. `isSaas` keeps its LAST value while a
+	// re-probe is in flight so the auth UI doesn't flicker away on every
+	// keystroke in the URL field; undefined = never probed ("Checking...").
+	// Each result is routed by the echoed hostUrl, so the dev and deploy
+	// panels can probe different targets without clobbering each other.
+	const [devProbe, setDevProbe] = useState<{ isSaas?: boolean; unreachable: boolean }>({ unreachable: false });
+	const [deployProbe, setDeployProbe] = useState<{ isSaas?: boolean; unreachable: boolean }>({ unreachable: false });
+	/** The URL each group's panel most recently asked to probe. */
+	const probeUrlRef = useRef<{ development?: string; deployment?: string }>({});
 
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	// Subscription state — defaults to false so the subscribe button shows until the host confirms
 	const [subscribed, setSubscribed] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
-	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
+	// The server the session's token was minted against — CloudPanel's
+	// subscribe gate compares the form's target against it.
+	const [cloudSignedInUrl, setCloudSignedInUrl] = useState('');
+	// Last sign-in attempt came back waitlisted (auth fine, access queued) —
+	// CloudPanel renders the friendly access-queue banner.
+	const [cloudWaitlisted, setCloudWaitlisted] = useState(false);
+	const [cloudWaitlistedName, setCloudWaitlistedName] = useState('');
+	// Staged (uncommitted) cloud auth change — sign-in/sign-out from the Cloud
+	// panel applies only on Save, so it participates in dirty tracking.
+	const [cloudPending, setCloudPending] = useState<{ signIn: boolean; signOut: boolean; userName: string; url: string }>({ signIn: false, signOut: false, userName: '', url: '' });
 
 	// Checkout modal state
 	const checkoutResolvers = useRef<{
@@ -435,9 +563,8 @@ export const Settings: React.FC = () => {
 	// Active settings tab
 	const [activeTab, setActiveTab] = useState('development');
 
-	// Dirty-state tracking — buttons only appear when user has edited something
+	// Dirty-state tracking — the footer Save/Cancel appear only when the user has edited something
 	const [dirty, setDirty] = useState(false);
-	const [saved, setSaved] = useState(false);
 	const savedSettingsRef = useRef<SettingsData | null>(null);
 	const pendingSaveSnapshotRef = useRef<SettingsData | null>(null);
 
@@ -461,7 +588,7 @@ export const Settings: React.FC = () => {
 					setEngineVersionsLoading(true);
 					sendMessage({ type: 'fetchVersions' });
 					// Hydrate cloud auth status so the Cloud panel renders correctly
-					sendMessage({ type: 'cloud:getStatus' } as any);
+					sendMessage({ type: 'cloud:getStatus' });
 					break;
 
 				case 'versionsLoaded' as any:
@@ -469,10 +596,20 @@ export const Settings: React.FC = () => {
 					setEngineVersionsLoading(false);
 					break;
 
-				case 'cloud:status' as any:
-					setCloudSignedIn((message as any).signedIn);
-					setCloudUserName((message as any).userName || '');
+				case 'cloud:status': {
+					setCloudSignedIn(message.signedIn);
+					setCloudUserName(message.userName || '');
+					setCloudSignedInUrl(message.signedInUrl || '');
+					setCloudWaitlisted(Boolean(message.waitlisted));
+					setCloudWaitlistedName(message.waitlistedName || '');
+					const pendingSignIn = Boolean(message.pendingSignIn);
+					const pendingSignOut = Boolean(message.pendingSignOut);
+					setCloudPending({ signIn: pendingSignIn, signOut: pendingSignOut, userName: message.pendingUserName || '', url: message.pendingUrl || '' });
+					// A staged auth change is an unsaved edit — surface the
+					// Save/Cancel footer so the user can commit or revert it.
+					if (pendingSignIn || pendingSignOut) setDirty(true);
 					break;
+				}
 
 				case 'subscriptionStatus':
 					setSubscribed(message.isSubscribed);
@@ -507,22 +644,25 @@ export const Settings: React.FC = () => {
 					break;
 				}
 
-				case 'teamsLoaded' as any:
-					setTeams((message as any).teams || []);
+				case 'setFocus' as any: {
+					const { focus } = message as unknown as { focus?: unknown };
+					if (!isSettingsTabId(focus)) break;
+					setActiveTab(focus);
 					break;
-
-				case 'setFocus' as any:
-					if ((message as any).focus) setActiveTab((message as any).focus);
-					break;
+				}
 
 				case 'authError' as any:
 					setAuthError((message as any).message || 'Authentication failed');
 					break;
 
 				case 'serverInfo' as any: {
-					const caps = (message as any).capabilities || [];
-					setServerCapabilities(caps);
-					setIsSaasProbed(caps.includes('saas'));
+					const caps: string[] = (message as any).capabilities || [];
+					const unreachable = Boolean((message as any).unreachable);
+					const url = (message as any).hostUrl as string | undefined;
+					const next = { isSaas: unreachable ? undefined : caps.includes('saas'), unreachable };
+					// Route by the echoed URL to the group(s) that probed it.
+					if (probeUrlRef.current.development === url) setDevProbe(next);
+					if (probeUrlRef.current.deployment === url) setDeployProbe(next);
 					break;
 				}
 
@@ -540,11 +680,9 @@ export const Settings: React.FC = () => {
 						// On successful save acknowledgement: update the saved snapshot
 						// so Cancel reverts to the newly saved values
 						if (message.level === 'success' && message.context === 'save') {
-							savedSettingsRef.current = pendingSaveSnapshotRef.current ?? JSON.parse(JSON.stringify(settings)) as SettingsData;
+							savedSettingsRef.current = pendingSaveSnapshotRef.current ?? (JSON.parse(JSON.stringify(settings)) as SettingsData);
 							pendingSaveSnapshotRef.current = null;
 							setDirty(false);
-							setSaved(true);
-							setTimeout(() => setSaved(false), 5000);
 						}
 					}
 					break;
@@ -592,9 +730,7 @@ export const Settings: React.FC = () => {
 					// 'test' commands display results inline via testMessage
 					// rather than resetting engine busy state
 					if (command === 'test') {
-						const msg: MessageData = success
-							? { level: 'success', message: 'Connection successful!' }
-							: { level: 'error', message: error || 'Connection failed' };
+						const msg: MessageData = success ? { level: 'success', message: 'Connection successful!' } : { level: 'error', message: error || 'Connection failed' };
 						setTestMessage(msg);
 						// Clear the auth error banner on successful test connection
 						if (success) {
@@ -619,7 +755,6 @@ export const Settings: React.FC = () => {
 					}
 					break;
 				}
-
 			}
 		},
 	});
@@ -637,14 +772,15 @@ export const Settings: React.FC = () => {
 		sendMessage({ type: 'saveSettings', settings: snapshot });
 	};
 
-	/** Revert to last-saved settings and clear dirty state. */
+	/** Revert to last-saved settings and clear dirty state — including any
+	 *  staged cloud sign-in/sign-out held on the host side. */
 	const handleCancelSettings = useCallback((): void => {
 		if (savedSettingsRef.current) {
 			setSettings(JSON.parse(JSON.stringify(savedSettingsRef.current)));
 		}
+		sendMessage({ type: 'cloud:clearPending' });
 		setDirty(false);
-		setSaved(false);
-	}, []);
+	}, [sendMessage]);
 
 	/**
 	 * Test connection via ioControl. On-prem passes hostUrl/apiKey as params;
@@ -656,15 +792,12 @@ export const Settings: React.FC = () => {
 	};
 
 	/**
-	 * Probe cloud server to check SaaS compatibility
+	 * Probe a group's cloud target for SaaS compatibility. The previous
+	 * result stays on screen until the fresh one arrives (no flicker).
 	 */
-	const handleProbeCloudServer = (cloudUrl: string): void => {
-		setIsSaasProbed(undefined); // reset to loading
+	const handleProbeCloudServer = (group: 'development' | 'deployment', cloudUrl: string): void => {
+		probeUrlRef.current[group] = cloudUrl;
 		sendMessage({ type: 'probeServerInfo', hostUrl: cloudUrl } as any);
-	};
-
-	const handleFetchTeams = (cloudUrl: string): void => {
-		sendMessage({ type: 'fetchTeams', hostUrl: cloudUrl } as any);
 	};
 
 	/**
@@ -689,7 +822,6 @@ export const Settings: React.FC = () => {
 	 */
 	const handleSettingsChange = (changes: Partial<SettingsData>): void => {
 		setDirty(true);
-		setSaved(false);
 		// Clear stale test results when the user switches mode —
 		// previous test output is no longer relevant to the new mode
 		if (changes.development?.connectionMode || changes.deployment?.connectionMode) {
@@ -727,8 +859,6 @@ export const Settings: React.FC = () => {
 			if ((devMode && needsVersions.includes(devMode)) || (depMode && needsVersions.includes(depMode))) {
 				sendMessage({ type: 'fetchVersions' });
 			}
-
-			// Teams are fetched by CloudPanel after it confirms the server is SaaS
 
 			return next;
 		});
@@ -774,7 +904,6 @@ export const Settings: React.FC = () => {
 	const makeDockerHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('docker', actionType);
 	const makeServiceHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('service', actionType);
 
-
 	const handleSudoSubmit = (): void => {
 		const password = sudoPasswordInput;
 		setSudoPasswordInput('');
@@ -790,14 +919,16 @@ export const Settings: React.FC = () => {
 	// TAB DEFINITIONS
 	// ========================================================================
 
-	const tabs: ITabPanelTab[] = useMemo(
-		() => [
-			{ id: 'development', label: 'Development' },
-			{ id: 'deployment', label: 'Deployment' },
-			{ id: 'pipeline', label: 'Pipeline' },
-			{ id: 'debugging', label: 'Debugging' },
-			{ id: 'integrations', label: 'Integrations' },
-		],
+	// ViewMenu declaration — rendered as this view's left-hand section nav.
+	const settingsMenu = useMemo<ViewMenu>(
+		() => ({
+			entries: [
+				{ id: 'development', label: 'Development' },
+				{ id: 'deployment', label: 'Deployment' },
+				{ id: 'pipeline', label: 'Pipeline' },
+				{ id: 'integrations', label: 'Integrations' },
+			],
+		}),
 		[]
 	);
 
@@ -809,19 +940,25 @@ export const Settings: React.FC = () => {
 		});
 	}, [sendMessage]);
 
-	const handleCreateCheckout = useCallback((priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
-		return new Promise((resolve, reject) => {
-			checkoutResolvers.current.session = { resolve, reject };
-			sendMessage({ type: 'checkout:createSession', priceId } as any);
-		});
-	}, [sendMessage]);
+	const handleCreateCheckout = useCallback(
+		(priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
+			return new Promise((resolve, reject) => {
+				checkoutResolvers.current.session = { resolve, reject };
+				sendMessage({ type: 'checkout:createSession', priceId } as any);
+			});
+		},
+		[sendMessage]
+	);
 
-	const handleConfirmPending = useCallback((subscriptionId: string, priceId: string): Promise<void> => {
-		return new Promise((resolve, reject) => {
-			checkoutResolvers.current.confirm = { resolve, reject };
-			sendMessage({ type: 'checkout:confirmPending', subscriptionId, priceId } as any);
-		});
-	}, [sendMessage]);
+	const handleConfirmPending = useCallback(
+		(subscriptionId: string, priceId: string): Promise<void> => {
+			return new Promise((resolve, reject) => {
+				checkoutResolvers.current.confirm = { resolve, reject };
+				sendMessage({ type: 'checkout:confirmPending', subscriptionId, priceId } as any);
+			});
+		},
+		[sendMessage]
+	);
 
 	const handleCheckoutSuccess = useCallback(() => {
 		setSubscribed(true);
@@ -836,24 +973,26 @@ export const Settings: React.FC = () => {
 						<ConnectionSettings
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
-							onSave={handleSaveSettings}
-							onCancel={handleCancelSettings}
-							dirty={dirty}
-							saved={saved}
 							onClearCredentials={handleClearCredentials}
 							onTestConnection={handleTestConnection}
-							serverCapabilities={serverCapabilities}
 							testMessage={testMessage}
 							engineVersions={engineVersions}
 							engineVersionsLoading={engineVersionsLoading}
 							cloudSignedIn={cloudSignedIn}
 							cloudUserName={cloudUserName}
-							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)}
-							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)}
-							onProbeCloudServer={handleProbeCloudServer}
-							onFetchTeams={handleFetchTeams}
-							isSaas={isSaasProbed}
-							teams={teams}
+							cloudSignedInUrl={cloudSignedInUrl}
+							cloudWaitlisted={cloudWaitlisted}
+							cloudWaitlistedName={cloudWaitlistedName}
+							// Sign-in targets the form's CURRENT effective server — the
+							// saved config lags until Save, and exchanging the OAuth code
+							// against the wrong server mints the wrong session.
+							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn', cloudUrl: (settings.development.useCustomServer && settings.development.cloudUrl) || settings.development.defaultCloudUrl })}
+							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' })}
+							cloudPending={cloudPending}
+							onCloudUndoPending={() => sendMessage({ type: 'cloud:clearPending' })}
+							onProbeCloudServer={(url) => handleProbeCloudServer('development', url)}
+							isSaas={devProbe.isSaas}
+							probeUnreachable={devProbe.unreachable}
 							dockerStatus={dockerStatus}
 							dockerProgress={dockerProgress}
 							dockerError={dockerError}
@@ -900,12 +1039,6 @@ export const Settings: React.FC = () => {
 						<DeploySettings
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
-							onSave={handleSaveSettings}
-							onCancel={handleCancelSettings}
-							dirty={dirty}
-							saved={saved}
-							serverCapabilities={serverCapabilities}
-							teams={teams}
 							engineVersions={engineVersions}
 							engineVersionsLoading={engineVersionsLoading}
 							onClearCredentials={handleClearCredentials}
@@ -913,11 +1046,19 @@ export const Settings: React.FC = () => {
 							testMessage={testMessage}
 							cloudSignedIn={cloudSignedIn}
 							cloudUserName={cloudUserName}
-							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)}
-							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)}
-							onProbeCloudServer={handleProbeCloudServer}
-							onFetchTeams={handleFetchTeams}
-							isSaas={isSaasProbed}
+							cloudSignedInUrl={cloudSignedInUrl}
+							cloudWaitlisted={cloudWaitlisted}
+							cloudWaitlistedName={cloudWaitlistedName}
+							// Sign-in targets the form's CURRENT effective server — the
+							// saved config lags until Save, and exchanging the OAuth code
+							// against the wrong server mints the wrong session.
+							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn', cloudUrl: (settings.deployment.useCustomServer && settings.deployment.cloudUrl) || settings.deployment.defaultCloudUrl })}
+							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' })}
+							cloudPending={cloudPending}
+							onCloudUndoPending={() => sendMessage({ type: 'cloud:clearPending' })}
+							onProbeCloudServer={(url) => handleProbeCloudServer('deployment', url)}
+							isSaas={deployProbe.isSaas}
+							probeUnreachable={deployProbe.unreachable}
 							dockerStatus={dockerStatus}
 							dockerProgress={dockerProgress}
 							dockerError={dockerError}
@@ -961,15 +1102,7 @@ export const Settings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
-					</div>
-				),
-			},
-			debugging: {
-				content: (
-					<div style={commonStyles.tabContent}>
-						<MessageDisplay message={message} />
-						<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
+						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
 					</div>
 				),
 			},
@@ -977,34 +1110,66 @@ export const Settings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
+						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} />
 					</div>
 				),
 			},
 		}),
-		[settings, message, testMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
+		[settings, message, testMessage, engineVersions, engineVersionsLoading, devProbe, deployProbe, cloudSignedIn, cloudUserName, cloudSignedInUrl, cloudWaitlisted, cloudWaitlistedName, cloudPending, subscribed, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
 	);
 
 	return (
 		<div style={commonStyles.columnFill}>
+			{/* ── Title bar — names the page + one-line description ── */}
+			<div style={settingsHeaderStyles.container}>
+				<h1 style={settingsHeaderStyles.title}>Settings</h1>
+				<div style={settingsHeaderStyles.subtitle}>Configure connections, pipelines, and integrations for the RocketRide extension.</div>
+			</div>
+
 			{/* ── Auth error banner (shown when opened due to auth failure) ── */}
 			{authError && (
 				<div style={authErrorBannerStyles.container}>
 					<div style={authErrorBannerStyles.content}>
 						<span style={{ fontSize: 18 }}>&#9888;</span>
 						<span style={authErrorBannerStyles.text}>{authError}</span>
-						<button
-							style={authErrorBannerStyles.dismiss}
-							onClick={() => setAuthError(null)}
-							title="Dismiss"
-						>
+						<button style={authErrorBannerStyles.dismiss} onClick={() => setAuthError(null)} title="Dismiss">
 							&#10005;
 						</button>
 					</div>
 				</div>
 			)}
-			{/* ── Tab panel ─────────────────────────────────────────── */}
-			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} panels={panels} />
+			{/* ── Body: left section nav (was the top pill strip) + page bodies ── */}
+			<div style={settingsNavStyles.body}>
+				{/* Left nav — one pill per settings section, driving the same activeTab. */}
+				<nav style={settingsNavStyles.sidebar} role="tablist" aria-orientation="vertical">
+					{settingsMenu.entries.map((entry) => {
+						// The selected section is highlighted and rendered by TabPanel.
+						const isActive = entry.id === activeTab;
+						return (
+							<button key={entry.id} role="tab" aria-selected={isActive} style={settingsNavStyles.navItem(isActive)} onClick={() => setActiveTab(entry.id)}>
+								{entry.label}
+							</button>
+						);
+					})}
+				</nav>
+
+				{/* Page bodies fill the space to the right of the nav. */}
+				<div style={pageBodyStyle}>
+					<TabPanel panels={panels} activeId={activeTab} />
+				</div>
+			</div>
+
+			{/* ── Footer — Save/Cancel appear once there are unsaved edits (DetailPanel pattern) ── */}
+			{dirty && (
+				<div style={settingsFooterStyles.bar}>
+					<button style={settingsFooterStyles.cancel} onClick={handleCancelSettings}>
+						Cancel
+					</button>
+					<button style={settingsFooterStyles.save} onClick={handleSaveSettings}>
+						Save
+					</button>
+				</div>
+			)}
 		</div>
 	);
 };

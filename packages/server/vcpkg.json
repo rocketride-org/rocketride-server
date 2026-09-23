@@ -22,8 +22,8 @@
     "boost-system",
     "boost-uuid",
     {
-      "name": "breakpad",
-      "platform": "linux"
+      "name": "crashpad",
+      "platform": "linux | osx"
     },
     "catch2",
     "cpprestsdk",

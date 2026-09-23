@@ -67,6 +67,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any relational database node."""
 
     engine = None
+    tx_registry = None  # type: ignore[assignment]  # TransactionRegistry, set in beginGlobal
     database: str = ''
     table: str = ''
     db_description: str = ''
@@ -460,6 +461,14 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             self.max_execute_rows = max(1, int(raw.get('max_execute_rows', DEFAULT_MAX_EXECUTE_ROWS)))
         except (TypeError, ValueError):
             self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
+        try:
+            self.tx_max_sessions = max(1, int(raw.get('tx_max_sessions', 20)))
+        except (TypeError, ValueError):
+            self.tx_max_sessions = 20
+        try:
+            self.tx_idle_timeout = max(1.0, float(raw.get('tx_idle_timeout', 300)))
+        except (TypeError, ValueError):
+            self.tx_idle_timeout = 300.0
 
         self.database = params['database']
         self.table = params['table']
@@ -470,6 +479,15 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         # pool_size + max_overflow allow up to 30 concurrent connections.
         self.engine = create_engine(db_url, pool_size=10, max_overflow=20)
+
+        from ai.common.database.tx_registry import TransactionRegistry
+
+        self.tx_registry = TransactionRegistry(
+            self.engine,
+            max_sessions=self.tx_max_sessions,
+            idle_timeout=self.tx_idle_timeout,
+            max_rows=self.max_execute_rows,
+        )
 
         # Reflect the full database schema once at startup so LLM prompts have
         # complete context without per-query reflection overhead.
@@ -488,5 +506,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             self.schema = {name: (col_type, '') for name, col_type in table_schema}
 
     def endGlobal(self) -> None:
+        if self.tx_registry:
+            self.tx_registry.close_all()
         if self.engine:
             self.engine.dispose()

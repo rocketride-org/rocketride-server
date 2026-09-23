@@ -21,8 +21,9 @@ from typing import Any, Dict, List, Optional, Union
 from rocketlib import debug, error
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
+from ai.common.llm_adapter import turn_usage
 
-from ai.common.utils import safe_str
+from ai.common.utils import parse_bool, safe_str
 
 from ._internal.host import AgentContext, AgentHostServices
 from ._internal.utils import (
@@ -32,6 +33,17 @@ from ._internal.utils import (
     new_run_id,
     truncate_at_stop_words,
 )
+
+
+class ToolCallRequiredError(RuntimeError):
+    """Raised by ``run_agent`` when the optional ``require_tool_call`` guard is
+    enabled but the driver produced an answer without invoking any tool.
+
+    Signals a likely *fabricated* answer — a planning model that narrated a
+    tool chain in prose instead of actually calling the tools.  ``run_agent``
+    catches it and returns a ``RocketRide.agent.guard.v1`` error answer instead
+    of delivering the ungrounded content.
+    """
 
 
 class AgentBase(ABC):
@@ -82,6 +94,14 @@ class AgentBase(ABC):
         # And save any specific instructions
         self._instructions = config.get('instructions', [])
         self._agent_description = config.get('agent_description', '') or ''
+
+        # Optional runtime guardrail.  When enabled, `run_agent` fails any run
+        # that produces an answer without invoking at least one tool (see
+        # `ToolCallRequiredError`).  Off by default — opt-in per node config so
+        # existing pipelines that legitimately answer tool-free are unaffected.
+        # parse_bool (not bool()) so a stringified "false"/"0"/"no" disables it
+        # instead of tripping the guard on every run.
+        self._require_tool_call = parse_bool(config.get('require_tool_call'), False)
 
     # =========================================================================
     # PIPELINE-FACING ENTRYPOINT
@@ -140,99 +160,160 @@ class AgentBase(ABC):
                 return safe_str(value)
 
         task_id = None
-        try:
-            # Add any global instructions from the config
-            for inst in self._instructions:
-                question.addInstruction('Additional Instruction', inst.strip())
-
-            # Get the jobs taskId — kept as a local variable inside the
-            # try/except so a missing/inaccessible jobConfig produces a
-            # graceful error answer instead of an unhandled AttributeError.
-            # Not on AgentContext: task_id is the same for every IInstance
-            # of a pipeline, so it serves no purpose as run scaffolding.
+        # Bound before the try so the guard/error handlers can read them even if
+        # a failure occurs before the context is built or `_run` returns.
+        context = None
+        raw = None
+        # Scope this turn's model calls. The agent reaches the model through many ask()
+        # invokes (and may drive sub-agents), possibly on a worker thread with a copied
+        # context (CrewAI); turn_usage collects them all and reads back the whole turn's
+        # total here regardless of thread, then clears once this outermost scope exits.
+        with turn_usage() as read_usage:
             try:
-                task_id = iInstance.IEndpoint.endpoint.jobConfig.get('taskId')
-            except Exception:
-                task_id = None
+                # Add any global instructions from the config
+                for inst in self._instructions:
+                    question.addInstruction('Additional Instruction', inst.strip())
 
-            # Build the per-call context inline.  Channels come from the
-            # cached host; metadata is stamped fresh per call.
-            context = AgentContext(
-                invoker=iInstance,
-                llm=host.llm,
-                tools=host.tools,
-                memory=host.memory,
-                run_id=run_id,
-                pipe_id=iInstance.instance.pipeId if iInstance.instance else 0,
-                framework=self.FRAMEWORK,
-                started_at=started_at,
-            )
+                # Get the jobs taskId — kept as a local variable inside the
+                # try/except so a missing/inaccessible jobConfig produces a
+                # graceful error answer instead of an unhandled AttributeError.
+                # Not on AgentContext: task_id is the same for every IInstance
+                # of a pipeline, so it serves no purpose as run scaffolding.
+                try:
+                    task_id = iInstance.IEndpoint.endpoint.jobConfig.get('taskId')
+                except Exception:
+                    task_id = None
 
-            # And execute
-            content, raw = self._run(
-                context=context,
-                question=question,
-            )
+                # Build the per-call context inline.  Channels come from the
+                # cached host; metadata is stamped fresh per call.
+                context = AgentContext(
+                    invoker=iInstance,
+                    llm=host.llm,
+                    tools=host.tools,
+                    memory=host.memory,
+                    run_id=run_id,
+                    pipe_id=iInstance.instance.pipeId if iInstance.instance else 0,
+                    framework=self.FRAMEWORK,
+                    started_at=started_at,
+                )
 
-            if not isinstance(content, str):
-                content = safe_str(content)
+                # And execute
+                content, raw = self._run(
+                    context=context,
+                    question=question,
+                )
 
-            ended_at = now_iso()
+                # Fabrication guardrail — before accepting the answer, assert the
+                # run actually grounded itself in at least one tool call when the
+                # operator required it.  A weak planning model can narrate a tool
+                # chain in prose without ever calling a tool; require_tool_call
+                # turns that silent failure into a loud, structural one.
+                if self._require_tool_call and not context.invoked_tools:
+                    raise ToolCallRequiredError(
+                        'require_tool_call is enabled but the agent produced an '
+                        'answer without invoking any tool (possible narrated or '
+                        'fabricated tool chain)'
+                    )
 
-            answer_payload: Dict[str, Any] = {
-                'content': content,
-                'meta': {
-                    'framework': self.FRAMEWORK,
-                    'agent_id': self._agent_id(iInstance),
-                    'run_id': run_id,
-                    'started_at': started_at,
-                    'ended_at': ended_at,
-                },
-                'stack': [],
-            }
-            if task_id:
-                answer_payload['meta']['task_id'] = task_id
+                if not isinstance(content, str):
+                    content = safe_str(content)
 
-            stack: List[Dict[str, Any]] = []
-            stack.append({'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)})
-            answer_payload['stack'] = stack
+                ended_at = now_iso()
 
-            debug(f'agent base _run completed run_id={run_id} content_len={len(content or "")}')
-
-        except Exception as e:
-            error_type = type(e).__name__
-            error_message = str(e)
-            error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
-            ended_at = now_iso()
-            answer_payload = {
-                'content': error_message or f'{error_type} (no message)',
-                'meta': {
-                    'framework': self.FRAMEWORK,
-                    'agent_id': self._agent_id(iInstance),
-                    'run_id': run_id,
-                    'started_at': started_at,
-                    'ended_at': ended_at,
-                    **({'task_id': task_id} if task_id else {}),
-                },
-                'stack': [],
-            }
-            stack = []
-            stack.append(
-                {
-                    'kind': 'RocketRide.agent.error.v1',
-                    'name': 'exception',
-                    'payload': {'type': error_type, 'message': error_message},
+                answer_payload: Dict[str, Any] = {
+                    'content': content,
+                    'meta': {
+                        'framework': self.FRAMEWORK,
+                        'agent_id': self._agent_id(iInstance),
+                        'run_id': run_id,
+                        'started_at': started_at,
+                        'ended_at': ended_at,
+                        'tool_calls': len(context.invoked_tools),
+                    },
+                    'stack': [],
                 }
-            )
-            answer_payload['stack'] = stack
+                if task_id:
+                    answer_payload['meta']['task_id'] = task_id
 
-        if emit_answers_lane:
-            debug(
-                f'agent base emitting answer run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}'
-            )
-            answer = Answer(expectJson=False)
-            answer.setAnswer(answer_payload.get('content', ''))
-            iInstance.instance.writeAnswers(answer)
+                stack: List[Dict[str, Any]] = []
+                stack.append(
+                    {'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)}
+                )
+                answer_payload['stack'] = stack
+
+                debug(f'agent base _run completed run_id={run_id} content_len={len(content or "")}')
+
+            except ToolCallRequiredError as e:
+                # Guardrail tripped: the run answered without invoking any tool.
+                # Reject the (likely fabricated) content and return a distinct
+                # guard answer — not the generic _run-failed path — so the cause is
+                # unambiguous in traces and to downstream handling.
+                guard_message = str(e)
+                error(f'agent base tool-call guard tripped run_id={run_id}: {guard_message}')
+                ended_at = now_iso()
+                answer_payload = {
+                    'content': guard_message,
+                    'meta': {
+                        'framework': self.FRAMEWORK,
+                        'agent_id': self._agent_id(iInstance),
+                        'run_id': run_id,
+                        'started_at': started_at,
+                        'ended_at': ended_at,
+                        'tool_calls': 0,
+                        **({'task_id': task_id} if task_id else {}),
+                    },
+                    'stack': [
+                        {
+                            'kind': 'RocketRide.agent.guard.v1',
+                            'name': 'tool_call_required',
+                            'payload': {'guard': 'require_tool_call', 'message': guard_message},
+                        },
+                        # Keep the rejected framework output for diagnosis — an operator
+                        # investigating a tripped guard wants to see what was narrated.
+                        {'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)},
+                    ],
+                }
+
+            except Exception as e:
+                error_type = type(e).__name__
+                error_message = str(e)
+                error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
+                ended_at = now_iso()
+                answer_payload = {
+                    'content': error_message or f'{error_type} (no message)',
+                    'meta': {
+                        'framework': self.FRAMEWORK,
+                        'agent_id': self._agent_id(iInstance),
+                        'run_id': run_id,
+                        'started_at': started_at,
+                        'ended_at': ended_at,
+                        'tool_calls': len(context.invoked_tools) if context is not None else 0,
+                        **({'task_id': task_id} if task_id else {}),
+                    },
+                    'stack': [],
+                }
+                stack = []
+                stack.append(
+                    {
+                        'kind': 'RocketRide.agent.error.v1',
+                        'name': 'exception',
+                        'payload': {'type': error_type, 'message': error_message},
+                    }
+                )
+                answer_payload['stack'] = stack
+
+            if emit_answers_lane:
+                debug(
+                    f'agent base emitting answer run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}'
+                )
+                answer = Answer(expectJson=False)
+                answer.setAnswer(answer_payload.get('content', ''))
+                # The whole turn's total (every model call the run made, across threads
+                # and sub-agents), read back from the turn collector.
+                usage = read_usage()
+                if usage:
+                    answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
+                iInstance.instance.writeAnswers(answer)
 
         return answer_payload
 
@@ -378,6 +459,14 @@ class AgentBase(ABC):
         Returns:
             The raw tool output (whatever the tool returned).
         """
+        # Record the invocation for the require_tool_call guard.  This adapter
+        # is the single choke point every framework driver routes real tool
+        # calls through, so counting here covers all agent frameworks at once.
+        # Recorded before invoke() so a tool that raises still counts — the
+        # agent genuinely attempted to use a tool, which is not fabrication.
+        # (Local reads such as memory.peek never reach this adapter and so are
+        # correctly excluded from "did the agent ground itself in a tool".)
+        context.invoked_tools.append(tool_name)
         return context.tools.invoke(tool_name, args)
 
     # =========================================================================

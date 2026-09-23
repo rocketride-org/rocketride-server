@@ -4,17 +4,18 @@
 // =============================================================================
 
 /**
- * DeploySettings — "Deployment Target" section of the VS Code Settings page.
+ * DeploySettings — "Deployment" section of the VS Code Settings page.
  *
- * Wraps the shared ConnectionConfig component in a card with a header,
- * save button, and a toggle checkbox to enable/disable a separate deploy target.
- *
- * When the checkbox is unchecked (deployment.connectionMode === null),
- * deployment uses the same target as development (shared mode).
+ * Renders the shared ConnectionConfig for the deployment group as a flat page
+ * (page header + description + controls), gated behind a toggle checkbox that
+ * enables a separate deploy target. When the checkbox is unchecked
+ * (deployment.connectionMode === null), deployment uses the same target as
+ * development (shared mode). The Settings surface owns the single Save/Cancel
+ * footer, so this component no longer carries a card or save button.
  */
 
 import React from 'react';
-import { SettingsData, ConnectionMode, MessageData, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
+import { SettingsData, ConnectionMode, MessageData, EngineVersionItem, settingsStyles as S } from './SettingsWebview';
 import { ConnectionConfig } from '../components/ConnectionConfig';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
@@ -23,7 +24,7 @@ import type { ServiceStatus, DockerStatus, VersionOption } from '../components/p
 // =============================================================================
 
 /**
- * Props for the Deployment Target settings card.
+ * Props for the Deployment Target settings page.
  *
  * When `settings.deployment.connectionMode` is null the deploy target is
  * "shared" with the development group and the ConnectionConfig is hidden.
@@ -31,25 +32,28 @@ import type { ServiceStatus, DockerStatus, VersionOption } from '../components/p
 interface DeploySettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
-	onSave: () => void;
-	onCancel?: () => void;
-	dirty?: boolean;
-	saved?: boolean;
 	onClearCredentials: () => void;
 	onTestConnection: (mode: string, params?: Record<string, unknown>) => void;
 	testMessage: MessageData | null;
-	/** Available teams for cloud mode (fetched after OAuth sign-in). */
-	teams: Array<{ id: string; name: string }>;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
-	serverCapabilities: string[];
 	cloudSignedIn?: boolean;
 	cloudUserName?: string;
+	/** The server the session's token was minted against (subscribe gate). */
+	cloudSignedInUrl?: string;
+	/** Last sign-in attempt was waitlisted — CloudPanel shows the queue banner. */
+	cloudWaitlisted?: boolean;
+	cloudWaitlistedName?: string;
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
-	onProbeCloudServer?: () => void;
-	onFetchTeams?: () => void;
+	/** Staged (uncommitted) cloud auth change — CloudPanel renders it as pending. */
+	cloudPending?: { signIn: boolean; signOut: boolean; userName: string; url: string };
+	/** Discard the staged cloud auth change. */
+	onCloudUndoPending?: () => void;
+	onProbeCloudServer?: (cloudUrl: string) => void;
 	isSaas?: boolean;
+	/** The probe could not reach the server (transport failure). */
+	probeUnreachable?: boolean;
 	/** Whether the user has an active subscription. */
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel. */
@@ -92,11 +96,22 @@ interface DeploySettingsProps {
 }
 
 // =============================================================================
+// STYLES
+// =============================================================================
+
+const styles = {
+	// Inline-aligned toggle checkbox + its label (the "separate deploy target" switch).
+	toggleInput: { marginRight: 8, verticalAlign: 'middle' } as React.CSSProperties,
+	toggleLabel: { display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' } as React.CSSProperties,
+};
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
+/** Deployment connection settings page (flat, card-less). */
 export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
-	const { settings, onSettingsChange, onSave, cloudSignedIn } = props;
+	const { settings, onSettingsChange, cloudSignedIn } = props;
 	const hasDeployTarget = settings.deployment.connectionMode !== null;
 
 	/**
@@ -106,98 +121,113 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 	 */
 	const handleToggle = (e: React.ChangeEvent<HTMLInputElement>) => {
 		if (e.target.checked) {
-			const isSaas = (props.serverCapabilities ?? []).includes('saas');
+			// Single source for SaaS-ness: the probe result prop (the same
+			// fact CloudPanel renders), never a separate capabilities list.
 			const devMode = settings.development.connectionMode;
-			const canUseCloud = cloudSignedIn && isSaas && devMode !== 'cloud';
+			const canUseCloud = cloudSignedIn && props.isSaas === true && devMode !== 'cloud';
 			const defaultMode: ConnectionMode = canUseCloud ? 'cloud' : 'local';
 			onSettingsChange({ deployment: { connectionMode: defaultMode } } as Partial<SettingsData>);
 		} else {
-			onSettingsChange({ deployment: { connectionMode: null, teamId: '' } } as Partial<SettingsData>);
+			onSettingsChange({ deployment: { connectionMode: null } } as Partial<SettingsData>);
 		}
 	};
 
+	/** Change the deploy group's connection mode. When switching to onprem,
+	 *  clear a stale cloud/localhost hostUrl (parity with ConnectionSettings). */
 	const handleModeChange = (mode: ConnectionMode) => {
-		onSettingsChange({ deployment: { connectionMode: mode } } as Partial<SettingsData>);
+		const groupUpdates: Partial<SettingsData['deployment']> = { connectionMode: mode };
+
+		if (mode === 'onprem') {
+			const hostUrl = settings.deployment.hostUrl;
+			if (!hostUrl || hostUrl.includes('cloud.rocketride') || hostUrl.startsWith('http://localhost')) {
+				groupUpdates.hostUrl = '';
+			}
+		}
+
+		onSettingsChange({ deployment: groupUpdates } as Partial<SettingsData>);
 	};
 
 	return (
-		<div style={S.card}>
-			<SettingsCardHeader title="Deployment Target" onSave={props.onSave} onCancel={props.onCancel} dirty={props.dirty} saved={props.saved} />
-			<div style={S.cardBody}>
-				<div style={S.sectionDescription}>Where pipelines are deployed for production. Leave unchecked to deploy to the same target as development.</div>
-				<div style={S.formGrid}>
-					{/* Enable/disable toggle */}
-					<div style={S.formGroup}>
-						<div>
-							<input type="checkbox" id="deployTargetEnabled" checked={hasDeployTarget} onChange={handleToggle} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-							<label htmlFor="deployTargetEnabled" style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-								Deploy to a different target
-							</label>
-						</div>
+		<div style={S.pageBody}>
+			<div style={S.pageHeader}>
+				<h2 style={S.pageTitle}>Deployment</h2>
+			</div>
+			<div style={S.sectionDescription}>Where pipelines are deployed for production. Leave unchecked to deploy to the same target as development.</div>
+			<div style={S.formGrid}>
+				{/* Enable/disable toggle */}
+				<div style={S.formGroup}>
+					<div>
+						<input type="checkbox" id="deployTargetEnabled" checked={hasDeployTarget} onChange={handleToggle} style={styles.toggleInput} />
+						<label htmlFor="deployTargetEnabled" style={styles.toggleLabel}>
+							Deploy to a different target
+						</label>
 					</div>
-
-					{/* ConnectionConfig — same component as Development, just group="deployment" */}
-					{hasDeployTarget && (
-						<ConnectionConfig
-							simplified={false}
-							idPrefix="deploy"
-							group="deployment"
-							otherGroupMode={settings.development.connectionMode}
-							serverCapabilities={props.serverCapabilities}
-							onConnectionModeChange={handleModeChange}
-							settings={settings}
-							onSettingsChange={onSettingsChange}
-							cloudSignedIn={props.cloudSignedIn ?? false}
-							cloudUserName={props.cloudUserName ?? ''}
-							onCloudSignIn={props.onCloudSignIn ?? (() => {})}
-							onCloudSignOut={props.onCloudSignOut ?? (() => {})}
-							onProbeCloudServer={props.onProbeCloudServer}
-							onFetchTeams={props.onFetchTeams}
-							isSaas={props.isSaas}
-							teams={props.teams ?? []}
-							onClearCredentials={props.onClearCredentials}
-							onTestConnection={props.onTestConnection}
-							testMessage={props.testMessage}
-							engineVersions={props.engineVersions}
-							engineVersionsLoading={props.engineVersionsLoading}
-							dockerStatus={props.dockerStatus}
-							dockerProgress={props.dockerProgress}
-							dockerError={props.dockerError}
-							dockerBusy={props.dockerBusy}
-							dockerAction={props.dockerAction}
-							dockerVersions={props.dockerVersions}
-							dockerSelectedVersion={props.dockerSelectedVersion}
-							onDockerVersionChange={props.onDockerVersionChange}
-							onDockerInstall={props.onDockerInstall}
-							onDockerUpdate={props.onDockerUpdate}
-							onDockerRemove={props.onDockerRemove}
-							onDockerStart={props.onDockerStart}
-							onDockerStop={props.onDockerStop}
-							serviceStatus={props.serviceStatus}
-							serviceProgress={props.serviceProgress}
-							serviceError={props.serviceError}
-							serviceBusy={props.serviceBusy}
-							serviceAction={props.serviceAction}
-							serviceVersions={props.serviceVersions}
-							serviceSelectedVersion={props.serviceSelectedVersion}
-							onServiceVersionChange={props.onServiceVersionChange}
-							onServiceInstall={props.onServiceInstall}
-							onServiceUpdate={props.onServiceUpdate}
-							onServiceRemove={props.onServiceRemove}
-							onServiceStart={props.onServiceStart}
-							onServiceStop={props.onServiceStop}
-							sudoPromptVisible={props.sudoPromptVisible}
-							sudoPasswordInput={props.sudoPasswordInput}
-							onSudoPasswordChange={props.onSudoPasswordChange}
-							onSudoSubmit={props.onSudoSubmit}
-							isSubscribed={props.isSubscribed}
-							onFetchPlans={props.onFetchPlans}
-							onCreateCheckout={props.onCreateCheckout}
-							onConfirmPending={props.onConfirmPending}
-							onCheckoutSuccess={props.onCheckoutSuccess}
-						/>
-					)}
 				</div>
+
+				{/* ConnectionConfig — same component as Development, just group="deployment" */}
+				{hasDeployTarget && (
+					<ConnectionConfig
+						simplified={false}
+						idPrefix="deploy"
+						group="deployment"
+						otherGroupMode={settings.development.connectionMode}
+						onConnectionModeChange={handleModeChange}
+						settings={settings}
+						onSettingsChange={onSettingsChange}
+						cloudSignedIn={props.cloudSignedIn ?? false}
+						cloudUserName={props.cloudUserName ?? ''}
+						cloudSignedInUrl={props.cloudSignedInUrl}
+						cloudWaitlisted={props.cloudWaitlisted}
+						cloudWaitlistedName={props.cloudWaitlistedName}
+						onCloudSignIn={props.onCloudSignIn ?? (() => {})}
+						onCloudSignOut={props.onCloudSignOut ?? (() => {})}
+						cloudPending={props.cloudPending}
+						onCloudUndoPending={props.onCloudUndoPending}
+						onProbeCloudServer={props.onProbeCloudServer}
+						isSaas={props.isSaas}
+						probeUnreachable={props.probeUnreachable}
+						onClearCredentials={props.onClearCredentials}
+						onTestConnection={props.onTestConnection}
+						testMessage={props.testMessage}
+						engineVersions={props.engineVersions}
+						engineVersionsLoading={props.engineVersionsLoading}
+						dockerStatus={props.dockerStatus}
+						dockerProgress={props.dockerProgress}
+						dockerError={props.dockerError}
+						dockerBusy={props.dockerBusy}
+						dockerAction={props.dockerAction}
+						dockerVersions={props.dockerVersions}
+						dockerSelectedVersion={props.dockerSelectedVersion}
+						onDockerVersionChange={props.onDockerVersionChange}
+						onDockerInstall={props.onDockerInstall}
+						onDockerUpdate={props.onDockerUpdate}
+						onDockerRemove={props.onDockerRemove}
+						onDockerStart={props.onDockerStart}
+						onDockerStop={props.onDockerStop}
+						serviceStatus={props.serviceStatus}
+						serviceProgress={props.serviceProgress}
+						serviceError={props.serviceError}
+						serviceBusy={props.serviceBusy}
+						serviceAction={props.serviceAction}
+						serviceVersions={props.serviceVersions}
+						serviceSelectedVersion={props.serviceSelectedVersion}
+						onServiceVersionChange={props.onServiceVersionChange}
+						onServiceInstall={props.onServiceInstall}
+						onServiceUpdate={props.onServiceUpdate}
+						onServiceRemove={props.onServiceRemove}
+						onServiceStart={props.onServiceStart}
+						onServiceStop={props.onServiceStop}
+						sudoPromptVisible={props.sudoPromptVisible}
+						sudoPasswordInput={props.sudoPasswordInput}
+						onSudoPasswordChange={props.onSudoPasswordChange}
+						onSudoSubmit={props.onSudoSubmit}
+						isSubscribed={props.isSubscribed}
+						onFetchPlans={props.onFetchPlans}
+						onCreateCheckout={props.onCreateCheckout}
+						onConfirmPending={props.onConfirmPending}
+						onCheckoutSuccess={props.onCheckoutSuccess}
+					/>
+				)}
 			</div>
 		</div>
 	);

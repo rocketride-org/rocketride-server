@@ -53,7 +53,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "util-infrastructure.svg",
-	"documentation": "https://docs.rocketride.org",
+	"documentation": "https://docs.rocketride.org/nodes/response",
 	//
 	//
 	//  Optional:
@@ -68,6 +68,7 @@
 	"lanes": {
 		"text": [],
 		"table": [],
+		"json": [],
 		"documents": [],
 		"questions": [],
 		"answers": [],
@@ -104,6 +105,7 @@
 				["audio", "Audio"],
 				["documents", "Documents"],
 				["image", "Image"],
+				["json", "JSON"],
 				["questions", "Questions"],
 				["table", "Table"],
 				["text", "Text"],

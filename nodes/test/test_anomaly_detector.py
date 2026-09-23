@@ -10,12 +10,20 @@ import os
 import sys
 import types
 
+# Stub rocketlib only while importing detector, then restore so it never leaks.
+_saved_rl = sys.modules.get('rocketlib')
 rocketlib = types.ModuleType('rocketlib')
 rocketlib.debug = lambda *a, **kw: None
-sys.modules.setdefault('rocketlib', rocketlib)
+sys.modules['rocketlib'] = rocketlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'anomaly_detector'))
-from detector import AnomalyDetector
+try:
+    from detector import AnomalyDetector  # noqa: E402
+finally:
+    if _saved_rl is not None:
+        sys.modules['rocketlib'] = _saved_rl
+    else:
+        sys.modules.pop('rocketlib', None)
 
 
 def _make_detector(**overrides):

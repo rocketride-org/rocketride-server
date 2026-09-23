@@ -51,6 +51,7 @@ void setProcessCommandLineResults(Error &ccode) noexcept;
 ///		External declarations for starting/stopping the python engine
 //-------------------------------------------------------------------------
 void setupDebug() noexcept;
+void setupProfiler() noexcept;
 bool isPython() noexcept;
 Error init() noexcept;
 Error execPython() noexcept;

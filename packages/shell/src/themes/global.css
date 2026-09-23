@@ -1,0 +1,68 @@
+/**
+ * RocketRide base stylesheet — import once per document.
+ *
+ * Provides:
+ *   - Figtree variable font
+ *   - Box-model reset
+ *   - html/body/#root full-height layout
+ *   - Sensible button/input defaults
+ *   - Thin token-themed scrollbars on every scroll surface
+ *
+ * CSS custom properties (--rr-*) are injected separately by the theme
+ * system (applyTheme / fetchAndApplyTheme) at runtime.
+ */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html,
+body,
+#root {
+	height: 100%;
+	font-family: var(--rr-font-family);
+	font-size: var(--rr-font-size-widget);
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-default);
+	/* Fade the root background in lockstep with app containers (which transition
+	   background-color over the same 0.35s). Without this the root snaps instantly
+	   when the palette var changes while the container fades, exposing the bare
+	   near-white body for a frame on switch-to-light — the "white flash". */
+	transition: background-color 0.35s ease;
+	overflow: hidden;
+}
+
+#root {
+	display: flex;
+	flex-direction: column;
+}
+
+button {
+	font-family: inherit;
+	cursor: pointer;
+	border: none;
+	background: none;
+	color: inherit;
+}
+
+input,
+textarea {
+	font-family: inherit;
+	font-size: inherit;
+}
+
+/* Scrollbars — every scroll surface gets the thin token-themed form: the
+   thumb token (vscode themes map it to the editor's own slider color) over
+   a transparent track, so the surface behind shows through. The universal
+   selector carries BOTH properties: scrollbar-color inherits but
+   scrollbar-width does not, and unstyled containers were rendering the
+   browser's light native chrome inside dark themes (the dashboard grid's
+   horizontal bar, 2026-07-18). */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--rr-bg-scrollbar-thumb, rgba(121, 121, 121, 0.4)) transparent;
+}

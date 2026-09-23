@@ -35,6 +35,29 @@ src_path = Path(__file__).parent.parent / 'src'
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
+# rocketride_common ships INSIDE the rocketride wheel — client-python:wheel-source
+# stages it under src/ beside this package, and client-python:sync-source drops a
+# copy next to it in dist/server — so at runtime the two always sit together. The
+# source tree is the ONE layout where they are apart, and that is the layout these
+# tests import from, so the sibling package has to be put on the path explicitly.
+#
+# Without this the suite resolved its two halves from different places: rocketride
+# from source via the line above, rocketride_common from whatever sync-source had
+# left in dist/server, which is on the engine's sys.path. That passes on a machine
+# that has run a build and fails on a clean CI runner — as it did, collecting
+# test_formatters_truncate.py:
+#
+#   src/rocketride/cli/__init__.py:44   from .main import main
+#   src/rocketride/cli/main.py:52       from .utils.env import (...)
+#   src/rocketride/cli/utils/env.py:29  from rocketride_common.env import (...)
+#   E   ModuleNotFoundError: No module named 'rocketride_common'
+#
+# Note the test that failed only wanted a string formatter: cli/__init__ eagerly
+# imports main, so touching ANY rocketride.cli submodule pulls the whole chain.
+common_path = Path(__file__).parents[2] / 'client-common' / 'python' / 'src'
+if str(common_path) not in sys.path:
+    sys.path.insert(0, str(common_path))
+
 import os
 from typing import Any, AsyncGenerator, Dict
 
