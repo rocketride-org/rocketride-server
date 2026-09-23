@@ -39,6 +39,7 @@ from ai.modules.task.task_engine import (
     Task,
     cap_trace_payload,
     filter_subprocess_env,
+    saas_pipeline_violation,
 )
 
 
@@ -1480,3 +1481,55 @@ async def test_an_absent_trace_level_still_emits_nothing(level):
     await Task.on_event(t, dict(_TRACE_MESSAGE))
 
     t._forward_task_event.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# saas_pipeline_violation — what a hosted engine refuses to launch
+# ---------------------------------------------------------------------------
+
+_SERVICES = {
+    'mcp_client': {'capabilities': ['invoke']},
+    'filesys': {'capabilities': ['filesystem', 'noremote', 'security', 'nosaas']},
+    'llm_openai': {'capabilities': ['invoke']},
+}
+
+
+def _mcp_node_config(provider, config):
+    """Stand-in for Config.getNodeConfig: the default profile is stdio."""
+    profiles = {'RocketRide': {'transport': 'stdio'}, 'sse': {'transport': 'sse'}}
+    profile = config.get('profile', 'RocketRide')
+    if profile not in profiles:
+        raise Exception(f'Profile {profile} is not defined in {provider}')
+    return {**profiles[profile], **{k: v for k, v in config.items() if k != 'profile'}}
+
+
+def _violation(*components):
+    return saas_pipeline_violation({'components': list(components)}, _SERVICES.get, _mcp_node_config)
+
+
+def test_saas_gate_allows_ordinary_nodes_and_http_mcp():
+    assert _violation({'id': 'a', 'provider': 'llm_openai'}) is None
+    assert _violation({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'streamable-http'}}) is None
+    assert _violation({'id': 'm', 'provider': 'mcp_client', 'config': {'profile': 'sse'}}) is None
+
+
+def test_saas_gate_refuses_nosaas_nodes():
+    assert 'not available on RocketRide Cloud' in _violation({'id': 'f', 'provider': 'filesys'})
+
+
+@pytest.mark.parametrize(
+    'config',
+    [
+        {},  # default profile is stdio
+        {'profile': 'RocketRide'},
+        {'transport': 'stdio'},
+        {'transport': 'STDIO '},
+        {'profile': 'sse', 'transport': 'stdio'},  # component value wins over the profile
+        {'profile': 'nope'},  # unresolvable -> refused
+    ],
+)
+def test_saas_gate_refuses_stdio_mcp(config):
+    problem = _violation(
+        {'id': 'm', 'provider': 'llm_openai'}, {'id': 'm2', 'provider': 'mcp_client', 'config': config}
+    )
+    assert problem and 'stdio MCP transport' in problem

@@ -38,7 +38,7 @@ import socket
 import hashlib
 import shlex
 import shutil
-from typing import TYPE_CHECKING, Dict, Any, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, args as startup_args
@@ -308,6 +308,73 @@ def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
         if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
             allowed[name] = value
     return allowed
+
+
+# Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
+# `nosaas` services, but a pipeline can reach the engine without the canvas,
+# so the engine enforces the same rule itself. The MCP client is refused only
+# in stdio mode: that transport launches a command inside the engine's
+# container. Its HTTP transports are fine.
+CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
+CONST_MCP_CLIENT_PROVIDER = 'mcp_client'
+
+
+def _service_capabilities(service: Any) -> List[str]:
+    """Capability names of a service definition, lower-cased."""
+    caps = service.get('capabilities') if service else None
+    if isinstance(caps, str):
+        caps = [caps]
+    return [str(c).lower() for c in (caps or [])]
+
+
+def saas_pipeline_violation(
+    pipeline: Dict[str, Any],
+    get_service: Callable[[str], Any],
+    get_node_config: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+) -> Optional[str]:
+    """Return why a hosted engine must refuse ``pipeline``, or None if it may run.
+
+    ``get_service`` and ``get_node_config`` are ``rocketlib.getServiceDefinition``
+    and ``Config.getNodeConfig`` in production. The MCP transport is resolved the
+    way the node resolves it (profile defaults merged under the component config),
+    because the default profile is itself stdio. Anything that cannot be resolved
+    is refused.
+    """
+    for component in pipeline.get('components', []) or []:
+        provider = str(component.get('provider') or '')
+        label = component.get('name') or component.get('id') or provider
+        service = get_service(provider) if provider else None
+
+        if CONST_SAAS_BLOCKED_CAPABILITY in _service_capabilities(service):
+            return f'Node "{label}" ({provider}) is not available on RocketRide Cloud.'
+
+        if provider == CONST_MCP_CLIENT_PROVIDER:
+            try:
+                transport = str(get_node_config(provider, component.get('config') or {}).get('transport') or 'stdio')
+            except Exception:
+                transport = 'unresolved'
+            if transport.strip().lower() not in ('streamable-http', 'sse'):
+                return (
+                    f'Node "{label}": the stdio MCP transport is not available on RocketRide Cloud. '
+                    'Use streamable-http or sse.'
+                )
+    return None
+
+
+def _is_saas_engine() -> bool:
+    """True when this engine is the hosted (SaaS) one.
+
+    Either signal is enough: the engine's own ``--saas`` launch flag (its argv,
+    which no pipeline can reach) or the account provider's ``saas`` capability.
+    """
+    if '--saas' in startup_args():
+        return True
+    try:
+        from ai.account import account
+
+        return 'saas' in (getattr(account, 'capabilities', None) or ())
+    except Exception:
+        return False
 
 
 class Task(DAPBase):
@@ -702,6 +769,14 @@ class Task(DAPBase):
 
         if source_component is None:
             raise ValueError(f'Pipeline source component "{self.source}" not found in components list')
+
+        if _is_saas_engine():
+            from rocketlib import getServiceDefinition
+            from ai.common.config import Config
+
+            problem = saas_pipeline_violation(pipeline, getServiceDefinition, Config.getNodeConfig)
+            if problem:
+                raise ValueError(problem)
 
         if 'config' not in source_component:
             source_component['config'] = {}
