@@ -21,20 +21,6 @@
 // SOFTWARE.
 // =============================================================================
 
-#include <engLib/eng.h>
+#include "msservices.hpp"
 
-namespace engine::store::filter::msNode::msEmailContainer {
-
-using namespace utility;
-
-MsEmailContainer::MsEmailContainer() noexcept : MsContainer() {}
-
-MsEmailContainer::~MsEmailContainer() noexcept {}
-
-MsEmailContainer::MsEmailContainer(const MsEmailContainer &value) noexcept
-    : MsContainer(value) {}
-
-MsEmailContainer::MsEmailContainer(MsEmailContainer &&value) noexcept
-    : MsContainer(value) {}
-
-}  // namespace engine::store::filter::msNode::msEmailContainer
+namespace engine::store::filter::sharepoint {};

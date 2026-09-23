@@ -65,9 +65,9 @@ Error IServiceEndpoint::mapPath(const Url &sourceUrl, Url &targetUrl) noexcept {
         config.logicalType == "aws"_itv ||
         config.logicalType == "azure"_itv ||
         config.physicalType == filter::python::Type ||
-        config.logicalType == filter::sharepoint::Type ||
-        config.logicalType == filter::outlook::TypeEnterprise ||
-        config.logicalType == filter::outlook::TypePersonal)
+        config.logicalType == "ms-sharepointcpp"_itv ||
+        config.logicalType == "outlook-enterprise"_itv ||
+        config.logicalType == "outlook-personal"_itv)
         targetProtocol = config.logicalType;
     else if (config.logicalType == engine::store::filter::zip::Type)
         // APPLAT-2912: Zip endpoint uses only the path of the target url to

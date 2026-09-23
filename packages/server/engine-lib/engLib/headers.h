@@ -23,8 +23,10 @@
 
 #pragma once
 
-// Include the cpprest definitions
-
+// Include the cpprest definitions. No engLib code uses cpprest, but its
+// astreambuf.h specializes std::char_traits<unsigned char> and so has to be
+// seen before anything instantiates it - the nodes that do use cpprest get it
+// through this PCH
 #include <cpprest/rawptrstream.h>
 #include <cpprest/asyncrt_utils.h>
 #include <cpprest/http_client.h>
@@ -58,10 +60,6 @@
 
 // Boost lambda -> output iterator utility class
 #include <boost/iterator/function_output_iterator.hpp>
-
-// Include the cpprest definitions
-#include <cpprest/rawptrstream.h>
-#include <cpprest/asyncrt_utils.h>
 
 #ifdef ROCKETRIDE_PLAT_WIN
 // Include atlbase.h header
