@@ -10,6 +10,7 @@ from typing import Any, Tuple
 
 from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
+from ai.common.utils import resolve_vendor
 
 from . import elevenlabs_tts, openai_tts, rime_tts
 
@@ -68,14 +69,10 @@ def _input_limit(engine: str, model: str) -> Any:
 def _resolve_engine(logical_type: Any) -> str:
     """Pick the vendor whose id appears in the node logicalType.
 
-    Longest id first so a vendor id that is a substring of another still resolves
-    to the most specific match.
+    See ``ai.common.utils.resolve_vendor`` -- shared with cloud_stt, which
+    resolves the same way.
     """
-    lt = str(logical_type).lower()
-    for engine in sorted(_ENGINES, key=len, reverse=True):
-        if engine in lt:
-            return engine
-    raise Exception(f'Unknown cloud TTS engine for logicalType: {logical_type}')
+    return resolve_vendor(_ENGINES, logical_type, kind='cloud TTS')
 
 
 class IGlobal(IGlobalBase):

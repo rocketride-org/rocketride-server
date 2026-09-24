@@ -36,7 +36,7 @@ def _load_iglobal():
     sys.modules so the rocketlib/ai stubs never leak to sibling tests.
     """
     # Save prior state so the stubs are scoped to the import below.
-    _core = ('rocketlib', 'ai', 'ai.common', 'ai.common.config')
+    _core = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
     _saved = {name: sys.modules.get(name) for name in _core}
 
     rocketlib = types.ModuleType('rocketlib')
@@ -51,6 +51,29 @@ def _load_iglobal():
     ai_cfg = types.ModuleType('ai.common.config')
     ai_cfg.Config = type('Config', (), {})
     sys.modules['ai.common.config'] = ai_cfg
+
+    # The real `resolve_vendor` (not a stub): loaded by file path so this
+    # picks up ai.common.utils.vendor_resolution without pulling in the rest
+    # of the real `ai` package (whose `__init__.py` needs the engine-only
+    # `depends` module).
+    _vendor_resolution_path = (
+        Path(__file__).resolve().parents[3]
+        / 'packages'
+        / 'ai'
+        / 'src'
+        / 'ai'
+        / 'common'
+        / 'utils'
+        / 'vendor_resolution.py'
+    )
+    _vendor_resolution_spec = importlib.util.spec_from_file_location(
+        'ai.common.utils.vendor_resolution', _vendor_resolution_path
+    )
+    _vendor_resolution = importlib.util.module_from_spec(_vendor_resolution_spec)
+    _vendor_resolution_spec.loader.exec_module(_vendor_resolution)
+    ai_utils = types.ModuleType('ai.common.utils')
+    ai_utils.resolve_vendor = _vendor_resolution.resolve_vendor
+    sys.modules['ai.common.utils'] = ai_utils
 
     # Synthetic package so IGlobal's `from . import openai_tts, elevenlabs_tts` resolves.
     pkg = types.ModuleType('cloud_tts')
