@@ -250,9 +250,9 @@ async def shell_static(request: Request):
         HTTPException: 404 for a /shell/static/* miss or traversal; 503 if the
             shell has not been built.
     """
-    # Not built: say so before any path handling, so asset URLs get the 503
-    # that names the build command instead of a bare 404.
-    if not Path(_shell_root).is_dir():
+    # Not built (or built only partway): say so before any path handling, so
+    # asset URLs get the 503 that names the build command instead of a bare 404.
+    if not (Path(_shell_root) / 'index.html').is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
 
     # Map the URL path into the shell directory.

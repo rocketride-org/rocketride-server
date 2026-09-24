@@ -395,3 +395,12 @@ def test_shell_static_unbuilt_shell_is_503(tmp_path, monkeypatch):
     r = _shell_client().get('/shell/static/js/main.abc123.js')
     assert r.status_code == 503
     assert 'shell:build' in r.text
+
+
+def test_shell_static_partial_build_is_503(tmp_path, monkeypatch):
+    """A shell dir with no index.html is an unfinished build: 503, not 404."""
+    (tmp_path / 'static' / 'js').mkdir(parents=True)
+    monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
+    r = _shell_client().get('/shell/static/js/missing.abc123.js')
+    assert r.status_code == 503
+    assert 'shell:build' in r.text
