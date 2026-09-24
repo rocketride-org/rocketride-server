@@ -272,6 +272,22 @@ async def shell_static(request: Request):
     # Resolve safely within the shell root
     file_path = _resolve_safe(_shell_root, raw_path)
 
+    # Prerendered marketing page, when the shell build carries a capture for
+    # this route: <shell>/_prerender/index.html for '/', and
+    # <shell>/_prerender/<route>/index.html otherwise (the layout the CDN's
+    # router used). Only public routes reach here with a non-/shell/ path, and a
+    # capture is served only if it exists, so no route list is mirrored. An
+    # OAuth callback lands on '/' with ?code/?state/?error and must get the app,
+    # not the marketing capture.
+    if not request.url.path.startswith('/shell/') and not any(
+        k in request.query_params for k in ('code', 'state', 'error')
+    ):
+        route = request.url.path.strip('/')
+        prerender_root = (Path(_shell_root) / '_prerender').resolve()
+        capture = _resolve_safe(_shell_root, f'_prerender/{route}/index.html' if route else '_prerender/index.html')
+        if capture.is_relative_to(prerender_root) and capture.is_file():
+            return FileResponse(capture)
+
     # Content-hashed bundles under /shell/static/ are not navigation routes: a
     # miss must 404 rather than fall through to the index.html SPA response
     # below. Behind the immutable, edge-cached /shell/static/* CloudFront
