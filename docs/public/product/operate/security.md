@@ -29,6 +29,46 @@ Nodes use `${ENV_VAR}` substitution so the key itself never has to appear in the
 reference to any other variable is replaced with `<REDACTED>`. See [Best Practices: Credential management](/guides/best-practices#credential-management)
 for how to keep keys out of version control.
 
+## Pipeline process isolation
+
+Each running pipeline is a separate engine process (a task). A task does not
+inherit the engine's full environment, only an allowlist:
+
+- process basics: `PATH`, `HOME`, locale, TLS and proxy settings
+- interpreter and ML runtime settings (`PYTHON*`, `HF_*`, `CUDA_*`, and similar)
+- every `ROCKETRIDE_` variable except the `ROCKETRIDE_DB_*` connection settings
+  (a task that uses a RocketRide database node gets only its own connection)
+- what nodes and the task itself use directly: `RR_STORE_URL`,
+  `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
+  `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and
+  the API-key fallbacks individual node pages document (such as
+  `OPENAI_API_KEY`)
+
+Pipeline code can read everything on that list. Any other engine setting stays
+in the engine.
+
+| Variable            | Effect                                                                                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment; use that only on a single-user install. |
+| `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                           |
+
+Set both in the engine's own environment or its `.env` file. Pipelines cannot
+change `RR_` variables.
+
+Limits of `RR_PROC_PRIVATE`:
+
+- Entries such as `cmdline` and `status` stay readable to everyone.
+- A process is covered only after its startup code has run, and only that
+  process: other programs the engine or a task starts are not covered.
+- While a crash dump is being written, the crashing process is readable again.
+- Same-user debuggers (`gdb`, `py-spy`) can no longer attach, and the kernel
+  writes no core dumps for these processes.
+- A task that cannot make itself private exits without running pipeline code.
+  If the engine itself cannot, it logs a warning and keeps serving.
+
+For strict separation between pipelines, run them under different OS users or
+in separate containers.
+
 ## Network exposure
 
 The engine binds to `localhost` by default:

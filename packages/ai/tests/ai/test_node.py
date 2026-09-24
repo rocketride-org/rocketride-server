@@ -580,3 +580,15 @@ def test_require_error_names_the_calling_node(monkeypatch):
 
     with pytest.raises(RuntimeError, match='dropper'):
         node.require_shared_web_server('dropper')
+
+
+def test_run_refuses_when_the_task_could_not_be_made_private(monkeypatch):
+    """A task that should hide its /proc entries and could not must not run pipeline code."""
+    started = []
+    monkeypatch.setattr(node, '_proc_private_error', 'prctl failed')
+    monkeypatch.setattr(node, '_start_event_loop', lambda: started.append(True))
+    monkeypatch.setattr(node, 'warning', lambda *a, **k: None)
+
+    with pytest.raises(node.TaskNotPrivateError, match='could not make the task process private'):
+        node.run()
+    assert started == []

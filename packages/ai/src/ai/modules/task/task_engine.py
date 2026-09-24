@@ -222,6 +222,9 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'RR_SIGNING_KEY',
         'RR_CORS_ORIGINS',
         'RR_OAUTH_BROKER_URL',
+        # Operator opt-in that makes task processes hide their /proc entries
+        # (ai.proc_privacy); non-secret, and tasks must see it to act on it
+        'RR_PROC_PRIVATE',
         # Executable override for the media toolkit nodes
         'MEDIA_TOOLKIT_FFMPEG',
         # Bare names individual node READMEs document as engine-host fallbacks
@@ -539,6 +542,10 @@ class Task(DAPBase):
 
         # Guard against _terminated() being called more than once
         self._terminated_called = False
+
+        # Whether the task sent its own >EXIT event this run. Without one,
+        # _terminated() falls back to the process exit code.
+        self._exit_event_seen = False
 
         # Server reference
         self._server = server
@@ -1055,6 +1062,36 @@ class Task(DAPBase):
 
         return response
 
+    async def _process_exit_code(self) -> Optional[int]:
+        """The subprocess exit code, or None if it has not exited in time.
+
+        _terminated() runs when the task's output closes, which can come a
+        moment before the process is reaped. Waiting briefly means the code is
+        known when it is recorded; _terminated() runs only once, so a code that
+        is unknown then is never recorded.
+        """
+        engine = self._engine_process
+        if not engine:
+            return 1
+        if engine.returncode is None:
+            try:
+                await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+        return engine.returncode
+
+    def _apply_process_exit_code(self, exit_code: Optional[int]) -> None:
+        """Record the subprocess exit code when the task sent no >EXIT event this run.
+
+        Tracked with a flag: exitCode starts at 0 on a first run, so testing it
+        for None recorded a task that exited before the engine could report
+        (a task refusing to start) as completed. A requested stop keeps its
+        existing exit code: the kill signal is not a task failure.
+        """
+        if not self._exit_event_seen and not self._stop_requested and exit_code is not None:
+            self._status.exitCode = exit_code
+            self._status.exitMessage = 'Stopped'
+
     async def _terminated(self) -> None:
         """
         Handle task termination with comprehensive resource cleanup.
@@ -1080,21 +1117,11 @@ class Task(DAPBase):
         self._status.state = TASK_STATE.STOPPING.value
         await self._send_status_update()
 
-        # Get subprocess reference
-        engine = self._engine_process
-
-        # Process exit code
-        if engine:
-            exit_code = engine.returncode
-        else:
-            exit_code = 1
+        exit_code = await self._process_exit_code()
 
         self.debug_message(f'Subprocess for task exited with code {exit_code}')
 
-        # Update completion status - only if we didn't get an >EXIT event
-        if self._status.exitCode is None:
-            self._status.exitCode = exit_code
-            self._status.exitMessage = 'Stopped'
+        self._apply_process_exit_code(exit_code)
 
         # If we are not restarting
         if not self._is_restarting:
@@ -1740,6 +1767,7 @@ class Task(DAPBase):
             # Save it
             self._status.exitCode = exit_code
             self._status.exitMessage = exit_message
+            self._exit_event_seen = True
 
             # Send out a status update when needed
             self._status_updated = True
@@ -2227,6 +2255,7 @@ class Task(DAPBase):
             self._status.completed = False
             self._final_events_sent = False
             self._terminated_called = False
+            self._exit_event_seen = False
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False

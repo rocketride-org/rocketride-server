@@ -927,6 +927,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             'RR_BASE_URL': 'https://engine.example',
             'RR_SIGNING_KEY': 'sign',
             'RR_OAUTH_BROKER_URL': 'https://broker.example',
+            'RR_PROC_PRIVATE': '1',
             'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
             'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
             'NOTION_API_KEY': 'notion',
@@ -952,6 +953,7 @@ def test_filter_subprocess_env_is_an_allowlist():
         'RR_BASE_URL': 'https://engine.example',
         'RR_SIGNING_KEY': 'sign',
         'RR_OAUTH_BROKER_URL': 'https://broker.example',
+        'RR_PROC_PRIVATE': '1',  # tasks must see the opt-in to act on it
         'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
         'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
         'NOTION_API_KEY': 'notion',
@@ -1559,3 +1561,80 @@ def test_saas_gate_refuses_stdio_mcp(config):
 def test_saas_gate_matches_the_node_not_the_provider_name(component):
     problem = _violation(component)
     assert problem and 'stdio MCP transport' in problem
+
+
+# ---------------------------------------------------------------------------
+# Exit code when the task sends no >EXIT event
+# ---------------------------------------------------------------------------
+
+
+def _exit_task(exit_event_seen=False):
+    from rocketride import TASK_STATUS
+
+    t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
+    t._exit_event_seen = exit_event_seen
+    t._stop_requested = False
+    return t
+
+
+def test_process_exit_code_used_when_no_exit_event():
+    """A task that exits before it can report (a refusal) is not recorded as exit 0."""
+    t = _exit_task()
+    Task._apply_process_exit_code(t, 1)
+    assert t._status.exitCode == 1
+    assert t._status.exitMessage == 'Stopped'
+
+
+def test_exit_event_wins_over_process_exit_code():
+    t = _exit_task(exit_event_seen=True)
+    t._status.exitMessage = 'Completed'
+    Task._apply_process_exit_code(t, 1)
+    assert (t._status.exitCode, t._status.exitMessage) == (0, 'Completed')
+
+
+def test_requested_stop_keeps_its_exit_code():
+    """The kill signal of a user stop is not a task failure (no dashboard task_error)."""
+    t = _exit_task()
+    t._stop_requested = True
+    Task._apply_process_exit_code(t, -9)
+    assert t._status.exitCode == 0
+
+
+def test_unknown_process_exit_code_leaves_status_alone():
+    t = _exit_task()
+    Task._apply_process_exit_code(t, None)
+    assert t._status.exitCode == 0
+
+
+@pytest.mark.asyncio
+async def test_exit_event_marks_the_run_as_reported():
+    t = _exit_task()
+    await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 3, 'message': 'boom'}})
+    assert t._exit_event_seen is True
+    assert (t._status.exitCode, t._status.exitMessage) == (3, 'boom')
+
+
+class _ExitingProcess:
+    """A subprocess whose output has closed but which is not reaped until wait()."""
+
+    def __init__(self, code):
+        self.returncode = None
+        self._code = code
+
+    async def wait(self):
+        self.returncode = self._code
+        return self._code
+
+
+@pytest.mark.asyncio
+async def test_exit_code_is_read_after_the_process_is_reaped():
+    t = _exit_task()
+    t._engine_process = _ExitingProcess(1)
+    assert await Task._process_exit_code(t) == 1
+
+
+@pytest.mark.asyncio
+async def test_no_process_counts_as_failed():
+    t = _exit_task()
+    t._engine_process = None
+    assert await Task._process_exit_code(t) == 1
