@@ -24,6 +24,7 @@ Two methods are already exercised by separate, security-focused tests:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import sys
@@ -1639,3 +1640,31 @@ async def test_no_process_counts_as_failed():
     t = _exit_task()
     t._engine_process = None
     assert await Task._process_exit_code(t) == 1
+
+
+class _LingeringProcess:
+    """Output closed, but the process only exits once it is killed."""
+
+    def __init__(self):
+        self.returncode = None
+        self.killed = False
+
+    async def wait(self):
+        if not self.killed:
+            await asyncio.sleep(3600)
+        self.returncode = -9
+        return -9
+
+    def kill(self):
+        self.killed = True
+
+
+@pytest.mark.asyncio
+async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
+    import ai.modules.task.task_engine as te
+
+    monkeypatch.setattr(te, 'CONST_CANCEL_WAIT_TIMEOUT_SECONDS', 0.05)
+    t = _exit_task()
+    t._engine_process = _LingeringProcess()
+    assert await Task._process_exit_code(t) == -9
+    assert t._engine_process.killed

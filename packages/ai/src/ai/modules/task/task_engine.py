@@ -1063,7 +1063,7 @@ class Task(DAPBase):
         return response
 
     async def _process_exit_code(self) -> Optional[int]:
-        """The subprocess exit code, or None if it has not exited in time.
+        """The subprocess exit code, or None if it could not be reaped (see below).
 
         _terminated() runs when the task's output closes, which can come a
         moment before the process is reaped. Waiting briefly means the code is
@@ -1077,7 +1077,13 @@ class Task(DAPBase):
             try:
                 await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
-                pass
+                # Output closed but the process is still alive: end it rather
+                # than leave it running behind a task recorded as finished.
+                try:
+                    engine.kill()
+                    await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)
+                except (ProcessLookupError, asyncio.TimeoutError):
+                    pass
         return engine.returncode
 
     def _apply_process_exit_code(self, exit_code: Optional[int]) -> None:
