@@ -38,7 +38,23 @@ import argparse
 import asyncio
 from typing import Any, Dict
 
+from rocketlib import warning
+
+from ai.proc_privacy import make_process_private, should_make_private
 from ai.web import WebServer
+
+
+def _make_engine_private() -> None:
+    """Make the engine's /proc entries private when hosted or opted in (see ai.proc_privacy).
+
+    Logged, never fatal: the engine keeps serving rather than crash-looping.
+    """
+    if not should_make_private():
+        return
+    try:
+        make_process_private()
+    except Exception as e:
+        warning(f'could not make the engine process private: {e}')
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -144,6 +160,10 @@ async def run(config: Dict[str, Any] = None) -> None:
 
     # Create the server
     server = WebServer(config=config, standardEndpoints=False)
+
+    # After WebServer, which loads the engine's .env (RR_PROC_PRIVATE may live
+    # there), and before serving, so before any task exists.
+    _make_engine_private()
 
     # Add our modules
     server.use('services')
