@@ -61,6 +61,18 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+def _shell_client() -> TestClient:
+    """
+    Build an app with only the shell asset route, as ``initModule`` registers it.
+
+    Returns:
+        TestClient: client for ``GET /shell/{file_path:path}``.
+    """
+    app = FastAPI()
+    app.get('/shell/{file_path:path}')(shell_static)
+    return TestClient(app)
+
+
 @pytest.fixture
 def shell_root(tmp_path, monkeypatch):
     """
@@ -311,3 +323,84 @@ def test_add_route_registry_unchanged_when_router_rejects(web_server, monkeypatc
 
     monkeypatch.undo()
     web_server.add_route('/rejected', _handler, ['GET'])
+
+
+# ---------------------------------------------------------------------------
+# Missing /shell/static/* assets 404 (do not fall through to index.html)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_shell_static_asset_404s(shell_root):
+    """A missing /shell/static/* asset must 404, not the index.html SPA fallback.
+
+    Behind the staging CloudFront the /shell/static/* behavior is edge-cached +
+    immutable; a 200 index.html served under a .js/.css URL gets cached as
+    HTML-under-a-JS-URL and poisons every viewer, breaking app boot. Regression
+    guard: content-hashed asset misses must be a real 404.
+    """
+    r = _shell_client().get('/shell/static/js/does-not-exist.deadbeef.js')
+    assert r.status_code == 404
+
+
+def test_shell_navigation_route_still_serves_index(shell_root):
+    """A non-static /shell/* route still gets the SPA index.html fallback."""
+    r = _shell_client().get('/shell/some/client/route')
+    assert r.status_code == 200
+    assert '<title>shell</title>' in r.text
+
+
+def test_existing_shell_static_asset_is_served(shell_root):
+    """A present /shell/static/* bundle is still served as a file.
+
+    Guards the ordering fix: the 404 check now runs before the serve step, so
+    a check that rejected every /shell/static/* path would otherwise pass.
+    """
+    asset = shell_root / 'static' / 'js' / 'main.abc123.js'
+    asset.parent.mkdir(parents=True)
+    asset.write_text('console.log(1)')
+    r = _shell_client().get('/shell/static/js/main.abc123.js')
+    assert r.status_code == 200
+    assert 'console.log(1)' in r.text
+
+
+def test_shell_static_traversal_does_not_serve_index(shell_root):
+    """A traversal-shaped /shell/static/* URL must 404, never index.html.
+
+    Percent-encoded on purpose: httpx resolves a literal ``../`` before sending,
+    so only ``%2e%2e`` reaches the handler decoded, as a real client's would.
+    """
+    r = _shell_client().get('/shell/static/js/%2e%2e/%2e%2e/%2e%2e/etc/passwd.js')
+    assert r.status_code == 404
+    assert '<title>shell</title>' not in r.text
+
+
+@pytest.mark.parametrize(
+    'url',
+    [
+        '/shell//static/js/missing.abc123.js',  # double slash
+        '/shell/%2e/static/js/missing.abc123.js',  # dot segment
+        '/shell/x/%2e%2e/static/js/missing.abc123.js',  # walks back into static/
+    ],
+)
+def test_shell_static_other_spellings_do_not_serve_index(shell_root, url):
+    """Every spelling that maps into static/ gets the 404, not just '/shell/static/'."""
+    r = _shell_client().get(url)
+    assert r.status_code == 404
+    assert '<title>shell</title>' not in r.text
+
+
+def test_shell_static_unbuilt_shell_is_503(tmp_path, monkeypatch):
+    """With no shell build, an asset URL still gets the 503 that names the build command."""
+    monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path / 'not-built'))
+    r = _shell_client().get('/shell/static/js/main.abc123.js')
+    assert r.status_code == 503
+    assert 'shell:build' in r.text
+
+
+def test_shell_static_partial_build_is_503(tmp_path, monkeypatch):
+    """A shell dir with no index.html is an unfinished build: 503, not 404."""
+    (tmp_path / 'static' / 'js').mkdir(parents=True)
+    monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
+    r = _shell_client().get('/shell/static/js/missing.abc123.js')
+    assert r.status_code == 503
+    assert 'shell:build' in r.text
