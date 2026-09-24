@@ -1,0 +1,99 @@
+{
+	"title": "Web Scraper Source",
+	"protocol": "scraper_beautifulsoup_source://",
+	"classType": ["source"],
+	"capabilities": ["noinclude"],
+	"register": "endpoint",
+	"node": "python",
+	"path": "nodes.scraper_beautifulsoup",
+	"prefix": "scraper",
+	"icon": "scraper.svg",
+	"documentation": "https://docs.rocketride.org/nodes/scraper_beautifulsoup",
+	"description": ["Run-once web scraping source built on BeautifulSoup. Needs no input, so it can start a scheduled deployment.", "Configure sources as JSON: public JSON APIs (GET or POST, with dot-path field mapping), RSS/Atom feeds, or HTML listing pages (CSS selectors). Each source becomes one pipeline object.", "Emits every item of a source as one JSON row list on the answers lane (wire it to a SQL node to load a table; each row carries a url_hash dedup key) and as one text document per item on the text lane.", "Only public hosts are reachable: every request and redirect hop is re-validated, responses are size-capped, and requests to the same host are paced."],
+	"tile": ["Sources: ${parameters.scraper.maxItemsPerSource} items max each"],
+	"lanes": {
+		"_source": ["answers", "text"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		}
+	},
+	"fields": {
+		"scraper.sources": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Sources (JSON)",
+			"description": "JSON array of sources. Each: name, kind (json | feed | html), url or urls (string or {url, name, extra}), optional platform, method (GET/POST, json only), headers, body (POST JSON), itemsPath (json), itemSelector (html), fields (output field -> dot path for json, CSS selector[@attr] for html; value may be a list of fallbacks), maxItems, extra (static columns), enabled. URLs, headers and bodies may use {today}, {now}, {days_ago:N}, {hours_ago:N}, {unix_days_ago:N}, {unix_hours_ago:N} (epoch seconds), {per_url}, {max}. Secrets: use ${ROCKETRIDE_*} variables in headers.",
+			"default": "[\n  {\n    \"name\": \"Hacker News\",\n    \"kind\": \"json\",\n    \"platform\": \"hackernews\",\n    \"url\": \"https://hn.algolia.com/api/v1/search?tags=story&numericFilters=created_at_i>{unix_days_ago:1}&hitsPerPage={per_url}\",\n    \"itemsPath\": \"hits\",\n    \"fields\": {\"title\": \"title\", \"url\": \"url\", \"author\": \"author\", \"published\": \"created_at\", \"score\": \"points\", \"comments\": \"num_comments\", \"body\": \"story_text\"}\n  }\n]"
+		},
+		"scraper.maxItemsPerSource": {
+			"type": "number",
+			"title": "Max items per source",
+			"description": "Default cap for sources that do not set maxItems (split evenly across a source's URLs).",
+			"default": 100
+		},
+		"scraper.timeout": {
+			"type": "number",
+			"title": "Timeout (seconds)",
+			"description": "Per-request timeout, 1-120 seconds.",
+			"default": 20
+		},
+		"scraper.maxResponseKB": {
+			"type": "number",
+			"title": "Max response size (KB)",
+			"description": "Response bodies are read up to this size; anything beyond is dropped and the result is marked truncated.",
+			"default": 5120
+		},
+		"scraper.requestIntervalMs": {
+			"type": "number",
+			"title": "Delay between requests to one host (ms)",
+			"description": "Politeness pacing: minimum gap between two requests to the same host. 0 disables pacing.",
+			"default": 250
+		},
+		"scraper.maxBodyChars": {
+			"type": "number",
+			"title": "Max item body characters",
+			"description": "Item bodies are trimmed to this many characters.",
+			"default": 20000
+		},
+		"scraper.userAgent": {
+			"type": "string",
+			"title": "User agent",
+			"description": "User-Agent header sent with every request. Leave blank for the default. Some sites (e.g. Reddit) reject generic agents.",
+			"default": "",
+			"optional": true
+		},
+		"scraper.allowPattern": {
+			"type": "string",
+			"title": "URL pattern (regex)",
+			"description": "Python regex searched against the full URL, e.g. ^https://news\\.ycombinator\\.com/",
+			"default": ""
+		},
+		"scraper.urlAllowList": {
+			"title": "URL allow-list",
+			"description": "Optional. When one or more patterns are set, a URL (and every redirect target) must match at least one. Empty allows every public URL; private and local addresses are always blocked.",
+			"type": "array",
+			"optional": true,
+			"minItems": 0,
+			"items": {
+				"type": "object",
+				"properties": ["scraper.allowPattern"]
+			}
+		},
+		"Pipe.source.parameters": {
+			"section": "parameters",
+			"properties": ["scraper.sources", "scraper.maxItemsPerSource", "scraper.timeout", "scraper.maxResponseKB", "scraper.requestIntervalMs", "scraper.maxBodyChars", "scraper.userAgent", "scraper.urlAllowList"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Web Scraper Source",
+			"properties": ["type", "Pipe.source.parameters"]
+		}
+	]
+}
