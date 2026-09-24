@@ -80,7 +80,7 @@ jobs:
             vcpkg_cmd: ./build/vcpkg/vcpkg.exe
           - platform: macos
             label: macOS (ARM64)
-            runner: macos-14
+            runner: macos-15
             builder_cmd: ./builder
             vcpkg_cmd: ./build/vcpkg/vcpkg
     steps:
@@ -95,6 +95,12 @@ jobs:
           version: 10.33.0
       - name: Set up vcpkg
         run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
+      - name: Install mono / macOS
+        # The macos-15 image dropped mono, and both this step and vcpkg itself
+        # run nuget.exe through it for the binary cache. Preinstalled on the
+        # ubuntu image, so macOS only.
+        if: matrix.platform == 'macos'
+        run: brew install mono
       - name: Set up vcpkg nuget / Linux/macOS
         if: matrix.platform != 'windows'
         run: |
