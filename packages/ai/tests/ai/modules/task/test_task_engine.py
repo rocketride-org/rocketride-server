@@ -1600,10 +1600,11 @@ def test_requested_stop_keeps_its_exit_code():
     assert t._status.exitCode == 0
 
 
-def test_unknown_process_exit_code_leaves_status_alone():
+def test_unknown_process_exit_code_is_not_success():
+    """The process did not exit in time: that is not a completed task."""
     t = _exit_task()
     Task._apply_process_exit_code(t, None)
-    assert t._status.exitCode == 0
+    assert t._status.exitCode == 1
 
 
 @pytest.mark.asyncio

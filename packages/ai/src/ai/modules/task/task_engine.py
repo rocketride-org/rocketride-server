@@ -1085,11 +1085,12 @@ class Task(DAPBase):
 
         Tracked with a flag: exitCode starts at 0 on a first run, so testing it
         for None recorded a task that exited before the engine could report
-        (a task refusing to start) as completed. A requested stop keeps its
-        existing exit code: the kill signal is not a task failure.
+        (a task refusing to start) as completed. An exit code that is still
+        unknown is not a success either, so it records 1. A requested stop
+        keeps its existing exit code: the kill signal is not a task failure.
         """
-        if not self._exit_event_seen and not self._stop_requested and exit_code is not None:
-            self._status.exitCode = exit_code
+        if not self._exit_event_seen and not self._stop_requested:
+            self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
 
     async def _terminated(self) -> None:
@@ -2249,6 +2250,11 @@ class Task(DAPBase):
         # Validate not already started
         if self._status.state != TASK_STATE.NONE.value:
             raise RuntimeError('Task has already been started')
+
+        # A restart reuses this Task: drop the previous run's process so a
+        # startup failure before the new one exists is not recorded with the
+        # old exit code.
+        self._engine_process = None
 
         try:
             # Make sure some of our start is initialized in case we are restarting
