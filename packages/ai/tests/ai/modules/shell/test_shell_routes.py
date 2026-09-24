@@ -372,3 +372,26 @@ def test_shell_static_traversal_does_not_serve_index(shell_root):
     r = _shell_client().get('/shell/static/js/%2e%2e/%2e%2e/%2e%2e/etc/passwd.js')
     assert r.status_code == 404
     assert '<title>shell</title>' not in r.text
+
+
+@pytest.mark.parametrize(
+    'url',
+    [
+        '/shell//static/js/missing.abc123.js',  # double slash
+        '/shell/%2e/static/js/missing.abc123.js',  # dot segment
+        '/shell/x/%2e%2e/static/js/missing.abc123.js',  # walks back into static/
+    ],
+)
+def test_shell_static_other_spellings_do_not_serve_index(shell_root, url):
+    """Every spelling that maps into static/ gets the 404, not just '/shell/static/'."""
+    r = _shell_client().get(url)
+    assert r.status_code == 404
+    assert '<title>shell</title>' not in r.text
+
+
+def test_shell_static_unbuilt_shell_is_503(tmp_path, monkeypatch):
+    """With no shell build, an asset URL still gets the 503 that names the build command."""
+    monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path / 'not-built'))
+    r = _shell_client().get('/shell/static/js/main.abc123.js')
+    assert r.status_code == 503
+    assert 'shell:build' in r.text

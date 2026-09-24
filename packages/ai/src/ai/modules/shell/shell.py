@@ -53,6 +53,7 @@ request headers.
 import hashlib
 import mimetypes
 import os
+import posixpath
 import re
 import sys
 import time
@@ -246,8 +247,14 @@ async def shell_static(request: Request):
         non-asset routes. A /shell/static/* miss or traversal is a 404.
 
     Raises:
-        HTTPException: 503 if the shell has not been built.
+        HTTPException: 404 for a /shell/static/* miss or traversal; 503 if the
+            shell has not been built.
     """
+    # Not built: say so before any path handling, so asset URLs get the 503
+    # that names the build command instead of a bare 404.
+    if not Path(_shell_root).is_dir():
+        raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
+
     # Map the URL path into the shell directory.
     # "/" → index.html
     # "/shell/static/js/main.js" → static/js/main.js
@@ -277,7 +284,15 @@ async def shell_static(request: Request):
     # path matching and is decoded only here) with index.html, so a check after
     # serving would never be reached. Same rule as apps_static's
     # "resolve before authorizing, refuse traversal".
-    if request.url.path.startswith('/shell/static/'):
+    #
+    # The trigger uses the stripped path, not the raw URL: '/shell//static/x.js',
+    # '/shell/%2e/static/x.js' and '/shell/a/../static/x.js' all land in static/
+    # but none starts with '/shell/static/'. Two views, either one triggers:
+    # the leading segment (catches static/../.. walking out) and the normalized
+    # path (catches a walk back in).
+    segments = [s for s in raw_path.split('/') if s not in ('', '.')]
+    normalized = posixpath.normpath('/' + raw_path).lstrip('/')
+    if segments[:1] == ['static'] or normalized.split('/', 1)[0] == 'static':
         static_root = (Path(_shell_root) / 'static').resolve()
         if not (file_path.is_relative_to(static_root) and file_path.is_file()):
             raise HTTPException(status_code=404, detail='Not found')
