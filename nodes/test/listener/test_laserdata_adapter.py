@@ -215,3 +215,47 @@ def test_handler_rejects_foreign_record(sdk):
     with pytest.raises(ValueError, match='not a tasking envelope'):
         asyncio.run(a._on_message(ctx, SimpleNamespace(json=lambda: 'hello')))
     assert ctx.replies == [] and sdk.events == []
+
+
+def test_handler_rejects_partial_envelope(sdk):
+    a = _adapter()
+    asyncio.run(a.start(_answer))
+    ctx = FakeCtx()
+    with pytest.raises(ValueError, match='not a tasking envelope'):
+        asyncio.run(a._on_message(ctx, SimpleNamespace(json=lambda: {'kind': 'task', 'task_id': 'x'})))
+    assert ctx.replies == [] and sdk.events == []
+
+
+def test_start_failure_is_scrubbed_of_credentials(monkeypatch):
+    cs = 'root:s3cretPW@laser.example.com:8090'
+    mod = types.ModuleType('laser_sdk')
+
+    class Laser:
+        @staticmethod
+        async def connect(conn, stream=None):
+            raise ConnectionError(f'dial {conn} failed (auth s3cretPW rejected)')
+
+    mod.Laser = Laser
+    monkeypatch.setitem(sys.modules, 'laser_sdk', mod)
+    a = _adapter(connection_string=cs)
+    with pytest.raises(RuntimeError, match='listener: LaserData start failed') as ei:
+        asyncio.run(a.start(_answer))
+    text = str(ei.value)
+    assert 's3cretPW' not in text and cs not in text
+    assert ei.value.__cause__ is None and ei.value.__suppress_context__
+
+
+def test_failed_event_detail_is_scrubbed(sdk):
+    cs = 'root:s3cretPW@laser.example.com:8090'
+    a = _adapter(connection_string=cs)
+    asyncio.run(a.start(_answer))
+
+    async def boom(text, name):
+        raise RuntimeError('tool auth s3cretPW rejected')
+
+    a._handle = boom
+    task = tasking.make_task(sender='intake', to='risk', body='x', inline=False)
+    with pytest.raises(RuntimeError):
+        asyncio.run(a._on_message(FakeCtx(), _msg(task)))
+    detail = sdk.events[-1]['detail']
+    assert sdk.events[-1]['event'] == 'failed' and 's3cretPW' not in detail and '****' in detail

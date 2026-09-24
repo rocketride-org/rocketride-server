@@ -118,6 +118,44 @@ def test_decode_rejects_foreign_records():
             t.decode(bad)
 
 
+def test_decode_rejects_partial_and_malformed_envelopes():
+    good = json.loads(t.encode(t.make_task(sender='a', to='b', body='hi', inline=False)))
+    bad_cases = [
+        {'kind': 'task', 'task_id': 'x'},  # partial: every other field missing
+        dict(good, body=42),
+        dict(good, sender='Not An Agent'),
+        dict(good, to=None),
+        dict(good, task_id='task-1'),
+        dict(good, conversation_id='conv-1'),
+        dict(good, reply_to=''),
+        dict(good, parent_task_id=''),
+        dict(good, sent_at='now'),
+    ]
+    for bad in bad_cases:
+        with pytest.raises(ValueError, match='not a tasking envelope'):
+            t.decode(bad)
+
+
+def test_decode_round_trips_reply():
+    task = t.make_task(sender='a', to='b', body='hi', inline=True, parent_task_id='p1')
+    reply = t.make_reply(task, sender='b', body='done')
+    assert t.decode(json.loads(t.encode(reply))) == reply
+
+
+def test_event_at_override():
+    env = t.make_task(sender='a', to='b', body='hi', inline=False)
+    assert t.event('sent', env, agent='a', at=env.sent_at)['at'] == env.sent_at
+    assert isinstance(t.event('sent', env, agent='a')['at'], int)
+
+
+def test_scrub_connection_string_and_password():
+    cs = 'root:s3cretPW@laser.example.com:8090'
+    out = t.scrub(f'dial {cs} failed (auth s3cretPW)', cs)
+    assert 's3cretPW' not in out and '<connection-string>' in out and '****' in out
+    assert t.scrub('plain', '') == 'plain'
+    assert t.scrub('no creds here', 'host:8090') == 'no creds here'
+
+
 def test_make_reply_keeps_ids_and_routes_back():
     task = t.make_task(sender='a', to='b', body='q', inline=False)
     reply = t.make_reply(task, sender='b', body='answer')

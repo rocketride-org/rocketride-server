@@ -37,7 +37,7 @@ import math
 import time
 from typing import Any, Dict, List
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import IInstanceBase, tool_function, warning
 
 from ai.common.utils import int_arg, normalize_tool_input, optional_str, require_str
 
@@ -288,7 +288,7 @@ class IInstance(IInstanceBase):
                 },
                 'wait_secs': {
                     'type': 'integer',
-                    'description': 'Seconds to wait for the reply (0-120). 0 (default) returns immediately with status "queued".',
+                    'description': 'Seconds to wait for the reply (0-120). 0 (default) returns immediately with status "queued" and the reply arrives later as a new turn. If the wait runs out, the call returns "queued" and the late result is not delivered; use 0 when the result must not be lost.',
                 },
                 'conversation_id': {
                     'type': 'string',
@@ -428,16 +428,7 @@ def _safe_error(cfg: IGlobal, exc: BaseException) -> str:
     string and the bare password are scrubbed before the text reaches tool
     results or logs.
     """
-    msg = str(exc) or type(exc).__name__
-    cs = getattr(cfg, 'connection_string', '') or ''
-    if cs:
-        msg = msg.replace(cs, '<connection-string>')
-        userinfo = cs.split('@', 1)[0]
-        if '@' in cs and ':' in userinfo:
-            password = userinfo.split(':', 1)[1]
-            if password:
-                msg = msg.replace(password, '****')
-    return msg
+    return tasking.scrub(str(exc) or type(exc).__name__, getattr(cfg, 'connection_string', '') or '')
 
 
 def _opt_str(args: Dict[str, Any], tool_name: str, key: str) -> str:
@@ -556,7 +547,16 @@ async def _send_task_op(cfg: IGlobal, laser: Any, env: Any, wait_secs: int) -> D
         cursor = laser.topic(env.reply_to).replay()
         await cursor.poll()  # drain history: only replies after this send count
     await laser.send_agent(inbox, tasking.encode(env), laser_sdk.Provenance(**tasking.provenance_kwargs(env)))
-    await laser.topic(tasking.EVENTS_TOPIC).publish(tasking.event('sent', env, agent=env.sender)).send()
+    try:
+        # The task is already durable: a failed trace event must not make the
+        # tool raise, or an agent retry would send the task twice.
+        await (
+            laser.topic(tasking.EVENTS_TOPIC)
+            .publish(tasking.event('sent', env, agent=env.sender, at=env.sent_at))
+            .send()
+        )
+    except Exception as exc:
+        warning(f'laserdata.send_task: task {env.task_id} queued but its sent event failed: {_safe_error(cfg, exc)}')
     out: Dict[str, Any] = {
         'task_id': env.task_id,
         'conversation_id': env.conversation_id,

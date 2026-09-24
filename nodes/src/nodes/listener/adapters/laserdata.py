@@ -72,18 +72,26 @@ class LaserDataAdapter:
         import laser_sdk
 
         self._handle = handle
-        self._laser = await laser_sdk.Laser.connect(self.connection_string, stream=self.stream)
-        for name in (self.inbox, tasking.EVENTS_TOPIC):
-            await self._laser.topic(name).ensure(1)
-        self._agent = self._laser.spawn_agent(
-            self.agent_id,
-            self.inbox,
-            self._on_message,
-            consumer_group=self.agent_id,
-            ack_on_pickup=False,
-            retry_max_attempts=self.max_attempts,
-        )
-        await self._agent.ready()
+        try:
+            self._laser = await laser_sdk.Laser.connect(self.connection_string, stream=self.stream)
+            for name in (self.inbox, tasking.EVENTS_TOPIC):
+                await self._laser.topic(name).ensure(1)
+            self._agent = self._laser.spawn_agent(
+                self.agent_id,
+                self.inbox,
+                self._on_message,
+                consumer_group=self.agent_id,
+                ack_on_pickup=False,
+                retry_max_attempts=self.max_attempts,
+            )
+            await self._agent.ready()
+        except Exception as exc:
+            # A native client error can echo the DSN; never let it reach logs.
+            raise RuntimeError(f'listener: LaserData start failed: {self._scrub(exc)}') from None
+
+    def _scrub(self, exc: BaseException) -> str:
+        """Render ``exc`` without connection-string credentials."""
+        return tasking.scrub(str(exc) or type(exc).__name__, self.connection_string)
 
     async def stop(self) -> None:
         """Stop consuming and close the connection."""
@@ -113,7 +121,7 @@ class LaserDataAdapter:
         try:
             answer = await self._handle(tasking.label(env), name)
         except Exception as exc:
-            await self._event('failed', env, detail=str(exc)[:_MAX_DETAIL])
+            await self._event('failed', env, detail=self._scrub(exc)[:_MAX_DETAIL])
             raise
         await ctx.reply_on(env.reply_to, tasking.encode(tasking.make_reply(env, sender=self.agent_id, body=answer)))
         await self._event('replied', env)

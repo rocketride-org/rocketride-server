@@ -795,6 +795,33 @@ def test_send_task_queues_and_records_event(fake_sdk):
     assert ('agent.risk.inbox', 1) in state['ensured']
 
 
+def test_send_task_sent_event_at_is_envelope_sent_at(fake_sdk, monkeypatch):
+    ticks = iter(range(1_000, 10_000, 7))  # every clock read advances, as across a real round trip
+    monkeypatch.setattr(IInstanceMod.tasking, '_now_ms', lambda: next(ticks))
+    inst, state = _instance()
+    inst.send_task({'to': 'risk', 'task': 'x'})
+    env = state['calls'][-1][2]
+    ev = state['topics']['agent.events'][-1].json()
+    assert ev['event'] == 'sent' and ev['at'] == env['sent_at']
+
+
+def test_send_task_event_publish_failure_still_queued(fake_sdk, monkeypatch):
+    class _Boom:
+        async def send(self):
+            raise ConnectionError('events topic down')
+
+    orig = FakeTopic.publish
+
+    def publish(self, body):
+        return _Boom() if self.name == 'agent.events' else orig(self, body)
+
+    monkeypatch.setattr(FakeTopic, 'publish', publish)
+    inst, state = _instance()
+    out = inst.send_task({'to': 'risk', 'task': 'x'})
+    assert out['status'] == 'queued' and out['task_id']
+    assert [c[0] for c in state['calls']].count('send_agent') == 1
+
+
 def test_send_task_passes_conversation_and_parent(fake_sdk):
     inst, state = _instance()
     conv = '01M38G1CWHCSB0T13N308BYJXN'

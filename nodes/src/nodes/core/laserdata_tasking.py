@@ -84,6 +84,25 @@ def normalize_connection_string(value: Any) -> str:
     raise ValueError(f'laserdata: connection string host "{hostport}" has no port; use host:port, e.g. {hostport}:8090')
 
 
+def scrub(text: str, connection_string: str) -> str:
+    """Remove connection-string credentials from ``text``.
+
+    The connection string has the form ``user:password@host``; a native client
+    error could echo it, so the full string becomes ``<connection-string>``
+    and the bare password becomes ``****``.
+    """
+    cs = connection_string or ''
+    if not cs:
+        return text
+    text = text.replace(cs, '<connection-string>')
+    userinfo = cs.split('@', 1)[0]
+    if '@' in cs and ':' in userinfo:
+        password = userinfo.split(':', 1)[1]
+        if password:
+            text = text.replace(password, '****')
+    return text
+
+
 @dataclass
 class Envelope:
     """One task or reply record as carried on an inbox topic."""
@@ -169,14 +188,43 @@ def encode(env: Envelope) -> bytes:
     return json.dumps(asdict(env)).encode('utf-8')
 
 
+def _envelope_problem(data: Dict[str, Any]) -> str:
+    """Name the first field that breaks the envelope contract, or return ''."""
+    if data.get('kind') not in _KINDS:
+        return 'kind'
+    for f in ('task_id', 'conversation_id'):
+        if not isinstance(data.get(f), str) or not _ULID.match(data[f]):
+            return f
+    for f in ('sender', 'to'):
+        try:
+            validate_agent_id(data.get(f), field=f)
+        except ValueError:
+            return f
+    if not isinstance(data.get('reply_to'), str) or not data['reply_to']:
+        return 'reply_to'
+    if not isinstance(data.get('body'), str):
+        return 'body'
+    parent = data.get('parent_task_id')
+    if parent is not None and (not isinstance(parent, str) or not parent):
+        return 'parent_task_id'
+    sent_at = data.get('sent_at')
+    if not isinstance(sent_at, int) or isinstance(sent_at, bool):
+        return 'sent_at'
+    return ''
+
+
 def decode(data: Any) -> Envelope:
-    """Parse a record dict into an Envelope, or raise ValueError for anything else."""
-    if not isinstance(data, dict) or data.get('kind') not in _KINDS or not data.get('task_id'):
+    """Parse a record dict into an Envelope, or raise ValueError for anything else.
+
+    Every field is checked, so a partial or malformed record is rejected before
+    the Listener records a pickup or runs the pipeline on it.
+    """
+    if not isinstance(data, dict):
         raise ValueError(f'laserdata: record is not a tasking envelope: {str(data)[:200]!r}')
-    try:
-        return Envelope(**{f: data.get(f) for f in Envelope.__dataclass_fields__})
-    except TypeError as exc:
-        raise ValueError(f'laserdata: record is not a tasking envelope: {exc}') from None
+    problem = _envelope_problem(data)
+    if problem:
+        raise ValueError(f'laserdata: record is not a tasking envelope (bad {problem}): {str(data)[:200]!r}')
+    return Envelope(**{f: data.get(f) for f in Envelope.__dataclass_fields__})
 
 
 def record_json(record: Any) -> Any:
@@ -204,8 +252,8 @@ def label(env: Envelope) -> str:
     return f'[task {env.task_id} conversation {env.conversation_id} from {env.sender}] {env.body}'
 
 
-def event(kind: str, env: Envelope, *, agent: str, detail: str = '') -> Dict[str, Any]:
-    """One record for the events topic."""
+def event(kind: str, env: Envelope, *, agent: str, detail: str = '', at: Optional[int] = None) -> Dict[str, Any]:
+    """One record for the events topic; ``at`` defaults to now (epoch ms)."""
     return {
         'event': kind,
         'task_id': env.task_id,
@@ -214,7 +262,7 @@ def event(kind: str, env: Envelope, *, agent: str, detail: str = '') -> Dict[str
         'sender': env.sender,
         'to': env.to,
         'agent': agent,
-        'at': _now_ms(),
+        'at': _now_ms() if at is None else at,
         'detail': detail,
     }
 

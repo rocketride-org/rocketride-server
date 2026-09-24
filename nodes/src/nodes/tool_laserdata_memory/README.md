@@ -133,7 +133,9 @@ run without it.
 - With `wait_secs` 0 (default) the reply goes to the sender's own `agent.<id>.inbox`, where its
   [Listener](../listener/README.md) picks it up as a new turn. With `wait_secs` > 0 (max 120)
   the reply goes to `agent.<id>.replies`, which no Listener reads, and the call waits for it; at
-  the deadline it returns `queued` and the late reply stays visible through `trace`.
+  the deadline it returns `queued`. The receiver still finishes the task (`trace` shows `done`),
+  but the late result text is not delivered to the sender. Use `wait_secs` 0 with a Listener
+  when the result must never be lost.
 - `laserdata.trace(task_id | conversation_id)` reads `agent.events` and returns each task's
   sender, receiver, status (`queued` / `in_progress` / `done` / `failed`), attempts, and timings
   (`queue_wait_ms`, `work_ms`, `end_to_end_ms`). A pipeline with only a `tools` source and this

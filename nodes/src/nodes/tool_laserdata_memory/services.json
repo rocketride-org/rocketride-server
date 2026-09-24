@@ -49,7 +49,7 @@
 	// Optional:
 	//		Description of this node shown in the pipeline builder
 	//
-	"description": ["Durable, shared agent memory exposed as tools, backed by LaserData (Apache Iggy) via the Laser SDK.", "Exposes four agent tools: 'remember' stores a statement, 'recall' returns the most relevant items, 'improve' reinforces a memory with feedback, and 'forget' deletes one; for agent-to-agent work, 'send_task' hands a task to another agent through its LaserData inbox and 'trace' shows that task's timeline. Pick your deployment (local Apache Iggy or LaserData Cloud), set the connection string and a namespace, and it works; point several agents at the same namespace to share one durable memory."],
+	"description": ["Durable, shared agent memory exposed as tools, backed by LaserData (Apache Iggy) via the Laser SDK.", "Exposes six agent tools: 'remember' stores a statement, 'recall' returns the most relevant items, 'improve' reinforces a memory with feedback, and 'forget' deletes one; for agent-to-agent work, 'send_task' hands a task to another agent through its LaserData inbox and 'trace' shows that task's timeline. Pick your deployment (local Apache Iggy or LaserData Cloud), set the connection string and a namespace, and it works; point several agents at the same namespace to share one durable memory."],
 	//
 	// Optional:
 	//		As a pipe component, define what this component takes and produces.
