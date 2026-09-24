@@ -57,13 +57,13 @@ Default: **Your own Apache Iggy server** (`local`).
 
 ### SDK contract provenance
 
-Pinned to **`laser-sdk==0.0.2`** (PyPI, in `requirements.txt`, shared with the Listener node).
-On 2026-09-23 a LaserData Cloud deployment accepted only wire protocol 0.10.x: `0.0.2` passed a
-live connect, topic ensure, `send_agent`, consumer-group `spawn_agent` handler, `reply_on`,
-replay and memory round trip, while `0.1.0` through `0.4.0` (protocol 0.11.0) were refused at
-connect with "Incompatible binary protocol version". On this version `Provenance.conversation_id`
-must be a ULID, so tasking ids are minted as ULIDs. Move the pin forward only once target
-deployments accept 0.11.0. The notes below date from earlier versions. rc20+ speaks only Apache Iggy's VSR
+Pinned to **`laser-sdk==0.4.0`** (PyPI, in `requirements.txt`, shared with the Listener node).
+Each laser-sdk release embeds one Apache Iggy client version, and a deployment accepts only its
+own Iggy range. On 2026-09-23 a freshly created LaserData Cloud deployment passed a live connect,
+topic ensure, `send_agent`, consumer-group `spawn_agent` handler, `reply_on`, replay and memory
+round trip on `0.4.0`, while `0.1.1` and `0.0.2` timed out at connect. Older deployments (Iggy
+0.10, accepting only `0.0.2`) are not supported by this pin: recreate them. Tasking ids are
+ULIDs, which every version accepts. The notes below date from earlier versions. rc20+ speaks only Apache Iggy's VSR
 cluster protocol (the upcoming clustering wire format), so the server must be a
 VSR-enabled build: LaserData Cloud deployments **created on/after 2026-07-31** serve it (older
 deployments must be recreated — confirmed with the LaserData team), as does
@@ -180,7 +180,7 @@ provider rather than an event-stream source.
 
 ## Dependencies
 
-- `laser-sdk` `==0.0.2`
+- `laser-sdk` `==0.4.0`
 
 ## Source
 

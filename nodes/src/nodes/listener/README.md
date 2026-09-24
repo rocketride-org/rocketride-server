@@ -97,7 +97,7 @@ keyed on a business id rather than assuming exactly-once delivery.
 
 ## Dependencies
 
-- `laser-sdk` `==0.0.2`
+- `laser-sdk` `==0.4.0`
 
 ## Source
 

@@ -1,7 +1,8 @@
 # Pinned by a live connect + publish + consumer-group + reply + memory test
-# against a LaserData Cloud deployment (2026-09-23). That server speaks wire
-# protocol 0.10.x: 0.1.0 and every later release (through 0.4.0) speaks 0.11.0
-# and is refused at connect ("Incompatible binary protocol version"). Move the
-# pin forward only once the target deployments accept 0.11.0. Shared with the
-# listener node through the single constraint compile.
-laser-sdk==0.0.2
+# against a freshly created LaserData Cloud deployment (2026-09-23): 0.4.0
+# passes; 0.1.1 and 0.0.2 time out at connect. Each laser-sdk release embeds
+# one Apache Iggy client version, and a deployment only accepts its own Iggy
+# range, so older deployments (Iggy 0.10) need 0.0.2 and are not supported
+# by this pin — recreate them. Shared with the listener node through the
+# single constraint compile.
+laser-sdk==0.4.0
