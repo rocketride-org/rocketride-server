@@ -931,8 +931,13 @@ function makeCompileTestsAction(options = {}) {
 			// Check source hash to skip if nothing changed since last test build
 			if (options.force) {
 				task.output = 'Checking for source changes...';
-				const [coreHash, libHash, cmakeHash] = await Promise.all([fingerprint(path.join(SERVER_DIR, 'engine-core')), fingerprint(path.join(SERVER_DIR, 'engine-lib')), fingerprint(path.join(SERVER_DIR, 'cmake'))]);
-				const combinedHash = require('crypto').createHash('md5').update(`${coreHash}:${libHash}:${cmakeHash}`).digest('hex');
+				const [coreHash, libHash, modHash, cmakeHash] = await Promise.all([
+					fingerprint(path.join(SERVER_DIR, 'engine-core')),
+					fingerprint(path.join(SERVER_DIR, 'engine-lib')),
+					fingerprint(path.join(SERVER_DIR, 'engine-mod')),
+					fingerprint(path.join(SERVER_DIR, 'cmake'))
+				]);
+				const combinedHash = require('crypto').createHash('md5').update(`${coreHash}:${libHash}:${modHash}:${cmakeHash}`).digest('hex');
 
 				const savedHash = await getState('server.testSrcHash');
 				if (combinedHash === savedHash) {
@@ -959,6 +964,11 @@ function makeCompileTestsAction(options = {}) {
 			task.output = 'Building engtest...';
 			const engtestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'engtest', '--parallel', String(jobs)];
 			await execCommand('cmake', engtestArgs, { task, env, verbose: options.verbose });
+
+			// Build nodetest
+			task.output = 'Building nodetest...';
+			const nodetestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'nodetest', '--parallel', String(jobs)];
+			await execCommand('cmake', nodetestArgs, { task, env, verbose: options.verbose });
 
 			// Save test source hash after successful build
 			if (ctx._testSrcHash) {
@@ -1071,6 +1081,10 @@ function makeCopyTestDataAction() {
 					name: getExecName('engtest'),
 					dir: path.join(BUILD_ROOT, 'engine-lib', 'test')
 				},
+				{
+					name: getExecName('nodetest'),
+					dir: path.join(BUILD_ROOT, 'engine-mod', 'test')
+				},
 			];
 
 			for (const test of testExes) {
@@ -1102,6 +1116,19 @@ function makeRunEngtestAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
 			const exe = path.join(DIST_DIR, getExecName('engtest'));
+			const args = [...(options.catch || [])];
+			if (options.trace?.length) {
+				args.push(`--trace=${options.trace.join(',')}`);
+			}
+			await execCommand(exe, args, { task, cwd: DIST_DIR });
+		},
+	};
+}
+
+function makeRunNodetestAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			const exe = path.join(DIST_DIR, getExecName('nodetest'));
 			const args = [...(options.catch || [])];
 			if (options.trace?.length) {
 				args.push(`--trace=${options.trace.join(',')}`);
@@ -1241,7 +1268,7 @@ function makeTestAction() {
 					parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
-					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
+					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-nodetest', 'server:run-rocketlib-test'], 'Run tests'),
 				],
 			}),
 		],
@@ -1373,6 +1400,7 @@ module.exports = {
 		{ name: 'server:copy-test-data', action: makeCopyTestDataAction },
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },
+		{ name: 'server:run-nodetest', action: makeRunNodetestAction },
 		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
 		{ name: 'server:clean-run', action: makeCleanServerAction },
 		{

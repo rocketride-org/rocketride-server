@@ -21,15 +21,47 @@
 // SOFTWARE.
 // =============================================================================
 
-#pragma once
+#include <engLib/eng.h>
 
-//-----------------------------------------------------------------------------
-// Include the test framework
-//-----------------------------------------------------------------------------
-#include "../test.h"
+namespace engine::test {
+//-------------------------------------------------------------------------
+/// @details
+///		Deinitialize the storage engine - removes all storage related
+///		factories
+//-------------------------------------------------------------------------
+void deinit() noexcept {
+    // // Register our command factories
+    // Factory::deregisterFactory(
+    // 	// Instances
+    // 	filter::wrap::IFilterInstance::Factory,
 
-//-----------------------------------------------------------------------------
-// Include the prereqs for all our tests here
-//-----------------------------------------------------------------------------
-using namespace engine::store;
+    // 	// // Global data
+    // 	// filter::wrap::IFilterGlobal::Factory
+    // );
+}
 
+//-------------------------------------------------------------------------
+/// @details
+///		Initialize the storage engine - adds all storage related
+///		factories
+//-------------------------------------------------------------------------
+void init() noexcept {
+    // // Register our command factories
+    // auto ccode = Factory::registerFactory(
+    // 	// Instances
+    // 	filter::wrap::IFilterInstance::Factory,
+
+    // 	// Global data
+    // 	// filter::wrap::IFilterGlobal::Factory
+    // );
+
+    // // If we had an error, deinit them
+    // if (ccode)
+    // {
+    // 	store::deinit();
+    // 	return;
+    // }
+
+    return;
+}
+}  // namespace engine::test
