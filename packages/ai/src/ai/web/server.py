@@ -297,6 +297,19 @@ class WebServer:
         # WebSockets.
         self.app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
+        # Security headers the CDN used to add (its response-headers policy),
+        # set here so they hold without one: HSTS, nosniff, referrer policy.
+        # Not X-XSS-Protection (deprecated by browsers) and not X-Frame-Options
+        # (the CDN only set it on static files; site-wide it could break
+        # legitimate embedding). setdefault: a route that sets its own wins.
+        @self.app.middleware('http')
+        async def _security_headers(request, call_next):
+            response = await call_next(request)
+            response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000')
+            response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+            response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+            return response
+
         # Store the server configuration
         self.config = config if config is not None else {}
 
