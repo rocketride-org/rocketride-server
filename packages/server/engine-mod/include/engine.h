@@ -40,6 +40,24 @@ ENGINE_API int engine_run(int argc, const wchar_t** argv) ENGINE_NOEXCEPT;
 ENGINE_API int engine_run(int argc, const char** argv) ENGINE_NOEXCEPT;
 #endif
 
+/*
+ * Bootstraps the engine for a test binary and hands control back to it.
+ *
+ * A test host cannot call the engine's init sequence itself without the module
+ * exporting every piece of it, so the sequence lives here, exactly as
+ * engine_run holds the one for the launcher. The callback receives the value
+ * of --testArgs and runs the test framework, which stays in the test binary.
+ */
+typedef int (*engine_test_runner)(const char* testArgs);
+
+#ifdef _WIN32
+ENGINE_API int engine_test_run(int argc, const wchar_t** argv,
+                               engine_test_runner runner) ENGINE_NOEXCEPT;
+#else
+ENGINE_API int engine_test_run(int argc, const char** argv,
+                               engine_test_runner runner) ENGINE_NOEXCEPT;
+#endif
+
 #ifdef __cplusplus
 }
 #endif
