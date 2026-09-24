@@ -23,13 +23,37 @@
 
 #pragma once
 
-//-----------------------------------------------------------------------------
-// Include the test framework
-//-----------------------------------------------------------------------------
-#include "../test.h"
+#include <catch.hpp>
+
+#include <engLib/eng.h>
 
 //-----------------------------------------------------------------------------
-// Include the prereqs for all our tests here
+// Bring in apTest's util.hpp under aptest::ap::test so it doesn't conflict
+// with our engine::test namespace
 //-----------------------------------------------------------------------------
+namespace aptest {
+using namespace ::ap;
+#include "../../engine-core/test/test/util.hpp"
+}  // namespace aptest
+
+//-----------------------------------------------------------------------------
+// Import that segregated namespace into ours
+//-----------------------------------------------------------------------------
+namespace engine::test {
+using namespace aptest::ap::test;
+}  // namespace engine::test
+
+//-----------------------------------------------------------------------------
+// Support shared with engtest. The word list is test data, so it stays in the
+// test tree rather than shipping inside the engine module; the filter harness
+// itself lives in engLib/store/testing
+//-----------------------------------------------------------------------------
+#include "../../engine-lib/test/test/util.hpp"
+#include "../../engine-lib/test/test/words.h"
+
+//-----------------------------------------------------------------------------
+// Include our namespaces
+//-----------------------------------------------------------------------------
+using namespace engine;
 using namespace engine::store;
-
+using namespace engine::test;

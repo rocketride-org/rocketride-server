@@ -23,7 +23,8 @@
 
 #pragma once
 
-namespace engine::test {
-void init() noexcept;
-void deinit() noexcept;
-}  // namespace engine::test
+//-----------------------------------------------------------------------------
+// The filter tests reach the engine through the module, so everything they
+// need arrives with the test header
+//-----------------------------------------------------------------------------
+#include "test.h"

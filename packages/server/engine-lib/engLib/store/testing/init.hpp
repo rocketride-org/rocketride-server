@@ -21,47 +21,9 @@
 // SOFTWARE.
 // =============================================================================
 
-#include "test.h"
+#pragma once
 
 namespace engine::test {
-//-------------------------------------------------------------------------
-/// @details
-///		Deinitialize the storage engine - removes all storage related
-///		factories
-//-------------------------------------------------------------------------
-void deinit() noexcept {
-    // // Register our command factories
-    // Factory::deregisterFactory(
-    // 	// Instances
-    // 	filter::wrap::IFilterInstance::Factory,
-
-    // 	// // Global data
-    // 	// filter::wrap::IFilterGlobal::Factory
-    // );
-}
-
-//-------------------------------------------------------------------------
-/// @details
-///		Initialize the storage engine - adds all storage related
-///		factories
-//-------------------------------------------------------------------------
-void init() noexcept {
-    // // Register our command factories
-    // auto ccode = Factory::registerFactory(
-    // 	// Instances
-    // 	filter::wrap::IFilterInstance::Factory,
-
-    // 	// Global data
-    // 	// filter::wrap::IFilterGlobal::Factory
-    // );
-
-    // // If we had an error, deinit them
-    // if (ccode)
-    // {
-    // 	store::deinit();
-    // 	return;
-    // }
-
-    return;
-}
+ROCKETRIDE_CORE_API void init() noexcept;
+ROCKETRIDE_CORE_API void deinit() noexcept;
 }  // namespace engine::test

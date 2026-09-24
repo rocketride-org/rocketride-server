@@ -958,6 +958,11 @@ function makeCompileTestsAction(options = {}) {
 			const engtestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'engtest', '--parallel', String(jobs)];
 			await execCommand('cmake', engtestArgs, { task, env, verbose: options.verbose });
 
+			// Build nodetest
+			task.output = 'Building nodetest...';
+			const nodetestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'nodetest', '--parallel', String(jobs)];
+			await execCommand('cmake', nodetestArgs, { task, env, verbose: options.verbose });
+
 			// Save test source hash after successful build
 			if (ctx._testSrcHash) {
 				await setState('server.testSrcHash', ctx._testSrcHash);
@@ -1110,6 +1115,20 @@ function makeRunEngtestAction(options = {}) {
 	};
 }
 
+function makeRunNodetestAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			const exeExt = isWindows() ? '.exe' : '';
+			const exe = path.join(DIST_DIR, 'nodetest' + exeExt);
+			const args = [...(options.catch || []), '--order', 'decl'];
+			if (options.trace?.length) {
+				args.push(`--trace=${options.trace.join(',')}`);
+			}
+			await execCommand(exe, args, { task, cwd: DIST_DIR });
+		},
+	};
+}
+
 function makeBuildCoreAction() {
 	return {
 		steps: [
@@ -1240,7 +1259,7 @@ function makeTestAction() {
 					parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
-					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
+					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-nodetest', 'server:run-rocketlib-test'], 'Run tests'),
 				],
 			}),
 		],
@@ -1370,6 +1389,7 @@ module.exports = {
 		{ name: 'server:copy-test-data', action: makeCopyTestDataAction },
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },
+		{ name: 'server:run-nodetest', action: makeRunNodetestAction },
 		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
 		{ name: 'server:clean-run', action: makeCleanServerAction },
 		{
