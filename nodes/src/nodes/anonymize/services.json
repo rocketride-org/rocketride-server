@@ -343,7 +343,7 @@
 			"title": "Model",
 			"description": "Anonymize model",
 			"type": "string",
-			"default": "glinerMergedLarge",
+			"default": "glinerSmall",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
