@@ -64,6 +64,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.routing import compile_path
 from rocketlib import debug
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
@@ -287,6 +288,14 @@ class WebServer:
                 allow_methods=['*'],
                 allow_headers=['*'],
             )
+
+        # Compress responses. Without it the engine served the shell's ~4MB of
+        # JavaScript raw, which is what a CDN was put in front of it to hide
+        # (10-20s first paint on staging). Added last so it is the outermost
+        # layer and compresses the final response. Starlette skips
+        # text/event-stream and already-encoded responses, and never touches
+        # WebSockets.
+        self.app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
         # Store the server configuration
         self.config = config if config is not None else {}

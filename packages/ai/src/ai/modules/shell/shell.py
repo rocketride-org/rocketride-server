@@ -264,8 +264,11 @@ async def shell_static(request: Request):
     # Resolve safely within the shell root
     file_path = _resolve_safe(_shell_root, raw_path)
 
-    # Serve the file if it exists
+    # Serve the file if it exists. Everything under static/ is content-hashed
+    # (a new build changes the name), so the browser may keep it for good.
     if file_path.exists() and file_path.is_file():
+        if request.url.path.startswith('/shell/static/'):
+            return FileResponse(file_path, headers={'Cache-Control': 'public, max-age=31536000, immutable'})
         return FileResponse(file_path)
 
     # SPA fallback: serve index.html for any unmatched route so that
