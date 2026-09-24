@@ -26,6 +26,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import threading
 import time
@@ -156,6 +157,17 @@ def _ensure_pkg() -> None:
         sys.modules['tool_laserdata_memory'] = pkg
 
 
+def _ensure_nodes_core() -> None:
+    """Register nodes / nodes.core packages so `from nodes.core import laserdata_tasking` resolves."""
+    src = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes'
+    nodes = types.ModuleType('nodes')
+    nodes.__path__ = [str(src)]
+    core = types.ModuleType('nodes.core')
+    core.__path__ = [str(src / 'core')]
+    sys.modules['nodes'] = nodes
+    sys.modules['nodes.core'] = core
+
+
 # Stub engine-only deps just long enough to import the node, then restore
 # sys.modules so these stubs never leak to sibling tests.
 _CORE_STUBS = (
@@ -164,12 +176,16 @@ _CORE_STUBS = (
     'ai.common',
     'ai.common.utils',
     'ai.common.config',
+    'nodes',
+    'nodes.core',
+    'nodes.core.laserdata_tasking',
 )
 _saved_core = {_name: sys.modules.get(_name) for _name in _CORE_STUBS}
 
 _ensure_rocketlib()
 _ensure_ai_common()
 _ensure_pkg()
+_ensure_nodes_core()
 
 try:
     from tool_laserdata_memory import IGlobal as IGlobalMod  # noqa: E402
@@ -246,8 +262,53 @@ class FakeLaser:
     def memory(self, namespace):
         return FakeMemory(self.state, namespace)
 
+    def topic(self, name):
+        return FakeTopic(self.state, name)
+
+    async def send_agent(self, topic, payload, provenance):
+        self.state['calls'].append(('send_agent', topic, json.loads(payload), provenance))
+        rec = SimpleNamespace(json=lambda p=payload: json.loads(p))
+        self.state.setdefault('topics', {}).setdefault(topic, []).append(rec)
+
     async def __aexit__(self, *_exc):
         self.state['closed'] = True
+
+
+class FakeTopic:
+    """Records ensure/publish; replay() returns a cursor over state['topics'][name]."""
+
+    def __init__(self, state, name):
+        self.state, self.name = state, name
+
+    async def ensure(self, partitions):
+        self.state.setdefault('ensured', []).append((self.name, partitions))
+
+    def publish(self, body):
+        state, name = self.state, self.name
+
+        class _Req:
+            async def send(self_inner):
+                state.setdefault('topics', {}).setdefault(name, []).append(SimpleNamespace(json=lambda b=body: b))
+
+        return _Req()
+
+    def replay(self):
+        return FakeCursor(self.state, self.name)
+
+
+class FakeCursor:
+    """Each poll returns records appended to the topic since the previous poll."""
+
+    def __init__(self, state, name):
+        self.state, self.name, self.pos = state, name, 0
+
+    async def poll(self):
+        hook = self.state.get('on_poll')
+        if hook:
+            hook(self.state, self.name)
+        recs = self.state.setdefault('topics', {}).setdefault(self.name, [])
+        new, self.pos = recs[self.pos :], len(recs)
+        return new
 
 
 class StubGlobal:
@@ -261,6 +322,8 @@ class StubGlobal:
         self.folded = True
         self.recall_limit = 10
         self.op_timeout = 30
+        self.agent_id = 'intake'
+        self.ensured_topics = set()
         for k, v in overrides.items():
             setattr(self, k, v)
 
@@ -312,6 +375,15 @@ def _real_global(monkeypatch, cfg, open_mode='run'):
     glb.glb = SimpleNamespace(logicalType='tool_laserdata_memory', connConfig={})
     glb.beginGlobal()
     return glb
+
+
+@pytest.fixture
+def fake_sdk(monkeypatch):
+    """Install a fake laser_sdk exposing Provenance(**kw) -> dict."""
+    mod = types.ModuleType('laser_sdk')
+    mod.Provenance = lambda **kw: dict(kw)
+    monkeypatch.setitem(sys.modules, 'laser_sdk', mod)
+    return mod
 
 
 @pytest.fixture
@@ -688,3 +760,133 @@ def test_connect_failure_maps_to_runtime_error():
     inst.IGlobal.get_laser = boom
     with pytest.raises(RuntimeError, match=r'laserdata\.remember: connect failed'):
         inst.remember({'content': 'x'})
+
+
+# ---------------------------------------------------------------------------
+# agent-to-agent tasking: config, send_task, trace
+# ---------------------------------------------------------------------------
+
+
+def test_begin_global_normalizes_cloud_port(bridge):
+    glb = bridge({'connection_string': 'u:p@x.laserdata.cloud', 'agent_id': 'intake'})
+    assert glb.connection_string == 'u:p@x.laserdata.cloud:8090'
+    assert glb.agent_id == 'intake'
+
+
+def test_begin_global_rejects_portless_other_host(monkeypatch):
+    with pytest.raises(ValueError, match='port'):
+        _real_global(monkeypatch, {'connection_string': 'iggy:iggy@localhost'})
+
+
+def test_begin_global_rejects_bad_agent_id(monkeypatch):
+    with pytest.raises(ValueError, match='agent_id'):
+        _real_global(monkeypatch, {'connection_string': 'iggy:laser@localhost:8090', 'agent_id': 'Intake Desk'})
+
+
+def test_send_task_queues_and_records_event(fake_sdk):
+    inst, state = _instance()
+    out = inst.send_task({'to': 'risk', 'task': 'check refund 42'})
+    assert out['status'] == 'queued' and out['to'] == 'risk'
+    _, topic, env, prov = state['calls'][-1]
+    assert topic == 'agent.risk.inbox' and env['body'] == 'check refund 42' and env['reply_to'] == 'agent.intake.inbox'
+    assert prov['idempotency_key'] == f'task:{out["task_id"]}' and out['conversation_id'] == out['task_id']
+    ev = state['topics']['agent.events'][-1].json()
+    assert (ev['event'], ev['task_id']) == ('sent', out['task_id'])
+    assert ('agent.risk.inbox', 1) in state['ensured']
+
+
+def test_send_task_passes_conversation_and_parent(fake_sdk):
+    inst, state = _instance()
+    conv = '01M38G1CWHCSB0T13N308BYJXN'
+    out = inst.send_task({'to': 'risk', 'task': 'x', 'conversation_id': conv, 'parent_task_id': 'p-1'})
+    env = state['calls'][-1][2]
+    assert (out['conversation_id'], env['conversation_id'], env['parent_task_id']) == (conv, conv, 'p-1')
+
+
+def test_send_task_rejects_non_ulid_conversation(fake_sdk):
+    inst, state = _instance()
+    with pytest.raises(ValueError, match='conversation_id'):
+        inst.send_task({'to': 'risk', 'task': 'x', 'conversation_id': 'conv-1'})
+    assert not [c for c in state['calls'] if c[0] == 'send_agent']
+
+
+def test_send_task_rejects_bad_target(fake_sdk):
+    inst, state = _instance()
+    with pytest.raises(ValueError, match='to'):
+        inst.send_task({'to': 'Risk Desk', 'task': 'x'})
+    assert not [c for c in state['calls'] if c[0] == 'send_agent']
+
+
+def test_send_task_rejects_self(fake_sdk):
+    inst, _ = _instance()
+    with pytest.raises(ValueError, match='itself'):
+        inst.send_task({'to': 'intake', 'task': 'x'})
+
+
+def test_send_task_requires_configured_agent_id(fake_sdk):
+    inst, _ = _instance(agent_id='')
+    with pytest.raises(ValueError, match='Agent id'):
+        inst.send_task({'to': 'risk', 'task': 'x'})
+
+
+def _reply_on_poll(body, *, task_id=None):
+    """on_poll hook: once the task is on the inbox, append its reply to intake's replies topic."""
+
+    def hook(state, name):
+        if name != 'agent.intake.replies':
+            return
+        sent = [c for c in state['calls'] if c[0] == 'send_agent']
+        if not sent or state.get('replied'):
+            return
+        env = sent[-1][2]
+        reply = dict(env, kind='reply', sender='risk', to='intake', body=body, task_id=task_id or env['task_id'])
+        state['topics'].setdefault(name, []).append(SimpleNamespace(json=lambda r=reply: r))
+        state['replied'] = True
+
+    return hook
+
+
+def test_send_task_wait_returns_done(fake_sdk):
+    inst, state = _instance({'calls': [], 'on_poll': _reply_on_poll('approved')})
+    out = inst.send_task({'to': 'risk', 'task': 'x', 'wait_secs': 5})
+    assert (out['status'], out['result']) == ('done', 'approved')
+    assert state['calls'][-1][2]['reply_to'] == 'agent.intake.replies'
+
+
+def test_send_task_wait_ignores_other_replies(fake_sdk, monkeypatch):
+    monkeypatch.setattr(IInstanceMod, '_WAIT_POLL_SECS', 0.01)
+    old = SimpleNamespace(json=lambda: {'kind': 'reply', 'task_id': 'old', 'body': 'stale'})
+    state = {
+        'calls': [],
+        'topics': {'agent.intake.replies': [old]},
+        'on_poll': _reply_on_poll('other', task_id='someone-else'),
+    }
+    inst, _ = _instance(state)
+    out = inst.send_task({'to': 'risk', 'task': 'x', 'wait_secs': 1})
+    assert out['status'] == 'queued' and 'result' not in out
+
+
+def test_send_task_wait_times_out_to_queued(fake_sdk, monkeypatch):
+    monkeypatch.setattr(IInstanceMod, '_WAIT_POLL_SECS', 0.01)
+    inst, _ = _instance()
+    start = time.monotonic()
+    out = inst.send_task({'to': 'risk', 'task': 'x', 'wait_secs': 1})
+    assert out['status'] == 'queued' and time.monotonic() - start < 3
+
+
+def test_trace_by_task_and_conversation(fake_sdk):
+    inst, state = _instance()
+    first = inst.send_task({'to': 'risk', 'task': 'a'})
+    inst.send_task(
+        {'to': 'payment', 'task': 'b', 'conversation_id': first['conversation_id'], 'parent_task_id': first['task_id']}
+    )
+    one = inst.trace({'task_id': first['task_id']})
+    assert [r['status'] for r in one['tasks']] == ['queued']
+    conv = inst.trace({'conversation_id': first['conversation_id']})
+    assert [r['to'] for r in conv['tasks']] == ['risk', 'payment']
+
+
+def test_trace_requires_a_key(fake_sdk):
+    inst, _ = _instance()
+    with pytest.raises(ValueError, match='task_id or conversation_id'):
+        inst.trace({})

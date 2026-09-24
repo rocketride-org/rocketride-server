@@ -49,7 +49,7 @@
 	// Optional:
 	//		Description of this node shown in the pipeline builder
 	//
-	"description": ["Durable, shared agent memory exposed as tools, backed by LaserData (Apache Iggy) via the Laser SDK.", "Exposes four agent tools: 'remember' stores a statement, 'recall' returns the most relevant items, 'improve' reinforces a memory with feedback, and 'forget' deletes one. Pick your deployment (local Apache Iggy or LaserData Cloud), set the connection string and a namespace, and it works; point several agents at the same namespace to share one durable memory."],
+	"description": ["Durable, shared agent memory exposed as tools, backed by LaserData (Apache Iggy) via the Laser SDK.", "Exposes four agent tools: 'remember' stores a statement, 'recall' returns the most relevant items, 'improve' reinforces a memory with feedback, and 'forget' deletes one; for agent-to-agent work, 'send_task' hands a task to another agent through its LaserData inbox and 'trace' shows that task's timeline. Pick your deployment (local Apache Iggy or LaserData Cloud), set the connection string and a namespace, and it works; point several agents at the same namespace to share one durable memory."],
 	//
 	// Optional:
 	//		As a pipe component, define what this component takes and produces.
@@ -72,6 +72,7 @@
 				"title": "Your own Apache Iggy server",
 				"connection_string": "",
 				"namespace": "",
+				"agent_id": "",
 				"show_advanced": false,
 				"stream": "rocketride-memory",
 				"allow_namespace_override": true,
@@ -84,6 +85,7 @@
 				"title": "LaserData Cloud",
 				"connection_string": "",
 				"namespace": "",
+				"agent_id": "",
 				"show_advanced": false,
 				"stream": "rocketride-memory",
 				"allow_namespace_override": true,
@@ -128,6 +130,13 @@
 			"optional": true,
 			"title": "Namespace",
 			"description": "The memory scope every call reads and writes, e.g. <code>customer:42</code>. The agent can pass a namespace per call; a namespace is required on the call or here.",
+			"default": ""
+		},
+		"laserdata.agent_id": {
+			"type": "string",
+			"optional": true,
+			"title": "Agent id",
+			"description": "This agent's identity for agent-to-agent tasks: lowercase letters, digits, - or _ (e.g. <code>intake</code>). Tasks it sends come from this id and replies return to <code>agent.&lt;id&gt;.inbox</code>. Leave blank if the agent only uses memory.",
 			"default": ""
 		},
 		// Toggle: when on, reveals the advanced fields listed in `conditional`.
@@ -199,11 +208,11 @@
 		// --- Per-mode groups + deployment dropdown (qdrant pattern) ---
 		"laserdata.local": {
 			"object": "local",
-			"properties": ["laserdata.local.connection_string", "laserdata.namespace", "laserdata.show_advanced"]
+			"properties": ["laserdata.local.connection_string", "laserdata.namespace", "laserdata.agent_id", "laserdata.show_advanced"]
 		},
 		"laserdata.cloud": {
 			"object": "cloud",
-			"properties": ["laserdata.cloud.connection_string", "laserdata.namespace", "laserdata.show_advanced"]
+			"properties": ["laserdata.cloud.connection_string", "laserdata.namespace", "laserdata.agent_id", "laserdata.show_advanced"]
 		},
 		"laserdata.profile": {
 			"title": "LaserData deployment",

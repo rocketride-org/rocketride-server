@@ -1,7 +1,8 @@
 # tool_laserdata_memory
 
-Adds durable, shared memory to agents through four tools: `laserdata.remember`,
-`laserdata.recall`, `laserdata.improve`, and `laserdata.forget`.
+Adds durable, shared memory to agents through four tools (`laserdata.remember`,
+`laserdata.recall`, `laserdata.improve`, `laserdata.forget`), and agent-to-agent tasking through
+two more (`laserdata.send_task`, `laserdata.trace`): six tools in all.
 
 This is a `tool` node (`classType: ["tool"]`, invoke capability, no data lanes). Multiple agents
 can connect to the same LaserData Memory node and share its namespace-scoped durable memory.
@@ -37,6 +38,11 @@ can additionally scope items to one session.
   recalls, negative demotes it.
 - **`laserdata.forget`** deletes one item by id (the durable audit stream keeps its history).
 
+- **`laserdata.send_task`** hands a task to another agent (see below) and returns its
+  `task_id`, `conversation_id` and `status` (`queued`, or `done` with `result`).
+- **`laserdata.trace`** returns the timeline of one task (`task_id`) or of every task in a
+  conversation (`conversation_id`).
+
 Bad input raises `ValueError`; backend and timeout failures raise `RuntimeError`. There is no
 destructive clear/reset tool.
 
@@ -51,8 +57,13 @@ Default: **Your own Apache Iggy server** (`local`).
 
 ### SDK contract provenance
 
-Pinned to **`laser-sdk==0.1.1`** (PyPI, in `requirements.txt`); the contract below was verified
-against `0.0.1rc21` and has not been re-checked on 0.1.1. rc20+ speaks only Apache Iggy's VSR
+Pinned to **`laser-sdk==0.0.2`** (PyPI, in `requirements.txt`, shared with the Listener node).
+On 2026-09-23 a LaserData Cloud deployment accepted only wire protocol 0.10.x: `0.0.2` passed a
+live connect, topic ensure, `send_agent`, consumer-group `spawn_agent` handler, `reply_on`,
+replay and memory round trip, while `0.1.0` through `0.4.0` (protocol 0.11.0) were refused at
+connect with "Incompatible binary protocol version". On this version `Provenance.conversation_id`
+must be a ULID, so tasking ids are minted as ULIDs. Move the pin forward only once target
+deployments accept 0.11.0. The notes below date from earlier versions. rc20+ speaks only Apache Iggy's VSR
 cluster protocol (the upcoming clustering wire format), so the server must be a
 VSR-enabled build: LaserData Cloud deployments **created on/after 2026-07-31** serve it (older
 deployments must be recreated — confirmed with the LaserData team), as does
@@ -108,6 +119,32 @@ Shared by both modes:
 
 ## Notes
 
+### Agent-to-agent tasks
+
+Agents hand work to each other through LaserData topics instead of calling each other directly,
+so the sender never waits on, or fails because of, the receiver. Set **Agent id** (`agent_id`) on
+this node to the agent's identity (lowercase letters, digits, `-`, `_`); tasking tools refuse to
+run without it.
+
+- `laserdata.send_task(to, task, wait_secs=0, conversation_id?, parent_task_id?)` appends a task
+  envelope to `agent.<to>.inbox` and a `sent` event to `agent.events`. The task is durable when
+  the call returns, even if the receiver is down. `conversation_id` defaults to the new
+  `task_id`; pass the one from the task you are handling so a multi-hop journey traces as one.
+- With `wait_secs` 0 (default) the reply goes to the sender's own `agent.<id>.inbox`, where its
+  [Listener](../listener/README.md) picks it up as a new turn. With `wait_secs` > 0 (max 120)
+  the reply goes to `agent.<id>.replies`, which no Listener reads, and the call waits for it; at
+  the deadline it returns `queued` and the late reply stays visible through `trace`.
+- `laserdata.trace(task_id | conversation_id)` reads `agent.events` and returns each task's
+  sender, receiver, status (`queued` / `in_progress` / `done` / `failed`), attempts, and timings
+  (`queue_wait_ms`, `work_ms`, `end_to_end_ms`). A pipeline with only a `tools` source and this
+  node can call it directly, with no agent.
+
+The receiving side is the **Listener** source node with its LaserData source: it consumes
+`agent.<agent_id>.inbox` under consumer group `<agent_id>`, runs each task through its pipeline,
+and replies. All agents in one system share one stream; topics are created on demand with one
+partition. A `*.laserdata.cloud` connection string without a port gets `:8090`; any other host
+must name its port.
+
 ### Deferred scope
 
 `context(id)` assembly, `kv` get/set/delete, and `fork(id)` copy-on-write
@@ -127,6 +164,7 @@ provider rather than an event-stream source.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
+| `laserdata.agent_id` | `string` | **Agent id**<br/>This agent's identity for agent-to-agent tasks: lowercase letters, digits, - or _ (e.g. <code>intake</code>). Tasks it sends come from this id and replies return to <code>agent.&lt;id&gt;.inbox</code>. Leave blank if the agent only uses memory. | `""` |
 | `laserdata.allow_namespace_override` | `boolean` | **Allow namespace override**<br/>When on (default), the agent may pass a different namespace per call. Turn off to lock every call to the configured namespace. | `true` |
 | `laserdata.cloud.connection_string` | `string` | **Connection string**<br/>LaserData Cloud endpoint in the form <code>user:password@host:port</code> — the user and password from your deployment's <b>Credentials</b> tab, the domain and TCP port from its <b>Overview</b> tab. TLS is automatic for <code>*.laserdata.cloud</code> hosts (the SDK ships the LaserData root CA). The deployment must serve VSR — created on/after 2026-07-31; recreate older ones. Falls back to the LASER_CONNECTION_STRING environment variable when blank. | `""` |
 | `laserdata.folded` | `boolean` | **Folded recall**<br/>When on (default), 'recall' folds the durable memory topic in-process — works against plain Apache Iggy and LaserData Cloud alike (verified live). Turn off only to read a managed KV view on a deployment that serves one. | `true` |
@@ -140,7 +178,7 @@ provider rather than an event-stream source.
 
 ## Dependencies
 
-- `laser-sdk` `==0.1.1`
+- `laser-sdk` `==0.0.2`
 
 ## Source
 

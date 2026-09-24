@@ -1,8 +1,7 @@
-# rc20+ speaks only Apache Iggy's VSR cluster protocol. LaserData Cloud
-# deployments created on/after 2026-07-31 serve VSR (verified live: full
-# memory round-trip on rc21); older deployments must be recreated, and a
-# local server must be a VSR-enabled build (e.g. laserdata/laser-stack).
-# Pin moved rc21 -> 0.1.1 so it resolves alongside sibling LaserData nodes
-# in the shared constraint compile (#2030). The VSR notes above were
-# verified on rc21 and have not been re-checked on 0.1.1.
-laser-sdk==0.1.1
+# Pinned by a live connect + publish + consumer-group + reply + memory test
+# against a LaserData Cloud deployment (2026-09-23). That server speaks wire
+# protocol 0.10.x: 0.1.0 and every later release (through 0.4.0) speaks 0.11.0
+# and is refused at connect ("Incompatible binary protocol version"). Move the
+# pin forward only once the target deployments accept 0.11.0. Shared with the
+# listener node through the single constraint compile.
+laser-sdk==0.0.2

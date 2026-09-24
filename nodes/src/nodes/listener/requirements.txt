@@ -1,0 +1,2 @@
+# Same pin as tool_laserdata_memory (one constraint compile); see its requirements.txt.
+laser-sdk==0.0.2

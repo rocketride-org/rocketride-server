@@ -14,6 +14,11 @@ Exposes four agent tools backed by LaserData's Laser SDK ``memory`` primitive
   improve  — record positive/negative feedback on a recalled item.
   forget   — append a tombstone deleting one item.
 
+and two agent-to-agent tasking tools (shared format in ``nodes.core.laserdata_tasking``):
+
+  send_task — queue a task on another agent's inbox, optionally waiting for its reply.
+  trace     — fold the ``agent.events`` topic into a timeline for a task or conversation.
+
 Unlike the run-scoped ``memory_internal`` node, this store is persistent and
 shared: every agent/run pointing at the same LaserData deployment and
 namespace reads and writes the same memory, so it is never cleared on open.
@@ -27,14 +32,21 @@ for backend failures); they are never returned as error dicts.
 
 from __future__ import annotations
 
+import asyncio
 import math
+import time
 from typing import Any, Dict, List
 
 from rocketlib import IInstanceBase, tool_function
 
 from ai.common.utils import int_arg, normalize_tool_input, optional_str, require_str
 
+from nodes.core import laserdata_tasking as tasking
+
 from .IGlobal import _MAX_RECALL_LIMIT, IGlobal
+
+# How often send_task polls the replies topic during an inline wait.
+_WAIT_POLL_SECS = 0.25
 
 
 class IInstance(IInstanceBase):
@@ -264,6 +276,98 @@ class IInstance(IInstanceBase):
         _run(cfg, 'forget', _forget_op(laser, namespace, memory_id, conversation))
         return {'forgotten': True, 'memory_id': memory_id}
 
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['to', 'task'],
+            'properties': {
+                'to': {'type': 'string', 'description': 'agent_id of the receiving agent, e.g. "risk".'},
+                'task': {
+                    'type': 'string',
+                    'description': 'The work to hand off, as plain text the receiving agent can act on.',
+                },
+                'wait_secs': {
+                    'type': 'integer',
+                    'description': 'Seconds to wait for the reply (0-120). 0 (default) returns immediately with status "queued".',
+                },
+                'conversation_id': {
+                    'type': 'string',
+                    'description': 'Conversation this task belongs to. When you are handling a task, pass the conversation id from its label so the whole journey traces as one.',
+                },
+                'parent_task_id': {
+                    'type': 'string',
+                    'description': 'The task you are handling when this one is a sub-task of it (its id is in the label).',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'task_id': {'type': 'string'},
+                'conversation_id': {'type': 'string'},
+                'to': {'type': 'string'},
+                'status': {
+                    'type': 'string',
+                    'description': '"done" (result included) or "queued" (durably queued; the receiver will pick it up).',
+                },
+                'result': {'type': 'string'},
+            },
+        },
+        description='Hand a task to another agent through LaserData. The task is durably queued the moment this returns, even if the receiving agent is down. With wait_secs > 0, waits that long for its answer.',
+    )
+    def send_task(self, args):
+        """Queue a task on another agent's inbox, optionally waiting for its reply."""
+        args = normalize_tool_input(args, tool_name='send_task')
+        cfg = self.IGlobal
+        sender = self._agent_id('send_task')
+        to = require_str(args, 'to', tool_name='laserdata.send_task')
+        body = require_str(args, 'task', tool_name='laserdata.send_task')
+        wait_secs = int_arg(
+            args, 'wait_secs', default=0, lo=0, hi=tasking.MAX_WAIT_SECS, tool_name='laserdata.send_task'
+        )
+        env = tasking.make_task(
+            sender=sender,
+            to=to,
+            body=body,
+            inline=wait_secs > 0,
+            conversation_id=_opt_str(args, 'send_task', 'conversation_id') or None,
+            parent_task_id=_opt_str(args, 'send_task', 'parent_task_id') or None,
+        )
+        laser = self._laser('send_task')
+        return _run(cfg, 'send_task', _send_task_op(cfg, laser, env, wait_secs), timeout=wait_secs + cfg.op_timeout)
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'task_id': {'type': 'string', 'description': 'One task to trace.'},
+                'conversation_id': {
+                    'type': 'string',
+                    'description': 'Trace every task in a conversation (the whole multi-agent journey).',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'task_id': {'type': 'string'},
+                'conversation_id': {'type': 'string'},
+                'tasks': {'type': 'array', 'items': {'type': 'object'}},
+            },
+        },
+        description='Show what happened to a task, or to every task in a conversation: who sent it to whom, status (queued / in_progress / done / failed), attempts, and timings (queue wait, work time, end-to-end, in ms).',
+    )
+    def trace(self, args):
+        """Fold the events topic into a timeline for one task or conversation."""
+        args = normalize_tool_input(args, tool_name='trace')
+        task_id = _opt_str(args, 'trace', 'task_id') or None
+        conversation_id = _opt_str(args, 'trace', 'conversation_id') or None
+        if not task_id and not conversation_id:
+            raise ValueError('laserdata.trace: pass task_id or conversation_id')
+        cfg = self.IGlobal
+        laser = self._laser('trace')
+        return _run(cfg, 'trace', _trace_op(cfg, laser, task_id, conversation_id))
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -284,6 +388,13 @@ class IInstance(IInstanceBase):
             )
         return ns
 
+    def _agent_id(self, tool_name: str) -> str:
+        """This agent's configured identity; tasking tools need it."""
+        agent_id = self.IGlobal.agent_id
+        if not agent_id:
+            raise ValueError(f'laserdata.{tool_name}: set "Agent id" in the node config to use tasking tools')
+        return agent_id
+
     def _laser(self, tool_name: str) -> Any:
         """Fetch the shared connection, mapping connect failures to RuntimeError."""
         try:
@@ -299,10 +410,10 @@ class IInstance(IInstanceBase):
 # ---------------------------------------------------------------------------
 
 
-def _run(cfg: IGlobal, tool_name: str, coro) -> Any:
+def _run(cfg: IGlobal, tool_name: str, coro, *, timeout: float | None = None) -> Any:
     """Run one SDK coroutine on the bridge loop, mapping failures to RuntimeError."""
     try:
-        return cfg.run(coro)
+        return cfg.run(coro, timeout=timeout)
     except (ValueError, RuntimeError):
         raise
     except Exception as exc:
@@ -423,3 +534,62 @@ async def _forget_op(laser: Any, namespace: str, memory_id: str, conversation: s
     if conversation:
         kwargs['conversation'] = conversation
     return await memory.forget(memory_id, **kwargs)
+
+
+async def _ensure(cfg: IGlobal, laser: Any, name: str) -> None:
+    """Create a topic once per connection (one partition: strict order)."""
+    if name not in cfg.ensured_topics:
+        await laser.topic(name).ensure(1)
+        cfg.ensured_topics.add(name)
+
+
+async def _send_task_op(cfg: IGlobal, laser: Any, env: Any, wait_secs: int) -> Dict[str, Any]:
+    """Append the task and its 'sent' event; optionally wait for the correlated reply."""
+    import laser_sdk
+
+    inbox = tasking.inbox_topic(env.to)
+    await _ensure(cfg, laser, inbox)
+    await _ensure(cfg, laser, tasking.EVENTS_TOPIC)
+    cursor = None
+    if wait_secs > 0:
+        await _ensure(cfg, laser, env.reply_to)
+        cursor = laser.topic(env.reply_to).replay()
+        await cursor.poll()  # drain history: only replies after this send count
+    await laser.send_agent(inbox, tasking.encode(env), laser_sdk.Provenance(**tasking.provenance_kwargs(env)))
+    await laser.topic(tasking.EVENTS_TOPIC).publish(tasking.event('sent', env, agent=env.sender)).send()
+    out: Dict[str, Any] = {
+        'task_id': env.task_id,
+        'conversation_id': env.conversation_id,
+        'to': env.to,
+        'status': 'queued',
+    }
+    if cursor is None:
+        return out
+    deadline = time.monotonic() + wait_secs
+    while time.monotonic() < deadline:
+        for rec in await cursor.poll():
+            try:
+                reply = tasking.decode(tasking.record_json(rec))
+            except ValueError:
+                continue
+            if reply.kind == 'reply' and reply.task_id == env.task_id:
+                return {**out, 'status': 'done', 'result': reply.body}
+        await asyncio.sleep(_WAIT_POLL_SECS)
+    return out
+
+
+async def _trace_op(cfg: IGlobal, laser: Any, task_id: str | None, conversation_id: str | None) -> Dict[str, Any]:
+    """Read the whole events topic and fold it into a timeline."""
+    await _ensure(cfg, laser, tasking.EVENTS_TOPIC)
+    cursor = laser.topic(tasking.EVENTS_TOPIC).replay()
+    events: List[Any] = []
+    while True:
+        batch = await cursor.poll()
+        if not batch:
+            break
+        for rec in batch:
+            try:
+                events.append(tasking.record_json(rec))
+            except Exception:
+                continue
+    return tasking.build_timeline(events, task_id=task_id, conversation_id=conversation_id)

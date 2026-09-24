@@ -27,6 +27,8 @@ from ai.common.config import Config
 from ai.common.utils import config_int
 from rocketlib import IGlobalBase, OPEN_MODE, debug, error, warning
 
+from nodes.core import laserdata_tasking as tasking
+
 # Defaults / bounds (avoid magic constants scattered in the code).
 _DEFAULT_STREAM = 'rocketride-memory'
 _DEFAULT_RECALL_LIMIT = 10
@@ -48,6 +50,10 @@ class IGlobal(IGlobalBase):
     folded: bool = True
     recall_limit: int = _DEFAULT_RECALL_LIMIT
     op_timeout: int = _DEFAULT_OP_TIMEOUT
+    # This agent's identity for send_task (sender id and reply inbox).
+    agent_id: str = ''
+    # Topics already ensured on this connection (send_task / trace create on demand).
+    ensured_topics: Any = None
 
     _loop: asyncio.AbstractEventLoop | None = None
     _loop_thread: threading.Thread | None = None
@@ -81,7 +87,14 @@ class IGlobal(IGlobalBase):
                 'LASER_CONNECTION_STRING env var (user:password@host:port)'
             )
             raise ValueError('laserdata: connection_string is required')
-        self.connection_string = connection_string
+        try:
+            self.connection_string = tasking.normalize_connection_string(connection_string)
+        except ValueError as exc:
+            error(str(exc))
+            raise
+        raw_agent = str(cfg.get('agent_id') or '').strip()
+        self.agent_id = tasking.validate_agent_id(raw_agent) if raw_agent else ''
+        self.ensured_topics = set()
 
         # The Iggy stream the memory topics live in; the SDK requires a default
         # stream pinned at connect before laser.memory() can be used.
