@@ -31,6 +31,7 @@
 #pragma once
 
 namespace engine::test {
+
 //------------------------------------------------------------------------
 /// @details
 ///		Define the flags for objects - these flags are also
@@ -52,7 +53,7 @@ public:
 ///		Define a simple container that will create an endpoint and manage
 ///		the test process
 //-------------------------------------------------------------------------
-class IFilterTest {
+class ROCKETRIDE_CORE_API IFilterTest {
 public:
     static const uint32_t DefaultFlags =
         Entry::FLAGS::SIGNING | Entry::FLAGS::INDEX | Entry::FLAGS::CLASSIFY;
@@ -61,12 +62,9 @@ public:
     //-----------------------------------------------------------------
     //  Constructors/destructor
     //-----------------------------------------------------------------
-    virtual ~IFilterTest() noexcept {
-        // Release the tag buffer if we allocated it
-        if (m_pTagBuffer) Memory::release(&m_pTagBuffer);
-
-        disconnect();
-    }
+    // Defined in container.cpp: it releases engine memory, which only the
+    // module can reach
+    virtual ~IFilterTest() noexcept;
 
     //-----------------------------------------------------------------
     /// @details
@@ -85,28 +83,29 @@ public:
     //-----------------------------------------------------------------
     // Public API - low-level API
     //-----------------------------------------------------------------
-    Error connect(OPEN_MODE openMode = OPEN_MODE::TARGET) noexcept;
-    ErrorOr<ServicePipe> getPipe() noexcept;
-    ErrorOr<ServicePipe> openObjectSimple(
+    Error connect(
+        store::OPEN_MODE openMode = store::OPEN_MODE::TARGET) noexcept;
+    ErrorOr<store::ServicePipe> getPipe() noexcept;
+    ErrorOr<store::ServicePipe> openObjectSimple(
         TextView name, uint32_t flags = DefaultFlags) noexcept;
-    ErrorOr<ServicePipe> openObject(TextView name,
-                                    uint32_t flags = DefaultFlags) noexcept;
+    ErrorOr<store::ServicePipe> openObject(
+        TextView name, uint32_t flags = DefaultFlags) noexcept;
     Entry getDummyEntry(TextView name);
-    Error writeTagBeginObject(ServicePipe pipe, Entry &entry) noexcept;
+    Error writeTagBeginObject(store::ServicePipe pipe, Entry &entry) noexcept;
     Error writeTagBeginStream(
-        ServicePipe pipe,
-        TAG_OBJECT_STREAM_BEGIN::STREAM_TYPE streamType =
-            TAG_OBJECT_STREAM_BEGIN::STREAM_TYPE::STREAM_DATA,
-        Dword streamAttributes = TAG_ATTRIBUTES::INSTANCE_DATA,
+        store::ServicePipe pipe,
+        store::TAG_OBJECT_STREAM_BEGIN::STREAM_TYPE streamType =
+            store::TAG_OBJECT_STREAM_BEGIN::STREAM_TYPE::STREAM_DATA,
+        Dword streamAttributes = store::TAG_ATTRIBUTES::INSTANCE_DATA,
         Dword streamSize = 0, Qword streamOffset = 0,
         Text streamName = {}) noexcept;
-    Error writeTagData(ServicePipe pipe, size_t size,
+    Error writeTagData(store::ServicePipe pipe, size_t size,
                        const void *pData) noexcept;
-    Error writeTagEndStream(ServicePipe pipe) noexcept;
-    Error writeTagEndObject(ServicePipe pipe) noexcept;
-    Error closeObjectSimple(ServicePipe pipe) noexcept;
-    Error closeObject(ServicePipe pipe) noexcept;
-    Error putPipe(ServicePipe pipe) noexcept;
+    Error writeTagEndStream(store::ServicePipe pipe) noexcept;
+    Error writeTagEndObject(store::ServicePipe pipe) noexcept;
+    Error closeObjectSimple(store::ServicePipe pipe) noexcept;
+    Error closeObject(store::ServicePipe pipe) noexcept;
+    Error putPipe(store::ServicePipe pipe) noexcept;
     Error disconnect() noexcept;
 
     const Entry &getEntry() const noexcept { return m_entry; }
@@ -138,14 +137,14 @@ private:
     //-----------------------------------------------------------------
     // Utility functions
     //-----------------------------------------------------------------
-    virtual Error getTagBuffer(TAG **ppTag) noexcept;
+    virtual Error getTagBuffer(store::TAG **ppTag) noexcept;
 
 private:
     //-----------------------------------------------------------------
     /// @details
     ///		Declare our factory info
     //-----------------------------------------------------------------
-    ServiceEndpoint m_endpoint;
+    store::ServiceEndpoint m_endpoint;
 
     //-----------------------------------------------------------------
     /// @details
@@ -182,7 +181,7 @@ private:
     ///		Built in tag buffer allocated only when needed via the
     ///		allocateTagBuffer member
     //-----------------------------------------------------------------
-    TAG *m_pTagBuffer = nullptr;
+    store::TAG *m_pTagBuffer = nullptr;
 
     //-----------------------------------------------------------------
     /// @details

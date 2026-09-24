@@ -24,6 +24,18 @@
 #include <engLib/eng.h>
 
 namespace engine::test {
+using namespace engine::store;
+
+//-------------------------------------------------------------------------
+/// @details
+///		Release the tag buffer if we allocated it, then disconnect
+//-------------------------------------------------------------------------
+IFilterTest::~IFilterTest() noexcept {
+    if (m_pTagBuffer) Memory::release(&m_pTagBuffer);
+
+    disconnect();
+}
+
 //=========================================================================
 // Low level API
 //=========================================================================
@@ -565,8 +577,9 @@ Error IFilterTest::writeTagData(TextView file, const char8_t *pText,
 ///		The file to send
 //-------------------------------------------------------------------------
 Error IFilterTest::sendFile(TextView file, uint32_t flags) noexcept {
-    // Build the path
-    file::Path path = datasetsPath() / file;
+    // Build the path. The test tree's datasetsPath() helper is not available
+    // here, and it resolves to this same directory beside the executable
+    file::Path path = application::execDir() / "datasets" / file;
 
     // Use the put API to store the file on the target and validate
     ErrorOr<Buffer> content = file::fetch(path);
