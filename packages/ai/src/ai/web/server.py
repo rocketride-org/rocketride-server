@@ -64,6 +64,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.routing import compile_path
 from rocketlib import debug
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
@@ -287,6 +288,28 @@ class WebServer:
                 allow_methods=['*'],
                 allow_headers=['*'],
             )
+
+        # Compress responses. Without it the engine served the shell's ~4MB of
+        # JavaScript raw, which is what a CDN was put in front of it to hide
+        # (10-20s first paint on staging). It wraps the routes and compresses
+        # their response body; the security-headers middleware below is added
+        # after it, so it sits outside and only adds headers. Starlette skips
+        # text/event-stream and already-encoded responses, and never touches
+        # WebSockets.
+        self.app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+        # Security headers the CDN used to add (its response-headers policy),
+        # set here so they hold without one: HSTS, nosniff, referrer policy.
+        # Not X-XSS-Protection (deprecated by browsers) and not X-Frame-Options
+        # (the CDN only set it on static files; site-wide it could break
+        # legitimate embedding). setdefault: a route that sets its own wins.
+        @self.app.middleware('http')
+        async def _security_headers(request, call_next):
+            response = await call_next(request)
+            response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000')
+            response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+            response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+            return response
 
         # Store the server configuration
         self.config = config if config is not None else {}

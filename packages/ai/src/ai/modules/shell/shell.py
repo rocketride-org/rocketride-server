@@ -272,6 +272,21 @@ async def shell_static(request: Request):
     # Resolve safely within the shell root
     file_path = _resolve_safe(_shell_root, raw_path)
 
+    # Prerendered marketing page, when the shell build carries a capture for
+    # this route: <shell>/_prerender/index.html for '/', and
+    # <shell>/_prerender/<route>/index.html otherwise (the layout the CDN's
+    # router used). Only public routes reach here with a non-/shell/ path, and a
+    # capture is served only if it exists, so no route list is mirrored. Any
+    # query string gets the app instead: an OAuth callback lands on '/' with
+    # ?code/?state/?error, and invite or verification links carry a token the
+    # app must read. Crawlers fetch the canonical URL, which has none.
+    if not request.url.path.startswith('/shell/') and not request.url.query:
+        route = request.url.path.strip('/')
+        prerender_root = (Path(_shell_root) / '_prerender').resolve()
+        capture = _resolve_safe(_shell_root, f'_prerender/{route}/index.html' if route else '_prerender/index.html')
+        if capture.is_relative_to(prerender_root) and capture.is_file():
+            return FileResponse(capture)
+
     # Content-hashed bundles under /shell/static/ are not navigation routes: a
     # miss must 404 rather than fall through to the index.html SPA response
     # below. Behind the immutable, edge-cached /shell/static/* CloudFront
@@ -292,13 +307,17 @@ async def shell_static(request: Request):
     # path (catches a walk back in).
     segments = [s for s in raw_path.split('/') if s not in ('', '.')]
     normalized = posixpath.normpath('/' + raw_path).lstrip('/')
-    if segments[:1] == ['static'] or normalized.split('/', 1)[0] == 'static':
+    is_static = segments[:1] == ['static'] or normalized.split('/', 1)[0] == 'static'
+    if is_static:
         static_root = (Path(_shell_root) / 'static').resolve()
         if not (file_path.is_relative_to(static_root) and file_path.is_file()):
             raise HTTPException(status_code=404, detail='Not found')
 
-    # Serve the file if it exists
+    # Serve the file if it exists. Everything under static/ is content-hashed
+    # (a new build changes the name), so the browser may keep it for good.
     if file_path.exists() and file_path.is_file():
+        if is_static:
+            return FileResponse(file_path, headers={'Cache-Control': 'public, max-age=31536000, immutable'})
         return FileResponse(file_path)
 
     # SPA fallback: serve index.html for any unmatched route so that

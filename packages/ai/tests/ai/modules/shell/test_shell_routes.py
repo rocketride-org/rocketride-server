@@ -404,3 +404,59 @@ def test_shell_static_partial_build_is_503(tmp_path, monkeypatch):
     r = _shell_client().get('/shell/static/js/missing.abc123.js')
     assert r.status_code == 503
     assert 'shell:build' in r.text
+
+
+def test_shell_static_asset_is_cached_immutable_but_index_is_not(shell_root):
+    """Content-hashed static files may be cached for good; the SPA index must not."""
+    asset = shell_root / 'static' / 'js' / 'main.abc123.js'
+    asset.parent.mkdir(parents=True)
+    asset.write_text('console.log(1)')
+    r = _shell_client().get('/shell/static/js/main.abc123.js')
+    assert r.status_code == 200
+    assert r.headers['cache-control'] == 'public, max-age=31536000, immutable'
+    index = _shell_client().get('/shell/some/client/route')
+    assert index.status_code == 200
+    assert 'immutable' not in index.headers.get('cache-control', '')
+
+
+def _capture_client():
+    """Shell routes as initModule registers them: '/' and a public route."""
+    app = FastAPI()
+    app.get('/')(shell_static)
+    app.get('/pricing')(shell_static)
+    app.get('/dashboard')(shell_static)
+    return TestClient(app)
+
+
+def test_prerender_capture_served_when_present(shell_root):
+    """A public route with a capture gets the capture; '/' maps to _prerender/index.html."""
+    (shell_root / '_prerender' / 'pricing').mkdir(parents=True)
+    (shell_root / '_prerender' / 'pricing' / 'index.html').write_text('<title>pricing capture</title>')
+    (shell_root / '_prerender' / 'index.html').write_text('<title>home capture</title>')
+    c = _capture_client()
+    assert 'pricing capture' in c.get('/pricing').text
+    assert 'home capture' in c.get('/').text
+
+
+def test_no_capture_falls_back_to_spa(shell_root):
+    """No capture for the route: the SPA index, as before."""
+    r = _capture_client().get('/dashboard')
+    assert r.status_code == 200
+    assert '<title>shell</title>' in r.text
+
+
+def test_oauth_callback_on_root_gets_the_app_not_the_capture(shell_root):
+    """?code/?state on '/' must reach the SPA so PKCE can complete."""
+    (shell_root / '_prerender').mkdir()
+    (shell_root / '_prerender' / 'index.html').write_text('<title>home capture</title>')
+    r = _capture_client().get('/?code=abc&state=xyz')
+    assert '<title>shell</title>' in r.text
+
+
+def test_any_query_string_gets_the_app_not_the_capture(shell_root):
+    """Invite and verification links carry a token the app must read."""
+    (shell_root / '_prerender' / 'pricing').mkdir(parents=True)
+    (shell_root / '_prerender' / 'pricing' / 'index.html').write_text('<title>pricing capture</title>')
+    c = _capture_client()
+    assert '<title>shell</title>' in c.get('/pricing?token=abc').text
+    assert 'pricing capture' in c.get('/pricing').text
