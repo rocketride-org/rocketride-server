@@ -467,6 +467,10 @@ def test_canonical_match_rejects_unsupported_authority_syntax(monkeypatch, patte
         (r'^https://api\.example\.com\?key=[a-z]+$', 'https://api.example.com?key=value'),
         (r'^https://api\.example\.com$', 'https://api.example.com'),
         (r'^https://api\.example\.com\Z', 'https://api.example.com'),
+        (r'^https://(hn\.algolia\.com|api\.github\.com)/', 'https://hn.algolia.com/api/v1/search'),
+        (r'^https://(hn\.algolia\.com|api\.github\.com)/', 'https://api.github.com/users'),
+        (r'^https://(hn\.algolia\.com|api\.github\.com|api\.stackexchange\.com)/', 'https://api.stackexchange.com/questions'),
+        (r'^https://(?:hn\.algolia\.com|api\.github\.com)/', 'https://hn.algolia.com/api/v1/search'),
     ],
 )
 def test_canonical_match_preserves_safe_full_url_patterns(monkeypatch, pattern, url):
