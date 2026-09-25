@@ -84,6 +84,17 @@ class FakeQuestion:
 LOGGED_ERRORS: list[str] = []
 
 
+def _merge_metadata(target, metadata):
+    """Stand-in for ai.common.utils.merge_metadata with the same semantics."""
+    if not isinstance(metadata, dict) or not metadata:
+        return
+    existing = getattr(target, 'metadata', None)
+    if isinstance(existing, dict):
+        existing.update(metadata)
+    else:
+        target.metadata = dict(metadata)
+
+
 def _load_iinstance_class():
     saved = {}
     stubs = {
@@ -92,6 +103,7 @@ def _load_iinstance_class():
         'ai.common': types.ModuleType('ai.common'),
         'ai.common.schema': types.ModuleType('ai.common.schema'),
         'ai.common.config': types.ModuleType('ai.common.config'),
+        'ai.common.utils': types.ModuleType('ai.common.utils'),
     }
 
     class FakeIInstanceBase:
@@ -115,6 +127,12 @@ def _load_iinstance_class():
     stubs['rocketlib'].OPEN_MODE = types.SimpleNamespace(CONFIG='config')
     stubs['ai.common.schema'].Question = FakeQuestion
     stubs['ai.common.config'].Config = types.SimpleNamespace(getNodeConfig=lambda *a: {})
+    # The node carries Question.metadata forward through this helper. The stub
+    # mirrors the real one (packages/ai/src/ai/common/utils/metadata_utils.py):
+    # update an existing dict in place, otherwise assign a shallow copy, and
+    # ignore anything that is not a non-empty dict. Stubbing it away entirely
+    # would let a regression in the carry pass these tests unnoticed.
+    stubs['ai.common.utils'].merge_metadata = _merge_metadata
 
     for name, stub in stubs.items():
         saved[name] = sys.modules.get(name)
