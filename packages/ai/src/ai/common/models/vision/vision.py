@@ -61,7 +61,7 @@ class VisionLoader(BaseLoader):
         """
         VisionLoader._ensure_dependencies()
 
-        from ai.common.torch import torch
+        from ai.common.torch import torch, probe_cuda
 
         variant = (variant or 'clip').lower()
         if variant not in ('clip', 'vit'):
@@ -79,6 +79,11 @@ class VisionLoader(BaseLoader):
         else:
             if device is None:
                 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+            if 'cuda' in str(device):
+                dev_idx = int(device.split(':')[1]) if ':' in str(device) else 0
+                if not probe_cuda(dev_idx):
+                    logger.warning(f'CUDA device {dev_idx} kernel probe failed, falling back to CPU')
+                    device = 'cpu'
             gpu_index = int(device.split(':')[1]) if ':' in str(device) else (0 if device == 'cuda' else -1)
 
         if variant == 'clip':
