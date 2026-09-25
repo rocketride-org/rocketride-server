@@ -724,6 +724,20 @@ def _combine_requirements(file_paths: list[str], output_path: str):
             out.write('\n')
 
 
+# uv pip compile reaches every configured index (PyPI, download.pytorch.org).
+# A 5xx or a dropped connection there is usually gone within a minute, and
+# failing here stops the engine from starting at all, so network failures are
+# retried. Resolution conflicts are not: they fail the same way every time.
+_COMPILE_BACKOFF_SECONDS = (10, 30)
+_TRANSIENT_COMPILE_ERROR = re.compile(
+    r'HTTP status server error|error sending request|timed out|connection (?:reset|refused|closed)|dns error',
+    re.IGNORECASE,
+)
+# A TLS failure is also reported as "error sending request", but a bad or
+# untrusted certificate does not fix itself in 40 seconds: fail at once.
+_PERMANENT_COMPILE_ERROR = re.compile(r'invalid peer certificate|certificate verify failed', re.IGNORECASE)
+
+
 def _compile_constraints(constraints_path: str):
     """Use uv pip compile to generate constraints file."""
     if not _uv_available():
@@ -748,20 +762,27 @@ def _compile_constraints(constraints_path: str):
     ]
     args.extend(_override_args(exe_dir))
     debug(f'Compile: {args}')
-    result = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        check=False,
-        stdin=subprocess.PIPE,
-        encoding='utf-8',
-        errors='replace',
-        cwd=exe_dir,
-    )
-
-    if result.returncode != 0:
-        error(f'Failed to compile constraints: {result.stderr}')
-        raise RuntimeError('Failed to compile constraints')
+    for attempt, delay in enumerate((*_COMPILE_BACKOFF_SECONDS, None), start=1):
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.PIPE,
+            encoding='utf-8',
+            errors='replace',
+            cwd=exe_dir,
+        )
+        if result.returncode == 0:
+            break
+        stderr = result.stderr or ''
+        transient = _TRANSIENT_COMPILE_ERROR.search(stderr) and not _PERMANENT_COMPILE_ERROR.search(stderr)
+        if delay is None or not transient:
+            error(f'Failed to compile constraints: {result.stderr}')
+            raise RuntimeError('Failed to compile constraints')
+        debug(f'Compile attempt {attempt} hit a network error, retrying in {delay}s: {result.stderr.strip()[-500:]}')
+        updateProgress(f'Package index unavailable, retrying in {delay}s...')
+        time.sleep(delay)
 
     debug(f'Constraints compiled: {constraints_path}')
 

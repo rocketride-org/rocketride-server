@@ -453,3 +453,73 @@ class TestDepends:
         monkeypatch.setattr(depends, 'ensure_constraints', lambda: pytest.fail('constraints must not run'))
 
         depends.depends(str(tmp_path / 'does-not-exist.txt'))
+
+
+class TestCompileConstraintsRetry:
+    UNAVAILABLE = (
+        'error: Failed to fetch: `https://download.pytorch.org/whl/cu128/torch/`\n'
+        '  Caused by: HTTP status server error (503 Service Unavailable) for url (https://download.pytorch.org/whl/cu128/torch/)\n'
+    )
+
+    @pytest.fixture
+    def compile_env(self, exe_dir, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr(depends, '_uv_available', lambda: True)
+        monkeypatch.setattr(depends, '_uv_abs_path', lambda: 'uv')
+        monkeypatch.setattr(depends, '_override_args', lambda exe_dir: [])
+        monkeypatch.setattr(depends, 'updateProgress', lambda message: None)
+        monkeypatch.setattr(depends, 'error', lambda message: None)
+        monkeypatch.setattr(depends.time, 'sleep', sleeps.append)
+        return sleeps
+
+    def _fake_run(self, monkeypatch, results):
+        calls = []
+
+        def run(args, **kwargs):
+            calls.append(args)
+            code, stderr = results[len(calls) - 1]
+            return SimpleNamespace(returncode=code, stderr=stderr, stdout='')
+
+        monkeypatch.setattr(depends.subprocess, 'run', run)
+        return calls
+
+    def test_retries_a_package_index_outage_then_succeeds(self, compile_env, monkeypatch):
+        calls = self._fake_run(monkeypatch, [(1, self.UNAVAILABLE), (1, self.UNAVAILABLE), (0, '')])
+
+        depends._compile_constraints('constraints.txt')
+
+        assert len(calls) == 3
+        assert compile_env == [10, 30]
+
+    def test_gives_up_after_the_last_attempt(self, compile_env, monkeypatch):
+        calls = self._fake_run(monkeypatch, [(1, self.UNAVAILABLE)] * 3)
+
+        with pytest.raises(RuntimeError, match='Failed to compile constraints'):
+            depends._compile_constraints('constraints.txt')
+
+        assert len(calls) == 3
+
+    def test_does_not_retry_a_resolution_conflict(self, compile_env, monkeypatch):
+        conflict = 'error: No solution found when resolving dependencies:\n  Because foo==1 depends on bar>2 ...\n'
+        calls = self._fake_run(monkeypatch, [(1, conflict)])
+
+        with pytest.raises(RuntimeError, match='Failed to compile constraints'):
+            depends._compile_constraints('constraints.txt')
+
+        assert len(calls) == 1
+        assert compile_env == []
+
+    def test_does_not_retry_a_certificate_error(self, compile_env, monkeypatch):
+        tls = (
+            'error: Failed to fetch: `https://download.pytorch.org/whl/cu128/torch/`\n'
+            '  Caused by: error sending request for url (https://download.pytorch.org/whl/cu128/torch/)\n'
+            '  Caused by: client error (Connect)\n'
+            '  Caused by: invalid peer certificate: UnknownIssuer\n'
+        )
+        calls = self._fake_run(monkeypatch, [(1, tls)])
+
+        with pytest.raises(RuntimeError, match='Failed to compile constraints'):
+            depends._compile_constraints('constraints.txt')
+
+        assert len(calls) == 1
+        assert compile_env == []
