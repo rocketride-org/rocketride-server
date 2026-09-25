@@ -291,8 +291,9 @@ class WebServer:
 
         # Compress responses. Without it the engine served the shell's ~4MB of
         # JavaScript raw, which is what a CDN was put in front of it to hide
-        # (10-20s first paint on staging). Added last so it is the outermost
-        # layer and compresses the final response. Starlette skips
+        # (10-20s first paint on staging). It wraps the routes and compresses
+        # their response body; the security-headers middleware below is added
+        # after it, so it sits outside and only adds headers. Starlette skips
         # text/event-stream and already-encoded responses, and never touches
         # WebSockets.
         self.app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)

@@ -276,12 +276,11 @@ async def shell_static(request: Request):
     # this route: <shell>/_prerender/index.html for '/', and
     # <shell>/_prerender/<route>/index.html otherwise (the layout the CDN's
     # router used). Only public routes reach here with a non-/shell/ path, and a
-    # capture is served only if it exists, so no route list is mirrored. An
-    # OAuth callback lands on '/' with ?code/?state/?error and must get the app,
-    # not the marketing capture.
-    if not request.url.path.startswith('/shell/') and not any(
-        k in request.query_params for k in ('code', 'state', 'error')
-    ):
+    # capture is served only if it exists, so no route list is mirrored. Any
+    # query string gets the app instead: an OAuth callback lands on '/' with
+    # ?code/?state/?error, and invite or verification links carry a token the
+    # app must read. Crawlers fetch the canonical URL, which has none.
+    if not request.url.path.startswith('/shell/') and not request.url.query:
         route = request.url.path.strip('/')
         prerender_root = (Path(_shell_root) / '_prerender').resolve()
         capture = _resolve_safe(_shell_root, f'_prerender/{route}/index.html' if route else '_prerender/index.html')

@@ -451,3 +451,12 @@ def test_oauth_callback_on_root_gets_the_app_not_the_capture(shell_root):
     (shell_root / '_prerender' / 'index.html').write_text('<title>home capture</title>')
     r = _capture_client().get('/?code=abc&state=xyz')
     assert '<title>shell</title>' in r.text
+
+
+def test_any_query_string_gets_the_app_not_the_capture(shell_root):
+    """Invite and verification links carry a token the app must read."""
+    (shell_root / '_prerender' / 'pricing').mkdir(parents=True)
+    (shell_root / '_prerender' / 'pricing' / 'index.html').write_text('<title>pricing capture</title>')
+    c = _capture_client()
+    assert '<title>shell</title>' in c.get('/pricing?token=abc').text
+    assert 'pricing capture' in c.get('/pricing').text
