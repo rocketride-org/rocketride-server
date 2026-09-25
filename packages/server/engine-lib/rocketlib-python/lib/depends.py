@@ -733,6 +733,9 @@ _TRANSIENT_COMPILE_ERROR = re.compile(
     r'HTTP status server error|error sending request|timed out|connection (?:reset|refused|closed)|dns error',
     re.IGNORECASE,
 )
+# A TLS failure is also reported as "error sending request", but a bad or
+# untrusted certificate does not fix itself in 40 seconds: fail at once.
+_PERMANENT_COMPILE_ERROR = re.compile(r'invalid peer certificate|certificate verify failed', re.IGNORECASE)
 
 
 def _compile_constraints(constraints_path: str):
@@ -772,7 +775,9 @@ def _compile_constraints(constraints_path: str):
         )
         if result.returncode == 0:
             break
-        if delay is None or not _TRANSIENT_COMPILE_ERROR.search(result.stderr or ''):
+        stderr = result.stderr or ''
+        transient = _TRANSIENT_COMPILE_ERROR.search(stderr) and not _PERMANENT_COMPILE_ERROR.search(stderr)
+        if delay is None or not transient:
             error(f'Failed to compile constraints: {result.stderr}')
             raise RuntimeError('Failed to compile constraints')
         debug(f'Compile attempt {attempt} hit a network error, retrying in {delay}s: {result.stderr.strip()[-500:]}')

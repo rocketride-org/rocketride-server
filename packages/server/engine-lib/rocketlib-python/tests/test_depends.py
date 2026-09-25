@@ -508,3 +508,18 @@ class TestCompileConstraintsRetry:
 
         assert len(calls) == 1
         assert compile_env == []
+
+    def test_does_not_retry_a_certificate_error(self, compile_env, monkeypatch):
+        tls = (
+            'error: Failed to fetch: `https://download.pytorch.org/whl/cu128/torch/`\n'
+            '  Caused by: error sending request for url (https://download.pytorch.org/whl/cu128/torch/)\n'
+            '  Caused by: client error (Connect)\n'
+            '  Caused by: invalid peer certificate: UnknownIssuer\n'
+        )
+        calls = self._fake_run(monkeypatch, [(1, tls)])
+
+        with pytest.raises(RuntimeError, match='Failed to compile constraints'):
+            depends._compile_constraints('constraints.txt')
+
+        assert len(calls) == 1
+        assert compile_env == []
