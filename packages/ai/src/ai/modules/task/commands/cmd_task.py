@@ -51,7 +51,6 @@ command processing layer in a task execution and debugging infrastructure.
 The actual task execution and management is delegated to the TaskServer.
 """
 
-import os
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
@@ -164,13 +163,11 @@ class TaskCommands(DAPConn):
             raw_env = args.get('env', {})
             caller_env = {k: v for k, v in raw_env.items() if k.startswith('ROCKETRIDE_')}
 
-            # sys.admin: seed with server RR_* keys mapped to ROCKETRIDE_* so
-            # admin pipelines can reference internal secrets via ${ROCKETRIDE_*}.
-            # This is the bottom layer — org/team/user secrets override it.
-            if 'sys.admin' in (self._account_info.sysPermissions or []):
-                merged_env = {'ROCKETRIDE_' + k[3:]: v for k, v in os.environ.items() if k.startswith('RR_')}
-            else:
-                merged_env = {}
+            # Placeholders resolve from saved org/team/user secrets only. The
+            # server's own RR_* settings are never a layer, sys.admin included:
+            # a pipeline an admin runs could otherwise write them into any node
+            # config.
+            merged_env: Dict[str, str] = {}
 
             # Run classification comes ONLY from the trusted in-process
             # dispatch (start_server_task_as_team sets these attributes on
