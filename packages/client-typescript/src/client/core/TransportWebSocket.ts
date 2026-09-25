@@ -36,8 +36,14 @@ async function ensureNodeWebSocket(): Promise<typeof import('ws') | undefined> {
 	NodeWebSocketPromise = (async () => {
 		try {
 			const wsModule = await import('ws');
-			const WsConstructor = (wsModule as { default?: typeof import('ws') }).default ?? wsModule;
-			NodeWebSocket = WsConstructor as typeof import('ws');
+			// Cast through `unknown`: under a browser-targeted, ambient-types-excluded
+			// program (e.g. shell's `types: []`), `typeof import('ws')`'s resolved shape
+			// can conflict with the DOM global `WebSocket` closely enough that TS treats
+			// a direct cast as a likely mistake. This file only ever runs in Node (the
+			// `typeof window !== 'undefined'` guard above), so the cast is safe regardless
+			// of which ambient types happen to be in scope for whatever checks this file.
+			const WsConstructor = (wsModule as unknown as { default?: typeof import('ws') }).default ?? wsModule;
+			NodeWebSocket = WsConstructor as unknown as typeof import('ws');
 			return NodeWebSocket;
 		} catch {
 			return undefined;
@@ -92,11 +98,11 @@ export class TransportWebSocket extends TransportBase {
 		this._uri = uri;
 	}
 
-	getConnectionInfo(): string | undefined {
+	override getConnectionInfo(): string | undefined {
 		return this._epoch?.uri ?? this._uri;
 	}
 
-	setUri(uri: string): void {
+	override setUri(uri: string): void {
 		if (uri === this._uri) return;
 
 		const epoch = this._epoch;
@@ -110,7 +116,7 @@ export class TransportWebSocket extends TransportBase {
 	/**
 	 * Join a current same-URI attempt, or replace it with a new connection epoch.
 	 */
-	connect(timeout?: number): Promise<void> {
+	override connect(timeout?: number): Promise<void> {
 		const current = this._epoch;
 		if (current && !current.invalidated && current.uri === this._uri) {
 			return current.promise;
@@ -555,7 +561,7 @@ export class TransportWebSocket extends TransportBase {
 	 * Invalidates the epoch before closing it. A pre-open attempt is rejected
 	 * without a disconnected callback; an established epoch publishes once.
 	 */
-	disconnect(): Promise<void> {
+	override disconnect(): Promise<void> {
 		const epoch = this._epoch;
 		if (!epoch) return this._waitForCleanups();
 		// A receive callback may call disconnect after one or more awaits. Do not
@@ -574,7 +580,7 @@ export class TransportWebSocket extends TransportBase {
 		return this._waitForCleanups();
 	}
 
-	async send(message: DAPMessage): Promise<void> {
+	override async send(message: DAPMessage): Promise<void> {
 		const epoch = this._epoch;
 		const socket = this._websocket;
 		if (!epoch || !socket || !this._owns(epoch) || !epoch.established || !this._connected) {

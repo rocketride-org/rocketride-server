@@ -93,7 +93,34 @@ tarball bundles the SDK's types too, so `import type { ... } from
 resolve to the host's live singletons through Module Federation — nothing
 platform-side is ever compiled into your bundle. (The SDK also publishes
 the same app surface as the `rocketride/app-sdk` subpath for apps built
-outside a RocketRide workspace; inside one, import from `'shell'`.)
+outside a RocketRide workspace; inside one, import from `'shell'`. Its
+types resolve through `package.json`'s `exports` map, so the external
+app's own `tsconfig.json` needs a `moduleResolution` that consults it:
+`"bundler"` (with `module` set to `"esnext"`/`"preserve"`/any ES2015+
+value — there is no `module: "bundler"`), or `"node16"`/`"nodenext"`
+(each requiring the identically-cased `module: "Node16"`/`"NodeNext"`).
+The legacy `"node"` resolver won't find them. Every
+value it exports — hooks, `connectionManager`, `Documents` — is a stub
+that Module Federation replaces with the shell's real implementation at
+runtime; calling one outside the host throws a clear error rather than
+returning `undefined`, so mock the module in tests that exercise this
+code without a host. The shell registers a matching host-side adapter
+under this exact share key (`packages/shell/src/app-sdk-adapter.ts`,
+wired into `rsbuild.config.mts`) — share it verbatim from your own
+`rsbuild.config.ts`, the same way an in-workspace app shares `'shell'`:
+
+```typescript
+shared: {
+	react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
+	'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
+	'rocketride/app-sdk': { singleton: true, requiredVersion: false, import: false },
+},
+```
+
+`import: false` means this remote provides no fallback build of its own for
+the key — it only *consumes* whatever the host provides. Without an entry
+under this exact string, MF has nothing to negotiate this specifier against
+and your bundle silently falls back to its own copy of the SDK's stubs.)
 
 ---
 
