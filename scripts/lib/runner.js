@@ -43,6 +43,7 @@ class TaskRunner {
         const listrTasks = requests.map(req => this._createModuleTask(req.module, req.command));
         
         // Phase 2: Execute via Listr2
+        const renderer = this.options.verbose || process.env.CI ? 'verbose' : 'default';
         const runner = new Listr(listrTasks, {
             concurrent: this.options.parallel,
             exitOnError: true,
@@ -51,10 +52,18 @@ class TaskRunner {
                 collapseErrors: false,
                 showTimer: true
             },
-            renderer: this.options.verbose || process.env.CI ? 'verbose' : 'default'
+            renderer
         });
-        
+
         await runner.run(this.context);
+
+        // Reports queued by tasks (see collectPytestReport). The verbose renderer
+        // already streamed them with the task output.
+        if (renderer === 'default') {
+            for (const report of this.context.reports || []) {
+                console.log(`\n${report}`);
+            }
+        }
     }
     
     /**

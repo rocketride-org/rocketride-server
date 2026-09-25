@@ -17,6 +17,7 @@ imported — IInstance receives a FakeGmail service and a real GoogleAccess.
 from __future__ import annotations
 
 import base64
+import contextlib
 import importlib
 import json
 import sys
@@ -417,10 +418,77 @@ def test_services_json_declares_access_and_gmail_flags():
 # and exercise a call end-to-end (no network, no real google-api-python-client).
 # ---------------------------------------------------------------------------
 
+# Packages the ROCKETRIDE_MOCK stubs replace.
+_MOCKED_SDK = ('google.oauth2', 'googleapiclient')
+_MOCKS_DIR = Path(__file__).resolve().parents[2] / 'mocks'
 
-def test_mock_sdk_builds_service_and_lists(monkeypatch):
-    mocks = Path(__file__).resolve().parents[2] / 'mocks'
-    monkeypatch.syspath_prepend(str(mocks))
+
+@contextlib.contextmanager
+def _stubbed_google_sdk():
+    """Make ``google.oauth2`` / ``googleapiclient`` resolve to the ROCKETRIDE_MOCK stubs.
+
+    The node test tasks install the real SDK, and an earlier test in this process
+    may already have imported it. Those cached modules would shadow the stubs, so
+    they are set aside and restored on exit, together with the ``oauth2``
+    attribute the stub import rebinds on the real ``google`` package (``import
+    google.oauth2.x as m`` resolves through it).
+    """
+
+    def mocked(name):
+        return any(name == pkg or name.startswith(pkg + '.') for pkg in _MOCKED_SDK)
+
+    saved = {name: sys.modules.pop(name) for name in [n for n in sys.modules if mocked(n)]}
+    sys.path.insert(0, str(_MOCKS_DIR))
+    importlib.invalidate_caches()
+    try:
+        yield
+    finally:
+        if str(_MOCKS_DIR) in sys.path:
+            sys.path.remove(str(_MOCKS_DIR))
+        for name in [n for n in sys.modules if mocked(n)]:
+            del sys.modules[name]
+        sys.modules.update(saved)
+        for pkg in _MOCKED_SDK:
+            parent, _, child = pkg.rpartition('.')
+            if parent not in sys.modules:
+                continue
+            if pkg in saved:
+                setattr(sys.modules[parent], child, saved[pkg])
+            elif hasattr(sys.modules[parent], child):
+                delattr(sys.modules[parent], child)
+        importlib.invalidate_caches()
+
+
+@pytest.fixture
+def mock_google_sdk():
+    """Run the test against the ROCKETRIDE_MOCK Google SDK stubs."""
+    with _stubbed_google_sdk():
+        yield
+
+
+def test_stubbed_sdk_restores_the_real_sdk():
+    real = pytest.importorskip('google.oauth2.credentials')
+
+    with _stubbed_google_sdk():
+        import google.oauth2.credentials as stub
+        import googleapiclient.discovery  # noqa: F401
+
+        assert Path(stub.__file__).resolve().is_relative_to(_MOCKS_DIR)
+
+    import google.oauth2.credentials as after
+
+    assert after is real
+    leftovers = [
+        name
+        for name, mod in sys.modules.items()
+        if name.startswith(_MOCKED_SDK)
+        and getattr(mod, '__file__', None)
+        and Path(mod.__file__).resolve().is_relative_to(_MOCKS_DIR)
+    ]
+    assert leftovers == []
+
+
+def test_mock_sdk_builds_service_and_lists(mock_google_sdk):
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.service_account')
     from nodes.tool_google_workspace.gmail import client as gmail_client
@@ -430,9 +498,7 @@ def test_mock_sdk_builds_service_and_lists(monkeypatch):
     assert data['messages'][0]['id'] == 'mock1'
 
 
-def test_mock_sdk_user_auth_builds_service(monkeypatch):
-    mocks = Path(__file__).resolve().parents[2] / 'mocks'
-    monkeypatch.syspath_prepend(str(mocks))
+def test_mock_sdk_user_auth_builds_service(mock_google_sdk):
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
     from nodes.tool_google_workspace.gmail import client as gmail_client
@@ -441,10 +507,8 @@ def test_mock_sdk_user_auth_builds_service(monkeypatch):
     assert gmail_client.execute(svc.users().labels().list(userId='me'))['labels'][0]['id'] == 'INBOX'
 
 
-def test_expired_token_no_refresh_path_raises(monkeypatch):
+def test_expired_token_no_refresh_path_raises(mock_google_sdk):
     """Expired token with no oauth_server_url and no client creds → clear ValueError."""
-    mocks = Path(__file__).resolve().parents[2] / 'mocks'
-    monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
     from nodes.tool_google_workspace.gmail import client as gmail_client
@@ -461,10 +525,8 @@ def test_expired_token_no_refresh_path_raises(monkeypatch):
         gmail_client.build_service('user', {'userToken': expired_token}, ['scope'])
 
 
-def test_valid_token_sets_expiry_on_credentials(monkeypatch):
+def test_valid_token_sets_expiry_on_credentials(mock_google_sdk):
     """A fresh token with expiry_date sets creds.expiry so the library won't auto-refresh."""
-    mocks = Path(__file__).resolve().parents[2] / 'mocks'
-    monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
     from nodes.tool_google_workspace.gmail import client as gmail_client
@@ -476,10 +538,8 @@ def test_valid_token_sets_expiry_on_credentials(monkeypatch):
     assert svc is not None
 
 
-def test_build_service_raises_on_scope_mismatch(monkeypatch):
+def test_build_service_raises_on_scope_mismatch(mock_google_sdk):
     """Token with only gmail.modify scope should raise immediately when settings scopes are required."""
-    mocks = Path(__file__).resolve().parents[2] / 'mocks'
-    monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
     from nodes.tool_google_workspace.gmail import client as gmail_client
@@ -498,10 +558,8 @@ def test_build_service_raises_on_scope_mismatch(monkeypatch):
         )
 
 
-def test_build_service_full_scope_token_not_blocked(monkeypatch):
+def test_build_service_full_scope_token_not_blocked(mock_google_sdk):
     """https://mail.google.com/ (full scope) must not trigger the scope-mismatch check."""
-    mocks = Path(__file__).resolve().parents[2] / 'mocks'
-    monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
     from nodes.tool_google_workspace.gmail import client as gmail_client
@@ -515,10 +573,8 @@ def test_build_service_full_scope_token_not_blocked(monkeypatch):
     assert svc is not None
 
 
-def test_build_service_no_scope_field_does_not_raise(monkeypatch):
+def test_build_service_no_scope_field_does_not_raise(mock_google_sdk):
     """Token without a scope field should not trigger the scope check (broker may omit it)."""
-    mocks = Path(__file__).resolve().parents[2] / 'mocks'
-    monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
     from nodes.tool_google_workspace.gmail import client as gmail_client

@@ -1,5 +1,20 @@
-# Test dependencies for nodes/test
+# Test dependencies for nodes/test.
+# Installed by nodes:test / nodes:test-full through depends(), so versions follow
+# the engine constraints (the same pins the nodes get at runtime).
 pytest
 pytest-asyncio
 pytest-timeout
 pytest-xdist
+
+# Packages the tests import directly. At runtime they come from the node that
+# declares them, which installs them only when a pipeline first loads it, so
+# without these the tests below skip depending on what ran earlier on the dist.
+# Base engine packages (numpy, pillow, requests, SQLAlchemy, antlr4) need no entry.
+img2table                   # ocr: test_model_server_ocr.py
+psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_full.py, test_rocketride_graph_full.py
+pgvector                    # rocketride_vector, store_postgres: test_rocketride_db_full.py
+python-docx                 # tool_microsoft_365: test_word.py
+smbprotocol                 # text_output: test_validate_config.py
+pygit2                      # tool_git: test_tools.py
+google-api-python-client    # tool_google_workspace: test_google_client.py, gmail/test_gmail.py
+google-auth                 # tool_google_workspace
