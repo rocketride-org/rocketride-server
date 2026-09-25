@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: add normalize_facts node (#1518)
 - **nodes**: add tool_notion — Notion agent-tool node (search, read pages/database rows, create/update content) (#2141)
 - **nodes**: add search_hybrid — BM25 + vector RRF post-retrieval re-ranker (#899)
+- **nodes**: add media_render — Media Toolkit: Render streamed node; renders a caller-supplied edit specification from named media streams with synchronized audio, burned-in captions and supplied framing (issue #2391)
 - **nodes, ai**: add graph base class; make FalkorDB a real graph node (#1584)
 - **nodes, server**: migrate neo4j onto the graph base class (#1611)
 - **nodes,ai**: RocketRide cloud DB nodes — sql, vector, graph (#1713)
