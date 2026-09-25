@@ -35,7 +35,7 @@ checks need to be selected individually.
 | Profile | Behaviour |
 | --- | --- |
 | `basic` **(default)** | Prompt injection + PII detection, `warn` mode. Only `policy_mode` is configurable in the UI. |
-| `strict` | All checks enabled, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. |
+| `strict` | All checks enabled plus `require_grounding`, `block` on violation, `max_input_length` 50000, `max_tokens_estimate` 4096. Exposes `policy_mode`, `max_tokens_estimate`, and `expected_format`. Requires the `documents` lane to be wired to have any effect. |
 | `custom` | All checks enabled with no size limit, `warn` mode. Exposes every individual check, limit, topic, format, and policy control. |
 
 ## Configuration
@@ -60,7 +60,7 @@ Run on the `answers` lane before the answer is forwarded:
 
 Enable hallucination checking only when relevant documents arrive on the `documents` lane before the answer. It is a lexical grounding test, so use it to flag potentially unsupported output rather than as a factual verifier. Select an expected format only when a downstream consumer requires that shape; an unrecognized format value is skipped.
 
-- **Hallucination** (rule `hallucination`, high severity): sentence-level grounding check. Each output sentence is evaluated for keyword overlap (3+ character non-stop words) against the combined source documents; sentences with less than 30% coverage are flagged. The check is skipped when no documents have been received on the `documents` lane.
+- **Hallucination** (rule `hallucination`, high severity): sentence-level grounding check. Each output sentence is evaluated for keyword overlap (3+ character non-stop words) against the combined source documents; sentences with less than 30% coverage are flagged. Coverage scoring runs only while `enable_hallucination_check` is on. The check is skipped when no documents have been received, unless `require_grounding` is set **and** the `documents` lane was actually dispatched, which is when a model is most likely to answer from memory. A pipeline with no `documents` lane never retrieves, so its answers are not treated as ungrounded. After a miss an answer fails only when it states a figure, so greetings and acknowledgements pass. A figure the question also named is allowed only when the answer declines rather than affirms it, since repeating a figure back as fact asserts it just as much as inventing one. A refusal is recognised by the negation in the figure's own clause rather than by matching a fixed phrase, so wordings the list never anticipated still pass while an affirmation carrying an unrelated "no" does not. Figures are compared as canonical values, so `$1,200` and `$1200`, or `12%` and `12.0%`, are one figure. Naming an entity is not treated as a claim: a mention is not an assertion, and ordinary replies name things constantly.
 - **Content safety** (rule `content_safety`, critical severity): regex patterns across three categories: self-harm, violence (weapon and explosive construction), and illegal activity (hacking, theft, counterfeiting).
 - **PII leak** (rule `pii_leak`, high severity): pattern matches for `email`, `phone_us`, `ssn`, `credit_card`, and `ip_address`.
 - **Format compliance** (rule `format_compliance`, medium severity): only runs when `expected_format` is set. `json` must parse cleanly; `markdown` requires at least one markdown element (heading, bold, code, list marker); `bullet_list` and `numbered_list` require at least half the non-empty lines to be list items.
@@ -99,6 +99,7 @@ Blocking happens silently from the pipeline's point of view: downstream nodes si
 | `max_input_length` | `number` | **Max input length (chars)**<br/>Maximum character count for input text (0 = no limit) | `0` |
 | `max_tokens_estimate` | `number` | **Max tokens (estimate)**<br/>Maximum estimated token count for input text (0 = no limit) | `0` |
 | `policy_mode` | `string` | **Policy mode**<br/>How to handle violations: block (reject), warn (log + continue), log (silent) | `"warn"` |
+| `require_grounding` | `boolean` | **Require grounding**<br/>After a retrieval returns nothing, treat an answer as a violation when it states a figure, unless the answer declines to give one. Greetings, acknowledgements and refusals are unaffected, and a non-numeric claim is not checked. Needs the documents lane wired to have any effect. | `false` |
 
 ## Source
 
