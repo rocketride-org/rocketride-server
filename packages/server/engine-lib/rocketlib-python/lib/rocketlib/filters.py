@@ -23,9 +23,14 @@
 # =============================================================================
 
 from __future__ import annotations  # Enables forward references
+import asyncio
 import functools
+import inspect
 import json
+import threading
+import types
 from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
+from .async_bridge import AsyncBridge
 from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
 
@@ -50,7 +55,7 @@ class ToolDescriptor(TypedDict, total=False):
     outputSchema: Dict[str, Any]
 
 
-def invoke_function(fn: Callable) -> Callable:
+def invoke_function(fn: Optional[Callable] = None, *, timeout: Optional[float] = None) -> Callable:
     """Mark a method as an invoke handler.
 
     The method name becomes the op name.  When ``invoke()`` is called with
@@ -59,9 +64,24 @@ def invoke_function(fn: Callable) -> Callable:
         @invoke_function
         def ask(self, param):
             return self._chat.chat(param.question)
+
+    The handler may be ``async def``; it then runs on the node's persistent
+    event loop (see ``IInstanceBase.run_async``) and the caller still gets a
+    plain return value.  ``timeout`` caps how long that await may take, in
+    seconds, and applies to awaitable results only — a synchronous handler is
+    never interrupted.  None, the default, means no limit::
+
+        @invoke_function(timeout=30)
+        async def ask(self, param): ...
     """
-    fn.__invoke_op__ = fn.__name__
-    return fn
+
+    def decorator(func: Callable) -> Callable:
+        func.__invoke_op__ = func.__name__
+        func.__op_timeout__ = timeout
+        return func
+
+    # Bare @invoke_function passes the function; @invoke_function(...) does not.
+    return decorator if fn is None else decorator(fn)
 
 
 def tool_function(
@@ -69,6 +89,7 @@ def tool_function(
     input_schema: Any = None,
     description: Any = None,
     output_schema: Any = None,
+    timeout: Optional[float] = None,
 ) -> Callable:
     """Mark a method as a tool entry point.
 
@@ -80,6 +101,12 @@ def tool_function(
 
         @tool_function(input_schema={...}, description='...')
         def get_data(self, args): ...
+
+    The handler may be ``async def``; it then runs on the node's persistent
+    event loop.  ``timeout`` caps that await in seconds and applies to
+    awaitable results only; None, the default, means no limit.  It is
+    deliberately kept out of ``__tool_meta__`` — it is how the node runs the
+    tool, not something an agent discovering the tool should see.
     """
 
     def decorator(fn: Callable) -> Callable:
@@ -88,6 +115,7 @@ def tool_function(
             'description': description,
             'output_schema': output_schema,
         }
+        fn.__op_timeout__ = timeout
         return fn
 
     return decorator
@@ -292,22 +320,158 @@ class IFilterGlobal(IServiceGlobal, Protocol):
     physicalType: str
 
 
+# =========================================================================
+# Per-node event loop
+#
+# The engine constructs IGlobal/IInstance with no arguments and then assigns
+# IEndpoint, glb and friends as plain attributes, so there is no __init__ to
+# hang a loop off — everything below is created on first use instead. The
+# attribute is spelled _rr_async_bridge rather than _loop or _thread because
+# nodes already use those names for loops of their own.
+# =========================================================================
+
+#: Guards lazy bridge creation. One lock for every node in the process: creating a
+#: bridge is rare and cheap, and a per-instance lock would need an __init__ to live in.
+_BRIDGE_LOCK = threading.Lock()
+
+#: Fallback loop for nodes that ship no IGlobal class at all. Process-wide and never
+#: closed — it is a daemon thread, and there is no lifecycle event that would own it.
+_fallback_bridge: Optional[AsyncBridge] = None
+
+
+def _rocketlib_bridge() -> AsyncBridge:
+    """Return the process-wide fallback bridge, created on first use."""
+    global _fallback_bridge
+    if _fallback_bridge is None:
+        with _BRIDGE_LOCK:
+            if _fallback_bridge is None:
+                _fallback_bridge = AsyncBridge('rocketlib')
+    return _fallback_bridge
+
+
+def _end_global_wrapper(method: Callable) -> Callable:
+    """
+    Wrap a subclass's endGlobal so the node's loop is always torn down.
+
+    The engine calls endGlobal by name, so an override that does not call
+    super() would otherwise leave the loop thread running with the node's
+    resources still on it. The user's own body runs first and in full — it may
+    well need ``run_async`` to close a pool — and the loop goes only after it.
+
+    Args:
+        method (Callable): The subclass's own endGlobal.
+
+    Returns:
+        Callable: The wrapping handler, stamped so it is never wrapped twice.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        # Chains are several frames deep — packages/ai stacks IGlobalTransform,
+        # StoreGlobalBase and the node's own IGlobal, each wrapped — and only the
+        # frame that entered first may close. Otherwise an inner super() call tears
+        # the loop down under the outer body, which may still want run_async().
+        outermost = not getattr(self, '_rr_ending_global', False)
+        if outermost:
+            self._rr_ending_global = True
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            if outermost:
+                self._rr_ending_global = False
+                self._close_async_bridge()
+
+    wrapper.__rr_bridge_guard__ = True
+    return wrapper
+
+
 class IGlobalBase:
     """
     Base class for all IGlobals.
 
     These calls may all be overridden in derived
     classes. The engine will call these functions.
+
+    Every IGlobal owns one persistent asyncio loop, started the first time
+    ``loop`` or ``run_async`` is touched and stopped by ``endGlobal``. A pool, a
+    session or an ``asyncio.Lock`` created on it in one op is still valid in the
+    next one — which is the reason it is per-node and not per-call.
     """
 
     IEndpoint: IEndpointBase = None
     glb: IFilterGlobal = None
+
+    def __init_subclass__(cls, **kwargs):
+        """Wrap the subclass's endGlobal so the node's event loop is always stopped."""
+        super().__init_subclass__(**kwargs)
+
+        # FunctionType, not callable(): a staticmethod is callable on 3.10+, and
+        # wrapping one would hand self to a function that takes no arguments. Such a
+        # node gets no automatic teardown — it has to close the loop itself, by
+        # calling super().endGlobal() or spelling endGlobal as a normal method.
+        fn = cls.__dict__.get('endGlobal')
+        if isinstance(fn, types.FunctionType) and not getattr(fn, '__rr_bridge_guard__', False):
+            cls.endGlobal = _end_global_wrapper(fn)
 
     def preventDefault(self) -> None:
         """
         Raise an exception indicating that there is no default behavior to prevent.
         """
         raise APERR(Ec.PreventDefault, 'No default to prevent')
+
+    # -------------------
+    # Persistent event loop
+    # -------------------
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        """
+        This node's event loop, started on first access.
+
+        Returns:
+            asyncio.AbstractEventLoop: The loop every one of this node's
+            coroutines runs on, for the lifetime of the node.
+        """
+        return self._async_bridge().loop
+
+    def run_async(self, coro: Any, *, timeout: Optional[float] = None) -> Any:
+        """
+        Run an awaitable on this node's loop and block until it finishes.
+
+        Args:
+            coro (Any): The coroutine — or any awaitable — to run.
+            timeout (Optional[float]): Seconds to wait, or None for no limit.
+
+        Returns:
+            Any: Whatever the awaitable returned; its exceptions propagate unchanged.
+        """
+        return self._async_bridge().run(coro, timeout=timeout)
+
+    def _async_bridge(self) -> AsyncBridge:
+        """
+        Return this node's bridge, created on first use.
+
+        Built lazily because the engine constructs IGlobal with no arguments and
+        there is no ``__init__`` on this class to rely on.
+
+        Returns:
+            AsyncBridge: The bridge owning this node's loop.
+        """
+        bridge = getattr(self, '_rr_async_bridge', None)
+        if bridge is None:
+            with _BRIDGE_LOCK:
+                bridge = getattr(self, '_rr_async_bridge', None)
+                if bridge is None:
+                    name = getattr(getattr(self, 'glb', None), 'logicalType', None) or type(self).__name__
+                    bridge = AsyncBridge(name)
+                    self._rr_async_bridge = bridge
+        return bridge
+
+    def _close_async_bridge(self) -> None:
+        """Stop this node's loop. A no-op when the node never started one."""
+        bridge = getattr(self, '_rr_async_bridge', None)
+        if bridge is not None:
+            bridge.close()
 
     # -------------------
     # These the following are all overridable by
@@ -322,8 +486,14 @@ class IGlobalBase:
     def endGlobal(self) -> None:
         """
         Clean up global resources at the end of execution.
+
+        Carries the loop teardown for nodes that define no endGlobal of their own.
+        When reached through an override's ``super().endGlobal()`` the outermost
+        wrapper closes instead, so the caller may keep using ``run_async``
+        afterwards.
         """
-        pass
+        if not getattr(self, '_rr_ending_global', False):
+            self._close_async_bridge()
 
 
 class IServiceFilterInstance(Protocol):
@@ -1048,6 +1218,66 @@ class IInstanceBase:
         """Prevent the default action from occurring."""
         raise APERR(Ec.PreventDefault, 'No default to prevent')
 
+    # ------------------------------------------------------------------
+    # Persistent event loop
+    #
+    # The loop belongs to the IGlobal, so every instance of a node shares
+    # one — a connection pool is opened once and used by all of them. A
+    # node shipping no IGlobal class falls back to a process-wide loop.
+    # ------------------------------------------------------------------
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        """
+        The event loop this instance's coroutines run on, started on first access.
+
+        Returns:
+            asyncio.AbstractEventLoop: The node's loop, shared with its IGlobal.
+        """
+        glb = self.IGlobal
+        # isinstance, not "is not None": a node without an IGlobal class, and a test
+        # that assigns a mock in its place, both have to reach the fallback loop
+        # rather than a `loop` attribute that answers anything at all.
+        return glb.loop if isinstance(glb, IGlobalBase) else _rocketlib_bridge().loop
+
+    def run_async(self, coro: Any, *, timeout: Optional[float] = None) -> Any:
+        """
+        Run an awaitable on the node's loop and block until it finishes.
+
+        Args:
+            coro (Any): The coroutine — or any awaitable — to run.
+            timeout (Optional[float]): Seconds to wait, or None for no limit.
+
+        Returns:
+            Any: Whatever the awaitable returned; its exceptions propagate unchanged.
+        """
+        glb = self.IGlobal
+        if isinstance(glb, IGlobalBase):
+            return glb.run_async(coro, timeout=timeout)
+        return _rocketlib_bridge().run(coro, timeout=timeout)
+
+    def _call_op(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
+        """
+        Call one dispatched op, bridging it to the node loop when it is async.
+
+        A handler that returns an awaitable — ``async def``, or a sync method
+        handing back a coroutine — is completed on the node's persistent loop, so
+        it sees the same loop, and the same loop-bound state, on every call.
+        Synchronous handlers go through untouched.
+
+        Args:
+            fn (Callable): The bound handler to call.
+            *args (Any): Its positional arguments.
+            **kwargs (Any): Its keyword arguments.
+
+        Returns:
+            Any: The handler's result, awaited if it needed awaiting.
+        """
+        result = fn(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = self.run_async(result, timeout=getattr(fn, '__op_timeout__', None))
+        return result
+
     def invoke(self, *args, **kwargs) -> Any:
         """Handle an incoming invoke call from the engine control-plane.
 
@@ -1086,7 +1316,7 @@ class IInstanceBase:
             # name.  e.g. op='ask' dispatches to @invoke_function 'ask'.
             invoke_methods = self._collect_invoke_methods()
             if op in invoke_methods:
-                return invoke_methods[op](param)
+                return self._call_op(invoke_methods[op], param)
 
         # Nothing matched — tell the engine to try the next driver.
         driver_name = getattr(getattr(self.IGlobal, 'glb', None), 'logicalType', type(self).__name__)
@@ -1239,11 +1469,11 @@ class IInstanceBase:
 
             # Try static @tool_function methods first
             if tool_name in methods:
-                output = methods[tool_name](input_obj)
+                output = self._call_op(methods[tool_name], input_obj)
 
             # Then try dynamic tools (MCP etc.)
             elif has_dynamic:
-                output = self._tool_invoke_dynamic(tool_name=tool_name, input_obj=input_obj)
+                output = self._call_op(self._tool_invoke_dynamic, tool_name=tool_name, input_obj=input_obj)
 
             # This node doesn't own this tool — let the next node try.
             else:

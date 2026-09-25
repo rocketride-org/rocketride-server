@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes, server**: migrate neo4j onto the graph base class (#1611)
 - **nodes,ai**: RocketRide cloud DB nodes — sql, vector, graph (#1713)
 - **nodes,vscode**: add Gmail tool node + Google user-OAuth broker (RR-1055, RR-1142) (#1334)
+- **rocketlib**: persistent per-node event loop; async invoke/tool ops run on it with an optional per-op timeout (#2098)
 - **run-logging**: task-event continuum, DVR sessions, permanent trace identity (#1661)
 - **server**: replace Breakpad with Crashpad crash reporting (#1476) (#1524)
 - **server, nodes**: add json lane (#1297)

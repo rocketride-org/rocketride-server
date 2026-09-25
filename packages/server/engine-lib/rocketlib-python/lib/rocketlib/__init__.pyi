@@ -9,8 +9,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Protocol, TypedDict, overload
+from typing import Any, Awaitable, Callable, Dict, Iterable, Iterator, List, Optional, Protocol, TypedDict, overload
 
 # ---------------------------------------------------------------------------
 # Re-exports — everything listed in __all__
@@ -466,6 +467,19 @@ class IInvokeDeepagent(IInvoke):
         node_id: str
         invoke: Any
 
+# ---- async_bridge.py ----
+
+class AsyncBridge:
+    """One persistent asyncio loop on a daemon thread; sync callers submit coroutines to it."""
+
+    def __init__(self, name: str) -> None: ...
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop: ...
+    @property
+    def is_running(self) -> bool: ...
+    def run(self, coro: Awaitable[Any], *, timeout: Optional[float] = None) -> Any: ...
+    def close(self, *, join_timeout: float = 5.0) -> None: ...
+
 # ---- filters.py ----
 
 class ToolDescriptor(TypedDict, total=False):
@@ -476,8 +490,14 @@ class ToolDescriptor(TypedDict, total=False):
     inputSchema: Dict[str, Any]
     outputSchema: Dict[str, Any]
 
+@overload
 def invoke_function(fn: Callable) -> Callable:
     """Decorator: mark a method as an invoke handler (op name = method name)."""
+    ...
+
+@overload
+def invoke_function(fn: None = None, *, timeout: Optional[float] = None) -> Callable[[Callable], Callable]:
+    """Same, with `timeout` capping an async handler's await in seconds; None means no limit."""
     ...
 
 def tool_function(
@@ -485,8 +505,13 @@ def tool_function(
     input_schema: Any = None,
     description: Any = None,
     output_schema: Any = None,
+    timeout: Optional[float] = None,
 ) -> Callable:
-    """Decorator: mark a method as a tool entry point discoverable by agents."""
+    """Decorator: mark a method as a tool entry point discoverable by agents.
+
+    `timeout` caps an async handler's await, in seconds; None means no limit.
+    It never appears in the tool descriptor.
+    """
     ...
 
 def normalize_tool_input(
@@ -687,9 +712,19 @@ class IGlobalBase:
     IEndpoint: IEndpointBase
     glb: Any  # IFilterGlobal Protocol — logicalType, physicalType, connConfig
 
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        """The node's persistent event loop, started on first access."""
+        ...
+
+    def run_async(self, coro: Awaitable[Any], *, timeout: Optional[float] = None) -> Any:
+        """Run an awaitable on the node's loop and block until it finishes."""
+        ...
+
     def preventDefault(self) -> None: ...
     def beginGlobal(self) -> None: ...
     def endGlobal(self) -> None: ...
+    def _close_async_bridge(self) -> None: ...
 
 class IInstanceBase:
     """Base class for all Python instance driver implementations."""
@@ -697,6 +732,15 @@ class IInstanceBase:
     IEndpoint: IEndpointBase
     IGlobal: IGlobalBase
     instance: IServiceFilterPipe
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        """The node's persistent event loop (the IGlobal's, when there is one)."""
+        ...
+
+    def run_async(self, coro: Awaitable[Any], *, timeout: Optional[float] = None) -> Any:
+        """Run an awaitable on the node's loop and block until it finishes."""
+        ...
 
     def preventDefault(self) -> None: ...
     def invoke(self, *args: Any, **kwargs: Any) -> Any: ...
@@ -728,6 +772,7 @@ class IInstanceBase:
     def close(self) -> None: ...
 
     # Internal dispatch helpers (not typically overridden)
+    def _call_op(self, fn: Callable, *args: Any, **kwargs: Any) -> Any: ...
     def _collect_invoke_methods(self) -> Dict[str, Callable]: ...
     def _collect_tool_methods(self) -> Dict[str, Callable]: ...
     def _build_tool_descriptors(self, methods: Dict[str, Callable]) -> List[ToolDescriptor]: ...
