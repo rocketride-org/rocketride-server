@@ -31,6 +31,10 @@
 #pragma once
 
 namespace engine::test {
+// The harness drives the store types unqualified, as it did when it lived in
+// the test tree behind that tree's using-directive
+using namespace engine::store;
+
 //------------------------------------------------------------------------
 /// @details
 ///		Define the flags for objects - these flags are also
@@ -52,7 +56,7 @@ public:
 ///		Define a simple container that will create an endpoint and manage
 ///		the test process
 //-------------------------------------------------------------------------
-class IFilterTest {
+class ROCKETRIDE_CORE_API IFilterTest {
 public:
     static const uint32_t DefaultFlags =
         Entry::FLAGS::SIGNING | Entry::FLAGS::INDEX | Entry::FLAGS::CLASSIFY;
@@ -61,12 +65,9 @@ public:
     //-----------------------------------------------------------------
     //  Constructors/destructor
     //-----------------------------------------------------------------
-    virtual ~IFilterTest() noexcept {
-        // Release the tag buffer if we allocated it
-        if (m_pTagBuffer) Memory::release(&m_pTagBuffer);
-
-        disconnect();
-    }
+    // Defined in container.cpp: it releases engine memory, which only the
+    // module can reach
+    virtual ~IFilterTest() noexcept;
 
     //-----------------------------------------------------------------
     /// @details

@@ -73,13 +73,44 @@ async function readFile(filePath, options = 'utf8') {
 }
 
 /**
+ * Strip JSONC comments and trailing commas, so JSON.parse accepts the text.
+ * services*.json and the vscode configs are written this way.
+ * @param {string} text - JSONC source
+ * @returns {string}
+ */
+function stripJsonc(text) {
+    return text
+        .replace(/^[ 	]*\/\/.*$/gm, '')
+        .replace(/(?<!:)\/\/.*$/gm, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/,(\s*[}\]])/g, '$1');
+}
+
+/**
+ * Parse JSONC text. Throws like JSON.parse.
+ * @param {string} text - JSONC source
+ * @returns {any}
+ */
+function parseJson(text) {
+    return JSON.parse(stripJsonc(text));
+}
+
+/**
  * Read a JSON file
  * @param {string} filePath - Path to JSON file
  * @returns {Promise<any>}
  */
 async function readJson(filePath) {
-    const content = await fsp.readFile(filePath, 'utf8');
-    return JSON.parse(content);
+    return parseJson(await fsp.readFile(filePath, 'utf8'));
+}
+
+/**
+ * Read a JSON file, for the generators that run synchronously
+ * @param {string} filePath - Path to JSON file
+ * @returns {any}
+ */
+function readJsonSync(filePath) {
+    return parseJson(fs.readFileSync(filePath, 'utf8'));
 }
 
 /**
@@ -778,7 +809,10 @@ module.exports = {
     // Reading
     readFile,
     readJson,
+    readJsonSync,
     readJsonSafe,
+    stripJsonc,
+    parseJson,
     readDir,
     readDirSafe,
     

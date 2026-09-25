@@ -21,35 +21,47 @@
 // SOFTWARE.
 // =============================================================================
 
-#pragma once
+#include <engLib/eng.h>
 
-namespace ap::application {
+namespace engine::test {
+//-------------------------------------------------------------------------
+/// @details
+///		Deinitialize the storage engine - removes all storage related
+///		factories
+//-------------------------------------------------------------------------
+void deinit() noexcept {
+    // // Register our command factories
+    // Factory::deregisterFactory(
+    // 	// Instances
+    // 	filter::wrap::IFilterInstance::Factory,
 
-class CmdLine;
+    // 	// // Global data
+    // 	// filter::wrap::IFilterGlobal::Factory
+    // );
+}
 
-[[noreturn]] void quickExit(int code = 0) noexcept;
-ROCKETRIDE_CORE_API CmdLine &cmdline() noexcept;
-int argc() noexcept;
-const char **argv() noexcept;
-const std::vector<Text> &args() noexcept;
-bool elevated() noexcept;
+//-------------------------------------------------------------------------
+/// @details
+///		Initialize the storage engine - adds all storage related
+///		factories
+//-------------------------------------------------------------------------
+void init() noexcept {
+    // // Register our command factories
+    // auto ccode = Factory::registerFactory(
+    // 	// Instances
+    // 	filter::wrap::IFilterInstance::Factory,
 
-int detectExecPath() noexcept;
+    // 	// Global data
+    // 	// filter::wrap::IFilterGlobal::Factory
+    // );
 
-#if ROCKETRIDE_PLAT_WIN
-void installCrashHandlers() noexcept;
+    // // If we had an error, deinit them
+    // if (ccode)
+    // {
+    // 	store::deinit();
+    // 	return;
+    // }
 
-int bootstrap(int argc, const Utf16Chr **argv, ErrorCode (*entry)()) noexcept;
-#else
-int bootstrap(int argc, const char **argv, ErrorCode (*entry)()) noexcept;
-#endif
-
-ROCKETRIDE_CORE_API file::Path execPath(bool stripExec = false) noexcept;
-inline auto execDir() noexcept { return execPath(true); }
-const file::Path &projectDir() noexcept;
-
-TextView buildHash() noexcept;
-TextView buildStamp() noexcept;
-Text projectVersion() noexcept;
-
-}  // namespace ap::application
+    return;
+}
+}  // namespace engine::test

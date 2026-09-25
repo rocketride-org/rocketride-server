@@ -28,6 +28,7 @@
 
 namespace ap::string {
 
-Text urlEncode(TextView input, bool encodeSlash = false) noexcept;
+ROCKETRIDE_CORE_API Text urlEncode(TextView input,
+                                   bool encodeSlash = false) noexcept;
 
 }  // namespace ap::string

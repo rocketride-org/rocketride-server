@@ -30,7 +30,7 @@
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
-const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, sequence, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
+const { getState, setState, updateState, removeDirs, removeMatching, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, sequence, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
 
 // Paths
@@ -958,6 +958,11 @@ function makeCompileTestsAction(options = {}) {
 			const engtestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'engtest', '--parallel', String(jobs)];
 			await execCommand('cmake', engtestArgs, { task, env, verbose: options.verbose });
 
+			// Build nodetest
+			task.output = 'Building nodetest...';
+			const nodetestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'nodetest', '--parallel', String(jobs)];
+			await execCommand('cmake', nodetestArgs, { task, env, verbose: options.verbose });
+
 			// Save test source hash after successful build
 			if (ctx._testSrcHash) {
 				await setState('server.testSrcHash', ctx._testSrcHash);
@@ -1110,6 +1115,20 @@ function makeRunEngtestAction(options = {}) {
 	};
 }
 
+function makeRunNodetestAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			const exeExt = isWindows() ? '.exe' : '';
+			const exe = path.join(DIST_DIR, 'nodetest' + exeExt);
+			const args = [...(options.catch || []), '--order', 'decl'];
+			if (options.trace?.length) {
+				args.push(`--trace=${options.trace.join(',')}`);
+			}
+			await execCommand(exe, args, { task, cwd: DIST_DIR });
+		},
+	};
+}
+
 function makeBuildCoreAction() {
 	return {
 		steps: [
@@ -1170,10 +1189,13 @@ function makeCleanServerAction() {
 			await setState('server', {});
 			await setState('package', null);
 
-			await removeFiles(BUILD_ROOT, ['CMakeCache.txt', 'cmake_install.cmake', 'build.ninja', '.ninja_deps', '.ninja_log', 'compile_commands.json', 'CPackConfig.cmake', 'CPackSourceConfig.cmake', 'CTestTestfile.cmake', 'Makefile', 'CMakePresets.json']);
+			await removeFiles(BUILD_ROOT, ['CMakeCache.txt', 'cmake_install.cmake', 'build.ninja', '.ninja_deps', '.ninja_log', 'compile_commands.json', 'CPackConfig.cmake', 'CPackSourceConfig.cmake', 'CTestTestfile.cmake', 'Makefile', 'CMakePresets.json', 'vc140.pdb']);
+
+			// An interrupted configure leaves CMakeCache.txt.tmp<random> behind
+			await removeMatching(BUILD_ROOT, /^CMakeCache\.txt\.tmp/, { recursive: false });
 
 			// Clean only the server build artifacts; vcpkg state is managed by vcpkg:clean
-			await removeDirs([path.join(BUILD_ROOT, 'CMakeFiles'), path.join(BUILD_ROOT, 'Testing'), path.join(BUILD_ROOT, 'apps'), path.join(BUILD_ROOT, 'engine-core'), path.join(BUILD_ROOT, 'engine-lib'), path.join(BUILD_ROOT, 'packages'), path.join(BUILD_ROOT, '_download_temp'), DIST_ARTIFACTS_DIR, DIST_DIR]);
+			await removeDirs([path.join(BUILD_ROOT, 'CMakeFiles'), path.join(BUILD_ROOT, 'Testing'), path.join(BUILD_ROOT, 'apps'), path.join(BUILD_ROOT, 'engine-core'), path.join(BUILD_ROOT, 'engine-lib'), path.join(BUILD_ROOT, 'engine-mod'), path.join(BUILD_ROOT, 'nodes'), path.join(BUILD_ROOT, 'packages'), path.join(BUILD_ROOT, '_download_temp'), DIST_ARTIFACTS_DIR, DIST_DIR]);
 
 			task.output = 'Cleaned server build';
 		},
@@ -1237,7 +1259,7 @@ function makeTestAction() {
 					parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
-					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
+					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-nodetest', 'server:run-rocketlib-test'], 'Run tests'),
 				],
 			}),
 		],
@@ -1367,6 +1389,7 @@ module.exports = {
 		{ name: 'server:copy-test-data', action: makeCopyTestDataAction },
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },
+		{ name: 'server:run-nodetest', action: makeRunNodetestAction },
 		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
 		{ name: 'server:clean-run', action: makeCleanServerAction },
 		{

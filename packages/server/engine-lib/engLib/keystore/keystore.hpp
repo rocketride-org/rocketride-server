@@ -105,7 +105,7 @@ public:
      * @return Value of the corresponding key inside the default partition, or
      * error
      */
-    ErrorOr<Text> getSecureValue(TextView key) noexcept;
+    ROCKETRIDE_CORE_API ErrorOr<Text> getSecureValue(TextView key) noexcept;
 
     /**
      * @brief Set value for the key inside the default partition
@@ -114,7 +114,8 @@ public:
      * @param value Value to set
      * @return Error if set failed
      */
-    Error setSecureValue(TextView key, TextView value) noexcept;
+    ROCKETRIDE_CORE_API Error setSecureValue(TextView key,
+                                             TextView value) noexcept;
 
     /**
      * @brief Delete the corresponding key from the corresponding partition

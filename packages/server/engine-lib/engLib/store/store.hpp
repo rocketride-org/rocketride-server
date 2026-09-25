@@ -93,6 +93,12 @@
 
 #include "./pipeline/validate_pipeline.hpp"
 
+// The filter test harness. It lives in the module so that a test binary
+// hosting engine.dll reaches the internals it drives, rather than the engine
+// exporting each of them
+#include "./testing/init.hpp"
+#include "./testing/container.hpp"
+
 namespace engine::store {
 Error init() noexcept;
 void deinit() noexcept;

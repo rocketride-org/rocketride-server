@@ -22,6 +22,7 @@ import { execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readJsonSync } from '../../scripts/lib/fs.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const NODES_DIR = path.join(HERE, '..', 'src', 'nodes');
@@ -90,20 +91,6 @@ function sourceBlock(name) {
 	return ['## Source', '', `[${GITHUB_MARK} View source](${url})`].join('\n');
 }
 
-function readJsonSilently(filepath) {
-	try {
-		let text = readFileSync(filepath, 'utf8');
-		// Strip comments
-		text = text.replace(/^[ \t]*\/\/.*$/gm, '');
-		text = text.replace(/(?<!:)\/\/.*$/gm, '');
-		text = text.replace(/\/\*[\s\S]*?\*\//g, '');
-		return JSON.parse(text);
-	} catch (e) {
-		console.error(`Error parsing JSON at ${filepath}:`, e);
-		return null;
-	}
-}
-
 function formatDescription(field) {
 	let desc = field.description || '';
 	if (Array.isArray(desc)) desc = desc.join('');
@@ -133,8 +120,8 @@ function schemaBlock(dir) {
 	const serviceBlocks = [];
 	for (const filename of files) {
 		const filePath = path.join(dir, filename);
-		const data = readJsonSilently(filePath);
-		if (!data || !data.fields) continue;
+		const data = readJsonSync(filePath);
+		if (!data.fields) continue;
 		
 		const title = data.title || '';
 		const heading = files.length > 1 ? (title ? `### ${title} (\`${filename}\`)` : `### \`${filename}\``) : '';

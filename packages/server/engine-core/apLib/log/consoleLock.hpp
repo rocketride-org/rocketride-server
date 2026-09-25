@@ -26,9 +26,6 @@
 namespace ap::log {
 
 // The global lock for console i/o
-inline auto consoleLock() noexcept {
-    static async::MutexLock lock;
-    return lock.acquire();
-}
+ROCKETRIDE_CORE_SHARED async::MutexLock::Guard consoleLock() noexcept;
 
 }  // namespace ap::log
