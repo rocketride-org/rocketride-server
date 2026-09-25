@@ -413,7 +413,7 @@ def test_shell_static_asset_is_cached_immutable_but_index_is_not(shell_root):
     asset.write_text('console.log(1)')
     r = _shell_client().get('/shell/static/js/main.abc123.js')
     assert r.status_code == 200
-    assert 'immutable' in r.headers.get('cache-control', '')
+    assert r.headers['cache-control'] == 'public, max-age=31536000, immutable'
     index = _shell_client().get('/shell/some/client/route')
     assert index.status_code == 200
     assert 'immutable' not in index.headers.get('cache-control', '')
