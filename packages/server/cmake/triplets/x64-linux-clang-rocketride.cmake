@@ -38,10 +38,19 @@ set(THREADS_PTHREAD_ARG "2" CACHE STRING "Fix curl" FORCE)
 set(HAVE_POLL_FINE_EXITCODE "ON" CACHE STRING "Fix curl" FORCE)
 set(HAVE_POLL_FINE_EXITCODE__TRYRUN_OUTPUT "" CACHE STRING "Fix curl" FORCE)
 
-# Dependency compile/link flags (libc++). Catch2 is built as a static lib, so its
-# cmake/vcpkg flags must stay consistent with the engine's (see the flags module).
 set(VCPKG_CXX_FLAGS "-stdlib=libc++")
 set(VCPKG_C_FLAGS "")
-set(VCPKG_LINKER_FLAGS "-stdlib=libc++ -Wl,--no-export-dynamic")
+
+# Catch2: The JVM uses POSIX signals, so Catch2 must not use them.
 set(VCPKG_CXX_FLAGS "${VCPKG_CXX_FLAGS} -DCATCH_CONFIG_NO_POSIX_SIGNALS")
 set(VCPKG_C_FLAGS "${VCPKG_C_FLAGS} -DCATCH_CONFIG_NO_POSIX_SIGNALS")
+
+set(VCPKG_LINKER_FLAGS "-stdlib=libc++")
+
+# Python: the engine exports its symbols for the embedded interpreter (see the flags);
+# dependencies must not.
+set(VCPKG_LINKER_FLAGS "${VCPKG_LINKER_FLAGS} -Wl,--no-export-dynamic")
+
+# Crashpad: gn links crashpad_handler with the flags from here, and ld.bfd can
+# emit a DT_INIT that makes the handler crash in _init before main.
+set(VCPKG_LINKER_FLAGS "${VCPKG_LINKER_FLAGS} -fuse-ld=lld")

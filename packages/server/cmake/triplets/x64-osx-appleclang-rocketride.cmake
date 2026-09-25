@@ -40,7 +40,7 @@ set(CMAKE_CXX_COMPILER "clang++" CACHE STRING "" FORCE)
 
 # Set default CMAKE_OSX_DEPLOYMENT_TARGET if unset
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "" FORCE)
 endif()
 
 # For vcpkg's non-CMake dependencies (autoconf/make based ports) - use the same deployment target

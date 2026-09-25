@@ -30,7 +30,7 @@ set(CMAKE_CXX_COMPILER "clang++" CACHE STRING "" FORCE)
 
 # Set default CMAKE_OSX_DEPLOYMENT_TARGET if not set (drives -mmacosx-version-min below)
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.6" CACHE STRING "" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "" FORCE)
 endif()
 
 # Common definitions across c++/c
