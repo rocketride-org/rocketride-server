@@ -417,6 +417,158 @@ class TestCliUpload:
                 await client.disconnect()
 
 
+class TestCliProfile:
+    """Test the profile commands against a live server.
+
+    Every session is on a task of the test's own. One on the server process
+    would profile everything else using this shared server, and leave data
+    behind that test_cprofile_client.py expects to be absent.
+    """
+
+    PIPELINE_TOKEN = 'PY-CLI-PROFILE'
+    PROJECT_ID = '5e1c2a90-7b3d-4f68-9a21-c4d8e6f03b17'
+    TOKEN_ARGS = ('--token', PIPELINE_TOKEN)
+
+    @pytest.mark.asyncio
+    async def test_should_profile_a_task_across_separate_invocations(self):
+        """A task's session belongs to the server's link to it, so it outlives each CLI process."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
+
+            code, output = await run_cli('profile', 'start', *self.TOKEN_ARGS, '--session', 'py-cli', *server_args())
+            assert code == 0, output
+            assert f"Profiling started: session 'py-cli' on task {self.PIPELINE_TOKEN}" in output
+
+            code, output = await run_cli('profile', 'status', *self.TOKEN_ARGS, *server_args())
+            assert code == 0, output
+            assert f"Profiling active on task {self.PIPELINE_TOKEN}: session 'py-cli'" in output
+
+            code, output = await run_cli('profile', 'stop', *self.TOKEN_ARGS, *server_args())
+            assert code == 0, output
+            assert "Profiling stopped: session 'py-cli'" in output
+
+            code, output = await run_cli('profile', 'report', *self.TOKEN_ARGS, *server_args())
+            assert code == 0, output
+            assert output.startswith('Session: py-cli'), output[:200]
+        finally:
+            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_list_threads_and_draw_one_threads_tree(self):
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
+
+            # Data goes through so engine worker threads run while profiled
+            assert (await client.cprofile_start(target=self.PIPELINE_TOKEN)).get('status') == 'started'
+            await client.send(self.PIPELINE_TOKEN, 'profile me', {}, 'text/plain')
+            assert (await client.cprofile_stop(target=self.PIPELINE_TOKEN)).get('status') == 'completed'
+
+            code, output = await run_cli('profile', 'threads', *self.TOKEN_ARGS, '--json', *server_args())
+            assert code == 0, output
+            threads = json.loads(output)['threads']
+            busiest = threads[0]
+
+            code, output = await run_cli('profile', 'threads', *self.TOKEN_ARGS, *server_args())
+            assert code == 0, output
+            assert output.splitlines()[0].split() == ['ID', 'NAME', 'TID', 'TIME', 'SHARE']
+            assert f'{len(threads)} thread(s)' in output
+
+            thread = ('--thread', str(busiest['id']), '--min-pct', '0')
+            code, output = await run_cli('profile', 'tree', *self.TOKEN_ARGS, *thread, '--json', *server_args())
+            assert code == 0, output
+            # Only that thread's calls, so the total is the one listed for it
+            assert json.loads(output)['total_calls'] == busiest['calls']
+
+            code, output = await run_cli('profile', 'tree', *self.TOKEN_ARGS, *thread, *server_args())
+            assert code == 0, output
+            assert output.startswith(f'Call tree, thread {busiest["id"]}:'), output[:200]
+            assert 'FUNCTION' in output
+
+            missing = str(max(t['id'] for t in threads) + 1000)
+            code, output = await run_cli('profile', 'tree', *self.TOKEN_ARGS, '--thread', missing, *server_args())
+            assert code == 1
+            assert f'Thread {missing} not found in the last session' in output
+        finally:
+            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_run_a_timed_session_to_completion(self):
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
+
+            code, output = await run_cli('profile', 'run', *self.TOKEN_ARGS, '--duration', '1', *server_args())
+            assert code == 0, output
+            assert 'Profiling stopped: session' in output
+
+            # The session it stopped left data behind to read
+            status = await client.cprofile_status(target=self.PIPELINE_TOKEN)
+            assert status.get('active') is False and status.get('has_report') is True, status
+        finally:
+            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_list_which_tasks_are_being_profiled(self):
+        other = 'PY-CLI-LIST-OTHER'
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            for token in (self.PIPELINE_TOKEN, other):
+                await ensure_clean_pipeline(client, token)
+            await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
+            await client.use(pipeline=get_echo_pipeline('8a3f1c52-6d7e-4b90-9c1a-2e4d6f8b0a13'), token=other)
+            assert (await client.cprofile_start(target=self.PIPELINE_TOKEN)).get('status') == 'started'
+
+            code, output = await run_cli('profile', 'list', '--json', *server_args())
+            assert code == 0, output
+            processes = {process['token']: process for process in json.loads(output)['processes']}
+            # The server process, listed under a null token
+            assert None in processes, processes
+            assert processes[self.PIPELINE_TOKEN]['status']['active'] is True, processes
+            assert processes[other]['status']['active'] is False, processes
+
+            code, output = await run_cli('profile', 'list', '--active', *server_args())
+            assert code == 0, output
+            assert self.PIPELINE_TOKEN in output
+            assert other not in output
+        finally:
+            for token in (self.PIPELINE_TOKEN, other):
+                await ensure_clean_pipeline(client, token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_fail_when_the_task_has_no_session_yet(self):
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
+
+            code, output = await run_cli('profile', 'tree', *self.TOKEN_ARGS, *server_args())
+
+            assert code == 1
+            assert 'No profiling data available' in output
+        finally:
+            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            if client.is_connected():
+                await client.disconnect()
+
+
 class TestCliDispatch:
     """Test argument handling shared by every command."""
 
@@ -444,3 +596,10 @@ class TestCliDispatch:
 
         assert code == 1
         assert 'Store subcommand is required' in output
+
+    @pytest.mark.asyncio
+    async def test_should_require_a_profile_subcommand(self):
+        code, output = await run_cli('profile')
+
+        assert code == 1
+        assert 'Profile subcommand is required' in output
