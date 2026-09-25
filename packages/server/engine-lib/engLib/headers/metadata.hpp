@@ -63,9 +63,9 @@ public:
     Error load(IFilterIndex &instance, index::DocId docId) noexcept;
 
     void clear() noexcept;
-    bool isEncrypted() const noexcept;
-    void set(Text name, Text value) noexcept;
-    TextView get(TextView name) const noexcept;
+    ROCKETRIDE_CORE_API bool isEncrypted() const noexcept;
+    ROCKETRIDE_CORE_API void set(Text name, Text value) noexcept;
+    ROCKETRIDE_CORE_API TextView get(TextView name) const noexcept;
     TextView operator[](TextView name) const noexcept;
     void remove(TextView name) noexcept;
     Text extract(TextView name) noexcept;
@@ -76,7 +76,8 @@ public:
     auto end() const noexcept;
     bool operator==(const Metadata &cmp) const noexcept;
     bool operator!=(const Metadata &cmp) const noexcept;
-    static Text renderProperty(TextView name, TextView value) noexcept;
+    static ROCKETRIDE_CORE_API Text renderProperty(TextView name,
+                                                   TextView value) noexcept;
     TextView getClosestKeyByIndex(size_t id) noexcept;
 
     template <typename Buffer>

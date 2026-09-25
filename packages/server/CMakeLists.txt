@@ -127,6 +127,7 @@ include(cmake/setup_vcpkg.cmake)
 # -----------------------------------------------------------------------------
 include(cmake/setup.cmake)
 include(cmake/rocketride.cmake)
+include(cmake/rocketride-node.cmake)
 
 # -----------------------------------------------------------------------------
 # Compiler information
@@ -165,6 +166,14 @@ add_subdirectory(engine-mod)
 
 # Main engine executable
 add_subdirectory(engine)
+
+# C++ nodes
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/hash ${CMAKE_BINARY_DIR}/nodes/hash)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/parse ${CMAKE_BINARY_DIR}/nodes/parse)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/indexer ${CMAKE_BINARY_DIR}/nodes/indexer)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/objstore ${CMAKE_BINARY_DIR}/nodes/objstore)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/azure ${CMAKE_BINARY_DIR}/nodes/azure)
+add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/msservices ${CMAKE_BINARY_DIR}/nodes/msservices)
 
 # -----------------------------------------------------------------------------
 # Testing configuration

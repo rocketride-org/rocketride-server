@@ -1,0 +1,216 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Azure",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "azure://",
+	//
+	// Required:
+	//		The physical type - "cpp" makes this a C++ node. The engine loads
+	//		the shared library named by "path" and calls its initializeNode
+	//		entry point, which registers the factories this protocol resolves
+	//		to.
+	//
+	"node": "cpp",
+	//
+	// Required (for "node": "cpp"):
+	//		Base name of the node's shared library, without the platform
+	//		prefix or extension. Must match the target name passed to
+	//		rocketride_add_node in CMakeLists.txt.
+	//
+	"path": "azure",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"internal",
+		"network"
+	],
+	//
+	// Optional:
+	//		Supported actions - if not specified, no actions are supported
+	//		engine
+	//
+	"actions": [
+		"export",
+		"delete",
+		"download"
+	],
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Microsoft Azure",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A source component that reads data from Azure blobs. It enables ",
+		"ingestion of files and documents stored in Azure for further processing within ",
+		"the pipeline. Configurable with Azure credentials and blob settings, the ",
+		"component supports secure and scalable access to cloud-hosted data across ",
+		"various formats."
+	],
+	//
+	//	Optional:
+	//		Displayed on the user interface
+	//
+	"icon": "azure-blob.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4hG9ux1",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"_source": [
+			"tags"
+		]
+	},
+	"input": [
+		{
+			"lane": "_source",
+			"output": [
+				{
+					"lane": "tags",
+					"description": "Outputs documents to be processed."
+				}
+			]
+		}
+	],
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"include": {
+			"description": "This path defines the paths included for Scan, File Signature, Index, Classify, and OCR.\nExample for Azure Blob Path: BlobContainer/FolderName/* or BlobContainer/*"
+		},
+		"include.path": {
+			"description": "This path defines the paths included for Scan, File Signature, Index, Classify, and OCR.\nExample for Azure Blob Path: BlobContainer/FolderName/* or BlobContainer/*"
+		},
+		"exclude": {
+			"description": "This path defines the paths excluded for Scan, File Signature, Index, Classify, and OCR.\nExample for Azure Blob Path: BlobContainer/FolderName/*"
+		},
+		"exclude.path": {
+			"description": "This path defines the paths excluded for Scan, File Signature, Index, Classify, and OCR.\nExample for Azure Blob Path: BlobContainer/FolderName/*"
+		},
+		"azure.accountName": {
+			"type": "string",
+			"title": "Account name",
+			"description": "The Azure storage account name."
+		},
+		"azure.accountKey": {
+			"type": "string",
+			"title": "Account key",
+			"description": "The Azure storage account key."
+		},
+		"azure.endpointSuffix": {
+			"type": "string",
+			"title": "Endpoint suffix",
+			"description": "Host suffix the account name is prefixed to.",
+			"default": "blob.core.windows.net"
+		},
+		"azure.source.parameters": {
+			"section": "parameters",
+			"title": "Parameters",
+			"properties": [
+				"azure.accountName",
+				"azure.accountKey",
+				"azure.endpointSuffix"
+			]
+		},
+		"azure.target.parameters": {
+			"object": "parameters",
+			"properties": [
+				"storePath",
+				"azure.accountName",
+				"azure.accountKey",
+				"azure.endpointSuffix"
+			]
+		},
+		"Pipe.include": {
+			"description": "Example path: path/to/your/blobs/*"
+		},
+		"Pipe.exclude": {
+			"description": "Example path: path/to/your/blobs/*"
+		},
+		"Pipe.azure.source.parameters": {
+			"section": "parameters",
+			"properties": [
+				"azure.accountName",
+				"azure.accountKey",
+				"azure.endpointSuffix"
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Source",
+			"title": "Azure Blob",
+			"properties": [
+				"type",
+				"actions",
+				"source.mode",
+				"azure.source.parameters",
+				"include",
+				"exclude",
+				"estimation"
+			]
+		},
+		{
+			"section": "Pipe",
+			"title": "Azure Blob",
+			"properties": [
+				"type",
+				"actions",
+				"source.mode",
+				"Pipe.azure.source.parameters",
+				"Pipe.include",
+				"Pipe.exclude"
+			]
+		},
+		{
+			"section": "Target",
+			"title": "Azure Blob",
+			"properties": [
+				"type",
+				"target.mode",
+				"azure.target.parameters"
+			]
+		},
+		{
+			"section": "Export",
+			"title": "Azure Blob",
+			"properties": [
+				"type",
+				"target.mode",
+				"azure.target.parameters"
+			]
+		}
+	]
+}

@@ -30,7 +30,7 @@
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
-const { getState, setState, updateState, removeDirs, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, sequence, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
+const { getState, setState, updateState, removeDirs, removeMatching, syncDir, syncFile, removeFiles, formatSyncStats, execCommand, runPytest, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux, exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile, loadPackageJson, downloadGitHubFile, createArchive, extractArchive, parallel, sequence, whenNot, fingerprint, contentHash, taskDebug, STATE_FILE } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
 
 // Paths
@@ -1117,7 +1117,7 @@ function makeBuildCoreAction() {
 			whenNot({
 				name: 'ready',
 				condition: (ctx) => ctx.serverReady,
-				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk', 'java:setup-jre'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'tika:submodule-build'],
+				then: [parallel(['server:setup-tools', 'vcpkg:submodule-build', 'java:setup-jdk', 'java:setup-jre'], 'Setup build tools'), 'server:configure', 'server:compile-engine', parallel(['server:setup-python', 'server:setup-jre'], 'Setup dependencies'), parallel(['server:setup-runtime-libs', 'server:setup-samba'], 'Setup runtime'), 'java:submodule-build'],
 			}),
 		],
 	};
@@ -1170,10 +1170,13 @@ function makeCleanServerAction() {
 			await setState('server', {});
 			await setState('package', null);
 
-			await removeFiles(BUILD_ROOT, ['CMakeCache.txt', 'cmake_install.cmake', 'build.ninja', '.ninja_deps', '.ninja_log', 'compile_commands.json', 'CPackConfig.cmake', 'CPackSourceConfig.cmake', 'CTestTestfile.cmake', 'Makefile', 'CMakePresets.json']);
+			await removeFiles(BUILD_ROOT, ['CMakeCache.txt', 'cmake_install.cmake', 'build.ninja', '.ninja_deps', '.ninja_log', 'compile_commands.json', 'CPackConfig.cmake', 'CPackSourceConfig.cmake', 'CTestTestfile.cmake', 'Makefile', 'CMakePresets.json', 'vc140.pdb']);
+
+			// An interrupted configure leaves CMakeCache.txt.tmp<random> behind
+			await removeMatching(BUILD_ROOT, /^CMakeCache\.txt\.tmp/, { recursive: false });
 
 			// Clean only the server build artifacts; vcpkg state is managed by vcpkg:clean
-			await removeDirs([path.join(BUILD_ROOT, 'CMakeFiles'), path.join(BUILD_ROOT, 'Testing'), path.join(BUILD_ROOT, 'apps'), path.join(BUILD_ROOT, 'engine-core'), path.join(BUILD_ROOT, 'engine-lib'), path.join(BUILD_ROOT, 'packages'), path.join(BUILD_ROOT, '_download_temp'), DIST_ARTIFACTS_DIR, DIST_DIR]);
+			await removeDirs([path.join(BUILD_ROOT, 'CMakeFiles'), path.join(BUILD_ROOT, 'Testing'), path.join(BUILD_ROOT, 'apps'), path.join(BUILD_ROOT, 'engine-core'), path.join(BUILD_ROOT, 'engine-lib'), path.join(BUILD_ROOT, 'engine-mod'), path.join(BUILD_ROOT, 'nodes'), path.join(BUILD_ROOT, 'packages'), path.join(BUILD_ROOT, '_download_temp'), DIST_ARTIFACTS_DIR, DIST_DIR]);
 
 			task.output = 'Cleaned server build';
 		},
@@ -1237,7 +1240,7 @@ function makeTestAction() {
 					parallel(['nodes:build', sequence(['mcp-widgets:build', 'ai:build'], 'ai (with widgets)'), 'client-python:build'], 'Build modules'),
 					'server:compile-tests',
 					'server:copy-test-data',
-					parallel(['tika:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
+					parallel(['java:submodule-test', 'server:run-aptest', 'server:run-engtest', 'server:run-rocketlib-test'], 'Run tests'),
 				],
 			}),
 		],
@@ -1338,7 +1341,7 @@ function makePackageAction(options = {}) {
 function makeCleanAction() {
 	return {
 		description: 'Cleaning server (all)',
-		steps: ['server:clean', 'vcpkg:submodule-clean', 'java:submodule-clean', 'tika:submodule-clean'],
+		steps: ['server:clean', 'vcpkg:submodule-clean', 'java:submodule-clean'],
 	};
 }
 

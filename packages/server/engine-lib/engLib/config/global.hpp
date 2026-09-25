@@ -25,65 +25,21 @@
 
 namespace engine::config {
 
-inline Text &nodeId(bool verify = true) noexcept {
-    static Text id;
-    if (verify && !id) dev::fatality(_location, "NodeId not defined");
-    return id;
-}
+ROCKETRIDE_CORE_SHARED Text &nodeId(bool verify = true) noexcept;
+ROCKETRIDE_CORE_SHARED Paths &paths() noexcept;
+ROCKETRIDE_CORE_SHARED util::Vars &vars() noexcept;
+ROCKETRIDE_CORE_SHARED Ptr<engine::monitor::Monitor> &monitor() noexcept;
 
-inline Paths &paths() noexcept {
-    static Paths pths;
-    return pths;
-}
+// Loads the optionally parsed json::Value from user.json, this file
+// must exist in the working directory, or the executable path (in that order)
+// of engine to be loaded properly
+ROCKETRIDE_CORE_SHARED const ErrorOr<json::Value> &user() noexcept;
 
 inline bool isPath(iTextView name) noexcept {
     return name == "data" || name == "cache" || name == "control" ||
            name == "log";
 }
 
-inline util::Vars &vars() noexcept {
-    static util::Vars vrs;
-    return vrs;
-}
-
 inline Text expand(TextView str) noexcept { return vars().expand(str); }
-
-inline auto &monitor() noexcept {
-    static Ptr<monitor::Monitor> monitor = nullPtr<monitor::Monitor>();
-    return monitor;
-}
-
-// Loads the optionally parsed json::Value from user.json, this file
-// must exist in the working directory, or the executable path (in that order)
-// of engine to be loaded properly
-inline const auto &user() noexcept {
-    auto fetch = [] {
-        // Cwd first
-        if (auto res =
-                file::fetchFromData<json::Value>(file::cwd() / "user.json"))
-            return res;
-
-        // Didn't find it in cwd, well try exec path
-        if (auto res = file::fetchFromData<json::Value>(application::execDir() /
-                                                        "user.json"))
-            return res;
-
-        // Now, look two levels up so to see if it is there. This will be for
-        // running in the build/engine directory
-        auto path = application::execDir() / ".." / ".." / "user.json";
-
-        // Resolve it
-        path = path.resolve();
-
-        // Attempt to fetch
-        return file::fetchFromData<json::Value>(path);
-    };
-
-    static ErrorOr<json::Value> res = fetch();
-
-    if (!res) res = json::Value{};
-
-    return res;
-}
 
 }  // namespace engine::config
