@@ -929,3 +929,28 @@ def test_store_commands_init_builds_subcommand_dispatch_table():
         'fs_rename',
         'fs_geturl',
     }
+
+
+@pytest.mark.asyncio
+async def test_on_execute_never_exposes_server_settings_to_sys_admin(monkeypatch):
+    """Server RR_* settings are never a placeholder layer, even for sys.admin.
+
+    A pipeline an admin runs could otherwise write ${ROCKETRIDE_<setting>}
+    into any node config and read the server's internal secrets.
+    """
+    from ai.account import account as account_mod
+
+    monkeypatch.setenv('RR_TEST_INTERNAL_SECRET', 'must-not-leak')
+    monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={'ROCKETRIDE_SAVED': 'ok'}))
+
+    account = _account_info(dev_team='team-1')
+    account.sysPermissions = ['sys.admin']
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=account, server=server)
+
+    await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
+
+    env = server.start_task.await_args.kwargs['env']
+    assert env == {'ROCKETRIDE_SAVED': 'ok'}
+    assert 'must-not-leak' not in env.values()
