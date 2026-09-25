@@ -46,6 +46,7 @@ from .image_utils import (
     matched_quality,
     source_quality,
 )
+from .pinned_http import pinned_session, resolve_public_addresses
 from .string_utils import safe_str
 from .tool_args import (
     int_arg,
@@ -86,12 +87,14 @@ __all__ = [
     'parse_bool',
     'pick_torch_device',
     'pick_torch_dtype',
+    'pinned_session',
     'require_bool',
     'require_dict',
     'require_int',
     'require_str',
     'require_str_list',
     'resolve_pipeline_device',
+    'resolve_public_addresses',
     'safe_str',
     'source_quality',
     'validate_public_url',
