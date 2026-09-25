@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - media stream descriptors + end-to-end source provenance (#1525)
 
 ### Fixed
+- **chroma**: convert Chroma distances into decreasing `[0, 1]` relevance scores, so a perfect match scores 1.0 instead of 0.5 and the opposite vector 0.0 instead of 1.5 (#2388)
 - **nodes**: harden HTTP Request SSRF guardrails for URL credentials and hostname-safe whitelist boundaries; regexes now match canonical URL starts and fail closed on unsupported or ambiguous authority syntax, so unrestricted authority and search-style patterns may require migration (#2060)
 - **agent**: optional require_tool_call runtime fabrication guard (#1490)
 - **ai**: install test deps via depends() so engine constraints apply (#1466) (#1471)
