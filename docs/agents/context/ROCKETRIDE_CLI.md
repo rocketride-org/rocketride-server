@@ -77,7 +77,7 @@ rocketride stop --token TASK_TOKEN                         # terminate a task
 ```
 
 - `start` options: `--pipeline <file>` (or `ROCKETRIDE_PIPELINE`; required), `--token <token>` (or `ROCKETRIDE_TOKEN`), `--threads <num>` (default 4), `--args <args...>`
-- `upload` options: `--pipeline <file>` or `--token <token>` (one required), `--threads <num>` (default 4), `--max-concurrent <num>` (default 5), `--args <args...>`
+- `upload` options: `--pipeline <file>` or `--token <token>` (one required), `--threads <num>` (default 4, sizes the pipeline this command starts), `--max-concurrent <num>` (default 5, caps how many files upload at once; must be a positive integer), `--args <args...>`
 
 There is no live-monitor command: continuous monitoring belongs to the
 platform's event monitor and server monitor apps — the CLI is one-shot,
