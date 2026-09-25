@@ -16,7 +16,10 @@ time_machine
 # (collection time), before any depends() runs, so they must be pre-installed
 # here. Unpinned to track the source packages' own (unpinned) declarations.
 #   pillow -> from PIL import Image (tests/ai/common/image, .../models/vision)
+#   anthropic -> from anthropic import Anthropic (tests/ai/common/test_config_env_resolve.py);
+#                declared by nodes/src/nodes/llm_anthropic, which ai tests never import
 pillow
+anthropic
 
 # AI module dependencies — each sub-package declares its own deps and
 # installs them via depends() at import time. Listing them here pre-installs
