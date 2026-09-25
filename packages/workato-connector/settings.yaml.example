@@ -1,0 +1,7 @@
+# Example connection settings for local testing with `workato exec`.
+# Encrypt the real file with: workato edit settings.yaml.enc  (uses master.key)
+# Never commit settings.yaml.enc or master.key.
+
+default:
+  webhook_url: "http://localhost:5565/webhook"
+  auth_key: "pk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
