@@ -513,14 +513,3 @@ def test_build_providers_shuts_down_tracer_when_metric_setup_fails(monkeypatch):
         build_providers(BridgeConfigStub(endpoint='https://collector:4318'))
 
     assert len(shut_down) == 1, 'tracer provider was left running after metric setup failed'
-
-
-def test_http_exporter_falls_back_to_its_own_transport_without_requests(monkeypatch):
-    """Exporter 1.45+ doesn't pull in requests; its urllib3 default refuses redirects."""
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-    from rocketride.otelbridge.setup import _http_exporter_kwargs
-
-    monkeypatch.setitem(sys.modules, 'requests', None)
-
-    assert _http_exporter_kwargs(OTLPSpanExporter) == {}

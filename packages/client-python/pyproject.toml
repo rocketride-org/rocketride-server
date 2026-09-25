@@ -82,6 +82,9 @@ test = [
 otel = [
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+    # otelbridge/setup.py subclasses requests.Session, and the OTLP/HTTP
+    # exporter does not bring requests along from 1.45 on.
+    "requests>=2.7",
 ]
 
 [project.urls]

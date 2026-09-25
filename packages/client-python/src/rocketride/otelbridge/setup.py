@@ -151,12 +151,6 @@ def _http_exporter_kwargs(exporter_cls: Any) -> Dict[str, Any]:
     if not supported:  # pragma: no cover - exporter older than the 'session' kwarg
         logger.debug('OTLP HTTP exporter %s takes no session=; redirects stay enabled', exporter_cls.__name__)
         return {}
-    try:
-        import requests  # noqa: F401
-    except ImportError:
-        # Exporter 1.45+ no longer depends on requests; its default urllib3
-        # transport already refuses redirects (Retry(0, redirect=False)).
-        return {}
     return {'session': _no_redirect_session()}
 
 
