@@ -18,7 +18,7 @@
 # from the constraints, as everywhere else.
 opentelemetry-sdk>=1.27.0
 opentelemetry-exporter-otlp-proto-http>=1.27.0
-requests>=2.7
+requests>=2.32.4
 
 # The GFM oracle for tests/test_pipediff_reporters.py: it wraps the same
 # cmark-gfm GitHub renders comments with, so the Markdown-escaping cross-check
