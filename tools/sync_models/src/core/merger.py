@@ -34,6 +34,8 @@ except ImportError:
 # None = not yet fetched; {} = fetch attempted but failed (no retry).
 _OPENROUTER_CACHE: Optional[Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str], bool]]] = None
 _OPENROUTER_AVAILABLE: bool = False
+# Input modalities (e.g. {"text", "image"}) per bare model ID, filled with the cache above.
+_OPENROUTER_INPUT_MODALITIES: Dict[str, frozenset] = {}
 
 
 def _load_openrouter_cache() -> None:
@@ -48,7 +50,7 @@ def _load_openrouter_cache() -> None:
     If the request fails for any reason (network error, timeout, bad JSON)
     the cache is set to an empty dict so subsequent calls skip the retry.
     """
-    global _OPENROUTER_CACHE, _OPENROUTER_AVAILABLE
+    global _OPENROUTER_CACHE, _OPENROUTER_AVAILABLE, _OPENROUTER_INPUT_MODALITIES
     if _OPENROUTER_CACHE is not None:
         return  # already loaded (or failed)
 
@@ -64,6 +66,7 @@ def _load_openrouter_cache() -> None:
             data = _json.loads(resp.read())
 
         cache: Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str], bool]] = {}
+        input_modalities: Dict[str, frozenset] = {}
         for model in data.get('data', []):
             raw_id = model.get('id', '')
             bare = raw_id.split('/', 1)[1] if '/' in raw_id else raw_id
@@ -76,10 +79,15 @@ def _load_openrouter_cache() -> None:
             out = int(out) if out is not None else None
             sp = model.get('supported_parameters') or []
             reasoning = 'reasoning' in sp or 'include_reasoning' in sp
+            arch = model.get('architecture')
+            modalities = arch.get('input_modalities') if isinstance(arch, dict) else None
             if bare not in cache:  # keep first occurrence per bare ID
                 cache[bare] = (ctx, out, name, exp, reasoning)
+                if isinstance(modalities, list):
+                    input_modalities[bare] = frozenset(modalities)
 
         _OPENROUTER_CACHE = cache
+        _OPENROUTER_INPUT_MODALITIES = input_modalities
         _OPENROUTER_AVAILABLE = True
     except Exception:
         _OPENROUTER_CACHE = {}  # empty sentinel — no retry on subsequent calls
@@ -495,6 +503,7 @@ def merge(
     revived_models: Optional[set] = None,
     derive_title_fn=None,
     output_limit_below_context: bool = False,
+    token_lookup_id_fn=None,
 ) -> tuple[Dict[str, Any], MergeResult]:
     """
     Perform a smart merge of current profiles against the provider API model list.
@@ -535,6 +544,11 @@ def merge(
         revived_models: model IDs whose call passed while the profile still
             carried a call-made mark. Only this lifts one — the listing path
             cannot, since the model was never missing from a listing.
+        token_lookup_id_fn: Optional callable mapping a model ID to the ID under
+            which OpenRouter and LiteLLM file it. Only those lookups use it;
+            config overrides stay keyed by the ID stored in services.json. A host
+            serving another vendor's model (``"openai/gpt-5.2"`` on GMI Cloud)
+            maps it to the vendor's own ID so the vendor's limits are found.
 
     Returns:
         Tuple of (updated_profiles dict, MergeResult describing what changed)
@@ -634,6 +648,10 @@ def merge(
         else:
             _token_lookup_id = model_id
 
+        # The ID the third-party databases file this model under. Identical to the
+        # stored ID unless the provider maps it (see token_lookup_id_fn).
+        _db_lookup_id = token_lookup_id_fn(_token_lookup_id) if token_lookup_id_fn is not None else _token_lookup_id
+
         _override = token_overrides.get(_token_lookup_id) or token_overrides.get(model_id)
         _api_ctx = api_entry.get('context_window')
         # When OpenRouter or LiteLLM was used as the fallback model source, entries
@@ -649,10 +667,10 @@ def merge(
         _api_entry_out = api_entry.get('max_output_tokens')
         _api_entry_name: Optional[str] = api_entry.get('name')
         _or_ctx, _or_out, _or_name, _or_exp = (
-            _openrouter_info(_token_lookup_id) if _use_openrouter else (None, None, None, None)
+            _openrouter_info(_db_lookup_id) if _use_openrouter else (None, None, None, None)
         )
         _display_name: Optional[str] = _api_entry_name or _or_name
-        _litellm_ctx, _litellm_out = _litellm_info(_token_lookup_id) if _use_litellm else (None, None)
+        _litellm_ctx, _litellm_out = _litellm_info(_db_lookup_id) if _use_litellm else (None, None)
         # Cast to int — config/litellm/openrouter values may arrive as float or str
         _override = int(_override) if _override is not None else None
         _api_ctx = int(_api_ctx) if _api_ctx is not None else None
@@ -718,6 +736,7 @@ def merge(
             # try the next source rather than break, so a good value further down the
             # list still wins. Elsewhere the equality is legitimate and must be kept.
             def _usable(out: Optional[int], ctx: Optional[int]) -> bool:
+                """True unless the pair carries the swap signature on a capped provider."""
                 return not (output_limit_below_context and _is_swapped_output(out, ctx))
 
             for _src in model_sources:

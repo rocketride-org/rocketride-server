@@ -56,6 +56,14 @@ describe the task for each image. When no analysis prompt is configured, the nod
 
 Provide an OpenAI API key in `image_vision_openai.apikey`. The key is validated at pipeline start: it must be present and must begin with `sk-`, otherwise the node raises a configuration error before any image is processed.
 
+## Notes
+
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_vision_openai` provider, `ROCKETRIDE_OPENAI_KEY`). OpenAI's model list does not say which models accept images, so the sync asks OpenRouter first, then LiteLLM, and takes the first answer it gets: a model is added only when that answer is yes, and a `no` from OpenRouter settles it without asking LiteLLM. Each new model is then verified with a real image, so text-only models such as `o3-mini` never land here.
+
+The sync runs **only** with that key, and is skipped without it, leaving this file untouched — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
 ## Upstream docs
 
 - [OpenAI Vision documentation](https://platform.openai.com/docs/guides/vision)
