@@ -31,14 +31,28 @@
 
 #undef AP_PLAT_MINIDUMP_CPP_PRIVATE_INCLUDE
 
+#include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
+
+#if ROCKETRIDE_PLAT_MAC
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#endif
 
 // mini_chromium's base defines a stream-style LOG macro; shield the engine's.
 #pragma push_macro("LOG")
@@ -129,6 +143,108 @@ inline const std::filesystem::path &crashDbDir() noexcept {
     return dir;
 }
 
+// The process a dump was taken from, from its MiscInfo stream. Concurrent
+// engines share the DB, so this is how a dump is attributed; the start time
+// tells a recycled pid apart from the process that crashed.
+struct DumpOwner {
+    pid_t pid{};             // 0 if unknown
+    int64_t startTime{-1};   // epoch seconds, -1 if unknown
+};
+
+inline DumpOwner dumpOwner(const std::filesystem::path &dmp) noexcept {
+    std::ifstream in{dmp, std::ios::binary};
+    auto read = [&](auto &out, uint64_t rva) {
+        return static_cast<bool>(
+            in.seekg(rva).read(reinterpret_cast<char *>(&out), sizeof(out)));
+    };
+
+    struct {
+        uint32_t signature, version, streamCount, streamDirRva;
+    } header{};
+    if (!read(header, 0) || header.signature != 0x504d444d /* "MDMP" */)
+        return {};
+
+    for (uint32_t i = 0; i < header.streamCount; ++i) {
+        struct {
+            uint32_t type, dataSize, rva;
+        } entry{};
+        if (!read(entry, header.streamDirRva + uint64_t{i} * sizeof(entry)))
+            return {};
+        if (entry.type != 15 /* MiscInfoStream */) continue;
+
+        struct {
+            uint32_t size, flags, processId, processCreateTime;
+        } misc{};
+        if (!read(misc, entry.rva) || !(misc.flags & 1 /* MISC1_PROCESS_ID */))
+            return {};
+
+        DumpOwner owner{static_cast<pid_t>(misc.processId)};
+        if (misc.flags & 2 /* MISC1_PROCESS_TIMES */)
+            owner.startTime = misc.processCreateTime;
+        return owner;
+    }
+    return {};
+}
+
+// Start time (epoch seconds) of a running process, computed as Crashpad does
+// for the dump; -1 if it is gone or a zombie (exited, not yet reaped).
+inline int64_t processStartTime(pid_t pid) noexcept {
+#if ROCKETRIDE_PLAT_LIN
+    char path[32];
+    std::snprintf(path, sizeof path, "/proc/%d/stat", static_cast<int>(pid));
+    std::ifstream in{path};
+    std::string stat;
+    if (!std::getline(in, stat)) return -1;
+
+    // Fields follow "(comm)", and comm may itself hold spaces or parens.
+    auto close = stat.rfind(')');
+    if (close == std::string::npos) return -1;
+    std::istringstream fields{stat.substr(close + 1)};
+
+    char state{};
+    fields >> state;  // field 3
+    if (state == 'Z' || state == 'X') return -1;
+
+    std::string skip;
+    for (int i = 4; i < 22; ++i) fields >> skip;
+    uint64_t ticks{};
+    if (!(fields >> ticks)) return -1;  // field 22: starttime, since boot
+
+    timespec now{}, uptime{};
+    ::clock_gettime(CLOCK_REALTIME, &now);
+    ::clock_gettime(CLOCK_BOOTTIME, &uptime);
+    const int64_t hz = ::sysconf(_SC_CLK_TCK);
+    const int64_t bootNs = (now.tv_sec - uptime.tv_sec) * 1'000'000'000LL
+                           + (now.tv_nsec - uptime.tv_nsec);
+    const int64_t startNs = bootNs + int64_t(ticks / hz) * 1'000'000'000LL
+                            + int64_t(ticks % hz) * 1'000'000'000LL / hz;
+    return startNs / 1'000'000'000LL;
+#elif ROCKETRIDE_PLAT_MAC
+    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    kinfo_proc info{};
+    size_t size = sizeof info;
+    if (::sysctl(mib, 4, &info, &size, nullptr, 0) != 0 || size == 0)
+        return -1;
+    if (info.kp_proc.p_stat == SZOMB) return -1;
+    return info.kp_proc.p_starttime.tv_sec;
+#else
+    return -1;
+#endif
+}
+
+// Is the dump's process still running? A pid match alone is not enough: the
+// pid may since have been recycled by an unrelated process.
+inline bool ownerRunning(const DumpOwner &owner) noexcept {
+    if (!owner.pid) return false;
+
+    auto started = processStartTime(owner.pid);
+    if (started < 0) return false;
+    if (owner.startTime < 0) return true;  // no time in the dump: trust the pid
+
+    // Both sides truncate to seconds from separately sampled clocks.
+    return std::abs(started - owner.startTime) <= 2;
+}
+
 // Move a dump out of the DB into crashDumpLocation() with the app's canonical
 // name, then notify. rename() with copy+remove fallback for cross-filesystem.
 inline void relocateAndNotify(const std::filesystem::path &src) noexcept {
@@ -138,6 +254,9 @@ inline void relocateAndNotify(const std::filesystem::path &src) noexcept {
     std::error_code ec;
     std::filesystem::rename(src, targetFs, ec);
     if (ec) {
+        // Another engine's sweep got here first and is reporting it.
+        if (!std::filesystem::exists(src, ec)) return;
+
         ec.clear();
         std::filesystem::copy_file(
             src, targetFs, std::filesystem::copy_options::overwrite_existing,
@@ -154,10 +273,11 @@ inline void relocateAndNotify(const std::filesystem::path &src) noexcept {
     if (dev::crashDumpCreatedCallback()) dev::crashDumpCreatedCallback()(target);
 }
 
-// crashpad_handler writes dumps out-of-process after the app is gone, so the
-// crashDumpCreatedCallback cannot fire at crash time. We instead recover a
-// previous run's dumps on the next startup -- notification is deferred one run.
-inline void sweepPreviousDumps(const std::filesystem::path &dbDir) noexcept {
+// Relocate dumps out of the DB. With ownOnly, just this process's dump (the
+// crash-time path); otherwise every dump whose process is gone (the per-task
+// path), leaving a running sibling's dump for its own crash handler to report.
+inline void sweepDumps(const std::filesystem::path &dbDir,
+                       bool ownOnly = false) noexcept {
     if (dbDir.empty()) return;  // crash reporting is off; nothing to recover
 
     for (const char *sub : {"pending", "completed"}) {
@@ -168,10 +288,61 @@ inline void sweepPreviousDumps(const std::filesystem::path &dbDir) noexcept {
         std::filesystem::directory_iterator it{dir, ec}, end;
         for (; !ec && it != end; it.increment(ec)) {
             const auto &p = it->path();
-            if (p.extension() == ".dmp") relocateAndNotify(p);
+            if (p.extension() != ".dmp") continue;
+
+            // Own: this very process (pid and start time), i.e. the crash
+            // being reported. Otherwise leave a running owner's dump to it.
+            auto owner = dumpOwner(p);
+            bool running = ownerRunning(owner);
+            bool own = running && owner.pid == ::getpid();
+            if (ownOnly ? !own : running && !own) continue;
+            relocateAndNotify(p);
         }
     }
 }
+
+#if ROCKETRIDE_PLAT_LIN
+// Crash-time reporting, so crashDumpCreatedCallback reaches the caller before
+// the process dies (as Breakpad's in-process callback did) instead of on the
+// next run. Crashpad's last-chance handler runs once the handler has written
+// the dump, but on Crashpad's alternate signal stack (~SIGSTKSZ): far too small
+// for the sweep, and overflowing it kills the process outright. So the handler
+// only wakes this thread over a pipe and waits for it, bounded in case the
+// sweep deadlocks on a lock the crashed thread held.
+// macOS dumps on EXC_CRASH, as the process dies, so there the next task run's
+// sweep recovers it.
+inline int g_reportRequest[2]{-1, -1};
+inline int g_reportDone[2]{-1, -1};
+
+inline void startCrashReporter() noexcept {
+    if (::pipe2(g_reportRequest, O_CLOEXEC) || ::pipe2(g_reportDone, O_CLOEXEC))
+        return;
+
+    std::thread{[] {
+        ::pthread_setname_np(::pthread_self(), "Crash Reporter");
+
+        char c;
+        ssize_t n;
+        while ((n = ::read(g_reportRequest[0], &c, 1)) < 0 && errno == EINTR) {
+        }
+        if (n != 1) return;
+
+        sweepDumps(crashDbDir(), /*ownOnly=*/true);
+        [[maybe_unused]] auto _ = ::write(g_reportDone[1], &c, 1);
+    }}.detach();
+}
+
+// Async-signal-safe: only write() and poll().
+inline bool reportOwnDump(int, siginfo_t *, ucontext_t *) noexcept {
+    char c{};
+    if (g_reportDone[0] >= 0 && ::write(g_reportRequest[1], &c, 1) == 1) {
+        pollfd done{g_reportDone[0], POLLIN, 0};
+        while (::poll(&done, 1, 10'000) < 0 && errno == EINTR) {
+        }
+    }
+    return false;  // chain on to the engine's own signal handler
+}
+#endif
 
 }  // namespace internal
 
@@ -230,10 +401,17 @@ public:
             /*restartable=*/true,
             /*asynchronous_start=*/false);
 
-        if (ok)
-            LOG(Dev, "Crashpad handler started", handlerPath);
-        else
+        if (!ok) {
             LOG(Error, "Failed to start Crashpad handler", handlerPath);
+            return;
+        }
+
+#if ROCKETRIDE_PLAT_LIN
+        internal::startCrashReporter();
+        crashpad::CrashpadClient::SetLastChanceExceptionHandler(
+            internal::reportOwnDump);
+#endif
+        LOG(Dev, "Crashpad handler started", handlerPath);
     }
 
     ~Minidump() noexcept = default;
