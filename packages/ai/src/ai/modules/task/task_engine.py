@@ -1094,9 +1094,12 @@ class Task(DAPBase):
         (a task refusing to start) as completed. An exit code that is still
         unknown is not a success either, so it records 1. A requested stop
         keeps its existing exit code: the kill signal is not a task failure.
+
+        Exit code 0 without >EXIT is also not a success: the task never went
+        through the protocol, so it cannot be treated as completed (issue #2416).
         """
         if not self._exit_event_seen and not self._stop_requested:
-            self._status.exitCode = exit_code if exit_code is not None else 1
+            self._status.exitCode = exit_code if (exit_code is not None and exit_code != 0) else 1
             self._status.exitMessage = 'Stopped'
 
     async def _terminated(self) -> None:
