@@ -20,12 +20,21 @@ same time share it, so each dump is matched to its process by the process ID and
 process start time it records. The start time keeps a recycled process ID from
 being mistaken for the process that crashed.
 
-- **Linux:** once the handler has written the dump, the crashing process moves
-  it into the configured crash-dump location and notifies the monitor before it
-  exits, so the caller learns of the crash at crash time, as on Windows.
-- **macOS:** Crashpad writes the dump as the process dies, so it is moved and
-  the monitor notified on the **next task run**. Notification arrives one run
-  later.
+In both cases below, the crashing process then moves the dump into the configured
+crash-dump location and notifies the monitor before it exits, so the caller
+learns of the crash at crash time, as on Windows.
+
+- **Linux:** Crashpad catches the fatal signal and writes the dump before the
+  process continues.
+- **macOS:** Crashpad normally dumps on `EXC_CRASH`, which the kernel raises only
+  once the process is already dying. So the engine catches the fatal signal
+  itself, asks Crashpad to write the dump right away, and then stops Crashpad
+  from writing a second one on `EXC_CRASH`. The dump records Crashpad's
+  simulated exception rather than `EXC_BAD_ACCESS`, but the crashing thread's
+  real registers, so it symbolizes to the faulting frame. Crashes that raise no
+  signal (for example `EXC_GUARD`, or the process being killed for exceeding a
+  resource limit) are still dumped on `EXC_CRASH` and reported on the **next
+  task run**.
 
 Each task run also sweeps the database for dumps nobody reported (for example,
 the process was killed while reporting). It waits until the monitor has

@@ -50,8 +50,10 @@
 #include <vector>
 
 #if ROCKETRIDE_PLAT_MAC
+#include <mach/mach.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
+#include <atomic>
 #endif
 
 // mini_chromium's base defines a stream-style LOG macro; shield the engine's.
@@ -61,6 +63,9 @@
 #include <client/crash_report_database.h>
 #include <client/crashpad_client.h>
 #include <client/settings.h>
+#if ROCKETRIDE_PLAT_MAC
+#include <client/simulate_crash_mac.h>
+#endif
 #pragma pop_macro("LOG")
 
 namespace ap::plat {
@@ -276,9 +281,11 @@ inline void relocateAndNotify(const std::filesystem::path &src) noexcept {
 // Relocate dumps out of the DB. With ownOnly, just this process's dump (the
 // crash-time path); otherwise every dump whose process is gone (the per-task
 // path), leaving a running sibling's dump for its own crash handler to report.
-inline void sweepDumps(const std::filesystem::path &dbDir,
-                       bool ownOnly = false) noexcept {
-    if (dbDir.empty()) return;  // crash reporting is off; nothing to recover
+// Returns how many dumps it took.
+inline size_t sweepDumps(const std::filesystem::path &dbDir,
+                         bool ownOnly = false) noexcept {
+    size_t taken{};
+    if (dbDir.empty()) return taken;  // crash reporting is off
 
     for (const char *sub : {"pending", "completed"}) {
         auto dir = dbDir / sub;
@@ -297,29 +304,39 @@ inline void sweepDumps(const std::filesystem::path &dbDir,
             bool own = running && owner.pid == ::getpid();
             if (ownOnly ? !own : running && !own) continue;
             relocateAndNotify(p);
+            ++taken;
         }
     }
+    return taken;
 }
 
-#if ROCKETRIDE_PLAT_LIN
 // Crash-time reporting, so crashDumpCreatedCallback reaches the caller before
 // the process dies (as Breakpad's in-process callback did) instead of on the
-// next run. Crashpad's last-chance handler runs once the handler has written
-// the dump, but on Crashpad's alternate signal stack (~SIGSTKSZ): far too small
-// for the sweep, and overflowing it kills the process outright. So the handler
-// only wakes this thread over a pipe and waits for it, bounded in case the
-// sweep deadlocks on a lock the crashed thread held.
-// macOS dumps on EXC_CRASH, as the process dies, so there the next task run's
-// sweep recovers it.
+// next run. It runs from a signal handler once the dump is written: Crashpad's
+// last-chance handler on Linux, our own handler on macOS. Neither may do the
+// sweep itself: it is not async-signal-safe, and on Linux the handler runs on
+// Crashpad's ~SIGSTKSZ alternate stack, which the sweep overflows. So the
+// handler only wakes this thread over a pipe and waits for it, bounded in case
+// the sweep deadlocks on a lock the crashed thread held.
 inline int g_reportRequest[2]{-1, -1};
 inline int g_reportDone[2]{-1, -1};
 
+inline bool makePipe(int (&fds)[2]) noexcept {
+    if (::pipe(fds)) return false;
+    ::fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+    ::fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    return true;
+}
+
 inline void startCrashReporter() noexcept {
-    if (::pipe2(g_reportRequest, O_CLOEXEC) || ::pipe2(g_reportDone, O_CLOEXEC))
-        return;
+    if (!makePipe(g_reportRequest) || !makePipe(g_reportDone)) return;
 
     std::thread{[] {
+#if ROCKETRIDE_PLAT_MAC
+        ::pthread_setname_np("Crash Reporter");
+#else
         ::pthread_setname_np(::pthread_self(), "Crash Reporter");
+#endif
 
         char c;
         ssize_t n;
@@ -327,20 +344,86 @@ inline void startCrashReporter() noexcept {
         }
         if (n != 1) return;
 
-        sweepDumps(crashDbDir(), /*ownOnly=*/true);
+        c = sweepDumps(crashDbDir(), /*ownOnly=*/true) ? 1 : 0;
         [[maybe_unused]] auto _ = ::write(g_reportDone[1], &c, 1);
     }}.detach();
 }
 
-// Async-signal-safe: only write() and poll().
-inline bool reportOwnDump(int, siginfo_t *, ucontext_t *) noexcept {
+// Async-signal-safe: only write(), poll() and read(). True if the reporter
+// found and reported this process's dump.
+inline bool reportOwnDump() noexcept {
     char c{};
-    if (g_reportDone[0] >= 0 && ::write(g_reportRequest[1], &c, 1) == 1) {
-        pollfd done{g_reportDone[0], POLLIN, 0};
-        while (::poll(&done, 1, 10'000) < 0 && errno == EINTR) {
-        }
+    if (g_reportDone[0] < 0 || ::write(g_reportRequest[1], &c, 1) != 1)
+        return false;
+
+    pollfd done{g_reportDone[0], POLLIN, 0};
+    int ready;
+    while ((ready = ::poll(&done, 1, 10'000)) < 0 && errno == EINTR) {
     }
+    return ready == 1 && ::read(g_reportDone[0], &c, 1) == 1 && c == 1;
+}
+
+#if ROCKETRIDE_PLAT_LIN
+// Crashpad's last-chance handler: runs once the handler has written the dump.
+inline bool onCrashDumped(int, siginfo_t *, ucontext_t *) noexcept {
+    reportOwnDump();
     return false;  // chain on to the engine's own signal handler
+}
+#endif
+
+#if ROCKETRIDE_PLAT_MAC
+// Crashpad on macOS dumps on EXC_CRASH, which the kernel raises only once the
+// process is dying, so nothing in-process can report it. Instead a fatal signal
+// (delivered before EXC_CRASH, while we are alive) has Crashpad dump now via
+// SimulateCrash(), which returns once the dump is written. The dump records
+// Crashpad's simulated exception, but the faulting thread's real registers.
+// Crashes that raise no signal (EXC_GUARD, a resource kill) still dump on
+// EXC_CRASH and are reported by the next task run's sweep.
+inline constexpr int FatalSignals[] = {SIGABRT, SIGBUS, SIGFPE, SIGILL,
+                                       SIGSEGV, SIGSYS, SIGTRAP};
+inline struct sigaction g_prevActions[NSIG]{};
+inline std::atomic_flag g_crashHandled = ATOMIC_FLAG_INIT;
+
+inline void onFatalSignal(int sig, siginfo_t *info, void *context) noexcept {
+    if (!g_crashHandled.test_and_set()) {
+        crashpad::NativeCPUContext cpu{};
+        auto *uc = static_cast<ucontext_t *>(context);
+        if (uc && uc->uc_mcontext) {
+#if defined(__x86_64__)
+            cpu.tsh.flavor = x86_THREAD_STATE64;
+            cpu.tsh.count = x86_THREAD_STATE64_COUNT;
+            cpu.uts.ts64 = uc->uc_mcontext->__ss;
+#elif defined(__aarch64__)
+            cpu.ash.flavor = ARM_THREAD_STATE64;
+            cpu.ash.count = ARM_THREAD_STATE64_COUNT;
+            cpu.ts_64 = uc->uc_mcontext->__ss;
+#endif
+        } else {
+            crashpad::CaptureContext(&cpu);
+        }
+        crashpad::SimulateCrash(cpu);
+
+        // Reported: stop Crashpad writing a second dump on EXC_CRASH. If not,
+        // keep it as the fallback for the next task run's sweep.
+        if (reportOwnDump())
+            ::task_set_exception_ports(::mach_task_self(), EXC_MASK_CRASH,
+                                       MACH_PORT_NULL, EXCEPTION_DEFAULT,
+                                       THREAD_STATE_NONE);
+    }
+
+    // Chain to the handler we displaced (normally the engine's). A hardware
+    // fault re-raises itself on return; a sent signal (kill, abort) does not.
+    ::sigaction(sig, &g_prevActions[sig], nullptr);
+    bool fault = info && info->si_code > 0 && info->si_code < SI_USER;
+    if (!fault) ::raise(sig);
+}
+
+inline void installFatalSignalHandlers() noexcept {
+    struct sigaction action {};
+    action.sa_sigaction = onFatalSignal;
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&action.sa_mask);
+    for (int sig : FatalSignals) ::sigaction(sig, &action, &g_prevActions[sig]);
 }
 #endif
 
@@ -406,10 +489,12 @@ public:
             return;
         }
 
-#if ROCKETRIDE_PLAT_LIN
         internal::startCrashReporter();
+#if ROCKETRIDE_PLAT_LIN
         crashpad::CrashpadClient::SetLastChanceExceptionHandler(
-            internal::reportOwnDump);
+            internal::onCrashDumped);
+#elif ROCKETRIDE_PLAT_MAC
+        internal::installFatalSignalHandlers();
 #endif
         LOG(Dev, "Crashpad handler started", handlerPath);
     }

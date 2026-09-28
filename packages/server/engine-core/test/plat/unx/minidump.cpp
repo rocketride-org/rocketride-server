@@ -98,13 +98,29 @@ TEST_CASE("crashpad") {
         int status = runCrashChild("crash");
         REQUIRE(WIFSIGNALED(status));
 
-        // On Linux the child relocates its own dump from Crashpad's last-chance
-        // handler; on macOS the parent's sweep recovers it.
-#if !ROCKETRIDE_PLAT_LIN
-        plat::minidumpSweep();
-#endif
-
+        // The child relocates its own dump at crash time; no parent sweep.
         REQUIRE(dumpsIn(crashDir).size() > before.size());
+    }
+
+    // On macOS the child dumps via SimulateCrash() and must then stop Crashpad
+    // dumping again on EXC_CRASH; on Linux Crashpad dumps once by design.
+    SECTION("a crash is reported exactly once") {
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-once";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        auto before = dumpsIn(crashDir);
+
+        int status = runCrashChild("crash", dir.c_str());
+        REQUIRE(WIFSIGNALED(status));
+
+        // Give a stray second dump from the out-of-process handler time to land.
+        ::usleep(1000 * 1000);
+
+        REQUIRE(dumpsIn(crashDir).size() == before.size() + 1);
+        REQUIRE(dumpsIn(dir / "pending").empty());
+        REQUIRE(dumpsIn(dir / "completed").empty());
+
+        std::filesystem::remove_all(dir, ec);
     }
 
     SECTION("clean exit writes no dump") {
@@ -171,7 +187,7 @@ TEST_CASE("crashpad") {
         REQUIRE((st.st_mode & 0777) == 0700);
 
         // Uploads are disabled, so a finished report stays in pending, unless
-        // the child already relocated it at crash time (Linux). The handler is
+        // the child already relocated it at crash time. The handler is
         // out-of-process and can outlive the child, so poll for it.
         bool landed = false;
         for (int i = 0; i < 50 && !landed; ++i) {
