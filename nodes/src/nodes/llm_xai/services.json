@@ -268,6 +268,17 @@
 					"reasoning": true
 				},
 				"apikey": ""
+			},
+			"grok-4-7": {
+				"title": "SpaceXAI: Grok 4.7",
+				"model": "grok-4.7",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 500000, // openrouter
+				"modelOutputTokens": 450000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
 			}
 		}
 	},
@@ -487,6 +498,12 @@
 					"properties": [
 						"xai.grok-4-6"
 					]
+				},
+				{
+					"value": "grok-4-7",
+					"properties": [
+						"xai.grok-4-7"
+					]
 				}
 			]
 		},
@@ -569,6 +586,13 @@
 		},
 		"xai.grok-4-6": {
 			"object": "grok-4-6",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"xai.grok-4-7": {
+			"object": "grok-4-7",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

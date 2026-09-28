@@ -361,7 +361,7 @@
 				"title": "Mistral: Mistral Small 3.2 24B",
 				"model": "mistral-small-3.2-24b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
+				"modelTotalTokens": 256000, // openrouter
 				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
@@ -369,8 +369,51 @@
 				"title": "Mistral: Mistral Medium 3.5 (batch)",
 				"model": "mistral-medium-3-5:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 26214, // openrouter
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 209715, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"codestral-2508-batch": {
+				"title": "Mistral: Codestral 2508 (batch)",
+				"model": "codestral-2508:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 256000, // openrouter
+				"modelOutputTokens": 204800, // openrouter
+				"apikey": ""
+			},
+			"ministral-8b-2512-batch": {
+				"title": "Mistral: Ministral 3 8B 2512 (batch)",
+				"model": "ministral-8b-2512:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 209715, // openrouter
+				"apikey": ""
+			},
+			"mistral-large-2512-batch": {
+				"title": "Mistral: Mistral Large 3 2512 (batch)",
+				"model": "mistral-large-2512:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 209715, // openrouter
+				"apikey": ""
+			},
+			"mistral-medium-3-1-batch": {
+				"title": "Mistral: Mistral Medium 3.1 (batch)",
+				"model": "mistral-medium-3.1:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 104857, // openrouter
+				"apikey": ""
+			},
+			"mistral-small-2603-batch": {
+				"title": "Mistral: Mistral Small 4 (batch)",
+				"model": "mistral-small-2603:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 209715, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -747,6 +790,36 @@
 					"properties": [
 						"mistral.mistral-medium-3-5-batch"
 					]
+				},
+				{
+					"value": "codestral-2508-batch",
+					"properties": [
+						"mistral.codestral-2508-batch"
+					]
+				},
+				{
+					"value": "ministral-8b-2512-batch",
+					"properties": [
+						"mistral.ministral-8b-2512-batch"
+					]
+				},
+				{
+					"value": "mistral-large-2512-batch",
+					"properties": [
+						"mistral.mistral-large-2512-batch"
+					]
+				},
+				{
+					"value": "mistral-medium-3-1-batch",
+					"properties": [
+						"mistral.mistral-medium-3-1-batch"
+					]
+				},
+				{
+					"value": "mistral-small-2603-batch",
+					"properties": [
+						"mistral.mistral-small-2603-batch"
+					]
 				}
 			]
 		},
@@ -969,6 +1042,41 @@
 		},
 		"mistral.mistral-medium-3-5-batch": {
 			"object": "mistral-medium-3-5-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.codestral-2508-batch": {
+			"object": "codestral-2508-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.ministral-8b-2512-batch": {
+			"object": "ministral-8b-2512-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-large-2512-batch": {
+			"object": "mistral-large-2512-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-medium-3-1-batch": {
+			"object": "mistral-medium-3-1-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-small-2603-batch": {
+			"object": "mistral-small-2603-batch",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
