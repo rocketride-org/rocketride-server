@@ -37,6 +37,9 @@ async function handleTermination(signal) {
 	process.exit(130); // Standard exit code for SIGINT
 }
 
+// Release is the default, Debug is not supported
+const CMAKE_CONFIGS = ['Release', 'RelWithDebInfo'];
+
 function parseArgs(args) {
 	const requests = [];
 	const options = {
@@ -52,6 +55,7 @@ function parseArgs(args) {
 		listModules: false,
 		logFile: null, // Log file for test output
 		overlayRoot: null, // Root directory for overlay
+		cmakeConfig: CMAKE_CONFIGS[0],
 		buildVersion: null,
 		buildHash: null,
 		buildStamp: null,
@@ -104,6 +108,13 @@ function parseArgs(args) {
 		} else if (arg.startsWith('--trace=')) {
 			options.trace = options.trace || [];
 			options.trace.push(arg.substring('--trace='.length));
+		} else if (arg.startsWith('--cmake-config=')) {
+			const value = arg.substring('--cmake-config='.length);
+			if (!CMAKE_CONFIGS.includes(value)) {
+				console.error(`Unknown --cmake-config=${value}, expected one of: ${CMAKE_CONFIGS.join(', ')}`);
+				process.exit(1);
+			}
+			options.cmakeConfig = value;
 		} else if (arg.startsWith('--taskserver=')) {
 			options.taskserver = arg.substring('--taskserver='.length);
 		} else if (arg.startsWith('--log=')) {

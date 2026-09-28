@@ -92,9 +92,12 @@ async function getPackageInfo(options = {}) {
 // State Management
 // =============================================================================
 
-async function isConfigured() {
+async function isConfigured(cmakeConfig) {
 	const configured = await getState('server.configured');
 	if (configured !== true) return false;
+
+	// Check whether CMAKE_BUILD_TYPE has been changed
+	if (cmakeConfig && (await getState('server.buildType')) !== cmakeConfig) return false;
 
 	// Check CMakeCache.txt exists
 	const cmakeCache = path.join(BUILD_ROOT, 'CMakeCache.txt');
@@ -683,7 +686,8 @@ function makeConfigureServerAction(options = {}) {
 	return {
 		locks: ['cmake'],
 		run: async (ctx, task) => {
-			if (!options.force && (await isConfigured())) {
+			const cmakeConfig = options.cmakeConfig || 'Release';
+			if (!options.force && (await isConfigured(cmakeConfig))) {
 				task.output = 'Already configured';
 				return;
 			}
@@ -704,7 +708,7 @@ function makeConfigureServerAction(options = {}) {
 			const overlayPorts = path.join(SERVER_DIR, 'cmake', 'ports');
 			const overlayTriplets = path.join(SERVER_DIR, 'cmake', 'triplets');
 
-			const cmakeArgs = ['cmake', '-B', BUILD_ROOT, '-S', SERVER_DIR, ...generator, '-DCMAKE_BUILD_TYPE=Release', `-DCMAKE_TOOLCHAIN_FILE=${vcpkgToolchain}`, `-DVCPKG_TARGET_TRIPLET=${triplet}`, `-DVCPKG_HOST_TRIPLET=${triplet}`, `-DVCPKG_OVERLAY_PORTS=${overlayPorts}`, `-DVCPKG_OVERLAY_TRIPLETS=${overlayTriplets}`];
+			const cmakeArgs = ['cmake', '-B', BUILD_ROOT, '-S', SERVER_DIR, ...generator, `-DCMAKE_BUILD_TYPE=${cmakeConfig}`, `-DCMAKE_TOOLCHAIN_FILE=${vcpkgToolchain}`, `-DVCPKG_TARGET_TRIPLET=${triplet}`, `-DVCPKG_HOST_TRIPLET=${triplet}`, `-DVCPKG_OVERLAY_PORTS=${overlayPorts}`, `-DVCPKG_OVERLAY_TRIPLETS=${overlayTriplets}`];
 
 			// Opt-in (CI / small-disk hosts): drop each port's buildtree + package
 			// staging right after it builds so peak disk stays low across the whole
@@ -741,7 +745,7 @@ function makeConfigureServerAction(options = {}) {
 			await updateServerState({
 				configured: true,
 				configuredAt: new Date().toISOString(),
-				buildType: 'Release',
+				buildType: cmakeConfig,
 			});
 		},
 	};
@@ -868,7 +872,8 @@ function makeCompileEngineAction(options = {}) {
 			}
 
 			const jobs = getParallelJobs();
-			const cmakeArgs = ['cmake', '--build', BUILD_ROOT, '--config', 'Release', '--target', 'engine', '--parallel', String(jobs)];
+			const cmakeConfig = options.cmakeConfig || 'Release';
+			const cmakeArgs = ['cmake', '--build', BUILD_ROOT, '--config', cmakeConfig, '--target', 'engine', '--parallel', String(jobs)];
 			await execCommand(cmakeArgs[0], cmakeArgs.slice(1), { task, env, verbose: options.verbose });
 
 			// Copy engine to dist
@@ -928,6 +933,8 @@ function makeCompileTestsAction(options = {}) {
 	return {
 		locks: ['cmake'],
 		run: async (ctx, task) => {
+			const cmakeConfig = options.cmakeConfig || 'Release';
+
 			// Check source hash to skip if nothing changed since last test build
 			if (options.force) {
 				task.output = 'Checking for source changes...';
@@ -937,7 +944,7 @@ function makeCompileTestsAction(options = {}) {
 					fingerprint(path.join(SERVER_DIR, 'engine-mod')),
 					fingerprint(path.join(SERVER_DIR, 'cmake'))
 				]);
-				const combinedHash = require('crypto').createHash('md5').update(`${coreHash}:${libHash}:${modHash}:${cmakeHash}`).digest('hex');
+				const combinedHash = require('crypto').createHash('md5').update(`${coreHash}:${libHash}:${modHash}:${cmakeHash}:${cmakeConfig}`).digest('hex');
 
 				const savedHash = await getState('server.testSrcHash');
 				if (combinedHash === savedHash) {
@@ -957,17 +964,17 @@ function makeCompileTestsAction(options = {}) {
 
 			// Build aptest
 			task.output = 'Building aptest...';
-			const aptestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'aptest', '--parallel', String(jobs)];
+			const aptestArgs = ['--build', BUILD_ROOT, '--config', cmakeConfig, '--target', 'aptest', '--parallel', String(jobs)];
 			await execCommand('cmake', aptestArgs, { task, env, verbose: options.verbose });
 
 			// Build engtest
 			task.output = 'Building engtest...';
-			const engtestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'engtest', '--parallel', String(jobs)];
+			const engtestArgs = ['--build', BUILD_ROOT, '--config', cmakeConfig, '--target', 'engtest', '--parallel', String(jobs)];
 			await execCommand('cmake', engtestArgs, { task, env, verbose: options.verbose });
 
 			// Build nodetest
 			task.output = 'Building nodetest...';
-			const nodetestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'nodetest', '--parallel', String(jobs)];
+			const nodetestArgs = ['--build', BUILD_ROOT, '--config', cmakeConfig, '--target', 'nodetest', '--parallel', String(jobs)];
 			await execCommand('cmake', nodetestArgs, { task, env, verbose: options.verbose });
 
 			// Save test source hash after successful build
