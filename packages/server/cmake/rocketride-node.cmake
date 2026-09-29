@@ -105,7 +105,7 @@ function(rocketride_add_node targetName)
     get_filename_component(nodeDir ${CMAKE_CURRENT_SOURCE_DIR} NAME)
     set(distDir "${ROCKETRIDE_PROJECT_ROOT}/dist/server/nodes/${nodeDir}")
 
-    if(ROCKETRIDE_CMAKE_KIST)
+    if(ROCKETRIDE_CMAKE_KITS)
         add_custom_command(TARGET ${targetName} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${distDir}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${targetName}> "${distDir}/"

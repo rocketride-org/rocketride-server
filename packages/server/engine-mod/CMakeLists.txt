@@ -54,7 +54,7 @@ add_custom_command(TARGET engineMod POST_BUILD
     COMMENT "Copying $<TARGET_FILE_NAME:engineMod> next to $<TARGET_FILE_NAME:engine>")
 
 # Mirror the exe -> dist/server copy that rocketride_add_executable performs
-if(ROCKETRIDE_CMAKE_KIST)
+if(ROCKETRIDE_CMAKE_KITS)
     add_custom_command(TARGET engineMod POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ROCKETRIDE_PROJECT_ROOT}/dist/server"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:engineMod> "${ROCKETRIDE_PROJECT_ROOT}/dist/server/"

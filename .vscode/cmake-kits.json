@@ -2,7 +2,7 @@
   {
     "name": "RocketRide Linux",
     "cmakeSettings": {
-      "ROCKETRIDE_CMAKE_KIST": "TRUE",
+      "ROCKETRIDE_CMAKE_KITS": "TRUE",
       "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/build/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "VCPKG_TARGET_TRIPLET": "x64-linux-clang-rocketride",
       "VCPKG_HOST_TRIPLET": "x64-linux-clang-rocketride",
@@ -13,7 +13,7 @@
   {
     "name": "RocketRide macOS x64",
     "cmakeSettings": {
-      "ROCKETRIDE_CMAKE_KIST": "TRUE",
+      "ROCKETRIDE_CMAKE_KITS": "TRUE",
       "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/build/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "VCPKG_TARGET_TRIPLET": "x64-osx-appleclang-rocketride",
       "VCPKG_HOST_TRIPLET": "x64-osx-appleclang-rocketride",
@@ -24,7 +24,7 @@
   {
     "name": "RocketRide macOS arm64",
     "cmakeSettings": {
-      "ROCKETRIDE_CMAKE_KIST": "TRUE",
+      "ROCKETRIDE_CMAKE_KITS": "TRUE",
       "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/build/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "VCPKG_TARGET_TRIPLET": "arm64-osx-appleclang-rocketride",
       "VCPKG_HOST_TRIPLET": "arm64-osx-appleclang-rocketride",
@@ -36,7 +36,7 @@
     "name": "RocketRide Windows",
     "environmentSetupScript": "${workspaceFolder}/scripts/vsvars.cmd",
     "cmakeSettings": {
-      "ROCKETRIDE_CMAKE_KIST": "TRUE",
+      "ROCKETRIDE_CMAKE_KITS": "TRUE",
       "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/build/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "VCPKG_TARGET_TRIPLET": "x64-windows-msvc-rocketride",
       "VCPKG_HOST_TRIPLET": "x64-windows-msvc-rocketride",
