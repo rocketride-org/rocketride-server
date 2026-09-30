@@ -195,7 +195,9 @@ rocketride profile tree [--token TOKEN] [--thread ID] [--min-pct 0.1] [--max-dep
   (default `session_<timestamp>`).
 - A task's session belongs to the server's link to that task, not to your
   connection: it outlives your CLI, and `stop --token` ends it whoever
-  started it — a colleague's `stop` ends your `run`, which then exits 1.
+  started it. A colleague's `stop` therefore pulls the session out from
+  under a running `run`, which waits out its Ctrl+C or `--duration` as
+  usual and only then fails with `No active profiling session`, exit 1.
   Ctrl+C in `run` stops the session first; killing the command instead
   leaves it profiling until `profile stop --token TOKEN` or the task ends.
 
