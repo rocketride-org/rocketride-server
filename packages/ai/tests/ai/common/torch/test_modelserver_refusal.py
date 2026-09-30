@@ -1,10 +1,10 @@
 """torch must stay out of a task process that has a model server.
 
-Two rules: no node imports ``ai.common.torch`` (embedding goes through
-``ai.common.models``, which proxies to the model server), and the wrapper
-refuses before installing rather than after fetching the CUDA wheel, since the
-guard is a ``sys.meta_path`` hook and never sees the install. The tests pin the
-order, not just the exception.
+Two rules: no node imports torch (embedding goes through ``ai.common.models``,
+which proxies to the model server), and the wrapper refuses before installing
+rather than after fetching the CUDA wheel, since the guard is a
+``sys.meta_path`` hook and never sees the install. The tests pin the order, not
+just the exception.
 
 The install functions are stubbed so nothing is ever fetched; ``rocketlib``
 stays real because asking the guard imports the model zoo.
@@ -12,13 +12,14 @@ stays real because asking the guard imports the model zoo.
 
 from __future__ import annotations
 
-import re
+import ast
 import sys
 from pathlib import Path
 
 import pytest
 
 WRAPPER = 'ai.common.torch'
+_WRAPPER_PARENT, _WRAPPER_LEAF = WRAPPER.rsplit('.', 1)
 
 
 def _nodes_root():
@@ -28,6 +29,34 @@ def _nodes_root():
         if candidate.is_dir():
             return candidate
     return None
+
+
+def _is_torch(name: str) -> bool:
+    return name in (WRAPPER, 'torch') or name.startswith((WRAPPER + '.', 'torch.'))
+
+
+def _imports_torch(source: str) -> bool:
+    """True when this source imports torch, through the wrapper or directly.
+
+    AST rather than a regex: ``from ai.common import torch`` is the same
+    wrapper under another spelling, and import-like text in a docstring is not
+    an import.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(_is_torch(alias.name) for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            module = node.module or ''
+            if _is_torch(module):
+                return True
+            if module == _WRAPPER_PARENT and any(alias.name == _WRAPPER_LEAF for alias in node.names):
+                return True
+    return False
 
 
 def _wrapper_installs(calls):
@@ -53,8 +82,8 @@ def depends_calls(monkeypatch):
     return calls
 
 
-def test_no_node_imports_the_torch_wrapper():
-    """A node reaching ai.common.torch is unusable under --modelserver.
+def test_no_node_imports_torch():
+    """A node that imports torch is unusable under --modelserver.
 
     Source-level: driving every beginGlobal would need the engine, and the rule
     should hold for nodes nobody has written yet.
@@ -63,17 +92,46 @@ def test_no_node_imports_the_torch_wrapper():
     if nodes_root is None:
         pytest.skip('nodes source tree not present in this layout')
 
-    pattern = re.compile(r'^\s*(?:import\s+ai\.common\.torch|from\s+ai\.common\.torch\s+import)', re.M)
     offenders = [
         str(path.relative_to(nodes_root))
         for path in nodes_root.rglob('*.py')
-        if pattern.search(path.read_text(encoding='utf-8', errors='replace'))
+        if _imports_torch(path.read_text(encoding='utf-8', errors='replace'))
     ]
 
     assert offenders == [], (
-        'these nodes import the torch wrapper directly; use ai.common.models instead, '
-        'which proxies to the model server when one is configured: ' + ', '.join(offenders)
+        'these nodes import torch directly; use ai.common.models instead, which proxies to the '
+        'model server when one is configured: ' + ', '.join(offenders)
     )
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        'import ai.common.torch',
+        'import ai.common.torch  # noqa: F401',
+        'import ai.common.torch as wrapper',
+        'from ai.common.torch import torch',
+        'from ai.common import torch',
+        'import torch',
+        'from torch import nn',
+    ],
+)
+def test_the_scan_catches_every_spelling(source):
+    """The invariant is only worth as much as the detector behind it."""
+    assert _imports_torch(source)
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        'from ai.common.models.vision import CLIPModel, ViTModel',
+        '"""import ai.common.torch here is prose, not an import."""',
+        "name = 'import torch'",
+        'from ai.common.image.image import Image',
+    ],
+)
+def test_the_scan_ignores_text_that_is_not_an_import(source):
+    assert not _imports_torch(source)
 
 
 def test_refuses_before_installing_when_the_guard_is_active(monkeypatch, depends_calls):
