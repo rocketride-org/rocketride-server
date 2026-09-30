@@ -159,36 +159,64 @@ function printStopped(out: Output, session: string | undefined, runtime: number 
 	out.line(`Read it with: rocketride profile report|threads|tree${token ? ` --token ${token}` : ''}`);
 }
 
+/** The first Ctrl+C, held for the command instead of the CLI's shutdown. */
+export interface Interrupt {
+	/** Resolves after `seconds`, or on the signal — at once if it already came. */
+	wait(seconds?: number): Promise<void>;
+	/** Hands later signals back to the shutdown handler. */
+	release(): void;
+}
+
 /**
- * Wait out `seconds`, or until Ctrl+C when no duration is given.
+ * Take the first SIGINT/SIGTERM until released.
  *
- * Takes the first SIGINT/SIGTERM from the CLI's shutdown handler, so the
- * caller can still stop the session on its own connection.
+ * Armed before the session starts, not just around the wait: a signal in
+ * between would otherwise tear the CLI down with a task still profiling,
+ * since a task's session belongs to the server's link to the subprocess
+ * and outlives this connection.
  *
- * @param seconds - How long to wait, or undefined to wait for Ctrl+C.
+ * @returns The armed interrupt.
  */
-export function waitForStop(seconds?: number): Promise<void> {
-	return new Promise((resolve) => {
-		const deadline = seconds === undefined ? Infinity : Date.now() + seconds * 1000;
-		let timer: NodeJS.Timeout | undefined;
-		const done = () => {
-			clearTimeout(timer);
-			onInterrupt(null);
-			resolve();
-		};
-		// Re-armed in steps: a longer timer fires at once, and without
-		// --duration this timer is what keeps the process waiting
-		const arm = () => {
-			const left = deadline - Date.now();
-			if (left <= 0) {
-				done();
-				return;
-			}
-			timer = setTimeout(arm, Math.min(left, MAX_TIMER_MS));
-		};
-		onInterrupt(done);
-		arm();
+export function armInterrupt(): Interrupt {
+	let signalled = false;
+	let wake: (() => void) | undefined;
+	// takeInterrupt() clears the hook as it fires, so the next signal shuts down
+	onInterrupt(() => {
+		signalled = true;
+		wake?.();
 	});
+
+	return {
+		wait(seconds?: number): Promise<void> {
+			if (signalled) {
+				return Promise.resolve();
+			}
+			return new Promise((resolve) => {
+				const deadline = seconds === undefined ? Infinity : Date.now() + seconds * 1000;
+				let timer: NodeJS.Timeout | undefined;
+				const done = () => {
+					clearTimeout(timer);
+					wake = undefined;
+					resolve();
+				};
+				// Re-armed in steps: a longer timer fires at once, and without
+				// --duration this timer is what keeps the process waiting
+				const arm = () => {
+					const left = deadline - Date.now();
+					if (left <= 0) {
+						done();
+						return;
+					}
+					timer = setTimeout(arm, Math.min(left, MAX_TIMER_MS));
+				};
+				wake = done;
+				arm();
+			});
+		},
+		release(): void {
+			onInterrupt(null);
+		},
+	};
 }
 
 /**
@@ -383,14 +411,24 @@ export function registerProfileCommands(program: Command): void {
 					seconds = parsed;
 				}
 				const client = await connectClient(options);
-				const started = await client.cprofileStart(options.token, options.session);
-				if (started.status === 'error') {
-					return out.fail(started.message || 'Profiling did not start');
+				// Armed before the session exists: a signal between the start and
+				// the wait would otherwise leave a task profiling with nobody to stop it
+				const interrupt = armInterrupt();
+				try {
+					const started = await client.cprofileStart(options.token, options.session);
+					if (started.status === 'error') {
+						return out.fail(started.message || 'Profiling did not start');
+					}
+					out.line(`Profiling started: session '${started.session}' on ${scopeOf(options.token)}`);
+					// stderr: prompts, so they show under bare --json without breaking stdout
+					console.error(seconds === undefined ? 'Press Ctrl+C to stop.' : `Stopping in ${options.duration}s — press Ctrl+C to stop sooner.`);
+					if (options.token) {
+						console.error(`Killing this command leaves the session running: rocketride profile stop --token ${options.token}`);
+					}
+					await interrupt.wait(seconds);
+				} finally {
+					interrupt.release();
 				}
-				out.line(`Profiling started: session '${started.session}' on ${scopeOf(options.token)}`);
-				// stderr: a prompt, so it shows under bare --json without breaking stdout
-				console.error(seconds === undefined ? 'Press Ctrl+C to stop.' : `Stopping in ${options.duration}s — press Ctrl+C to stop sooner.`);
-				await waitForStop(seconds);
 				const stopped = await client.cprofileStop(options.token);
 				if (stopped.status === 'error') {
 					return out.fail(stopped.message || 'Profiling did not stop');

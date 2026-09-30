@@ -404,6 +404,8 @@ describe('CLI profile Integration Tests', () => {
 
 		expect(code).toBe(0);
 		expect(output).toContain('Profiling stopped: session');
+		// A task's session outlives this command, so it says how to end one left behind
+		expect(output).toContain(`Killing this command leaves the session running: rocketride profile stop --token ${PIPELINE_TOKEN}`);
 
 		// The session it stopped left data behind to read
 		const status = await client.cprofileStatus(PIPELINE_TOKEN);

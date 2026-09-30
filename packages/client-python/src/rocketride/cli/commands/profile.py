@@ -112,43 +112,50 @@ def _print_stopped(out: Output, stopped: Dict[str, Any], token: Optional[str]) -
     out.line(f'Read it with: rocketride profile report|threads|tree{f" --token {token}" if token else ""}')
 
 
-async def _wait_for_stop(seconds: Optional[float]) -> None:
+class _Interrupt:
     """
-    Wait out ``seconds``, or until Ctrl+C when no duration is given.
+    The first SIGINT/SIGTERM, taken from the usual handling until released.
 
-    The first SIGINT/SIGTERM ends the wait instead of the process, so the
-    caller can still stop the session on its own connection; the one after
-    that gets the usual handling back.
-
-    Args:
-        seconds: How long to wait, or None to wait for Ctrl+C.
+    Armed before the session starts, not just around the wait: a signal in
+    between would otherwise end the CLI with a task still profiling, since
+    a task's session belongs to the server's link to the subprocess and
+    outlives this connection. The signal after the first one gets the usual
+    handling back, so it aborts as before.
     """
-    loop = asyncio.get_running_loop()
-    stop = asyncio.Event()
-    previous: Dict[int, Any] = {}
 
-    def restore() -> None:
-        for signum, handler in previous.items():
+    def __init__(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        self._signalled = asyncio.Event()
+        self._previous: Dict[int, Any] = {}
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            try:
+                self._previous[signum] = signal.signal(signum, self._on_signal)
+            except ValueError:
+                # Not the main thread, where signals cannot be caught; a duration still applies
+                pass
+
+    def _on_signal(self, signum, frame) -> None:
+        self.release()
+        self._loop.call_soon_threadsafe(self._signalled.set)
+
+    def release(self) -> None:
+        """Hand later signals back to the usual handling. Safe to call twice."""
+        for signum, handler in self._previous.items():
             # None means the handler was not set from Python
             signal.signal(signum, signal.SIG_DFL if handler is None else handler)
-        previous.clear()
+        self._previous.clear()
 
-    def on_signal(signum, frame) -> None:
-        restore()
-        loop.call_soon_threadsafe(stop.set)
+    async def wait(self, seconds: Optional[float]) -> None:
+        """
+        Wait out ``seconds``, or until the signal; return at once if it already came.
 
-    for signum in (signal.SIGINT, signal.SIGTERM):
+        Args:
+            seconds: How long to wait, or None to wait for the signal alone.
+        """
         try:
-            previous[signum] = signal.signal(signum, on_signal)
-        except ValueError:
-            # Not the main thread, where signals cannot be caught; the duration still applies
+            await asyncio.wait_for(self._signalled.wait(), seconds)
+        except asyncio.TimeoutError:
             pass
-    try:
-        await asyncio.wait_for(stop.wait(), seconds)
-    except asyncio.TimeoutError:
-        pass
-    finally:
-        restore()
 
 
 def format_threads(threads: List[Dict[str, Any]]) -> List[str]:
@@ -354,16 +361,27 @@ async def run_profile(args) -> int:
                 if seconds is None or seconds <= 0:
                     return out.fail('--duration must be a positive number of seconds')
             client = await connect_client(args.uri, args.apikey)
-            started = await client.cprofile_start(target=token, session=args.session)
-            if started.get('status') == 'error':
-                return out.fail(started.get('message') or 'Profiling did not start')
-            out.line(f"Profiling started: session '{started.get('session')}' on {_scope(token)}")
-            # stderr: a prompt, so it shows under bare --json without breaking stdout
-            if seconds is None:
-                print('Press Ctrl+C to stop.', file=sys.stderr)
-            else:
-                print(f'Stopping in {args.duration}s — press Ctrl+C to stop sooner.', file=sys.stderr)
-            await _wait_for_stop(seconds)
+            # Armed before the session exists: a signal between the start and the
+            # wait would otherwise leave a task profiling with nobody to stop it
+            interrupt = _Interrupt()
+            try:
+                started = await client.cprofile_start(target=token, session=args.session)
+                if started.get('status') == 'error':
+                    return out.fail(started.get('message') or 'Profiling did not start')
+                out.line(f"Profiling started: session '{started.get('session')}' on {_scope(token)}")
+                # stderr: prompts, so they show under bare --json without breaking stdout
+                if seconds is None:
+                    print('Press Ctrl+C to stop.', file=sys.stderr)
+                else:
+                    print(f'Stopping in {args.duration}s — press Ctrl+C to stop sooner.', file=sys.stderr)
+                if token:
+                    print(
+                        f'Killing this command leaves the session running: rocketride profile stop --token {token}',
+                        file=sys.stderr,
+                    )
+                await interrupt.wait(seconds)
+            finally:
+                interrupt.release()
             stopped = await client.cprofile_stop(target=token)
             if stopped.get('status') == 'error':
                 return out.fail(stopped.get('message') or 'Profiling did not stop')

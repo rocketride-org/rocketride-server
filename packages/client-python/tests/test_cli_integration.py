@@ -512,6 +512,11 @@ class TestCliProfile:
             code, output = await run_cli('profile', 'run', *self.TOKEN_ARGS, '--duration', '1', *server_args())
             assert code == 0, output
             assert 'Profiling stopped: session' in output
+            # A task's session outlives this command, so it says how to end one left behind
+            assert (
+                f'Killing this command leaves the session running: rocketride profile stop --token {self.PIPELINE_TOKEN}'
+                in output
+            )
 
             # The session it stopped left data behind to read
             status = await client.cprofile_status(target=self.PIPELINE_TOKEN)

@@ -31,7 +31,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { formatProfileList, formatThreads, formatTree, waitForStop } from '../src/cli/commands/profile';
+import { armInterrupt, formatProfileList, formatThreads, formatTree } from '../src/cli/commands/profile';
 import type { ProfileListEntry } from '../src/cli/commands/profile';
 import { takeInterrupt } from '../src/cli/common';
 import type { CProfileReportTreeResponse, CProfileThreadInfo, CProfileTreeNode } from '../src/client/types';
@@ -172,15 +172,29 @@ describe('profile list format', () => {
 // The signal handler in rocketride.ts offers each signal to takeInterrupt() first
 describe('profile run waiting', () => {
 	it('should end the wait on the first Ctrl+C and leave the next one to shutdown', async () => {
-		const waiting = waitForStop();
+		const interrupt = armInterrupt();
+		const waiting = interrupt.wait();
 
 		expect(takeInterrupt()).toBe(true);
 		await waiting;
 		expect(takeInterrupt()).toBe(false);
 	});
 
-	it('should end the wait after the duration and stop listening', async () => {
-		await waitForStop(0.05);
+	it('should return at once from a wait entered after the signal', async () => {
+		const interrupt = armInterrupt();
+
+		// As a Ctrl+C during the start call does, before the wait begins
+		expect(takeInterrupt()).toBe(true);
+		await interrupt.wait();
+
+		interrupt.release();
+	});
+
+	it('should end the wait after the duration and stop listening once released', async () => {
+		const interrupt = armInterrupt();
+
+		await interrupt.wait(0.05);
+		interrupt.release();
 
 		expect(takeInterrupt()).toBe(false);
 	});

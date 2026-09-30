@@ -34,7 +34,7 @@ import signal
 import pytest
 
 from rocketride.cli.commands.profile import (
-    _wait_for_stop,
+    _Interrupt,
     format_profile_list,
     format_threads,
     format_tree,
@@ -202,18 +202,34 @@ class TestRunWaiting:
     @pytest.mark.asyncio
     async def test_ends_the_wait_on_the_first_ctrl_c_and_restores_the_usual_handling(self):
         before = signal.getsignal(signal.SIGINT)
-        # Without the wait's own handler this raises KeyboardInterrupt instead
+        interrupt = _Interrupt()
+        # Without the interrupt's own handler this raises KeyboardInterrupt instead
         asyncio.get_running_loop().call_later(0.1, signal.raise_signal, signal.SIGINT)
 
-        await asyncio.wait_for(_wait_for_stop(None), 10)
+        await asyncio.wait_for(interrupt.wait(None), 10)
 
+        assert signal.getsignal(signal.SIGINT) is before
+
+    @pytest.mark.asyncio
+    async def test_returns_at_once_from_a_wait_entered_after_the_signal(self):
+        before = signal.getsignal(signal.SIGINT)
+        interrupt = _Interrupt()
+        # As a Ctrl+C during the start call does, before the wait begins
+        signal.raise_signal(signal.SIGINT)
+        await asyncio.sleep(0)
+
+        await asyncio.wait_for(interrupt.wait(None), 10)
+
+        interrupt.release()
         assert signal.getsignal(signal.SIGINT) is before
 
     @pytest.mark.asyncio
     async def test_ends_the_wait_after_the_duration_and_restores_the_usual_handling(self):
         before = signal.getsignal(signal.SIGINT)
+        interrupt = _Interrupt()
 
-        await _wait_for_stop(0.05)
+        await interrupt.wait(0.05)
+        interrupt.release()
 
         assert signal.getsignal(signal.SIGINT) is before
 
