@@ -141,6 +141,12 @@ _LLM_MOCK_CREDENTIALS = {
     'tool_deepl': {'apikey': 'mock-deepl-placeholder-for-tests'},
     'tool_slack': {'token': 'xoxb-mock-placeholder-for-tests'},
     'tool_notion': {'apikey': 'secret_mock-notion-placeholder-for-tests'},
+    # Deepgram calls the REST API directly via `requests` (no SDK), so its
+    # deterministic test relies on nodes/test/mocks/requests/ shadowing that
+    # endpoint rather than an SDK-level mock; this placeholder just needs to
+    # be non-empty so IGlobal.beginGlobal doesn't reject the config before
+    # the request is even made (see PR #2132 review discussion).
+    'stt_deepgram': {'apikey': 'mock-deepgram-placeholder-for-tests'},
 }
 
 
