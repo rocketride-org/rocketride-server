@@ -16,10 +16,12 @@ from unittest.mock import MagicMock
 import pytest
 
 # tools/sync_models/src is added to sys.path by conftest.py
+from core import merger
 from core.merger import (
     merge,
     _make_profile_key,
     _derive_title,
+    _is_reasoning_model,
     find_swapped_output_profiles,
     _source_is_authoritative,
     _migration_from_provider,
@@ -1129,3 +1131,61 @@ class TestRetirementAnomaly:
     def test_nothing_verified_cannot_be_judged(self):
         # No calls were made, so there is no ratio to reason about.
         assert is_retirement_anomaly(3, 0) is False
+
+
+# ---------------------------------------------------------------------------
+# Reasoning flag lookup
+# ---------------------------------------------------------------------------
+
+
+class TestReasoningLookup:
+    """
+    How a stored model ID is matched against the OpenRouter cache.
+
+    The cache is keyed by the bare vendor ID, while nodes store prefixed forms:
+    a host reselling another vendor's model ("openai/gpt-5.2"), or Gemini's
+    "models/..." IDs. Whether a model reasons belongs to the model, not to the
+    host serving it, so the name alone is enough to recognise it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _cache(self, monkeypatch):
+        """Load a small OpenRouter cache, so no test reaches the network."""
+        monkeypatch.setattr(
+            merger,
+            '_OPENROUTER_CACHE',
+            {
+                'gpt-5.2': (400000, 128000, 'OpenAI: GPT-5.2', None, True),
+                'claude-opus-4.5': (200000, 64000, 'Anthropic: Claude Opus 4.5', None, True),
+                'gemini-3-flash-preview': (1048576, 65536, 'Google: Gemini 3 Flash', None, True),
+                'gpt-4o': (128000, 16384, 'OpenAI: GPT-4o', None, False),
+            },
+        )
+
+    def test_a_bare_id_still_resolves(self):
+        assert _is_reasoning_model('gpt-5.2') is True
+        assert _is_reasoning_model('gpt-4o') is False
+
+    def test_a_resold_vendor_model_resolves(self):
+        """A host stores the vendor's model under its own prefix."""
+        assert _is_reasoning_model('openai/gpt-5.2') is True
+        assert _is_reasoning_model('anthropic/claude-opus-4.5') is True
+
+    def test_a_models_prefixed_id_resolves(self):
+        """Gemini stores "models/..." while OpenRouter keys the bare name."""
+        assert _is_reasoning_model('models/gemini-3-flash-preview') is True
+
+    def test_hyphens_still_match_openrouter_dots(self):
+        """Anthropic profiles write claude-opus-4-5 where OpenRouter writes 4.5."""
+        assert _is_reasoning_model('anthropic/claude-opus-4-5') is True
+
+    def test_a_model_the_cache_does_not_know_falls_back_to_the_family(self):
+        assert _is_reasoning_model('deepseek-ai/DeepSeek-R1') is True
+        assert _is_reasoning_model('some-org/plain-chat-model') is False
+
+    def test_a_listed_non_reasoning_model_stays_false(self):
+        assert _is_reasoning_model('openai/gpt-4o') is False
+
+    def test_candidates_are_ordered_and_unique(self):
+        assert merger._openrouter_name_candidates('openai/gpt-5.2') == ['openai/gpt-5.2', 'gpt-5.2']
+        assert merger._openrouter_name_candidates('claude-opus-4-5') == ['claude-opus-4-5', 'claude-opus-4.5']

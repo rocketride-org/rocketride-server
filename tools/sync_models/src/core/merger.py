@@ -108,15 +108,44 @@ _REASONING_FAMILIES = (
 )
 
 
+def _openrouter_name_candidates(model_id: str) -> List[str]:
+    """
+    Names to try in the OpenRouter cache for one model ID.
+
+    The cache is keyed by the bare vendor ID, while a node may store the same
+    model under a prefix — ``"openai/gpt-5.2"`` on a host that resells it,
+    ``"models/gemini-3-flash-preview"`` on Gemini — or with hyphens where
+    OpenRouter writes dots (``"claude-opus-4-7"``).
+
+    Args:
+        model_id: Model ID as stored in services.json
+
+    Returns:
+        Candidate keys, most specific first, without duplicates
+    """
+    candidates: List[str] = []
+    for name in (model_id, model_id.rsplit('/', 1)[-1].lower()):
+        for form in (name, re.sub(r'(\d)-(\d)', r'\1.\2', name)):
+            if form and form not in candidates:
+                candidates.append(form)
+    return candidates
+
+
 def _is_reasoning_model(bare_id: str) -> bool:
-    """True if the model is in OpenRouter as reasoning, or matches a known family root."""
+    """
+    True if the model is in OpenRouter as reasoning, or matches a known family root.
+
+    The lookup also tries the name without its prefix. Whether a model reasons is
+    a property of the model, so the same name identifies it whichever host serves
+    it — unlike a context window, which belongs to one host's deployment and is
+    therefore matched strictly (see ``allowed_sources`` in sync_models.config.json).
+    """
     cache = get_openrouter_cache()
-    entry = cache.get(bare_id)
-    if entry is None:
-        # Anthropic profiles store hyphens (claude-opus-4-7) while OR uses dots (claude-opus-4.7).
-        dotted = re.sub(r'(\d)-(\d)', r'\1.\2', bare_id)
-        if dotted != bare_id:
-            entry = cache.get(dotted)
+    entry = None
+    for candidate in _openrouter_name_candidates(bare_id):
+        entry = cache.get(candidate)
+        if entry is not None:
+            break
     if entry is not None and entry[4]:
         return True
     low = bare_id.lower()
