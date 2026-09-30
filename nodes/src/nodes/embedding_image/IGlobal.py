@@ -40,7 +40,6 @@ class IGlobal(IGlobalBase):
         Initialize resources needed for the node when the global lifecycle begins.
 
         This includes:
-        - Importing the torch module to ensure PyTorch is available (side effects only).
         - Importing the Embedding class from the local embedding module.
         - Retrieving the "bag" from the current endpoint, which typically contains
           shared state or contextual data.
@@ -50,19 +49,14 @@ class IGlobal(IGlobalBase):
           and bag for further embedding operations.
 
         Note:
-            The import of torch is done here with a noqa directive to suppress
-            lint warnings about unused imports. This is to ensure torch is
-            loaded in the environment as a side effect.
+            Nothing here loads torch. ai.common.models proxies to the model
+            server when --modelserver is set and imports torch only on the
+            local path; importing it here breaks the node under --modelserver.
         """
         from depends import depends
 
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
-
-        # Import torch to ensure the PyTorch framework is loaded.
-        # Although not directly referenced, its import may trigger environment
-        # setup or register necessary backend components.
-        import ai.common.torch  # noqa: F401
 
         # Import Embedding class locally to avoid circular imports and delay
         # initialization until beginGlobal is called.
