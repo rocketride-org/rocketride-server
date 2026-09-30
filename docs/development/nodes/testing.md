@@ -129,12 +129,17 @@ instance, not its parent GPU. If NVML cannot resolve it, VRAM counts as unknown
 and every test with a `cuda.vramGb` minimum is skipped, rather than being measured
 against the parent's much larger memory.
 
-A test is skipped (reason `[hardware]`) when the class is not allowed, when a
-total is below its minimum, or when less than `vramGb` is free at session start;
-the reason names the processes holding VRAM. Before each gated CUDA test the
-harness waits up to 60 s for `vramGb` to be free and **fails** if it is not: an
-earlier test kept its memory, another process took the GPU, or NVML stopped
-answering.
+A test is skipped (reason `[hardware]`) when the class is not allowed or a total
+is below its minimum — that is, when this machine can never run it. **How busy the
+machine is never skips a test:** before each gated CUDA test the harness waits up
+to 60 s for `vramGb` to be free and **fails** if it is not, naming the processes
+that hold it. So a GPU occupied by a leftover process produces failures, not a
+green run full of skips. When the memory is already short at session start, the
+header says so:
+
+```text
+hardware: only 1.6 GB of 8.0 GB VRAM free, up to 6 GB needed: heavy tests wait 60s for it, then fail (held by: engine.exe[8124] 5.5 GB)
+```
 
 | Variable | Effect |
 | -------- | ------ |

@@ -145,6 +145,31 @@ class Plan:
         """
         return {s.key for s in self.specs if s.heavy and s.runnable}
 
+    def busy_gpu_note(self) -> Optional[str]:
+        """Warn when cuda:0 holds less free VRAM than a selected test needs.
+
+        The gate allows a big-enough GPU whatever it is busy with, so such a test
+        is no longer skipped: it waits in setup and fails if the memory stays
+        taken (:func:`wait_for_free_vram`). Say so before the run, so a busy
+        machine is obvious from the header rather than from 60 s pauses.
+
+        Returns:
+            A one-line warning, or None when every runnable heavy test fits.
+        """
+        snapshot = self.snapshot
+        if snapshot.device != 'cuda' or snapshot.vram_free_gb is None or snapshot.vram_total_gb is None:
+            return None
+        needs = [s.need_gb for s in self.specs if s.heavy and s.runnable and s.need_gb]
+        if not needs or snapshot.vram_free_gb >= max(needs):
+            return None
+        note = (
+            f'only {snapshot.vram_free_gb:.1f} GB of {snapshot.vram_total_gb:.1f} GB VRAM free, up to '
+            f'{max(needs):g} GB needed: heavy tests wait {PREFLIGHT_WAIT_S:.0f}s for it, then fail'
+        )
+        if snapshot.residents:
+            note += f' (held by: {", ".join(snapshot.residents)})'
+        return note
+
 
 def truthy(value: Optional[str]) -> bool:
     """Interpret an environment flag.

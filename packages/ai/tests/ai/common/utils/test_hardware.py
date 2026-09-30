@@ -287,11 +287,11 @@ def test_check_total_vram_too_small():
     assert res.reason == 'needs 11 GB VRAM; RTX has 8.0 GB'
 
 
-def test_check_free_vram_names_residents():
+def test_check_allows_a_big_enough_gpu_that_is_busy():
+    # Capacity, not the free memory of the moment: the caller waits for a busy GPU
+    # and reports it, instead of skipping the workload and looking green.
     res = check_hardware(REQ, _cuda(24.0, 4.0, ['engine.exe[7] 19.0 GB']))
-    assert not res.ok
-    assert 'only 4.0 GB of 24.0 GB free' in res.reason
-    assert res.reason.endswith('(held by: engine.exe[7] 19.0 GB)')
+    assert res.ok and res.device == 'cuda' and res.need_gb == 11.0
 
 
 def test_check_ram_too_small():

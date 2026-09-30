@@ -409,12 +409,16 @@ def pytest_xdist_node_collection_finished(node, ids):
 
 
 def pytest_report_header(config):
-    """Show what the hardware gate sees."""
+    """Show what the hardware gate sees, and whether the GPU is busy."""
     bits = [f'strict {"on" if gate.truthy(os.environ.get(gate.ENV_STRICT)) else "off"}']
     if _worker_count(config) > 1:
         lanes = os.environ.get(gate.ENV_LANES) or '1'
         bits.append(f'{_plan(config).lane_count} heavy lane(s) ({gate.ENV_LANES}={lanes})')
-    return f'hardware: {config.stash[_SNAPSHOT].describe()}; {", ".join(bits)}'
+    lines = [f'hardware: {config.stash[_SNAPSHOT].describe()}; {", ".join(bits)}']
+    busy = _plan(config).busy_gpu_note()
+    if busy:
+        lines.append(f'hardware: {busy}')
+    return lines
 
 
 def pytest_runtest_setup(item):

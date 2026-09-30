@@ -284,6 +284,10 @@ def check_hardware(requirement: HardwareRequirement, snapshot: HardwareSnapshot)
     is too small fails even if ``cpu`` is allowed, because torch would still pick
     the GPU.
 
+    Capacity only: totals decide, never the free VRAM of the moment. A GPU that is
+    big enough but momentarily busy stays allowed, so the caller can wait for the
+    memory and report a busy machine, instead of silently dropping the workload.
+
     Args:
         requirement: Parsed ``requiresHardware``.
         snapshot: The machine to check.
@@ -308,14 +312,6 @@ def check_hardware(requirement: HardwareRequirement, snapshot: HardwareSnapshot)
                 f'needs {spec.vram_gb:g} GB VRAM; {snapshot.name} has {snapshot.vram_total_gb:.1f} GB',
                 device,
             )
-        if snapshot.vram_free_gb is not None and snapshot.vram_free_gb < spec.vram_gb:
-            reason = (
-                f'needs {spec.vram_gb:g} GB free VRAM; only {snapshot.vram_free_gb:.1f} GB of '
-                f'{snapshot.vram_total_gb:.1f} GB free at session start'
-            )
-            if snapshot.residents:
-                reason += f' (held by: {", ".join(snapshot.residents)})'
-            return HardwareCheck(False, reason, device)
 
     if spec.ram_gb is not None:
         if snapshot.ram_total_gb is None:

@@ -238,6 +238,22 @@ def test_wait_for_free_vram_times_out():
     assert not ok and mem.residents == ['engine.exe[9] 20.0 GB']
 
 
+def test_busy_gpu_is_allowed_and_announced():
+    # Capacity fits, so the test runs and waits in setup; the header says who holds
+    # the memory, instead of the run skipping everything and looking green.
+    busy = HardwareSnapshot('cuda', 'RTX 24G', 24.0, 4.0, 64.0, 40.0, ['engine.exe[7] 19.0 GB'])
+    specs = gate.build_specs([_config(hardware=HEAVY)], 'fulltest', busy, strict=False)
+    assert specs[0].runnable and specs[0].need_gb == 11.0
+    note = gate.Plan(busy, False, specs).busy_gpu_note()
+    assert note.startswith('only 4.0 GB of 24.0 GB VRAM free, up to 11 GB needed')
+    assert note.endswith('(held by: engine.exe[7] 19.0 GB)')
+
+
+def test_no_busy_gpu_note_when_the_memory_is_free():
+    specs = gate.build_specs([_config(hardware=HEAVY)], 'fulltest', CUDA_80, strict=False)
+    assert gate.Plan(CUDA_80, False, specs).busy_gpu_note() is None
+
+
 def test_wait_for_free_vram_fails_closed_without_a_reading():
     # The snapshot came from a working probe, so losing it now is an anomaly: don't
     # start a heavy test on an unverified GPU.
