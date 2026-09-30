@@ -37,6 +37,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -53,7 +54,6 @@
 #include <mach/mach.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
-#include <atomic>
 #endif
 
 // mini_chromium's base defines a stream-style LOG macro; shield the engine's.
@@ -365,8 +365,11 @@ inline bool reportOwnDump() noexcept {
 
 #if ROCKETRIDE_PLAT_LIN
 // Crashpad's last-chance handler: runs once the handler has written the dump.
+// Crashpad already calls it only for the first fatal signal; the guard makes
+// that explicit, as the reporter thread serves a single request.
 inline bool onCrashDumped(int, siginfo_t *, ucontext_t *) noexcept {
-    reportOwnDump();
+    static std::atomic_flag once = ATOMIC_FLAG_INIT;
+    if (!once.test_and_set()) reportOwnDump();
     return false;  // chain on to the engine's own signal handler
 }
 #endif
@@ -384,7 +387,7 @@ inline constexpr int FatalSignals[] = {SIGABRT, SIGBUS, SIGFPE, SIGILL,
 inline struct sigaction g_prevActions[NSIG]{};
 inline std::atomic_flag g_crashHandled = ATOMIC_FLAG_INIT;
 
-inline void onFatalSignal(int sig, siginfo_t *info, void *context) noexcept {
+inline void onFatalSignal(int sig, siginfo_t *, void *context) noexcept {
     if (!g_crashHandled.test_and_set()) {
         crashpad::NativeCPUContext cpu{};
         auto *uc = static_cast<ucontext_t *>(context);
@@ -411,11 +414,13 @@ inline void onFatalSignal(int sig, siginfo_t *info, void *context) noexcept {
                                        THREAD_STATE_NONE);
     }
 
-    // Chain to the handler we displaced (normally the engine's). A hardware
-    // fault re-raises itself on return; a sent signal (kill, abort) does not.
+    // Chain to the handler we displaced (normally the engine's). Always
+    // re-raise: only some signals re-fire on return (a faulting load does; a
+    // sent signal, SIGSYS or an x86 int3 does not), and Darwin does not fill
+    // si_code reliably enough to tell them apart. A signal that does re-fire
+    // just reaches that handler twice.
     ::sigaction(sig, &g_prevActions[sig], nullptr);
-    bool fault = info && info->si_code > 0 && info->si_code < SI_USER;
-    if (!fault) ::raise(sig);
+    ::raise(sig);
 }
 
 inline void installFatalSignalHandlers() noexcept {
