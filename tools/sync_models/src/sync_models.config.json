@@ -483,6 +483,11 @@
 			"auth_header": "Authorization",
 			"auth_prefix": "Bearer",
 			"smoke_test": "chat",
+			// kimi.py refuses to start a profile whose serverbase is empty, and the node
+			// defines no field for it, so a new profile has to bring the endpoint itself.
+			"extra_profile_fields": {
+				"serverbase": "https://api.moonshot.ai/v1"
+			},
 			"model_filter": {
 				"include_prefixes": ["kimi-", "moonshot-"],
 				"exclude_prefixes": [],
