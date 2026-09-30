@@ -77,15 +77,20 @@ class IGlobal(IGlobalBase):
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             apikey = config.get('apikey')
             model = config.get('model')
-            serverbase = config.get('serverbase') or self._GMI_CLOUD_BASE_URL
+            serverbase = config.get('serverbase')
 
             # Nothing to validate if model or API key is not set yet.
             if not model or not apikey:
                 return
 
-            # Deploy-on-demand profiles (Llama, Qwen) require the user to supply
-            # their deployment endpoint URL. Skip the probe if it has not been set yet.
-            if not config.get('serverbase'):
+            # Deploy-on-demand profiles (Llama, Qwen) require the user to supply their
+            # deployment endpoint URL. Say so now: the run would otherwise fail at pipe
+            # start, where the message arrives far from the field that is missing.
+            if not serverbase:
+                warning(
+                    'Endpoint URL is required for this model. Deploy it in the GMI Cloud console '
+                    'and paste the endpoint URL here.'
+                )
                 return
 
             err = self._validate_serverbase(serverbase)
@@ -159,7 +164,14 @@ class IGlobal(IGlobalBase):
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         if not config.get('apikey'):
             raise ValueError('GMI Cloud API key is required.')
-        serverbase = config.get('serverbase') or self._GMI_CLOUD_BASE_URL
+        # No default here: Chat refuses an empty endpoint, and sending a deploy-on-demand
+        # model to the shared one would turn that into a 404 halfway through the run.
+        serverbase = config.get('serverbase')
+        if not serverbase:
+            raise ValueError(
+                'GMI Cloud endpoint URL is required for this model. '
+                'Deploy it in the GMI Cloud console and paste the endpoint URL into the node.'
+            )
         err = self._validate_serverbase(serverbase)
         if err:
             raise ValueError(err)

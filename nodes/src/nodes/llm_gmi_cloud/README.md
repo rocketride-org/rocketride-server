@@ -109,8 +109,10 @@ token limit, and endpoint URL directly.
 
 When the node configuration is saved, it is validated against the live API:
 
-- Validation is skipped when the model or API key is not set yet, or (for
-  deploy-on-demand profiles) when the endpoint URL has not been entered yet.
+- Validation is skipped when the model or API key is not set yet.
+- A deploy-on-demand profile whose endpoint URL is still empty is reported right
+  there: the pipeline could not start without it, and the message belongs next to
+  the field, not at run time.
 - The endpoint URL is checked for HTTPS and the `gmi-serving.com` domain.
 - If the model name looks like a vision/multimodal model (contains `vl`, `vision`,
   `visual`, or `multimodal`), a warning is raised suggesting a vision node instead, and
