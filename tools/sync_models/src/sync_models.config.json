@@ -514,6 +514,10 @@
 			// three this node serves. A keyless run could only add that foreign ID, so the
 			// provider is synced through its own API alone (see llm_gmi_cloud).
 			"require_api_key": true,
+			// Every seeded profile carries the endpoint; new ones must match.
+			"extra_profile_fields": {
+				"serverbase": "https://qianfan.baidubce.com/v2"
+			},
 			"model_filter": {
 				"include_prefixes": ["ernie-"],
 				"exclude_prefixes": [],
@@ -547,6 +551,10 @@
 			"auth_header": "Authorization",
 			"auth_prefix": "Bearer",
 			"smoke_test": "chat",
+			// Every seeded profile carries the endpoint; new ones must match.
+			"extra_profile_fields": {
+				"serverbase": "https://api.z.ai/api/paas/v4"
+			},
 			"model_filter": {
 				"include_prefixes": ["glm-"],
 				"exclude_prefixes": [],
@@ -606,6 +614,14 @@
 			// another host serves says nothing about this one. So "openai/gpt-oss-*" — an
 			// open-weight family, not the API models — is deliberately not listed here.
 			"vendor_proxy_prefixes": ["openai/gpt-3", "openai/gpt-4", "openai/gpt-5", "openai/o1", "openai/o3", "openai/o4", "anthropic/claude-", "google/gemini-"],
+			// gmi_cloud.py refuses to start a profile whose serverbase is empty, and the
+			// field carries no default, so a new profile has to bring the endpoint itself.
+			// The shared one is the right value: discovery smoke-tests every new model
+			// against it, so a model that reaches the catalogue is one that answers there.
+			// A deploy-on-demand model still needs the console URL, entered per pipeline.
+			"extra_profile_fields": {
+				"serverbase": "https://api.gmi-serving.com/v1"
+			},
 			"model_filter": {
 				"include_prefixes": ["meta-llama/", "Qwen/", "deepseek-ai/", "moonshotai/", "zai-org/", "MiniMaxAI/", "openai/", "anthropic/", "google/"],
 				"exclude_prefixes": [],

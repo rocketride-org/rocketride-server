@@ -208,6 +208,7 @@ These serve many vendors' models behind one API, and their token data needs care
 - `allowed_sources` drops LiteLLM for both. Nebius keeps only `provider`.
 - `vendor_proxy_prefixes` lists the models the host **resells** rather than runs — `openai/gpt-5.2`, `anthropic/claude-opus-4.5`, `google/gemini-3-flash-preview` on GMI Cloud. There the vendor's own published limits apply, and OpenRouter files them under the bare vendor ID, so those profiles get the same numbers as `llm_openai`, `llm_anthropic` and `llm_gemini`. Everything else keeps its host ID, which matches nothing on purpose.
 - The open-weight families under a vendor's name (`openai/gpt-oss-*`) are deliberately **not** listed: the org is the model's author, not the API vendor.
+- `extra_profile_fields` gives each new profile the host's shared endpoint, because both nodes need one in the profile: GMI Cloud's driver refuses to start without it, and the Nebius service pins its base URL. For GMI the shared endpoint is the honest value — discovery smoke-tests each new model against it. A deploy-on-demand model still needs the URL from the GMI console, entered per pipeline.
 
 OpenRouter also lists `GMICloud` and `Nebius` as providers, and its `/models/<slug>/endpoints` API would give their exact per-host windows. It is not used: of the 25 models in these two nodes, OpenRouter serves exactly one through the host in question.
 
@@ -387,6 +388,8 @@ pytest tools/sync_models/test/test_sync_live.py
 ```
 
 `test_new_providers.py` also checks the wiring of every registered provider: config block, `services.json` path, handler class, the workflow's key map, and `scripts/tasks.js`. A provider missing from the workflow is never synced, and this test is what notices.
+
+It also checks that a provider whose seeded profiles all carry an endpoint (`serverbase` / `base_url`) writes that endpoint into new profiles through `extra_profile_fields`. Without it a synced profile can be unusable: `gmi_cloud.py` and `kimi.py` refuse to start when theirs is empty, and neither field has a default.
 
 ---
 

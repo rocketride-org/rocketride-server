@@ -22,6 +22,7 @@ import pytest
 
 import sync_models
 from core import smoke
+from core.patcher import get_profiles
 from providers.base import CloudProvider
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -118,7 +119,28 @@ class TestProviderWiring:
         block = text.split('const SERVICES_JSON_PATHS = {', 1)[1].split('};', 1)[0]
         assert dict(re.findall(r"(\w+): '([^']+)'", block)) == sync_models._SERVICES_JSON_PATHS
 
-    def test_provider_extra_profile_fields_reach_new_profiles(self, monkeypatch, config):
+    @pytest.mark.parametrize(
+        'provider, expected',
+        [
+            # Nebius pins its endpoint and the env-var key reference its seeded profiles use.
+            (
+                'llm_nebius',
+                {
+                    'apikey': '${ROCKETRIDE_NEBIUS_KEY}',
+                    'base_url': 'https://api.tokenfactory.nebius.com/v1/',
+                },
+            ),
+            # GMI Cloud's driver refuses to start without an endpoint in the profile.
+            (
+                'llm_gmi_cloud',
+                {
+                    'apikey': '',
+                    'serverbase': 'https://api.gmi-serving.com/v1',
+                },
+            ),
+        ],
+    )
+    def test_provider_extra_profile_fields_reach_new_profiles(self, monkeypatch, config, provider, expected):
         """A provider's extra_profile_fields override and extend the defaults."""
         captured = {}
 
@@ -132,12 +154,28 @@ class TestProviderWiring:
             captured.update(kwargs)
 
         monkeypatch.setattr(CloudProvider, 'sync', fake_sync)
-        sync_models.sync_provider('llm_nebius', config, _REPO_ROOT, apply=False)
+        sync_models.sync_provider(provider, config, _REPO_ROOT, apply=False)
 
-        assert captured['extra_profile_fields'] == {
-            'apikey': '${ROCKETRIDE_NEBIUS_KEY}',
-            'base_url': 'https://api.tokenfactory.nebius.com/v1/',
-        }
+        assert captured['extra_profile_fields'] == expected
+
+    def test_a_new_profile_can_start_on_every_host(self, config):
+        """
+        A host whose driver demands an endpoint must supply one to new profiles.
+
+        `gmi_cloud.py` and `kimi.py` raise when a profile's endpoint is empty, and
+        neither field carries a default, so a profile the sync writes without one
+        fails at pipe start. Only providers this tool syncs are checked.
+        """
+        endpoint_keys = ('serverbase', 'base_url')
+        missing = []
+        for name in sync_models._PROVIDER_REGISTRY:
+            profiles = get_profiles(str(_REPO_ROOT / sync_models._SERVICES_JSON_PATHS[name]))
+            seeded = [p for p in profiles.values() if isinstance(p, dict) and p.get('model')]
+            needed = {key for key in endpoint_keys if seeded and all(key in p for p in seeded)}
+            written = set(config['providers'][name].get('extra_profile_fields', {}))
+            if needed - written:
+                missing.append(f'{name}: seeded profiles all carry {sorted(needed)}, new ones would not')
+        assert not missing, '\n'.join(missing)
 
 
 # ---------------------------------------------------------------------------

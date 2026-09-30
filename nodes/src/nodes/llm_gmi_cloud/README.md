@@ -125,6 +125,11 @@ When the node configuration is saved, it is validated against the live API:
 Profiles are maintained by the `sync_models` tooling (`llm_gmi_cloud` provider,
 `ROCKETRIDE_GMI_CLOUD_KEY`), which reads GMI Cloud's own model list.
 
+A profile the sync adds carries the shared endpoint
+(`https://api.gmi-serving.com/v1`), since that is where discovery verified the
+model answers. Selecting it needs only an API key. A deploy-on-demand model
+still requires the endpoint URL from the GMI Cloud console.
+
 Token limits come from GMI Cloud itself, with one exception: for the models GMI
 resells rather than hosts (`openai/…`, `anthropic/…`, `google/…`), the vendor's
 published limits apply, so those profiles track `llm_openai`, `llm_anthropic` and
