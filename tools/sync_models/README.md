@@ -81,7 +81,7 @@ python tools/sync_models/src/sync_models.py --provider llm_openai --model-source
 | `llm_qwen`               | `llm_qwen`                                | `ROCKETRIDE_QWEN_KEY`          |                  |
 | `llm_minimax`            | `llm_minimax`                             | `ROCKETRIDE_MINIMAX_KEY`       |                  |
 | `llm_kimi`               | `llm_kimi`                                | `ROCKETRIDE_KIMI_KEY`          |                  |
-| `llm_baidu_qianfan`      | `llm_baidu_qianfan`                       | `ROCKETRIDE_BAIDU_QIANFAN_KEY` |                  |
+| `llm_baidu_qianfan`      | `llm_baidu_qianfan`                       | `ROCKETRIDE_BAIDU_QIANFAN_KEY` | key only         |
 | `llm_glm`                | `llm_glm`                                 | `ROCKETRIDE_GLM_KEY`           |                  |
 | `llm_gmi_cloud`          | `llm_gmi_cloud`                           | `ROCKETRIDE_GMI_CLOUD_KEY`     | key only         |
 | `llm_nebius`             | `llm_openai_api` (`services.nebius.json`) | `ROCKETRIDE_NEBIUS_KEY`        | key only         |
@@ -171,7 +171,7 @@ The sync has two distinct modes:
 
 ### Why some providers need their own key
 
-Six of the providers above carry `require_api_key: true`. Without their key the sync does **nothing** for them — no enrichment, no deprecation, no discovery — and the report says so. That is deliberate. Running them from OpenRouter instead does not give a worse answer; it gives a wrong one, in four ways.
+Seven of the providers above carry `require_api_key: true`. Without their key the sync does **nothing** for them — no enrichment, no deprecation, no discovery — and the report says so. That is deliberate. Running them from OpenRouter instead does not give a worse answer; it gives a wrong one, in four ways.
 
 **1. OpenRouter decides what still exists, and it does not know these IDs.**
 With no key, OpenRouter becomes the model source, and any profile it does not list is marked `deprecated`. These nodes store IDs it has never heard of:
@@ -182,13 +182,14 @@ With no key, OpenRouter becomes the model source, and any profile it does not li
 | `llm_nebius`             | 3 of 3                                               |
 | `llm_vision_mistral`     | 2 of 6 (`mistral-medium-2508`, `mistral-small-2506`) |
 | `accessibility_describe` | 1 of 3 (`gemini-2.0-flash`)                          |
+| `llm_baidu_qianfan`      | 3 of 3                                               |
 | `llm_vision_openai`      | 0 of 5                                               |
 | `llm_vision_gemini`      | 0 of 5                                               |
 
 A keyless run would therefore retire models that work. The hosts would lose their whole catalogue in one PR.
 
 **2. Fallback discovery invents IDs the runtime cannot call.**
-The weekly workflow runs every keyless provider with `--allow-fallback-discovery`, so new profiles would be created with OpenRouter's spelling: `mistral-medium-3.1` where Mistral's API wants `mistral-medium-2508`, or a bare `llama-4-scout` where GMI Cloud wants `meta-llama/Llama-4-Scout-17B-16E-Instruct`. This is not hypothetical — see the four dead profiles documented in `nodes/src/nodes/llm_qwen/README.md`, which arrived exactly this way.
+The weekly workflow runs every keyless provider with `--allow-fallback-discovery`, so new profiles would be created with OpenRouter's spelling: `mistral-medium-3.1` where Mistral's API wants `mistral-medium-2508`, or a bare `llama-4-scout` where GMI Cloud wants `meta-llama/Llama-4-Scout-17B-16E-Instruct`. It can also add a model the node is not for: the one ERNIE entry OpenRouter carries is `ernie-4.5-vl-424b-a47b`, a vision-language model, which a keyless run would put in Qianfan's text-only node. This is not hypothetical — see the four dead profiles documented in `nodes/src/nodes/llm_qwen/README.md`, which arrived exactly this way.
 
 **3. The token numbers would belong to someone else.**
 For a host, a database entry under a similar ID describes a different deployment. LiteLLM answers `gpt-4o` with 16384 (an output limit) and `claude-opus-4.5` with 64000; OpenRouter shows `llama-3.3-70b-instruct` served with anything from 12288 to 131072 tokens, depending on the host. See [Model hosts](#model-hosts-gmi-cloud-nebius) below.

@@ -510,10 +510,15 @@
 			"auth_header": "Authorization",
 			"auth_prefix": "Bearer",
 			"smoke_test": "chat",
+			// Qianfan's IDs are its own: OpenRouter lists one ERNIE model, and none of the
+			// three this node serves. A keyless run could only add that foreign ID, so the
+			// provider is synced through its own API alone (see llm_gmi_cloud).
+			"require_api_key": true,
 			"model_filter": {
 				"include_prefixes": ["ernie-"],
 				"exclude_prefixes": [],
-				"exclude_patterns": ["embedding", "rerank", "image", "vision", "audio", "speech", "tts"]
+				// "vl" keeps the vision-language ERNIE models out of this text-only node.
+				"exclude_patterns": ["embedding", "rerank", "image", "vision", "vl", "audio", "speech", "tts"]
 			},
 			"protected_profiles": [
 				["custom", "2126-04-09"],

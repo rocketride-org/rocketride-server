@@ -63,6 +63,20 @@ without one. The key must have access to the selected model.
 An invalid or unauthorized key is reported as "Baidu Qianfan API key is invalid or
 unauthorized" both at save-time validation and at runtime.
 
+## Notes
+
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_baidu_qianfan` provider,
+`ROCKETRIDE_BAIDU_QIANFAN_KEY`), which reads Qianfan's own model list. The filter keeps
+the `ernie-*` text chat models; embedding, rerank, image, vision-language (`vl`), audio
+and speech variants are excluded, because they belong in dedicated nodes.
+
+The sync runs **only** with that key. Qianfan's IDs are its own — OpenRouter lists a
+single ERNIE model, and none of the three this node serves — so a keyless run could add
+nothing but a foreign ID. Without the key the provider is skipped and nothing changes:
+see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
 ---
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
