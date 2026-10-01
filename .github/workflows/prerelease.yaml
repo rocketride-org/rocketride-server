@@ -248,6 +248,9 @@ jobs:
               });
               core.setOutput('action', 'refreshed');
               core.setOutput('url', issue.html_url);
+              core.setOutput('title', issue.title);
+              core.setOutput('number', String(issue.number));
+              core.setOutput('notified', String((issue.labels || []).some(l => (l.name || l) === 'discord-notified')));
               core.notice(`Refreshed #${issue.number}.`);
             } else {
               const created = await github.rest.issues.create({
@@ -258,14 +261,21 @@ jobs:
               core.setOutput('action', 'opened');
               core.setOutput('url', created.data.html_url);
               core.setOutput('title', created.data.title);
+              core.setOutput('number', String(created.data.number));
+              core.setOutput('notified', 'false');
               core.notice(`Opened #${created.data.number}.`);
             }
 
-      # Only on a new issue: a refresh means the channel already knows.
+      # Posts once per tracking issue. Delivery is recorded as the
+      # `discord-notified` label, added only after Discord confirms the
+      # message (wait=true), so a failed post is retried on the next run.
       - name: Post to the Discord issues forum
-        if: steps.track.outputs.action == 'opened'
+        if: steps.track.outputs.action != 'none' && steps.track.outputs.notified != 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_ISSUES_FORUM_WEBHOOK_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ steps.track.outputs.number }}
           TITLE: ${{ steps.track.outputs.title }}
           URL: ${{ steps.track.outputs.url }}
         run: |
@@ -275,5 +285,7 @@ jobs:
           fi
           payload=$(jq -n --arg t "$TITLE" --arg u "$URL" \
             '{thread_name: ($t | .[0:100]), content: ("Prerelease failed and nothing else will say so: " + $u)}')
+          case "$DISCORD_WEBHOOK_URL" in *\?*) sep='&' ;; *) sep='?' ;; esac
           curl -sS --fail-with-body --connect-timeout 10 --max-time 30 \
-            -H 'Content-Type: application/json' -d "$payload" "$DISCORD_WEBHOOK_URL" >/dev/null
+            -H 'Content-Type: application/json' -d "$payload" "${DISCORD_WEBHOOK_URL}${sep}wait=true" >/dev/null
+          gh api -X POST "repos/$REPO/issues/$NUMBER/labels" -f 'labels[]=discord-notified' >/dev/null
