@@ -36,6 +36,11 @@ learns of the crash at crash time, as on Windows.
   resource limit) are still dumped on `EXC_CRASH` and reported on the **next
   task run**.
 
+A process forked from the engine without `exec` (for example a Python
+multiprocessing worker) is still dumped by Crashpad, but only the engine process
+itself reports at crash time. The forked process's dump is reported on the next
+task run.
+
 Each task run also sweeps the database for dumps nobody reported (for example,
 the process was killed while reporting). It waits until the monitor has
 installed its callback and the crash-dump location points at the task's log

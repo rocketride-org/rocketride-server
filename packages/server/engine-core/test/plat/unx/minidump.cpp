@@ -123,6 +123,25 @@ TEST_CASE("crashpad") {
         std::filesystem::remove_all(dir, ec);
     }
 
+    // A fork without exec inherits the reporter's pipes and handlers but not
+    // its thread: the forked copy's crash must not consume this process's
+    // crash-time report, nor be reported as this process's dump.
+    SECTION("a forked child's crash does not take the parent's report") {
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-fork";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        auto before = dumpsIn(crashDir);
+
+        int status = runCrashChild("forkcrash", dir.c_str());
+        REQUIRE(WIFSIGNALED(status));
+
+        ::usleep(1000 * 1000);  // as above: let any stray dump land
+
+        REQUIRE(dumpsIn(crashDir).size() == before.size() + 1);
+
+        std::filesystem::remove_all(dir, ec);
+    }
+
     SECTION("clean exit writes no dump") {
         auto before = dumpsIn(crashDir);
 

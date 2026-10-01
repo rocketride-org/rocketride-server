@@ -318,8 +318,12 @@ inline size_t sweepDumps(const std::filesystem::path &dbDir,
 // Crashpad's ~SIGSTKSZ alternate stack, which the sweep overflows. So the
 // handler only wakes this thread over a pipe and waits for it, bounded in case
 // the sweep deadlocks on a lock the crashed thread held.
+// A fork without exec inherits the pipes and handlers but not the thread, so a
+// forked child must not use them: its request would consume this process's
+// single-shot reporter. Only the process that started the reporter reports.
 inline int g_reportRequest[2]{-1, -1};
 inline int g_reportDone[2]{-1, -1};
+inline pid_t g_reporterPid{};
 
 inline bool makePipe(int (&fds)[2]) noexcept {
     if (::pipe(fds)) return false;
@@ -330,6 +334,7 @@ inline bool makePipe(int (&fds)[2]) noexcept {
 
 inline void startCrashReporter() noexcept {
     if (!makePipe(g_reportRequest) || !makePipe(g_reportDone)) return;
+    g_reporterPid = ::getpid();
 
     std::thread{[] {
 #if ROCKETRIDE_PLAT_MAC
@@ -349,9 +354,11 @@ inline void startCrashReporter() noexcept {
     }}.detach();
 }
 
-// Async-signal-safe: only write(), poll() and read(). True if the reporter
-// found and reported this process's dump.
+// Async-signal-safe: only getpid(), write(), poll() and read(). True if the
+// reporter found and reported this process's dump.
 inline bool reportOwnDump() noexcept {
+    if (::getpid() != g_reporterPid) return false;  // forked child, or no reporter
+
     char c{};
     if (g_reportDone[0] < 0 || ::write(g_reportRequest[1], &c, 1) != 1)
         return false;
@@ -388,7 +395,9 @@ inline struct sigaction g_prevActions[NSIG]{};
 inline std::atomic_flag g_crashHandled = ATOMIC_FLAG_INIT;
 
 inline void onFatalSignal(int sig, siginfo_t *, void *context) noexcept {
-    if (!g_crashHandled.test_and_set()) {
+    // A forked child inherits the exception ports, so Crashpad still dumps it
+    // once on EXC_CRASH; it just cannot be reported at crash time.
+    if (::getpid() == g_reporterPid && !g_crashHandled.test_and_set()) {
         crashpad::NativeCPUContext cpu{};
         auto *uc = static_cast<ucontext_t *>(context);
         if (uc && uc->uc_mcontext) {
