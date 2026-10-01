@@ -123,10 +123,15 @@ Error TestMain() noexcept {
             // A fork without exec crashes first, then this process. abort(), not
             // a fault: the forked copy has no signal listener thread, so the
             // engine's SIGSEGV handler would re-fault forever.
-            if (auto pid = ::fork(); pid == 0)
-                std::abort();
-            else if (pid > 0)
-                ::waitpid(pid, nullptr, 0);
+            auto pid = ::fork();
+            if (pid == 0) std::abort();
+
+            // No fork, or the copy did not crash: exit cleanly so the parent's
+            // WIFSIGNALED check fails instead of passing on our dump alone.
+            int status{};
+            if (pid < 0 || ::waitpid(pid, &status, 0) != pid
+                || !WIFSIGNALED(status))
+                ap::application::quickExit(1);
             crash();
         }
         ap::application::quickExit(0);
