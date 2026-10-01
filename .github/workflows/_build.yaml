@@ -129,7 +129,7 @@ jobs:
 
       - name: Initialize CodeQL
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
           languages: cpp
           build-mode: manual
@@ -303,7 +303,7 @@ jobs:
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
           category: /language:cpp
 
