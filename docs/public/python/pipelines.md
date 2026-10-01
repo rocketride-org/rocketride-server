@@ -19,7 +19,10 @@ result = await client.use(filepath='pipeline.pipe')
 token = result['token']
 ```
 
-Beyond `filepath`/`pipeline`, `use()` accepts `source`, `threads`, `use_existing`,
+Beyond `filepath`/`pipeline`, `use()` accepts `source`, `threads`,
+`torch_threads` (the BLAS/OMP thread count pinned into the engine process for
+this task; unset uses the server default from `ROCKETRIDE_TORCH_THREADS`, 0
+disables pinning for this task), `use_existing`,
 `args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
 [run log](/clients/python/logs)), `name` (a display name for the task), and `env`
 (per-run variable overrides). Pass the pipeline config **as-is** — the client sends it

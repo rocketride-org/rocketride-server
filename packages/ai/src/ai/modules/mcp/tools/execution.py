@@ -39,7 +39,12 @@ from ..tooling import ToolRegistry
 # document-processing pipelines; not user-configurable in v1.
 DEFAULT_TIMEOUT_SECONDS = 120
 
-_OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads', 'pipelineTraceLevel')
+_OPTIONAL_USE_KWARGS = ('ttl', 'use_existing', 'source', 'threads', 'torch_threads', 'pipelineTraceLevel')
+
+_TORCH_THREADS_SCHEMA = {
+    'type': 'integer',
+    'description': 'BLAS/OMP thread count pinned into the task; omit to use the server default from ROCKETRIDE_TORCH_THREADS, 0 to disable pinning',
+}
 
 _RUN_PIPELINE_SCHEMA = {
     'type': 'object',
@@ -50,6 +55,7 @@ _RUN_PIPELINE_SCHEMA = {
         'use_existing': {'type': 'boolean', 'description': 'Reuse an existing task instead of starting a new one'},
         'source': {'type': 'string', 'description': 'Optional source label forwarded to use()'},
         'threads': {'type': 'integer', 'description': 'Optional thread count forwarded to use()'},
+        'torch_threads': _TORCH_THREADS_SCHEMA,
         'pipelineTraceLevel': {
             'type': 'string',
             'enum': ['none', 'metadata', 'summary', 'full'],
@@ -67,6 +73,7 @@ _RUN_DROPPER_PIPE_SCHEMA = {
         'use_existing': {'type': 'boolean', 'description': 'Reuse an existing task instead of starting a new one'},
         'source': {'type': 'string', 'description': 'Optional source label forwarded to use()'},
         'threads': {'type': 'integer', 'description': 'Optional thread count forwarded to use()'},
+        'torch_threads': _TORCH_THREADS_SCHEMA,
         'pipelineTraceLevel': {
             'type': 'string',
             'enum': ['none', 'metadata', 'summary', 'full'],

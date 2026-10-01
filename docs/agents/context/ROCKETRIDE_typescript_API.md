@@ -310,7 +310,8 @@ Start a RocketRide pipeline. Returns the server response body; `token` is the ta
 - `filepath?: string` — path to a `.pipe` or JSON file (Node.js only); `{ "pipeline": { ... } }` wrappers are unwrapped automatically
 - `token?: string` — custom task token (auto-generated if not provided)
 - `source?: string` — override the pipeline's source component
-- `threads?: number` — number of execution threads. **No client default** — when omitted, the server decides
+- `threads?: number` — the engine's worker thread count for pipe execution, i.e. how many pipes the task runs at once; it does **not** parallelise a single model's inference. **No client default** — when omitted, the server decides
+- `torchThreads?: number` — BLAS/OMP thread count pinned into the engine process for this task. Unset uses the server default from `ROCKETRIDE_TORCH_THREADS` (which itself defaults to not pinning); `0` disables pinning for this task. Ignored when `useExisting` hands back an already-running task — the thread count is fixed when the engine process starts
 - `useExisting?: boolean` — reuse an existing pipeline instance
 - `args?: string[]` — extra command-line flags appended to the run's engine process (see the note below); not a data channel
 - `ttl?: number` — idle time-to-live in seconds (server default when omitted; `0` = no timeout)

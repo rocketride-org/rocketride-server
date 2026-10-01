@@ -319,7 +319,8 @@ Start a RocketRide pipeline for processing data.
 - `filepath` (str, optional): Path to a `.pipe` or JSON/JSON5 file containing pipeline configuration. Files with a top-level `pipeline` key are automatically unwrapped.
 - `token` (str, optional): Custom token for the pipeline (auto-generated if not provided)
 - `source` (str, optional): Override the pipeline source (which source component this task runs from)
-- `threads` (int, optional): Number of threads for execution (default: None, the server decides)
+- `threads` (int, optional): The engine's worker thread count for pipe execution — how many pipes the task runs at once (default: None, the server decides). It does not parallelise a single model's inference.
+- `torch_threads` (int, optional): BLAS/OMP thread count pinned into the engine process for this task. Unset uses the server default from `ROCKETRIDE_TORCH_THREADS` (which itself defaults to not pinning); 0 disables pinning for this task. Ignored when `use_existing` hands back an already-running task — the thread count is fixed when the engine process starts.
 - `use_existing` (bool, optional): Reuse an existing pipeline instance with the same identity
 - `args` (List[str], optional): Extra command-line flags appended to the run's engine process (see the note below); not a data channel
 - `ttl` (int, optional): Time-to-live in seconds for idle pipelines (server default if not provided; use 0 for no timeout)

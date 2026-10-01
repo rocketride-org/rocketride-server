@@ -98,6 +98,7 @@ class ExecutionMixin(DAPClient):
         pipeline: Optional[PipelineConfig] = None,
         source: str = None,
         threads: int = None,
+        torch_threads: int = None,
         use_existing: bool = None,
         args: List[str] = None,
         ttl: int = None,
@@ -131,7 +132,11 @@ class ExecutionMixin(DAPClient):
             filepath: Path to a ``.pipe`` or JSON/JSON5 pipeline configuration file
             pipeline: Flat PipelineConfig dict (components, source, project_id at top level)
             source: Override the source specified in the pipeline config
-            threads: Number of processing threads to use (default: server decides)
+            threads: Engine worker threads for pipe execution (default: server
+                decides); does not parallelise one model's inference
+            torch_threads: BLAS/OMP threads pinned into the engine process for
+                this task. Unset uses the server default from
+                ROCKETRIDE_TORCH_THREADS; 0 disables pinning for this task
             use_existing: Whether to reuse existing pipeline with same token
             args: Command-line style arguments to pass to the pipeline
             ttl: Time-to-live in seconds for idle pipelines (optional, server default
@@ -197,7 +202,8 @@ class ExecutionMixin(DAPClient):
 
         Tips:
             - JSON5 files support comments and trailing commas for easier editing
-            - Use threads parameter for CPU-intensive operations
+            - threads widens pipe concurrency; torch_threads caps the BLAS/OMP
+              pool so co-located tasks do not oversubscribe the cores
             - Custom args are passed to pipeline steps that support them
             - The returned token is needed for all data operations with this pipeline
         """
@@ -249,6 +255,8 @@ class ExecutionMixin(DAPClient):
             arguments['token'] = token
         if threads is not None:
             arguments['threads'] = threads
+        if torch_threads is not None:
+            arguments['torchThreads'] = torch_threads
         if use_existing is not None:
             arguments['useExisting'] = use_existing
         if pipelineTraceLevel is not None:

@@ -67,6 +67,7 @@ Central orchestration server managing:
 
 import time
 import errno
+import os
 import socket
 import sys
 import asyncio
@@ -78,7 +79,9 @@ from typing import Dict, Any, Optional, Set
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
+    CONST_DEFAULT_TORCH_THREADS,
     CONST_DEFAULT_TTL,
+    CONST_TORCH_THREADS_CPU_FALLBACK,
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
@@ -94,7 +97,40 @@ from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
 
-from rocketlib import debug
+from rocketlib import debug, warning
+
+
+def resolve_torch_threads(requested: Any) -> int:
+    """Resolve this task's BLAS/OMP thread count; 0 means pin nothing.
+
+    An explicit `torchThreads` beats the server-wide default. Anything
+    unusable — unparseable, negative, or more threads than the box has
+    cores — warns and falls back to 0 rather than failing the launch.
+    Warns rather than debugs: a typo in the operator's environment has to
+    be visible at normal verbosity.
+    """
+    from_request = requested is not None
+    value = requested if from_request else CONST_DEFAULT_TORCH_THREADS
+    if value is None or value == '':
+        return 0
+
+    # bool is an int subclass: True would otherwise pin one thread.
+    threads = None
+    if not isinstance(value, bool):
+        try:
+            threads = int(value)
+        except (TypeError, ValueError):
+            threads = None
+
+    ceiling = os.cpu_count() or CONST_TORCH_THREADS_CPU_FALLBACK
+    if threads is None or threads < 0 or threads > ceiling:
+        source = 'torchThreads' if from_request else 'ROCKETRIDE_TORCH_THREADS'
+        warning(
+            f'[TASK] ignoring {source}={value!r}: expected an integer from 0 to {ceiling}; not pinning BLAS/OMP threads'
+        )
+        return 0
+
+    return threads
 
 
 @dataclass
@@ -1318,6 +1354,9 @@ class TaskServer(DAPBase):
         # Extract TTL from args (use server-configured default if not provided)
         ttl = args.get('ttl', CONST_DEFAULT_TTL)
 
+        # BLAS/OMP threads to pin into the engine subprocess (0 = pin nothing)
+        torch_threads = resolve_torch_threads(args.get('torchThreads'))
+
         # Parse task configuration from request arguments
         control.client_id = client_id
         control.userId = user_id
@@ -1501,6 +1540,7 @@ class TaskServer(DAPBase):
                 run_kind=run_kind,
                 owner_kind=control.owner_kind,
                 trigger=trigger,
+                torch_threads=torch_threads,
             )
 
             # Register task in central registry
