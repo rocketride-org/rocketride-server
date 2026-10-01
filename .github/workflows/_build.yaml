@@ -41,6 +41,11 @@ on:
         required: false
         type: boolean
         default: false
+      test:
+        description: Run the test step
+        required: false
+        type: boolean
+        default: true
       retention_days:
         # 1 day is enough to chain build → release → docker within the same
         # workflow run; downloads inside a run work even after "expiry".
@@ -271,7 +276,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Test
-        if: inputs.codeql == false
+        if: inputs.codeql == false && inputs.test
         # Integration tests boot a local server on :5565 and connect a test
         # client. Both sides need the same shared secret to authenticate;
         # without ROCKETRIDE_APIKEY the server raises AuthenticationException

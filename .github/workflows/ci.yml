@@ -10,6 +10,7 @@ on:
     branches: [develop, stage, main, 'release/**']
   pull_request:
     branches: [develop, stage, main, 'release/**']
+    types: [opened, synchronize, reopened, edited, labeled]
   merge_group:
     types: [checks_requested]
   schedule:
@@ -132,6 +133,7 @@ jobs:
       !cancelled() &&
       needs.init.result == 'success' &&
       github.event_name != 'schedule' &&
+      (github.event.action != 'edited' || github.event.changes.base) &&
       (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/_build.yaml
     permissions:
@@ -141,6 +143,11 @@ jobs:
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
+      # Skipped for re-targets, applied for PR stacks.
+      test: ${{ github.event_name != 'pull_request'
+                || contains(fromJSON('["develop", "stage", "main"]'), github.event.pull_request.base.ref)
+                || startsWith(github.event.pull_request.base.ref, 'release/')
+                || contains(github.event.pull_request.labels.*.name, 'ci:test') }}
     secrets: inherit
 
   # ---------------------------------------------------------------------------
@@ -154,6 +161,7 @@ jobs:
       !cancelled() &&
       needs.init.result == 'success' &&
       github.event_name == 'pull_request' &&
+      (github.event.action != 'edited' || github.event.changes.base) &&
       needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     strategy:
