@@ -186,6 +186,22 @@ class _FakeIInstanceBase:
         raise _PreventDefaultRaised()
 
 
+def _merge_metadata(target, metadata):
+    """Mirror ai.common.utils.merge_metadata for the stubbed nodes.
+
+    Args:
+        target: Object carrying a ``metadata`` attribute.
+        metadata: Mapping to merge in; a non-dict or empty value is ignored.
+    """
+    if not isinstance(metadata, dict) or not metadata:
+        return
+    existing = getattr(target, 'metadata', None)
+    if isinstance(existing, dict):
+        existing.update(metadata)
+    else:
+        target.metadata = dict(metadata)
+
+
 def _make_stubs():
     """Build the rocketlib and ai.common.* stub modules these nodes import."""
 
@@ -204,6 +220,16 @@ def _make_stubs():
     class FakeAnswer:
         """Stand-in for ai.common.schema.Answer."""
 
+        def __init__(self, expectJson=False):
+            """Create an answer.
+
+            Args:
+                expectJson: Whether the payload is JSON, as eval_cobalt asks for.
+            """
+            self.expectJson = expectJson
+            self.answer = None
+            self.metadata = {}
+
         def setAnswer(self, value):
             """Store the answer text.
 
@@ -211,6 +237,18 @@ def _make_stubs():
                 value: The answer text.
             """
             self.answer = value
+
+        def isJson(self):
+            """Report whether the payload is JSON."""
+            return bool(self.expectJson)
+
+        def getJson(self):
+            """Return the payload when it is JSON-shaped."""
+            return self.answer if isinstance(self.answer, (dict, list)) else None
+
+        def getText(self):
+            """Return the payload as text."""
+            return self.answer if isinstance(self.answer, str) else ''
 
     stubs = {
         'rocketlib': types.ModuleType('rocketlib'),
@@ -241,6 +279,9 @@ def _make_stubs():
     stubs['ai.common.utils'].normalize_tool_input = lambda args, **kw: args
     stubs['ai.common.utils'].optional_int = lambda args, key, default=None, **kw: default
     stubs['ai.common.utils'].require_str = lambda args, key, **kw: str(args[key])
+    # dataset_cobalt's IInstance and its common.py both carry row metadata through
+    # merge_metadata; the stub keeps the shipped semantics (non-dict values ignored).
+    stubs['ai.common.utils'].merge_metadata = _merge_metadata
     stubs['ai.common.llm_base'].LLMBase = _FakeIInstanceBase
     stubs['ai.common.avi.descriptor'].rename_ext = lambda metadata, ext: metadata
     return stubs
@@ -1067,3 +1108,156 @@ def test_memory_persistent_stored_answer_delivered_once():
         f'both arrive unless writeAnswers suppresses the default forward'
     )
     assert store.sessions['sess-1'] == {'last_answer': '42', 'answer_count': 1}
+
+
+# ============================================================================
+# eval_cobalt / dataset_cobalt: the Cobalt evaluation pair (#683)
+#
+# eval_cobalt documents "two answers per input" and dataset_cobalt "one question
+# per dataset row", and both counts were wrong by one delivery: each handler
+# wrote its own payloads and then returned normally, so the engine also
+# delivered the incoming argument. A live run of examples/cobalt-evaluation.pipe
+# with three dataset rows put 18 answers into the sink where the documented
+# contract allows 12. These assert the counts rather than the forwards.
+# ============================================================================
+
+
+class _StubEvaluator:
+    """Stand-in for CobaltEvaluator: a fixed score, no cobalt install, no network."""
+
+    def __init__(self, eval_type='similarity'):
+        """Record the evaluator mode the node branches on.
+
+        Args:
+            eval_type: The configured evaluator type.
+        """
+        self.eval_type = eval_type
+
+    def evaluate(self, output, expected):
+        """Return a fixed result shaped like the real evaluator's.
+
+        Args:
+            output: The answer text under evaluation.
+            expected: The reference text.
+
+        Returns:
+            The evaluation result dict.
+        """
+        return {'score': 0.5, 'passed': False, 'evaluator': 'stub', 'reasoning': 'stub'}
+
+
+def _eval_cobalt(evaluator, listeners=None):
+    """Build an eval_cobalt instance with the given evaluator."""
+    return _build('eval_cobalt', types.SimpleNamespace(_evaluator=evaluator), listeners)
+
+
+class _CobaltAnswer:
+    """Stand-in for an incoming Answer: text payload plus pipeline metadata."""
+
+    def __init__(self, text, metadata=None):
+        """Build the answer eval_cobalt receives.
+
+        Args:
+            text: The answer text.
+            metadata: Pipeline metadata carrying the reference answer.
+        """
+        self.answer = text
+        self.metadata = dict(metadata or {})
+
+    def isJson(self):
+        """Report that this answer is plain text."""
+        return False
+
+    def getText(self):
+        """Return the answer text."""
+        return self.answer
+
+
+def _answer(text='Paris is the capital of France.', metadata=None):
+    """Build a text answer carrying the given metadata."""
+    return _CobaltAnswer(text, metadata)
+
+
+def test_eval_cobalt_emits_exactly_two_answers_per_input():
+    """The forwarded copy and the score answer arrive; the original does not follow them."""
+    inst, fake = _eval_cobalt(_StubEvaluator())
+    answer = _answer(metadata={'expected': 'The capital of France is Paris.'})
+
+    delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
+
+    assert len(delivered) == 2, (
+        f'answers lane delivered {len(delivered)} answers for one input. The node documents two '
+        f'(the forwarded answer and the score); the third is the engine default forward of the '
+        f'incoming original, which writeAnswers must suppress'
+    )
+    assert delivered[1].getJson()['cobalt_score'] == 0.5
+    assert answer not in delivered, 'the untouched original was delivered instead of the deep copy'
+
+
+def test_eval_cobalt_emits_exactly_one_answer_without_an_evaluator():
+    """The pass-through branch forwards a copy, so it needs its own suppression."""
+    inst, fake = _eval_cobalt(None)
+    answer = _answer()
+
+    delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
+
+    assert len(delivered) == 1, (
+        f'answers lane delivered {len(delivered)} answers. Without an evaluator the node forwards '
+        f'one copy, and the engine must not add the original on top of it'
+    )
+    assert delivered[0] is not answer
+
+
+def _dataset_cobalt(items, listeners=None):
+    """Build a dataset_cobalt instance preloaded with dataset rows."""
+    return _build('dataset_cobalt', types.SimpleNamespace(_questions=items), listeners)
+
+
+_DATASET_ROWS = [
+    {'text': 'What is the capital of France?', 'metadata': {'expected': 'Paris'}},
+    {'text': 'What is 2 + 2?', 'metadata': {'expected': '4'}},
+    {'text': 'Name the largest ocean on Earth.', 'metadata': {'expected': 'The Pacific'}},
+]
+
+
+def test_dataset_cobalt_emits_one_question_per_row():
+    """N rows produce N questions; the incoming template is not one of them."""
+    inst, fake = _dataset_cobalt(_DATASET_ROWS)
+    template = FakeQuestion()
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(template), template)
+
+    assert len(delivered) == 3, (
+        f'questions lane delivered {len(delivered)} questions for 3 dataset rows. The fourth is '
+        f'the engine forwarding the incoming template, which carries no dataset row at all'
+    )
+    assert [q.questions for q in delivered] == [
+        ['What is the capital of France?'],
+        ['What is 2 + 2?'],
+        ['Name the largest ocean on Earth.'],
+    ]
+    assert [q.metadata['expected'] for q in delivered] == ['Paris', '4', 'The Pacific']
+
+
+def test_dataset_cobalt_emits_nothing_without_a_dataset():
+    """With no dataset loaded the template is not passed on as a promptless question."""
+    inst, fake = _dataset_cobalt([])
+    template = FakeQuestion()
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(template), template)
+
+    assert delivered == [], (
+        f'questions lane delivered {len(delivered)} questions with no dataset loaded. The template '
+        f'carries no prompt of its own, so forwarding it asks the LLM an empty question'
+    )
+
+
+def test_dataset_cobalt_skipped_rows_do_not_change_the_delivered_count():
+    """A text-less row is dropped and the template still does not take its place."""
+    rows = [_DATASET_ROWS[0], {'text': '', 'metadata': {'expected': 'Paris'}}, _DATASET_ROWS[1]]
+    inst, fake = _dataset_cobalt(rows)
+    template = FakeQuestion()
+
+    delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(template), template)
+
+    assert len(delivered) == 2, f'questions lane delivered {len(delivered)} questions for 2 emittable rows'

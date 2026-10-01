@@ -1,0 +1,181 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""Global state for the Cobalt Evaluator node.
+
+Manages the shared CobaltEvaluator instance across all threads for the
+current pipeline execution.
+"""
+
+import os
+from typing import Any, Dict
+
+from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+from ai.common.config import Config
+
+# This node's own service prefix — services.json declares `"prefix": "eval"`,
+# and the credential catalog is generated from that same value, so config the
+# engine injects for this node arrives flat under `eval.<field>`.
+_SERVICE_PREFIX = 'eval.'
+
+
+class IGlobal(IGlobalBase):
+    _evaluator = None
+
+    def validateConfig(self):
+        """Save-time validation for the Cobalt Evaluator node.
+
+        Checks that cobalt-ai can be loaded and that LLM judge mode has
+        an API key configured.
+        """
+        try:
+            from depends import depends
+
+            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+            depends(requirements)
+
+            config = self._extractConfig()
+            eval_type = config.get('eval_type', 'similarity')
+
+            if eval_type == 'llm_judge':
+                apikey = config.get('apikey', '')
+                if not apikey:
+                    warning('API key required for LLM judge evaluator')
+                    return
+
+            # Validate threshold is within bounds
+            threshold = config.get('threshold', 0.7)
+            try:
+                threshold = float(threshold)
+                if threshold < 0.0 or threshold > 1.0:
+                    warning('Threshold must be between 0.0 and 1.0')
+                    return
+            except (ValueError, TypeError):
+                warning('Threshold must be a valid number between 0.0 and 1.0')
+                return
+
+        # Broad by intent: validation surfaces dependency/config failures as warnings.
+        except Exception as e:
+            warning(str(e))
+
+    def beginGlobal(self):
+        """Initialize the evaluator for pipeline execution.
+
+        In CONFIG mode this is a no-op. Otherwise loads dependencies and
+        creates a CobaltEvaluator instance from the node configuration.
+        """
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
+        self._installDriver()
+
+        from .cobalt_evaluator import CobaltEvaluator
+
+        config = self._extractConfig()
+        bag = self.IEndpoint.endpoint.bag
+        self._evaluator = CobaltEvaluator(config, bag)
+
+    def _installDriver(self) -> None:
+        """Install the optional cobalt driver, tolerating an install failure.
+
+        The node ships pure-Python evaluators for every eval_type (Jaccard
+        word overlap for ``similarity``, and ``relevance``/``grounding``/
+        ``format`` need no dependency at all), and README.md promises them
+        when ``basalt-ai-cobalt`` is absent. Letting ``depends()`` raise here
+        would make that promise unreachable: an unreachable index or a
+        resolution conflict would abort pipeline init even though the node can
+        still score. Mirrors ``dataset_cobalt``'s ``IGlobal._installDriver``.
+        """
+        from depends import depends
+
+        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        debug(f'Cobalt Evaluator Global: Loading requirements from {requirements}')
+        # Broad by intent: any install failure degrades to the pure-Python evaluators.
+        try:
+            depends(requirements)
+        except Exception as e:
+            warning(
+                f'Cobalt Evaluator Global: could not install {requirements}: {e!s}. '
+                'Continuing with the pure-Python evaluators.'
+            )
+
+    def endGlobal(self):
+        """Release the evaluator instance."""
+        self._evaluator = None
+
+    def _extractConfig(self) -> Dict[str, Any]:
+        """Return evaluator config with service-schema prefixes normalized."""
+        current_conn_config = getattr(self.IEndpoint.endpoint, 'connConfig', self.glb.connConfig)
+        normalized_conn_config = self._normalizeConfigKeys(current_conn_config)
+        config = Config.getNodeConfig(self.glb.logicalType, normalized_conn_config)
+        return self._normalizeConfigKeys(config)
+
+    @classmethod
+    def _normalizeConfigKeys(cls, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Map service field names onto the flat keys consumed by CobaltEvaluator.
+
+        The engine delivers credential-backed config under the node's own
+        service prefix: ``nodes/scripts/gen-credentials.mjs`` builds every
+        catalog path as ``<services.json "prefix">.<field>``, and this node
+        declares ``"prefix": "eval"``, so the generated credential for the
+        judge API key arrives as the flat key ``eval.apikey`` (see the
+        ``eval_cobalt`` entry in ``packages/ai/src/ai/modules/mcp/credentials.json``).
+        Stripping that prefix is what puts the value where
+        ``config.get('apikey')`` can find it — without it the llm_judge profile
+        ran keyless. The sibling ``dataset_cobalt`` node strips its own
+        ``dataset.`` prefix the same way.
+
+        ``cobalt_eval.`` and ``llm.cloud.apikey`` are kept for config saved by
+        earlier UI shapes.
+
+        Args:
+            config: Raw config mapping, possibly nested one profile deep.
+
+        Returns:
+            The same mapping with prefixed keys flattened onto bare field names.
+        """
+        normalized = {}
+        prefixed = {}
+        for key, value in config.items():
+            normalized_key = key
+            if isinstance(key, str):
+                if key.startswith(_SERVICE_PREFIX):
+                    normalized_key = key.removeprefix(_SERVICE_PREFIX)
+                elif key.startswith('cobalt_eval.'):
+                    normalized_key = key.removeprefix('cobalt_eval.')
+                elif key == 'llm.cloud.apikey':
+                    normalized_key = 'apikey'
+
+            if isinstance(value, dict):
+                normalized_value = cls._normalizeConfigKeys(value)
+            else:
+                normalized_value = value
+
+            if normalized_key != key:
+                prefixed[normalized_key] = normalized_value
+            else:
+                normalized[normalized_key] = normalized_value
+
+        normalized.update(prefixed)
+
+        return normalized

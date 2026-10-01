@@ -230,6 +230,16 @@ Question(
 
 `QuestionType`: `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT`.
 
+`metadata` is **never rendered into the prompt** — `getPrompt()` does not include
+it, so the model never sees it. Nodes use it to carry a value a later node needs,
+such as the reference answer an evaluator scores against. It travels only as far
+as the nodes that carry it forward: a node that forwards the same question object
+preserves it, while a node that builds a new `Question` has to copy it across
+explicitly (the `prompt` node does). A node that creates a question from text or
+a tool result rather than from an upstream question starts from an empty
+`metadata`, so do not assume a value set at the head of a pipeline reaches the
+tail.
+
 | Method | Signature | Description |
 | --- | --- | --- |
 | `addInstruction` | `addInstruction(self, title: str, instruction: str)` | Adds an instruction (e.g. "Use bullet points"). |
@@ -240,6 +250,7 @@ Question(
 | `addDocuments` | `addDocuments(self, documents: Doc \| List[Doc])` | Adds documents for the AI to reference. |
 | `addGoal` | `addGoal(self, goal: str)` | Adds a goal statement for the AI. |
 | `getPrompt` | `getPrompt(self, has_previous_json_failed: bool = False) -> str` | Returns the full prompt (internal). |
+| `metadata` | field | Pipeline state carried alongside the question, `Optional[Dict[str, Any]]` defaulting to `{}`. Never rendered into the prompt. <!-- language-specific --> |
 
 ## Answer
 
@@ -254,6 +265,7 @@ From `rocketride.schema`. Parses chat response content — see
 | `isJson` | `isJson(self) -> bool` | Returns the `expectJson` flag (does not inspect content). |
 | `parsePython` | `parsePython(self, value: str) -> Any` | Extracts Python code from a code block in the response. |
 | `tokens` | field | Turn-total LLM token usage reported by the server. The TypeScript `Answer` carries no usage field. <!-- language-specific --> |
+| `metadata` | field | Pipeline state carried over from the question, `Optional[Dict[str, Any]]` defaulting to `{}`. The LLM drivers copy `Question.metadata` onto the answer on both the success and the error path; it is not part of the response body sent to the client. <!-- language-specific --> |
 
 ## Types
 
