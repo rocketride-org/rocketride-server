@@ -21,13 +21,16 @@ from unittest.mock import MagicMock
 import pytest
 
 import sync_models
-from core import smoke
+from core import merger, smoke
 from core.patcher import get_profiles
 from providers.base import CloudProvider
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WORKFLOW = _REPO_ROOT / '.github' / 'workflows' / 'sync-models.yml'
 _TASKS_JS = _REPO_ROOT / 'tools' / 'sync_models' / 'scripts' / 'tasks.js'
+# OpenRouter's routing variants. The part after the colon tells OpenRouter how to
+# route and is no part of the name a vendor answers to.
+_ROUTING_VARIANTS = ('batch', 'free', 'thinking', 'nitro', 'floor', 'online', 'extended')
 
 
 def _fake_openai(monkeypatch, models):
@@ -176,6 +179,78 @@ class TestProviderWiring:
             if needed - written:
                 missing.append(f'{name}: seeded profiles all carry {sorted(needed)}, new ones would not')
         assert not missing, '\n'.join(missing)
+
+
+class TestRoutingAliases:
+    """
+    OpenRouter's routing variants must never become profiles.
+
+    It lists them as models of their own — `gpt-4o:batch`, `gpt-oss-120b:free` —
+    but the suffix is an instruction to OpenRouter, not part of the name the
+    vendor answers to, so no native SDK accepts such an ID.
+    """
+
+    class _Provider(CloudProvider):
+        """Takes every ID the cache offers, so only the alias filter decides."""
+
+        provider_name = 'llm_test_alias'
+
+        def make_client(self, api_key: str) -> object:
+            """
+            Args:
+                api_key: Ignored
+
+            Returns:
+                Nothing usable; this provider never fetches
+            """
+            raise AssertionError('the fallback path must not build a client')
+
+        def fetch_models(self, client: object) -> list:
+            """
+            Args:
+                client: Ignored
+
+            Returns:
+                Nothing; discovery runs from the OpenRouter cache here
+            """
+            raise AssertionError('the fallback path must not call the provider API')
+
+    def test_discovery_skips_them_and_keeps_the_base_model(self, monkeypatch):
+        """The base model is listed separately, so nothing is lost by dropping the variant."""
+        monkeypatch.setattr(
+            merger,
+            '_OPENROUTER_CACHE',
+            {
+                'gpt-4o': (128000, 16384, 'OpenAI: GPT-4o', None, False),
+                'gpt-4o:batch': (128000, 16384, 'OpenAI: GPT-4o (batch)', None, False),
+                'gpt-oss-120b:free': (131072, 32768, 'OpenAI: gpt-oss-120b (free)', None, False),
+            },
+        )
+
+        found = self._Provider({'model_filter': {'include_prefixes': ['gpt-']}})._fetch_openrouter_models()
+
+        assert [entry['id'] for entry in found] == ['gpt-4o']
+
+    def test_a_local_model_id_with_a_colon_is_not_a_routing_alias(self):
+        """Ollama-style IDs (deepseek-r1:7b) are real names; only OpenRouter's variants are not."""
+        profiles = get_profiles(str(_REPO_ROOT / 'nodes/src/nodes/llm_deepseek/services.json'))
+        local = [p for p in profiles.values() if isinstance(p, dict) and str(p.get('model', '')).endswith(':7b')]
+
+        assert local, 'expected the local deepseek-r1:7b profile to still be here'
+        assert not any(p.get('deprecated') for p in local)
+
+    def test_no_live_profile_carries_one(self):
+        """Nothing a user can pick may hold an alias the provider cannot serve."""
+        offenders = []
+        for name, rel in sync_models._SERVICES_JSON_PATHS.items():
+            for key, profile in get_profiles(str(_REPO_ROOT / rel)).items():
+                if not isinstance(profile, dict) or profile.get('modelSource') != 'openrouter':
+                    continue
+                model = str(profile.get('model', ''))
+                _, _, suffix = model.partition(':')
+                if suffix in _ROUTING_VARIANTS and not profile.get('deprecated'):
+                    offenders.append(f'{name}: {key} ({model})')
+        assert not offenders, 'live profiles holding an OpenRouter routing alias:\n' + '\n'.join(offenders)
 
 
 # ---------------------------------------------------------------------------

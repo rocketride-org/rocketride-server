@@ -694,6 +694,12 @@ class CloudProvider(ABC):
         seen: Dict[str, Dict[str, Any]] = {}  # native_id → entry
 
         for bare_id, (ctx, _out, _name, _exp, _reasoning) in get_openrouter_cache().items():
+            # OpenRouter lists routing variants as models of their own: "gpt-4o:batch",
+            # "gpt-oss-120b:free". What follows the colon tells OpenRouter how to route
+            # and is no part of the name the vendor answers to, so such an ID is never
+            # valid for a native SDK. The base model is listed separately anyway.
+            if ':' in bare_id:
+                continue
             # Apply the same two-step conversion as _fetch_litellm_models():
             # 1. normalize_model_id() — handles raw ID quirks (e.g. dots→hyphens for Anthropic)
             # 2. litellm_to_native_model_id() — converts to the native format stored in
