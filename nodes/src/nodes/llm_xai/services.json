@@ -253,6 +253,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 900000, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the xAI API serves no model with this ID. Please use 'grok-4.3' instead.",
 				"capabilities": {
 					"reasoning": true
 				},

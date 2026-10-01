@@ -232,6 +232,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 196608, // openrouter
 				"modelOutputTokens": 176947, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter free routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M2.7' instead.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -243,6 +245,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 524288, // openrouter
 				"modelOutputTokens": 471859, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M3' instead.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -254,6 +258,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 943718, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter free routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M3' instead.",
 				"capabilities": {
 					"reasoning": true
 				},

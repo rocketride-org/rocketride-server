@@ -377,6 +377,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
 				"modelOutputTokens": 235929, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the DashScope API serves no model with this ID. Please use 'qwen3.5-9b' instead.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -487,6 +489,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1010000, // openrouter
 				"modelOutputTokens": 909000, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the DashScope API serves no model with this ID. Please use 'qwen3.8-2.4t-a95b' instead.",
 				"capabilities": {
 					"reasoning": true
 				},
