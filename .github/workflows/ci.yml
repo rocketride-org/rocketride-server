@@ -10,7 +10,6 @@ on:
     branches: [develop, stage, main, 'release/**']
   pull_request:
     branches: [develop, stage, main, 'release/**']
-    types: [opened, synchronize, reopened, edited, labeled]
   merge_group:
     types: [checks_requested]
   schedule:
@@ -133,7 +132,6 @@ jobs:
       !cancelled() &&
       needs.init.result == 'success' &&
       github.event_name != 'schedule' &&
-      (github.event.action != 'edited' || github.event.changes.base) &&
       (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/_build.yaml
     permissions:
@@ -143,7 +141,8 @@ jobs:
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
-      # Skipped for re-targets, applied for PR stacks.
+      # Build only for a pull request into another feature branch (the middle of
+      # a stack). CI OK then fails on purpose: see `Verify results` below.
       test: ${{ github.event_name != 'pull_request'
                 || contains(fromJSON('["develop", "stage", "main"]'), github.event.pull_request.base.ref)
                 || startsWith(github.event.pull_request.base.ref, 'release/')
@@ -161,7 +160,6 @@ jobs:
       !cancelled() &&
       needs.init.result == 'success' &&
       github.event_name == 'pull_request' &&
-      (github.event.action != 'edited' || github.event.changes.base) &&
       needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -370,10 +368,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Verify results
+        env:
+          # Must match the `test:` input passed to the build job above.
+          TESTS_RAN: ${{ github.event_name != 'pull_request'
+                     || contains(fromJSON('["develop", "stage", "main"]'), github.event.pull_request.base.ref)
+                     || startsWith(github.event.pull_request.base.ref, 'release/')
+                     || contains(github.event.pull_request.labels.*.name, 'ci:test') }}
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
             echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+            exit 1
+          fi
+          # A stacked pull request builds without tests, so CI OK stays red and it
+          # cannot merge until a push with develop as its base runs the suite.
+          if [[ "${{ needs.build.result }}" == "success" && "$TESTS_RAN" != "true" ]]; then
+            echo "❌ Built without tests (pull request into a feature branch). Push to this branch after it targets develop, or add the ci:test label and push, to run the suite."
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
