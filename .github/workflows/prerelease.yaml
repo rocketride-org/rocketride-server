@@ -167,3 +167,113 @@ jobs:
       server_version: ${{ needs.init.outputs.server_version }}
       prerelease: true
     secrets: inherit
+
+  # ---------------------------------------------------------------------------
+  # Make a failed prerelease loud.
+  #
+  # Docker failed on every prerelease from 2026-09-24 to 09-30 while every other
+  # job stayed green, so the tags looked current and nobody looked (#2441). A red
+  # job in a workflow nobody watches is silent. This job opens one tracking
+  # issue when any job above fails, posts it to the Discord issues forum, and
+  # closes it on the next run where everything passes.
+  #
+  # The Discord post is made here, not by discord-issues.yml: an issue created
+  # with GITHUB_TOKEN does not trigger other workflows.
+  #
+  # A run where `init` was skipped (CI on develop failed) is neither a failure
+  # nor a recovery, so it changes nothing.
+  # ---------------------------------------------------------------------------
+  alert:
+    name: Alert on failure
+    needs: [init, build, cleanup-prereleases, prerelease, docker]
+    if: always() && needs.init.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open, refresh or close the tracking issue
+        id: track
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const needs = JSON.parse(process.env.NEEDS);
+            const failed = Object.entries(needs)
+              .filter(([, j]) => j.result === 'failure' || j.result === 'cancelled')
+              .map(([name, j]) => `${name} (${j.result})`);
+            const marker = '<!-- prerelease-failure-alert -->';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const sha = (context.payload.workflow_run && context.payload.workflow_run.head_sha) || context.sha;
+
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'prerelease-failing',
+            });
+            const issue = open.find(i => (i.body || '').includes(marker));
+
+            if (failed.length === 0) {
+              core.setOutput('action', 'none');
+              if (issue) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `Prerelease is green again at \`${sha.slice(0, 8)}\` ([run](${runUrl})). Closing.`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: issue.number, state: 'closed', state_reason: 'completed',
+                });
+                core.notice(`Closed #${issue.number}.`);
+              }
+              return;
+            }
+
+            const body = [
+              marker,
+              `The prerelease run for \`${sha.slice(0, 8)}\` failed: **${failed.join(', ')}**.`,
+              '',
+              `Run: ${runUrl}`,
+              '',
+              'Jobs that passed still published, so tags and prereleases can look current while an artifact (for example the Docker image) is stale.',
+              '',
+              '_Opened and refreshed by the `alert` job in `prerelease.yaml`. It closes itself on the next fully green prerelease._',
+            ].join('\n');
+
+            if (issue) {
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, body,
+              });
+              core.setOutput('action', 'refreshed');
+              core.setOutput('url', issue.html_url);
+              core.notice(`Refreshed #${issue.number}.`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: `Prerelease failing: ${failed.join(', ')}`,
+                body, labels: ['prerelease-failing'],
+              });
+              core.setOutput('action', 'opened');
+              core.setOutput('url', created.data.html_url);
+              core.setOutput('title', created.data.title);
+              core.notice(`Opened #${created.data.number}.`);
+            }
+
+      # Only on a new issue: a refresh means the channel already knows.
+      - name: Post to the Discord issues forum
+        if: steps.track.outputs.action == 'opened'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_ISSUES_FORUM_WEBHOOK_URL }}
+          TITLE: ${{ steps.track.outputs.title }}
+          URL: ${{ steps.track.outputs.url }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_ISSUES_FORUM_WEBHOOK_URL is not set; skipping"
+            exit 0
+          fi
+          payload=$(jq -n --arg t "$TITLE" --arg u "$URL" \
+            '{thread_name: ($t | .[0:100]), content: ("Prerelease failed and nothing else will say so: " + $u)}')
+          curl -sS --fail-with-body --connect-timeout 10 --max-time 30 \
+            -H 'Content-Type: application/json' -d "$payload" "$DISCORD_WEBHOOK_URL" >/dev/null
