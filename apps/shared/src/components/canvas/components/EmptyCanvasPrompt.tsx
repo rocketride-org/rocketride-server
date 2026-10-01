@@ -173,7 +173,7 @@ interface IEmptyCanvasPromptProps {
 
 /**
  * EmptyCanvasPrompt renders the starting point overlay when the pipeline canvas has no nodes.
- * Prioritizes curated starter templates and nests raw source components in an advanced collapsible section (open by default).
+ * Prioritizes curated starter templates and nests raw source components in an advanced collapsible section (collapsed by default).
  *
  * @param props - Component properties including template instantiation and node addition callbacks.
  * @returns The rendered empty canvas prompt overlay or null if no sources/templates are available.
@@ -296,9 +296,9 @@ export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: 
 					{sources.length > 0 && (
 						<>
 							{templateList.length > 0 && <div style={styles.divider} />}
-							<details open style={styles.details}>
+							<details style={styles.details}>
 								<summary style={styles.summary}>Advanced: Start with a raw source component</summary>
-								<p style={styles.note}>Every pipeline must begin with a single source component.</p>
+								<p style={styles.note}>Every pipeline starts from a source component.</p>
 								<div style={styles.grid}>
 									{sources.map(({ key, service }) => (
 										<button

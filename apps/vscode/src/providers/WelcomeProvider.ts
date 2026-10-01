@@ -40,6 +40,7 @@ import { getConnectionManager, getEngineRegistry } from '../extension';
 import { commitStagedCloudCredentials } from '../connection/connection';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
+import { getLogger } from '../shared/util/output';
 
 const DISMISSED_KEY = 'welcomeDismissed';
 
@@ -51,6 +52,7 @@ export class WelcomeProvider {
 	/** True while the provider itself is being disposed (host shutdown) — a
 	 * panel closed by shutdown is NOT a user dismissal. */
 	private isShuttingDown = false;
+	private logger = getLogger();
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -264,41 +266,44 @@ export class WelcomeProvider {
 	 */
 	private async saveAndConnect(settings: Record<string, unknown>): Promise<void> {
 		try {
-			// Record whether this is the first-run onboarding setup before marking as dismissed.
-			// Re-opening Welcome later to adjust settings should not auto-launch another canvas.
+			// Step 1: Check if first run (before dismissal) — re-opening Welcome
+			// later to adjust settings should not auto-launch another canvas.
 			const isFirstRun = !this.isDismissed();
 
-			// Step 1: Atomic write — suppresses config-change listeners during the batch
+			// Step 2: Atomic write — suppresses config-change listeners during the batch
 			await this.configManager.applyAllSettings(settings as any);
 
-			// Step 1b: Commit any staged cloud sign-in/sign-out together with the
+			// Step 3: Commit any staged cloud sign-in/sign-out together with the
 			// form it belongs to (the welcome flow is transactional like Settings).
 			await commitStagedCloudCredentials();
 
-			// Step 2: Persist dismissal so the welcome page doesn't re-open on next activation
+			// Step 4: Persist dismissal so the welcome page doesn't re-open on next activation
 			await vscode.workspace.getConfiguration('rocketride').update(DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
 
-			// Step 3: The welcomeDismissed write above fires a config-change event
+			// Step 5: The welcomeDismissed write above fires a config-change event
 			// AFTER the batch flag is cleared. Cancel it so it doesn't race with
 			// the reconcile we're about to trigger.
 			const connectionManager = getConnectionManager();
 			connectionManager?.cancelPendingConfigChange();
 
-			// Step 4-5: Initialize CMs then reconcile — same order as normal activation
+			// Step 6: Initialize CMs (validates creds, sets mode) — same order as normal activation
 			if (connectionManager) await connectionManager.initialize();
 
+			// Step 7: Reconcile engines (downloads/starts, CMs auto-connect on 'ready')
 			const registry = getEngineRegistry();
 			if (registry) await registry.reconcile();
 
-			// Step 6: Close panel — engines are starting, CMs will auto-connect
+			// Step 8: Close panel — engines are starting, CMs will auto-connect
 			this.panel?.dispose();
 
-			// Auto-launch blank canvas on initial onboarding (first run only) so user lands in the builder
+			// Step 9: Auto-launch blank canvas on initial onboarding (first run only) so user lands in the builder
 			if (isFirstRun) {
-				void vscode.commands.executeCommand('rocketride.pipeline.new');
+				vscode.commands.executeCommand('rocketride.pipeline.new').then(undefined, (err: unknown) => {
+					this.logger.error(`[WelcomeProvider] Failed to auto-launch blank canvas: ${err}`);
+				});
 			}
 		} catch (error) {
-			console.error('[WelcomeProvider] Failed to save settings:', error);
+			this.logger.error(`[WelcomeProvider] Failed to save settings: ${error}`);
 			this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: `Failed to save settings: ${error}` });
 		}
 	}
