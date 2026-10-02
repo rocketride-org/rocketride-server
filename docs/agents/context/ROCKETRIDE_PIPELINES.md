@@ -298,6 +298,7 @@ data. The complete set in the current catalog:
 | `filestore_source` | `tags` | Reads from a RocketRide file store |
 | `filesys` | `tags` | Reads from the local file system |
 | `telegram` | `text`, `image`, `audio`, `video`, `tags` | Telegram Bot messages, routed per message type |
+| `scraper_beautifulsoup_source` | `answers`, `text` | Run-once web scraping of configured JSON APIs, RSS/Atom feeds and HTML pages (no input; schedulable). `answers` carries one JSON row list per source — wire it to a SQL node's `answers` lane to load a table |
 | `tools` | — (nothing) | Transfers no data; exists to **host tool nodes** via invoke |
 
 (`remote` is NOT a source — it is an infrastructure transport for distributed pipelines.)
@@ -832,7 +833,8 @@ Research needs two capabilities: finding sources and reading them; the agent's L
 synthesis. Search tools (pick one): `tool_tavily` (`apikey`, `maxResults`, `searchDepth`
 `basic`/`advanced`, `topic` `general`/`news`/`finance`) or `tool_exa_search` (`apikey`,
 `numResults`, `searchType` `auto`/`neural`/`keyword`, `useAutoprompt`, `includeText`). Page
-reader: `tool_firecrawl` (`apikey`; exposes `firecrawl.scrape_url` and `firecrawl.map_url`).
+reader: `tool_firecrawl` (`apikey`; exposes `firecrawl.scrape_url` and `firecrawl.map_url`), or the
+key-free `scraper_beautifulsoup` (`fetch_page`, `extract`, `fetch_feed`, `fetch_json`; no JavaScript rendering).
 Tool configs are flat — `{ "type": "tool_tavily", "apikey": "${ROCKETRIDE_TAVILY_KEY}" }` —
 and each tool declares `"control": [{ "classType": "tool", "from": "agent_rocketride_1" }]`
 exactly as in Pattern 13.
