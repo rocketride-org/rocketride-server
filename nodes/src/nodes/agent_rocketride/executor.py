@@ -755,12 +755,16 @@ def _describe_dict(
 # ---------------------------------------------------------------------------
 
 
+# Returned by _memory_get when a key is not there. A stored value can itself be
+# None (JSON null), so None cannot mean "missing".
+_MISSING = object()
+
+
 def _memory_get(key: str, context: AgentContext) -> Any:
     """Fetch a raw value from the memory store.
 
-    Returns ``None`` on missing key, failed lookup, or any error — callers
-    treat None as "key not found" and substitute an empty string or None
-    in the template output.
+    Returns ``_MISSING`` on missing key, failed lookup, or any error. A stored
+    null comes back as ``None``, like any other stored value.
     """
     try:
         result = context.memory.get(key)
@@ -769,7 +773,7 @@ def _memory_get(key: str, context: AgentContext) -> Any:
             return result.get('value')
     except Exception:
         pass
-    return None
+    return _MISSING
 
 
 def _format_value(
@@ -837,7 +841,7 @@ def _resolve_refs(
             fmt = exact.group(2)
             path = exact.group(3)
             v = _memory_get(key, context)
-            if v is None:
+            if v is _MISSING:
                 return None
             # Apply JMESPath extraction before formatting so format receives
             # the narrowed slice, not the full stored object.
@@ -861,8 +865,10 @@ def _resolve_refs(
             fmt = m.group(2)
             path = m.group(3)
             v = _memory_get(key, context)
-            if v is None:
-                return ''  # Missing key → empty string, don't break the surrounding text
+            if v is _MISSING:
+                # Say what is missing instead of leaving a silent gap in the text.
+                debug(f'rocketride wave unresolved memory ref key={key!r}')
+                return f'[missing data: {key}]'
             if path:
                 try:
                     v = jmespath.search(path, v)
@@ -909,7 +915,19 @@ def resolve_answer_refs(
     if not isinstance(answer, str) or not _REF_PATTERN.search(answer):
         # Fast exit — no template references to resolve
         return answer
-    return _resolve_refs(answer, agent_base=agent_base, context=context)
+    exact = _REF_PATTERN.fullmatch(answer)
+    if exact and _memory_get(exact.group(1), context) is _MISSING:
+        return f'[missing data: {exact.group(1)}]'
+    resolved = _resolve_refs(answer, agent_base=agent_base, context=context)
+    if isinstance(resolved, str):
+        return resolved
+    # The whole answer was one tag, which resolves to the stored value itself
+    # (a dict, a list, a number, or a stored null). An answer is text: render it as
+    # JSON, or as plain text when the data cannot be JSON (tuple keys, a cycle).
+    try:
+        return json.dumps(resolved, ensure_ascii=False, default=str)
+    except (TypeError, ValueError, RecursionError):
+        return str(resolved)
 
 
 # ---------------------------------------------------------------------------

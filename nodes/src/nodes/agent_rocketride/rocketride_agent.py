@@ -48,6 +48,11 @@ from .executor import execute_wave, resolve_answer_refs
 # Can be overridden via the ``max_waves`` node configuration field.
 _DEFAULT_MAX_WAVES = 10
 
+# How much of each memory.peek result the synthesis fallback includes. Peeks are
+# targeted reads, so this is usually all of it; the cap bounds a wide one, and the
+# line then says where it was cut.
+_SYNTHESIS_PREVIEW_CHARS = 2000
+
 
 class RocketRideDriver(AgentBase):
     """
@@ -88,11 +93,14 @@ class RocketRideDriver(AgentBase):
         Each iteration:
           1. Calls plan_wave() which builds the full prompt and fires one LLM call.
           2. Extracts scratch (persistent working notes) from the LLM response.
-          3. Prunes memory keys the LLM has finished with (remove field).
-          4. Surfaces the LLM's thought to the UI via SSE.
-          5. If done=true, resolves {{memory.ref:...}} template refs in the answer
-             and returns.
-          6. Otherwise, executes the tool_calls in parallel and loops.
+          3. Surfaces the LLM's thought to the UI via SSE.
+          4. If done=true with no calls, resolves {{memory.ref:...}} template refs
+             in the answer and returns.
+          5. Otherwise, executes the tool_calls in parallel. If the reply also set
+             done=true and every call succeeded, returns its answer.
+          6. Prunes memory keys the LLM has finished with (remove field) and loops.
+
+        The trace records why the run stopped: done, max_waves, empty_plan or error.
 
         Returns:
             A ``(content, trace)`` tuple consumed by ``AgentBase.run_agent``.
@@ -137,38 +145,29 @@ class RocketRideDriver(AgentBase):
                 )
             except Exception as exc:
                 error(f'rocketride wave plan failed run_id={run_id}: {exc}')
-                return f'LLM error: {exc}', trace
+                trace['stop_reason'] = 'error'
+                trace['error'] = f'{type(exc).__name__}: {exc}'
+                # A retry that failed after an unusable reply carries that reply's notes.
+                current_scratch = safe_str(getattr(exc, 'wave_scratch', '')) or current_scratch
+                if not waves and not current_scratch:
+                    # Nothing was gathered, so there is nothing to save; the cause
+                    # (a bad key, a rate limit, an unreadable reply) is the useful part.
+                    self.sendSSE(context, 'thinking', message='Planning failed.', stop_reason='error')
+                    return f'LLM error: {exc}', trace
+                # Work was gathered: answer from it instead of discarding it.
+                self.sendSSE(
+                    context,
+                    'thinking',
+                    message='Planning failed; answering from what was gathered...',
+                    stop_reason='error',
+                )
+                return self._synthesize(question=question, waves=waves, context=context, scratch=current_scratch), trace
 
             # Update scratch from the LLM response.  Fall back to the previous
             # scratch if the LLM returned an empty string — we never want to
             # lose accumulated working notes due to an accidental empty response.
             current_scratch = safe_str(result.get('scratch', '')) or current_scratch
             trace['scratch'] = current_scratch
-
-            # ------------------------------------------------------------------
-            # Memory pruning — evict keys the LLM is done with
-            # ------------------------------------------------------------------
-
-            # The LLM signals via the remove field which memory keys it no
-            # longer needs.  We clear them from the memory store and strip them
-            # from wave history so they don't re-appear in the next prompt.
-            # This keeps the "Previous tool results" context lean as the session
-            # progresses and old intermediate results become irrelevant.
-            remove_keys = result.get('remove') or []
-            if remove_keys:
-                for key in remove_keys:
-                    try:
-                        context.memory.clear(key)
-                    except Exception as exc:
-                        debug(f'rocketride wave remove key={key!r} failed: {exc}')
-                # Strip removed result entries from wave history to keep context lean
-                for w in waves:
-                    w['results'] = [r for r in w.get('results', []) if r.get('key') not in remove_keys]
-                # Drop wave entries that are now completely empty (all results pruned)
-                waves[:] = [w for w in waves if w.get('results')]
-                # Forget fingerprints for cleared keys, or a later note would point at
-                # a key that no longer resolves.
-                self.seen_results = {f: k for f, k in self.seen_results.items() if k not in remove_keys}
 
             # Surface the LLM's thought to the UI — one-sentence description of
             # what the agent is doing this turn.  Shown in the "thinking" panel.
@@ -191,7 +190,10 @@ class RocketRideDriver(AgentBase):
                 ]
                 if notes:
                     waves.append({'wave_num': wave_num, 'calls': [], 'results': notes})
-                return self._final_answer(result, context), trace
+                trace['stop_reason'] = 'done'
+                answer = self._final_answer(result, context)
+                self._clear_keys(result.get('remove') or [], context)  # after the answer has used them
+                return answer, trace
 
             # ------------------------------------------------------------------
             # Execute tool calls
@@ -211,6 +213,7 @@ class RocketRideDriver(AgentBase):
                         for i, problem in enumerate(problems)
                     ]
                     waves.append({'wave_num': wave_num, 'calls': [], 'results': results})
+                trace['stop_reason'] = 'empty_plan'
                 break
 
             # Inform the UI which tools are about to run this wave
@@ -218,6 +221,16 @@ class RocketRideDriver(AgentBase):
             self.sendSSE(
                 context, 'thinking', message=f'Running: {", ".join(tool_names)}', wave=wave_num + 1, tools=tool_names
             )
+
+            # Keys this reply removes are cleared after the wave, so its calls can still
+            # read them, but their fingerprints are forgotten now: a duplicate note made
+            # during this wave must not point at a key that is about to disappear.
+            # Only results from earlier waves can be removed: a key this wave's calls are
+            # about to be stored under would otherwise clear a result just fetched.
+            earlier = {r.get('key') for w in waves for r in w.get('results', [])}
+            remove_keys = [k for k in result.get('remove') or [] if k in earlier]
+            if remove_keys:
+                self.seen_results = {f: k for f, k in self.seen_results.items() if k not in remove_keys}
 
             # Execute all tool calls in this wave concurrently.  Each result is
             # stored in memory under "wave-N.rM" and a structural summary is
@@ -244,27 +257,64 @@ class RocketRideDriver(AgentBase):
             # the model sees why and goes on.
             if result.get('done') and not any(r.get('error') or r.get('failed') for r in results):
                 debug(f'rocketride wave done after its calls wave_num={wave_num} run_id={run_id}')
-                return self._final_answer(result, context), trace
+                trace['stop_reason'] = 'done'
+                answer = self._final_answer(result, context)
+                self._clear_keys(remove_keys, context)  # after the answer has used them
+                return answer, trace
+
+            # ------------------------------------------------------------------
+            # Memory pruning — evict keys the LLM is done with
+            # ------------------------------------------------------------------
+
+            # Runs only when the loop goes on: the answer above was already built,
+            # so a key this reply both removes and references is still there.
+            # The LLM signals via the remove field which memory keys it no
+            # longer needs.  We clear them from the memory store and strip them
+            # from wave history so they don't re-appear in the next prompt.
+            # This keeps the "Previous tool results" context lean as the session
+            # progresses and old intermediate results become irrelevant.
+            if remove_keys:
+                self._clear_keys(remove_keys, context)
+                # Strip removed result entries from wave history to keep context lean
+                for w in waves:
+                    w['results'] = [r for r in w.get('results', []) if r.get('key') not in remove_keys]
+                # Drop wave entries that are now completely empty (all results pruned)
+                waves[:] = [w for w in waves if w.get('results')]
 
         # ------------------------------------------------------------------
-        # Synthesis fallback — max waves reached without done=true
+        # Synthesis fallback — max waves reached, or an unusable plan
         # ------------------------------------------------------------------
 
         # If the LLM never converged on a done=true response within max_waves
         # iterations, ask it one final time to produce a best-effort answer
         # from everything that was gathered.  This prevents the agent from
-        # silently returning nothing after a long run.
-        debug(f'rocketride wave max waves reached run_id={run_id}, synthesizing final answer')
-        self.sendSSE(context, 'thinking', message='Synthesizing final answer...')
-        return self._synthesize(question=question, waves=waves, context=context), trace
+        # silently returning nothing after a long run. The stop reason travels
+        # with the trace and the last status event, so a caller can tell this
+        # answer from a finished one.
+        trace.setdefault('stop_reason', 'max_waves')
+        debug(f'rocketride wave stopping ({trace["stop_reason"]}) run_id={run_id}, synthesizing final answer')
+        self.sendSSE(context, 'thinking', message='Synthesizing final answer...', stop_reason=trace['stop_reason'])
+        return self._synthesize(question=question, waves=waves, context=context, scratch=current_scratch), trace
 
     # ------------------------------------------------------------------
     # Final answer
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _clear_keys(keys: List[str], context: AgentContext) -> None:
+        """Clear memory keys the model is done with; a failed clear only costs memory."""
+        for key in keys or []:
+            # The memory node reads a clear with no key as "clear everything".
+            if not isinstance(key, str) or not key.strip():
+                continue
+            try:
+                context.memory.clear(key)
+            except Exception as exc:
+                debug(f'rocketride wave remove key={key!r} failed: {exc}')
+
     def _final_answer(self, result: Dict[str, Any], context: AgentContext) -> str:
         """Return the answer of a done=true plan, with its memory refs filled in."""
-        self.sendSSE(context, 'thinking', message='Generating final answer...')
+        self.sendSSE(context, 'thinking', message='Generating final answer...', stop_reason='done')
         answer = safe_str(result.get('answer', ''))
 
         # Resolve {{memory.ref:key:format:path}} references in the answer.
@@ -285,12 +335,13 @@ class RocketRideDriver(AgentBase):
         question: Question,
         waves: List[Dict[str, Any]],
         context: AgentContext,
+        scratch: str = '',
     ) -> str:
         """Ask the LLM to produce a final answer from all gathered results.
 
         Collects tool result summaries from every wave into a compact
-        bullet list, injects it as context, and asks the LLM to synthesize
-        a coherent answer.
+        bullet list, adds the scratch notes the model kept, and asks the
+        LLM to synthesize a coherent answer.
 
         This is a simple single-shot LLM call (no JSON format, no tool calls)
         — the goal is a best-effort human-readable answer from whatever data
@@ -308,6 +359,9 @@ class RocketRideDriver(AgentBase):
                     # The call returned, but its result says it failed: the summary's
                     # sample may not show where, so the fallback must not read it as success.
                     lines.append(f'- {tool}: FAILED (the result reports a failure) — {r.get("summary", "")}')
+                elif 'preview' in r:
+                    # memory.peek results carry their data in "preview", not "summary".
+                    lines.append(f'- {tool}: {_peek_line(r)}')
                 else:
                     lines.append(f'- {tool}: {r.get("summary", "")}')
 
@@ -326,8 +380,54 @@ class RocketRideDriver(AgentBase):
         q.questions = []
 
         q.addContext(f'Information gathered:\n{gathered}')
-        q.addQuestion('Based on the above, provide a complete and accurate final answer.')
+        # The notes are where the model kept what it had worked out (counts, names,
+        # conclusions); without them the fallback can only re-derive from summaries.
+        if scratch:
+            q.addContext(f'Your working notes from the steps so far:\n{scratch}')
+        q.addQuestion(
+            'Based on the above, provide a complete and accurate final answer. '
+            'The work stopped before it was finished: if something the goal needs is '
+            'still unknown, say what is missing rather than guessing.'
+        )
         try:
-            return self.call_llm(context, q)
+            answer = self.call_llm(context, q)
         except Exception as exc:
-            return f'Unable to produce final answer: {exc}'
+            # The model cannot be reached for the answer either. Hand the user what
+            # was gathered, as it stands, rather than only the error.
+            return _partial_report(f'the model call failed ({type(exc).__name__}: {exc})', lines, scratch)
+        if not safe_str(answer).strip():
+            # An empty reply is no answer either; the gathered facts still are.
+            return _partial_report('the model returned no text', lines, scratch)
+        return answer
+
+
+def _peek_line(r: Dict[str, Any]) -> str:
+    """A memory.peek result as one line: what was read, the data, and whether it is all of it."""
+    text = safe_str(r.get('preview', ''))
+    if len(text) > _SYNTHESIS_PREVIEW_CHARS:
+        text = (
+            f'{text[:_SYNTHESIS_PREVIEW_CHARS]} ... (cut at {_SYNTHESIS_PREVIEW_CHARS:,} of {len(text):,} characters)'
+        )
+    notes = []
+    if r.get('truncated'):
+        notes.append(f'showing {r.get("returned_items")} of {r.get("total_items")} items')
+    # This runs outside the fallback's try block, so a count that is not a number
+    # must not raise here and cost the user the gathered work.
+    if isinstance(r.get('total_chars'), int):
+        start = int(r.get('offset') or 0)
+        notes.append(f'characters {start:,} to {start + int(r.get("length") or 0):,} of {r["total_chars"]:,}')
+    where = f'{r["path"]} = ' if r.get('path') else ''
+    return where + text + (f' ({"; ".join(notes)})' if notes else '')
+
+
+def _partial_report(cause: str, lines: List[str], scratch: str) -> str:
+    """The answer when the fallback call fails or returns nothing: the cause, then the gathered facts."""
+    parts = [f'I could not finish: {cause}.']
+    if scratch:
+        parts += ['', 'My working notes:', scratch]
+    if lines:
+        # Whole lines: each is already bounded (a summary by its budget, a peek by
+        # _SYNTHESIS_PREVIEW_CHARS, with a note where it was cut), and these facts
+        # are all the user gets.
+        parts += ['', 'What I gathered:', *lines]
+    return '\n'.join(parts)

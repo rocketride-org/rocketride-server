@@ -547,8 +547,8 @@ def plan(
 
     Returns:
         The reply checked by ``normalize_plan``, plus ``problems`` (calls that were
-        dropped, for the model to see), or only ``problems`` when even a second try
-        produced neither an answer nor a call.
+        dropped, for the model to see), or only ``problems`` and any new ``scratch``
+        when even a second try produced neither an answer nor a call.
     """
     wave_prompt = _build_wave_question(
         context=context,
@@ -571,15 +571,27 @@ def plan(
     # instead of ending the run on a typo.
     if not result['tool_calls'] and not result['done']:
         debug(f'plan: unusable reply ({"; ".join(problems)}), asking once more')
+        # The retry is asked only to fix its shape, so notes this reply wrote are
+        # kept unless the retry writes new ones.
+        first_scratch = result.get('scratch')
         wave_prompt.addInstruction(
             'CRITICAL',
             'Your previous reply was not usable: '
             + '; '.join(problems)
             + '. Reply with exactly one of the two shapes in Response Format.',
         )
-        reply = agent_base.call_llm_json(context, wave_prompt)
+        try:
+            reply = agent_base.call_llm_json(context, wave_prompt)
+        except Exception as exc:
+            # The first reply's notes are all this round produced. They go with the
+            # error, so the driver can still answer from them.
+            if safe_str(first_scratch or '').strip():
+                exc.wave_scratch = first_scratch
+            raise
         debug(f'plan: retry result={json.dumps(reply, ensure_ascii=False, default=str)[:500]}')
         result, problems = normalize_plan(reply)
+        if first_scratch and not safe_str(result.get('scratch', '')).strip():
+            result['scratch'] = first_scratch
 
     # Diagnostic trace file — append each REQUEST/RESULT pair for offline
     # analysis.  Failures are silently swallowed so a missing/locked file
@@ -601,7 +613,11 @@ def plan(
         debug('plan: empty wave response, falling through to synthesis')
         # Nothing to run, but why still matters: the driver records these problems
         # before it falls back, so the trace and the fallback answer show them.
-        return {'problems': problems}
+        # The notes go too, so the fallback answer can use what the model worked out.
+        empty: Dict[str, Any] = {'problems': problems}
+        if safe_str(result.get('scratch', '')).strip():
+            empty['scratch'] = result['scratch']
+        return empty
 
     # Calls dropped from an otherwise usable reply are shown to the model next
     # round, so nothing it asked for disappears silently.
