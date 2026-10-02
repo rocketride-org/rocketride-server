@@ -410,6 +410,12 @@ async function syncRocketlibPythonLib(options = {}) {
 	return { synced: true, stats };
 }
 
+// Registered for packaging: a release archive without them gives an engine that
+// cannot load (exit 127) wherever the host has no matching libc++.
+function stageRuntimeLib(src, dest) {
+	return syncFile(src, dest, { package: true });
+}
+
 async function copyClangRuntimeLibs(options = {}) {
 	if (!isLinux()) return { copied: false, reason: 'Not Linux' };
 
@@ -422,18 +428,18 @@ async function copyClangRuntimeLibs(options = {}) {
 		const libcpp = path.join(llvmLib, 'libc++.so.1');
 
 		if (await exists(libcpp)) {
-			await copyFile(libcpp, path.join(DIST_DIR, 'lib', 'libc++.so.1'));
+			await stageRuntimeLib(libcpp, path.join(DIST_DIR, 'lib', 'libc++.so.1'));
 
 			const libcppabi = path.join(llvmLib, 'libc++abi.so.1');
 			if (await exists(libcppabi)) {
-				await copyFile(libcppabi, path.join(DIST_DIR, 'lib', 'libc++abi.so.1'));
+				await stageRuntimeLib(libcppabi, path.join(DIST_DIR, 'lib', 'libc++abi.so.1'));
 			}
 
 			const unwindPaths = [path.join(llvmLib, 'libunwind.so.1'), '/usr/lib/x86_64-linux-gnu/libunwind.so.1', '/usr/lib/x86_64-linux-gnu/libunwind.so.8'];
 
 			for (const unwindPath of unwindPaths) {
 				if (await exists(unwindPath)) {
-					await copyFile(unwindPath, path.join(DIST_DIR, 'lib', 'libunwind.so.1'));
+					await stageRuntimeLib(unwindPath, path.join(DIST_DIR, 'lib', 'libunwind.so.1'));
 					break;
 				}
 			}
@@ -446,16 +452,16 @@ async function copyClangRuntimeLibs(options = {}) {
 	const systemLibcpp = path.join(systemLib, 'libc++.so.1');
 
 	if (await exists(systemLibcpp)) {
-		await copyFile(systemLibcpp, path.join(destLib, 'libc++.so.1'));
+		await stageRuntimeLib(systemLibcpp, path.join(destLib, 'libc++.so.1'));
 
 		const systemLibcppabi = path.join(systemLib, 'libc++abi.so.1');
 		if (await exists(systemLibcppabi)) {
-			await copyFile(systemLibcppabi, path.join(destLib, 'libc++abi.so.1'));
+			await stageRuntimeLib(systemLibcppabi, path.join(destLib, 'libc++abi.so.1'));
 		}
 
 		const systemUnwind = path.join(systemLib, 'libunwind.so.1');
 		if (await exists(systemUnwind)) {
-			await copyFile(systemUnwind, path.join(destLib, 'libunwind.so.1'));
+			await stageRuntimeLib(systemUnwind, path.join(destLib, 'libunwind.so.1'));
 		}
 
 		return { copied: true, version: 'system' };
@@ -467,16 +473,16 @@ async function copyClangRuntimeLibs(options = {}) {
 	const fedoraLibcpp = path.join(fedoraLib, 'libc++.so.1');
 
 	if (await exists(fedoraLibcpp)) {
-		await copyFile(fedoraLibcpp, path.join(destLib, 'libc++.so.1'));
+		await stageRuntimeLib(fedoraLibcpp, path.join(destLib, 'libc++.so.1'));
 
 		const fedoraLibcppabi = path.join(fedoraLib, 'libc++abi.so.1');
 		if (await exists(fedoraLibcppabi)) {
-			await copyFile(fedoraLibcppabi, path.join(destLib, 'libc++abi.so.1'));
+			await stageRuntimeLib(fedoraLibcppabi, path.join(destLib, 'libc++abi.so.1'));
 		}
 
 		for (const unwindPath of [path.join(fedoraLib, 'libunwind.so.1'), path.join(fedoraLib, 'libunwind.so.8')]) {
 			if (await exists(unwindPath)) {
-				await copyFile(unwindPath, path.join(destLib, 'libunwind.so.1'));
+				await stageRuntimeLib(unwindPath, path.join(destLib, 'libunwind.so.1'));
 				break;
 			}
 		}
@@ -498,10 +504,10 @@ async function copyClangRuntimeLibs(options = {}) {
 		const libcpp = path.join(dir, 'libc++.so.1');
 		if (!(await exists(libcpp))) continue;
 
-		await copyFile(libcpp, path.join(destLib, 'libc++.so.1'));
+		await stageRuntimeLib(libcpp, path.join(destLib, 'libc++.so.1'));
 		for (const name of ['libc++abi.so.1', 'libunwind.so.1']) {
 			const src = path.join(dir, name);
-			if (await exists(src)) await copyFile(src, path.join(destLib, name));
+			if (await exists(src)) await stageRuntimeLib(src, path.join(destLib, name));
 		}
 		return { copied: true, version: 'llvm-tarball' };
 	}
@@ -815,7 +821,7 @@ function makeSetupRuntimeLibsAction(options = {}) {
 			if (result.copied) {
 				for (const name of ['libc++.so.1', 'libc++abi.so.1', 'libunwind.so.1']) {
 					const src = path.join(DIST_DIR, 'lib', name);
-					if (await exists(src)) await copyFile(src, path.join(DIST_DIR, name));
+					if (await exists(src)) await stageRuntimeLib(src, path.join(DIST_DIR, name));
 				}
 			}
 

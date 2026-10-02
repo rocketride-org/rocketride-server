@@ -52,6 +52,7 @@ from ai.constants import (
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
     CONST_STATUS_HISTORY_LIMIT,
     CONST_ANALYTICS_SLOWEST_DOCS,
+    CONST_TASK_DATA_PATH,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
@@ -819,9 +820,7 @@ class Task(DAPBase):
         Returns:
             Complete subprocess task configuration
         """
-        executable_path = sys.executable
-        exec_dir = os.path.dirname(executable_path)
-        data_path = os.path.abspath(os.path.join(exec_dir, '../data'))
+        data_path = CONST_TASK_DATA_PATH
 
         os.makedirs(data_path, exist_ok=True)
 

@@ -52,7 +52,9 @@ const {
     collectPytestReport,
     parallel,
     bracket,
-    parseServerAddress
+    parseServerAddress,
+    isLinux,
+    loadPackageJson
 } = require('../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -396,6 +398,73 @@ function makeTestAction(options = {}) {
     return { description: 'Testing nodes', steps };
 }
 
+// Why the container tasks cannot run here, or null. Linux only: elsewhere
+// dist/server holds a Windows or macOS engine, which cannot go into a Linux image.
+async function containerUnavailable() {
+    if (!isLinux()) return 'Linux only; dist/server here is not a Linux engine. Pull a published engine-base instead';
+    try {
+        await execCommand('docker', ['info'], { stdio: 'ignore', silent: true });
+    } catch {
+        return 'no Docker daemon reachable';
+    }
+    return null;
+}
+
+function skipLoudly(taskName, task, reason) {
+    task.output = `Skipped: ${reason}`;
+    console.warn(`WARNING: ${taskName} skipped — ${reason}`);
+}
+
+// Both images carry the engine version: the task protocol is not versioned.
+async function imageNames() {
+    const { version } = await loadPackageJson();
+    return { base: `rocketride/engine-base:${version}`, node: `rocketride/node:${version}` };
+}
+
+// Builds engine-base from dist/server, then the node image FROM it.
+function makeBuildImageAction(options = {}) {
+    return {
+        run: async (ctx, task) => {
+            const reason = await containerUnavailable();
+            if (reason) return skipLoudly('nodes:build-container', task, reason);
+
+            const { base, node } = await imageNames();
+            const dockerDir = path.join(PROJECT_ROOT, 'docker');
+            // The per-Dockerfile .dockerignore files need BuildKit
+            const env = { ...process.env, DOCKER_BUILDKIT: '1' };
+
+            task.output = `Building ${base}...`;
+            await execCommand('docker', ['build', '-f', path.join(dockerDir, 'Dockerfile.engine-base'), '-t', base, path.dirname(DIST_ROOT)],
+                { task, env, verbose: options.verbose });
+
+            task.output = `Building ${node}...`;
+            await execCommand('docker', ['build', '-f', path.join(dockerDir, 'Dockerfile.node'), '--build-arg', `ENGINE_BASE=${base}`, '-t', node, PROJECT_ROOT],
+                { task, env, verbose: options.verbose });
+
+            task.output = `Built ${node}`;
+        }
+    };
+}
+
+// Stage 0 of the container tests: the node image as a run gets it, checked by
+// docker/test-node-image.sh (the release workflow runs the same script before
+// signing). The runtime itself (a pipeline through the container) comes with
+// its Launcher.
+function makeTestImageAction(options = {}) {
+    return {
+        run: async (ctx, task) => {
+            const reason = await containerUnavailable();
+            if (reason) return skipLoudly('nodes:test-container', task, reason);
+
+            const { node } = await imageNames();
+            task.output = `Checking ${node}...`;
+            await execCommand('sh', [path.join(PROJECT_ROOT, 'docker', 'test-node-image.sh'), node],
+                { task, verbose: options.verbose });
+            task.output = `${node}: engine probe and offline installs passed`;
+        }
+    };
+}
+
 // ============================================================================
 // Module Export
 // ============================================================================
@@ -418,6 +487,15 @@ module.exports = {
         { name: 'nodes:build', action: () => ({
             description: 'Build nodes',
             steps: ['server:build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate']
+        })},
+        { name: 'nodes:build-container', action: (options) => ({
+            description: 'Build the node container image',
+            steps: ['nodes:build', { name: 'nodes:build-image', action: makeBuildImageAction(options) }]
+        })},
+        // Not part of nodes:test: it needs a daemon, and skips loudly without one
+        { name: 'nodes:test-container', action: (options) => ({
+            description: 'Test the node container image',
+            steps: ['nodes:build-container', { name: 'nodes:test-image', action: makeTestImageAction(options) }]
         })},
         { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
         { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
