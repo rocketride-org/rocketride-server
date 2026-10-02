@@ -1589,8 +1589,8 @@ version you want off the air while you investigate — and the still-visible
 row is the reminder. **Remove** is the statement that you no longer serve
 this audience at all, and it tidies the table. The Deploy tab's **Remove**
 action on a where-live row is the remove verb; from scripts,
-`client.removeAppPublish(appId, target)` performs remove, and disable rides
-the same deploy command as its `disable` subcommand. For the `@public` row,
+`client.removeAppPublish(appId, target)` performs remove and
+`client.disableAppPublish(appId, target)` performs disable. For the `@public` row,
 only the developer organization may do either.
 
 ### Testing a specific published version: the version override
@@ -1641,6 +1641,7 @@ same verbs (TypeScript camelCase / Python snake_case):
 | Deploy a source zip | `client.deploy.add({ kind: 'app', data, metadata })` |
 | Publish to a rung | `client.publishApp(appId, version, target)` |
 | Remove a binding | `client.removeAppPublish(appId, target)` |
+| Disable a binding | `client.disableAppPublish(appId, target)` |
 | Where live | `client.whereApp(appId)` |
 | Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` |
 | Review thread reply | `client.replyApp(appId, message)` |

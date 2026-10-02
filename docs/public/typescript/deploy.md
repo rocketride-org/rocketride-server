@@ -34,7 +34,8 @@ for (const dep of live.rows) {
 
 `add({ pipeline, deployTo })` collapses add + deploy into one step.
 Listings (`deploy.list`, `deploy.versions`, `deploy.history`) return the standard
-`{ rows, total, page, pageSize }` envelope, server-paged.
+`{ rows, total, page, pageSize }` envelope, server-paged. `deploy.list` and
+`deploy.history` take an optional `teamId` to scope the listing to one team.
 `deploy.artifact(projectId, version)` fetches one immutable version's pipeline
 JSON, sha256-verified server-side.
 
@@ -88,21 +89,24 @@ App ids are partitioned by the caller org's **developer id**: every app is
 ids inside its own namespace — the platform holds `rocketride`. Deploying or
 publishing an app requires the org to have claimed a developer id.
 
-`deploy.add` and `deploy.addApp` live on `client.deploy`; every other verb
-below is a method on the client itself (`client.listDeployments(...)`,
-`client.publishApp(...)`), not on `client.deploy`.
+The `deploy.`-prefixed verbs below (`add`, `addApp`, `createApp`, `verifyApp`)
+live on `client.deploy`; every other verb is a method on the client itself
+(`client.listDeployments(...)`, `client.publishApp(...)`), not on `client.deploy`.
 
 | Method | Description |
 | --- | --- |
 | `deploy.add` | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
 | `deploy.addApp` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `onProgress` receives one line per step. Deploying activates nothing — bind an audience with `publishApp` afterwards. |
+| `deploy.createApp` | Scaffold a new app in the workspace — the programmatic twin of the App Builder's New App wizard, rendering the identical templates (Node.js only). Writes `./apps/<slug>`, vendors the connected server's shell + client packages, and runs the workspace install. The id becomes `<developerId>.<slug>`. Scaffolding only — the lifecycle (`verifyApp` → `addApp` → `publishApp`) follows. |
 | `deploy.verifyApp` | The no-side-effect precheck for `addApp` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
-| `listDeployments` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
+| `listDeployments` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its build lifecycle (`buildStatus` — 'ok' = servable — plus the `buildPhase` it reached and `buildEndedAt`), and the `rungs` naming the audiences bound to it. |
 | `submitApp` | Submit a deployed version for store review — flips the deployment `private` → `submit` (it enters the admin queue). Developer-org + namespace gated. |
 | `withdrawApp` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private` (leaves the admin queue, back to draft; history records `withdrawn`). Only a version in `submit` withdraws. Developer-org + namespace gated. |
 | `replyApp` | Append a developer message to the app's review thread — the developer half of the reviewer conversation. Rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated. |
 | `buildLog` | One version's durable server build log — the full phase-by-phase output the build worker stores beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; `''` = no log. Developer-org gated. |
 | `publishApp` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@me`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
+| `removeAppPublish` | Remove an audience binding — the app stops serving to that audience and the row leaves the where-live listing. SOFT: registry versions and audit history survive; publishing to the audience again revives it. |
+| `disableAppPublish` | Disable an audience binding — serving stops, but the row STAYS in the where-live listing marked `disabled` (a visible off switch), unlike `removeAppPublish`. Publishing any version to that audience re-enables it. |
 | `whereApp` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound DEPLOYMENT's review state. |
 
 Serving needs no verb: a version's bundle loads from the stable
