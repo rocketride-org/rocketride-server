@@ -8,8 +8,8 @@ Unit + regression tests for Chroma top-k retrieval tuning (issue #1411).
 
 Covers a configurable `top_k` that overrides the incoming DocFilter limit for
 search retrieval while leaving behaviour unchanged when it is unset. Exact
-fetches continue to use the DocFilter limit, and the existing hardcoded 0.20
-score floor remains in place.
+fetches continue to use the DocFilter limit, and the MIN_RELEVANCE_SCORE floor
+remains in place.
 
 `chroma.py` is loaded with its heavy dependencies (rocketlib, ai.common, chromadb,
 numpy) temporarily stubbed inside a scoped context, then the originals are
@@ -188,22 +188,23 @@ def _empty_query_result():
     return {'ids': [[]], 'metadatas': [[]], 'distances': [[]], 'documents': [[]]}
 
 
-# --- _convertToDocs: preserve the hardcoded 0.20 floor -----------------------
+# --- _convertToDocs: preserve the MIN_RELEVANCE_SCORE floor -------------------
 
 
-def test_convert_to_docs_applies_hardcoded_score_floor(monkeypatch):
-    store = _make_store(similarity='l2')
-    scores = iter([0.19, 0.20])
-    monkeypatch.setattr(_CHROMA.np, 'exp', lambda _value: (1.0 / next(scores)) - 1.0)
+def test_convert_to_docs_applies_relevance_floor():
+    store = _make_store(similarity='cosine')
 
-    docs = store._convertToDocs(_query_result([0.0, 1.0]))
+    # Cosine distances 1.7 and 1.5 rescale to 0.15 and 0.25 (see #2236): the
+    # first is under the 0.20 floor and dropped, the second is kept.
+    docs = store._convertToDocs(_query_result([1.7, 1.5]))
 
     assert len(docs) == 1
     assert docs[0].page_content == 'chunk 1'
     # Plain tolerance compare on purpose: pytest.approx probes numpy's bool_ type,
     # and other node test files in the shared CI worker leave a stubbed `numpy` in
     # sys.modules, which makes that probe raise TypeError.
-    assert abs(docs[0].score - 0.20) < 1e-9
+    assert abs(docs[0].score - 0.25) < 1e-9
+    assert _CHROMA.MIN_RELEVANCE_SCORE == 0.20
 
 
 # --- _effectiveLimit / top_k override ----------------------------------------
