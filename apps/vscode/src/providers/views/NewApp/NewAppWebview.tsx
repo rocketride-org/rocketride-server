@@ -346,9 +346,9 @@ const NewAppWebview: React.FC = () => {
 
 	// step: pick the footer note for the current state
 	const note = !workspaceOpen
-		? 'Open a workspace folder first — the app is scaffolded into it.'
+		? 'Open a workspace folder first. The app is scaffolded into it.'
 		: identity.source === 'default'
-			? 'No organization developer id — using the "local" default.'
+			? 'No organization developer id. Using the "local" default.'
 			: 'Developer ID is read from the organization account profile.';
 
 	return (
@@ -356,7 +356,7 @@ const NewAppWebview: React.FC = () => {
 			<div style={styles.card}>
 				{/* ── Application frame ─────────────────────────────────── */}
 				<h3 style={styles.heading}>Create a new app</h3>
-				<p style={styles.subheading}>Choose an application frame to begin — the preview updates live</p>
+				<p style={styles.subheading}>Choose an application frame to begin; the preview updates live</p>
 				<div style={styles.frameRow}>
 					<FramePreview frame={frame} />
 					<div style={styles.frameOptions}>

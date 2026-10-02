@@ -419,7 +419,7 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 				<div style={styles.loading}>
 					<div style={{ textAlign: 'center', maxWidth: 460, padding: '0 24px' }}>
 						<div style={styles.initTitle}>Preview shell not responding</div>
-						<div style={styles.initDetail}>The shell at {shellOrigin} did not load — is the server running? Retrying automatically; the preview appears as soon as it answers.</div>
+						<div style={styles.initDetail}>The shell at {shellOrigin} did not load. Is the server running? Retrying automatically; the preview appears as soon as it answers.</div>
 						<div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center' }}>
 							<button type="button" style={styles.overlayButton} onClick={() => setAttemptSeq((n) => n + 1)}>
 								Retry now
