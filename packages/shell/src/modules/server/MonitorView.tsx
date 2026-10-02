@@ -137,10 +137,10 @@ type TabId = 'overview' | 'connections' | 'tasks' | 'activity';
  * DOC_SUBVIEW_SUBTITLES convention).
  */
 const PAGE_SUBTITLES: Record<TabId, string> = {
-	overview: 'Overview — server health at a glance.',
-	connections: 'Connections — every client attached to this server.',
-	tasks: 'Tasks — running and recent pipeline tasks.',
-	activity: 'Activity — the live server event feed.',
+	overview: 'Overview: server health at a glance.',
+	connections: 'Connections: every client attached to this server.',
+	tasks: 'Tasks: running and recent pipeline tasks.',
+	activity: 'Activity: the live server event feed.',
 };
 
 // =============================================================================

@@ -244,7 +244,7 @@ test('handleStoredTokenFailure downgrades a network latch to session expiry when
 		assert.equal(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
 		assert.deepEqual(manager.connectionStatus.lastFailure, {
 			kind: 'auth',
-			lastError: 'Your session has expired — please sign in again.',
+			lastError: 'Your session has expired. Please sign in again.',
 			errorKind: 'session',
 		});
 	} finally {
@@ -755,7 +755,7 @@ test('onConnectError latches a session-expired auth failure when a background re
 		assert.equal(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
 		assert.deepEqual(manager.connectionStatus.lastFailure, {
 			kind: 'auth',
-			lastError: 'Your session has expired — please sign in again.',
+			lastError: 'Your session has expired. Please sign in again.',
 			errorKind: 'session',
 		});
 		assert.equal(clearedTokens.length, 1);

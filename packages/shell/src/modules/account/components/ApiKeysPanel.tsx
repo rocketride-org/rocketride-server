@@ -313,7 +313,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 	// default sort — the server's own key ordering.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: 'Name', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Key label chosen at creation (e.g. "Production Server") — purely descriptive, not part of the secret.', headerSort: true },
+			{ title: 'Name', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Key label chosen at creation (e.g. "Production Server"). Purely descriptive, not part of the secret.', headerSort: true },
 			{
 				title: 'Status',
 				field: 'status',
@@ -345,7 +345,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				field: 'lastUsedAt',
 				rrType: 'date',
 				rrDefault: true,
-				rrDescription: 'When the key last authenticated successfully — stamped server-side on each use; empty when the key has never been used.',
+				rrDescription: 'When the key last authenticated successfully. Stamped server-side on each use; empty when the key has never been used.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => {
 					const iso = cell.getValue() as string | null;
@@ -532,7 +532,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 					open
 					onClose={closePanel}
 					title={revealed ? 'Key Created' : 'New API Key'}
-					subtitle={revealed ? 'Copy it now — it will not be shown again' : undefined}
+					subtitle={revealed ? 'Copy it now; it will not be shown again' : undefined}
 					dirty={createDirty}
 					editing={revealed == null}
 					onExitMode={closePanel}
@@ -575,7 +575,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 										{copied ? '✓ Copied' : '⎘ Copy'}
 									</button>
 								</div>
-								<div style={styles.revealWarn}>Warning: store safely — it cannot be retrieved after closing.</div>
+								<div style={styles.revealWarn}>Warning: store safely. It cannot be retrieved after closing.</div>
 							</div>
 							<Section label="Details">
 								<LabelValue label="Expires">{revealed.expiresAt ? new Date(revealed.expiresAt).toLocaleDateString() : 'No expiry'}</LabelValue>

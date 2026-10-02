@@ -1102,9 +1102,9 @@ export class ConnectionManager implements IConnectionManager {
 		const isAuthFailure = state === ConnectionState.AUTH_FAILED;
 		const isNetworkFailure = error instanceof ConnectionFailure && error.kind === 'network';
 		const lastError = isNetworkFailure
-			? 'Can\'t reach the server — check your connection and retry.'
+			? 'Can\'t reach the server. Check your connection and retry.'
 			: isAuthFailure
-				? 'Your session has expired — please sign in again.'
+				? 'Your session has expired. Please sign in again.'
 				: error instanceof Error ? error.message : String(error);
 		this.updateConnectionStatus({
 			state,
@@ -1151,7 +1151,7 @@ export class ConnectionManager implements IConnectionManager {
 					// cleared the latch swaps the reference, and must not be
 					// overwritten with a session downgrade.
 					if (this.connectionStatus.lastFailure !== latchedFailure) return;
-					const message = 'Your session has expired — please sign in again.';
+					const message = 'Your session has expired. Please sign in again.';
 					this.updateConnectionStatus({
 						state: ConnectionState.AUTH_FAILED,
 						lastError: message,

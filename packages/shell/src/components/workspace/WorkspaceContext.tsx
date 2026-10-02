@@ -398,7 +398,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 					await Promise.race([
 						waitForDevRemote(appId),
 						new Promise<never>((_, reject) =>
-							setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT / 1000}s — is the app's dev server running?`)), DEV_REMOTE_TIMEOUT),
+							setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT / 1000}s. Is the app's dev server running?`)), DEV_REMOTE_TIMEOUT),
 						),
 					]);
 				} catch (waitErr) {
@@ -423,7 +423,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			if (!descriptor || !descriptor.app) {
 				console.error(`[WorkspaceContext] Invalid AppDescriptor for "${appId}": missing app`);
 				failedSetRef.current.add(appId);
-				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (app entry point) — the bundle may be stale or only partially deployed.` }));
+				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (app entry point). The bundle may be stale or only partially deployed.` }));
 				return false;
 			}
 

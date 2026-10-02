@@ -474,7 +474,7 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 	// top-consumers-first rollup order.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Consumer display name resolved server-side — user display name with email fallback, or team name; "(unassigned)" pools usage rows carrying no user/team id.', headerSort: true },
+			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Consumer display name resolved server-side: user display name with email fallback, or team name; "(unassigned)" pools usage rows carrying no user/team id.', headerSort: true },
 			{
 				title: 'Total Tokens',
 				field: 'total',
@@ -695,7 +695,7 @@ const TransactionLog: React.FC<{
 				rrType: 'date',
 				rrDefault: true,
 				rrDefaultSort: 'desc',
-				rrDescription: 'When the ledger entry was written — UTC on the wire, rendered in your local time; newest-first is the default sort.',
+				rrDescription: 'When the ledger entry was written. UTC on the wire, rendered in your local time; newest-first is the default sort.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => {
 					// formatDateValue applies the platform wire contract — a
@@ -723,7 +723,7 @@ const TransactionLog: React.FC<{
 				field: 'type',
 				rrType: 'enum',
 				rrDefault: true,
-				rrDescription: 'Ledger entry kind: purchase and credit grant credits, usage consumes them — determines the sign of Amount.',
+				rrDescription: 'Ledger entry kind: purchase and credit grant credits, usage consumes them. Determines the sign of Amount.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => typeBadgeEl(cell.getValue() as string),
 			},
@@ -777,7 +777,7 @@ const TransactionLog: React.FC<{
 				field: 'context',
 				rrType: 'json',
 				rrDefault: true,
-				rrDescription: 'Structured JSON attached to the entry (task id, pipeline, source, pack id); the cell shows one salient field — click the row for the full payload.',
+				rrDescription: 'Structured JSON attached to the entry (task id, pipeline, source, pack id); the cell shows one salient field. Click the row for the full payload.',
 				// Muted, ellipsis-truncated context with the full value as a tooltip.
 				formatter: (cell: CellComponent) => {
 					const tx = cell.getRow().getData() as TxRow;

@@ -1507,7 +1507,7 @@ function DataGridInner<Row extends Record<string, unknown>>(props: IDataGridProp
 						// served by the view's fetchPage through the ref.
 						ajaxURL: tableId ?? 'rr-grid',
 						sortMode: remoteSort ? 'remote' : undefined,
-						dataLoaderError: 'Failed to load — showing previous results.',
+						dataLoaderError: 'Failed to load. Showing previous results.',
 						dataLoaderErrorTimeout: 4000,
 						ajaxRequestFunc: (_url: string, _config: unknown, params: Record<string, unknown>) => {
 							const page = typeof params.page === 'number' ? params.page : 1;

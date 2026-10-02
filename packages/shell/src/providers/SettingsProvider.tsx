@@ -631,7 +631,7 @@ const SettingsProvider: React.FC = () => {
 	return (
 		<div style={styles.root}>
 			{/* ── Page heading ───────────────────────────────────── */}
-			<ContentHeader title="Settings" subtitle="Preferences for RocketRide and your installed apps. Only the values you change are saved — everything else uses each app's default." />
+			<ContentHeader title="Settings" subtitle="Preferences for RocketRide and your installed apps. Only the values you change are saved. Everything else uses each app's default." />
 
 			{/* ── Search row ─────────────────────────────────────── */}
 			<div style={styles.searchRow}>
