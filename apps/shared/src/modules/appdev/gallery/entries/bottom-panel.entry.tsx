@@ -39,7 +39,7 @@ export const bottomPanelEntry: IGalleryEntry = {
 	name: 'Bottom panel',
 	group: 'chrome',
 	blurb: 'The fixed-height (140px) output panel above the StatusBar: a tab row (Output / Run / Logs), a close button, and a scrolling content area.',
-	doc: `\`BottomPanel\` is part of the frozen shell surface, but the current cloud shell layout does NOT mount it — the StatusBar's app-name click is inert there. It exists on the surface for standalone hosts, which mount it themselves between the client area and their status bar and wire its visibility to their own toggle.`,
+	doc: `\`BottomPanel\` is part of the frozen shell surface, but the current cloud shell layout does NOT mount it; the StatusBar's app-name click is inert there. It exists on the surface for standalone hosts, which mount it themselves between the client area and their status bar and wire its visibility to their own toggle.`,
 	docNote: 'Hosted apps never mount BottomPanel or build their own bottom strip - per-item state belongs in the view (StatusBadge), view-level messages in a Banner.',
 	demo: BottomPanelDemo,
 	code: `// STANDALONE HOSTS ONLY - mounted between the client area and the status

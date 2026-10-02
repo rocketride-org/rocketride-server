@@ -61,7 +61,7 @@ export const navButtonEntry: IGalleryEntry = {
 	name: 'NavButton',
 	group: 'sidebar',
 	blurb: 'A single sidebar navigation row: icon + label when expanded, icon-only on the icon rail, with the active-item treatment.',
-	doc: `The building block for custom sidebar navigation when \`SidebarMenu\` is too structured — one row per view, driven by the same \`collapsed\` state the frame provides (\`useSidebarCollapsed()\`).`,
+	doc: `The building block for custom sidebar navigation when \`SidebarMenu\` is too structured. One row per view, driven by the same \`collapsed\` state the frame provides (\`useSidebarCollapsed()\`).`,
 	knobs: [
 		{ id: 'label', label: 'Label', kind: 'text', defaultValue: 'Pipelines' },
 		{ id: 'isActive', label: 'Active', kind: 'boolean', defaultValue: true },
