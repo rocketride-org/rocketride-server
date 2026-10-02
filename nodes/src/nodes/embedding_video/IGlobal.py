@@ -21,7 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import os
 import threading
 from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
@@ -41,21 +40,16 @@ class IGlobal(IGlobalBase):
         Initialize resources needed for the video embedding node.
 
         This includes:
-        - Installing node-specific dependencies from requirements.txt.
         - Importing and loading the embedding model for frame embedding.
         - Loading frame extraction configuration (interval, max frames, etc.).
         - Creating a thread lock for device access during video processing.
 
         Note:
-            Nothing here loads torch -- see embedding_image.IGlobal.beginGlobal.
+            Nothing here loads or installs torch -- see
+            embedding_image.IGlobal.beginGlobal.
         """
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
-
-        from depends import depends
-
-        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
-        depends(requirements)
 
         # Import Embedding class locally to avoid circular imports.
         from nodes.embedding_image.embedding import Embedding

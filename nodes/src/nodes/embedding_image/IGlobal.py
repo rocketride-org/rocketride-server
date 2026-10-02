@@ -21,7 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import os
 from rocketlib import IGlobalBase
 from ai.common.config import Config
 
@@ -49,15 +48,12 @@ class IGlobal(IGlobalBase):
           and bag for further embedding operations.
 
         Note:
-            Nothing here loads torch. ai.common.models proxies to the model
-            server when --modelserver is set and imports torch only on the
-            local path; importing it here breaks the node under --modelserver.
+            Nothing here loads or installs torch. ai.common.models proxies to the
+            model server when --modelserver is set; on the local path its loader
+            installs the model stack (transformers, torch) itself. So the node
+            declares no requirements of its own: a requirements.txt naming
+            accelerate made every cloud run download a CUDA torch it never used.
         """
-        from depends import depends
-
-        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-        depends(requirements)
-
         # Import Embedding class locally to avoid circular imports and delay
         # initialization until beginGlobal is called.
         from .embedding import Embedding

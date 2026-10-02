@@ -21,13 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import os
-from depends import depends  # type: ignore
-
-# Load the requirements from a requirements.txt file located in the same directory
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
-
 import numpy as np
 from typing import Dict, Any, List
 from ai.common.models.vision import CLIPModel, ViTModel
