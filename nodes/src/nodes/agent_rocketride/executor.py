@@ -949,6 +949,94 @@ def _result_fingerprint(result: Any) -> Optional[str]:
     return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 
 
+# The output fields of a code runner's result: tool_python (stdout, stderr) and
+# tool_daytona (output). They mark a result whose exit_code and timed_out are a run's.
+_RUNNER_OUTPUT = ('stdout', 'stderr', 'output')
+
+# The fields of tool_http_request's result. It answers an error status (403, 500)
+# with a normal result, so its status_code is the call's own.
+_HTTP_RESPONSE = ('status_code', 'status_text', 'headers')
+
+# The stack entries an agent called as a tool (AgentBase.run_agent) returns when its
+# run raised or its tool-call guard tripped: a normal answer that reports a failure.
+_AGENT_FAILURE_KINDS = ('RocketRide.agent.error.v1', 'RocketRide.agent.guard.v1')
+
+
+def _error_message(value: Any) -> bool:
+    """True when an ``error`` field holds an error: text, a structure, or true.
+
+    A number there is a measurement (a fit's error of 0.25), not a failure.
+    """
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, (str, dict, list)) and bool(value)
+
+
+def _flags_failure(item: Any) -> bool:
+    """True when a dict says outright that it failed: ok or success false, or isError."""
+    return isinstance(item, dict) and (
+        item.get('ok') is False or item.get('success') is False or item.get('isError') is True
+    )
+
+
+def _reports_failure(result: Any, _seen: Optional[set] = None) -> bool:
+    """True when a tool returned a failure instead of raising one.
+
+    Many tools answer a failed request with a normal result, such as
+    ``{"ok": false, "error": "conflict"}``. MCP tools mark a failed call with
+    ``"isError": true``; tool_http_request returns an error status (400 and up) as
+    a normal response; an agent called as a tool returns its crash or its tripped
+    guard as an answer whose stack says so; and code runners (tool_python,
+    tool_daytona) report a run that failed or was cut off with a non-zero
+    ``exit_code`` or ``"timed_out": true``. tool_python also returns the script's
+    own ``result`` (a dict or a list), which is checked the same way (a check
+    written in Python reports its verdict there), and tool_vertex_search reports a
+    failure as a list holding only error entries. A list in which any item says
+    outright that it failed (``ok`` or ``success`` false, ``isError``) counts too.
+    The call did not raise, but the work did not happen, so the loop must not
+    treat it as a success. An ``error`` field counts when it holds text, a
+    structure or true; a number there is a measurement.
+
+    Each tool's fields count only on that tool's result: elsewhere an
+    ``exit_code`` (a CI job's status, say), a ``status_code`` or a ``result``
+    field is data, and so is a list of rows that merely have an ``error`` column
+    (a log search). An HTTP status of 400 or more counts even when the caller
+    expected it (a 404 that answers "does it exist?"): that costs one more round,
+    while missing a real failure would report work that never happened.
+    """
+    if isinstance(result, list):
+        if any(_flags_failure(item) for item in result):
+            return True  # a batch where an item says it failed did not fully happen
+        return bool(result) and all(
+            isinstance(item, dict) and set(item) == {'error'} and _error_message(item['error']) for item in result
+        )
+    if not isinstance(result, dict):
+        return False
+    if _flags_failure(result) or _error_message(result.get('error')):
+        return True
+    if all(k in result for k in _HTTP_RESPONSE):
+        status = result.get('status_code')
+        return isinstance(status, int) and not isinstance(status, bool) and status >= 400
+    if isinstance(result.get('stack'), list) and isinstance(result.get('meta'), dict) and 'content' in result:
+        return any(isinstance(entry, dict) and entry.get('kind') in _AGENT_FAILURE_KINDS for entry in result['stack'])
+    if any(k in result for k in _RUNNER_OUTPUT) and ('exit_code' in result or 'timed_out' in result):
+        exit_code = result.get('exit_code')
+        if result.get('timed_out') is True or (
+            # A bool is a code too: tool_python keeps SystemExit(True) as exit_code=True.
+            isinstance(exit_code, int) and exit_code != 0
+        ):
+            return True
+        # A script's result can hold itself (result['result'] = result); never follow
+        # one twice, or the check would raise RecursionError on a successful run.
+        seen = set() if _seen is None else _seen
+        if id(result) in seen:
+            return False
+        seen.add(id(result))
+        nested = result.get('result')
+        return isinstance(nested, (dict, list)) and _reports_failure(nested, seen)
+    return False
+
+
 def _store_and_preview(
     tool: str,
     key: str,
@@ -979,6 +1067,8 @@ def _store_and_preview(
         raise
 
     entry = {'tool': tool, 'key': key, 'summary': _describe(result)}
+    if _reports_failure(result):
+        entry['failed'] = True
 
     seen = getattr(agent_base, 'seen_results', None)
     if seen is None:

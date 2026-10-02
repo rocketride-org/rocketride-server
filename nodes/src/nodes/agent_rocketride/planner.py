@@ -31,7 +31,7 @@ Usage::
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from rocketlib import debug
 
@@ -403,6 +403,122 @@ def _build_wave_question(
 
 
 # ---------------------------------------------------------------------------
+# Reply checking
+# ---------------------------------------------------------------------------
+
+
+def normalize_plan(reply: Any) -> Tuple[Dict[str, Any], List[str]]:
+    """Check one planning reply and repair what can be repaired safely.
+
+    Models get the reply format wrong in small, regular ways. Each is handled here,
+    once, so the loop can trust what it receives:
+
+    - ``done`` written as text counts by its meaning: ``"false"`` is not done, even
+      though any non-empty string is truthy in Python.
+    - A call in OpenAI's shapes, ``{"name", "arguments"}`` or
+      ``{"function": {"name", "arguments"}}`` with the arguments as JSON text, is
+      read as ``{"tool", "args"}``.
+    - A single call object outside a list, and ``remove`` written as one key, are
+      wrapped in a list.
+    - A call that is not an object, names no tool, or has arguments that are not
+      an object is dropped and reported. So is a ``remove`` entry that is not a key.
+    - ``done`` is not done when the answer is blank, or when any of the reply's
+      calls had to be dropped: the work it described did not all happen.
+
+    Args:
+        reply: The parsed JSON the model sent.
+
+    Returns:
+        ``(plan, problems)``. ``plan`` is a copy of the reply with a bool ``done``, a
+        ``tool_calls`` list of ``{"tool": str, "args": dict}`` and a ``remove`` list of
+        strings. ``problems`` names each thing that was dropped, in words the model
+        can act on.
+    """
+    problems: List[str] = []
+    if not isinstance(reply, dict):
+        empty = {'done': False, 'tool_calls': [], 'remove': []}
+        return empty, [f'the reply was a JSON {type(reply).__name__}, not an object']
+    plan = dict(reply)
+
+    done = plan.get('done')
+    if isinstance(done, str):
+        done = done.strip().lower() == 'true'
+    plan['done'] = done is True
+
+    # Only a missing or null tool_calls means "no calls"; any other value, even an
+    # empty object or an empty string, is checked like a call so it cannot vanish.
+    raw_calls = plan.get('tool_calls')
+    if raw_calls is None:
+        raw_calls = []
+    if isinstance(raw_calls, dict):
+        raw_calls = [raw_calls]
+    dropped = False
+    if not isinstance(raw_calls, list):
+        problems.append('tool_calls was not a list')
+        raw_calls = []
+        dropped = True
+    calls: List[Dict[str, Any]] = []
+    for i, entry in enumerate(raw_calls):
+        if not isinstance(entry, dict):
+            problems.append(f'tool_calls[{i}] was not an object')
+            continue
+        # OpenAI's nested shape keeps the name and arguments under "function".
+        fn = entry.get('function') if isinstance(entry.get('function'), dict) else entry
+        name = entry.get('tool') or fn.get('name')
+        args = entry.get('args')
+        if args is None:
+            # "args": null beside OpenAI's arguments still means those arguments.
+            args = fn.get('arguments')
+        if args is None:
+            args = {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except ValueError:
+                problems.append(f'tool_calls[{i}] arguments were not valid JSON')
+                continue
+        if not isinstance(name, str) or not name:
+            problems.append(f'tool_calls[{i}] named no tool')
+            continue
+        if not isinstance(args, dict):
+            problems.append(f'tool_calls[{i}] args were not an object')
+            continue
+        calls.append({'tool': name, 'args': args})
+    plan['tool_calls'] = calls
+    dropped = dropped or len(calls) < len(raw_calls)
+
+    # remove only tidies memory, so problems with it are reported but never block a reply.
+    # As with tool_calls, only a missing or null remove means "nothing"; any other
+    # value is checked, so a malformed one (even a blank key) is reported.
+    remove = plan.get('remove')
+    if remove is None:
+        remove = []
+    if isinstance(remove, str):
+        remove = [remove]
+    if not isinstance(remove, list):
+        problems.append('remove was not a list of keys, so nothing was removed')
+        remove = []
+    # A blank key is dropped too: the memory node reads a clear without a key as
+    # "clear everything", which would wipe the results this reply's calls store.
+    plan['remove'] = [k for k in remove if isinstance(k, str) and k.strip()]
+    for i, k in enumerate(remove):
+        if not isinstance(k, str) or not k.strip():
+            problems.append(f'remove[{i}] was not a key, so it was ignored')
+
+    if plan['done'] and not safe_str(plan.get('answer', '')).strip():
+        problems.append('it set done=true without an answer')
+        plan['done'] = False
+    if plan['done'] and dropped:
+        # The reply described work that did not all happen, so its answer cannot stand.
+        plan['done'] = False
+    # A bad remove is reported but is never the reason a reply cannot be used, so it
+    # must not hide the real one.
+    if not plan['done'] and not calls and all(p.startswith('remove') for p in problems):
+        problems.append('it had neither done=true nor any tool_calls')
+    return plan, problems
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -430,10 +546,9 @@ def plan(
         current_scratch: The LLM's working notes from the previous iteration.
 
     Returns:
-        One of two shapes:
-          - ``{"done": true, "answer": "...", "scratch": "..."}``
-          - ``{"tool_calls": [...], "thought": "...", "scratch": "..."}``
-          - ``{}`` — empty (LLM returned nothing useful).
+        The reply checked by ``normalize_plan``, plus ``problems`` (calls that were
+        dropped, for the model to see), or only ``problems`` when even a second try
+        produced neither an answer nor a call.
     """
     wave_prompt = _build_wave_question(
         context=context,
@@ -447,8 +562,24 @@ def plan(
     # call_llm but returns the parsed JSON dict instead of extracted
     # text.  The wave_prompt is built with expectJson=True so the
     # schema layer parses the response as JSON.
-    result = agent_base.call_llm_json(context, wave_prompt)
-    debug(f'plan: result={json.dumps(result, ensure_ascii=False, default=str)[:500]}')
+    reply = agent_base.call_llm_json(context, wave_prompt)
+    debug(f'plan: result={json.dumps(reply, ensure_ascii=False, default=str)[:500]}')
+    result, problems = normalize_plan(reply)
+
+    # Nothing to run and not finished (normalize_plan clears done when the reply's
+    # answer or calls were unusable): ask once more, saying exactly what was wrong,
+    # instead of ending the run on a typo.
+    if not result['tool_calls'] and not result['done']:
+        debug(f'plan: unusable reply ({"; ".join(problems)}), asking once more')
+        wave_prompt.addInstruction(
+            'CRITICAL',
+            'Your previous reply was not usable: '
+            + '; '.join(problems)
+            + '. Reply with exactly one of the two shapes in Response Format.',
+        )
+        reply = agent_base.call_llm_json(context, wave_prompt)
+        debug(f'plan: retry result={json.dumps(reply, ensure_ascii=False, default=str)[:500]}')
+        result, problems = normalize_plan(reply)
 
     # Diagnostic trace file — append each REQUEST/RESULT pair for offline
     # analysis.  Failures are silently swallowed so a missing/locked file
@@ -464,11 +595,15 @@ def plan(
     # except Exception as _e:
     #     debug(f'plan: agent.txt write failed: {_e}')
 
-    # If the LLM returned neither done=true nor tool_calls, the response is
-    # malformed or empty.  Return {} to signal the outer loop to fall through
-    # to the synthesis fallback rather than silently stalling.
-    if not result.get('done') and not result.get('tool_calls'):
+    # Still neither done=true nor a usable call: return no plan (only the problems)
+    # so the outer loop falls through to the synthesis fallback instead of stalling.
+    if not result['done'] and not result['tool_calls']:
         debug('plan: empty wave response, falling through to synthesis')
-        return {}
+        # Nothing to run, but why still matters: the driver records these problems
+        # before it falls back, so the trace and the fallback answer show them.
+        return {'problems': problems}
 
+    # Calls dropped from an otherwise usable reply are shown to the model next
+    # round, so nothing it asked for disappears silently.
+    result['problems'] = problems
     return result
