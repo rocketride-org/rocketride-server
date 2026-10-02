@@ -1485,6 +1485,23 @@ Key rules:
 You normally never run these yourself — the watch runs the dev server, and
 deploys build on the server — but they are there for CI or scripted checks.
 
+**The `dist/` folder is never served.** `npm run build` writes `dist/` in
+your app folder, and nothing reads it: not the preview, not the server. A
+local build only proves that the app compiles. The two places a browser
+gets your app from are:
+
+- **The preview** loads it from the watch's dev server (see
+  [The Dev Loop](#the-dev-loop)). If a change does not appear there, read
+  the watch status line. Rebuilding into `dist/` will not help.
+- **Everyone else** loads a deployed version, which the server built itself
+  from your uploaded source and serves at
+  `/apps/<appManifest.id>/v<N>/remoteEntry.js` (see
+  [Deploy and Publish](#deploy-and-publish)). If a change does not appear
+  for them, deploy a new version and publish it.
+
+The served path is keyed on `appManifest.id`, never on the name of your app
+folder.
+
 ---
 
 ## Deploy and Publish

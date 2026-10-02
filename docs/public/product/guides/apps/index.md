@@ -61,8 +61,8 @@ The shell mounts one component from your app:
 ## Getting Started
 
 You build a shell app in your own repository: `npm install rocketride`, export
-an `AppDescriptor` through Module Federation, and deploy the bundle to any
-shell host.
+an `AppDescriptor` through Module Federation, and deploy the source to a
+RocketRide server, which builds and serves it.
 
 > **Shortcut:** the VS Code extension's [App Builder](/clients/vscode/app-builder)
 > scaffolds this whole shape from a template and adds a live preview, publish,
@@ -195,7 +195,7 @@ export default defineConfig(() => ({
 npx rsbuild build
 ```
 
-Deploy the contents of `./dist/` to your hosting provider. The shell loads your app's `remoteEntry.js` at runtime when it appears in the app manifest.
+A local build only checks that the app compiles. Nothing serves `./dist/`, and hosting it yourself does not make the app load: the shell only loads a version that the server built. To ship the app, deploy it from the Deploy tab of the [App Builder](/clients/vscode/app-builder), or with `rocketride app deploy`. That uploads your source, the server builds it into the next version, and publishing that version makes it available to its audience.
 
 ---
 
