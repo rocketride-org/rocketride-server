@@ -259,6 +259,11 @@ export default defineConfig(() => ({
 	// `as const` keeps the rule's `type` a literal for the config typecheck.
 	tools: {
 		rspack: {
+			// A build with errors emits nothing, so the preview keeps running the
+			// last good one. Emitted, its hot update disposes every module only
+			// the broken file imported; the fix's update cannot bring them back,
+			// and every later save dies silently (the frozen-preview bug).
+			optimization: { emitOnErrors: false },
 			module: {
 				rules: [{ test: /\.pipe$/, type: 'json' } as const],
 			},
@@ -273,7 +278,8 @@ export default defineConfig(() => ({
 	// that rejects check() falls back to a full reload of the preview page.
 	// (The historic reload loop came from zombie multi-container HMR clients,
 	// gone since dev-remote injection became once-per-page; the silent-freeze
-	// class is prevented at the source by the AppDescriptor jsx anchor.)
+	// class is prevented at the source by emitOnErrors: false above for failed
+	// builds, and by the AppDescriptor jsx anchor for JSX-free saves.)
 	// lazyCompilation stays off: compile-on-request made every served bundle
 	// one hash behind, so the dev client always saw itself as stale.
 	// client: the bundle runs INSIDE the preview shell's page (a different
@@ -367,10 +373,11 @@ def _app_descriptor(v: TemplateVars) -> str:
  * declares its layout inside with <AppLayout>.
  */
 
-// HMR anchor: keeps the shared jsx runtime referenced even when the app's
-// root component fails to compile — an error build otherwise orphans it, the
-// hot runtime tombstones its factory, and every later fix-apply dies
-// silently (the frozen-preview bug).
+// HMR anchor: keeps the shared jsx runtime referenced even when a save leaves
+// the root component with no JSX — that update otherwise disposes it, no later
+// update can bring it back, and every later save dies silently (the
+// frozen-preview bug). Failed builds are covered by emitOnErrors: false in
+// rsbuild.config.mts.
 import 'react/jsx-dev-runtime';
 
 import type { AppDescriptor } from 'shell';
