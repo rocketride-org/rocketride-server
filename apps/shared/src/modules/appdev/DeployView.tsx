@@ -779,7 +779,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			{/* View header — title + one-line purpose (the pipeline pattern) */}
 			<div style={styles.head}>
 				<div style={styles.h1}>{app.name}</div>
-				<div style={styles.sub}>Deploy immutable versions, then publish each to an audience — @me, a team, or the public store. Internal audiences serve instantly; the store gates every version on review.</div>
+				<div style={styles.sub}>Deploy immutable versions, then publish each to an audience: @me, a team, or the public store. Internal audiences serve instantly; the store gates every version on review.</div>
 				{/* Failures from the dialog-less actions (publish/submit) land
 				    here — otherwise they are invisible. */}
 				{actionError ? <div style={styles.devError}>{actionError}</div> : null}
@@ -794,7 +794,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					{host.registerDeveloper && !readOnly && developerId === '' && (
 						<div style={styles.devBanner}>
 							<div style={styles.devBannerText}>
-								<strong>Register as a developer to deploy apps.</strong> Every app id is <code>&lt;developerId&gt;.&lt;name&gt;</code> — claim your organization&rsquo;s developer id (letters and underscores only) to publish under your own namespace.
+								<strong>Register as a developer to deploy apps.</strong> Every app id is <code>&lt;developerId&gt;.&lt;name&gt;</code>. Claim your organization&rsquo;s developer id (letters and underscores only) to publish under your own namespace.
 							</div>
 							<div style={styles.devBannerRow}>
 								<input style={styles.devInput} placeholder="developer id (e.g. acme_labs)" value={regSlug} onChange={(e) => setRegSlug(e.target.value)} />
@@ -920,7 +920,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					<div style={styles.livePanel}>
 						<div style={styles.liveHead}>Where this app is live</div>
 						{(pins ?? []).length === 0 ? (
-							<div style={styles.liveFoot}>Nothing is deployed yet — publish a version and deploy it to your personal rung to see it here.</div>
+							<div style={styles.liveFoot}>Nothing is deployed yet. Publish a version and deploy it to your personal rung to see it here.</div>
 						) : (
 							<>
 								{(pins ?? []).map((p) => (
@@ -948,8 +948,8 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 								))}
 								<div style={styles.liveFoot}>
 									{host.submitForReview
-										? 'Deploy pins a rung to an immutable version — first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.'
-										: 'Deploy pins a rung to an immutable version — first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server — the store publishes directly.'}
+										? 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.'
+										: 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server; the store publishes directly.'}
 								</div>
 							</>
 						)}
@@ -974,7 +974,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 						</>
 					}
 				>
-					<div style={styles.dialogHint}>Packs the app source and ships it to the server as the next immutable version. Binds nothing — publish it to an audience afterwards.</div>
+					<div style={styles.dialogHint}>Packs the app source and ships it to the server as the next immutable version. Binds nothing. Publish it to an audience afterwards.</div>
 					<InputField placeholder="What changed? (optional comment)" value={deployMessage} onChange={(e) => setDeployMessage(e.target.value)} disabled={deployBusy} />
 					{deployError ? <div style={styles.devError}>{deployError}</div> : null}
 				</Modal>
@@ -994,7 +994,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 						</Button>
 					}
 				>
-					<div style={styles.dialogHint}>The server&rsquo;s full build output for this version, phase by phase — the failure reason is at the end.</div>
+					<div style={styles.dialogHint}>The server&rsquo;s full build output for this version, phase by phase. The failure reason is at the end.</div>
 					<pre style={styles.logPre}>{logText === null ? 'Loading build log…' : logText}</pre>
 				</Modal>
 			)}
@@ -1014,8 +1014,8 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 				>
 					<div style={styles.dialogHint}>
 						{host.submitForReview
-							? 'Points the chosen audience at this version — first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
-							: 'Points the chosen audience at this version — first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
+							? 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
+							: 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
 					</div>
 					<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@me')}>
 						Me<span style={styles.pubRowState}>{pinStateOf('@me', publishFor)}</span>
@@ -1031,11 +1031,11 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					    the internal rows; with one, only 'ready' unlocks it. */}
 					{(host.submitForReview ? publishFor.state === 'ready' : publishFor.state !== 'failed') ? (
 						<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@public')}>
-							Public — the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
+							Public: the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
 						</button>
 					) : (
-						<button style={styles.pubRowOff} disabled title="The store needs an approved ('ready') version — submit it for review first">
-							Public — the app store<span style={styles.pubRowState}>needs review approval</span>
+						<button style={styles.pubRowOff} disabled title="The store needs an approved ('ready') version; submit it for review first">
+							Public: the app store<span style={styles.pubRowState}>needs review approval</span>
 						</button>
 					)}
 				</Modal>
@@ -1045,7 +1045,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			{removePin && (
 				<ConfirmDialog
 					title={`Remove ${app.name} from ${removePin.label}?`}
-					message={`Takes the app off ${removePin.handle}: it stops serving to that audience. This is a SOFT remove — every published version and the audit history survive, and publishing to ${removePin.handle} again revives it.`}
+					message={`Takes the app off ${removePin.handle}: it stops serving to that audience. This is a SOFT remove: every published version and the audit history survive, and publishing to ${removePin.handle} again revives it.`}
 					confirmLabel="Remove"
 					cancelLabel="Cancel"
 					onConfirm={() => {
