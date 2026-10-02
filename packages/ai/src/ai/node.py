@@ -380,7 +380,11 @@ if __name__ == '__main__':
         sys.exit(1)
 
     except Exception as e:
+        # Exit non-zero so the engine records this as CANCELLED, not COMPLETED.
+        # A task that crashes before sending >EXIT must not appear to have
+        # succeeded (issue #2416).
         debug(e)
+        sys.exit(1)
 
     except (KeyboardInterrupt, SystemExit):
         pass

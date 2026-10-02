@@ -1608,6 +1608,14 @@ def test_unknown_process_exit_code_is_not_success():
     assert t._status.exitCode == 1
 
 
+def test_exit_zero_without_exit_event_is_not_success():
+    """A task that exits 0 without sending >EXIT is not a completed task (issue #2416)."""
+    t = _exit_task()
+    Task._apply_process_exit_code(t, 0)
+    assert t._status.exitCode == 1
+    assert t._status.exitMessage == 'Stopped'
+
+
 @pytest.mark.asyncio
 async def test_exit_event_marks_the_run_as_reported():
     t = _exit_task()
