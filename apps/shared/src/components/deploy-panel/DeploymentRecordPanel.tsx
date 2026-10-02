@@ -196,7 +196,7 @@ export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ o
 	// opening gesture is never a dead click and never a double slide-in.
 	if (!data) {
 		return (
-			<DetailPanel open onClose={onClose} title={fallbackTitle} subtitle="Team deployment — scheduled runs, monitoring, and replay" width={width} persistKey="panelDeploymentRecordWidth" flushBody>
+			<DetailPanel open onClose={onClose} title={fallbackTitle} subtitle="Team deployment: scheduled runs, monitoring, and replay" width={width} persistKey="panelDeploymentRecordWidth" flushBody>
 				<div style={S.stateMessage}>{loadError ? `Failed to load deployment: ${loadError}` : 'Loading deployment\u2026'}</div>
 			</DetailPanel>
 		);
@@ -268,7 +268,7 @@ export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ o
 
 	return (
 		<>
-			<DetailPanel open={open} onClose={onClose} title={`${teamName} / ${deployment.pipelineName} / ${viewProps.sourceName || viewProps.sourceId}`} subtitle="Team deployment — scheduled runs, monitoring, and replay" width={width} persistKey="panelDeploymentRecordWidth" flushBody busy={busy} {...(footer ? { footer } : {})}>
+			<DetailPanel open={open} onClose={onClose} title={`${teamName} / ${deployment.pipelineName} / ${viewProps.sourceName || viewProps.sourceId}`} subtitle="Team deployment: scheduled runs, monitoring, and replay" width={width} persistKey="panelDeploymentRecordWidth" flushBody busy={busy} {...(footer ? { footer } : {})}>
 				{/* The view renders its own TabControl strip + panels; the drawer
 				    header carries the title, so no documentTitle (no doubling). */}
 				<DeploymentView {...viewProps} {...(sourceConfig && onSetSourceConfig ? { sourceConfig: effectiveConfig, onSourceConfigChange: setStagedConfig } : {})} />

@@ -166,12 +166,12 @@ ${body}`,
 
 	const getPath = parseHttpUrl(urlWithAuth);
 	const curlUiBash = `curl -sS "${urlWithAuth}"`;
-	const curlUiCmd = `REM URL already includes ?auth= — no Authorization header needed
+	const curlUiCmd = `REM URL already includes ?auth=, so no Authorization header needed
 curl.exe -sS "${urlWithAuth}"`;
 	const psUiGet = `Invoke-RestMethod -Uri '${urlWithAuth.replace(/'/g, "''")}' -Method Get`;
 
 	return {
-		curl: `# Open in browser (optional — URL includes auth):
+		curl: `# Open in browser (optional, URL includes auth):
 # ${urlWithAuth}
 
 ${curlUiBash}`,
