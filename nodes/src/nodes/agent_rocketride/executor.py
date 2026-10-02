@@ -31,7 +31,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import jmespath
 
@@ -68,27 +68,55 @@ _PEEK_DEFAULT_LENGTH = 8000
 # until RecursionError and costing the tool its result.
 _SUMMARY_MAX_DEPTH = 6
 
-# Rows of a list-of-dicts always sampled in a structural summary, whatever they cost.
-_SUMMARY_MIN_ROWS = 2
+# Longest list of dicts shown whole: its rows split its room like a dict's fields, so
+# an MCP tool's one or two content blocks show their text. A longer list is a sample:
+# it shows as many whole rows as fit its room. A list inside a sampled row shows this
+# many rows at most, so rows stay narrow and many of them fit.
+_SUMMARY_SHORT_LIST = 2
 
-# Character budget for a whole summary. A dict splits its share between the fields
-# that hold containers, so a result with many lists cannot cost more than a result
-# with one. Narrow rows such as {id, name, mimeType} still fit in full, which is what
-# a find-by-name task needs to converge.
+# Character budget for a whole summary. A dict splits its room between the fields
+# that can spend it (long texts, lists, dicts), so a result with many lists cannot
+# cost more than a result with one. Narrow rows such as {id, name, mimeType} still
+# fit in full, which is what a find-by-name task needs to converge.
 _SUMMARY_BUDGET = 4000
 
-# Smallest share a field can be given. Without it a result with many fields would
-# hand each one too little to render a single row.
-_SUMMARY_MIN_SHARE = 300
+# Longest string shown in full inside a sampled list row. Rows are there to show the
+# shape of the data and to identify items, so they stay narrow and many of them fit.
+# Text anywhere else (a file's content, a command's output) gets its share of the
+# budget instead: that text is usually the result itself. A string this long or
+# shorter is a short field: paid for before the budget is split, and listed on the
+# summary's last line if a cut leaves it out.
+_ROW_TEXT_CHARS = 80
 
-# Ceiling applied to the finished summary. The budget is divided rather than
-# multiplied on the way down, so this only catches the overshoot from always
-# rendering _SUMMARY_MIN_ROWS.
+# Fewest characters of a cut text worth showing. Below this its start and end say
+# nothing, so the text shows its length instead (see _render_text).
+_TEXT_MIN_CHARS = 20
+
+# Ceiling on the finished summary. The budget is what long texts and lists share;
+# keys, short fields, length notes and list headers are paid for first and may take
+# a summary past the budget, up to here. Past this a container keeps the fields that
+# fit, whole, and says how many it left out (see _describe).
 _SUMMARY_HARD_CAP = 6000
 
-# Appended when the cap trims a summary, so the planner peeks instead of assuming
-# it saw everything.
-_SUMMARY_TRUNCATED = '\n... (truncated, peek the key for the rest)'
+# Room kept under the hard cap for one line that lists the short fields of nested
+# dicts and short lists (an exit code, an ok flag, a short error) that no container
+# had room for, so no cut can hide a status, however the result is nested.
+_SUMMARY_MISSING_CHARS = 400
+
+# Field names that say whether a call worked: kept before other short fields when a
+# dict cannot show them all, and listed first on that line.
+_STATUS_NAME = re.compile(
+    r'(?i)^(exit_?code|return_?code|returncode|status(_?code)?|code|ok|success|succeeded|failed|failure|'
+    r'error|errors|is_?error|timed_?out|stderr)$'
+)
+
+# Most left-out short fields remembered for that line, so a huge result costs a
+# bounded walk.
+_SUMMARY_MISSING_FIELDS = 5000
+
+# A key that stands bare in a path on that line; any other is quoted, as JMESPath
+# wants it, so a key with a dot or a colon reads as one key.
+_PLAIN_KEY = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
 
 # Compiled regex for {{memory.ref:key:format:path}} template tags.
 #
@@ -106,6 +134,33 @@ _REF_PATTERN = re.compile(r'\{\{memory\.ref:([^}:]+)(?::([^}:]+))?(?::([^}]+))?\
 # ---------------------------------------------------------------------------
 # Structural summary (_describe)
 # ---------------------------------------------------------------------------
+#
+# A summary is built in two passes over each container. _cost sizes its fields
+# exactly (keys, separators, notes, headers, row labels) without rendering them;
+# _render then gives each field a room and renders it within that room. Every
+# container keeps to its room by leaving out whole fields or whole rows, never by
+# cutting a rendered string, so no parent cuts a child again and a list's header
+# counts the rows under it. Whatever a container leaves out is recorded by path, and
+# the short fields among them are listed on the summary's last line.
+
+
+class _Omitted:
+    """The short fields a summary left out, by path, for the line that lists them.
+
+    Holds the first _SUMMARY_MISSING_FIELDS and remembers that there were more.
+    """
+
+    __slots__ = ('fields', 'more')
+
+    def __init__(self) -> None:
+        self.fields: List[Tuple[Tuple[Any, ...], str]] = []
+        self.more = False
+
+    def add(self, path: Tuple[Any, ...], shown: str) -> None:
+        if len(self.fields) < _SUMMARY_MISSING_FIELDS:
+            self.fields.append((path, shown))
+        else:
+            self.more = True
 
 
 def _describe(value: Any) -> str:
@@ -117,26 +172,318 @@ def _describe(value: Any) -> str:
     LLM to formulate a correct JMESPath path for memory.peek.
 
     Every planning wave resends every prior summary, so size here is paid
-    repeatedly. The result is bounded by _SUMMARY_HARD_CAP.
+    repeatedly. The result is bounded by _SUMMARY_HARD_CAP: the root gets the
+    budget, or its fixed costs (short fields, keys, length notes, headers) when
+    those are more, up to the cap. A root that cannot show all its short fields
+    keeps room under the cap for the line that lists the rest.
     """
-    summary = _render(value, 0, _SUMMARY_BUDGET)
-    if len(summary) > _SUMMARY_HARD_CAP:
-        # The notice counts against the cap, so the returned string never exceeds it.
-        keep = _SUMMARY_HARD_CAP - len(_SUMMARY_TRUNCATED)
-        return f'{summary[:keep]}{_SUMMARY_TRUNCATED}'
-    return summary
+    omitted = _Omitted()
+    _, floor, _ = _cost(value, 0, False, _SUMMARY_HARD_CAP)
+    # A root given its floor leaves nothing out, so the line is needed only past the cap.
+    room = _SUMMARY_HARD_CAP - _SUMMARY_MISSING_CHARS if floor > _SUMMARY_HARD_CAP else max(_SUMMARY_BUDGET, floor)
+    summary = _render(value, 0, room, omitted=omitted)
+    if not omitted.fields:
+        return summary
+    line = _missing_line(omitted)
+    if len(summary) + len(line) > _SUMMARY_HARD_CAP:
+        # Not expected: a root within its floor leaves nothing out. Render again with
+        # the line's room kept free rather than cut the summary after the fact.
+        omitted = _Omitted()
+        summary = _render(value, 0, _SUMMARY_HARD_CAP - _SUMMARY_MISSING_CHARS, omitted=omitted)
+        line = _missing_line(omitted)
+    return summary + line
 
 
-def _render(value: Any, depth: int, budget: int) -> str:
-    """Render *value* within *budget* characters.
+def _missing_line(omitted: _Omitted) -> str:
+    """One line listing the short fields a summary left out, within _SUMMARY_MISSING_CHARS.
+
+    Fields named like a status come first, then the shortest entries, so an exit
+    code or an ok flag comes before counters and the most fields fit. An entry too
+    long for the room is skipped, not the ones after it, and the line ends with how
+    many it could not list.
+    """
+    ranked = []
+    for path, shown in omitted.fields:
+        status = isinstance(path[-1], str) and _STATUS_NAME.search(path[-1]) is not None
+        # A bound under the entry's length: a path only grows when a key is quoted.
+        ranked.append((not status, sum(len(str(seg)) for seg in path) + len(shown), path, shown))
+    head = '\n(short fields a cut may have hidden: '
+    tail = f'; and {len(omitted.fields)}+ more'
+    room = _SUMMARY_MISSING_CHARS - len(head) - len(tail) - 1
+    parts: List[str] = []
+    skipped = 0
+    for _, bound, path, shown in sorted(ranked, key=lambda entry: entry[:2]):
+        if bound + 2 > room:
+            skipped += 1
+            continue
+        item = f'{_path_text(path)}: {shown}'
+        cost = len(item) + (2 if parts else 0)
+        if cost > room:
+            skipped += 1
+            continue
+        parts.append(item)
+        room -= cost
+    if skipped or omitted.more:
+        more = f'{skipped}{"+" if omitted.more else ""} more'
+        parts.append(f'and {more}' if parts else f'{more}, with paths too long to list')
+    return f'{head}{"; ".join(parts)})'
+
+
+def _path_text(path: Tuple[Any, ...]) -> str:
+    """A path as JMESPath writes it: keys joined by dots, quoted unless plain, list rows by index."""
+    out = ''
+    for seg in path:
+        if isinstance(seg, int):
+            out += f'[{seg}]'
+        else:
+            key = seg if _PLAIN_KEY.fullmatch(seg) else json.dumps(seg, ensure_ascii=False)
+            out = f'{out}.{key}' if out else key
+    return out
+
+
+def _is_short(value: Any) -> bool:
+    """True for a value that is paid for before the budget is split: a scalar, a string a row would show whole, an empty container."""
+    if isinstance(value, (list, dict)):
+        return not value
+    return not (isinstance(value, str) and len(value) > _ROW_TEXT_CHARS)
+
+
+def _collect_short(value: Any, path: Tuple[Any, ...], depth: int, omitted: _Omitted) -> None:
+    """Record the short fields of a *value* no container had room for: its own, its nested dicts' and its short lists' rows'.
+
+    The rows of a longer list are a sample by design, so their fields are not
+    recorded. Depth counts every container edge, like the summary itself.
+    """
+    if depth > _SUMMARY_MAX_DEPTH or omitted.more:
+        return
+    if _is_short(value):
+        # Strings as JSON, so a multi-line error stays on the one line.
+        omitted.add(path, json.dumps(value, ensure_ascii=False) if isinstance(value, str) else _render(value, 0, 0))
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            if omitted.more:
+                break
+            _collect_short(v, path + (str(k),), depth + 1, omitted)
+    elif isinstance(value, list) and len(value) <= _SUMMARY_SHORT_LIST:
+        for i, v in enumerate(value):
+            _collect_short(v, path + (i,), depth + 1, omitted)
+
+
+def _row_text(value: str) -> str:
+    """A string inside a sampled row: whole up to _ROW_TEXT_CHARS, else its start and its length."""
+    if len(value) <= _ROW_TEXT_CHARS:
+        return f'"{value}"'
+    # Show prefix and total length so the LLM knows it can page through with offset/length
+    return f'"{value[:_ROW_TEXT_CHARS]}..." ({len(value)} chars)'
+
+
+def _text_note(length: int) -> str:
+    """What a long text shows when its room is too small for any of it to be worth reading."""
+    return f'({length} chars, peek the key to read it)'
+
+
+def _cut_text(value: str, chars: int) -> str:
+    """Quote *value*, keeping its start and end when it is longer than *chars*.
+
+    A file's closing lines and a traceback's final error are often what the planner
+    needs, so the middle is what gets dropped. The full length is reported so the
+    planner can read the rest with memory.peek offset/length.
+    """
+    limit = max(_TEXT_MIN_CHARS, chars)
+    if len(value) <= limit:
+        return f'"{value}"'
+    head = (limit * 2) // 3
+    tail = limit - head
+    return f'"{value[:head]} ... {value[-tail:]}" ({len(value)} chars, middle omitted)'
+
+
+def _render_text(value: str, room: int) -> str:
+    """A text outside a list row, in at most *room* characters.
+
+    Whole when it fits; else its start and end, with the room less the quotes and
+    the note (see _cut_text); else, when that leaves fewer than _TEXT_MIN_CHARS, its
+    length alone. The parent pays for the length note before splitting its room, so
+    the text is never shown in less.
+    """
+    length = len(value)
+    if length + 2 <= room:
+        return f'"{value}"'
+    chars = room - len(f'" ... " ({length} chars, middle omitted)')
+    if chars >= _TEXT_MIN_CHARS:
+        return _cut_text(value, chars)
+    return _text_note(length)
+
+
+def _fields_notice(depth: int, shown: int, total: int) -> int:
+    """How long a dict's notice of fields left out is at *depth*; a dict's least room is the notice for all of them."""
+    return len(_INDENT) * depth + len(f'... (showing {shown} of {total} fields, peek the key for the rest)')
+
+
+def _row_keys(value: list) -> list:
+    """The field names a list of dicts shows: those of up to 5 rows, so sparse early rows do not hide fields that appear later."""
+    return list(dict.fromkeys(k for row in value[:5] if isinstance(row, dict) for k in row))
+
+
+def _cost(value: Any, depth: int, in_row: bool, limit: int) -> Tuple[int, int, int]:
+    """How long *value* renders at *depth*, exactly, as ``(least, floor, want)``.
+
+    least is the fewest characters it can be shown in: a scalar as it is, a list its
+    header, a dict its notice of fields left out. floor is what it shows with no
+    budget to spend: its short fields, a length note for each long text, and the
+    floors of what it nests. want is all of it. A container that wants no more than
+    _ROW_TEXT_CHARS is a short field: its three are equal, and it is shown whole or
+    not at all. Counting stops past *limit*, so a huge value costs a bounded walk.
+    Inside a sampled row everything is whole, so the three are equal there too.
+    """
+    if depth > _SUMMARY_MAX_DEPTH:
+        return 3, 3, 3
+    if value is None or isinstance(value, (bool, int, float)):
+        length = len(_render(value, depth, 0))
+        return length, length, length
+    if isinstance(value, str):
+        length = len(value)
+        if in_row:
+            length = len(_row_text(value))
+        elif length > _ROW_TEXT_CHARS:
+            note = len(_text_note(length))
+            return note, note, length + 2
+        else:
+            length += 2
+        return length, length, length
+    if isinstance(value, dict):
+        if not value:
+            return 2, 2, 2
+        pad = len(_INDENT) * depth
+        floor = want = -1  # the fields' newlines, one fewer than fields
+        for k, v in value.items():
+            _, f, w = _cost(v, depth + 1, in_row, limit)
+            label = pad + len(str(k)) + 3
+            floor += label + f
+            want += label + w
+            if floor > limit:
+                break
+        if in_row or want <= _ROW_TEXT_CHARS:
+            return want, want, want
+        return min(_fields_notice(depth, len(value), len(value)), want), floor, want
+    if isinstance(value, list):
+        if not value:
+            return 12, 12, 12  # "[] (0 items)"
+        n = len(value)
+        pad = len(_INDENT) * depth
+        if isinstance(value[0], dict):
+            header = len(f'{n} items, fields: {_row_keys(value)}')
+            if in_row:
+                rows = value[:_SUMMARY_SHORT_LIST]
+                want = header + (len(f' (showing {len(rows)} of {n})') if n > len(rows) else 0)
+                for i, row in enumerate(rows):
+                    want += pad + len(str(i)) + 10 + _cost(row, depth + 1, True, limit)[2]
+                return want, want, want
+            least = header + len(f' (showing 0 of {n})')
+            floor = want = header
+            whole = n <= _SUMMARY_SHORT_LIST
+            for i, row in enumerate(value):
+                _, f, w = _cost(row, depth + 1, not whole, limit)
+                label = pad + len(str(i)) + 10  # "\n{pad}  row[i]:\n"
+                want += label + w
+                if whole:
+                    floor += label + f
+                elif want > limit:
+                    break
+            if not whole:
+                floor = least
+        else:
+            shown = value[:3]
+            prefix = len(f'{n} items, sample: [')
+            least = prefix + 4  # "...]"
+            floor = want = prefix + 1 + 2 * (len(shown) - 1)  # "]" and ", " between items
+            for item in shown:
+                _, f, w = _cost(item, depth + 1, in_row, limit)
+                floor += f
+                want += w
+        if in_row or want <= _ROW_TEXT_CHARS:
+            return want, want, want
+        return min(least, want), floor, want
+    length = len(_render(value, depth, 0))
+    return length, length, length
+
+
+def _split(room: int, needs: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    """Share *room* between items that each need so much: the ones that fit an equal share take only what they need, and the rest is split again."""
+    out: List[Tuple[int, int]] = []
+    left = len(needs)
+    for i, need in sorted(needs, key=lambda item: item[1]):
+        give = min(need, room // left)
+        out.append((i, give))
+        room -= give
+        left -= 1
+    return out
+
+
+def _allocate(
+    room: int, items: List[Tuple[int, int, int, int]], order: List[int], notice: int
+) -> Tuple[Dict[int, int], bool]:
+    """Which of a container's *items* fit in *room*, and the room each one's value gets.
+
+    Each item is ``(fixed, least, floor, want)``: what its label and separator cost,
+    and its value's costs (see _cost). Items are kept in *order* while their label
+    and least fit; *notice* is reserved as soon as one does not, so the container
+    can say so inside its room. The rest of the room then goes to the kept items'
+    floors (short fields first, so a cut dict keeps its status), then to what they
+    want beyond that, each split so that an item needing less than an equal share
+    takes only that (see _split).
+
+    Returns:
+        The room per kept item, by index, and whether any item was left out.
+    """
+    kept: List[int] = []
+    used = 0
+    for i in order:
+        cost = items[i][0] + items[i][1]
+        if used + cost <= room:
+            kept.append(i)
+            used += cost
+    cut = len(kept) < len(items)
+    if cut:
+        # Make room for the notice by giving up the last kept, least wanted, items.
+        room -= notice
+        while used > room and kept:
+            used -= sum(items[kept.pop()][:2])
+    rooms = {i: items[i][1] for i in kept}
+    left = room - used
+    for low, high in ((1, 2), (2, 3)):
+        needs = [(i, items[i][high] - items[i][low]) for i in kept if items[i][high] > items[i][low]]
+        for i, give in _split(left, needs):
+            rooms[i] += give
+            left -= give
+    return rooms, cut
+
+
+def _render(
+    value: Any,
+    depth: int,
+    room: int,
+    in_row: bool = False,
+    text_cap: Optional[int] = None,
+    omitted: Optional[_Omitted] = None,
+    path: Tuple[Any, ...] = (),
+) -> str:
+    """Render *value* within *room* characters.
+
+    A container keeps to its room by leaving out whole fields or whole rows (see
+    _describe_dict, _render_rows); what it leaves out is recorded in *omitted* by
+    *path*. A scalar is what it is: its parent paid for it. Inside a sampled list
+    row (*in_row*) everything is shown whole, except that a string is cut to
+    _ROW_TEXT_CHARS and a nested list shows _SUMMARY_SHORT_LIST rows, so rows stay
+    narrow. *text_cap*, when given, sets the most any text may show, wherever it
+    sits, and no field is left out: argument previews use it, sized by _args_text_cap.
 
     Design decisions:
-    - Strings longer than 80 chars are truncated with a char count so the LLM
-      knows it is a large value and should use chunked reading if needed.
-    - Lists of dicts show field names, then as many rows as fit the budget,
-      so narrow rows are listed in full and a lookup can be answered from the
-      summary. The header reports how many rows were shown when some are
-      omitted, so the LLM knows the sample is partial.
+    - Text outside a sampled row is shown in full when it fits its room; past that
+      its start and end are kept and the middle is dropped (see _render_text).
+    - Lists of dicts show field names, then as many whole rows as fit, so narrow
+      rows are listed in full and a lookup can be answered from the summary. The
+      header reports how many rows were shown when some are omitted, so the LLM
+      knows the sample is partial.
     - Lists of primitives show a short sample (first 3 items).
     - Depth is tracked so nested structures are indented readably.
     """
@@ -151,79 +498,164 @@ def _render(value: Any, depth: int, budget: int) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, str):
-        if len(value) <= 80:
-            return f'"{value}"'
-        # Show prefix and total length so the LLM knows it can page through with offset/length
-        return f'"{value[:80]}..." ({len(value)} chars)'
+        if text_cap is not None:
+            return _cut_text(value, text_cap)
+        if in_row:
+            return _row_text(value)
+        return _render_text(value, room)
     if isinstance(value, list):
-        n = len(value)
-        if n == 0:
+        if not value:
             return '[] (0 items)'
-        first = value[0]
-        if isinstance(first, dict):
-            # Collect field names from up to 5 rows to handle sparse rows
-            # where early rows may be missing fields that appear later.
-            keys = list(dict.fromkeys(k for row in value[:5] if isinstance(row, dict) for k in row))
-            rows = _sample_rows(value, depth, budget)
-            header = f'{n} items, fields: {keys}'
-            if len(rows) < n:
-                # Say the sample is partial, so a lookup peeks the key instead of
-                # re-running the search that produced it.
-                header += f' (showing {len(rows)} of {n})'
-            return '\n'.join([header] + rows)
-        # Non-dict list — show a short JSON sample
-        sample = json.dumps(value[:3], ensure_ascii=False)
-        return f'{n} items, sample: {sample}'
+        if isinstance(value[0], dict):
+            return _render_rows(value, depth, room, in_row, text_cap, omitted, path)
+        return _render_sample(value, depth, room, in_row, text_cap, omitted, path)
     if isinstance(value, dict):
-        return _describe_dict(value, depth, budget)
+        if not value:
+            return '{}'
+        return _describe_dict(value, depth, room, in_row, text_cap, omitted, path)
     return str(value)
 
 
-def _sample_rows(value: list, depth: int, budget: int) -> List[str]:
-    """Render as many rows of *value* as *budget* allows.
+def _render_rows(
+    value: list,
+    depth: int,
+    room: int,
+    in_row: bool,
+    text_cap: Optional[int],
+    omitted: Optional[_Omitted],
+    path: Tuple[Any, ...],
+) -> str:
+    """A list of dicts: its field names, then its rows.
 
-    Args:
-        value: The list of dicts being summarised.
-        depth: Current nesting depth.
-        budget: Characters this list may spend.
-
-    Returns:
-        The rendered rows, always at least _SUMMARY_MIN_ROWS where available.
-        The first _SUMMARY_MIN_ROWS count against the budget too, so wide rows
-        exhaust it and the sample stops at two.
+    A list of up to _SUMMARY_SHORT_LIST rows (an MCP tool's content blocks) is shown
+    whole: its rows split its room like a dict's fields and show their text. A longer
+    list is a sample: its rows are shown whole, in order, while they fit, and the
+    header counts the ones shown. Inside a sampled row a list shows
+    _SUMMARY_SHORT_LIST rows at most. _render picks this branch from the first item
+    alone, so a later row can be a scalar; it is rendered like any value.
     """
+    n = len(value)
+    header = f'{n} items, fields: {_row_keys(value)}'
     pad = _INDENT * depth
+
+    def labelled(i: int, body: str) -> str:
+        return f'\n{pad}{_INDENT}row[{i}]:\n{body}'
+
+    whole = n <= _SUMMARY_SHORT_LIST and not in_row
     rows: List[str] = []
-    spent = 0
-    for i, row in enumerate(value):
-        # _render picks this branch from the first item alone, so a later row can
-        # be a scalar. Widening the window past two rows made that reachable.
-        body = _render(row, depth + 1, budget)
-        text = f'{pad}{_INDENT}row[{i}]:\n{body}'
-        if i >= _SUMMARY_MIN_ROWS and spent + len(text) > budget:
-            break
-        rows.append(text)
-        spent += len(text)
-    return rows
+    if text_cap is None and in_row:
+        rows = [labelled(i, _render(row, depth + 1, room, True)) for i, row in enumerate(value[:_SUMMARY_SHORT_LIST])]
+    elif text_cap is None and whole:
+        items = [(len(labelled(i, '')), *_cost(row, depth + 1, False, room)) for i, row in enumerate(value)]
+        rooms, _ = _allocate(room - len(header), items, list(range(n)), len(f' (showing 0 of {n})'))
+        for i, row in enumerate(value):
+            if i in rooms:
+                rows.append(labelled(i, _render(row, depth + 1, rooms[i], False, None, omitted, path + (i,))))
+            elif omitted is not None:
+                _collect_short(row, path + (i,), depth + 1, omitted)
+    elif whole:
+        rows = [labelled(i, _render(row, depth + 1, room, False, text_cap)) for i, row in enumerate(value)]
+    else:
+        used = len(header)
+        for i, row in enumerate(value):
+            text = labelled(i, _render(row, depth + 1, room, True, text_cap))
+            # The notice counts too, unless this is the last row and the header needs none.
+            notice = 0 if i == n - 1 else len(f' (showing {i + 1} of {n})')
+            if used + len(text) + notice > room and (text_cap is None or i >= _SUMMARY_SHORT_LIST):
+                break
+            rows.append(text)
+            used += len(text)
+    if len(rows) < n:
+        # Say the sample is partial, so a lookup peeks the key instead of
+        # re-running the search that produced it.
+        header += f' (showing {len(rows)} of {n})'
+    return header + ''.join(rows)
 
 
-def _describe_dict(d: dict, depth: int, budget: int) -> str:
+def _render_sample(
+    value: list,
+    depth: int,
+    room: int,
+    in_row: bool,
+    text_cap: Optional[int],
+    omitted: Optional[_Omitted],
+    path: Tuple[Any, ...],
+) -> str:
+    """A list that does not start with a dict: its first 3 items, each rendered like a field of its parent.
+
+    Outside a sampled row the items split the list's room, so one huge item is cut
+    like any text and cannot push the fields after it past the cap; an item that
+    does not fit at all is left out and the sample ends in "...".
+    """
+    n = len(value)
+    shown = value[:3]
+    prefix = f'{n} items, sample: ['
+    if in_row or text_cap is not None:
+        parts = [_render(item, depth + 1, room, in_row, text_cap) for item in shown]
+        return f'{prefix}{", ".join(parts)}]'
+    items = [(2, *_cost(item, depth + 1, False, room)) for item in shown]
+    # The first item has no ", " before it, and the room counts the closing bracket.
+    rooms, cut = _allocate(room - len(prefix) + 1, items, list(range(len(shown))), len(', ...'))
+    parts = []
+    for i, item in enumerate(shown):
+        if i in rooms:
+            parts.append(_render(item, depth + 1, rooms[i], False, None, omitted, path + (i,)))
+        elif omitted is not None:
+            _collect_short(item, path + (i,), depth + 1, omitted)
+    if cut:
+        parts.append('...')
+    return f'{prefix}{", ".join(parts)}]'
+
+
+def _describe_dict(
+    d: dict,
+    depth: int,
+    room: int,
+    in_row: bool,
+    text_cap: Optional[int],
+    omitted: Optional[_Omitted],
+    path: Tuple[Any, ...],
+) -> str:
     """Render a dict as indented key: value lines using _render for values.
 
-    The budget is split between the fields holding containers rather than handed
-    to each in turn, so what a lookup can answer does not depend on key order.
+    When all of it fits its room, every field is shown whole. Otherwise the room
+    is allocated once (see _allocate): every key, short field and length note is
+    paid for first, nested containers' short fields with them, and what is left is
+    split between the fields that can spend it, so what a lookup can answer does
+    not depend on key order, a command's stdout cannot crowd out its stderr or exit
+    code, and a text that needs less than an equal share leaves the rest to the
+    others. Fields that do not fit even so are left out whole, short fields named
+    like a status last, and a final line says how many.
     """
     pad = _INDENT * depth
-    containers = sum(1 for v in d.values() if isinstance(v, (list, dict)) and v)
-    share = max(_SUMMARY_MIN_SHARE, budget // containers) if containers else budget
+
+    def line(k: Any, desc: str) -> str:
+        # A multi-line value goes on its own lines below the key.
+        return f'{pad}{k}:\n{desc}' if '\n' in desc else f'{pad}{k}: {desc}'
+
+    if in_row or text_cap is not None:
+        return '\n'.join(line(k, _render(v, depth + 1, room, in_row, text_cap)) for k, v in d.items())
+    keys = list(d)
+    items = [(len(pad) + len(str(k)) + 3, *_cost(v, depth + 1, False, room)) for k, v in d.items()]
+    if sum(item[0] + item[3] for item in items) - 1 <= room:
+        rooms = {i: items[i][3] for i in range(len(items))}
+        cut = False
+    else:
+
+        def priority(i: int) -> Tuple[int, int]:
+            short = items[i][1] == items[i][3]  # shown whole or not at all
+            return (0 if short and _STATUS_NAME.search(str(keys[i])) else 1 if short else 2), i
+
+        notice = _fields_notice(depth, len(d), len(d)) + 1  # and its newline
+        rooms, cut = _allocate(room + 1, items, sorted(range(len(items)), key=priority), notice)
     lines = []
-    for k, v in d.items():
-        desc = _render(v, depth + 1, share)
-        if '\n' in desc:
-            # Multi-line value — put it on its own line below the key
-            lines.append(f'{pad}{k}:\n{desc}')
-        else:
-            lines.append(f'{pad}{k}: {desc}')
+    for i, (k, v) in enumerate(d.items()):
+        if i in rooms:
+            lines.append(line(k, _render(v, depth + 1, rooms[i], False, None, omitted, path + (str(k),))))
+        elif omitted is not None and not omitted.more:
+            _collect_short(v, path + (str(k),), depth + 1, omitted)
+    if cut:
+        lines.append(f'{pad}... (showing {len(rooms)} of {len(d)} fields, peek the key for the rest)')
     return '\n'.join(lines)
 
 

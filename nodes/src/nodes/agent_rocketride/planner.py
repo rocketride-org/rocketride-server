@@ -24,7 +24,6 @@ Usage::
         context=context,
         question=question,
         waves=waves,
-        instructions=instructions,
         current_scratch=current_scratch,
     )
 """
@@ -107,7 +106,6 @@ def _build_wave_question(
     context: AgentContext,
     question: Question,
     waves: List[Dict[str, Any]],
-    instructions: List[str],
     scratch: str = '',
 ) -> Question:
     """
@@ -205,16 +203,8 @@ def _build_wave_question(
     tools_block = (tools_block + '\n' + peek_descriptor) if tools_block != '(none)' else peek_descriptor
     q.addInstruction('Available Tools', tools_block)
 
-    # ------------------------------------------------------------------
-    # User-specified additional instructions
-    # ------------------------------------------------------------------
-
-    # Node operators can attach extra instructions (e.g. domain constraints,
-    # output style preferences) via the node's configuration.  Each one is
-    # injected as a separate Instruction block so it renders distinctly in
-    # the prompt and doesn't blend into the system-level instructions above.
-    for inst in instructions:
-        q.addInstruction('Instruction', inst)
+    # The node's configured instructions are not added here: AgentBase.run_agent
+    # already added them to the question, and the deep copy above carries them.
 
     # ------------------------------------------------------------------
     # Memory usage instructions
@@ -423,7 +413,6 @@ def plan(
     context: AgentContext,
     question: Question,
     waves: List[Dict[str, Any]],
-    instructions: List[str],
     current_scratch: str = '',
 ) -> Dict[str, Any]:
     """
@@ -438,7 +427,6 @@ def plan(
         context: The current agent run context (carries the host channels).
         question: The original user request (question, documents, context).
         waves: History of prior waves (calls + results) for context.
-        instructions: Additional user-specified instructions to include.
         current_scratch: The LLM's working notes from the previous iteration.
 
     Returns:
@@ -451,7 +439,6 @@ def plan(
         context=context,
         question=question,
         waves=waves,
-        instructions=instructions,
         scratch=current_scratch,
     )
     debug(f'plan: request {wave_prompt.getPrompt()}')

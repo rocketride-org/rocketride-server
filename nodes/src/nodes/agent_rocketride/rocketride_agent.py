@@ -133,7 +133,6 @@ class RocketRideDriver(AgentBase):
                     context=context,
                     question=question,
                     waves=waves,
-                    instructions=self._instructions,
                     current_scratch=current_scratch,
                 )
             except Exception as exc:
