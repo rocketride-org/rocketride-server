@@ -47,6 +47,25 @@ import { getRegisteredAppPack } from './app-pack-registry.js';
 import type { AppPackModule } from './app-pack-registry.js';
 import type { AppVerifyReport, CreatedApp } from '../app-pack/index.js';
 
+/**
+ * This file is Node-only (uses `process.cwd()` as a default workspace root)
+ * but also ships as part of the 'rocketride' Module Federation share, so it
+ * can end up type-checked inside a browser package's program — e.g. the
+ * shell, whose `types: []` tsconfig deliberately excludes `@types/node`
+ * (see `packages/shell/src/types/global.d.ts`), and whose ambient `process`
+ * is narrowed to `{ env }` only. A real `import process from 'node:process'`
+ * would fix the type but breaks bundling here (rspack refuses to bundle a
+ * Node builtin for a browser target); relying on `@types/node`'s own
+ * `node:process` module typing doesn't work either, since resolving its full
+ * `NodeJS.Process` shape depends on ambient inclusion `types: []` cuts off.
+ * A minimal local shape for the one method actually used sidesteps both
+ * problems: no import, no dependency on which ambient types are in scope.
+ */
+interface NodeCwd {
+	cwd(): string;
+}
+const nodeProcess = process as unknown as NodeCwd;
+
 // =============================================================================
 // HELPERS
 // =============================================================================
@@ -182,7 +201,7 @@ export class DeployApi {
 	 */
 	async addApp(appRoot: string, options: { workspaceRoot?: string; comment?: string; metadata?: Record<string, unknown>; onProgress?: (line: string) => void } = {}): Promise<PublishResult> {
 		const pack = await this.loadAppPack();
-		const packed = pack.packAppSource(options.workspaceRoot ?? process.cwd(), appRoot, options.onProgress);
+		const packed = pack.packAppSource(options.workspaceRoot ?? nodeProcess.cwd(), appRoot, options.onProgress);
 		return this.add({
 			kind: 'app',
 			data: packed.data,
@@ -223,7 +242,7 @@ export class DeployApi {
 			}
 		}
 		const { workspaceRoot, onProgress, ...rest } = options;
-		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, serverBaseUrl, onProgress });
+		return pack.createAppWorkspace(workspaceRoot ?? nodeProcess.cwd(), slug, { ...rest, serverBaseUrl, onProgress });
 	}
 
 	/**
@@ -243,7 +262,7 @@ export class DeployApi {
 	 */
 	async verifyApp(appRoot: string, options: { workspaceRoot?: string } = {}): Promise<AppVerifyReport> {
 		const pack = await this.loadAppPack();
-		return pack.verifyAppSource(options.workspaceRoot ?? process.cwd(), appRoot);
+		return pack.verifyAppSource(options.workspaceRoot ?? nodeProcess.cwd(), appRoot);
 	}
 
 	// =========================================================================

@@ -147,7 +147,7 @@ export class DAPClient extends DAPBase {
 	 * Reject exactly the requests registered against an invalidated transport
 	 * epoch. Requests on a replacement transport remain untouched.
 	 */
-	protected _onTransportEpochInvalidated(epoch: number, reason: Error): void {
+	protected override _onTransportEpochInvalidated(epoch: number, reason: Error): void {
 		for (const [seq, request] of this._pendingRequests) {
 			if (request.epoch !== epoch) continue;
 			if (request.timer) clearTimeout(request.timer);
@@ -178,7 +178,7 @@ export class DAPClient extends DAPBase {
 	 *
 	 * @param connectionInfo - Optional human-readable description of the connection
 	 */
-	async onConnected(connectionInfo?: string): Promise<void> {
+	override async onConnected(connectionInfo?: string): Promise<void> {
 		// Propagate to DAPBase so shared housekeeping runs
 		await super.onConnected(connectionInfo);
 	}
@@ -190,7 +190,7 @@ export class DAPClient extends DAPBase {
 	 *
 	 * @param error - The error that caused the connection attempt to fail
 	 */
-	async onConnectError(error: Error): Promise<void> {
+	override async onConnectError(error: Error): Promise<void> {
 		// Propagate to DAPBase for centralised error handling
 		await super.onConnectError(error);
 	}
@@ -205,7 +205,7 @@ export class DAPClient extends DAPBase {
 	 * @param reason - Human-readable reason for the disconnection
 	 * @param hasError - Whether the disconnection was caused by an error condition
 	 */
-	async onDisconnected(reason?: string, hasError = false): Promise<void> {
+	override async onDisconnected(reason?: string, hasError = false): Promise<void> {
 		await super.onDisconnected(reason, hasError);
 	}
 
@@ -219,11 +219,11 @@ export class DAPClient extends DAPBase {
 	 *
 	 * @param message - The DAP message received from the server
 	 */
-	async onReceive(message: DAPMessage): Promise<void> {
+	override async onReceive(message: DAPMessage): Promise<void> {
 		await this._receiveForEpoch(message, this._transportEpoch);
 	}
 
-	protected async _onTransportReceive(message: DAPMessage, epoch: number): Promise<void> {
+	protected override async _onTransportReceive(message: DAPMessage, epoch: number): Promise<void> {
 		await this._receiveForEpoch(message, epoch);
 	}
 

@@ -65,6 +65,19 @@ import type { AppPackModule } from '../client/app-pack-registry.js';
 import { renderTemplate, TEMPLATE_NAMES } from '../app-scaffold/index.js';
 import type { TemplateName } from '../app-scaffold/index.js';
 
+/**
+ * This file is Node-only but also ships (via `../client/app-pack-registry.js`)
+ * as part of the 'rocketride' Module Federation share, so it can end up
+ * type-checked inside a browser package's program whose ambient `process` is
+ * narrowed (see the same note in `../client/deploy.ts`). A minimal local
+ * shape for the one property actually used sidesteps depending on which
+ * ambient types are in scope wherever this file gets checked from.
+ */
+interface NodePlatform {
+	platform: string;
+}
+const nodeProcess = process as unknown as NodePlatform;
+
 /** Receives one human-readable line per pack/verify step. */
 export type PackProgress = (line: string) => void;
 
@@ -824,7 +837,7 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 			// stdio:'ignore' because nobody reads these pipes — a full pipe
 			// buffer would block pnpm forever and the timer below would kill
 			// an install that was in fact succeeding.
-			const proc = process.platform === 'win32'
+			const proc = nodeProcess.platform === 'win32'
 				? spawn('pnpm install --prefer-offline', { cwd: wsAbs, shell: true, stdio: 'ignore', env: { ...process.env, NO_COLOR: '1' } })
 				: spawn('pnpm', ['install', '--prefer-offline'], { cwd: wsAbs, stdio: 'ignore', env: { ...process.env, NO_COLOR: '1' } });
 			const timer = setTimeout(() => {

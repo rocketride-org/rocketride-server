@@ -33,9 +33,12 @@
 //                  IntelliSense for all types, hooks, and functions.
 //
 // At runtime:      Module Federation's shared singleton mechanism replaces
-//                  these stubs with the real implementations from the shell
-//                  host (the shell).  Third-party apps never bundle the
-//                  implementations.
+//                  every export below with the real implementation from the
+//                  shell host.  Third-party apps never bundle the
+//                  implementations — outside the host (a plain Node/browser
+//                  environment, a unit test that doesn't mock this module),
+//                  each one throws a clear error rather than silently
+//                  returning `undefined`.
 // =============================================================================
 
 // =============================================================================
@@ -82,8 +85,23 @@ export type {
 // IMPORTS FOR HOOK RETURN TYPES
 // =============================================================================
 
+import type * as React from 'react';
 import type { RocketRideClient } from '../client/index';
 import type { IWorkspaceContext, ShellApiConfig, ConnectResult, DocumentsState, Document, ShellEventMap } from './types';
+
+/**
+ * Every export in this file is a stub: Module Federation's shared-singleton
+ * mechanism swaps it for the shell host's real implementation at runtime, so
+ * none of this code is meant to actually run standalone (see the module
+ * doc-comment above). Calling one outside the host — a plain Node/browser
+ * environment, or a unit test that hasn't mocked `rocketride/app-sdk` —
+ * throws this instead of returning `undefined`, so the failure points
+ * straight at the missing host/mock rather than surfacing later as a
+ * confusing "cannot read properties of undefined".
+ */
+function shellHostRequired(name: string): never {
+	throw new Error(`rocketride/app-sdk: '${name}' has no standalone implementation — it only works when the app is loaded ` + `by the RocketRide shell host, which replaces this stub with the real implementation via Module ` + `Federation's shared-singleton mechanism. If you're seeing this in a unit test or a plain Node/browser ` + `environment, mock '${name}' instead of calling the real export.`);
+}
 
 // =============================================================================
 // CONNECTION HOOKS
@@ -101,11 +119,13 @@ import type { IWorkspaceContext, ShellApiConfig, ConnectResult, DocumentsState, 
  * if (!client) return <p>Connecting…</p>;
  * ```
  */
-export declare function useShellConnection(): {
+export function useShellConnection(): {
 	client: RocketRideClient | null;
 	isConnected: boolean;
 	statusMessage: string | null;
-};
+} {
+	return shellHostRequired('useShellConnection');
+}
 
 /**
  * Access the shell-level API config keys (environment variables forwarded
@@ -113,7 +133,9 @@ export declare function useShellConnection(): {
  *
  * @returns A string-keyed record of config values.
  */
-export declare function useShellApiConfig(): ShellApiConfig;
+export function useShellApiConfig(): ShellApiConfig {
+	return shellHostRequired('useShellApiConfig');
+}
 
 // =============================================================================
 // WORKSPACE HOOKS
@@ -125,7 +147,9 @@ export declare function useShellApiConfig(): ShellApiConfig;
  *
  * @returns The workspace context object.
  */
-export declare function useWorkspace(): IWorkspaceContext;
+export function useWorkspace(): IWorkspaceContext {
+	return shellHostRequired('useWorkspace');
+}
 
 // =============================================================================
 // AUTH HOOKS
@@ -136,25 +160,31 @@ export declare function useWorkspace(): IWorkspaceContext;
  *
  * @returns The ConnectResult from the server, or null if not authenticated.
  */
-export declare function useAuthUser(): ConnectResult | null;
+export function useAuthUser(): ConnectResult | null {
+	return shellHostRequired('useAuthUser');
+}
 
 /**
  * Get the logout function.
  *
  * @returns A function that triggers logout, or null.
  */
-export declare function useLogout(): (() => void) | null;
+export function useLogout(): (() => void) | null {
+	return shellHostRequired('useLogout');
+}
 
 /**
  * Access the user's desktop apps and subscription state.
  *
  * @returns Object with desktopApps array, isOnDesktop lookup, and getStatus lookup.
  */
-export declare function useSubscriptions(): {
+export function useSubscriptions(): {
 	desktopApps: { appId: string; appStatus: string; onDesktop: boolean; seats?: number; seatsUsed?: number; features?: string[] }[];
 	isOnDesktop: (appId: string) => boolean;
 	getStatus: (appId: string) => string | undefined;
-};
+} {
+	return shellHostRequired('useSubscriptions');
+}
 
 // =============================================================================
 // DOCUMENTS CLASS
@@ -172,34 +202,68 @@ export declare function useSubscriptions(): {
  * docs.destroy();
  * ```
  */
-export declare class Documents {
-	constructor(vfs?: import('./types').IVirtualFileSystem | null, initialState?: DocumentsState);
+export class Documents {
+	constructor(_vfs?: import('./types').IVirtualFileSystem | null, _initialState?: DocumentsState) {
+		shellHostRequired('Documents');
+	}
 
 	// State access
-	getState(): DocumentsState;
-	getDocument(uri: string): Document | undefined;
+	getState(): DocumentsState {
+		return shellHostRequired('Documents.getState');
+	}
+	getDocument(_uri: string): Document | undefined {
+		return shellHostRequired('Documents.getDocument');
+	}
 
 	// React hook — subscribes to state changes
-	useStore(): DocumentsState;
+	useStore(): DocumentsState {
+		return shellHostRequired('Documents.useStore');
+	}
 
 	// Document operations
-	openDocument(uri: string, groupId?: string): Promise<void>;
-	createDocument(groupId?: string, initialContent?: unknown): string;
-	closeEditor(editorId: string): void;
-	updateContent(uri: string, content: unknown): void;
-	saveDocument(uri: string): Promise<void>;
-	revertDocument(uri: string): Promise<void>;
+	openDocument(_uri: string, _groupId?: string): Promise<void> {
+		return shellHostRequired('Documents.openDocument');
+	}
+	createDocument(_groupId?: string, _initialContent?: unknown): string {
+		return shellHostRequired('Documents.createDocument');
+	}
+	closeEditor(_editorId: string): void {
+		return shellHostRequired('Documents.closeEditor');
+	}
+	updateContent(_uri: string, _content: unknown): void {
+		return shellHostRequired('Documents.updateContent');
+	}
+	saveDocument(_uri: string): Promise<void> {
+		return shellHostRequired('Documents.saveDocument');
+	}
+	revertDocument(_uri: string): Promise<void> {
+		return shellHostRequired('Documents.revertDocument');
+	}
 
 	// Editor group operations
-	splitGroup(groupId: string, orientation: import('./types').SplitOrientation): void;
-	moveEditor(editorId: string, targetGroupId: string): void;
-	closeGroup(groupId: string): void;
-	setActiveEditor(groupId: string, editorIndex: number): void;
-	setActiveGroup(groupId: string): void;
-	updateEditorViewport(editorId: string, patch: Partial<Pick<import('./types').Editor, 'scrollTop' | 'scrollLeft' | 'cursorLine' | 'cursorColumn'>>): void;
+	splitGroup(_groupId: string, _orientation: import('./types').SplitOrientation): void {
+		return shellHostRequired('Documents.splitGroup');
+	}
+	moveEditor(_editorId: string, _targetGroupId: string): void {
+		return shellHostRequired('Documents.moveEditor');
+	}
+	closeGroup(_groupId: string): void {
+		return shellHostRequired('Documents.closeGroup');
+	}
+	setActiveEditor(_groupId: string, _editorIndex: number): void {
+		return shellHostRequired('Documents.setActiveEditor');
+	}
+	setActiveGroup(_groupId: string): void {
+		return shellHostRequired('Documents.setActiveGroup');
+	}
+	updateEditorViewport(_editorId: string, _patch: Partial<Pick<import('./types').Editor, 'scrollTop' | 'scrollLeft' | 'cursorLine' | 'cursorColumn'>>): void {
+		return shellHostRequired('Documents.updateEditorViewport');
+	}
 
 	// Lifecycle
-	destroy(): void;
+	destroy(): void {
+		return shellHostRequired('Documents.destroy');
+	}
 }
 
 // =============================================================================
@@ -213,7 +277,7 @@ export declare class Documents {
  * plus client access and connection state.  Works from React components,
  * hooks, or plain functions.
  */
-export declare const connectionManager: {
+export const connectionManager: {
 	/** Emit a typed shell event. */
 	emit<K extends keyof ShellEventMap>(event: K, payload: ShellEventMap[K]): void;
 	/** Subscribe to a typed shell event. Returns an unsubscribe function. */
@@ -222,21 +286,40 @@ export declare const connectionManager: {
 	getClient(): import('../client/index').RocketRideClient | null;
 	/** Returns true when the WebSocket is authenticated and connected. */
 	isConnected(): boolean;
+} = {
+	emit() {
+		return shellHostRequired('connectionManager.emit');
+	},
+	on() {
+		return shellHostRequired('connectionManager.on');
+	},
+	getClient() {
+		return shellHostRequired('connectionManager.getClient');
+	},
+	isConnected() {
+		return shellHostRequired('connectionManager.isConnected');
+	},
 };
 
 /**
  * Returns a snapshot of the debug event log (last 500 events).
  */
-export declare function getDebugLog(): Array<{ timestamp: string; event: string; payload: unknown }>;
+export function getDebugLog(): Array<{ timestamp: string; event: string; payload: unknown }> {
+	return shellHostRequired('getDebugLog');
+}
 
 /** Clears all entries from the debug log. */
-export declare function clearDebugLog(): void;
+export function clearDebugLog(): void {
+	return shellHostRequired('clearDebugLog');
+}
 
 /**
  * Registers a wildcard listener called for every emitted event.
  * Returns an unsubscribe function.
  */
-export declare function onAny(handler: (event: string, payload: unknown) => void): () => void;
+export function onAny(_handler: (event: string, payload: unknown) => void): () => void {
+	return shellHostRequired('onAny');
+}
 
 // =============================================================================
 // CROSS-APP COMPONENT LOADING
@@ -253,11 +336,15 @@ export declare function onAny(handler: (event: string, payload: unknown) => void
  * @param componentName - The key in that app's `components` object (e.g. 'SpecialChart').
  * @returns The React component, or null if not yet loaded / not found.
  */
-export declare function useAppComponent(appId: string, componentName: string): React.ComponentType<any> | null;
+export function useAppComponent(_appId: string, _componentName: string): React.ComponentType<any> | null {
+	return shellHostRequired('useAppComponent');
+}
 
 // =============================================================================
 // CLIENT ACCESS (non-React)
 // =============================================================================
 
 /** Returns the RocketRide client singleton, or null if not initialised. */
-export declare function getClient(): RocketRideClient | null;
+export function getClient(): RocketRideClient | null {
+	return shellHostRequired('getClient');
+}
