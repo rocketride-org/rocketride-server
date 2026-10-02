@@ -27,8 +27,9 @@ question.addQuestion('Summarize the main points and list keywords.');
 
 If you send the same question again and again with only its context, documents,
 goals or questions changing (an agent loop does), set `question.cachePrefix = true`.
-A provider that supports prompt caching (the Anthropic node) may then cache the
-unchanging start of the prompt; other providers ignore the flag.
+A provider that supports prompt caching (the Anthropic node, and Claude models on
+the Bedrock node) may then cache the unchanging start of the prompt; other
+providers ignore the flag.
 
 `new Question({ type?, filter?, expectJson?, cachePrefix?, role? })` — `QuestionType` is one of
 `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT` (default `QUESTION`). Steer the
