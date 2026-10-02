@@ -1,0 +1,6 @@
+# The distribution is `tenki`, not the legacy `tenki-sandbox`: that package stopped
+# at 0.4.0 and never returns a closeable handle when a create fails its readiness wait.
+# Pinned exactly: the unit tests stub the SDK, so a 1.x release that renamed something this
+# node relies on (the handle a failed create carries, say) would pass CI and fail in use.
+# Bump deliberately, and run nodes/test/test_tool_tenki_sdk.py against the new version first.
+tenki==1.0.6
