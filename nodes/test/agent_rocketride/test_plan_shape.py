@@ -193,5 +193,5 @@ def test_a_reply_with_nothing_to_do_says_so(check):
 def test_a_reply_that_is_not_an_object_says_what_it_was(check):
     plan, problems = check(['workspace.list'])
 
-    assert plan == {'done': False, 'tool_calls': [], 'remove': []}
+    assert plan == {'done': False, 'asked_done': False, 'tool_calls': [], 'remove': []}
     assert problems == ['the reply was a JSON list, not an object']

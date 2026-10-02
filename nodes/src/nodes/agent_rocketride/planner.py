@@ -31,7 +31,7 @@ Usage::
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from rocketlib import debug
 
@@ -49,6 +49,27 @@ from ai.common.utils import safe_str
 # Keeping it brief and declarative — the detailed instructions follow in the
 # numbered sections — so the model internalizes its role without noise.
 SYSTEM_ROLE = 'You are RocketRide Wave, a planning agent that solves tasks step-by-step. '
+
+# The rule about checking work. Without a check tool the planner is told to trust
+# tool results, since it has no way to verify them. With one (``verify_tool`` in the
+# node config, e.g. a compiler), passing that check is the proof the work is done.
+_TRUST_RULE = """\
+        - Trust that, if a tool succeeds, it worked and gave you the correct answer.
+        You do not need to verify, re-fetch, or confirm a tool's results. If the result
+        is clearly wrong (e.g. wrong columns, wrong data entirely), you may retry once
+        with a different approach — but never re-run the same request hoping for a
+        different outcome."""
+
+_CHECK_RULE = """\
+        - After you change anything, call {tool} on its own, in a later step than the change,
+        and fix every problem it reports before you set done=true. Its result is the proof
+        that the work is finished: never report success it has not confirmed."""
+
+# Added when the node fixes the check's arguments (``verify_args``): then only that
+# exact call checks the work, and any other call to the same tool is a change.
+_CHECK_ARGS_RULE = """
+        - The check is {tool} called with exactly these arguments: {args}. A call to {tool}
+        with any other arguments counts as a change, not a check."""
 
 # ---------------------------------------------------------------------------
 # Private helpers — formatting
@@ -107,6 +128,8 @@ def _build_wave_question(
     question: Question,
     waves: List[Dict[str, Any]],
     scratch: str = '',
+    verify_tool: str = '',
+    verify_args: Optional[Dict[str, Any]] = None,
 ) -> Question:
     """
     Build the wave-planning Question sent to the LLM each iteration.
@@ -221,9 +244,9 @@ def _build_wave_question(
         'Memory',
         """\
         Every tool result is automatically stored in memory. All prior results appear in
-        "Previous tool results" below, keyed by memory key. Each entry shows a structural
-        summary — field names, array lengths, and sample values — so you can understand
-        the data shape without loading it.
+        "Previous tool results" below, keyed by memory key. Each entry shows the arguments
+        of the call that produced it and a structural summary — field names, array lengths,
+        and sample values — so you can understand the data shape without loading it.
 
         There are two distinct memory mechanisms. Use the right one:
 
@@ -326,16 +349,17 @@ def _build_wave_question(
     #   structural summary already contains the needed values.
     # - "Remove peek results": keeps the context window lean by evicting
     #   transient peek results as soon as their data is captured in scratch.
+    check_rule = _CHECK_RULE.format(tool=verify_tool) if verify_tool else _TRUST_RULE
+    if verify_tool and verify_args is not None:
+        check_rule += _CHECK_ARGS_RULE.format(tool=verify_tool, args=json.dumps(verify_args, ensure_ascii=False))
     q.addInstruction(
         'Rules',
         """\
         - Think things through thoroughly. Plan accordingly. Prefer the simplest
         approach that answers the question — do not over-analyze.
-        - Trust that, if a tool succeeds, it worked and gave you the correct answer.
-        You do not need to verify, re-fetch, or confirm a tool's results. If the result
-        is clearly wrong (e.g. wrong columns, wrong data entirely), you may retry once
-        with a different approach — but never re-run the same request hoping for a
-        different outcome.
+"""
+        + check_rule
+        + """
         - Once all the information needed to complete the goal is available in scratch or
         previous results, write the answer now and set done=true. Presenting the answer is
         not a future plan step — it happens in the same response where you recognize the
@@ -397,8 +421,10 @@ def _build_wave_question(
         )
 
     # This is the actual planning question — placed last so it is the freshest
-    # thing in the LLM's context window when it generates its response.
-    q.addQuestion('Plan the next set of tool calls to advance towards the goal.')
+    # thing in the LLM's context window when it generates its response. It names
+    # both ways to reply, so it never argues against the rule to answer once the
+    # data is ready.
+    q.addQuestion('Plan the next set of tool calls, or set done=true if the goal is already met.')
     return q
 
 
@@ -431,12 +457,14 @@ def normalize_plan(reply: Any) -> Tuple[Dict[str, Any], List[str]]:
     Returns:
         ``(plan, problems)``. ``plan`` is a copy of the reply with a bool ``done``, a
         ``tool_calls`` list of ``{"tool": str, "args": dict}`` and a ``remove`` list of
-        strings. ``problems`` names each thing that was dropped, in words the model
-        can act on.
+        strings. ``asked_done`` records whether the reply asked to finish, even when
+        ``done`` was then cleared: the loop keeps such a reply's results for the
+        model to read. ``problems`` names each thing that was dropped, in words the
+        model can act on.
     """
     problems: List[str] = []
     if not isinstance(reply, dict):
-        empty = {'done': False, 'tool_calls': [], 'remove': []}
+        empty = {'done': False, 'asked_done': False, 'tool_calls': [], 'remove': []}
         return empty, [f'the reply was a JSON {type(reply).__name__}, not an object']
     plan = dict(reply)
 
@@ -444,6 +472,7 @@ def normalize_plan(reply: Any) -> Tuple[Dict[str, Any], List[str]]:
     if isinstance(done, str):
         done = done.strip().lower() == 'true'
     plan['done'] = done is True
+    plan['asked_done'] = plan['done']
 
     # Only a missing or null tool_calls means "no calls"; any other value, even an
     # empty object or an empty string, is checked like a call so it cannot vanish.
@@ -530,6 +559,8 @@ def plan(
     question: Question,
     waves: List[Dict[str, Any]],
     current_scratch: str = '',
+    verify_tool: str = '',
+    verify_args: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Run the single-phase planning cycle and return the plan dict.
@@ -544,6 +575,8 @@ def plan(
         question: The original user request (question, documents, context).
         waves: History of prior waves (calls + results) for context.
         current_scratch: The LLM's working notes from the previous iteration.
+        verify_tool: The tool that checks the work (node config), or '' for none.
+        verify_args: The exact arguments of the check call (node config), or None for any.
 
     Returns:
         The reply checked by ``normalize_plan``, plus ``problems`` (calls that were
@@ -555,6 +588,8 @@ def plan(
         question=question,
         waves=waves,
         scratch=current_scratch,
+        verify_tool=verify_tool,
+        verify_args=verify_args,
     )
     debug(f'plan: request {wave_prompt.getPrompt()}')
 

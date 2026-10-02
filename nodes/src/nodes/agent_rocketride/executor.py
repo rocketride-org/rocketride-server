@@ -31,7 +31,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
-from typing import Any, Dict, List, Optional, Tuple
+from typing import AbstractSet, Any, Dict, List, Optional, Tuple
 
 import jmespath
 
@@ -121,6 +121,18 @@ _SUMMARY_MISSING_FIELDS = 5000
 # A key that stands bare in a path on that line; any other is quoted, as JMESPath
 # wants it, so a key with a dot or a colon reads as one key.
 _PLAIN_KEY = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+
+# Character budget for the texts in the arguments shown next to each result. Enough
+# to show a path, a query or the start and end of written content; the full
+# arguments are in the trace. Paid in every later prompt, like the summaries. All
+# the texts in one call share it, wherever they sit (see _args_text_cap).
+_ARGS_BUDGET = 600
+
+# The most an argument preview may take, labels included. The texts keep to
+# _ARGS_BUDGET, the labels around them add a little, and a text never shows less
+# than _ROW_TEXT_CHARS, so a call with many texts can run over the budget and must
+# still show each one's start and end. Only a preview far over budget is cut here.
+_ARGS_HARD_CAP = 2 * _ARGS_BUDGET
 
 # Compiled regex for {{memory.ref:key:format:path}} template tags.
 #
@@ -315,6 +327,37 @@ def _cut_text(value: str, chars: int) -> str:
     head = (limit * 2) // 3
     tail = limit - head
     return f'"{value[:head]} ... {value[-tail:]}" ({len(value)} chars, middle omitted)'
+
+
+def _texts(value: Any, depth: int = 0) -> List[int]:
+    """The lengths of the texts _render would show in *value*, at any depth it renders."""
+    if depth > _SUMMARY_MAX_DEPTH:
+        return []
+    if isinstance(value, str):
+        return [len(value)]
+    if isinstance(value, dict):
+        return [n for v in value.values() for n in _texts(v, depth + 1)]
+    if isinstance(value, list) and value and isinstance(value[0], dict):
+        return [n for row in value for n in _texts(row, depth + 1)]
+    if isinstance(value, list):
+        return [n for item in value[:3] for n in _texts(item, depth + 1)]  # the sample _render shows
+    return []
+
+
+def _args_text_cap(args: Any) -> int:
+    """The most each text in a call's arguments may show, so together they fit _ARGS_BUDGET.
+
+    Texts that fit are shown in full; the longer ones share what is left equally
+    and keep their start and end. No text shows less than _ROW_TEXT_CHARS.
+    """
+    lengths = sorted(_texts(args))
+    remaining = _ARGS_BUDGET
+    for i, n in enumerate(lengths):
+        left = len(lengths) - i
+        if n * left > remaining:
+            return max(_ROW_TEXT_CHARS, remaining // left)
+        remaining -= n
+    return _ARGS_BUDGET  # everything fits whole
 
 
 def _render_text(value: str, room: int) -> str:
@@ -1004,7 +1047,8 @@ def _reports_failure(result: Any, _seen: Optional[set] = None) -> bool:
     ``{"ok": false, "error": "conflict"}``. MCP tools mark a failed call with
     ``"isError": true``; tool_http_request returns an error status (400 and up) as
     a normal response; an agent called as a tool returns its crash or its tripped
-    guard as an answer whose stack says so; and code runners (tool_python,
+    guard as an answer whose stack says so, and a run that ended in an error (its
+    model call failed, say) as ``meta.stop_reason``; and code runners (tool_python,
     tool_daytona) report a run that failed or was cut off with a non-zero
     ``exit_code`` or ``"timed_out": true``. tool_python also returns the script's
     own ``result`` (a dict or a list), which is checked the same way (a check
@@ -1036,6 +1080,10 @@ def _reports_failure(result: Any, _seen: Optional[set] = None) -> bool:
         status = result.get('status_code')
         return isinstance(status, int) and not isinstance(status, bool) and status >= 400
     if isinstance(result.get('stack'), list) and isinstance(result.get('meta'), dict) and 'content' in result:
+        # A run that ended in an error answers normally, with only the stop reason to
+        # say so: a checking agent whose model call failed checked nothing.
+        if result['meta'].get('stop_reason') == 'error':
+            return True
         return any(isinstance(entry, dict) and entry.get('kind') in _AGENT_FAILURE_KINDS for entry in result['stack'])
     if any(k in result for k in _RUNNER_OUTPUT) and ('exit_code' in result or 'timed_out' in result):
         exit_code = result.get('exit_code')
@@ -1055,12 +1103,80 @@ def _reports_failure(result: Any, _seen: Optional[set] = None) -> bool:
     return False
 
 
+def _is_check_call(tool: str, args: Any, check_tool: str = '', check_args: Optional[Dict[str, Any]] = None) -> bool:
+    """True for a call that checks the work: the check tool, with its fixed arguments if the node sets them.
+
+    The rules require such a call again after every change, so it is never called
+    a repeat. Any other call to the same tool (a command runner editing a file,
+    say) is an ordinary call, and its repeats are pointed out like any other's.
+    """
+    if not check_tool or tool != check_tool:
+        return False
+    return check_args is None or (args or {}) == check_args
+
+
+def _with_call(
+    entry: Dict[str, Any],
+    tool: str,
+    args: Dict[str, Any],
+    seen_calls: Optional[Dict[str, str]],
+    removed: AbstractSet[str] = frozenset(),
+    check_tool: str = '',
+    check_args: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Put a short form of a call's arguments next to its result, and point out repeats.
+
+    Without the arguments the planner sees what came back but not what it asked for:
+    not the code it ran, not the content it wrote, so it cannot tell a retry from a
+    repeat. A call identical to an earlier one in this run gets a note naming it. The
+    note informs and never blocks: reading a file again after writing it is legitimate.
+
+    Args:
+        entry: The result dict for the call (``tool``, ``key`` and a summary or error).
+        tool: The tool name.
+        args: The arguments as the model wrote them, before memory refs were resolved.
+        seen_calls: This run's map of call fingerprints to keys, or None to skip.
+        removed: Keys the model removed in this run.
+        check_tool: The configured check tool; its check calls are never called repeats.
+        check_args: The check's fixed arguments (verify_args), or None for any.
+
+    Returns:
+        A new dict ordered tool, key, args, then the rest of *entry*.
+    """
+    shown: Dict[str, Any] = {'tool': entry.get('tool', tool), 'key': entry.get('key')}
+    if args:
+        text = _render(args, 0, _ARGS_BUDGET, text_cap=_args_text_cap(args))
+        if len(text) > _ARGS_HARD_CAP:
+            # The texts share the budget, but each keeps at least 80 characters, so a
+            # call with dozens of long values still runs long: the preview is capped too.
+            text = f'{text[:_ARGS_HARD_CAP]} ... ({len(text):,} characters, cut at {_ARGS_HARD_CAP:,})'
+        shown['args'] = text
+    shown.update({k: v for k, v in entry.items() if k not in shown})
+
+    fingerprint = _result_fingerprint({'tool': tool, 'args': args})
+    # A check run again is what the rules ask for, not a repeat.
+    if seen_calls is not None and fingerprint is not None and not _is_check_call(tool, args, check_tool, check_args):
+        # setdefault is atomic, so of two identical calls in one wave exactly one is first.
+        first_key = seen_calls.setdefault(fingerprint, shown['key'])
+        if first_key != shown['key'] and first_key in removed:
+            # Read, remove, read again: the model dropped data it still needed.
+            shown['note'] = (
+                f'Same tool and arguments as {first_key}, whose result you removed. If you still need '
+                'data from a result, keep it in scratch before you remove the result.'
+            )
+        elif first_key != shown['key']:
+            # A result-level duplicate note, when there is one, already says more.
+            shown.setdefault('note', f'Same tool and arguments as {first_key}.')
+    return shown
+
+
 def _store_and_preview(
     tool: str,
     key: str,
     result: Any,
     context: AgentContext,
     agent_base: AgentBase,
+    is_check: bool = False,
 ) -> Dict[str, Any]:
     """Store *result* in memory under *key* and return a compact summary dict.
 
@@ -1089,8 +1205,8 @@ def _store_and_preview(
         entry['failed'] = True
 
     seen = getattr(agent_base, 'seen_results', None)
-    if seen is None:
-        return entry
+    if seen is None or is_check:
+        return entry  # a check that passes again is news, not a repeat
 
     fingerprint = _result_fingerprint(result)
     if fingerprint is None:
@@ -1123,6 +1239,10 @@ def _execute_wave_calls(
     agent_base: AgentBase,
     context: AgentContext,
     wave_name: str = 'wave-0',
+    seen_calls: Optional[Dict[str, str]] = None,
+    removed: AbstractSet[str] = frozenset(),
+    check_tool: str = '',
+    check_args: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Execute all tool calls in a wave in parallel and return result dicts.
 
@@ -1142,19 +1262,27 @@ def _execute_wave_calls(
     tagged: List[Dict[str, Any]] = [{**call, '_key': _auto_key(wave_name, i)} for i, call in enumerate(wave)]
 
     def _run_one(call: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a single tool call and return a result dict."""
+        """Execute a single tool call and return a result dict that also shows the call."""
         tool = call.get('tool', '')
         key = call['_key']
-        args = call.get('args') or {}
-        if not isinstance(args, dict):
-            args = {}
+        asked = call.get('args') or {}
+        if not isinstance(asked, dict):
+            asked = {}
 
         # Resolve any {{memory.ref:...}} template references in the args
         # before passing them to the tool.  This lets the LLM compose tool
         # inputs from previously stored results without extra peek calls.
-        args = _resolve_refs(args, agent_base=agent_base, context=context)
+        args = _resolve_refs(asked, agent_base=agent_base, context=context)
 
         debug(f'rocketride wave execute tool={tool!r} key={key!r}')
+        # The model is shown the arguments as it wrote them, tags and all.
+        is_check = _is_check_call(tool, asked, check_tool, check_args)
+        return _with_call(
+            _call_one(tool, key, args, is_check), tool, asked, seen_calls, removed, check_tool, check_args
+        )
+
+    def _call_one(tool: str, key: str, args: Dict[str, Any], is_check: bool = False) -> Dict[str, Any]:
+        """Run one call (memory.peek locally, anything else through the host)."""
         try:
             # memory.peek is handled entirely within the executor rather than
             # being routed through the tool pipeline.  Reasons:
@@ -1227,7 +1355,7 @@ def _execute_wave_calls(
             # Store the result in memory and return a structural summary.
             # The summary is what gets injected into the next planning prompt;
             # the full result stays in memory for later memory.peek access.
-            return _store_and_preview(tool, key, result, context, agent_base)
+            return _store_and_preview(tool, key, result, context, agent_base, is_check)
 
         except Exception as exc:
             err_msg = f'{type(exc).__name__}: {exc}'
@@ -1273,6 +1401,10 @@ def execute_wave(
     agent_base: AgentBase,
     context: AgentContext,
     wave_name: str = 'wave-0',
+    seen_calls: Optional[Dict[str, str]] = None,
+    removed: AbstractSet[str] = frozenset(),
+    check_tool: str = '',
+    check_args: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Execute all tool calls in a wave concurrently.
 
@@ -1286,8 +1418,21 @@ def execute_wave(
             tool invocation through the AgentBase host adapter.
         context: The current agent run context (carries the host channels).
         wave_name: Name prefix for generated memory keys (e.g. ``"wave-0"``).
+        seen_calls: This run's map of call fingerprints to keys (a repeat gets a note).
+        removed: Keys the model removed in this run.
+        check_tool: The configured check tool; the repeat notes leave its check calls alone.
+        check_args: The check's fixed arguments (verify_args), or None for any.
 
     Returns:
         List of result dicts (same order as wave).
     """
-    return _execute_wave_calls(wave, agent_base=agent_base, context=context, wave_name=wave_name)
+    return _execute_wave_calls(
+        wave,
+        agent_base=agent_base,
+        context=context,
+        wave_name=wave_name,
+        seen_calls=seen_calls,
+        removed=removed,
+        check_tool=check_tool,
+        check_args=check_args,
+    )
