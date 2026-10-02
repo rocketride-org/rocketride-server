@@ -93,7 +93,7 @@ const HelloApp: React.FC<ShellAppProps> = ({ identity }) => {
 				<div style={styles.subtitle}>
 					{identity
 						? `Welcome, ${identity.displayName ?? 'user'}!`
-						: 'Not authenticated — running as a public app.'
+						: 'Not authenticated, running as a public app.'
 					}
 				</div>
 				<div style={styles.title}>Hello World!</div>
