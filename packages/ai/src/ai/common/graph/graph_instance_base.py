@@ -318,7 +318,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
         Raises:
             ValueError: ``params`` is not an object, or the driver cannot bind them.
         """
-        if not raw:
+        if raw is None or (isinstance(raw, (dict, list)) and not raw):
             return None
         if not isinstance(raw, dict):
             raise ValueError(

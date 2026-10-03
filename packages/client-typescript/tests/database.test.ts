@@ -71,6 +71,14 @@ describe('DatabaseApi transactions', () => {
 		});
 	});
 
+	it('named params do not type-check with rowMode array', async () => {
+		const c = fakeClient();
+		const db = new DatabaseApi(c);
+		// Graph nodes return row objects, so named params never yield positional rows.
+		// @ts-expect-error named (graph) params pair with rowMode 'object' only
+		await db.query({ token: 't', sql: 'MATCH (n) RETURN n', params: { a: 1 }, rowMode: 'array' });
+	});
+
 	it('commit invokes the commit tool', async () => {
 		const c = fakeClient();
 		const db = new DatabaseApi(c);

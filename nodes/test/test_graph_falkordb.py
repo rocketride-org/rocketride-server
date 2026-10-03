@@ -468,6 +468,14 @@ def test_execute_tool_refuses_params_the_driver_cannot_bind():
         _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
 
 
+@pytest.mark.parametrize('params', [0, False, '', 'rows', 42])
+def test_execute_tool_refuses_non_object_params(params):
+    glb = _FakeGlobal(_FakeGraph())
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match='keyed by placeholder name'):
+        _instance(glb).execute({'query': 'CREATE (n:Person)', 'params': params})
+
+
 def test_execute_tool_refuses_positional_params():
     glb = _FakeGlobal(_FakeGraph())
     glb.allow_execute = True

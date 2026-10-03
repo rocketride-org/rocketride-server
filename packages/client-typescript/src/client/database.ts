@@ -125,16 +125,17 @@ export class DatabaseApi {
 	 * @param options.params - Optional parameters bound to the statement: a
 	 *   positional array for SQL nodes (e.g. `[1, 'foo']` for `$1`, `$2`), or an
 	 *   object keyed by placeholder name for graph (Cypher) nodes (e.g.
-	 *   `{ rows: [...] }` for `UNWIND $rows`).
+	 *   `{ rows: [...] }` for `UNWIND $rows`). Graph nodes return row objects,
+	 *   so named params pair with the default `rowMode: 'object'` only.
 	 * @param options.rowMode - Row shape: `'object'` (default) returns rows as
 	 *   objects keyed by column name; `'array'` returns positional arrays
 	 *   (column order preserved, duplicate column names kept) — the shape ORM
 	 *   drivers such as Drizzle require.
 	 * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number).
 	 */
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
 	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
 	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
