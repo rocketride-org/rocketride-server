@@ -287,6 +287,35 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		per-endpoint plumbing — published around the task's
     ///		begin/end window by ITask::execute.
     ///------------------------------------------------------------
+    //-------------------------------------------------------------
+    /// @details
+    ///		Registers one service definition that did not come from a
+    ///		services.json on this machine. The definition is the same
+    ///		shape the loader reads from disk; nodeDir is the directory
+    ///		the node was unpacked into, which anchors its icon the way
+    ///		the file's own directory does for a scanned one.
+    ///
+    ///		Replaces a definition already registered under the same
+    ///		logical type - the factories an earlier one put in place
+    ///		stay, since they are registered against that type.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(registerService, [](py::object definition,
+                                               const std::string &nodeDir) {
+        // Convert the definition the caller handed us
+        auto json = engine::python::pyjson::dictToJson(definition);
+
+        // Anchor it where the node lives, as a scanned one is anchored by
+        // the directory its services.json sits in
+        file::Path definitionPath = file::Path(nodeDir) / "services.json";
+
+        // Register it, replacing whatever the seeded scan put there
+        if (auto ccode = engine::store::IServices::registerDefinition(
+                _mv(json), definitionPath, /*replace=*/true))
+            throw ccode;
+
+        return true;
+    });
+
     engLib.PYBIND_FUNCTION(getTask, []() -> py::object {
         // Read the published task (a copy; null when none is running)
         auto task = engine::task::ITask::currentTask();
