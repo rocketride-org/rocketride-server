@@ -125,6 +125,8 @@
 				"enable_content_safety": false,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": false,
+				"enable_nonce_fencing": false,
+				"nonce_length": 16,
 				"max_input_length": 0,
 				"max_tokens_estimate": 0,
 				"expected_format": "",
@@ -138,6 +140,8 @@
 				"enable_content_safety": true,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
+				"enable_nonce_fencing": true,
+				"nonce_length": 16,
 				"max_input_length": 50000,
 				"max_tokens_estimate": 4096,
 				"expected_format": "",
@@ -151,6 +155,8 @@
 				"enable_content_safety": true,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
+				"enable_nonce_fencing": false,
+				"nonce_length": 16,
 				"max_input_length": 0,
 				"max_tokens_estimate": 0,
 				"expected_format": "",
@@ -266,6 +272,20 @@
 				"type": "string"
 			}
 		},
+		"enable_nonce_fencing": {
+			"type": "boolean",
+			"title": "Enable nonce fencing",
+			"description": "Wrap untrusted input in cryptographic nonce delimiters so the LLM treats it as data, not instructions",
+			"default": false
+		},
+		"nonce_length": {
+			"type": "integer",
+			"title": "Nonce length (bytes)",
+			"description": "Length of the cryptographic nonce in bytes (min 16, max 128)",
+			"default": 16,
+			"minimum": 16,
+			"maximum": 128
+		},
 		"guardrails.custom": {
 			"object": "custom",
 			"properties": [
@@ -274,6 +294,8 @@
 				"enable_content_safety",
 				"enable_pii_detection",
 				"enable_hallucination_check",
+				"enable_nonce_fencing",
+				"nonce_length",
 				"max_input_length",
 				"max_tokens_estimate",
 				"expected_format",
@@ -291,6 +313,7 @@
 			"object": "strict",
 			"properties": [
 				"policy_mode",
+				"enable_nonce_fencing",
 				"max_tokens_estimate",
 				"expected_format"
 			]

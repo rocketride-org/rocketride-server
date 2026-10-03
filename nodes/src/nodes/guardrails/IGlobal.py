@@ -21,13 +21,14 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
     config = None
     engine = None
+    nonce_fencer = None
 
     def beginGlobal(self):
         # Are we in config mode or some other mode?
@@ -51,7 +52,22 @@ class IGlobal(IGlobalBase):
 
             self.engine = GuardrailsEngine(self.config)
 
+            # Create the nonce fencer when enabled
+            if self.config.get('enable_nonce_fencing', False):
+                from .nonce_fencer import NonceFencer
+
+                nonce_length = self.config.get('nonce_length', 16)
+                if not isinstance(nonce_length, int) or nonce_length < 16:
+                    warning(f'[Guardrails] nonce_length must be integer >= 16, got {nonce_length!r}; using 16')
+                    nonce_length = 16
+                elif nonce_length > 128:
+                    warning(f'[Guardrails] nonce_length must be <= 128, got {nonce_length}; using 128')
+                    nonce_length = 128
+
+                self.nonce_fencer = NonceFencer(nonce_length=nonce_length)
+
     def endGlobal(self):
         # Clean up resources
         self.engine = None
+        self.nonce_fencer = None
         self.config = None
