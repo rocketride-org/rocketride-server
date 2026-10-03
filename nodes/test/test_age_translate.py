@@ -233,6 +233,94 @@ class TestCapabilities:
             with pytest.raises(age.AgeUnsupportedFeature, match=hint):
                 age.translate(query, mode=RAW, graph_name='g')
 
+    @pytest.mark.parametrize(
+        'query',
+        [
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) MERGE (a)-[r:K]->(b) SET r.since = 1',
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) MERGE (a)-[r:K]->(b) SET r.since = 1 RETURN r',
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) MERGE (a)-[r:K]->(b) SET r += {since: 1}',
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) MERGE (a)-[r:K]->(b) SET r = {since: 1}',
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) MERGE (a)-[r:K]->(b) WITH r SET r.since = 1',
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) MERGE (a)-[`my rel`:K]->(b) SET `my rel`.since = 1',
+            'MERGE (a:P {id: 1})-[r:K]->(b:P {id: 2}) SET a.seen = true, r.since = 1',
+        ],
+    )
+    def test_merge_relationship_set_rejected(self, query):
+        # AGE 1.5.0 drops a SET on an edge that MERGE creates, while RETURN
+        # still shows the new value — reject before the silent data loss.
+        with pytest.raises(age.AgeUnsupportedFeature, match='MERGE pattern'):
+            age.translate(query, mode=RAW, graph_name='g')
+
+    @pytest.mark.parametrize(
+        'query',
+        [
+            # SET on a node bound by MERGE is stored correctly.
+            'MERGE (n:P {id: 1}) SET n.seen = true',
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) MERGE (a)-[r:K]->(b) SET a.seen = true',
+            # Properties inside the MERGE pattern are stored correctly.
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) MERGE (a)-[r:K {since: 1}]->(b)',
+            # CREATE + SET on the new edge is stored correctly.
+            'MATCH (a:P {id: 1}), (b:P {id: 2}) CREATE (a)-[r:K]->(b) SET r.since = 1',
+            # SET on a MATCH-bound edge next to an unrelated MERGE.
+            'MATCH (a:P)-[e:K]->(b:P) MERGE (a)-[r:L]->(b) SET e.since = 1',
+        ],
+    )
+    def test_merge_relationship_set_lookalikes_pass(self, query):
+        plan = age.translate(query, mode=RAW, graph_name='g')
+        assert query in plan.statements[plan.result_index]
+
+    @pytest.mark.parametrize(
+        ('query', 'expected'),
+        [
+            ('MATCH (n) WHERE n.id IN [] RETURN n.id', 'MATCH (n) WHERE false RETURN n.id'),
+            ('MATCH (n) WHERE n.id IN [ ] RETURN n.id', 'MATCH (n) WHERE false RETURN n.id'),
+            ('MATCH (n) WHERE NOT n.id IN [] RETURN n.id', 'MATCH (n) WHERE NOT false RETURN n.id'),
+            (
+                'MATCH (n) WHERE n.id IN [] AND n.id = 1 RETURN n.id',
+                'MATCH (n) WHERE false AND n.id = 1 RETURN n.id',
+            ),
+            (
+                'MATCH (n) WHERE n.a IN [] OR n.b in [] RETURN n.id',
+                'MATCH (n) WHERE false OR false RETURN n.id',
+            ),
+            ('MATCH (n) WHERE n.id IN [] IS NULL RETURN n.id', 'MATCH (n) WHERE false IS NULL RETURN n.id'),
+            ('MATCH (n) WHERE (n.id IN []) IN [] RETURN n.id', 'MATCH (n) WHERE false RETURN n.id'),
+            ('MATCH (n) WHERE n.id IN [1] IN [] RETURN n.id', 'MATCH (n) WHERE false RETURN n.id'),
+        ],
+    )
+    def test_empty_list_in_rewritten_to_false(self, query, expected):
+        # AGE 1.5.0 evaluates 'x IN []' as true (or errors under NOT/AND);
+        # openCypher defines it as false, so the layer substitutes that value.
+        plan = age.translate(query, graph_name='g')
+        stmt = plan.statements[plan.result_index]
+        assert expected in stmt
+        assert plan.columns == ['n.id']
+
+    def test_empty_list_in_keeps_column_names(self):
+        plan = age.translate('RETURN 1 IN [] AS hit, 2 IN []', graph_name='g')
+        assert 'RETURN false AS hit, false' in plan.statements[plan.result_index]
+        original = age.analyze('RETURN 1 IN [] AS hit, 2 IN []')
+        assert plan.columns == [c.display_name for c in original.return_columns]
+
+    @pytest.mark.parametrize(
+        'query',
+        [
+            'MATCH (n) WHERE n.id IN [1] RETURN n.id',
+            "MATCH (n) WHERE n.note = 'x IN []' RETURN n.id",
+            'MATCH (n) WHERE n.id IN [[]] RETURN n.id',
+            'MATCH (n) WHERE [] IN n.lists RETURN n.id',
+        ],
+    )
+    def test_non_empty_in_left_alone(self, query):
+        plan = age.translate(query, graph_name='g')
+        assert query in plan.statements[plan.result_index]
+
+    def test_empty_list_parameter_left_alone(self):
+        # AGE evaluates an empty list passed as a $parameter correctly.
+        query = 'MATCH (n) WHERE n.id IN $ids RETURN n.id'
+        plan = age.translate(query, params={'ids': []}, graph_name='g')
+        assert any(query in stmt for stmt in plan.statements)
+
     def test_table_structure(self):
         assert age.DEFAULT_AGE_VERSION == '1.5.0'
         table = age.CAPABILITY_TABLES['1.5.0']
@@ -240,8 +328,9 @@ class TestCapabilities:
         # No cell remains unverified: every 1.5.0 cell has an empirical status.
         tbd = {k for k, cap in table.items() if cap.status is age.CellStatus.TBD}
         assert tbd == set()
-        for feature in ('merge_on_set', 'where_label_check', 'multi_label', 'shortest_path'):
+        for feature in ('merge_on_set', 'where_label_check', 'multi_label', 'shortest_path', 'merge_relationship_set'):
             assert table[feature].status is age.CellStatus.REJECT
+        assert table['empty_list_in'].status is age.CellStatus.EMULATE
 
     def test_unknown_version_falls_back(self):
         with pytest.raises(age.AgeUnsupportedFeature):

@@ -19,8 +19,8 @@ the version gaps. This package is that translation, as a **pure transform**
    paths (query length, variable-length depth, statement timeout); semantic
    read-only rules (no writes, no CALL) on the **safe** path only.
 3. **Dialect** ([capabilities.py](capabilities.py)) — capability table keyed
-   by AGE version: `SUPPORTED` / `EMULATE` (rewrite hook; framework only in
-   v1) / `REJECT` (fail loud pre-flight) / `TBD` (unverified: passes through,
+   by AGE version: `SUPPORTED` / `EMULATE` (same-meaning rewrite, re-analyzed
+   before emit) / `REJECT` (fail loud pre-flight) / `TBD` (unverified: passes through,
    AGE's own error surfaces via EXPLAIN/execute). Verify TBD cells against
    the live instance and promote them.
 4. **Emit** ([emit.py](emit.py)) — `cypher()` envelope with a
@@ -58,6 +58,18 @@ Probed against a container on the live pin (PG 16.14 + AGE 1.5.0 + pgvector
   execute CREATE TABLE in a read-only transaction").
 - `datetime()` does not exist on 1.5.0 (`ag_catalog.age_datetime` missing)
   → capability REJECT.
+- `MERGE` that creates an edge, followed by `SET` on that edge, stores the
+  edge **without** the property while `RETURN` shows the new value (SET on a
+  MERGE-bound node, SET on an edge MERGE matched, and properties inside the
+  MERGE pattern are all stored) → capability REJECT (`merge_relationship_set`).
+- A literal `x IN []` matches every row; under `NOT`, `AND` or in `RETURN` it
+  fails with `cache lookup failed for type 0`. An empty list passed as a
+  `$parameter` evaluates correctly → capability EMULATE (`empty_list_in`),
+  rewritten to `false`.
+
+Both gaps above have canary tests in `nodes/test/test_rocketride_graph_full.py`
+that run the shape on AGE directly: when a canary fails after an AGE upgrade,
+the gap is fixed upstream and its capability cell can go.
 
 ## Vendored code
 
@@ -95,6 +107,5 @@ antlr4 -v 4.13.2 -Dlanguage=Python3 -visitor -o _agtype/gen _agtype/Agtype.g4
   (`syntax error at or near ...`) while plain `MERGE` on the same graph
   succeeds, so all four are promoted to `REJECT` with actionable messages.
   No `TBD` cells remain in the 1.5.0 table.
-- `EMULATE` rewrites (framework hook exists, no emulations implemented).
 - Capability routing to FalkorDB/Neo4j for AGE-can't-do workloads (own
   effort, per the design).

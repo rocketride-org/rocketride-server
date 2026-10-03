@@ -348,6 +348,94 @@ class TestExecutePath:
             glb.endGlobal()
 
 
+def _raw_cypher(conn, body: str, columns: str = 'v agtype') -> list:
+    """Run Cypher on the test graph directly, bypassing the translation layer."""
+    with conn.cursor() as cur:
+        cur.execute('SET search_path = ag_catalog, "$user", public')
+        cur.execute(f"SELECT * FROM cypher('{GRAPH}', $$ {body} $$) AS ({columns})")
+        return cur.fetchall() if cur.description else []
+
+
+class TestAgeDataGaps:
+    """AGE 1.5.0 shapes that report success while storing or returning wrong data.
+
+    Each gap has a canary that runs the shape on AGE directly and pins the
+    wrong behaviour (when it starts failing, the AGE pin has fixed the gap and
+    its capability cell can go), plus tests that the node path is correct.
+    """
+
+    def test_canary_age_drops_set_on_merged_relationship(self, rr_env, age_graph):
+        returned = _raw_cypher(
+            age_graph,
+            "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
+            'MERGE (a)-[r:MENTORS]->(c) SET r.since = 2024 RETURN r.since',
+            'since agtype',
+        )
+        assert returned == [('2024',)]
+        stored = _raw_cypher(age_graph, 'MATCH ()-[r:MENTORS]->() RETURN r.since', 'since agtype')
+        assert stored == [(None,)]
+
+    def test_canary_age_matches_every_row_on_empty_in(self, rr_env, age_graph):
+        rows = _raw_cypher(age_graph, 'MATCH (p:Person) WHERE p.name IN [] RETURN p.name', 'name agtype')
+        assert len(rows) == 3
+
+    def test_merge_relationship_set_rejected_before_db(self, rr_env, age_graph):
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            with pytest.raises(Exception, match='MERGE pattern'):
+                inst.execute(
+                    {
+                        'query': "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
+                        'MERGE (a)-[r:MENTORS]->(c) SET r.since = 2024'
+                    }
+                )
+            assert _raw_cypher(age_graph, 'MATCH ()-[r:MENTORS]->() RETURN count(r)', 'n agtype') == [('0',)]
+        finally:
+            glb.endGlobal()
+
+    def test_merge_relationship_properties_in_pattern_are_stored(self, rr_env, age_graph):
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            inst.execute(
+                {
+                    'query': "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
+                    'MERGE (a)-[r:MENTORS {since: 2024}]->(c)'
+                }
+            )
+            rows = glb._run_query('MATCH ()-[r:MENTORS]->() RETURN r.since AS since')
+            assert rows == [{'since': 2024}]
+        finally:
+            glb.endGlobal()
+
+    @pytest.mark.parametrize(
+        ('where', 'expected'),
+        [
+            ('p.name IN []', []),
+            ('NOT p.name IN []', ['alice', 'bob', 'carol']),
+            ("p.name IN [] OR p.name = 'bob'", ['bob']),
+            ("p.name IN [] AND p.name = 'bob'", []),
+        ],
+    )
+    def test_empty_list_in_returns_correct_rows(self, rr_env, age_graph, where, expected):
+        glb = _begin(rr_env)
+        try:
+            rows = glb._run_query(f'MATCH (p:Person) WHERE {where} RETURN p.name AS name ORDER BY p.name')
+            assert [r['name'] for r in rows] == expected
+        finally:
+            glb.endGlobal()
+
+    def test_empty_list_in_projection(self, rr_env, age_graph):
+        glb = _begin(rr_env)
+        try:
+            assert glb._run_query('RETURN 1 IN [] AS hit') == [{'hit': False}]
+        finally:
+            glb.endGlobal()
+
+
 class TestValidateQuery:
     def test_valid_query_passes(self, rr_env, age_graph):
         glb = _begin(rr_env)

@@ -88,6 +88,14 @@ class CypherFacts:
     # ORDER BY references a bare projection alias rather than an expression
     # (capability: order_by_alias — AGE 1.5.0: 'could not find rte for <name>').
     has_order_by_alias: bool = False
+    # A SET targets a relationship variable bound by a MERGE pattern
+    # (capability: merge_relationship_set — AGE 1.5.0 drops the property when
+    # the MERGE creates the edge, while RETURN still shows the new value).
+    has_merge_relationship_set: bool = False
+    # Character spans (start, stop inclusive) of '<expr> IN []' with a literal
+    # empty list (capability: empty_list_in — AGE 1.5.0 matches every row, or
+    # fails with 'cache lookup failed for type 0' under NOT / AND / RETURN).
+    empty_in_spans: List[Tuple[int, int]] = field(default_factory=list)
 
     @property
     def is_write(self) -> bool:
@@ -145,6 +153,34 @@ def _parse_range_literal(text: str) -> Tuple[Optional[int], Optional[int]]:
         return (n, n)
     low_s, _, high_s = body.partition('..')
     return (int(low_s) if low_s else None, int(high_s) if high_s else None)
+
+
+_LEADING_VARIABLE = re.compile(r'^\s*(`(?:[^`]|``)+`|[A-Za-z_][A-Za-z0-9_]*)')
+
+
+def _set_item_variable(item_ctx) -> Optional[str]:
+    """Variable a SET item writes to: ``r`` for ``r.p = 1`` / ``r = {...}`` / ``r += {...}``."""
+    match = _LEADING_VARIABLE.match(_source_text(item_ctx))
+    return _strip_backticks(match.group(1)) if match else None
+
+
+def _empty_in_span(ctx) -> Optional[Tuple[int, int]]:
+    """Span of an oC_StringListNullPredicateExpression up to its last ``IN []``.
+
+    The predicate chain is left-associative, so everything before the last
+    empty-list ``IN`` is that ``IN``'s left operand; the span covers the whole
+    ``<lhs> IN []`` and later predicates (e.g. ``IS NULL``) stay outside it.
+    """
+    last = None
+    for i in range(ctx.getChildCount()):
+        child = ctx.getChild(i)
+        if isinstance(child, CypherParser.OC_ListPredicateExpressionContext):
+            operand = child.oC_AddOrSubtractExpression()
+            if re.sub(r'\s+', '', operand.getText()) == '[]':
+                last = child
+    if last is None:
+        return None
+    return (ctx.start.start, last.stop.stop)
 
 
 def _projection_column(item_ctx) -> ReturnColumn:
@@ -233,14 +269,35 @@ def analyze(query: str) -> CypherFacts:
             returns.append(node)
         if isinstance(node, CypherParser.OC_SortItemContext):
             sort_items.append(node.oC_Expression().getText())
+        if isinstance(node, CypherParser.OC_RelationshipDetailContext) and node.oC_Variable() is not None:
+            parent = node.parentCtx
+            while parent is not None and not isinstance(parent, CypherParser.OC_MergeContext):
+                parent = parent.parentCtx
+            if parent is not None:
+                merged_relationships.add(_strip_backticks(node.oC_Variable().getText()))
+        if isinstance(node, CypherParser.OC_SetItemContext):
+            variable = _set_item_variable(node)
+            if variable is not None:
+                set_variables.add(variable)
+        if isinstance(node, CypherParser.OC_StringListNullPredicateExpressionContext):
+            span = _empty_in_span(node)
+            if span is not None:
+                facts.empty_in_spans.append(span)
 
     sort_items: List[str] = []
+    merged_relationships: Set[str] = set()
+    set_variables: Set[str] = set()
     try:
         _walk(tree, visit)
     except RecursionError:
         raise AgeTranslationError(
             'Cypher expression is nested too deeply to analyze (reduce parenthesis/expression nesting)'
         ) from None
+
+    # Variable names are matched query-wide: a SET can only name a MERGE-bound
+    # relationship after that MERGE (or under a WITH that keeps the name),
+    # which is exactly the shape AGE 1.5.0 mishandles.
+    facts.has_merge_relationship_set = bool(merged_relationships & set_variables)
 
     if returns:
         # Multiple RETURNs at the same (shallowest) depth = UNION branches; all

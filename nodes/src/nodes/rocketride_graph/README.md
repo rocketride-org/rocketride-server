@@ -50,6 +50,13 @@ execute bypasses the read-only gate but still passes Cypher through the AGE
 translation and resource limits; it raises if direct execution is disabled or
 the input is invalid, and otherwise returns {rows, affected_rows}.
 
+The translator also guards two AGE 1.5.0 gaps that would otherwise return wrong
+data without an error. A literal empty-list test such as `x IN []` is rewritten
+to `false`, its standard Cypher value. A SET on a relationship bound by MERGE
+is rejected, because AGE stores the new edge without that property; put the
+property in the MERGE pattern, as in `MERGE (a)-[r:REL {prop: 1}]->(b)`, or run
+the SET as a separate statement.
+
 ## Configuration
 
 The single built-in profile supplies the default graph name. RocketRide
