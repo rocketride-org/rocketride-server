@@ -25,9 +25,10 @@
 // =============================================================================
 //
 // Renders a fixed top banner whenever ConnectionStatus carries a latched
-// failure (status.lastFailure). Network failures offer a Retry that re-runs
-// bootstrap via reload; auth failures offer Sign in via the shell's
-// edition-aware login dispatcher (shell:loginRequest).
+// failure (status.lastFailure). Network failures offer a Retry that prefers
+// ConnectionManager.reconnect() when a token is stored (reload as fallback);
+// auth failures offer Sign in via the shell's edition-aware login dispatcher
+// (shell:loginRequest).
 // =============================================================================
 
 import React, { CSSProperties, useEffect, useState } from 'react';
@@ -119,12 +120,12 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 	const action = isNetworkFailure ? 'Retry' : isOAuthCallbackFailure ? 'Try again' : 'Sign in';
 	const onAction = isNetworkFailure
 		? onRetry ?? (() => {
-			// A reload re-runs bootstrap, which recovers every shape: a stored
-			// token logs back in, tokenless renders the landing, and a still-
-			// unreachable server re-latches this banner. In-place recovery via
-			// ConnectionManager.reconnect() stalls in CONNECTING even against a
-			// healthy server (pre-existing; tracked separately) — don't use it
-			// as the default action.
+			// Prefer in-place recovery when a stored token exists; reload only
+			// when there is nothing to reconnect with or reconnect itself fails.
+			const manager = ConnectionManager.getInstance();
+			if (manager.loadToken()) {
+				return manager.reconnect().catch(() => window.location.reload());
+			}
 			window.location.reload();
 		})
 		: onSignIn ?? (() => {
