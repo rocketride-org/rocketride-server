@@ -16,6 +16,7 @@ clearing the transform key), which otherwise have no test.
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -186,6 +187,23 @@ def test_transform_key_format(monkeypatch):
     assert g.TRANFORM_KEY_TAG_NAME == 'teststore://host/5555/coll/status'
 
 
+def test_begin_global_starts_each_task_with_an_empty_written_object_ids_set(monkeypatch):
+    """A fresh, empty _written_object_ids set for every beginGlobal call.
+
+    IGlobal instances can be reused across tasks (see the same reset pattern
+    on ``store`` above), so a set left over from a prior task must not leak
+    into the next one and falsely trip the #1986 guard on a brand-new run.
+    """
+    _patch_config(monkeypatch, {})
+    g = _make()
+    g.beginGlobal()
+    g._written_object_ids.add('leftover-from-a-previous-task')
+
+    g.beginGlobal()
+
+    assert g._written_object_ids == set()
+
+
 # ---------------------------------------------------------------------------
 # 5. endGlobal clears store, embedder AND the transform key
 # ---------------------------------------------------------------------------
@@ -197,11 +215,13 @@ def test_end_global_clears_state_and_transform_key(monkeypatch):
     g = _make()
     g.beginGlobal()
     assert g.TRANFORM_KEY_TAG_NAME  # set by beginGlobal
+    g._written_object_ids.add('leftover-from-this-task')
 
     g.endGlobal()
     assert g.store is None
     assert g.embed_query is None
     assert g.embed_model_name is None
+    assert g._written_object_ids == set()
     assert g.TRANFORM_KEY_TAG_NAME == ''
 
 
@@ -212,8 +232,17 @@ def test_end_global_clears_state_and_transform_key(monkeypatch):
 
 def _instance_with_store(store):
     inst = _TestableInstance.__new__(_TestableInstance)
-    inst.IGlobal = SimpleNamespace(store=store)
+    inst.IGlobal = SimpleNamespace(
+        store=store,
+        _written_object_ids=set(),
+        _written_object_ids_lock=threading.Lock(),
+    )
     return inst
+
+
+def _doc(object_id: str):
+    """A Doc-shaped stand-in: writeDocuments only ever reads .metadata.objectId."""
+    return SimpleNamespace(metadata=SimpleNamespace(objectId=object_id))
 
 
 def test_write_questions_raises_when_store_missing():
@@ -243,7 +272,71 @@ def test_lane_handlers_delegate_to_store_when_present():
     inst = _instance_with_store(store)
 
     inst.writeQuestions(SimpleNamespace())
-    inst.writeDocuments([{'x': 1}])
+    inst.writeDocuments([_doc('a')])
 
     kinds = [c[0] for c in store.calls]
     assert kinds == ['search', 'add']
+
+
+# ---------------------------------------------------------------------------
+# 7. writeDocuments guards a repeated objectId within one task (#1986)
+# ---------------------------------------------------------------------------
+#
+# addChunks() replaces all of an objectId's existing chunks. A node that
+# flushes one object's chunks across more than one writeDocuments() call (to
+# bound memory on a large object) used to have every batch but the last
+# silently destroyed. These pin the fix: the first call for an objectId still
+# goes straight through, and a second one raises instead of discarding data.
+
+
+def test_write_documents_allows_the_first_call_for_an_object_id():
+    """A single writeDocuments call for a not-yet-seen objectId is unaffected."""
+    store = _FakeStore()
+    inst = _instance_with_store(store)
+
+    inst.writeDocuments([_doc('a'), _doc('a')])  # two chunks of the same object
+
+    assert [c[0] for c in store.calls] == ['add']
+    assert inst.IGlobal._written_object_ids == {'a'}
+
+
+def test_write_documents_allows_different_object_ids_across_calls():
+    """Separate objects each still get their own unguarded first write."""
+    store = _FakeStore()
+    inst = _instance_with_store(store)
+
+    inst.writeDocuments([_doc('a')])
+    inst.writeDocuments([_doc('b')])
+
+    assert [c[0] for c in store.calls] == ['add', 'add']
+    assert inst.IGlobal._written_object_ids == {'a', 'b'}
+
+
+def test_write_documents_raises_on_a_second_call_for_the_same_object_id():
+    """A second flush for an objectId already written this task raises instead of
+    silently discarding the first flush.
+    """
+    store = _FakeStore()
+    inst = _instance_with_store(store)
+
+    inst.writeDocuments([_doc('a')])
+    with pytest.raises(Exception, match='already written earlier in this task'):
+        inst.writeDocuments([_doc('a')])
+
+    # The rejected second batch never reached the store.
+    assert [c[0] for c in store.calls] == ['add']
+
+
+def test_write_documents_rejects_the_whole_batch_when_only_one_id_repeats():
+    """A batch mixing a new objectId with an already-written one still raises, and
+    none of it reaches the store -- not just the repeated part.
+    """
+    store = _FakeStore()
+    inst = _instance_with_store(store)
+
+    inst.writeDocuments([_doc('a')])
+    with pytest.raises(Exception, match='already written earlier in this task'):
+        inst.writeDocuments([_doc('b'), _doc('a')])
+
+    assert [c[0] for c in store.calls] == ['add']  # only the first call went through
+    assert inst.IGlobal._written_object_ids == {'a'}  # 'b' was never recorded either
