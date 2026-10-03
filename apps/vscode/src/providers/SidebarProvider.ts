@@ -32,6 +32,8 @@ import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
+import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, EMPTY_FILE_SETTLE_MS } from '../shared/util/pipeFileDecision';
+import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
 import { getProjectProvider } from '../extension';
 import { scanWorkspaceApps, appIconDataUri } from '../appdev/appScan';
 import type { ScannedApp } from '../appdev/appScan';
@@ -68,6 +70,11 @@ interface ProjectEntryDTO {
 // PROVIDER
 // =============================================================================
 
+/** Resolves after `ms`: the watcher's "give the other writer a moment" wait. */
+function settle(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class SidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'rocketride.sidebar.main';
 
@@ -99,6 +106,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'apps';
 
 	private logger = getLogger();
+	/** Set by dispose(): a settle wait that outlives the provider must not write. */
+	private disposed = false;
+	/** `<fsPath>\n<project_id>` pairs the duplicate warning was already shown for. */
+	private duplicatePromptsShown = new Set<string>();
 
 	/**
 	 * Creates the sidebar provider.
@@ -293,37 +304,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		return rows;
 	}
 
-	/** Handles a newly created .pipe file — assigns a project_id if missing. */
+	/**
+	 * Handles a newly created .pipe file. A genuinely new, empty file gets the
+	 * starter skeleton and a pipeline without a project_id gets one; see
+	 * reconcileProjectId for what the watcher may and may not write.
+	 */
 	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
-		try {
-			const raw = await vscode.workspace.fs.readFile(uri);
-			const text = Buffer.from(raw).toString('utf8').trim();
-
-			if (!text) {
-				const parsed = { project_id: crypto.randomUUID(), components: [] };
-				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
-			} else {
-				try {
-					const result = JSON.parse(text);
-					if (result && typeof result === 'object' && !Array.isArray(result)) {
-						const parsed = result as Record<string, unknown>;
-						if (Array.isArray(parsed.components)) {
-							const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
-							const projectId = typeof parsed.project_id === 'string' && parsed.project_id.trim() !== '' ? parsed.project_id : null;
-							const isDuplicate = projectId !== null && existingIds.has(projectId);
-							if (!projectId || isDuplicate) {
-								parsed.project_id = crypto.randomUUID();
-								await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
-							}
-						}
-					}
-				} catch {
-					// Invalid JSON — leave as-is
-				}
-			}
-		} catch {
-			// File can't be read yet
-		}
+		await this.reconcileProjectId(uri, 'created');
 		await this.loadPipelineFiles();
 	}
 
@@ -335,42 +322,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Re-parses a changed .pipe file, ensures project_id, and optionally restarts. */
 	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
-		try {
-			const raw = await vscode.workspace.fs.readFile(uri);
-			const text = Buffer.from(raw).toString('utf8');
-			const trimmed = text.trim();
-
-			if (!trimmed) {
-				const parsed = { project_id: crypto.randomUUID(), components: [] };
-				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
-			} else {
-				try {
-					const result = JSON.parse(text);
-					if (result && typeof result === 'object' && !Array.isArray(result)) {
-						const root = result as Record<string, unknown>;
-						const target = root.pipeline && typeof root.pipeline === 'object' && !Array.isArray(root.pipeline) ? (root.pipeline as Record<string, unknown>) : root;
-						if (Array.isArray(target.components)) {
-							const existingIds = new Set(
-								[...this.parsedFiles.values()]
-									.filter((f) => f.filePath !== uri.fsPath)
-									.map((f) => f.projectId)
-									.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-							);
-							const projectId = typeof target.project_id === 'string' && target.project_id.trim() !== '' ? target.project_id : null;
-							const isDuplicate = projectId !== null && existingIds.has(projectId);
-							if (!projectId || isDuplicate) {
-								target.project_id = crypto.randomUUID();
-								await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(result, null, 2), 'utf8'));
-							}
-						}
-					}
-				} catch {
-					// Invalid JSON
-				}
-			}
-		} catch {
-			// File can't be read
-		}
+		await this.reconcileProjectId(uri, 'changed');
 
 		// Re-parse the changed file
 		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
@@ -380,6 +332,112 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 		// Handle pipeline restart based on configuration
 		await this.handlePipelineRestart(uri, parsedFile);
+	}
+
+	// =========================================================================
+	// PROJECT ID RECONCILIATION (issue #2466)
+	// =========================================================================
+
+	/**
+	 * The only path through which the watcher writes to a user's file. What
+	 * happens is decided by the pure decidePipeFile(); this method reads,
+	 * waits, prompts and writes.
+	 */
+	private async reconcileProjectId(uri: vscode.Uri, event: PipeFileEvent, settled = false): Promise<void> {
+		if (this.disposed) return;
+		const text = await this.readPipeText(uri);
+		// Not readable (not there yet, or already gone): nothing to decide.
+		if (text === undefined) return;
+
+		const decision = decidePipeFile({ event, filePath: uri.fsPath, text, known: [...this.parsedFiles.values()], settled });
+		switch (decision.kind) {
+			case 'leave':
+				return;
+			case 'confirm-empty':
+				// A file another program is still saving reads as empty for a
+				// moment. Look again once it has had time to land.
+				await settle(EMPTY_FILE_SETTLE_MS);
+				await this.reconcileProjectId(uri, event, true);
+				return;
+			case 'seed-empty':
+				// Only reachable through the settled re-entry above, so the disposed
+				// check ran and `text` was read after the wait, with no await since.
+				await this.writePipeText(uri, emptyPipelineSkeleton(crypto.randomUUID()), 'new empty file, wrote the starter pipeline');
+				return;
+			case 'assign-id':
+				await this.assignProjectId(uri, readPipeProjectId(text) ?? null, 'had no project_id, assigned one');
+				return;
+			case 'ask-duplicate':
+				// Deliberately not awaited: the warning stays open until the user
+				// acts, and the rest of the handler (sidebar refresh, re-parse,
+				// restart) must not wait for that. The prompt is marked as shown
+				// before it opens and the file is re-read before any write, so a
+				// detached, late answer is safe.
+				void this.offerNewProjectId(uri, decision.projectId, decision.otherPath).catch((error) => {
+					this.logger.error(`Pipeline ${vscode.workspace.asRelativePath(uri)}: duplicate id prompt failed (${error instanceof Error ? error.message : String(error)}).`);
+				});
+				return;
+		}
+	}
+
+	/**
+	 * Writes a fresh project_id into the file, keeping its formatting. The file
+	 * is read again first and left alone if its id is no longer `expectedId`:
+	 * the user may have edited it since the decision was made (the duplicate
+	 * warning can sit open for a long time).
+	 */
+	private async assignProjectId(uri: vscode.Uri, expectedId: string | null, why: string): Promise<void> {
+		const text = await this.readPipeText(uri);
+		if (text === undefined || readPipeProjectId(text) !== expectedId) return;
+		const next = withProjectId(text, crypto.randomUUID());
+		if (next === undefined) return;
+		await this.writePipeText(uri, next, why);
+	}
+
+	/**
+	 * A genuine duplicate: another file carries the same id. Nothing is written
+	 * unless the user asks for it. The clash is confirmed against the disk
+	 * first, because a rename delivers delete and create in no fixed order and
+	 * the cache can briefly still hold the file's previous path.
+	 */
+	private async offerNewProjectId(uri: vscode.Uri, projectId: string, otherPath: string): Promise<void> {
+		const other = await PipelineFileParser.parseFile(otherPath, this.getServiceClassInfoMap());
+		if (other.projectId !== projectId) return;
+
+		const file = vscode.workspace.asRelativePath(uri);
+		const otherFile = vscode.workspace.asRelativePath(otherPath);
+		this.logger.info(`Pipeline ${file}: project_id ${projectId} is also used by ${otherFile}. File left unchanged.`);
+
+		// Ask once per file and id for the session: every save of a file the
+		// user chose to keep as it is would otherwise ask again.
+		const promptKey = `${uri.fsPath}\n${projectId}`;
+		if (this.duplicatePromptsShown.has(promptKey)) return;
+		this.duplicatePromptsShown.add(promptKey);
+
+		const assign = 'Assign new id';
+		const choice = await vscode.window.showWarningMessage(`${file} has the same project_id as ${otherFile}. Pipelines with the same id cannot be told apart when they run. The file was not changed.`, assign);
+		if (choice !== assign) return;
+		await this.assignProjectId(uri, projectId, `duplicate of ${otherFile}, new id assigned at the user's request`);
+	}
+
+	/** The file's text, or undefined when it cannot be read (not there yet, or gone). */
+	private async readPipeText(uri: vscode.Uri): Promise<string | undefined> {
+		try {
+			return Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** Writes `text` to the file and records why in the output channel. */
+	private async writePipeText(uri: vscode.Uri, text: string, why: string): Promise<void> {
+		const file = vscode.workspace.asRelativePath(uri);
+		try {
+			await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'));
+			this.logger.info(`Pipeline ${file}: ${why}.`);
+		} catch (error) {
+			this.logger.error(`Pipeline ${file}: write failed (${error instanceof Error ? error.message : String(error)}).`);
+		}
 	}
 
 	// =========================================================================
@@ -800,6 +858,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Unsubscribes from task events and disposes all listeners. */
 	public dispose(): void {
+		this.disposed = true;
 		const client = this.connectionManager.getClient();
 		if (client) {
 			client.removeMonitor({ token: '*' }, ['task']).catch(() => {});
