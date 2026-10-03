@@ -28,13 +28,15 @@ the transfer.
 
 ## Files: `send_files()`
 
-Uploads a list of files concurrently (all at once via `asyncio.gather`) and returns
-one `UPLOAD_RESULT` per file. Each entry is a path `str`, a `(path, objinfo)` tuple,
-or a `(path, objinfo, mimetype)` tuple:
+Uploads a list of files with at most `max_concurrent` transfers in flight at once
+(default 5) — a pipe left open by a failed write frees its slot immediately and is
+reclaimed by the server's reaper — and returns one `UPLOAD_RESULT` per file in the
+order they were given. Each entry is a path `str`, a `(path, objinfo)` tuple, or a
+`(path, objinfo, mimetype)` tuple:
 
 ```python
 files = ['doc1.md', 'doc2.md', ('doc3.json', {'tag': 'export'}, 'application/json')]
-upload_results = await client.send_files(files, token)
+upload_results = await client.send_files(files, token, max_concurrent=10)
 for r in upload_results:
     if r['action'] == 'complete':
         print('OK', r['filepath'])
@@ -42,11 +44,14 @@ for r in upload_results:
         print('Failed', r['filepath'], r.get('error'))
 ```
 
-Two things to know:
+Three things to know:
 
 - `send_files` **requires an API key** on the client (it raises `RuntimeError`
   without one).
 - A missing file raises `ValueError` (`'File not found: …'`).
+- `max_concurrent` must be a positive integer; anything else raises `ValueError`
+  before the first file is opened. Raise it for many small files, lower it for
+  large ones.
 
 Watch progress by subscribing to `apaevt_status_upload` events
 ([Events](/clients/python/pipelines#events)) — bodies carry `filepath`,

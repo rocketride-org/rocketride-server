@@ -538,12 +538,16 @@ class DataMixin(DAPClient):
             ]
         ],
         token: str,
-    ) -> UPLOAD_RESULT:
+        max_concurrent: int = 5,
+    ) -> List[UPLOAD_RESULT]:
         """
         Upload multiple files to a pipeline with progress tracking.
 
-        Efficiently uploads files using parallel transfers with automatic
-        progress events. Files are processed concurrently for better performance.
+        Uploads run concurrently with automatic progress events, with at most
+        max_concurrent transfers in flight at once; a pipe left open by a failed
+        write frees its slot immediately and is reclaimed by the server's reaper.
+        Results keep the order of the files argument, and a failure on one file
+        does not stop the rest of the batch.
 
         Each file can be specified as:
         - Just a file path: "/path/to/file.pdf"
@@ -553,13 +557,15 @@ class DataMixin(DAPClient):
         Args:
             files: List of files to upload (see formats above)
             token: Pipeline token to upload files to
+            max_concurrent: Maximum number of files uploaded at the same time.
+                Must be a positive integer (default: 5)
 
         Returns:
-            List[Dict]: Upload results for each file with status, timing, and processing results
+            List[UPLOAD_RESULT]: One result per file, in the order of ``files``
 
         Raises:
-            ValueError: If files list is empty, file paths invalid, or token missing
-            FileNotFoundError: If any specified file doesn't exist
+            ValueError: If files list is empty, a file path is invalid or missing,
+                token missing, or max_concurrent is not a positive integer
             RuntimeError: If API key is not configured
 
         Example:
@@ -582,7 +588,7 @@ class DataMixin(DAPClient):
                 ("financial_report.pdf", {"department": "finance", "year": 2024}),
                 ("sales_data.csv", {"type": "quarterly_data"}, "text/csv")
             ]
-            results = await client.send_files(files, token)
+            results = await client.send_files(files, token, max_concurrent=10)
 
         Progress Events:
             If you've configured event handling, you'll receive progress events:
@@ -596,7 +602,7 @@ class DataMixin(DAPClient):
             - Use specific MIME types for better processing
             - Add descriptive metadata to help with organization
             - Monitor progress events for user feedback
-            - Server handles queuing automatically - all files uploaded in parallel
+            - Raise max_concurrent for many small files, lower it for large ones
         """
         # Fixed chunk size for optimal performance
         chunk_size = 1024 * 1024  # 1MB
@@ -607,6 +613,10 @@ class DataMixin(DAPClient):
 
         if not token or not isinstance(token, str):
             raise ValueError('Token must be a non-empty string')
+
+        # Checked before any pipe is opened. bool subclasses int, so exclude it explicitly
+        if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int) or max_concurrent < 1:
+            raise ValueError('max_concurrent must be a positive integer')
 
         if not self._apikey:
             raise RuntimeError('API key is required for file uploads')
@@ -668,13 +678,14 @@ class DataMixin(DAPClient):
         async def upload_file(index: int, filepath: str, objinfo: Dict[str, Any], mimetype: str) -> None:
             """
             Upload a single file - straightforward linear process:
-            1. Wait for pipe to become available (server handles queuing)
+            1. Open a pipe for the file
             2. Transfer data
             3. Close pipe
             4. Send status update
             """
             start_time = time.time()
             bytes_sent = 0
+            file_size = 0
             pipe = None
             file_exception = None
             close_result = None
@@ -683,7 +694,7 @@ class DataMixin(DAPClient):
                 # Get file size for progress tracking
                 file_size = os.path.getsize(filepath)
 
-                # Step 1: Create and open pipe (waits for server to allocate)
+                # Step 1: Create and open the pipe for this file
                 pipe = await self.pipe(token, self._objinfo_with_size(objinfo, file_size), mimetype)
                 self.debug_message(f'Opening pipe for {filepath}')
                 await pipe.open()
@@ -735,6 +746,12 @@ class DataMixin(DAPClient):
                 file_exception = e
                 self.debug_message(f'Error uploading {filepath}: {e}')
 
+                # The pipe is deliberately left open. close() is the finalize call:
+                # it flushes whatever was written and commits it as a finished
+                # object, so closing a half-sent file would ingest a truncated one.
+                # There is no abort subcommand, so an interrupted pipe is left to
+                # the server's zombie reaper, which drops it without processing.
+
             # Calculate upload time
             upload_time = time.time() - start_time
 
@@ -743,7 +760,7 @@ class DataMixin(DAPClient):
                 'action': 'complete' if file_exception is None else 'error',
                 'filepath': filepath,
                 'bytes_sent': bytes_sent,
-                'file_size': os.path.getsize(filepath) if os.path.exists(filepath) else 0,
+                'file_size': file_size,
                 'upload_time': upload_time,
                 'result': close_result,
             }
@@ -764,11 +781,18 @@ class DataMixin(DAPClient):
             else:
                 self.debug_message(f'Upload completed: {filepath} ({bytes_sent} bytes, {upload_time:.2f}s)')
 
-        # Create a coroutine for every file - let server handle queuing
-        self.debug_message(f'Starting upload of {len(normalized_files)} files (token={token})')
+        # The token is a credential, so it stays out of the log line
+        self.debug_message(f'Starting upload of {len(normalized_files)} files (max_concurrent={max_concurrent})')
+
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def upload_bounded(index: int, filepath: str, objinfo: Dict[str, Any], mimetype: str) -> None:
+            """Hold a slot for one file's whole open/write/close cycle."""
+            async with semaphore:
+                await upload_file(index, filepath, objinfo, mimetype)
 
         upload_tasks = [
-            upload_file(index, filepath, objinfo, mimetype)
+            upload_bounded(index, filepath, objinfo, mimetype)
             for index, (filepath, objinfo, mimetype) in enumerate(normalized_files)
         ]
 
@@ -781,7 +805,7 @@ class DataMixin(DAPClient):
         total_bytes = sum(r.get('bytes_sent', 0) for r in results if r and r.get('action') == 'complete')
 
         self.debug_message(
-            f'Upload completed: {successful_uploads} successful, {failed_uploads} failed, {total_bytes} total bytes transferred (token={token})'
+            f'Upload completed: {successful_uploads} successful, {failed_uploads} failed, {total_bytes} total bytes transferred'
         )
 
         return results
