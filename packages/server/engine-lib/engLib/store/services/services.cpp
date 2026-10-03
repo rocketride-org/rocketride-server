@@ -1950,8 +1950,26 @@ Error IServices::registerDefinition(json::Value serviceInfo,
     // Get the logical type
     auto logicalType = def.logicalType;
 
+    // Is this logical type already in the map? The walk never meets one
+    // twice, but a definition arriving from somewhere else can land on a
+    // type the walk already registered
+    const bool known = m_services.find(logicalType) != m_services.end();
+    if (known && !replace) {
+        LOG(Services, "    Already registered, kept");
+        return {};
+    }
+
     // Save it
     m_services[logicalType] = _mv(def);
+
+    // Factories are registered against the logical type, so the ones an
+    // earlier definition put in place already serve this one. Registering
+    // them twice is what we are avoiding here, not re-registering a
+    // definition
+    if (known) {
+        LOG(Services, "    Replaced, factories kept");
+        return {};
+    }
 
     // A C++ node brings its own factories, so it is only declared
     // here - the "register" field does not apply
