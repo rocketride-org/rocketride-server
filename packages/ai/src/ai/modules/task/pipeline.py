@@ -1,20 +1,19 @@
 """Pipeline utility functions for source resolution and variable substitution."""
 
-import json
-import re
 from typing import Dict, Any, Optional
 
-# Only environment variables with this prefix are permitted to resolve in pipelines.
-# All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
-ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
+from ai.common.env_resolve import resolve_env_placeholders
+
+# Re-exported for backwards compatibility with callers that import it from here.
+from ai.common.env_resolve import ALLOWED_ENV_PREFIX  # noqa: F401
 
 
 def resolve_pipeline_env(pipeline: Dict[str, Any], env: Dict[str, str]) -> Dict[str, Any]:
     """Replace ``${KEY}`` placeholders in a pipeline dict with environment values.
 
-    Only variables whose names start with :data:`ALLOWED_ENV_PREFIX` are
-    resolved.  All other references are replaced with ``<REDACTED>`` to
-    prevent secret exfiltration.
+    Only variables whose names start with ``ROCKETRIDE_`` are resolved. All
+    other references are replaced with ``<REDACTED>`` to prevent secret
+    exfiltration. Delegates to :func:`ai.common.env_resolve.resolve_env_placeholders`.
 
     Args:
         pipeline: Pipeline configuration dictionary.
@@ -23,19 +22,7 @@ def resolve_pipeline_env(pipeline: Dict[str, Any], env: Dict[str, str]) -> Dict[
     Returns:
         New dictionary with resolved environment variables.
     """
-    pipeline_str = json.dumps(pipeline)
-
-    def replacer(match: re.Match) -> str:
-        env_var = match.group(1)
-        if env_var.startswith(ALLOWED_ENV_PREFIX):
-            value = env.get(env_var, match.group(0))
-            if value == match.group(0):
-                return value  # placeholder not found — keep as-is
-            return json.dumps(value)[1:-1]  # escape but strip outer quotes
-        return '<REDACTED>'
-
-    resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
-    return json.loads(resolved_str)
+    return resolve_env_placeholders(pipeline, env)
 
 
 def resolve_implied_source(pipeline: Dict[str, Any]) -> Optional[str]:
