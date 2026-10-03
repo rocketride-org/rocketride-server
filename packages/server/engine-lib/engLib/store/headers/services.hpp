@@ -179,6 +179,17 @@ private:
 
     //-----------------------------------------------------------------
     ///	@details
+    ///		Registers one parsed service definition into the service map,
+    ///		without reading anything from disk. The directory walk uses it
+    ///		for every services.json it finds; anything else that can hand
+    ///		us a definition uses the same path
+    //-----------------------------------------------------------------
+    static Error registerDefinition(json::Value serviceInfo,
+                                    const Path &definitionPath,
+                                    bool replace = false) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
     ///		Define the structures we use to keep track of the field
     ///		definitions
     //-----------------------------------------------------------------
