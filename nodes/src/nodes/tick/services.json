@@ -1,0 +1,44 @@
+{
+	"title": "Tick",
+	"protocol": "tick://",
+	"classType": ["source"],
+	"capabilities": ["noinclude"],
+	"register": "endpoint",
+	"node": "python",
+	"path": "nodes.tick",
+	"prefix": "Tick",
+	"icon": "tick.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["A timer source that fires once when the task starts, writes one text and completes.", "Built for scheduled deployments: the deploy schedule's cron picks the time, the tick supplies the input, and the run ends when the pipeline drains.", "Pair it with a 'prompt' lane whose saved instructions are the real input.", "The text is the configured Message or, by default, the fire time in ISO 8601 UTC."],
+	"tile": ["Message: ${parameters.tick.text}"],
+	"lanes": {
+		"_source": ["text"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		}
+	},
+	"fields": {
+		"tick.text": {
+			"type": "string",
+			"title": "Message",
+			"description": "Text written on each fire. Leave empty to send the fire time in ISO 8601 UTC, e.g. 2026-09-13T08:00:00+00:00.",
+			"default": ""
+		},
+		"Pipe.source.parameters": {
+			"section": "parameters",
+			"properties": ["tick.text"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Tick",
+			"properties": ["type", "Pipe.source.parameters"]
+		}
+	]
+}
