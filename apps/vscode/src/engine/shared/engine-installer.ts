@@ -37,6 +37,10 @@ import * as lockfile from 'proper-lockfile';
 import { execFile, execFileSync } from 'child_process';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
+import {
+	DARWIN_X64_UNSUPPORTED_MESSAGE,
+	isUnsupportedDarwinX64,
+} from './darwinX64Fallback';
 
 // =============================================================================
 // TYPES
@@ -212,6 +216,12 @@ export class EngineInstaller {
 		token?: vscode.CancellationToken,
 		githubToken?: string
 	): Promise<string> {
+		// No darwin-x64 engine asset is published — fail before lock/download.
+		if (isUnsupportedDarwinX64()) {
+			this.logger.output(`${icons.error} ${DARWIN_X64_UNSUPPORTED_MESSAGE}`);
+			throw new Error(DARWIN_X64_UNSUPPORTED_MESSAGE);
+		}
+
 		const displaySpec = versionSpec.replace(/^server-/, '');
 		this.logger.output(`${icons.info} Engine version requested: ${displaySpec}`);
 
@@ -568,12 +578,17 @@ export class EngineInstaller {
 
 		if (platform === 'win32') return { name: 'win64', ext: 'zip' };
 		if (platform === 'darwin') {
-			const darwinArch = arch === 'arm64' ? 'arm64' : 'x64';
-			return { name: `darwin-${darwinArch}`, ext: 'tar.gz' };
+			if (arch === 'x64') {
+				throw new Error(DARWIN_X64_UNSUPPORTED_MESSAGE);
+			}
+			if (arch !== 'arm64') {
+				throw new Error(`Unsupported platform: ${platform} ${arch}. Supported: Windows (x64), macOS (ARM64), Linux (x64). Use Docker on Intel Macs.`);
+			}
+			return { name: 'darwin-arm64', ext: 'tar.gz' };
 		}
 		if (platform === 'linux') return { name: 'linux-x64', ext: 'tar.gz' };
 
-		throw new Error(`Unsupported platform: ${platform} ${arch}. Supported: Windows (x64), macOS (x64/ARM64), Linux (x64).`);
+		throw new Error(`Unsupported platform: ${platform} ${arch}. Supported: Windows (x64), macOS (ARM64), Linux (x64).`);
 	}
 
 	/** Finds the matching asset for this platform in a release. */
@@ -586,7 +601,10 @@ export class EngineInstaller {
 
 		if (!asset) {
 			const available = release.assets.map(a => a.name).join(', ');
-			throw new Error(`No release asset found for this platform (expected: *${suffix}). Available: ${available}`);
+			throw new Error(
+				`No release asset found for this platform (expected: *${suffix}). ` +
+				`Available: ${available}. On Intel Macs, use Docker (rocketride.development.connectionMode = "docker").`
+			);
 		}
 
 		return asset;
