@@ -1,0 +1,384 @@
+{
+	"title": "Discord Bot",
+	"protocol": "discord://",
+	"classType": ["source"],
+	"capabilities": ["noinclude"],
+	"register": "endpoint",
+	"node": "python",
+	"path": "nodes.discord",
+	"prefix": "Discord",
+	"description": [
+		"A Discord Bot source node that receives messages from channels and DMs via the Discord Gateway. ",
+		"Supports text messages and media attachments (images, audio, video, documents). ",
+		"Each message type is routed to the appropriate pipeline lane. ",
+		"Pipeline responses are automatically sent back as replies to the originating channel or thread. ",
+		"Supports message content intent, attachment downloading, reply threading, and long-message chunking."
+	],
+	"icon": "discord.svg",
+	"documentation": "https://docs.rocketride.org/nodes/discord",
+	"tile": ["Status: ${parameters.discord.botToken ? 'connected' : 'pending'}"],
+	"lanes": {
+		"_source": ["text", "image", "audio", "video", "tags"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	"fields": {
+		"discord.botToken": {
+			"type": "string",
+			"title": "Bot Token",
+			"description": "Discord bot token from the Developer Portal (keep this secret - do not share)",
+			"optional": false,
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"discord.guildIds": {
+			"type": "array",
+			"items": {
+				"type": "string"
+			},
+			"title": "Server IDs (Guild IDs)",
+			"description": "List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in.",
+			"optional": true
+		},
+		"discord.channelIds": {
+			"type": "array",
+			"items": {
+				"type": "string"
+			},
+			"title": "Channel IDs",
+			"description": "List of channel IDs to listen to. Leave empty to listen to all channels.",
+			"optional": true
+		},
+		"discord.ignoreBots": {
+			"type": "boolean",
+			"title": "Ignore Bot Messages",
+			"description": "If true (default), messages from other bots are ignored to prevent loops.",
+			"default": true
+		},
+		"discord.requireMention": {
+			"type": "boolean",
+			"title": "Require @Mention",
+			"description": "If true, the bot only responds when explicitly @mentioned. If false, responds to all messages.",
+			"default": false
+		},
+		"discord.replyMode": {
+			"type": "string",
+			"title": "Reply Mode",
+			"description": "How the bot sends answers: 'channel' (post as normal message), 'reply' (reply to the message), or 'thread' (post in a thread).",
+			"enum": ["channel", "reply", "thread"],
+			"default": "reply"
+		},
+		"discord.showTyping": {
+			"type": "boolean",
+			"title": "Show Typing Indicator",
+			"description": "If true, show a typing indicator while processing the pipeline.",
+			"default": true
+		},
+		"discord.maxAttachmentBytes": {
+			"type": "number",
+			"title": "Max Attachment Size (bytes)",
+			"description": "Maximum size of attachments to download. Larger files are skipped. Default 25 MB.",
+			"default": 26214400
+		},
+		"discord.sendResponses": {
+			"type": "boolean",
+			"title": "Send Responses",
+			"description": "If true, the bot sends pipeline answers back to Discord. If false, only processes messages.",
+			"default": true
+		},
+		"discord.requireMentionChannelIds": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Require Mention Channel IDs",
+			"description": "Channels (or thread parent channels) where a direct bot mention is always required.",
+			"optional": true,
+			"default": []
+		},
+		"discord.allowedBotIds": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Allowed Bot IDs",
+			"description": "Bot user IDs allowed through when Ignore Bot Messages is enabled.",
+			"optional": true,
+			"default": []
+		},
+		"discord.allowedMentionRoleIds": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Allowed Mention Role IDs",
+			"description": "Role IDs that outbound pipeline responses may mention.",
+			"optional": true,
+			"default": []
+		},
+		"discord.allowedMentionUserIds": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Allowed Mention User IDs",
+			"description": "User IDs that outbound pipeline responses may mention.",
+			"optional": true,
+			"default": []
+		},
+		"discord.threadName": {
+			"type": "string",
+			"title": "Thread Name",
+			"description": "Name template for response threads. {content} is replaced with the triggering message text.",
+			"default": "Pipeline Response",
+			"optional": true
+		},
+		"discord.threadNameMaxLength": {
+			"type": "number",
+			"title": "Thread Name Max Length",
+			"description": "Maximum number of characters in a resolved response thread name.",
+			"default": 90,
+			"optional": true
+		},
+		"discord.threadAutoArchiveMinutes": {
+			"type": "number",
+			"title": "Thread Auto Archive Minutes",
+			"description": "Discord auto-archive duration, in minutes, for response threads the node creates: 60, 1440, 4320 or 10080. 0 (the default) uses the channel's own default.",
+			"default": 0,
+			"optional": true
+		},
+		"discord.numberChunks": {
+			"type": "boolean",
+			"title": "Number Reply Chunks",
+			"description": "When an answer is too long for one Discord message, end each message with its position, for example (2/3). A reply that fits in one message is never labelled.",
+			"default": false,
+			"optional": true
+		},
+		"discord.textAttachmentExtensions": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Text Attachment Extensions",
+			"description": "Filename extensions decoded as UTF-8 and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object.",
+			"default": [],
+			"optional": true
+		},
+		"discord.textAttachmentMaxChars": {
+			"type": "number",
+			"title": "Text Attachment Max Characters",
+			"description": "Maximum decoded characters folded into the text lane per attachment.",
+			"default": 12000,
+			"optional": true
+		},
+		"discord.mergeAttachments": {
+			"type": "boolean",
+			"title": "Merge attachments into the question",
+			"description": "When enabled, text-like files are folded into the message text and the answers the pipeline gives for image, audio, and video attachments are folded in as context before the text pass, so one reply covers everything. When disabled (the default), text and every attachment are asked separately and the first non-empty answer wins.",
+			"default": false,
+			"optional": true
+		},
+		"discord.emitReactions": {
+			"type": "boolean",
+			"title": "Emit Reactions",
+			"description": "Emit raw reaction add and remove events into the pipeline.",
+			"default": false,
+			"optional": true
+		},
+		"discord.emitNoReply": {
+			"type": "boolean",
+			"title": "Emit No Reply Events",
+			"description": "Emit an event when processing produces no answer or raises an error.",
+			"default": false,
+			"optional": true
+		},
+		"discord.emitOutbound": {
+			"type": "boolean",
+			"title": "Emit Outbound Events",
+			"description": "Emit an event after posting a pipeline response to Discord.",
+			"default": false,
+			"optional": true
+		},
+		"discord.captureEvents": {
+			"type": "boolean",
+			"title": "Capture Events To Database",
+			"description": "Write every event this node handles — question, follow-up, reply, no-reply, reaction — into a database node connected to this source with a tool control edge. Question rows are always written; outbound, no_reply and reaction rows exist only when the matching Emit Outbound Events (emitOutbound), Emit No Reply Events (emitNoReply) or Emit Reactions (emitReactions) option is also on, because those events are not produced at all when it is off. Writes happen off the answering path; if the database is unreachable the bot keeps answering and each failed write is logged as a warning.",
+			"default": false,
+			"optional": true
+		},
+		"discord.captureNodeId": {
+			"type": "string",
+			"title": "Capture Database Node",
+			"description": "Component id of the database node to write to. Empty: the only database tool node connected to this source.",
+			"default": "",
+			"optional": true
+		},
+		"discord.captureTable": {
+			"type": "string",
+			"title": "Capture Table",
+			"description": "Table the captured events are written to. Created if it does not exist. Letters, digits and underscore only, not starting with a digit, at most 54 characters (Postgres truncates identifiers at 63 bytes, and this table's index and constraint names are derived from its name).",
+			"default": "discord_events",
+			"optional": true
+		},
+		"discord.captureSource": {
+			"type": "string",
+			"title": "Capture Source Label",
+			"description": "Text written to each captured row's source column, e.g. to tell which pipeline wrote it, and the only way to tell two Discord sources sharing one capture table apart. Letters, digits and _ . : + @ - only, up to 128 characters. Empty: discord:<node type>, which is discord:discord for every Discord source.",
+			"default": "",
+			"optional": true
+		},
+		"discord.includeMemberMetadata": {
+			"type": "boolean",
+			"title": "Include Member Metadata",
+			"description": "Include display names and role IDs; requires the Discord members intent.",
+			"default": false,
+			"optional": true
+		},
+		"discord.backfillLimit": {
+			"type": "number",
+			"title": "Backfill Limit",
+			"description": "Most-recent messages to process per readable channel at startup. Zero disables backfill.",
+			"default": 0,
+			"optional": true
+		},
+		"discord.threadHistoryLimit": {
+			"type": "number",
+			"title": "Thread History Limit",
+			"description": "Prior thread messages fetched as conversation context for a message in a thread. Zero disables it.",
+			"default": 0,
+			"optional": true
+		},
+		"discord.threadHistoryMaxChars": {
+			"type": "number",
+			"title": "Thread History Max Characters",
+			"description": "Maximum characters of thread transcript passed as context; the oldest lines are dropped first.",
+			"default": 6000,
+			"optional": true
+		},
+		"discord.escalationPause": {
+			"type": "boolean",
+			"title": "Pause After Escalation",
+			"description": "After an answer containing an escalation marker is posted into a thread, stay quiet in that thread until the bot is mentioned again.",
+			"default": false,
+			"optional": true
+		},
+		"discord.escalationMarkers": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Escalation Markers",
+			"description": "Text markers that mark an answer as escalated (for example a team role mention). Allowed Mention Role IDs are added automatically.",
+			"default": [],
+			"optional": true
+		},
+		"discord.teamMentionAlias": {
+			"type": "string",
+			"title": "Team Mention Alias",
+			"description": "Literal team name the pipeline writes when it hands a question over, for example \"@RocketRide team\". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Empty leaves answers untouched.",
+			"default": "",
+			"optional": true
+		},
+		"discord.ignoreAimedAtOthers": {
+			"type": "boolean",
+			"title": "Ignore Messages Aimed At Others",
+			"description": "Skip messages that mention another user or role, or reply to a message the bot did not write, unless the bot is mentioned.",
+			"default": false,
+			"optional": true
+		},
+		"discord.ackEmoji": {
+			"type": "string",
+			"title": "Acknowledgement Emoji",
+			"description": "Emoji added to a message that is skipped as aimed at somebody else. Empty adds no reaction.",
+			"default": "",
+			"optional": true
+		},
+		"discord.feedbackReactions": {
+			"type": "boolean",
+			"title": "Feedback Reactions",
+			"description": "Add feedback emojis to the last posted answer chunk so readers can grade it in one click.",
+			"default": false,
+			"optional": true
+		},
+		"discord.feedbackEmojis": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Feedback Emojis",
+			"description": "Emojis added, in order, to the last posted answer chunk when Feedback Reactions is enabled.",
+			"default": ["✅", "❌"],
+			"optional": true
+		},
+		"discord.sanitizeReplies": {
+			"type": "boolean",
+			"title": "Sanitize Replies",
+			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it.",
+			"default": false,
+			"optional": true
+		},
+		"discord.nonAnswerRetries": {
+			"type": "number",
+			"title": "Retries on a non-answer",
+			"description": "When Sanitize Replies strips the whole reply (the pipeline returned only agent scratchpad such as Thought: lines), re-run the text pass up to this many times before giving up. Zero never retries.",
+			"default": 1,
+			"minimum": 0,
+			"maximum": 3,
+			"optional": true
+		},
+		"discord.pipelineTimeoutSeconds": {
+			"type": "number",
+			"title": "Pipeline Timeout (seconds)",
+			"description": "Give up on a message whose pipeline has not answered after this many seconds and report a no_reply with reason timeout instead of posting. Each pipeline run (the question, each attachment, each retry) gets this long. The run itself is not stopped: it finishes in the background and its late answer is dropped. Zero (default) waits as long as it takes.",
+			"default": 0,
+			"minimum": 0,
+			"optional": true
+		},
+		"Pipe.source.parameters": {
+			"section": "parameters",
+			"title": "Discord Bot Configuration",
+			"properties": [
+				"discord.botToken",
+				"discord.guildIds",
+				"discord.channelIds",
+				"discord.ignoreBots",
+				"discord.requireMention",
+				"discord.replyMode",
+				"discord.showTyping",
+				"discord.maxAttachmentBytes",
+				"discord.sendResponses",
+				"discord.requireMentionChannelIds",
+				"discord.allowedBotIds",
+				"discord.allowedMentionRoleIds",
+				"discord.allowedMentionUserIds",
+				"discord.threadName",
+				"discord.threadNameMaxLength",
+				"discord.threadAutoArchiveMinutes",
+				"discord.numberChunks",
+				"discord.textAttachmentExtensions",
+				"discord.textAttachmentMaxChars",
+				"discord.mergeAttachments",
+				"discord.emitReactions",
+				"discord.emitNoReply",
+				"discord.emitOutbound",
+				"discord.captureEvents",
+				"discord.captureNodeId",
+				"discord.captureTable",
+				"discord.captureSource",
+				"discord.includeMemberMetadata",
+				"discord.backfillLimit",
+				"discord.threadHistoryLimit",
+				"discord.threadHistoryMaxChars",
+				"discord.escalationPause",
+				"discord.escalationMarkers",
+				"discord.teamMentionAlias",
+				"discord.ignoreAimedAtOthers",
+				"discord.ackEmoji",
+				"discord.feedbackReactions",
+				"discord.feedbackEmojis",
+				"discord.sanitizeReplies",
+				"discord.nonAnswerRetries",
+				"discord.pipelineTimeoutSeconds"
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Discord Bot",
+			"properties": ["type", "Pipe.source.parameters"]
+		}
+	]
+}

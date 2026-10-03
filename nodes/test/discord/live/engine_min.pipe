@@ -1,0 +1,144 @@
+{
+  "components": [
+    {
+      "id": "discord_1",
+      "provider": "discord",
+      "name": "Discord Bot",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "type": "discord",
+        "parameters": {
+          "botToken": "${ROCKETRIDE_DISCORD_DISCORD_BOT_TOKEN}",
+          "guildIds": [
+            "${ROCKETRIDE_DISCORD_GUILD_ID}"
+          ],
+          "channelIds": [
+            "${ROCKETRIDE_DISCORD_SUPPORT_CHANNEL_ID}"
+          ],
+          "replyMode": "reply",
+          "threadName": "{content}",
+          "threadNameMaxLength": 90,
+          "threadAutoArchiveMinutes": 1440,
+          "requireMentionChannelIds": [],
+          "allowedMentionRoleIds": [
+            "${ROCKETRIDE_DISCORD_TEAM_ROLE_ID}"
+          ],
+          "allowedBotIds": [],
+          "emitNoReply": true,
+          "emitOutbound": true,
+          "showTyping": true
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "prompt_1",
+      "provider": "prompt",
+      "name": "Support Prompt",
+      "config": {
+        "instructions": [
+          "You are Rocket Ralph, the RocketRide support assistant in a Discord support channel. RocketRide is a platform for building AI pipelines and apps.",
+          "Answer briefly — two or three sentences where you can, and never more than a short paragraph. Discord messages are read on phones.",
+          "Answer only what you actually know about RocketRide. Do not invent product names, config fields, SDK methods, URLs, prices, or dates.",
+          "If you are unsure, or the question needs a human (account, billing, access, an outage, or anything you cannot answer from what you know), answer what you can and end your reply with exactly this line: Escalated to the RocketRide team.",
+          "Never write that line in a reply you are confident about.",
+          "Each message is a separate question from a separate person unless it is explicitly a follow-up in the same thread. Do not carry facts from one question into another."
+        ],
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "discord_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "OpenAI",
+      "config": {
+        "profile": "openai-5-2",
+        "openai-5-2": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "prompt_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "llm_openai_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 680,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "ea4a9516-2a9e-467c-8f0b-18bc983578f3",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

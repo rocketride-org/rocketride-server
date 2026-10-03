@@ -1,0 +1,631 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+
+"""
+Unit tests for the Discord bot source node.
+
+These tests exercise the node's real pure-logic helpers (message chunking and
+MIME-type detection) plus the shipped services.json schema. The helpers live in
+``text_utils.py`` — a module with no discord.py dependency — so they are loaded
+directly by file path here, avoiding both the discord.py runtime requirement and
+the name collision between the ``discord`` node package and the discord.py
+library during test collection.
+"""
+
+import importlib.util
+import json
+import os
+import re
+
+import pytest
+
+_NODE_DIR = os.path.join(os.path.dirname(__file__), '../../src/nodes/discord')
+_SERVICES_JSON = os.path.join(_NODE_DIR, 'services.json')
+
+
+def _load_text_utils():
+    """Load the node's text_utils module directly from its file path."""
+    path = os.path.join(_NODE_DIR, 'text_utils.py')
+    spec = importlib.util.spec_from_file_location('discord_text_utils', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+text_utils = _load_text_utils()
+chunk_message = text_utils.chunk_message
+guess_media_type = text_utils.guess_media_type
+should_process_message = text_utils.should_process_message
+format_thread_transcript = text_utils.format_thread_transcript
+with_thread_context = text_utils.with_thread_context
+find_marker = text_utils.find_marker
+sanitize_reply = text_utils.sanitize_reply
+looks_like_error = text_utils.looks_like_error
+inject_role_mention = text_utils.inject_role_mention
+is_aimed_at_someone_else = text_utils.is_aimed_at_someone_else
+DISCORD_MESSAGE_CHAR_LIMIT = text_utils.DISCORD_MESSAGE_CHAR_LIMIT
+
+
+def _gate(**overrides):
+    """Build should_process_message kwargs with permissive defaults."""
+    kwargs = dict(
+        author_id=1,
+        bot_user_id=999,
+        author_is_bot=False,
+        ignore_bots=True,
+        guild_id=10,
+        channel_id=20,
+        parent_channel_id=None,
+        allowed_guild_ids=[],
+        allowed_channel_ids=[],
+        allowed_bot_ids=[],
+        require_mention=False,
+        is_mentioned=False,
+    )
+    kwargs.update(overrides)
+    return should_process_message(**kwargs)
+
+
+class TestShouldProcessMessage:
+    """Test the real gating predicate."""
+
+    def test_default_message_passes(self):
+        assert _gate() is True
+
+    def test_own_message_skipped(self):
+        assert _gate(author_id=999, bot_user_id=999) is False
+
+    def test_bot_message_skipped_when_ignore_bots(self):
+        assert _gate(author_is_bot=True, ignore_bots=True) is False
+
+    def test_bot_message_allowed_when_not_ignoring(self):
+        assert _gate(author_is_bot=True, ignore_bots=False) is True
+
+    def test_guild_allowlist_blocks_other_guilds(self):
+        assert _gate(guild_id=10, allowed_guild_ids=['77']) is False
+        assert _gate(guild_id=77, allowed_guild_ids=['77']) is True
+
+    def test_guild_allowlist_blocks_dms(self):
+        assert _gate(guild_id=None, allowed_guild_ids=['77']) is False
+
+    def test_channel_allowlist(self):
+        assert _gate(channel_id=20, allowed_channel_ids=['21']) is False
+        assert _gate(channel_id=21, allowed_channel_ids=['21']) is True
+
+    def test_thread_parent_channel_allowlist(self):
+        assert _gate(channel_id=99, parent_channel_id=21, allowed_channel_ids=['21']) is True
+        assert _gate(channel_id=99, parent_channel_id=22, allowed_channel_ids=['21']) is False
+
+    def test_allowed_bot_overrides_ignore_bots(self):
+        assert _gate(author_id=42, author_is_bot=True, allowed_bot_ids=['42']) is True
+        assert _gate(author_id=43, author_is_bot=True, allowed_bot_ids=['42']) is False
+
+    def test_require_mention_gate(self):
+        assert _gate(require_mention=True, is_mentioned=False) is False
+        assert _gate(require_mention=True, is_mentioned=True) is True
+
+    def test_empty_allowlists_allow_all(self):
+        assert _gate(allowed_guild_ids=[], allowed_channel_ids=[]) is True
+
+
+class TestChunkMessage:
+    """Test the real chunk_message helper against Discord's 2000-char limit."""
+
+    def test_short_message_not_chunked(self):
+        text = 'Hello, this is a short message.'
+        assert chunk_message(text) == [text]
+
+    def test_exact_limit_not_chunked(self):
+        text = 'a' * DISCORD_MESSAGE_CHAR_LIMIT
+        chunks = chunk_message(text)
+        assert chunks == [text]
+
+    def test_long_message_split_by_lines(self):
+        text = 'Line\n' * 500
+        chunks = chunk_message(text)
+        assert len(chunks) > 1
+        assert all(len(c) <= DISCORD_MESSAGE_CHAR_LIMIT for c in chunks)
+
+    def test_every_chunk_within_limit(self):
+        text = 'This is a sentence. ' * 300
+        chunks = chunk_message(text)
+        assert len(chunks) > 1
+        assert all(len(c) <= DISCORD_MESSAGE_CHAR_LIMIT for c in chunks)
+
+    def test_unbroken_token_longer_than_limit_is_hard_split(self):
+        # A single token with no whitespace/sentence boundary must still be
+        # split so no chunk exceeds the limit (regression: previously emitted
+        # one oversized chunk that Discord would reject).
+        text = 'a' * 4501
+        chunks = chunk_message(text)
+        assert all(len(c) <= DISCORD_MESSAGE_CHAR_LIMIT for c in chunks)
+        assert ''.join(chunks) == text  # no data lost
+        assert len(chunks) == 3  # 2000 + 2000 + 501
+
+    def test_no_empty_chunks(self):
+        text = 'word ' * 800
+        chunks = chunk_message(text)
+        assert all(c.strip() for c in chunks)
+
+    def test_custom_max_length(self):
+        chunks = chunk_message('abcdefghij', max_length=4)
+        assert all(len(c) <= 4 for c in chunks)
+        assert ''.join(chunks) == 'abcdefghij'
+
+    def test_numbering_is_off_by_default_and_labels_every_chunk_when_on(self):
+        text = 'Line\n' * 500
+        plain = chunk_message(text)
+        numbered = chunk_message(text, number=True)
+
+        assert len(plain) > 1
+        assert not any(chunk.endswith('*') for chunk in plain), 'numbering must be opt-in'
+        total = len(numbered)
+        assert total > 1
+        for index, chunk in enumerate(numbered, 1):
+            assert chunk.endswith(f'\n\n*({index}/{total})*')
+
+    def test_numbered_chunks_still_fit_the_discord_limit(self):
+        # The label has to be paid for by the split, not added on top of a
+        # chunk that already fills the message.
+        text = 'This is a sentence. ' * 2000
+        numbered = chunk_message(text, number=True)
+
+        assert len(numbered) > 9, 'a three-digit-free run of labels is not the interesting case'
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in numbered)
+
+    def test_a_single_chunk_is_never_labelled(self):
+        assert chunk_message('short enough', number=True) == ['short enough']
+        exact = 'a' * DISCORD_MESSAGE_CHAR_LIMIT
+        assert chunk_message(exact, number=True) == [exact]
+
+    def test_a_cap_too_small_for_a_label_keeps_the_length_guarantee(self):
+        # Degenerate caller-supplied max_length: the limit is what Discord
+        # enforces, so the labels are what gets dropped.
+        chunks = chunk_message('word ' * 50, max_length=12, number=True)
+        assert all(len(chunk) <= 12 for chunk in chunks)
+        assert not any('*(' in chunk for chunk in chunks)
+
+    def test_numbering_keeps_the_whole_answer(self):
+        text = 'word ' * 800
+        numbered = chunk_message(text, number=True)
+        stripped = [re.sub(r'\n\n\*\(\d+/\d+\)\*$', '', chunk) for chunk in numbered]
+        assert ''.join(stripped).split() == text.split()
+
+    def test_code_fence_is_balanced_across_chunks(self):
+        text = 'Intro\n```python\n' + ('print("long code line")\n' * 10) + '```\nOutro'
+        chunks = chunk_message(text, max_length=60)
+
+        assert len(chunks) > 1
+        assert all(len(chunk) <= 60 for chunk in chunks)
+        assert all(chunk.count('```') % 2 == 0 for chunk in chunks)
+        # Removing synthetic close/reopen boundaries reconstructs all original
+        # non-whitespace content, including the opening language marker.
+        joined = ''.join(chunks).replace('\n``````python\n', '')
+        assert ''.join(joined.split()) == ''.join(text.split())
+
+    def test_a_long_code_block_splits_between_lines(self):
+        # Live F12/F44: every boundary inside a fence used to cut a code line in
+        # two, so a copied block was broken. Each message must hold whole lines.
+        body = ''.join(f'line {index:04d} ' + 'x' * 12 + '\n' for index in range(300))
+        text = 'Intro\n```\n' + body + '```\nOutro'
+        chunks = chunk_message(text)
+
+        assert len(chunks) > 2
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        full_line = re.compile(r'^line \d{4} x{12}$')
+        for chunk in chunks:
+            for line in chunk.splitlines():
+                if line.startswith('line '):
+                    assert full_line.match(line), f'cut mid-line: {line!r}'
+        # The fence pair standing in for each boundary newline is the only change.
+        assert ''.join(chunks).replace('\n``````\n', '\n') == text
+
+    def test_a_single_line_longer_than_a_chunk_is_still_split(self):
+        # No newline to break on: the length guarantee still holds.
+        text = '```\n' + 'y' * 5000 + '\n```'
+        chunks = chunk_message(text)
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert ''.join(chunks).replace('\n``````\n', '').count('y') == 5000
+
+    def test_a_numbered_last_chunk_has_no_trailing_blank_lines(self):
+        # Live F12: the answer's trailing newlines sat between the closing fence
+        # and the label as blank lines.
+        body = ''.join(f'line {index:04d} ' + 'x' * 12 + '\n' for index in range(150))
+        numbered = chunk_message('```\n' + body + '```\n\n\n', number=True)
+        total = len(numbered)
+        assert total > 1
+        assert numbered[-1].endswith(f'```\n\n*({total}/{total})*')
+
+
+class TestGuessMediaType:
+    """Test the real guess_media_type helper."""
+
+    def test_image_types(self):
+        assert guess_media_type('photo.jpg') == 'image/jpeg'
+        assert guess_media_type('picture.png') == 'image/png'
+        assert guess_media_type('animation.gif') == 'image/gif'
+        assert guess_media_type('modern.webp') == 'image/webp'
+
+    def test_audio_types(self):
+        assert guess_media_type('song.mp3') == 'audio/mpeg'
+        assert guess_media_type('clip.wav') == 'audio/wav'
+        assert guess_media_type('voice.ogg') == 'audio/ogg'
+
+    def test_video_types(self):
+        assert guess_media_type('movie.mp4') == 'video/mp4'
+        assert guess_media_type('clip.webm') == 'video/webm'
+        assert guess_media_type('video.mov') == 'video/quicktime'
+
+    def test_document_types(self):
+        assert guess_media_type('doc.pdf') == 'application/pdf'
+        assert guess_media_type('report.docx').endswith('wordprocessingml.document')
+        assert guess_media_type('sheet.xlsx').endswith('spreadsheetml.sheet')
+        assert guess_media_type('archive.zip') == 'application/zip'
+
+    def test_unknown_defaults_to_octet_stream(self):
+        assert guess_media_type('file.xyz') == 'application/octet-stream'
+        assert guess_media_type('noext') == 'application/octet-stream'
+
+    def test_case_insensitive_extension(self):
+        assert guess_media_type('Photo.JPG') == 'image/jpeg'
+        assert guess_media_type('Document.PDF') == 'application/pdf'
+
+    def test_content_type_takes_priority(self):
+        assert guess_media_type('file.jpg', 'image/png') == 'image/png'
+        assert guess_media_type('file.bin', 'text/plain') == 'text/plain'
+
+    def test_content_type_parameters_stripped(self):
+        assert guess_media_type('file.txt', 'text/plain; charset=utf-8') == 'text/plain'
+
+    def test_content_type_case_normalized(self):
+        # A mixed-case reported type must lowercase so the downstream
+        # startswith('image/') lane check still routes it correctly.
+        assert guess_media_type('file.bin', 'IMAGE/PNG') == 'image/png'
+        assert guess_media_type('file.bin', 'Image/PNG; charset=binary') == 'image/png'
+
+    def test_malformed_content_type_falls_back_to_extension(self):
+        # A present-but-empty-after-normalization content type must not win;
+        # fall through to the filename extension.
+        assert guess_media_type('photo.jpg', '   ; charset=utf-8') == 'image/jpeg'
+        assert guess_media_type('mystery.xyz', ' ; x=y') == 'application/octet-stream'
+
+
+class TestThreadTranscript:
+    """The thread-context transcript mirrors the support bot's threadTranscript."""
+
+    def test_lines_are_name_colon_content_oldest_first(self):
+        transcript = format_thread_transcript(
+            [('ada', 'first question'), ('Rocket Ralph', 'the answer'), ('ada', 'follow-up')]
+        )
+        assert transcript == 'ada: first question\nRocket Ralph: the answer\nada: follow-up'
+
+    def test_blank_content_is_dropped_and_content_is_stripped(self):
+        transcript = format_thread_transcript([('ada', '  padded  '), ('bob', '   '), ('cid', '')])
+        assert transcript == 'ada: padded'
+
+    def test_empty_entries_give_empty_transcript(self):
+        assert format_thread_transcript([]) == ''
+
+    def test_oversized_transcript_keeps_the_tail_with_an_ellipsis(self):
+        entries = [('ada', 'x' * 100) for _ in range(10)]
+        transcript = format_thread_transcript(entries, max_chars=200)
+        assert transcript.startswith('…\n')
+        assert len(transcript) == 202  # the ellipsis prefix plus exactly max_chars
+        assert transcript.endswith('x' * 100)  # the newest line survives
+
+    def test_transcript_at_the_cap_is_untouched(self):
+        transcript = format_thread_transcript([('a', 'x' * 8)], max_chars=11)
+        assert transcript == 'a: ' + 'x' * 8
+
+    def test_context_framing_and_no_op_without_transcript(self):
+        framed = with_thread_context('how do I stop it?', 'ada: how do I start?')
+        assert framed == (
+            "User's latest message: how do I stop it?\n\n"
+            'Earlier in this thread (oldest first, for context):\nada: how do I start?'
+        )
+        assert with_thread_context('plain question', '') == 'plain question'
+
+
+class TestMarkersAndSanitize:
+    """Escalation-marker detection and the reply sanitizer (sanitizeReply)."""
+
+    MARKERS = ['<@&900000000000000202>', 'ESCALATED']
+
+    def test_find_marker_returns_first_configured_match(self):
+        assert find_marker('please <@&900000000000000202> look', self.MARKERS) == '<@&900000000000000202>'
+        assert find_marker('ESCALATED and <@&900000000000000202>', self.MARKERS) == '<@&900000000000000202>'
+        assert find_marker('ESCALATED only', self.MARKERS) == 'ESCALATED'
+        assert find_marker('nothing here', self.MARKERS) is None
+        assert find_marker('', self.MARKERS) is None
+        assert find_marker('anything', []) is None
+
+    def test_plain_answer_is_untouched_apart_from_trimming(self):
+        assert sanitize_reply('  A clean answer.  ', self.MARKERS) == 'A clean answer.'
+        assert sanitize_reply('', self.MARKERS) == ''
+        assert sanitize_reply(None, self.MARKERS) == ''
+
+    def test_final_answer_keeps_only_what_follows_the_last_one(self):
+        raw = 'Thought: I should search\nFinal Answer: first\nObservation: hm\nfinal answer: the real answer'
+        assert sanitize_reply(raw, self.MARKERS) == 'the real answer'
+
+    def test_empty_final_answer_falls_back_to_the_text_above_it(self):
+        # An empty tail must not blank a usable answer.
+        assert sanitize_reply('Here is the answer.\nFinal Answer:   ', self.MARKERS) == (
+            'Here is the answer.\nFinal Answer:'
+        )
+
+    def test_reasoning_only_without_marker_is_suppressed(self):
+        for raw in (
+            'Thought: I should look this up',
+            'action: search(docs)',
+            'Action Input: {"q": "x"}',
+            'Observation: nothing found',
+            'Reasoning: unclear',
+        ):
+            assert sanitize_reply(raw, self.MARKERS) == '', raw
+
+    def test_reasoning_with_marker_becomes_a_handoff_that_keeps_the_marker(self):
+        raw = 'Thought: I should bring in <@&900000000000000202> for this'
+        assert sanitize_reply(raw, self.MARKERS) == (
+            "Thanks for flagging this — I've looped in the team to take a look. <@&900000000000000202>"
+        )
+
+    def test_reasoning_after_final_answer_extraction_is_still_scratchpad(self):
+        raw = 'Thought: step one\nFinal Answer: Observation: nothing to add'
+        assert sanitize_reply(raw, self.MARKERS) == ''
+
+    def test_a_final_json_envelope_is_decoded_to_its_content(self):
+        """The agent sometimes wraps its answer in {"type":"final","content":"..."}."""
+        raw = 'Thought: done\n{"type": "final", "content": "Deploy with `rocketride deploy`."}'
+        assert sanitize_reply(raw, self.MARKERS) == 'Deploy with `rocketride deploy`.'
+
+    def test_escapes_inside_the_envelope_are_decoded(self):
+        raw = '{"type":"final","content":"line one\\nline two \\"quoted\\""}'
+        assert sanitize_reply(raw, self.MARKERS) == 'line one\nline two "quoted"'
+
+    def test_the_envelope_wins_over_a_final_answer_above_it(self):
+        raw = 'Final Answer: the scratchpad one\n{"type": "final", "content": "the real one"}'
+        assert sanitize_reply(raw, self.MARKERS) == 'the real one'
+
+    def test_an_undecodable_envelope_falls_back_to_the_captured_text(self):
+        raw = '{"type": "final", "content": "bad \\q escape"}'
+        assert sanitize_reply(raw, self.MARKERS) == 'bad \\q escape'
+
+    def test_text_without_an_envelope_is_untouched(self):
+        raw = 'Here is a JSON example: {"type": "config", "content": "x"}'
+        assert sanitize_reply(raw, self.MARKERS) == raw
+
+
+class TestLooksLikeError:
+    """Engine/model failures that arrive as the answer text (looksLikeError)."""
+
+    def test_the_api_error_sentence_is_an_error(self):
+        assert looks_like_error('An error occurred with the OpenAI API: timeout') is True
+        assert looks_like_error('an error occurred with the anthropic api') is True
+
+    def test_the_engine_llm_error_answer_is_an_error(self):
+        # Live F40: the engine's LLM layer turned a provider failure into this
+        # answer text, and it was posted to Discord with sanitizeReplies on.
+        assert looks_like_error('**LLM error** — ValueError: An error occurred with the API.') is True
+        assert looks_like_error('  **LLM error**: Rate limit exceeded. Please try again later.') is True
+
+    def test_the_bare_api_error_sentence_is_an_error(self):
+        assert looks_like_error('An error occurred with the API.') is True
+        assert looks_like_error('ValueError: An error occurred with the API.') is True
+
+    def test_prose_about_api_errors_is_not_an_error(self):
+        assert looks_like_error('If an error occurred with the API call, check your key and retry.') is False
+        assert looks_like_error('The log once said **LLM error**; here is what it means.') is False
+
+    def test_an_engine_stack_frame_is_an_error(self):
+        assert looks_like_error('... raised in chat.py:412 while answering') is True
+        assert looks_like_error('agent.py:77 blew up') is True
+
+    def test_run_failed_and_a_traceback_are_errors(self):
+        assert looks_like_error('_run failed after 2 attempts') is True
+        assert looks_like_error('Traceback (most recent call last):\n  File "x"') is True
+
+    def test_an_exception_or_error_prefix_is_an_error(self):
+        assert looks_like_error('Exception: something went wrong') is True
+        assert looks_like_error('   \n Error: something went wrong') is True
+        # Not a prefix: the words may legitimately open a sentence about errors.
+        assert looks_like_error('Errors happen; here is how to read them.') is False
+
+    def test_an_api_error_code_anywhere_is_an_error(self):
+        real = (
+            "Exception: Error code: 429 - {'error': {'message': "
+            "'You have no credits remaining...', 'type': 'insufficient_quota'}}"
+        )
+        assert looks_like_error(real) is True
+        assert looks_like_error('the server replied Error code: 503') is True
+        # Three digits is the API shape; a version or a count is not.
+        assert looks_like_error('error code: 42 in the docs') is False
+
+    def test_a_normal_answer_is_not_an_error(self):
+        for text in (
+            '',
+            'Use `rocketride validate` to check the pipeline.',
+            'If the node errors, read the task log — error handling is in the docs.',
+            'Set error_mode to strict in chat.py to see more.',
+        ):
+            assert looks_like_error(text) is False, text
+
+
+class TestInjectRoleMention:
+    """The literal team alias becomes a real role mention (injectRoleMention)."""
+
+    def test_the_alias_becomes_the_role_mention(self):
+        assert inject_role_mention('I am looping in @RocketRide team.', '@RocketRide team', '<@&77>') == (
+            'I am looping in <@&77>.'
+        )
+
+    def test_matching_is_case_insensitive_and_whitespace_tolerant(self):
+        text = 'ping @rocketride   team and @RocketRide\nteam again'
+        assert inject_role_mention(text, '@RocketRide team', '<@&77>') == 'ping <@&77> and <@&77> again'
+
+    def test_an_empty_alias_or_mention_changes_nothing(self):
+        text = 'escalating to @RocketRide team'
+        assert inject_role_mention(text, '', '<@&77>') == text
+        assert inject_role_mention(text, '@RocketRide team', '') == text
+        assert inject_role_mention('', '@RocketRide team', '<@&77>') == ''
+
+    def test_regex_metacharacters_in_the_alias_are_literal(self):
+        assert inject_role_mention('ask the a.b team now', 'a.b team', '<@&77>') == 'ask the <@&77> now'
+        assert inject_role_mention('ask the axb team now', 'a.b team', '<@&77>') == 'ask the axb team now'
+
+
+class TestIsAimedAtSomeoneElse:
+    """The aimed-elsewhere decision table (isAimedAtSomeoneElse)."""
+
+    @staticmethod
+    def _aimed(**overrides):
+        kwargs = dict(
+            is_bot_mentioned=False,
+            mentioned_user_ids=[],
+            bot_user_id='999',
+            role_mention_count=0,
+            is_reply=False,
+            reply_target_is_bot=None,
+        )
+        kwargs.update(overrides)
+        return is_aimed_at_someone_else(**kwargs)
+
+    def test_plain_message_is_for_the_bot(self):
+        assert self._aimed() is False
+
+    def test_bot_mention_always_wins(self):
+        assert self._aimed(is_bot_mentioned=True, mentioned_user_ids=['5', '999'], role_mention_count=1) is False
+        assert self._aimed(is_bot_mentioned=True, is_reply=True, reply_target_is_bot=False) is False
+
+    def test_another_user_mention_is_aimed_elsewhere(self):
+        assert self._aimed(mentioned_user_ids=['5']) is True
+
+    def test_role_mention_is_aimed_elsewhere(self):
+        assert self._aimed(role_mention_count=1) is True
+
+    def test_reply_to_the_bot_is_for_the_bot(self):
+        assert self._aimed(is_reply=True, reply_target_is_bot=True) is False
+
+    def test_reply_to_somebody_else_is_aimed_elsewhere(self):
+        assert self._aimed(is_reply=True, reply_target_is_bot=False) is True
+
+    def test_unfetchable_reference_stays_aimed_elsewhere(self):
+        # The referenced message could not be fetched: the bot's behavior is to
+        # treat it as somebody else's conversation.
+        assert self._aimed(is_reply=True, reply_target_is_bot=None) is True
+
+
+class TestServicesJsonSchema:
+    """Validate the shipped services.json contract."""
+
+    @pytest.fixture(scope='class')
+    def schema(self):
+        with open(_SERVICES_JSON, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    def test_top_level_keys(self, schema):
+        for key in ('title', 'protocol', 'classType', 'fields', 'lanes'):
+            assert key in schema, f'missing top-level key: {key}'
+        assert schema['protocol'] == 'discord://'
+        assert schema['classType'] == ['source']
+
+    def test_all_config_fields_present(self, schema):
+        required = [
+            'discord.botToken',
+            'discord.guildIds',
+            'discord.channelIds',
+            'discord.ignoreBots',
+            'discord.requireMention',
+            'discord.replyMode',
+            'discord.showTyping',
+            'discord.maxAttachmentBytes',
+            'discord.sendResponses',
+            'discord.requireMentionChannelIds',
+            'discord.allowedBotIds',
+            'discord.allowedMentionRoleIds',
+            'discord.allowedMentionUserIds',
+            'discord.threadName',
+            'discord.threadNameMaxLength',
+            'discord.threadAutoArchiveMinutes',
+            'discord.textAttachmentExtensions',
+            'discord.textAttachmentMaxChars',
+            'discord.mergeAttachments',
+            'discord.emitReactions',
+            'discord.emitNoReply',
+            'discord.emitOutbound',
+            'discord.captureEvents',
+            'discord.captureNodeId',
+            'discord.captureTable',
+            'discord.includeMemberMetadata',
+            'discord.backfillLimit',
+            'discord.threadHistoryLimit',
+            'discord.threadHistoryMaxChars',
+            'discord.escalationPause',
+            'discord.escalationMarkers',
+            'discord.ignoreAimedAtOthers',
+            'discord.ackEmoji',
+            'discord.feedbackReactions',
+            'discord.feedbackEmojis',
+            'discord.sanitizeReplies',
+            'discord.teamMentionAlias',
+            'discord.numberChunks',
+        ]
+        for field in required:
+            assert field in schema['fields'], f'missing field: {field}'
+
+    def test_parity_fields_are_registered_and_off_by_default(self, schema):
+        """The new behaviors must be reachable in the UI and default to off."""
+        properties = schema['fields']['Pipe.source.parameters']['properties']
+        defaults = {
+            'discord.threadHistoryLimit': 0,
+            'discord.threadHistoryMaxChars': 6000,
+            'discord.escalationPause': False,
+            'discord.escalationMarkers': [],
+            'discord.ignoreAimedAtOthers': False,
+            'discord.ackEmoji': '',
+            'discord.feedbackReactions': False,
+            'discord.feedbackEmojis': ['✅', '❌'],
+            'discord.sanitizeReplies': False,
+            'discord.teamMentionAlias': '',
+            'discord.numberChunks': False,
+        }
+        for field, default in defaults.items():
+            assert field in properties, f'{field} not registered in Pipe.source.parameters'
+            assert schema['fields'][field]['default'] == default, f'{field} default drift'
+
+    def test_new_opt_in_fields_are_typed_and_optional(self, schema):
+        """A field the UI cannot leave alone is not opt-in."""
+        for field, kind in (('discord.teamMentionAlias', 'string'), ('discord.numberChunks', 'boolean')):
+            declared = schema['fields'][field]
+            assert declared['type'] == kind
+            assert declared['optional'] is True
+            assert declared['title'] and declared['description']
+
+    def test_merge_attachments_is_registered_and_off_by_default(self, schema):
+        """Attachment merging is opt-in; off keeps one object per attachment."""
+        properties = schema['fields']['Pipe.source.parameters']['properties']
+        assert 'discord.mergeAttachments' in properties
+        assert schema['fields']['discord.mergeAttachments']['default'] is False
+
+    def test_attachment_routing_defaults_keep_the_original_behaviour(self, schema):
+        """No text decoding and the channel's own archive duration unless configured."""
+        fields = schema['fields']
+        assert fields['discord.textAttachmentExtensions']['default'] == []
+        assert fields['discord.threadAutoArchiveMinutes']['default'] == 0
+
+    def test_bot_token_is_secure(self, schema):
+        assert schema['fields']['discord.botToken'].get('secure') is True
+
+    def test_source_lanes(self, schema):
+        lanes = schema['lanes']['_source']
+        for lane in ('text', 'image', 'audio', 'video', 'tags'):
+            assert lane in lanes, f'missing lane: {lane}'
+
+    def test_reply_mode_enum(self, schema):
+        assert schema['fields']['discord.replyMode']['enum'] == ['channel', 'reply', 'thread']
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])

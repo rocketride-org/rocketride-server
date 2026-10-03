@@ -1,0 +1,665 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""Pure text helpers for the Discord node.
+
+These functions have no discord.py dependency so they can be unit-tested
+directly without a Gateway connection or the discord.py package installed.
+"""
+
+import json
+import re
+from typing import Iterable, List, Optional, Sequence, Tuple
+
+DISCORD_MESSAGE_CHAR_LIMIT: int = 2000  # Discord's per-message cap
+
+# Default cap on the thread transcript handed to the pipeline as context.
+THREAD_HISTORY_MAX_CHARS: int = 6000
+
+# A reply that still opens with one of these labels is leaked agent scratchpad
+# ("Thought: ...", "Action Input: ...") rather than a user-facing answer.
+_OPENS_WITH_REASONING = re.compile(r'^\s*(Thought|Action(?:\s+Input)?|Observation|Reasoning)\s*:', re.IGNORECASE)
+_FINAL_ANSWER = re.compile(r'Final Answer\s*:\s*', re.IGNORECASE)
+
+# Some agent runtimes wrap the finished answer in a small JSON envelope instead
+# of writing it out: ``{"type": "final", "content": "<escaped string>"}``.
+_FINAL_JSON = re.compile(r'\{\s*"type"\s*:\s*"final"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}')
+
+# Engine and model failures can surface as the "answer" text — a provider API
+# error, a Python traceback, an engine stack frame, a bare exception line, or an
+# HTTP status from the provider. None of those may ever reach Discord.
+_ERROR_SIGNATURES = (
+    re.compile(r'an error occurred with the \w+ api\b', re.IGNORECASE),
+    re.compile(r'\b(chat|agent)\.py:\d+', re.IGNORECASE),
+    re.compile(r'_run failed\b', re.IGNORECASE),
+    re.compile(r'Traceback \(most recent call last\)', re.IGNORECASE),
+    re.compile(r'^\s*(Exception|Error)\s*:', re.IGNORECASE),
+    re.compile(r'Error code:\s*\d{3}\b', re.IGNORECASE),
+    # The engine's LLM layer reports a provider failure as the answer itself:
+    # ``**LLM error** — ValueError: An error occurred with the API.``
+    re.compile(r'^\s*\*\*LLM error\*\*'),
+    # ...and the sentence its mapped exception carries, when that sentence is the
+    # whole answer (prose that merely mentions API errors is not matched).
+    re.compile(r'^\s*(?:\w+Error:\s*)?an error occurred with the api\.?\s*$', re.IGNORECASE),
+)
+
+# Chunk numbering: each chunk ends with '\n\n*(3/7)*' when it is turned on.
+_CHUNK_LABEL_OVERHEAD = len('\n\n*(/)*')
+
+# Prefix added to a capped transcript so the reader knows the head was dropped.
+_TRANSCRIPT_TRUNCATION_PREFIX = '…\n'
+
+# Suffix marking a folded attachment whose tail was dropped at the char cap.
+_ATTACHMENT_TRUNCATION_SUFFIX = '\n… (truncated)'
+
+# Framing for a message that carries only files. Without it the pipeline gets a
+# bare document and no task, and answers generically (the support bot's
+# ``collectParts`` adds the same line).
+NO_MESSAGE_FRAMING = (
+    'The user shared the following file(s) with no message. '
+    'Explain what each file is and what it does, and help them with it.'
+)
+
+_EXT_TO_MIME = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime',
+    '.pdf': 'application/pdf',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.zip': 'application/zip',
+}
+
+
+def _hard_split(text: str, max_length: int) -> List[str]:
+    """Split text into fixed-size pieces, each at most ``max_length`` chars."""
+    return [text[i : i + max_length] for i in range(0, len(text), max_length)]
+
+
+def _chunk_label(index: int, total: int) -> str:
+    """The ``*(i/n)*`` marker appended to one chunk of a numbered reply."""
+    return f'\n\n*({index}/{total})*'
+
+
+def _label_width(total: int) -> int:
+    """Room every label needs for a split of ``total`` chunks (worst case)."""
+    return _CHUNK_LABEL_OVERHEAD + 2 * len(str(total))
+
+
+def _numbered_chunks(text: str, max_length: int) -> List[str]:
+    """Split ``text`` and end each chunk with ``*(i/n)*``, label included in the cap.
+
+    Mirrors the support bot's ``chunk``: a reply that needs more than one
+    Discord message says which message this is, and the label is paid for by
+    the split rather than added on top of a chunk that already fills the limit.
+    """
+    chunks = chunk_message(text, max_length)
+    if len(chunks) < 2:
+        return chunks
+
+    # How wide a label is depends on how many chunks there are, so widen the
+    # reservation until the split it produces no longer needs a wider one. A
+    # smaller cap only ever adds chunks, so this settles after a digit or two.
+    reserve = _label_width(len(chunks))
+    while max_length - reserve >= 1:
+        candidate = chunk_message(text, max_length - reserve)
+        needed = _label_width(len(candidate))
+        if needed <= reserve:
+            chunks = candidate
+            break
+        reserve = needed
+    else:
+        # A caller-supplied cap too small to hold content plus a label. The
+        # length guarantee is what Discord enforces, so the labels are dropped.
+        return chunks
+
+    total = len(chunks)
+    if total < 2:
+        return chunks
+    # A piece's trailing blank lines would sit between its text and the label.
+    return [piece.rstrip() + _chunk_label(index, total) for index, piece in enumerate(chunks, 1)]
+
+
+def chunk_message(text: str, max_length: int = DISCORD_MESSAGE_CHAR_LIMIT, number: bool = False) -> List[str]:
+    """Split text into chunks that each fit within Discord's per-message limit.
+
+    Splits on newline boundaries first, then on sentence boundaries for any
+    line that still exceeds the limit, and finally hard-splits any single
+    token/sentence that is itself longer than ``max_length`` (e.g. a long URL
+    with no whitespace). Every returned chunk is guaranteed to be at most
+    ``max_length`` characters.
+
+    Args:
+        text (str): The reply text.
+        max_length (int): The maximum chunk length.
+        number (bool): Append ``*(i/n)*`` to every chunk when the reply needs
+            more than one message. A single chunk is never labeled.
+
+    Returns:
+        List[str]: Non-empty chunks, each at most ``max_length`` characters.
+    """
+    if number:
+        return _numbered_chunks(text, max_length)
+
+    if len(text) <= max_length:
+        return [text]
+
+    # Keep the established splitting behavior for ordinary prose. Fenced code
+    # needs a little more care: Discord renders each message independently, so
+    # a fence spanning two messages leaves both chunks malformed unless we
+    # temporarily close and reopen it at the boundary.
+    if '```' in text:
+        return _chunk_fenced_message(text, max_length)
+
+    chunks: List[str] = []
+    current = ''
+    for line in text.split('\n'):
+        if len(current) + len(line) + 1 <= max_length:
+            current += line + '\n'
+            continue
+
+        if current:
+            chunks.append(current.rstrip())
+            current = ''
+
+        if len(line) <= max_length:
+            current = line + '\n'
+            continue
+
+        # Line too long on its own: split on sentence boundaries.
+        sentence = ''
+        for part in re.split(r'(?<=[.!?])\s+', line):
+            if len(part) > max_length:
+                # A single sentence/token exceeds the limit — flush and hard-split.
+                if sentence:
+                    chunks.append(sentence.rstrip())
+                    sentence = ''
+                chunks.extend(_hard_split(part, max_length))
+            elif len(sentence) + len(part) + 1 <= max_length:
+                sentence += part + ' '
+            else:
+                if sentence:
+                    chunks.append(sentence.rstrip())
+                sentence = part + ' '
+        if sentence:
+            chunks.append(sentence.rstrip())
+
+    if current.strip():
+        chunks.append(current.rstrip())
+
+    return [c for c in chunks if c.strip()]
+
+
+def _fence_state(fragment: str, is_open: bool, language: str) -> tuple:
+    """Apply real fence tokens in ``fragment`` to the current fence state."""
+    for match in re.finditer(r'```', fragment):
+        if is_open:
+            is_open = False
+            language = ''
+            continue
+        is_open = True
+        line_end = fragment.find('\n', match.end())
+        if line_end < 0:
+            line_end = len(fragment)
+        language = fragment[match.end() : line_end].strip()
+    return is_open, language
+
+
+def _safe_fence_boundary(text: str, start: int, end: int) -> int:
+    """Move ``end`` so it never cuts through one of the three backticks."""
+    fence = text.rfind('```', start, min(len(text), end + 2))
+    if fence >= start and fence < end < fence + 3:
+        if fence > start:
+            return fence
+        return min(len(text), fence + 3)
+    return end
+
+
+def _chunk_fenced_message(text: str, max_length: int) -> List[str]:
+    """Hard-split fenced text while balancing fences in every emitted chunk."""
+    if max_length <= 0:
+        return []
+    if max_length < 9:
+        # There is not enough room for an opening fence, content, and a closing
+        # fence. Preserve the content and length guarantee in this degenerate
+        # caller-supplied case.
+        return _hard_split(text, max_length)
+
+    chunks: List[str] = []
+    position = 0
+    is_open = False
+    language = ''
+
+    while position < len(text):
+        # The language marker is best-effort. A pathological language token
+        # must not consume the whole Discord message by itself.
+        max_language = max(0, max_length - 9)
+        reopen_language = language[:max_language] if is_open else ''
+        prefix = f'```{reopen_language}\n' if is_open else ''
+
+        # Reserve room for a closing fence. It is released below when the
+        # selected payload ends outside a code block.
+        reserved_close = 4
+        capacity = max(1, max_length - len(prefix) - reserved_close)
+        end = min(len(text), position + capacity)
+        # Break between lines when the window has a newline in its second half:
+        # a code line cut in two cannot be copied out of either message. The
+        # newline is not emitted; the synthetic close/reopen pair stands in for
+        # it (consumed below). A newline right before a fence is passed over, so
+        # a boundary never produces an empty code block.
+        line_break = False
+        if end < len(text):
+            newline = text.rfind('\n', position, end)
+            while newline > position + capacity // 2 and text.startswith('```', newline + 1):
+                newline = text.rfind('\n', position, newline)
+            if newline > position + capacity // 2:
+                end = newline
+                line_break = True
+        end = _safe_fence_boundary(text, position, end)
+        if end <= position:
+            end = min(len(text), position + 1)
+
+        # Grow into any spare room when the candidate closes the real fence;
+        # otherwise shrink until prefix + payload + synthetic close fits.
+        while True:
+            payload = text[position:end]
+            next_open, next_language = _fence_state(payload, is_open, language)
+            suffix = '\n```' if next_open else ''
+            overflow = len(prefix) + len(payload) + len(suffix) - max_length
+            if overflow <= 0:
+                break
+            end = _safe_fence_boundary(text, position, max(position + 1, end - overflow))
+
+        chunk = prefix + payload + suffix
+        if chunk.strip():
+            chunks.append(chunk)
+        position = end
+        if line_break and next_open and text.startswith('\n', end):
+            position = end + 1
+        is_open, language = next_open, next_language
+
+    return chunks
+
+
+def should_process_message(
+    *,
+    author_id: int,
+    bot_user_id: Optional[int],
+    author_is_bot: bool,
+    ignore_bots: bool,
+    guild_id: Optional[int],
+    channel_id: int,
+    allowed_guild_ids: List[str],
+    allowed_channel_ids: List[str],
+    require_mention: bool,
+    is_mentioned: bool,
+    parent_channel_id: Optional[int] = None,
+    allowed_bot_ids: Optional[List[str]] = None,
+) -> bool:
+    """Decide whether an incoming message should be routed to the pipeline.
+
+    Pure predicate (no discord.py types) so the gating rules can be unit-tested
+    in isolation. ``_on_message`` extracts the relevant primitives from the
+    Gateway message and delegates the decision here.
+
+    Args:
+        author_id: The message author's user id.
+        bot_user_id: This bot's own user id, or None if not yet known.
+        author_is_bot: Whether the author is a bot account.
+        ignore_bots: Whether messages from other bots should be ignored.
+        guild_id: The originating guild id, or None for DMs.
+        channel_id: The originating channel id.
+        allowed_guild_ids: Guild allowlist (empty means all guilds).
+        allowed_channel_ids: Channel allowlist (empty means all channels).
+        require_mention: Whether the bot must be @mentioned to respond.
+        is_mentioned: Whether the bot is mentioned in this message.
+
+    Returns:
+        bool: True if the message passes every gate and should be processed.
+    """
+    # Never process our own messages (prevents reply loops).
+    if bot_user_id is not None and author_id == bot_user_id:
+        return False
+    if ignore_bots and author_is_bot and str(author_id) not in (allowed_bot_ids or []):
+        return False
+    if allowed_guild_ids and (guild_id is None or str(guild_id) not in allowed_guild_ids):
+        return False
+    if (
+        allowed_channel_ids
+        and str(channel_id) not in allowed_channel_ids
+        and str(parent_channel_id) not in allowed_channel_ids
+    ):
+        return False
+    if require_mention and not is_mentioned:
+        return False
+    return True
+
+
+def format_thread_transcript(
+    entries: Iterable[Tuple[str, str]],
+    max_chars: int = THREAD_HISTORY_MAX_CHARS,
+) -> str:
+    """Render prior thread messages as a plain ``<name>: <content>`` transcript.
+
+    Mirrors the support bot's ``threadTranscript``: one line per message,
+    oldest first, and a tail-capped result prefixed with an ellipsis line when
+    the transcript is longer than ``max_chars`` (keeping the most recent
+    context, which is what the agent needs).
+
+    Args:
+        entries: ``(author_name, content)`` pairs, already ordered oldest first
+            and already filtered (no system messages, no empty content).
+        max_chars: Maximum transcript length before the head is dropped.
+
+    Returns:
+        str: The transcript, or '' when there is nothing to show.
+    """
+    lines: List[str] = []
+    for name, content in entries:
+        text = (content or '').strip()
+        if not text:
+            continue
+        lines.append(f'{name}: {text}')
+    out = '\n'.join(lines)
+    if max_chars > 0 and len(out) > max_chars:
+        out = _TRANSCRIPT_TRUNCATION_PREFIX + out[-max_chars:]
+    return out
+
+
+def with_thread_context(content: str, transcript: str) -> str:
+    """Frame the latest message plus its thread transcript for the pipeline.
+
+    Mirrors the support bot's context framing. Returns ``content`` unchanged
+    when there is no transcript, so a brand-new thread is a no-op.
+
+    Args:
+        content (str): The user's latest message text.
+        transcript (str): The formatted transcript (see
+            :func:`format_thread_transcript`).
+
+    Returns:
+        str: The text to hand to the pipeline.
+    """
+    if not transcript:
+        return content
+    return f"User's latest message: {content}\n\nEarlier in this thread (oldest first, for context):\n{transcript}"
+
+
+def attachment_kind(mime_type: str) -> str:
+    """Name the modality of an attachment as the merged question refers to it.
+
+    Args:
+        mime_type (str): The attachment MIME type.
+
+    Returns:
+        str: 'image', 'audio', 'video', or 'file' for anything else.
+    """
+    for kind in ('image', 'audio', 'video'):
+        if mime_type.startswith(f'{kind}/'):
+            return kind
+    return 'file'
+
+
+def fold_text_attachment(name: str, content: str, max_chars: int = 12000) -> str:
+    """Render a text-like attachment as a fenced block for the merged question.
+
+    Mirrors the support bot's ``collectParts``: a text file travels with the
+    user's own words instead of becoming a separate question, so one answer has
+    seen both.
+
+    Args:
+        name (str): The attachment filename.
+        content (str): The decoded file content.
+        max_chars (int): Maximum characters kept; anything beyond is dropped
+            behind a ``… (truncated)`` line. Zero or less keeps everything.
+
+    Returns:
+        str: The block to fold into the question.
+    """
+    text = content
+    if max_chars > 0 and len(text) > max_chars:
+        text = text[:max_chars] + _ATTACHMENT_TRUNCATION_SUFFIX
+    return f'Contents of attached file "{name}":\n```\n{text}\n```'
+
+
+def fold_binary_answer(kind: str, name: str, answer: str) -> str:
+    """Render what the pipeline made of one binary attachment as context.
+
+    Args:
+        kind (str): The modality word (see :func:`attachment_kind`).
+        name (str): The attachment filename.
+        answer (str): The answer that attachment's lane produced.
+
+    Returns:
+        str: The block to fold into the question.
+    """
+    return f'What the pipeline found in the attached {kind} "{name}":\n{answer}'
+
+
+def compose_merged_question(user_text: str, blocks: Sequence[str]) -> str:
+    """Join the user's words and the folded attachment blocks into one question.
+
+    Args:
+        user_text (str): The user's message (already carrying thread context).
+        blocks (Sequence[str]): Folded blocks, in the order they should appear.
+
+    Returns:
+        str: The text handed to the text lane — ``user_text`` unchanged when
+            there is nothing to fold, and a message that is only files framed
+            with :data:`NO_MESSAGE_FRAMING` so the pipeline is given a task
+            rather than a bare document.
+    """
+    parts = [block for block in blocks if block]
+    if not parts:
+        return user_text
+    if user_text:
+        return '\n\n'.join([user_text, *parts])
+    return '\n\n'.join([NO_MESSAGE_FRAMING, *parts])
+
+
+def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
+    """Return the first configured escalation marker present in ``text``.
+
+    The support bot tests a single team role mention; the node generalizes that
+    to a configured list (plus the outbound-allowlisted role mentions).
+
+    Args:
+        text (str): The text to inspect (typically a pipeline answer).
+        markers (Sequence[str]): The effective escalation markers.
+
+    Returns:
+        Optional[str]: The first marker found, in configured order, else None.
+    """
+    if not text:
+        return None
+    for marker in markers or ():
+        if marker and marker in text:
+            return marker
+    return None
+
+
+def looks_like_error(text: str) -> bool:
+    """Whether this "answer" is really an engine or model failure.
+
+    Mirrors the support bot's ``looksLikeError``, plus the two shapes that
+    reached a user anyway: a reply that opens with ``Exception:`` / ``Error:``,
+    and a provider status such as ``Error code: 429``. The caller suppresses
+    these instead of relaying them to Discord.
+
+    Args:
+        text (str): The candidate reply.
+
+    Returns:
+        bool: True when the text is a failure rather than an answer.
+    """
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _ERROR_SIGNATURES)
+
+
+def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
+    """Turn the literal team name the model wrote into a real role mention.
+
+    Mirrors the support bot's ``injectRoleMention``: the agent is prompted to
+    hand off to "@RocketRide team", which Discord renders as plain text and
+    pings nobody. Matching is case-insensitive, and whitespace inside the alias
+    matches any run of whitespace so a line break between the words still hits.
+
+    Args:
+        text (str): The pipeline answer.
+        alias (str): The configured literal alias (empty disables this).
+        role_mention (str): The ``<@&id>`` mention to substitute.
+
+    Returns:
+        str: The answer with every occurrence of the alias replaced.
+    """
+    if not text or not alias or not role_mention:
+        return text
+    tokens = [re.escape(token) for token in alias.split()]
+    if not tokens:
+        return text
+    # A lambda, not the string itself: a replacement is a template, and a
+    # backslash in it would otherwise be read as a group reference.
+    return re.sub(r'\s+'.join(tokens), lambda _match: role_mention, text, flags=re.IGNORECASE)
+
+
+def sanitize_reply(text: str, markers: Sequence[str]) -> str:
+    """Strip leaked agent scratchpad from a reply before it is posted.
+
+    Mirrors the support bot's ``sanitizeReply`` (plus its ``extractFinalText``):
+
+    - unwrap a ``{"type": "final", "content": "..."}`` envelope;
+    - keep only what follows the LAST ``Final Answer:`` (when non-empty);
+    - if the result still opens with a reasoning label it is scratchpad, not an
+      answer: with an escalation marker present it becomes a short hand-off line
+      that keeps the marker, otherwise it becomes '' so nothing is posted.
+
+    Args:
+        text (str): The raw pipeline answer.
+        markers (Sequence[str]): The effective escalation markers.
+
+    Returns:
+        str: The reply to post, or '' when there is no real answer.
+    """
+    result = (text or '').strip()
+    if not result:
+        return result
+
+    envelope = _FINAL_JSON.search(result)
+    if envelope:
+        captured = envelope.group(1)
+        try:
+            result = json.loads(f'"{captured}"')
+        except ValueError:
+            # An envelope we cannot decode still told us where the answer is.
+            result = captured
+        result = result.strip()
+        if not result:
+            return result
+
+    marks = list(_FINAL_ANSWER.finditer(result))
+    if marks:
+        after = result[marks[-1].end() :].strip()
+        if after:
+            result = after
+
+    if _OPENS_WITH_REASONING.match(result):
+        marker = find_marker(result, markers)
+        if marker:
+            return f"Thanks for flagging this — I've looped in the team to take a look. {marker}"
+        return ''
+    return result
+
+
+def is_aimed_at_someone_else(
+    *,
+    is_bot_mentioned: bool,
+    mentioned_user_ids: Sequence[str],
+    bot_user_id: Optional[str],
+    role_mention_count: int,
+    is_reply: bool,
+    reply_target_is_bot: Optional[bool] = None,
+) -> bool:
+    """Decide whether a message is addressed to somebody other than the bot.
+
+    Pure mirror of the support bot's ``isAimedAtSomeoneElse``: a direct mention
+    of the bot always wins; otherwise a mention of another user or any role, or
+    a reply to a message the bot did not author, means the message belongs to
+    someone else's conversation.
+
+    Args:
+        is_bot_mentioned: Whether the bot is directly @mentioned.
+        mentioned_user_ids: The mentioned user ids, as strings.
+        bot_user_id: The bot's own user id as a string, or None if unknown.
+        role_mention_count: How many roles the message mentions.
+        is_reply: Whether the message replies to another message.
+        reply_target_is_bot: Whether the replied-to message is the bot's, or
+            None when it could not be fetched.
+
+    Returns:
+        bool: True when the message should be acknowledged rather than answered.
+    """
+    if is_bot_mentioned:
+        return False
+    mentions_others = any(str(user_id) != str(bot_user_id) for user_id in mentioned_user_ids or ()) or (
+        role_mention_count > 0
+    )
+    if not mentions_others and not is_reply:
+        return False
+    if is_reply and reply_target_is_bot:
+        return False
+    return True
+
+
+def guess_media_type(filename: str, content_type: str = '') -> str:
+    """Guess a MIME type from a reported content type or the file extension.
+
+    Args:
+        filename (str): The attachment filename.
+        content_type (str): The reported content type, if any (takes priority).
+
+    Returns:
+        str: A MIME type string, defaulting to 'application/octet-stream'.
+    """
+    if content_type:
+        # Normalize to lowercase without parameters (e.g. '; charset=utf-8').
+        # discord.py usually reports lowercase, but a mixed-case 'Image/PNG'
+        # would otherwise fail the 'image/' lane check downstream. A malformed
+        # value that normalizes to empty falls through to the extension guess.
+        mime = content_type.split(';')[0].strip().lower()
+        if mime:
+            return mime
+
+    filename_lower = filename.lower()
+    for ext, mime_type in _EXT_TO_MIME.items():
+        if filename_lower.endswith(ext):
+            return mime_type
+    return 'application/octet-stream'
