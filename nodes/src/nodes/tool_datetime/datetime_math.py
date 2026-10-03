@@ -1,0 +1,528 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""
+The arithmetic, with no engine around it.
+
+Separated from ``IInstance`` so it can be tested as plain functions: this node
+exists because a model gets date arithmetic wrong, and a node whose arithmetic
+is only reachable through a running pipeline would be asking to be trusted on
+exactly the thing it was built to be doubted about.
+
+TWO KINDS OF SHIFT, AND THE DIFFERENCE MATTERS.
+
+``minute`` and ``hour`` are durations: add them to the instant. ``day``, ``week``,
+``month`` and ``year`` are calendar steps: convert to local time, move the
+calendar, convert back. Across a daylight-saving boundary those disagree by an
+hour, and the calendar answer is the one a person means. "Same time tomorrow"
+is 09:00 tomorrow, not 08:00 because the clocks moved.
+"""
+
+from __future__ import annotations
+
+import calendar
+import logging
+import math
+from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from typing import Any, Optional
+
+try:  # pragma: no cover - exercised by whichever branch the platform takes
+    from zoneinfo import ZoneInfo, available_timezones
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[assignment]
+    available_timezones = None  # type: ignore[assignment]
+
+_log = logging.getLogger(__name__)
+
+#: Said once per process rather than once per call: an absent database fails
+#: every name, and one line is a diagnosis where thousands are noise.
+_tzdb_reported = False
+
+#: Where an unusable zone lands. Never an exception: a mistyped zone should
+#: cost the caller a UTC answer it can see and correct, not a failed turn.
+DEFAULT_ZONE = 'UTC'
+
+#: Calendar steps, which move the local date. See the module docstring.
+CALENDAR_UNITS = ('day', 'week', 'month', 'year')
+
+#: Durations, which move the instant.
+DURATION_UNITS = ('second', 'minute', 'hour')
+
+UNITS = DURATION_UNITS + CALENDAR_UNITS
+
+#: Monday-first, matching ISO and `datetime.weekday()`.
+WEEKDAYS = ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')
+
+BOUNDARY_UNITS = ('day', 'week', 'month', 'quarter', 'year')
+
+
+@lru_cache(maxsize=1)
+def _tzdb_missing() -> bool:
+    """
+    Whether the IANA database is absent, rather than the name being wrong.
+
+    CACHED, because the answer cannot change inside a process and finding it
+    walks the whole database. Without the cache the common case paid for it
+    every time: `_tzdb_reported` latches only on the branch where the database
+    is MISSING, so with a database present an agent guessing `PST` or
+    `America/San_Francisco` re-listed some 600 zones on every bad lookup — and,
+    every answer being silently UTC, it had no reason to stop guessing.
+
+    ``zoneinfo`` ships no data of its own — it reads the system database, or the
+    ``tzdata`` wheel this node declares in its requirements. With neither, every
+    name raises and every answer silently becomes UTC: the wrong-by-an-offset
+    bug this node exists to remove, back again with nothing on screen to say so.
+    A mistyped zone and an absent database raise the same exception here, and
+    only one of them is the caller's fault.
+
+    Returns:
+        True when no zone can be resolved at all.
+    """
+    if available_timezones is None:  # pragma: no cover - Python without zoneinfo
+        return True
+    try:
+        return not available_timezones()
+    except Exception:  # noqa: BLE001 — a database that cannot be listed is not there
+        return True
+
+
+def resolve_zone(name: Optional[str]) -> tuple[Any, str]:
+    """
+    A timezone object and the name it actually resolved to.
+
+    Args:
+        name: An IANA name, or None/'' for the default.
+
+    Returns:
+        The tzinfo and the name to report, which is ``UTC`` whenever the
+        requested one could not be used.
+    """
+    global _tzdb_reported
+
+    wanted = (name or '').strip()
+    if not wanted or wanted.upper() == 'UTC' or ZoneInfo is None:
+        return timezone.utc, DEFAULT_ZONE
+    try:
+        return ZoneInfo(wanted), wanted
+    except Exception:  # noqa: BLE001 — a bad zone is an answer, not a failure
+        if not _tzdb_reported and _tzdb_missing():
+            _tzdb_reported = True
+            _log.warning(
+                'tool_datetime: no IANA timezone database — %r, and every other zone, '
+                'will be answered in UTC. Install the "tzdata" package.',
+                wanted,
+            )
+        return timezone.utc, DEFAULT_ZONE
+
+
+def render(epoch: float, zone: Optional[str] = None) -> dict[str, Any]:
+    """
+    One instant, in every shape a caller might need.
+
+    The `date` and `time` fields are the CRMs' formats — Pipedrive documents
+    `due_date` as YYYY-MM-DD and `due_time` as HH:MM — so a caller never has to
+    format an instant by hand, which is one more place to get it wrong.
+
+    BOTH RENDERINGS, ALWAYS, and that is the point of the `utc_` fields.
+
+    An instant has no single date and time: it has one per zone. A CRM field
+    wants a particular one, and which is a fact about the field, not about the
+    caller — Pipedrive reads `due_time` as UTC while GoHighLevel wants an
+    offset-bearing local string. A booking asked for at 12:30 Pacific was
+    written as `12:30`, stored as UTC, and shown back to the person who asked
+    for it as 05:30.
+
+    Nothing here can know which field it is feeding. What it can do is refuse to
+    make the caller choose blind: every answer carries the local rendering and
+    the UTC one side by side, so writing the right one is reading a different
+    key rather than doing arithmetic. Subtracting an offset by hand is exactly
+    the class of mistake this node exists to take away.
+
+    `render` is the single funnel — `shift`, `next_weekday`, `boundary`, `at`
+    and `now` all return through it — so these fields reach every tool answer.
+
+    Args:
+        epoch: Unix seconds.
+        zone: IANA name, or None for UTC.
+
+    Returns:
+        The rendering, including the zone actually used and the UTC form.
+    """
+    tz, name = resolve_zone(zone)
+    # ONE INSTANT, not two. The rendered fields and the `epoch` that comes back
+    # beside them must describe the same moment: rendering from the float while
+    # returning `int(epoch)` answered 1.9 as "epoch 1" next to a time of 00:00:01
+    # — a caller storing the epoch and a caller reading the date would disagree.
+    # Floored (not truncated) so a pre-1970 instant moves backwards in time like
+    # every other, and floored ONCE here because whole seconds are the node's
+    # unit: nothing it renders is finer than a minute.
+    whole = math.floor(float(epoch))
+    local = datetime.fromtimestamp(whole, tz)
+    utc = datetime.fromtimestamp(whole, timezone.utc)
+    return {
+        'epoch': whole,
+        'iso': local.isoformat(),
+        'date': local.strftime('%Y-%m-%d'),
+        'time': local.strftime('%H:%M'),
+        'weekday': local.strftime('%A'),
+        'timezone': name,
+        'utc_iso': utc.isoformat(),
+        'utc_date': utc.strftime('%Y-%m-%d'),
+        'utc_time': utc.strftime('%H:%M'),
+    }
+
+
+def _clamped(year: int, month: int, day: int) -> tuple[int, int, int]:
+    """
+    The same day of a different month, or that month's last day.
+
+    Normalised with `divmod` rather than a loop per year: `shift` multiplies a
+    year amount by 12 before it arrives here, so a hallucinated `10**9 years`
+    would otherwise step twelve billion times with nothing on screen. The bound
+    in `IInstance.shift` refuses such a number at the boundary; this makes the
+    arithmetic itself constant-time either way.
+    """
+    carry, zero_based = divmod(month - 1, 12)
+    year, month = year + carry, zero_based + 1
+    return year, month, min(day, calendar.monthrange(year, month)[1])
+
+
+def _anchored(local: datetime, tz: Any, zone: Optional[str]) -> dict[str, Any]:
+    """
+    A wall time rendered in its own zone, saying whether the clock moved under it.
+
+    A CALENDAR STEP CAN LAND ON A TIME THAT DOES NOT EXIST. Arithmetic on a local
+    datetime produces a wall clock reading, and on the morning clocks go forward
+    an hour of readings names no instant at all — 02:30, or midnight itself in
+    Chile, Cuba and Lebanon, which change at 24:00. ``timestamp()`` resolves such
+    a reading to a real instant an hour away and says nothing.
+
+    ``at()`` already reports this as ``adjusted``; this is the same comparison,
+    so a boundary or a shift that absorbed an hour says so too rather than
+    handing back an epoch that is quietly wrong for whoever schedules on it.
+
+    Args:
+        local: The wall time wanted, tz-aware or naive — only its clock reading
+            is used.
+        tz: The zone to re-anchor it in.
+        zone: The name to render with.
+
+    Returns:
+        The rendering, plus ``adjusted``: True when the hour asked for does not
+        exist and a different one came back.
+    """
+    wall = local.replace(tzinfo=None)
+    answer = render(wall.replace(tzinfo=tz).timestamp(), zone)
+    # DATE AND TIME, because a transition can skip a whole calendar day and
+    # leave the clock reading untouched: Samoa crossed the date line at the end
+    # of 2011, so 2011-12-30 never happened in Pacific/Apia and midnight on it
+    # resolves to midnight on the 31st. Comparing only HH:MM called that
+    # unadjusted — the one answer this node exists to stop giving.
+    answer['adjusted'] = (answer['date'], answer['time']) != (wall.strftime('%Y-%m-%d'), wall.strftime('%H:%M'))
+    return answer
+
+
+def shift(epoch: float, amount: int, unit: str, zone: Optional[str] = None) -> dict[str, Any]:
+    """
+    An instant moved by a whole number of units.
+
+    Args:
+        epoch: Unix seconds to move from.
+        amount: How many, negative to go back.
+        unit: One of `UNITS`.
+        zone: The calendar to move within, for calendar units.
+
+    Returns:
+        The new instant, rendered, plus ``adjusted`` — True when the wall time
+        the step landed on does not exist and the nearest real one was used
+        instead. A duration step always reports False: it moves the instant, so
+        there is no wall time to be missing.
+
+    Raises:
+        ValueError: On an unknown unit, which is a caller bug rather than a
+            date that does not exist.
+    """
+    if unit not in UNITS:
+        raise ValueError(f'"unit" must be one of {list(UNITS)}; got {unit!r}')
+
+    if unit in DURATION_UNITS:
+        seconds = {'second': 1, 'minute': 60, 'hour': 3600}[unit]
+        answer = render(float(epoch) + amount * seconds, zone)
+        # A duration lands on an instant by construction, so there is no wall
+        # time that could have been missing. Said explicitly so every answer
+        # from this function carries the same keys.
+        answer['adjusted'] = False
+        return answer
+
+    tz, _ = resolve_zone(zone)
+    local = datetime.fromtimestamp(float(epoch), tz)
+
+    if unit == 'day':
+        moved = local + timedelta(days=amount)
+    elif unit == 'week':
+        moved = local + timedelta(weeks=amount)
+    else:
+        months = amount if unit == 'month' else amount * 12
+        year, month, day = _clamped(local.year, local.month + months, local.day)
+        moved = local.replace(year=year, month=month, day=day)
+
+    # Re-anchored in the zone rather than trusting the arithmetic's tzinfo: a
+    # date built across a DST change carries the offset it started with, and
+    # `timestamp()` on that is an hour out.
+    return _anchored(moved, tz, zone)
+
+
+def next_weekday(
+    epoch: float,
+    weekday: str,
+    zone: Optional[str] = None,
+    allow_today: bool = False,
+) -> dict[str, Any]:
+    """
+    The next occurrence of a named weekday.
+
+    STRICTLY IN THE FUTURE BY DEFAULT, and that is a choice worth stating rather
+    than discovering: asked on a Tuesday to book something "next Tuesday", a
+    person means the one coming, not the day they are standing in. A caller that
+    wants "today if today qualifies" passes `allow_today`.
+
+    Time of day is preserved — this moves the date, not the clock.
+
+    Args:
+        epoch: Unix seconds to count from.
+        weekday: A day name, case-insensitive.
+        zone: The calendar to count in.
+        allow_today: Whether landing on today counts as an occurrence.
+
+    Returns:
+        The occurrence, rendered.
+
+    Raises:
+        ValueError: On an unrecognised day name.
+    """
+    wanted = (weekday or '').strip().lower()
+    if wanted not in WEEKDAYS:
+        raise ValueError(f'"weekday" must be one of {list(WEEKDAYS)}; got {weekday!r}')
+
+    tz, _ = resolve_zone(zone)
+    local = datetime.fromtimestamp(float(epoch), tz)
+    ahead = (WEEKDAYS.index(wanted) - local.weekday()) % 7
+    if ahead == 0 and not allow_today:
+        ahead = 7
+    return shift(epoch, ahead, 'day', zone)
+
+
+def boundary(epoch: float, unit: str, edge: str, zone: Optional[str] = None) -> dict[str, Any]:
+    """
+    The first or last instant of the period an instant falls in.
+
+    `end` is the last SECOND of the period, not the first of the next one — so
+    an end-of-month date reads as the 31st rather than the 1st, which is what
+    somebody asking for "end of the month" means and what a CRM wants stored.
+
+    A START IS THE FIRST INSTANT OF THE PERIOD, WHICH IS NOT ALWAYS MIDNIGHT.
+    Chile, Cuba and Lebanon move their clocks at 24:00, so on those dates 00:00
+    is a reading that names no instant and the first real one is 01:00. The
+    answer carries ``adjusted`` when that happened, rather than reporting a
+    midnight the day did not have.
+
+    Args:
+        epoch: Unix seconds inside the period.
+        unit: One of `BOUNDARY_UNITS`.
+        edge: 'start' or 'end'.
+        zone: The calendar the period belongs to.
+
+    Returns:
+        The boundary instant, rendered, plus ``adjusted`` — True when the
+        period's edge fell in a gap and the nearest real instant was used.
+
+    Raises:
+        ValueError: On an unknown unit or edge.
+    """
+    if unit not in BOUNDARY_UNITS:
+        raise ValueError(f'"unit" must be one of {list(BOUNDARY_UNITS)}; got {unit!r}')
+    if edge not in ('start', 'end'):
+        raise ValueError(f'"edge" must be "start" or "end"; got {edge!r}')
+
+    tz, _ = resolve_zone(zone)
+    local = datetime.fromtimestamp(float(epoch), tz)
+    day = local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if unit == 'day':
+        first = day
+    elif unit == 'week':
+        first = day - timedelta(days=day.weekday())
+    elif unit == 'month':
+        first = day.replace(day=1)
+    elif unit == 'quarter':
+        first = day.replace(month=((day.month - 1) // 3) * 3 + 1, day=1)
+    else:
+        first = day.replace(month=1, day=1)
+
+    if edge == 'start':
+        moment = first
+    else:
+
+        def _months_on(value, count):
+            year, month, day = _clamped(value.year, value.month + count, 1)
+            return value.replace(year=year, month=month, day=day)
+
+        step = {
+            'day': lambda d: d + timedelta(days=1),
+            'week': lambda d: d + timedelta(days=7),
+            'month': lambda d: _months_on(d, 1),
+            'quarter': lambda d: _months_on(d, 3),
+            'year': lambda d: d.replace(year=d.year + 1),
+        }[unit]
+        moment = step(first) - timedelta(seconds=1)
+
+    return _anchored(moment, tz, zone)
+
+
+def difference(start: float, end: float, unit: str, zone: Optional[str] = None) -> dict[str, Any]:
+    """
+    How far apart two instants are.
+
+    BOTH ANSWERS, because the question is ambiguous and picking one silently is
+    how "how many days until Friday" comes back as 0 at 23:00 on Thursday.
+    `elapsed` is the real duration in the requested unit; `calendar_days` is how
+    many dates you cross on a wall calendar in the given zone, which is what a
+    person counting days means.
+
+    Args:
+        start: Unix seconds.
+        end: Unix seconds.
+        unit: One of second, minute, hour, day, week.
+        zone: The calendar `calendar_days` is counted on.
+
+    Returns:
+        `elapsed`, `calendar_days`, and the zone used.
+
+    Raises:
+        ValueError: On an unknown unit.
+    """
+    per = {'second': 1, 'minute': 60, 'hour': 3600, 'day': 86400, 'week': 604800}
+    if unit not in per:
+        raise ValueError(f'"unit" must be one of {list(per)}; got {unit!r}')
+
+    tz, name = resolve_zone(zone)
+    seconds = float(end) - float(start)
+    first = datetime.fromtimestamp(float(start), tz).date()
+    second = datetime.fromtimestamp(float(end), tz).date()
+
+    return {
+        'elapsed': seconds / per[unit],
+        'unit': unit,
+        'calendar_days': (second - first).days,
+        'timezone': name,
+    }
+
+
+def at(date: str, time: str, zone: Optional[str] = None) -> dict[str, Any]:
+    """
+    The instant a wall-clock date and time name in one zone.
+
+    THE INVERSE OF `render`, AND THE GAP THAT MADE THIS NODE HALF A TOOL.
+
+    Every other function here moves an instant it was already given. None of
+    them could accept one: there was no way to say "next Wednesday at 12:30 in
+    America/Los_Angeles". The nearest route was `boundary(day, start, zone)`
+    then `shift(+750, 'minute')`, which is two calls, documented nowhere, and
+    asks the caller to turn 12:30 into 750 — arithmetic in exactly the place
+    this node exists to remove it from.
+
+    A wall time is not always an instant, and both ways it fails are real:
+
+    - **It may name no instant.** On the morning the clocks go forward, 02:30
+      does not happen. Resolved forward to a real instant, with `adjusted` set
+      so the caller can see the hour it actually got rather than discovering it
+      from a booking.
+    - **It may name two.** On the morning they go back, 01:30 happens twice.
+      The earlier one is taken, deterministically, with `ambiguous` set.
+
+    Neither raises. A meeting that has to be booked is better booked at a stated
+    wrong-by-an-hour time than not booked at all, and both flags travel with the
+    answer so the reason is never invisible.
+
+    Args:
+        date: Calendar date, ``YYYY-MM-DD``.
+        time: Wall-clock time, ``HH:MM`` or ``HH:MM:SS``.
+        zone: IANA name the wall time is read in, or None for UTC.
+
+    Returns:
+        The instant, rendered — plus ``requested`` (the wall time asked for),
+        ``adjusted`` and ``ambiguous``.
+
+    Raises:
+        ValueError: If the date or time is not in the documented shape. A
+            misparsed date is not recoverable into an honest answer the way a
+            bad zone is, so this one refuses rather than guessing.
+    """
+    text = f'{str(date).strip()} {str(time).strip()}'
+    # Which shape matched is remembered: seconds the caller sent belong in
+    # `requested`, which is what they compare our answer against. Dropping them
+    # made an echo of "09:30:45" read back as "09:30" and look like a change we
+    # had made.
+    with_seconds = False
+    for shape in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S'):
+        try:
+            naive = datetime.strptime(text, shape)
+            with_seconds = shape.endswith('%S')
+            break
+        except ValueError:
+            continue
+    else:
+        raise ValueError(f'Expected date as YYYY-MM-DD and time as HH:MM or HH:MM:SS, got "{text}"')
+
+    tz, _ = resolve_zone(zone)
+    earlier = naive.replace(tzinfo=tz)
+    later = naive.replace(tzinfo=tz, fold=1)
+
+    answer = render(earlier.timestamp(), zone)
+    # A gap does not round-trip: ask for 02:30 and the instant reads back 03:30.
+    # A fold does round-trip, and is told apart by the two offsets disagreeing.
+    answer['requested'] = f'{naive.strftime("%Y-%m-%d")} {naive.strftime("%H:%M:%S" if with_seconds else "%H:%M")}'
+    # DATE AND TIME BOTH — see `_anchored`: a transition that skips a whole day
+    # leaves the clock reading alone, so comparing only HH:MM missed it. Minute
+    # precision on purpose: `render` states no seconds, and seconds the caller
+    # sent are not a difference we introduced.
+    answer['adjusted'] = (answer['date'], answer['time']) != (naive.strftime('%Y-%m-%d'), naive.strftime('%H:%M'))
+    answer['ambiguous'] = not answer['adjusted'] and earlier.utcoffset() != later.utcoffset()
+    return answer
+
+
+def now(zone: Optional[str] = None, at: Optional[float] = None) -> dict[str, Any]:
+    """
+    The current instant.
+
+    Args:
+        zone: IANA name, or None for UTC.
+        at: Override the clock. For tests only — nothing else should pass it,
+            and a tool that reads its own clock is the point of the node.
+
+    Returns:
+        The instant, rendered.
+    """
+    epoch = datetime.now(timezone.utc).timestamp() if at is None else at
+    return render(epoch, zone)
