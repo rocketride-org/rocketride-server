@@ -676,8 +676,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	 * checking whether its service schema requires configuration.
 	 *
 	 * A node requires config when its Pipe schema has properties
-	 * (excluding the hideForm flag). Nodes without schemas or with
-	 * hideForm set are considered valid by default.
+	 * (excluding the hideForm flag). A summary-only catalog entry stays
+	 * invalid until its full schema arrives; fully resolved nodes without
+	 * configurable fields are valid by default.
 	 *
 	 * Matches the logic from the old factory code in factories.ts.
 	 */
@@ -687,6 +688,10 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const service = servicesJson?.[data.provider];
 			if (!service) return true;
 			const pipe = service.Pipe as { schema?: { properties?: Record<string, unknown> } } | undefined;
+			// The catalog initially contains summaries only. Until the full
+			// definition arrives, assume a node needs configuration rather than
+			// briefly marking it valid and allowing it to run without required fields.
+			if (!pipe) return false;
 			return hasConfigurableSchema(pipe) ? false : true;
 		},
 		[servicesJson]
