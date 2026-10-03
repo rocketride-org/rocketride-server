@@ -90,7 +90,7 @@ class TrOCRLoader(BaseLoader):
         # disable contract check for craft_text_detector due to opencv conflict (see README)
         from craft_text_detector import Craft  # contract-check: ignore  requirements_trocr.txt is `disable`d
         from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-        from ai.common.torch import torch
+        from ai.common.torch import torch, probe_cuda
 
         exclude_gpus = exclude_gpus or []
 
@@ -113,6 +113,11 @@ class TrOCRLoader(BaseLoader):
             else:
                 gpu_index = 0
                 torch_device = 'cuda:0'
+
+            if torch_device != 'cpu' and not probe_cuda(gpu_index):
+                logger.warning(f'CUDA device {gpu_index} kernel probe failed, falling back to CPU')
+                torch_device = 'cpu'
+                gpu_index = -1
 
         logger.info(f'Loading TrOCR pipeline on {torch_device}')
 
