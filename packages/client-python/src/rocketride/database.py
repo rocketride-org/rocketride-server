@@ -73,7 +73,7 @@ class DatabaseApi:
         sql: str,
         node_id: str = '',
         session_id: str = '',
-        params: list | None = None,
+        params: list | dict | None = None,
     ) -> Dict[str, Any]:
         """
         Execute a raw SQL or Cypher statement against a database pipeline node.
@@ -89,8 +89,10 @@ class DatabaseApi:
             session_id: Optional transaction session ID returned by
                 ``begin_transaction``.  When provided the statement runs within
                 that transaction.
-            params: Optional positional parameters bound to the statement
-                (e.g. ``[1, 'foo']`` for ``$1``, ``$2`` placeholders).
+            params: Optional parameters bound to the statement: a positional
+                list for SQL nodes (e.g. ``[1, 'foo']`` for ``$1``, ``$2``), or a
+                dict keyed by placeholder name for graph (Cypher) nodes (e.g.
+                ``{'rows': [...]}`` for ``UNWIND $rows``).
 
         Returns:
             Dict with ``rows`` (list of row dicts) and ``affected_rows`` (int).

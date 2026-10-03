@@ -52,6 +52,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .analysis import CypherFacts
 from .errors import AgeTranslationError
+from .firewall import FirewallConfig, check_params_size
 
 # AGE graph names: unquoted-identifier discipline, same as table names.
 VALID_GRAPH_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
@@ -102,6 +103,7 @@ def emit(
     limit: Optional[int] = None,
     statement_timeout_ms: int = 30_000,
     read_only: bool = False,
+    firewall: Optional[FirewallConfig] = None,
 ) -> TranslatedQuery:
     """Build the transaction's statement list for one translated query.
 
@@ -153,8 +155,10 @@ def emit(
         )
         tq.statements.append(select)
         tq.binds.append(())
+        params_json = _params_to_agtype_json(params)
+        check_params_size(params_json, firewall or FirewallConfig())
         tq.statements.append(f'EXECUTE {stmt_name}(%s::agtype)')
-        tq.binds.append((_params_to_agtype_json(params),))
+        tq.binds.append((params_json,))
         tq.result_index = len(tq.statements) - 1
         tq.statements.append(f'DEALLOCATE {stmt_name}')
         tq.binds.append(())

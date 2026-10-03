@@ -80,6 +80,7 @@ class IGlobal(GraphGlobalBase):
     max_rows: int = DEFAULT_MAX_ROWS
     query_timeout_ms: int = DEFAULT_QUERY_TIMEOUT_MS
     age_version: str = ''
+    supports_execute_params = True
 
     # ------------------------------------------------------------------
     # Driver lifecycle
@@ -231,11 +232,15 @@ class IGlobal(GraphGlobalBase):
         raw_rows = self._execute_plan(plan, fetch_cap=cap)
         return [decode_row(plan, row) for row in raw_rows]
 
-    def _run_query_raw(self, query: str) -> Dict[str, Any]:
+    def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """EXECUTE path: translation still applies (AGE can't run bare Cypher);
         only the semantic firewall is skipped, never the resource caps.
+
+        ``params`` binds ``$name`` values through the plan's prepared
+        statement, so they skip the parser and the query-length cap (they
+        have their own size cap, ``max_params_bytes``).
         """
-        plan = self._translate(query, mode=TranslateMode.RAW)
+        plan = self._translate(query, params=params, mode=TranslateMode.RAW)
         max_rows = self.max_execute_rows
         raw_rows = self._execute_plan(plan, fetch_cap=max_rows + 1)
         if len(raw_rows) > max_rows:

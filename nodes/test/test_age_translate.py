@@ -33,6 +33,7 @@ external dependency is the antlr4 runtime.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 
 from pathlib import Path
@@ -190,6 +191,40 @@ class TestFirewall:
         query = 'RETURN ' + '(' * 10 + '1' + ')' * 10
         plan = age.translate(query, graph_name='g')
         assert plan.has_return is True
+
+    def test_inline_value_over_length_cap_rejected(self):
+        # A value pasted into the query text counts toward the length cap.
+        query = 'CREATE (n:Note {text: "' + 'x' * age.FirewallConfig().max_query_length + '"})'
+        with pytest.raises(age.AgeFirewallRejected, match='max_query_length'):
+            age.translate(query, mode=RAW, graph_name='g')
+
+    def test_bound_params_do_not_count_toward_length_cap(self):
+        # The same data as a $parameter: the query stays short, and the values
+        # travel as JSON in the EXECUTE bind instead of through the parser.
+        rows = [{'id': i, 'name': f'item {i} "quoted" \\ back'} for i in range(20_000)]
+        plan = age.translate(
+            'UNWIND $rows AS r CREATE (:Item {id: r.id, name: r.name})',
+            params={'rows': rows},
+            mode=RAW,
+            graph_name='g',
+        )
+        bound = plan.binds[plan.result_index][0]
+        assert len(bound) > age.FirewallConfig().max_query_length * 50
+        assert json.loads(bound) == {'rows': rows}
+
+    def test_params_size_cap(self):
+        config = age.FirewallConfig(max_params_bytes=100)
+        with pytest.raises(age.AgeFirewallRejected, match='max_params_bytes'):
+            age.translate(
+                'CREATE (n:Note {text: $t})', params={'t': 'x' * 200}, mode=RAW, graph_name='g', firewall=config
+            )
+        plan = age.translate(
+            'CREATE (n:Note {text: $t})', params={'t': 'x' * 50}, mode=RAW, graph_name='g', firewall=config
+        )
+        assert plan.binds[plan.result_index] == ('{"t": "' + 'x' * 50 + '"}',)
+
+    def test_params_size_cap_default(self):
+        assert age.FirewallConfig().max_params_bytes == 8 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------

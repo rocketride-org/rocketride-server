@@ -122,18 +122,20 @@ export class DatabaseApi {
 	 *   broadcasts to all tool-lane nodes; the first database node handles it.
 	 * @param options.sessionId - Optional transaction session ID returned by
 	 *   `beginTransaction`.  When provided the statement runs within that session.
-	 * @param options.params - Optional positional parameters bound to the statement
-	 *   (e.g. `[1, 'foo']` for `$1`, `$2` placeholders).
+	 * @param options.params - Optional parameters bound to the statement: a
+	 *   positional array for SQL nodes (e.g. `[1, 'foo']` for `$1`, `$2`), or an
+	 *   object keyed by placeholder name for graph (Cypher) nodes (e.g.
+	 *   `{ rows: [...] }` for `UNWIND $rows`).
 	 * @param options.rowMode - Row shape: `'object'` (default) returns rows as
 	 *   objects keyed by column name; `'array'` returns positional arrays
 	 *   (column order preserved, duplicate column names kept) — the shape ORM
 	 *   drivers such as Drizzle require.
 	 * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number).
 	 */
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }> {
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
 		}
