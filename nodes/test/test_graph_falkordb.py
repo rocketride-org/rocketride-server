@@ -441,6 +441,48 @@ def test_execute_tool_runs_writes_when_allowed():
     assert out['affected_rows'] == 1
 
 
+def test_execute_tool_accepts_sql_key_from_database_query():
+    # client.database.query sends the statement as 'sql', not 'query'.
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    out = _instance(glb).execute({'sql': 'CREATE (n:Person)'})
+    assert graph.calls[0][0] == 'query'
+    assert out['affected_rows'] == 1
+
+
+@pytest.mark.parametrize('params', [None, {}, []])
+def test_execute_tool_treats_empty_params_as_none(params):
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    out = _instance(glb).execute({'query': 'CREATE (n:Person)', 'params': params})
+    assert out['affected_rows'] == 1
+
+
+def test_execute_tool_refuses_params_the_driver_cannot_bind():
+    # FalkorDB's _run_query_raw takes no params: refuse rather than drop them.
+    glb = _FakeGlobal(_FakeGraph())
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match='not supported'):
+        _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
+
+
+@pytest.mark.parametrize('params', [0, False, '', 'rows', 42])
+def test_execute_tool_refuses_non_object_params(params):
+    glb = _FakeGlobal(_FakeGraph())
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match='keyed by placeholder name'):
+        _instance(glb).execute({'query': 'CREATE (n:Person)', 'params': params})
+
+
+def test_execute_tool_refuses_positional_params():
+    glb = _FakeGlobal(_FakeGraph())
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match='keyed by placeholder name'):
+        _instance(glb).execute({'query': 'CREATE (n:Person {name: $1})', 'params': ['Ada']})
+
+
 def test_validate_query_uses_explain():
     graph = _FakeGraph()
     ok, err = _FakeGlobal(graph)._validate_query('MATCH (n) RETURN n')

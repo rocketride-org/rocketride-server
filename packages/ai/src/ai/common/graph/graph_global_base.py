@@ -62,6 +62,9 @@ class GraphGlobalBase(IGlobalBase, ABC):
     max_validation_attempts: int = DEFAULT_MAX_VALIDATION_ATTEMPTS
     allow_execute: bool = False
     max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
+    # True when _run_query_raw accepts a ``params`` keyword: the execute tool
+    # then binds ``$name`` values instead of refusing them.
+    supports_execute_params: bool = False
 
     # ------------------------------------------------------------------
     # Abstract interface — every graph driver must implement these
@@ -127,6 +130,9 @@ class GraphGlobalBase(IGlobalBase, ABC):
         Returns ``{'rows': [...], 'affected_rows': N}``, mirroring the SQL side.
         Only reachable when the node owner sets ``allow_execute``. Must cap rows
         at ``max_execute_rows`` so one query cannot exhaust worker memory.
+
+        A driver that sets ``supports_execute_params`` also accepts
+        ``params: Optional[Dict]`` — bound values for ``$name`` placeholders.
         """
 
     @abstractmethod

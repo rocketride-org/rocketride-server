@@ -36,7 +36,7 @@ node defines no configurable server-name prefix. Inputs are JSON objects.
 | get_data | Converts required natural-language question to a safe read-only Cypher query and returns rows; limit is optional. |
 | get_schema | Returns the discovered labels, sampled node properties, and relationships. |
 | get_query | Converts required natural-language question to read-only Cypher without executing it; limit is optional. |
-| execute | Runs required raw Cypher query when direct execution is enabled. |
+| execute | Runs required raw Cypher query when direct execution is enabled; optional params binds `$name` values (for example `{"rows": [...]}` for `UNWIND $rows`), which need no escaping and do not count toward the 10,000-character query limit (params JSON is capped at 8 MiB). The statement may also be sent as sql, the key client.database.query uses. |
 | dialect | Returns {"dialect": "age"}. |
 
 get_data defaults to the shared read limit, then clamps the requested limit to

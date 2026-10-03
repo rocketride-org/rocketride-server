@@ -348,6 +348,61 @@ class TestExecutePath:
             glb.endGlobal()
 
 
+class TestExecuteParams:
+    """Bound $parameters on the execute path: values skip the query text."""
+
+    def test_bulk_write_with_unwind_params(self, rr_env, age_graph):
+        # ~1 MB of values: over 50x the query-length cap if pasted inline.
+        rows = [{'id': i, 'name': f'item {i}'} for i in range(20_000)]
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            inst.execute(
+                {'query': 'UNWIND $rows AS r CREATE (:Item {id: r.id, name: r.name})', 'params': {'rows': rows}}
+            )
+            count = glb._run_query('MATCH (i:Item) RETURN count(i) AS n')
+            assert count == [{'n': 20_000}]
+        finally:
+            glb.endGlobal()
+
+    def test_value_round_trips_without_escaping(self, rr_env, age_graph):
+        text = 'quote " apostrophe \' backslash \\ newline \n dollar $rr_cypher$ end'
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            written = inst.execute({'query': 'CREATE (n:Note {text: $t}) RETURN n.text AS text', 'params': {'t': text}})
+            assert written['rows'] == [{'text': text}]
+            back = glb._run_query('MATCH (n:Note) RETURN n.text AS text')
+            assert back == [{'text': text}]
+        finally:
+            glb.endGlobal()
+
+    def test_sql_key_and_params_from_database_query(self, rr_env, age_graph):
+        # client.database.query sends {sql, params}.
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            out = inst.execute(
+                {'sql': 'MATCH (p:Person) WHERE p.name = $who RETURN p.age AS age', 'params': {'who': 'carol'}}
+            )
+            assert out['rows'] == [{'age': 41}]
+        finally:
+            glb.endGlobal()
+
+    def test_params_size_cap_enforced(self, rr_env, age_graph):
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            with pytest.raises(Exception, match='max_params_bytes'):
+                inst.execute({'query': 'CREATE (n:Note {text: $t})', 'params': {'t': 'x' * (9 * 1024 * 1024)}})
+        finally:
+            glb.endGlobal()
+
+
 class TestValidateQuery:
     def test_valid_query_passes(self, rr_env, age_graph):
         glb = _begin(rr_env)

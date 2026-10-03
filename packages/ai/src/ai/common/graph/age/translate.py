@@ -98,6 +98,7 @@ def translate(
         limit=limit,
         statement_timeout_ms=config.statement_timeout_ms,
         read_only=mode is TranslateMode.SAFE,
+        firewall=config,
     )
 
 

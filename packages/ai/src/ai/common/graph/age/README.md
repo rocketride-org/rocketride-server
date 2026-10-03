@@ -16,7 +16,9 @@ the version gaps. This package is that translation, as a **pure transform**
    not regex. Extracts RETURN projection, write clauses, `$params`,
    variable-length depth bounds, invoked functions.
 2. **Firewall** ([firewall.py](firewall.py)) — resource caps on **both**
-   paths (query length, variable-length depth, statement timeout); semantic
+   paths (query length, variable-length depth, statement timeout, size of the
+   bound `$parameter` JSON — values bound as params skip the parser and the
+   query-length cap); semantic
    read-only rules (no writes, no CALL) on the **safe** path only.
 3. **Dialect** ([capabilities.py](capabilities.py)) — capability table keyed
    by AGE version: `SUPPORTED` / `EMULATE` (rewrite hook; framework only in

@@ -102,7 +102,7 @@ surface (`rocketride/drizzle`), plus a deprecated Sequelize binding.
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL through the pipeline's `execute` tool function; returns `{rows, affected_rows}`. |
+| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL or Cypher through the pipeline's `execute` tool function; `params` is a positional list for SQL nodes, or a dict keyed by placeholder name for graph (Cypher) nodes; returns `{rows, affected_rows}`. |
 | `database.begin_transaction` | `async def begin_transaction(*, token, node_id='') -> dict` | Open a transaction (`begin` tool function); returns `{session_id}`. |
 | `database.commit` | `async def commit(*, token, session_id, node_id='') -> dict` | Commit the open transaction. |
 | `database.rollback` | `async def rollback(*, token, session_id, node_id='') -> dict` | Roll back the open transaction. |
