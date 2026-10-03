@@ -360,8 +360,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				await this.reconcileProjectId(uri, event, true);
 				return;
 			case 'seed-empty':
-				// Only reachable through the settled re-entry above, so the disposed
-				// check ran and `text` was read after the wait, with no await since.
+				// Only reachable through the settled re-entry above, so `text` was
+				// read after the wait. writePipeText re-checks the disposed flag.
 				await this.writePipeText(uri, emptyPipelineSkeleton(crypto.randomUUID()), 'new empty file, wrote the starter pipeline');
 				return;
 			case 'assign-id':
@@ -431,6 +431,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Writes `text` to the file and records why in the output channel. */
 	private async writePipeText(uri: vscode.Uri, text: string, why: string): Promise<void> {
+		// Every write path awaits a read or a prompt first, and the provider
+		// may be disposed meanwhile. Checked here so no path can forget it.
+		if (this.disposed) return;
 		const file = vscode.workspace.asRelativePath(uri);
 		try {
 			await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'));

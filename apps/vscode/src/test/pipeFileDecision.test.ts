@@ -152,6 +152,17 @@ test('a second project_id string in the file falls back to a full re-serialisati
 	assert.equal(out.components[0].config.project_id, 'x');
 });
 
+test('a lone project_id string that is not the target falls back as well', () => {
+	// JSON allows the key to be escaped, so the parsed target id can exist
+	// without a literal "project_id" in the text. The only literal match
+	// here is the nested one; swapping it would change the wrong value.
+	const text = `{"components":[{"config":{"project_id":"x"}}],"project\\u005fid":"${ID_A}"}`;
+	assert.equal(readPipeProjectId(text), ID_A);
+	const out = JSON.parse(withProjectId(text, ID_B) ?? '');
+	assert.equal(out.project_id, ID_B);
+	assert.equal(out.components[0].config.project_id, 'x');
+});
+
 test('the wrapped shape gets its id on the inner pipeline object', () => {
 	const out = JSON.parse(withProjectId(JSON.stringify({ pipeline: { components: [] } }), ID_B) ?? '');
 	assert.equal(out.pipeline.project_id, ID_B);

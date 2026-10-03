@@ -137,12 +137,15 @@ export function withProjectId(text: string, projectId: string): string | undefin
 	const parsed = pipeTarget(text);
 	if (typeof parsed === 'string') return undefined;
 
-	if (projectIdOf(parsed.target) !== null) {
-		// Exactly one occurrence means it is the one we parsed. More than one
-		// (an id nested in some component's config) and the safe path is the
-		// re-serialisation below.
-		const occurrences = [...text.matchAll(PROJECT_ID_PROPERTY)].length;
-		if (occurrences === 1) return text.replace(PROJECT_ID_PROPERTY, `$1${projectId}$3`);
+	const current = projectIdOf(parsed.target);
+	if (current !== null) {
+		// Swap in place only when the text has exactly one occurrence and it
+		// carries the value we parsed. More than one (an id nested in some
+		// component's config), or a lone occurrence that is not the target's
+		// (an escaped key such as "project\u005fid"), and the safe path is
+		// the re-serialisation below.
+		const matches = [...text.matchAll(PROJECT_ID_PROPERTY)];
+		if (matches.length === 1 && matches[0][2] === current) return text.replace(PROJECT_ID_PROPERTY, `$1${projectId}$3`);
 	}
 
 	parsed.target.project_id = projectId;
