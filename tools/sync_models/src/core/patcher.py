@@ -623,5 +623,21 @@ def get_profiles(file_path: str) -> Dict[str, Any]:
     Returns:
         The profiles dict, or an empty dict if the key path does not exist
     """
-    data = load(file_path)
+    with open(file_path, encoding='utf-8') as fh:
+        raw = fh.read()
+    # Retain the source annotations emitted by _inject_source_comments.
+    # Consume strings and other comments whole so their contents stay literal.
+    tokens = re.compile(
+        r'(?P<value>"(?P<field>modelTotalTokens|modelOutputTokens)"\s*:\s*\d+),?[ \t]*//[ \t]*(?P<source>[^\r\n]+)'
+        r'|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/',
+        re.DOTALL,
+    )
+
+    def retain_source(match: re.Match) -> str:
+        if match.group('field') is None:
+            return match.group()
+        source = json.dumps(match.group('source').strip())
+        return f'{match.group("value")}, "_src_{match.group("field")}": {source},'
+
+    data = json5.loads(tokens.sub(retain_source, raw))
     return data.get('preconfig', {}).get('profiles', {})
