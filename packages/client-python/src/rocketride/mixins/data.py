@@ -36,8 +36,7 @@ Key Features:
 
 Usage:
     # Send simple text data
-    result = await client.use(filepath="text_processor.json")
-    token = result["token"]
+    token = (await client.use(filepath="text_processor.json"))["token"]
     result = await client.send(token, "Process this text")
 
     # Upload multiple files
@@ -486,8 +485,7 @@ class DataMixin(DAPClient):
 
         Example:
             # Send text data
-            result = await client.use(filepath="text_analyzer.json")
-            token = result["token"]
+            token = (await client.use(filepath="text_analyzer.json"))["token"]
             result = await client.send(token, "Analyze this text for sentiment")
             print(f"Sentiment: {result['sentiment']}")
 
