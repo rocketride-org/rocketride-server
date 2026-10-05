@@ -168,15 +168,6 @@ public:
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
 
-private:
-    //-----------------------------------------------------------------
-    ///	@details
-    ///		Declares the C++ node a service is implemented by, so the
-    ///		factory maps its library the first time one of the node's
-    ///		factories is looked up
-    //-----------------------------------------------------------------
-    static Error declareNode(const ServiceDefinition &def) noexcept;
-
     //-----------------------------------------------------------------
     ///	@details
     ///		Registers one parsed service definition into the service map,
@@ -187,6 +178,15 @@ private:
     static Error registerDefinition(json::Value serviceInfo,
                                     const Path &definitionPath,
                                     bool replace = false) noexcept;
+
+private:
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Declares the C++ node a service is implemented by, so the
+    ///		factory maps its library the first time one of the node's
+    ///		factories is looked up
+    //-----------------------------------------------------------------
+    static Error declareNode(const ServiceDefinition &def) noexcept;
 
     //-----------------------------------------------------------------
     ///	@details
