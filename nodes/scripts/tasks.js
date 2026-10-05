@@ -31,6 +31,7 @@
  */
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 const {
     exists,
     syncDir,
@@ -38,10 +39,11 @@ const {
     readDirSafe,
     readJson,
     formatSyncStats,
+    isDirectory,
     removeDir,
     getSharedName,
     getSymName,
-    PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
+    PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, OVERLAY_ROOT,
     startServer,
     stopServer,
     execCommand,
@@ -58,12 +60,18 @@ const {
 } = require('../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
-const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'nodes');
+
+// Map of node name -> project or overlay src/nodes directory. Overlay node wins over project node.
+const SRC_NODE_DIRS = new Map(
+    [path.join(PACKAGE_DIR, 'src', 'nodes'),
+     ...(OVERLAY_ROOT ? [path.join(OVERLAY_ROOT, 'nodes', 'src', 'nodes')] : [])]
+        .filter((srcDir) => fs.existsSync(srcDir))
+        .flatMap((srcDir) => fs.readdirSync(srcDir).map((name) => [name, srcDir])));
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'nodes');
 
-// Build inputs of the c++ and java nodes, not copied into dist
-const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**'];
+// Build inputs or runtime files - none of it belongs in dist.
+const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**', '**/__pycache__/**'];
 
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
@@ -75,33 +83,32 @@ const BUILD_NODES_DIR = path.join(BUILD_ROOT, 'nodes');
 // Action Factories
 // ============================================================================
 
-function makeSyncNodesAction(options = {}) {
+function makeSyncNodesAction() {
     return {
         run: async (ctx, task) => {
             task.output = 'Scanning for changes...';
 
             const stats = {};
-            await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true, ignore: IGNORE }, stats);
 
-            if (options.overlayRoot) {
-                const overlaySrcDir = path.join(options.overlayRoot, 'nodes', 'src', 'nodes');
-                if (await exists(overlaySrcDir)) {
-                    await syncDir(overlaySrcDir, DIST_DIR, { mirror: false, package: true, ignore: IGNORE }, stats);
-                }
+            for (const [name, srcDir] of SRC_NODE_DIRS) {
+                const src = path.join(srcDir, name);
+
+                if (await isDirectory(src))
+                    await syncNode(name, src, stats);
+                else
+                    await syncFile(src, path.join(DIST_DIR, name), { package: true }, stats);
             }
-
-            await syncNodeBinaries(stats);
 
             task.output = formatSyncStats(stats);
         }
     };
 }
 
-// A node folder builds exactly one library, which its services*.json name in
-// their "path". Several services may share it, so they are read as a group
-async function nodeLibrary(nodeDir) {
-    const srcDir = path.join(SRC_DIR, nodeDir);
+async function syncNode(name, srcDir, stats) {
+    const distDir = path.join(DIST_DIR, name);
     const libs = new Set();
+
+    await syncDir(srcDir, distDir, { mirror: false, package: true, ignore: IGNORE }, stats);
 
     for (const file of await readDirSafe(srcDir)) {
         if (!/^services.*\.json$/.test(file)) continue;
@@ -117,23 +124,17 @@ async function nodeLibrary(nodeDir) {
     }
 
     if (libs.size > 1)
-        throw new Error(`The node ${nodeDir} names more than one library: `
+        throw new Error(`The node ${name} names more than one library: `
                         + [...libs].join(', '));
 
     const [lib] = libs;
-    return lib ?? null;
-}
+    if (!lib) return;
 
-async function syncNodeBinaries(stats) {
-    for (const nodeDir of await readDirSafe(BUILD_NODES_DIR)) {
-        const lib = await nodeLibrary(nodeDir);
-        if (!lib) continue;
+    for (const file of [getSharedName(lib), getSymName(lib)].filter(Boolean)) {
+        const built = path.join(BUILD_NODES_DIR, name, file);
+        if (!(await exists(built))) continue;
 
-        for (const name of [getSharedName(lib), getSymName(lib)].filter(Boolean)) {
-            await syncFile(path.join(BUILD_NODES_DIR, nodeDir, name),
-                           path.join(DIST_DIR, nodeDir, name),
-                           { package: true }, stats);
-        }
+        await syncFile(built, path.join(distDir, file), { package: true }, stats);
     }
 }
 
@@ -514,6 +515,5 @@ module.exports = {
 };
 
 // Export paths for external use
-module.exports.SRC_DIR = SRC_DIR;
 module.exports.DIST_DIR = DIST_DIR;
 module.exports.TEST_DIR = TEST_DIR;
