@@ -177,7 +177,8 @@ public:
     //-----------------------------------------------------------------
     static Error registerDefinition(json::Value serviceInfo,
                                     const Path &definitionPath,
-                                    bool replace = false) noexcept;
+                                    bool replace = false,
+                                    bool refresh = true) noexcept;
 
 private:
     //-----------------------------------------------------------------

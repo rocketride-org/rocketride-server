@@ -1671,10 +1671,21 @@ Error IServices::declareNode(const ServiceDefinition &def) noexcept {
 //-------------------------------------------------------------------------
 Error IServices::registerDefinition(json::Value serviceInfo,
                                     const file::Path &definitionPath,
-                                    bool replace) noexcept {
+                                    bool replace, bool refresh) noexcept {
     // The directory the definition lives in: the icon is relative to it, and
     // so is a C++ node's library
     const auto path = definitionPath.parent();
+
+    // A definition registered on its own has to be resolved and given its url
+    // mapper here, since nothing else will. The walk turns this off and
+    // batches both once, after the whole tree. Both are safe to repeat:
+    // updateDefinitions() skips what is already resolved, and
+    // declareDefaultUrlMappers() only fills in what a mapper lacks
+    const auto finish = localfcn()->Error {
+        if (!refresh) return {};
+        if (auto ccode = updateDefinitions()) return ccode;
+        return declareDefaultUrlMappers();
+    };
 
     // Get the type
     iText protocol = serviceInfo.lookup<iText>("protocol");
@@ -1968,7 +1979,7 @@ Error IServices::registerDefinition(json::Value serviceInfo,
     // definition
     if (known) {
         LOG(Services, "    Replaced, factories kept");
-        return {};
+        return finish();
     }
 
     // A C++ node brings its own factories, so it is only declared
@@ -1976,7 +1987,7 @@ Error IServices::registerDefinition(json::Value serviceInfo,
     if (isCppNode) {
         if (auto ccode = declareNode(m_services[logicalType]))
             return ccode;
-        return {};
+        return finish();
     }
 
     // Register the factories if needed
@@ -2021,7 +2032,7 @@ Error IServices::registerDefinition(json::Value serviceInfo,
         Factory::registerFactory(factoryInstance);
     }
 
-    return {};
+    return finish();
 }
 
 //-------------------------------------------------------------------------
@@ -2076,7 +2087,8 @@ Error IServices::init() noexcept {
             // Register it - everything past the parse is shared with any
             // other source a definition can arrive from
             if (auto ccode = registerDefinition(*serviceJson, definitionPath,
-                                                /*replace=*/true))
+                                                /*replace=*/true,
+                                                /*refresh=*/false))
                 return ccode;
         }
 
