@@ -37,12 +37,15 @@ debugging your code.
 1. `rsbuild build` writes it to `build/apps/<appId>/`.
 2. The copy step syncs that folder to `dist/server/static/apps/<appId>/`, next
    to the engine binary.
-3. When the engine starts, it seeds every app listed in `apps.json` into its
-   store as a version, copying the files from `static/apps/<appId>/`. It does
-   this when the app has no version yet, or when the `version` in the app's
-   `package.json` differs from the one it seeded last. An app with no
-   `version` in its `package.json` is never re-seeded. (RocketRide Cloud runs
-   the same seeding from its deploy tooling instead of at startup.)
+3. When the engine starts, it seeds the apps listed in `apps.json` into its
+   store, copying the files from `static/apps/<appId>/` into a new version
+   when one is needed: when the app has no versions yet, when its versions
+   contain no platform seed (someone deployed that id first), or when a seed
+   exists but the `version` in the app's `package.json` is set and differs
+   from the one seeded last. An app with no `version` in its `package.json`
+   is seeded once and never re-seeded. (RocketRide Cloud runs the shared
+   seeder from its deploy tooling instead of at startup, with that tool's
+   own update policy.)
 
 What follows from that:
 
@@ -173,11 +176,13 @@ pnpm install
 ```javascript
 const path = require('path');
 const { execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
-const { registerApp } = require('../../../scripts/lib/registerApp');
+const { registerApp, assertSafeAppId } = require('../../../scripts/lib/registerApp');
 
 const APP_ROOT = path.join(__dirname, '..');
-// Both folders are keyed on appManifest.id, not the folder name.
+// Both folders are keyed on appManifest.id, not the folder name. The id is
+// joined into paths, so refuse one that could escape build/apps/.
 const APP_ID = require('../package.json').appManifest.id;
+assertSafeAppId(APP_ID);
 const BUILD_DIR = path.join(BUILD_ROOT, 'apps', APP_ID);
 const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'apps', APP_ID);
 
