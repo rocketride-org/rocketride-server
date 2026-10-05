@@ -33,8 +33,11 @@ Facts verified against the live AGE 1.5.0 pin (see the layer README):
 - The cypher() params argument MUST be a real prepared-statement parameter —
   an inline ``'...'::agtype`` literal is rejected by AGE. With params we emit
   ``PREPARE <name>(agtype) AS ...`` / ``EXECUTE <name>(%s::agtype)`` /
-  ``DEALLOCATE <name>`` for one transaction (transaction-pooler safe;
-  a rolled-back transaction discards its prepared statements).
+  ``DEALLOCATE <name>`` inside one transaction. A prepared statement is a
+  session object that survives ROLLBACK, so the caller must DEALLOCATE it
+  even when EXECUTE fails (``TranslatedQuery.prepared_name``) — in the same
+  transaction, since a transaction pooler may run the next one on another
+  backend.
 - The Cypher body is embedded via dollar-quoting; the tag is chosen to not
   collide with the body so user text can never escape the envelope.
 
@@ -76,6 +79,9 @@ class TranslatedQuery:
     has_return: bool = True
     # The caller must open the transaction READ ONLY (safe path).
     read_only: bool = False
+    # Name of the statement PREPAREd by this plan (params path), which the
+    # caller must DEALLOCATE if the EXECUTE at ``result_index`` fails.
+    prepared_name: Optional[str] = None
 
 
 def _dollar_quote(body: str) -> str:
@@ -160,6 +166,7 @@ def emit(
         tq.statements.append(f'EXECUTE {stmt_name}(%s::agtype)')
         tq.binds.append((params_json,))
         tq.result_index = len(tq.statements) - 1
+        tq.prepared_name = stmt_name
         tq.statements.append(f'DEALLOCATE {stmt_name}')
         tq.binds.append(())
     else:

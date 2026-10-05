@@ -476,6 +476,39 @@ def test_execute_tool_refuses_non_object_params(params):
         _instance(glb).execute({'query': 'CREATE (n:Person)', 'params': params})
 
 
+@pytest.mark.parametrize(
+    ('extra', 'message'),
+    [
+        ({'session_id': 'tx-1'}, 'no transactions'),
+        ({'row_mode': 'array'}, "must be 'object'"),
+    ],
+)
+def test_execute_tool_refuses_sql_only_options(extra, message):
+    # client.database.query forwards these SQL-node options; graph nodes have
+    # no transactions and always return row objects.
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match=message):
+        _instance(glb).execute({'sql': 'CREATE (n:Person)', **extra})
+    assert graph.calls == []
+
+
+def test_execute_tool_accepts_object_row_mode():
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    out = _instance(glb).execute({'sql': 'CREATE (n:Person)', 'row_mode': 'object', 'session_id': ''})
+    assert out['affected_rows'] == 1
+
+
+def test_execute_schema_lists_params_only_when_supported():
+    glb = _FakeGlobal(_FakeGraph())
+    assert 'params' not in _instance(glb)._execute_input_schema()['properties']
+    glb.supports_execute_params = True
+    assert 'params' in _instance(glb)._execute_input_schema()['properties']
+
+
 def test_execute_tool_refuses_positional_params():
     glb = _FakeGlobal(_FakeGraph())
     glb.allow_execute = True

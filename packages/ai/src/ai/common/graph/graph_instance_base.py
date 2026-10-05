@@ -227,22 +227,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
         return {'query': query, 'valid': True}
 
     @tool_function(
-        input_schema={
-            'type': 'object',
-            'required': ['query'],
-            'properties': {
-                'query': {'type': 'string', 'description': 'Raw query to execute.'},
-                'params': {
-                    'type': 'object',
-                    'description': (
-                        'Values for $name placeholders in the query, keyed by name '
-                        '(e.g. {"rows": [...]} for UNWIND $rows). Values are bound, not '
-                        'pasted into the query text, so they need no escaping and do not '
-                        'count toward the query length limit.'
-                    ),
-                },
-            },
-        },
+        input_schema=lambda self: self._execute_input_schema(),
         output_schema={
             'type': 'object',
             'properties': {
@@ -268,13 +253,21 @@ class GraphInstanceBase(IInstanceBase, ABC):
             dict: ``{'rows': [...], 'affected_rows': int}``.
 
         Raises:
-            ValueError: execute is disabled, the statement is missing, or
-                ``params`` is not an object / not supported by this driver.
+            ValueError: execute is disabled, the statement is missing,
+                ``params`` is not an object / not supported by this driver, or
+                the call carries a ``session_id`` / ``row_mode`` other than
+                ``'object'`` (graph nodes have neither).
         """
         args = normalize_tool_input(args, tool_name='execute')
         key = 'sql' if 'query' not in args and 'sql' in args else 'query'
         query = require_str(args, key, tool_name='execute')
         params = self._execute_params(args.get('params'))
+        # client.database.query also forwards these SQL-node options; refuse
+        # them rather than run outside the transaction or in another row shape.
+        if args.get('session_id'):
+            raise ValueError('execute: graph nodes have no transactions, so "session_id" is not supported')
+        if (args.get('row_mode') or 'object') != 'object':
+            raise ValueError('execute: graph nodes return row objects, so "row_mode" must be \'object\'')
 
         if not self.IGlobal.allow_execute:
             raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
@@ -303,6 +296,27 @@ class GraphInstanceBase(IInstanceBase, ABC):
     # ------------------------------------------------------------------
     # Sanitization helpers
     # ------------------------------------------------------------------
+
+    def _execute_input_schema(self) -> Dict[str, Any]:
+        """Input schema of the execute tool for this driver.
+
+        Returns:
+            Dict[str, Any]: JSON schema; ``params`` is listed only when the
+            driver sets ``supports_execute_params``, so agents are not offered
+            an argument the node would refuse.
+        """
+        properties: Dict[str, Any] = {'query': {'type': 'string', 'description': 'Raw query to execute.'}}
+        if getattr(getattr(self, 'IGlobal', None), 'supports_execute_params', False):
+            properties['params'] = {
+                'type': 'object',
+                'description': (
+                    'Values for $name placeholders in the query, keyed by name '
+                    '(e.g. {"rows": [...]} for UNWIND $rows). Values are bound, not '
+                    'pasted into the query text, so they need no escaping and do not '
+                    'count toward the query length limit.'
+                ),
+            }
+        return {'type': 'object', 'required': ['query'], 'properties': properties}
 
     def _execute_params(self, raw: Any) -> Optional[Dict[str, Any]]:
         """Validate the execute tool's ``params``; None when there are none.

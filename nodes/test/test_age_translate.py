@@ -442,6 +442,14 @@ class TestCapabilities:
 
 
 class TestEmit:
+    def test_prepared_name_recorded_for_params(self):
+        # The caller frees this statement if the EXECUTE fails.
+        plan = age.translate('RETURN $x AS x', params={'x': 1}, graph_name='g')
+        assert plan.prepared_name is not None
+        assert plan.statements[plan.result_index].startswith(f'EXECUTE {plan.prepared_name}(')
+        assert plan.statements[-1] == f'DEALLOCATE {plan.prepared_name}'
+        assert age.translate('RETURN 1 AS x', graph_name='g').prepared_name is None
+
     def test_envelope_shape_without_params(self):
         plan = age.translate('MATCH (n:P) RETURN n.name AS name, n', graph_name='mygraph', limit=7)
         select = plan.statements[plan.result_index]
