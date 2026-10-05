@@ -85,6 +85,7 @@ class IEndpoint(IEndpointBase):
 
     def validateConfig(self, syntaxOnly: bool) -> None:
         self._load_specs()
+        build_fetcher(self._params())  # rejects an invalid URL allow-list
 
     def scanObjects(self, path: str, scanCallback: Callable[[Dict[str, Any]], int]) -> None:
         """Report one object per enabled source; content is fetched at render time."""
@@ -97,31 +98,36 @@ class IEndpoint(IEndpointBase):
                 break
 
     def renderSourceObject(self, entry, instance) -> None:
-        """Fetch one source and send its rows on the answers and text lanes."""
-        specs = getattr(self, '_specs', None) or {s.name: s for s in self._load_specs()}
-        columns = getattr(self, '_columns', None) or row_columns(list(specs.values()))
-        name = str(entry.name)
-        spec = specs.get(name)
-        if spec is None:
-            raise ValueError(f'Web Scraper source: unknown source {name!r}')
+        """Fetch one source and send its rows on the answers and text lanes.
 
-        params = self._params()
-        fetcher = build_fetcher(params)
-        max_body = config_int(params, 'maxBodyChars', DEFAULT_MAX_BODY_CHARS, min_value=200)
-        result = run_source(spec, fetcher, max_body_chars=max_body)
+        Errors still propagate (the engine marks the object failed), but the
+        object pipe is closed first: task-mode closes it itself, dev-mode
+        leaves closure to the source (same contract as filestore_source /
+        telegram), and an unclosed object stays PROCESSING forever.
+        """
+        try:
+            specs = getattr(self, '_specs', None) or {s.name: s for s in self._load_specs()}
+            columns = getattr(self, '_columns', None) or row_columns(list(specs.values()))
+            name = str(entry.name)
+            spec = specs.get(name)
+            if spec is None:
+                raise ValueError(f'Web Scraper source: unknown source {name!r}')
 
-        for err in result.errors:
-            warning(f'Web Scraper [{spec.name}] {err}')
-        if not result.rows and result.errors:
-            raise RuntimeError(f'Web Scraper [{spec.name}]: every URL failed ({len(result.errors)} errors)')
+            params = self._params()
+            fetcher = build_fetcher(params)
+            max_body = config_int(params, 'maxBodyChars', DEFAULT_MAX_BODY_CHARS, min_value=200)
+            result = run_source(spec, fetcher, max_body_chars=max_body)
 
-        if result.rows:
-            answer = Answer(expectJson=True)
-            answer.setAnswer(pad_rows(result.rows, columns))
-            instance.sendAnswers(answer)
-            for text in rows_to_text(result.rows):
-                instance.sendText(text)
+            for err in result.errors:
+                warning(f'Web Scraper [{spec.name}] {err}')
+            if not result.rows and result.errors:
+                raise RuntimeError(f'Web Scraper [{spec.name}]: every URL failed ({len(result.errors)} errors)')
 
-        # Task-mode closes the object pipe itself, but dev-mode leaves closure
-        # to the source (same contract as filestore_source / telegram).
-        instance.sendClose()
+            if result.rows:
+                answer = Answer(expectJson=True)
+                answer.setAnswer(pad_rows(result.rows, columns))
+                instance.sendAnswers(answer)
+                for text in rows_to_text(result.rows):
+                    instance.sendText(text)
+        finally:
+            instance.sendClose()

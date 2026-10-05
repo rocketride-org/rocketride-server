@@ -33,10 +33,17 @@ source variant's ``IEndpoint`` builds its own from the source parameters via
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 
 from ai.common.config import Config
-from ai.common.utils import config_int, pinned_session, resolve_public_addresses
+from ai.common.utils import (
+    check_allow_pattern,
+    config_int,
+    pinned_session,
+    resolve_public_addresses,
+    url_matches_pattern,
+)
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 from .scrape_fetch import DEFAULT_USER_AGENT, Fetcher, compile_patterns
@@ -45,6 +52,14 @@ DEFAULT_TIMEOUT_S = 20
 DEFAULT_MAX_BYTES_KB = 5 * 1024
 DEFAULT_INTERVAL_MS = 250
 DEFAULT_MAX_BODY_CHARS = 20000
+
+
+def allow_patterns(cfg: Dict[str, Any]) -> List[re.Pattern]:
+    """Compile the URL allow-list; every pattern must pin the scheme and host (``ValueError`` otherwise)."""
+    patterns = compile_patterns(cfg.get('urlAllowList'))
+    for pattern in patterns:
+        check_allow_pattern(pattern)
+    return patterns
 
 
 def build_fetcher(cfg: Dict[str, Any]) -> Fetcher:
@@ -56,7 +71,8 @@ def build_fetcher(cfg: Dict[str, Any]) -> Fetcher:
         max_bytes=config_int(cfg, 'maxResponseKB', DEFAULT_MAX_BYTES_KB, min_value=16, max_value=50 * 1024) * 1024,
         min_interval=config_int(cfg, 'requestIntervalMs', DEFAULT_INTERVAL_MS, min_value=0, max_value=60000) / 1000.0,
         user_agent=str(cfg.get('userAgent') or '').strip() or DEFAULT_USER_AGENT,
-        allow_patterns=compile_patterns(cfg.get('urlAllowList')),
+        allow_patterns=allow_patterns(cfg),
+        allow_match=url_matches_pattern,
     )
 
 
@@ -76,7 +92,7 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            compile_patterns(cfg.get('urlAllowList'))
+            allow_patterns(cfg)
         except Exception as e:
             warning(str(e))
 

@@ -41,12 +41,10 @@ Source variant: ``renderObject`` delegates to
 from __future__ import annotations
 
 import json
-import sys
-import threading
 from typing import TYPE_CHECKING, Any, Dict, Tuple
 
-from ai.common.utils import normalize_tool_input
-from rocketlib import IInstanceBase, tool_function, warning
+from ai.common.utils import int_arg, normalize_tool_input, register_debugger_thread
+from rocketlib import IInstanceBase, tool_function
 
 if TYPE_CHECKING:
     # Annotation-only: keeps minimal test stubs of ``rocketlib`` importable.
@@ -66,39 +64,9 @@ from .scrape_fetch import FetchError
 from .scrape_sources import normalize_row
 
 DEFAULT_MAX_CHARS = 20000
+MAX_CHARS = 1_000_000
+DEFAULT_LIMIT = 50
 MAX_ITEMS = 500
-
-# Thread idents already registered with a loaded debugger; failures are
-# recorded too so a broken debugger warns once, not once per object.
-_DEBUGGER_THREADS: set[int] = set()
-
-
-def _register_debugger_thread() -> None:
-    """Register the engine render thread with pydevd (no-op without a debugger).
-
-    ``renderObject`` runs on an engine C++ thread pydevd never saw created;
-    unregistered, line instrumentation can livelock under the designer's
-    debugger (same guard as ``tool_filesystem``).
-    """
-    pydevd = sys.modules.get('pydevd')
-    if pydevd is None:
-        return
-    ident = threading.get_ident()
-    if ident in _DEBUGGER_THREADS:
-        return
-    _DEBUGGER_THREADS.add(ident)
-    try:
-        pydevd.settrace(suspend=False)
-    except Exception as e:
-        warning(f'scraper_beautifulsoup: pydevd thread registration failed (continuing untraced): {e}')
-
-
-def _int_arg(args: Dict[str, Any], key: str, default: int, maximum: int) -> int:
-    try:
-        value = int(args.get(key) or default)
-    except (TypeError, ValueError):
-        value = default
-    return max(1, min(value, maximum))
 
 
 def _clip(text: str, max_chars: int) -> Tuple[str, bool]:
@@ -119,7 +87,7 @@ class IInstance(IInstanceBase):
         pipeline-source pipes), but guard anyway so a non-source endpoint falls
         through to the engine default.
         """
-        _register_debugger_thread()
+        register_debugger_thread('scraper_beautifulsoup')
         render = getattr(self.IEndpoint, 'renderSourceObject', None)
         if render is None:
             return
@@ -179,7 +147,7 @@ class IInstance(IInstanceBase):
         fmt = str(args.get('format') or 'markdown').lower()
         if fmt not in ('markdown', 'text', 'html', 'links'):
             raise ValueError('`format` must be markdown, text, html or links')
-        max_chars = _int_arg(args, 'max_chars', DEFAULT_MAX_CHARS, 1_000_000)
+        max_chars = int_arg(args, 'max_chars', default=DEFAULT_MAX_CHARS, lo=1, hi=MAX_CHARS, tool_name='scraper')
         result = self._fetch(args.get('url'))
         out: Dict[str, Any] = {'url': result.url, 'status': result.status, 'truncated': result.truncated}
 
@@ -235,9 +203,10 @@ class IInstance(IInstanceBase):
         fields = args.get('fields')
         if not isinstance(fields, dict) or not fields:
             raise ValueError('`fields` must be a non-empty object of name -> selector')
+        limit = int_arg(args, 'limit', default=DEFAULT_LIMIT, lo=1, hi=MAX_ITEMS, tool_name='scraper')
         result = self._fetch(args.get('url'))
         items = extract_html_items(result.content, result.url, str(args.get('item_selector') or ''), fields)
-        return {'url': result.url, 'items': items[: _int_arg(args, 'limit', 50, MAX_ITEMS)]}
+        return {'url': result.url, 'items': items[:limit]}
 
     @tool_function(
         input_schema={
@@ -256,7 +225,7 @@ class IInstance(IInstanceBase):
     )
     def fetch_feed(self, args):
         args = normalize_tool_input(args, tool_name='scraper')
-        limit = _int_arg(args, 'limit', 50, MAX_ITEMS)
+        limit = int_arg(args, 'limit', default=DEFAULT_LIMIT, lo=1, hi=MAX_ITEMS, tool_name='scraper')
         result = self._fetch(args.get('url'))
         try:
             raw_items = parse_feed(result.content)
@@ -318,6 +287,8 @@ class IInstance(IInstanceBase):
     def fetch_json(self, args):
         args = normalize_tool_input(args, tool_name='scraper')
         method = str(args.get('method') or 'GET').upper()
+        limit = int_arg(args, 'limit', default=DEFAULT_LIMIT, lo=1, hi=MAX_ITEMS, tool_name='scraper')
+        max_chars = int_arg(args, 'max_chars', default=DEFAULT_MAX_CHARS, lo=1, hi=MAX_CHARS, tool_name='scraper')
         headers = args.get('headers') if isinstance(args.get('headers'), dict) else {}
         headers = {'Accept': 'application/json', **headers}
         result = self._fetch(args.get('url'), method=method, headers=headers, json_body=args.get('body_json'))
@@ -334,9 +305,8 @@ class IInstance(IInstanceBase):
             else:
                 found = get_path(data, items_path)
                 items = found if isinstance(found, list) else ([found] if found is not None else [])
-            return {'url': result.url, 'items': items[: _int_arg(args, 'limit', 50, MAX_ITEMS)]}
+            return {'url': result.url, 'items': items[:limit]}
 
-        max_chars = _int_arg(args, 'max_chars', DEFAULT_MAX_CHARS, 1_000_000)
         text = json.dumps(data)
         if len(text) <= max_chars:
             return {'url': result.url, 'data': data, 'truncated': result.truncated}

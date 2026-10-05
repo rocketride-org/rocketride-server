@@ -41,7 +41,7 @@ from typing import Any, Dict, Iterable, List, Optional, Union
 from urllib.parse import urljoin
 from xml.parsers import expat
 
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, Comment, Doctype, NavigableString, ProcessingInstruction, Tag
 from soupsieve import SelectorSyntaxError
 
 HTML_PARSER = 'html.parser'
@@ -350,12 +350,24 @@ def page_links(content: Union[bytes, str], base_url: str, limit: int = 200) -> L
     return links
 
 
-def _md_inline(node: Any, base_url: str) -> str:
+# Markdown conversion recurses once per nesting level; deeper subtrees are
+# emitted as plain text (``get_text`` walks iteratively) so a hostile or broken
+# page cannot raise RecursionError.
+_MAX_MD_DEPTH = 200
+# Not page content. CData is deliberately absent: it can hold real text.
+_NON_CONTENT = (Comment, Doctype, ProcessingInstruction)
+
+
+def _md_inline(node: Any, base_url: str, depth: int = 0) -> str:
+    if isinstance(node, _NON_CONTENT):
+        return ''
     if isinstance(node, NavigableString):
         return _WS.sub(' ', str(node))
     if not isinstance(node, Tag):
         return ''
-    inner = ''.join(_md_inline(c, base_url) for c in node.children)
+    if depth >= _MAX_MD_DEPTH:
+        return _WS.sub(' ', node.get_text(' '))
+    inner = ''.join(_md_inline(c, base_url, depth + 1) for c in node.children)
     name = node.name
     if name == 'a' and node.get('href'):
         text = inner.strip()
@@ -378,8 +390,15 @@ def _md_inline(node: Any, base_url: str) -> str:
 _BLOCKS = ('p', 'div', 'section', 'article', 'main', 'header', 'footer', 'aside', 'blockquote', 'figure', 'table')
 
 
-def _md_block(node: Tag, base_url: str, out: List[str]) -> None:
+def _md_block(node: Tag, base_url: str, out: List[str], depth: int = 0) -> None:
+    if depth >= _MAX_MD_DEPTH:
+        text = _WS.sub(' ', node.get_text(' ')).strip()
+        if text:
+            out.append(text)
+        return
     for child in node.children:
+        if isinstance(child, _NON_CONTENT):
+            continue
         if isinstance(child, NavigableString):
             text = _WS.sub(' ', str(child)).strip()
             if text:
@@ -389,25 +408,25 @@ def _md_block(node: Tag, base_url: str, out: List[str]) -> None:
             continue
         name = child.name
         if name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
-            text = _md_inline(child, base_url).strip()
+            text = _md_inline(child, base_url, depth + 1).strip()
             if text:
                 out.append(f'{"#" * int(name[1])} {text}')
         elif name in ('ul', 'ol'):
             for i, li in enumerate(child.find_all('li', recursive=False), 1):
                 bullet = f'{i}.' if name == 'ol' else '-'
-                text = _md_inline(li, base_url).strip()
+                text = _md_inline(li, base_url, depth + 2).strip()
                 if text:
                     out.append(f'{bullet} {text}')
         elif name == 'pre':
             out.append('```\n' + child.get_text().strip('\n') + '\n```')
         elif name == 'p':
-            text = _md_inline(child, base_url).strip()
+            text = _md_inline(child, base_url, depth + 1).strip()
             if text:
                 out.append(text)
         elif name in _BLOCKS:
-            _md_block(child, base_url, out)
+            _md_block(child, base_url, out, depth + 1)
         else:
-            text = _md_inline(child, base_url).strip()
+            text = _md_inline(child, base_url, depth + 1).strip()
             if text:
                 out.append(text)
 

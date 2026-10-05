@@ -76,7 +76,7 @@ This field holds a JSON array of sources. Each source becomes one pipeline objec
 | `enabled` | all | `false` skips the source. |
 | `method`, `body` | json | Use `POST` with a JSON `body`, for example a GraphQL query. |
 | `itemsPath` | json | Dot path to the item list (`hits`, `data.children`, `data.feed.edges`). |
-| `fields` | json, html | Output field → where to find it. For JSON: a dot path, or a list of fallback paths. For HTML: `"selector"` or `"selector@attr"`. `url` is required. Keys outside the standard set pass through as extra columns. |
+| `fields` | json, feed, html | Output field → where to find it. For JSON: a dot path, or a list of fallback paths. For HTML: `"selector"` or `"selector@attr"`. For feeds (optional): the parsed feed key to read (`title`, `url`, `author`, `published`, `body`, `categories`), and only the mapped keys are kept. `url` is required whenever `fields` is set. Keys outside the standard set pass through as extra columns. |
 | `itemSelector` | html | CSS selector for each repeated item. |
 
 URLs, headers, and bodies can use these template tokens:
@@ -105,18 +105,18 @@ URLs, headers, and bodies can use these template tokens:
 
 If one URL of a source fails, a warning is logged and the rows from the other URLs are still emitted. If every URL of a source fails, that object is marked failed.
 
-Every row from every source carries the same columns: the standard set (`source`, `platform`, `url`, `url_hash`, `title`, `author`, `published_at`, `score`, `comments`, `body`, `fetched_at`), followed by every `extra` key and custom `fields` key used by any source, in alphabetical order. Missing values are `null`. This matters because SQL `answers` ingestion creates the table from the first row it sees, and later drops any key the table does not have.
+Every row from every source carries the same columns: the standard set (`source`, `platform`, `url`, `url_hash`, `title`, `author`, `published_at`, `score`, `comments`, `body`, `fetched_at`), followed by every `extra` key, every custom `fields` key, and `categories` when any feed source has no `fields`, in alphabetical order. Missing values are `null`. This matters because SQL `answers` ingestion creates the table from the first row it sees, and later drops any key the table does not have.
 
 When loading into `rocketride_sql` or `db_postgres`, it is best to create the target table yourself with `TEXT` columns. An auto-created table sizes text columns from the first batch only, so it can pick `VARCHAR(255)`, and a longer `title`, `url` or `body` later makes that batch's insert fail. The SQL node only logs that failure. It does not upsert, so deduplicate on `url_hash` when you copy rows out of the table.
 
 #### Network limits
 
 The source and the tools share these fields:
-- **Timeout**: per request.
+- **Timeout**: one limit for the whole fetch, including redirects, connecting, and reading the body.
 - **Max response size**: the body is read up to this size and the rest is dropped.
 - **Delay between requests to one host**: politeness pacing, 250 ms by default.
 - **User agent**: some sites, such as Reddit, reject generic agents.
-- **URL allow-list**: optional regex patterns. When any are set, every URL and every redirect target must match one.
+- **URL allow-list**: optional regex patterns. When any are set, every URL and every redirect target must match one. A pattern is matched from the start of the URL. It must begin with the literal scheme and an exact host (or `[^/]+` for any host), closed by `/`, `\?`, `(?=/|$)` or `$`. For example, `^https://news\.ycombinator\.com/` is valid. `news\.ycombinator\.com` is rejected when the node starts, because it would also match `https://evil.example/?u=news.ycombinator.com`.
 
 ### Web Scraper (`scraper_beautifulsoup://`)
 
@@ -126,7 +126,7 @@ Leave the defaults for general page reading. Add allow-list patterns when an age
 
 ### Network safety
 
-Only public hosts can be reached. For every request, and every redirect hop, the host is resolved once and every address must be public. Private, loopback, link-local, CGNAT, and IPv6 forms that embed a private IPv4 address are rejected, as is anything that does not resolve. The connection then goes only to those validated addresses, so a second DNS answer cannot point it somewhere else (no DNS rebinding). Environment proxies are ignored. Redirects are followed manually so that each `Location` is re-checked against the validator and the allow-list; after five redirects the request fails. A redirect to a different origin (scheme, host, or port) drops every request header except `User-Agent`, `Accept`, and `Accept-Language`, so credentials in `headers` never leave the host they were meant for. Only GET and POST are supported. Feeds whose DTD declares entities are refused before parsing; a bare `<!DOCTYPE>` (such as RSS 0.91's) is fine. An invalid CSS selector fails the URL with a clear error instead of crashing the source.
+Only public hosts can be reached. For every request, and every redirect hop, the host is resolved once and every address must be public. Private, loopback, link-local, CGNAT, and IPv6 forms that embed a private IPv4 address are rejected, as is anything that does not resolve. The connection then goes only to those validated addresses, so a second DNS answer cannot point it somewhere else (no DNS rebinding). Environment proxies are ignored. Redirects are followed manually so that each `Location` is re-checked against the validator and the allow-list; after five redirects the request fails. A redirect to a different origin (scheme, host, or port) drops every request header except `User-Agent`, `Accept`, and `Accept-Language`, so credentials in `headers` never leave the host they were meant for. A `Host` header in `headers` is refused, because it would send the request to a different virtual host than the one validated. Error messages and logs show URLs without their query string, so API keys placed in a query are not logged. Only GET and POST are supported. Feeds whose DTD declares entities are refused before parsing; a bare `<!DOCTYPE>` (such as RSS 0.91's) is fine. An invalid CSS selector fails the URL with a clear error instead of crashing the source.
 
 ### What it does not do
 

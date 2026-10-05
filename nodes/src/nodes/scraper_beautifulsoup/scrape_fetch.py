@@ -24,14 +24,19 @@
 """Guarded HTTP fetcher for scraper_beautifulsoup.
 
 Every request (and every redirect hop) is checked against an optional regex
-allow-list, then resolved once by an injected ``resolve_url`` callable — in
+allow-list (matched by an injected ``allow_match``, in the engine
+``ai.common.utils.url_matches_pattern``, which only trusts patterns that pin
+the scheme and host), then resolved once by an injected ``resolve_url`` callable — in
 the engine ``ai.common.utils.resolve_public_addresses``, which rejects
 non-public hosts. The request is sent through ``open_session(addresses)``
 (``ai.common.utils.pinned_session``), which connects only to those validated
 addresses, so a second DNS answer cannot redirect it (no rebinding gap).
 Redirects are followed manually so each ``Location`` is re-resolved and
 re-validated; responses are streamed and capped at ``max_bytes``; requests to
-the same host are paced by ``min_interval``.
+the same host are paced by ``min_interval``. ``timeout`` bounds the whole
+fetch (every hop, connect and body read), not each socket operation. Error
+messages carry the URL without its query string, so keys in a query never
+reach the logs.
 
 This module has no engine imports so it can be unit-tested standalone.
 """
@@ -40,11 +45,12 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlsplit
 
 import requests
 
@@ -52,6 +58,16 @@ DEFAULT_USER_AGENT = 'RocketRide-Scraper/1.0 (+https://rocketride.org)'
 REDIRECT_CODES = (301, 302, 303, 307, 308)
 # Headers still sent after a redirect to a different origin; all others are dropped.
 SAFE_REDIRECT_HEADERS = frozenset({'user-agent', 'accept', 'accept-language'})
+
+
+def redact_url(url: str) -> str:
+    """``url`` without query string, fragment or userinfo, for error messages."""
+    try:
+        parts = urlsplit(url)
+        netloc = parts.netloc.rpartition('@')[2]
+        return parts._replace(netloc=netloc, query='', fragment='').geturl()
+    except ValueError:
+        return '<invalid URL>'
 
 
 def _origin(url: str) -> tuple:
@@ -104,6 +120,7 @@ class Fetcher:
     min_interval: float = 0.0
     user_agent: str = DEFAULT_USER_AGENT
     allow_patterns: List[re.Pattern] = field(default_factory=list)
+    allow_match: Optional[Callable[[re.Pattern, str], bool]] = None
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -115,17 +132,22 @@ class Fetcher:
         """Validate one URL (scheme, allow-list, public host); returns the resolved addresses."""
         parsed = urlparse(url)
         if parsed.scheme not in ('http', 'https') or not parsed.hostname:
-            raise FetchError(f'Only absolute http(s) URLs are allowed: {url!r}')
-        if self.allow_patterns and not any(p.search(url) for p in self.allow_patterns):
-            raise FetchError(f'URL is not in the allow-list: {url}')
+            raise FetchError(f'Only absolute http(s) URLs are allowed: {redact_url(url)!r}')
+        if self.allow_patterns:
+            if self.allow_match is None:
+                # Fail closed: a plain re.search would accept the pattern anywhere in the URL.
+                raise FetchError('URL allow-list is set but no allow-list matcher is configured')
+            if not any(self.allow_match(p, url) for p in self.allow_patterns):
+                raise FetchError(f'URL is not in the allow-list: {redact_url(url)}')
         try:
             return self.resolve_url(url)
         except ValueError as e:
             raise FetchError(str(e)) from e
 
-    def _pace(self, url: str) -> None:
+    def _pace(self, url: str) -> float:
+        """Sleep out the per-host interval; returns the seconds slept."""
         if self.min_interval <= 0:
-            return
+            return 0.0
         host = (urlparse(url).hostname or '').lower()
         with self._lock:
             now = time.monotonic()
@@ -133,6 +155,14 @@ class Fetcher:
             self._last_hit[host] = now + max(wait, 0.0)
         if wait > 0:
             time.sleep(wait)
+            return wait
+        return 0.0
+
+    def _remaining(self, deadline: float, url: str) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s')
+        return remaining
 
     # -- request ----------------------------------------------------------
 
@@ -146,18 +176,28 @@ class Fetcher:
         json_body: Any = None,
         raise_for_status: bool = True,
     ) -> FetchResult:
-        """Fetch ``url``, following redirects manually with re-validation."""
+        """Fetch ``url``, following redirects manually with re-validation.
+
+        ``timeout`` covers the whole call: every redirect hop, each connect
+        attempt and the body read share one deadline. Time spent pacing is
+        politeness, not network time, and extends the deadline.
+        """
         method = (method or 'GET').upper()
         if method not in ('GET', 'POST'):
             raise FetchError(f'Unsupported method: {method}')
 
         send_headers = {'User-Agent': self.user_agent, 'Accept': '*/*'}
         send_headers.update({str(k): str(v) for k, v in (headers or {}).items()})
+        if any(k.lower() == 'host' for k in send_headers):
+            raise FetchError('The Host header is derived from the validated URL and cannot be overridden')
 
+        deadline = time.monotonic() + self.timeout
         current = url
         for _hop in range(self.max_redirects + 1):
+            self._remaining(deadline, current)
             addresses = self.check_url(current)
-            self._pace(current)
+            deadline += self._pace(current)
+            timeout = self._remaining(deadline, current)
             session = self.open_session(addresses)
             try:
                 resp = session.request(
@@ -166,13 +206,14 @@ class Fetcher:
                     headers=send_headers,
                     params=params,
                     json=json_body if method == 'POST' else None,
-                    timeout=self.timeout,
+                    timeout=timeout,
                     allow_redirects=False,
                     stream=True,
                 )
             except requests.RequestException as e:
                 session.close()
-                raise FetchError(f'{method} {current} failed: {e}') from e
+                # The exception text repeats the URL (query included): report its type only.
+                raise FetchError(f'{method} {redact_url(current)} failed: {type(e).__name__}') from e
 
             try:
                 if resp.status_code in REDIRECT_CODES and resp.headers.get('location'):
@@ -188,7 +229,7 @@ class Fetcher:
                         method, json_body = 'GET', None
                     continue
 
-                content, truncated = self._read_capped(resp)
+                content, truncated = self._read_capped(resp, deadline, current)
                 result = FetchResult(
                     url=current,
                     status=resp.status_code,
@@ -201,17 +242,37 @@ class Fetcher:
                 session.close()
 
             if raise_for_status and result.status >= 400:
-                raise FetchError(f'{method} {current} returned HTTP {result.status}')
+                raise FetchError(f'{method} {redact_url(current)} returned HTTP {result.status}')
             return result
 
-        raise FetchError(f'Too many redirects (>{self.max_redirects}) starting at {url}')
+        raise FetchError(f'Too many redirects (>{self.max_redirects}) starting at {redact_url(url)}')
 
-    def _read_capped(self, resp: requests.Response) -> tuple[bytes, bool]:
-        """Stream the body, stopping at ``max_bytes``; returns (content, truncated)."""
+    def _read_capped(self, resp: requests.Response, deadline: float, url: str) -> tuple[bytes, bool]:
+        """Stream the body, stopping at ``max_bytes`` or the deadline; returns (content, truncated).
+
+        A read blocks until a whole chunk arrives, so a server trickling bytes
+        could hold it far past the deadline. A watchdog therefore shuts the
+        socket down at the deadline, which ends the blocked read.
+        """
+        timed_out = threading.Event()
+        sock = _response_socket(resp)
+
+        def abort() -> None:
+            timed_out.set()
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+        watchdog = threading.Timer(self._remaining(deadline, url), abort) if sock is not None else None
+        if watchdog is not None:
+            watchdog.daemon = True
+            watchdog.start()
         chunks: List[bytes] = []
         total = 0
         try:
             for chunk in resp.iter_content(chunk_size=65536):
+                self._remaining(deadline, url)
                 if not chunk:
                     continue
                 total += len(chunk)
@@ -219,9 +280,32 @@ class Fetcher:
                     chunks.append(chunk[: len(chunk) - (total - self.max_bytes)])
                     return b''.join(chunks), True
                 chunks.append(chunk)
-        except requests.RequestException as e:
-            raise FetchError(f'Reading {resp.url} failed: {e}') from e
+        except Exception as e:
+            if timed_out.is_set():
+                raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s') from e
+            if isinstance(e, (requests.RequestException, OSError)):
+                raise FetchError(f'Reading {redact_url(url)} failed: {type(e).__name__}') from e
+            raise
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+        if timed_out.is_set():
+            # A body without Content-Length ends "normally" when the socket closes.
+            raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s')
         return b''.join(chunks), False
+
+
+def _response_socket(resp: requests.Response) -> Optional[socket.socket]:
+    """The socket under a streamed response, or None if it cannot be reached."""
+    connection = getattr(resp.raw, 'connection', None) or getattr(resp.raw, '_connection', None)
+    sock = getattr(connection, 'sock', None)
+    if not isinstance(sock, socket.socket):
+        # When the response closes the connection, http.client drops
+        # ``connection.sock`` and the socket lives on in the response's file
+        # (urllib3 response -> http.client response -> BufferedReader -> SocketIO).
+        fp = getattr(getattr(resp.raw, '_fp', None), 'fp', None)
+        sock = getattr(getattr(fp, 'raw', None), '_sock', None)
+    return sock if isinstance(sock, socket.socket) else None
 
 
 def compile_patterns(raw: Any) -> List[re.Pattern]:

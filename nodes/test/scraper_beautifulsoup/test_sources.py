@@ -33,8 +33,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip('bs4')
-pytest.importorskip('requests')
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'scraper_beautifulsoup'))
 
@@ -118,6 +116,7 @@ class TestParseSources:
             ({'name': 'a', 'kind': 'xml', 'url': 'https://a'}, 'kind must be'),
             ({'name': 'a', 'kind': 'feed'}, 'url or urls'),
             ({'name': 'a', 'kind': 'json', 'url': 'https://a', 'fields': {}}, 'fields.url'),
+            ({'name': 'a', 'kind': 'feed', 'url': 'https://a', 'fields': {'title': 'title'}}, 'fields.url'),
             ({'name': 'a', 'kind': 'html', 'url': 'https://a', 'fields': {'url': 'a@href'}}, 'itemSelector'),
             ({'name': 'a', 'kind': 'feed', 'url': 'https://a', 'method': 'POST'}, 'only json'),
             ({'name': 'a', 'kind': 'feed', 'url': 'https://a', 'extra': {'url_hash': 'x'}}, 'reserved'),
@@ -208,6 +207,11 @@ class TestNormalizeRow:
     def test_body_html_stripped_and_trimmed(self):
         row = self.base({'url': 'https://a', 'body': '<p>' + 'x' * 500 + '</p>'}, max_body_chars=200)
         assert row['body'] == 'x' * 200
+
+    @pytest.mark.parametrize('value', [float('inf'), float('-inf'), float('nan'), 'Infinity', '-inf', '1e999'])
+    def test_non_finite_numbers_become_null(self, value):
+        row = self.base({'url': 'https://a', 'score': value, 'comments': value})
+        assert row['score'] is None and row['comments'] is None
 
     def test_extra_and_custom_fields(self):
         row = self.base({'url': 'https://a', 'language': 'Rust', 'stars': 5}, extra={'category': 'ai-lab'})

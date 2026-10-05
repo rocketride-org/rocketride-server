@@ -169,6 +169,9 @@ def _parse_one(item: Any, index: int, default_max_items: int) -> SourceSpec:
         raise ValueError(f'{where}: fields must be an object')
     if kind == 'json' and 'url' not in fields:
         raise ValueError(f'{where}: json sources need a fields.url path')
+    if kind == 'feed' and fields and 'url' not in fields:
+        # Feed fields rebuild each item from the mapped keys only; without url every row is dropped.
+        raise ValueError(f'{where}: feed sources with fields need a fields.url entry (e.g. "url": "url")')
     if kind == 'html':
         if not item.get('itemSelector'):
             raise ValueError(f'{where}: html sources need itemSelector')
@@ -288,7 +291,8 @@ def _to_int(value: Any) -> Optional[int]:
         return None
     try:
         return int(float(str(value).replace(',', '')))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: inf / 1e999 from a JSON API or page text.
         return None
 
 

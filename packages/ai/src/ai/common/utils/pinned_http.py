@@ -46,6 +46,7 @@ import ipaddress
 import os
 import socket
 import sys
+import time
 from typing import Callable, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -181,13 +182,25 @@ class _PinnedConnectionMixin:
 
     def _new_conn(self):
         last_error: Optional[OSError] = None
+        # The connect timeout is one budget for the whole address list, not a
+        # fresh interval per address (a host with many dead addresses would
+        # otherwise multiply it).
+        timeout = self.timeout if isinstance(self.timeout, (int, float)) else None
+        deadline = time.monotonic() + timeout if timeout is not None else None
         for family, socktype, proto, sockaddr in self.validated_addresses:
             sock = None
             try:
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        last_error = socket.timeout('connect budget exhausted')
+                        break
                 sock = socket.socket(family, socktype, proto)
                 for option in self.socket_options or ():
                     sock.setsockopt(*option)
-                if self.timeout is not None:
+                if deadline is not None:
+                    sock.settimeout(remaining)
+                elif self.timeout is not None:
                     sock.settimeout(self.timeout)
                 if self.source_address:
                     sock.bind(self.source_address)

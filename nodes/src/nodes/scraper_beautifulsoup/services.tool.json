@@ -24,7 +24,7 @@
 		"scraper.timeout": {
 			"type": "number",
 			"title": "Timeout (seconds)",
-			"description": "Per-request timeout, 1-120 seconds.",
+			"description": "Time limit for one whole fetch, including redirects and reading the response, 1-120 seconds.",
 			"default": 20
 		},
 		"scraper.maxResponseKB": {
@@ -55,7 +55,7 @@
 		"scraper.allowPattern": {
 			"type": "string",
 			"title": "URL pattern (regex)",
-			"description": "Python regex searched against the full URL, e.g. ^https://news\\.ycombinator\\.com/",
+			"description": "Python regex matched from the start of the URL. It must begin with the literal scheme and host, closed by /, \\?, (?=/|$) or $, e.g. ^https://news\\.ycombinator\\.com/",
 			"default": ""
 		},
 		"scraper.urlAllowList": {

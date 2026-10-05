@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip('bs4')
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'scraper_beautifulsoup'))
 
@@ -224,6 +223,23 @@ class TestHtml:
         assert '## [Post one](https://example.com/p/1)' in md
         assert '- alpha' in md
         assert '- [beta](https://example.com/x)' in md
+
+    def test_markdown_skips_comments_and_declarations(self):
+        html = (
+            '<!DOCTYPE html><html><body><main><!-- hidden note --><p>Shown<!-- inline --> text</p>'
+            '<?php echo 1; ?><div><![CDATA[kept]]></div></main></body></html>'
+        )
+        content = page_to_markdown(html, 'https://x/')['content']
+        assert 'hidden note' not in content and 'inline' not in content
+        assert 'php' not in content and 'DOCTYPE' not in content
+        assert 'Shown text' in content
+
+    @pytest.mark.parametrize('tag', ['span', 'div'])
+    def test_markdown_deeply_nested_page(self, tag):
+        depth = 1500
+        html = '<html><body>' + f'<{tag}>' * depth + 'deep' + f'</{tag}>' * depth + '</body></html>'
+        assert page_to_markdown(html, 'https://x/')['content'] == 'deep'
+        assert page_to_text(html)['content'] == 'deep'
 
     def test_links_dedup_and_absolute(self):
         links = page_links(HTML + b'<a href="/p/1">dup</a><a href="mailto:x@y">m</a>', 'https://example.com/')

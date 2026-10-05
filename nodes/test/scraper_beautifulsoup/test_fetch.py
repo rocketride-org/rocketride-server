@@ -44,8 +44,6 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-pytest.importorskip('requests')
-pytest.importorskip('bs4')
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'scraper_beautifulsoup'))
 
@@ -57,6 +55,10 @@ _PINNED_PATH = (
 _spec = importlib.util.spec_from_file_location('scraper_test_pinned_http', _PINNED_PATH)
 pinned_http = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(pinned_http)
+
+_spec = importlib.util.spec_from_file_location('scraper_test_url_policy', _PINNED_PATH.with_name('url_policy.py'))
+url_policy = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(url_policy)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -94,8 +96,23 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Length', '999999999')
             self.end_headers()
-        elif self.path == '/404':
+        elif self.path.startswith('/404'):
             self._send(404, b'nope')
+        elif self.path.startswith('/trickle'):
+            # Declares 100 bytes, then sends one every 100 ms (10 s in total).
+            self.send_response(200)
+            if self.path == '/trickle':
+                self.send_header('Content-Length', '100')
+            else:
+                self.send_header('Connection', 'close')
+            self.end_headers()
+            try:
+                for _ in range(100):
+                    self.wfile.write(b'x')
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except OSError:
+                pass  # the client gave up
         else:
             self._send(500)
 
@@ -144,7 +161,14 @@ class Validator:
 
 
 def make(validator=None, **kw):
-    return Fetcher(resolve_url=validator or Validator(), open_session=pinned_http.pinned_session, timeout=5, **kw)
+    kw.setdefault('allow_match', url_policy.url_matches_pattern)
+    kw.setdefault('timeout', 5)
+    return Fetcher(resolve_url=validator or Validator(), open_session=pinned_http.pinned_session, **kw)
+
+
+def pinned(server, path):
+    """An allow-list pattern for exactly ``path`` on the test server."""
+    return re.escape(server) + re.escape(path) + '$'
 
 
 def test_basic_get(server):
@@ -213,16 +237,87 @@ def test_scheme_rejected():
 
 
 def test_allow_list(server):
-    fetcher = make(allow_patterns=compile_patterns([r'/ok$']))
+    fetcher = make(allow_patterns=compile_patterns(['^' + pinned(server, '/ok')]))
     assert fetcher.fetch(f'{server}/ok').status == 200
     with pytest.raises(FetchError, match='allow-list'):
         fetcher.fetch(f'{server}/json')
 
 
 def test_allow_list_applies_to_redirect_target(server):
-    fetcher = make(allow_patterns=compile_patterns([r'/redirect-local$']))
+    fetcher = make(allow_patterns=compile_patterns([pinned(server, '/redirect-local')]))
     with pytest.raises(FetchError, match='allow-list'):
         fetcher.fetch(f'{server}/redirect-local')
+
+
+def test_allow_list_unanchored_pattern_never_matches(server):
+    # Searched anywhere, '/ok' would match; the strict matcher needs scheme + host.
+    fetcher = make(allow_patterns=compile_patterns([r'/ok$']))
+    with pytest.raises(FetchError, match='allow-list'):
+        fetcher.fetch(f'{server}/ok')
+
+
+def test_allow_list_without_matcher_fails_closed(server):
+    fetcher = make(allow_patterns=compile_patterns(['^' + pinned(server, '/ok')]), allow_match=None)
+    with pytest.raises(FetchError, match='matcher'):
+        fetcher.fetch(f'{server}/ok')
+
+
+@pytest.mark.parametrize(
+    'pattern,url',
+    [
+        (r'news\.ycombinator\.com', 'https://evil.example/?u=news.ycombinator.com'),
+        (r'^https://news\.ycombinator\.com', 'https://news.ycombinator.com.evil.example/'),
+        (r'^https://news\.ycombinator\.com/|^https://', 'https://evil.example/'),
+    ],
+)
+def test_allow_list_bypass_patterns_do_not_match(pattern, url):
+    assert not url_policy.url_matches_pattern(re.compile(pattern), url)
+
+
+def test_allow_list_pinned_pattern_matches():
+    pattern = re.compile(r'^https://news\.ycombinator\.com/')
+    url_policy.check_allow_pattern(pattern)
+    assert url_policy.url_matches_pattern(pattern, 'https://news.ycombinator.com/item?id=1')
+
+
+@pytest.mark.parametrize('pattern', [r'news\.ycombinator\.com', r'^https://news\.ycombinator\.com', r'/ok$'])
+def test_check_allow_pattern_rejects_unpinned(pattern):
+    with pytest.raises(ValueError, match='literal http'):
+        url_policy.check_allow_pattern(re.compile(pattern))
+
+
+@pytest.mark.parametrize('name', ['Host', 'host', 'HOST'])
+def test_host_header_override_refused(server, name):
+    with pytest.raises(FetchError, match='Host header'):
+        make().fetch(f'{server}/headers', headers={name: 'admin.example.com'})
+
+
+def test_error_messages_omit_query_string(server):
+    with pytest.raises(FetchError) as exc:
+        make().fetch(f'{server}/404?apiKey=SECRET-KEY')
+    assert 'SECRET-KEY' not in str(exc.value)
+    assert f'{server}/404' in str(exc.value)
+
+
+def test_transport_error_reports_type_not_url(server):
+    port = int(server.rsplit(':', 1)[1])
+    dead = ((socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, ('127.0.0.1', 1)),)
+    fetcher = Fetcher(resolve_url=lambda url: dead, open_session=pinned_http.pinned_session, timeout=5)
+    with pytest.raises(FetchError) as exc:
+        fetcher.fetch(f'http://127.0.0.1:{port}/ok?token=SECRET-KEY')
+    assert 'SECRET-KEY' not in str(exc.value)
+    assert 'ConnectionError' in str(exc.value)
+
+
+@pytest.mark.parametrize('path', ['/trickle', '/trickle-close'])
+def test_timeout_bounds_whole_body_read(server, path):
+    # Each byte arrives well inside the per-read timeout; only a whole-fetch
+    # deadline stops it.
+    fetcher = make(timeout=1)
+    start = time.monotonic()
+    with pytest.raises(FetchError, match='timed out'):
+        fetcher.fetch(f'{server}{path}')
+    assert time.monotonic() - start < 3
 
 
 def test_size_cap_truncates(server):

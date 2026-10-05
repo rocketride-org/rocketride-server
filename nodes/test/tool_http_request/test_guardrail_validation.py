@@ -19,6 +19,17 @@ import pytest
 pytest.importorskip('requests')
 
 NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_http_request'
+URL_POLICY_PATH = (
+    Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'url_policy.py'
+)
+
+
+def _load_url_policy():
+    """Load the real shared allow-list checker standalone (it has no engine imports)."""
+    spec = importlib.util.spec_from_file_location('_tool_http_request_test_url_policy', URL_POLICY_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _load_node_modules(monkeypatch: pytest.MonkeyPatch):
@@ -40,6 +51,7 @@ def _load_node_modules(monkeypatch: pytest.MonkeyPatch):
     config_module.Config = Mock()
     utils_module = types.ModuleType('ai.common.utils')
     utils_module.config_int = Mock()
+    utils_module.url_matches_pattern = _load_url_policy().url_matches_pattern
     ai_module = types.ModuleType('ai')
     common_module = types.ModuleType('ai.common')
     monkeypatch.setitem(sys.modules, 'ai', ai_module)
@@ -380,7 +392,7 @@ def test_canonical_match_rejects_extended_hostnames_for_each_address_family(monk
     """DNS, IPv4, and bracketed IPv6 prefixes are detected semantically."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
 
-    assert not iinstance._pattern_matches_canonical_url(re.compile(pattern), url)
+    assert not iinstance.url_matches_pattern(re.compile(pattern), url)
 
 
 @pytest.mark.parametrize(
@@ -397,7 +409,7 @@ def test_canonical_match_rejects_forced_suffix_regex_constructs(monkeypatch, pat
     """Path/query suffixes and legal brace forms cannot conceal a hostname prefix."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
 
-    assert not iinstance._pattern_matches_canonical_url(re.compile(pattern), url)
+    assert not iinstance.url_matches_pattern(re.compile(pattern), url)
 
 
 def test_canonical_match_rejects_python_314_terminal_z(monkeypatch):
@@ -408,7 +420,7 @@ def test_canonical_match_rejects_python_314_terminal_z(monkeypatch):
         pytest.skip(r'Python does not support \z')
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
 
-    assert not iinstance._pattern_matches_canonical_url(pattern, 'https://api.example.com.evil.net/private')
+    assert not iinstance.url_matches_pattern(pattern, 'https://api.example.com.evil.net/private')
 
 
 @pytest.mark.parametrize(
@@ -432,7 +444,7 @@ def test_canonical_match_rejects_unsupported_authority_syntax(monkeypatch, patte
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
 
     assert re.compile(pattern).match(url)
-    assert not iinstance._pattern_matches_canonical_url(re.compile(pattern), url)
+    assert not iinstance.url_matches_pattern(re.compile(pattern), url)
 
 
 @pytest.mark.parametrize(
@@ -473,7 +485,7 @@ def test_canonical_match_preserves_safe_full_url_patterns(monkeypatch, pattern, 
     """Authority-safe URL, path, escaped, lazy, and bounded patterns still work."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
 
-    assert iinstance._pattern_matches_canonical_url(re.compile(pattern), url)
+    assert iinstance.url_matches_pattern(re.compile(pattern), url)
 
 
 def test_canonical_match_rejects_multiline_authority_boundary(monkeypatch):
@@ -482,7 +494,7 @@ def test_canonical_match_rejects_multiline_authority_boundary(monkeypatch):
     pattern = re.compile(r'^https://api\.example\.com$', re.MULTILINE)
 
     assert pattern.match('https://api.example.com\n.evil')
-    assert not iinstance._pattern_matches_canonical_url(pattern, 'https://api.example.com\n.evil')
+    assert not iinstance.url_matches_pattern(pattern, 'https://api.example.com\n.evil')
 
 
 def test_canonical_match_allows_multiline_after_consuming_path_boundary(monkeypatch):
@@ -490,7 +502,7 @@ def test_canonical_match_allows_multiline_after_consuming_path_boundary(monkeypa
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     pattern = re.compile(r'^https://api\.example\.com/data$', re.MULTILINE)
 
-    assert iinstance._pattern_matches_canonical_url(pattern, 'https://api.example.com/data')
+    assert iinstance.url_matches_pattern(pattern, 'https://api.example.com/data')
 
 
 @pytest.mark.parametrize(
