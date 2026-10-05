@@ -432,6 +432,24 @@ def test_execute_tool_is_disabled_unless_allowed():
         inst.execute({'query': 'CREATE (n:Person)'})
 
 
+@pytest.mark.parametrize(
+    'args',
+    [
+        {'query': 'CREATE (n:Person)', 'session_id': 'tx-1'},
+        {'sql': 'CREATE (n:Person)', 'row_mode': 'array'},
+        {'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}},
+        {'query': 'CREATE (n:Person)', 'params': ['Ada']},
+        {'query': ''},
+    ],
+)
+def test_execute_tool_reports_disabled_before_argument_errors(args):
+    # A disabled node answers "disabled", not which argument is wrong.
+    graph = _FakeGraph()
+    with pytest.raises(ValueError, match='allow_execute'):
+        _instance(_FakeGlobal(graph)).execute(args)
+    assert graph.calls == []
+
+
 def test_execute_tool_runs_writes_when_allowed():
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)

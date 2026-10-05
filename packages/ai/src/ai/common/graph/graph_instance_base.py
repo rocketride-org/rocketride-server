@@ -259,6 +259,10 @@ class GraphInstanceBase(IInstanceBase, ABC):
                 ``'object'`` (graph nodes have neither).
         """
         args = normalize_tool_input(args, tool_name='execute')
+        # A disabled node reports that first, whatever the arguments are.
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+
         key = 'sql' if 'query' not in args and 'sql' in args else 'query'
         query = require_str(args, key, tool_name='execute')
         params = self._execute_params(args.get('params'))
@@ -268,9 +272,6 @@ class GraphInstanceBase(IInstanceBase, ABC):
             raise ValueError('execute: graph nodes have no transactions, so "session_id" is not supported')
         if (args.get('row_mode') or 'object') != 'object':
             raise ValueError('execute: graph nodes return row objects, so "row_mode" must be \'object\'')
-
-        if not self.IGlobal.allow_execute:
-            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
 
         if params:
             result = self.IGlobal._run_query_raw(query, params=params)
