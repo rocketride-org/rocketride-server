@@ -30,22 +30,36 @@ wrap it in `{ pipeline: ... }`; the client sends it to the server, which resolve
 **Running the same pipeline more than once at a time.** Without a custom `token`,
 the server names the task after its owner, `project_id` and source, so a second
 `use()` of the same pipe fails with `Pipeline is already running.` Give each
-instance its own `token` and they run side by side. Use an unguessable value that
-keeps the `tk_` prefix, `tk_` plus a UUID for example. The value you choose is
-the run's [private token](/operate/security#endpoint-authentication): full
-control of the run for anyone who presents it, so treat it as a secret; a token
-without the prefix cannot serve as one on webhook or dropper endpoints; and
-tokens share one namespace across every user of the server, so a predictable
-value collides with other people's tasks. Keep the tokens you chose: both
-instances get the same `pk_` public authorization key (webhook calls and dropper
-upload URLs carry it), and `getTaskToken()` is keyed by the pipe's `project_id` and
-source, so each resolves to only one of the instances. Monitor subscriptions are
-keyed the same way: both instances' events arrive in one subscription that the
-SDK's documented fields cannot tell apart, and a few minutes after one instance
-ends, when the server removes it from its registry, the shared subscription is
-dropped and the surviving instance's events stop arriving (resubscribe). The
-run log is written per identity and is not built for two instances at once, so
-treat a forked run's log as unreliable.
+instance its own `token` and they run side by side:
+
+```typescript
+const { token } = await client.use({ filepath: './pipeline.pipe', token: `tk_${crypto.randomUUID()}` });
+```
+
+The value you choose is the run's
+[private token](/operate/security#endpoint-authentication): full control of
+the run for anyone who presents it. So make it unguessable, and keep the `tk_`
+prefix (without it the token cannot authenticate on webhook or dropper
+endpoints). Tokens share one namespace across every user of the server: a
+predictable value collides with other people's tasks, and with `useExisting` a
+token that matches a running task attaches to it, whoever started it.
+
+What two instances still share:
+
+- **The `pk_` public authorization key.** Both get the same one, and a webhook
+  call or dropper upload that uses it always reaches the instance that started
+  first. To send data to one specific instance, use that instance's `tk_` token.
+- **`getTaskToken()`**, keyed by the pipe's `project_id` and source, returns only
+  one of them.
+- **The monitor subscription.** Both instances' events arrive in one
+  subscription. Each event carries the emitting run's id in `body.__id` (the
+  first eight characters of the token after `tk_`, plus the source id); it is
+  truncated and can collide, so treat it as a best-effort way to tell them
+  apart. A few minutes after one instance ends, when the server removes it
+  from its registry, the shared subscription is dropped and the surviving
+  instance's events stop arriving; resubscribe.
+- **The run log**, written per identity and not built for two instances at
+  once; treat a forked run's log as unreliable.
 
 **Check `reused` before trusting the result.** `useExisting` returns the
 instance that is already running under that token rather than starting the one

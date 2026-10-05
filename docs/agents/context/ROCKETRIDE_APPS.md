@@ -906,8 +906,9 @@ your app calls `use()`, the owner is the signed-in **user**. So every user
 of your app gets their own instance of the pipeline, automatically.
 `useExisting` does not change that: it attaches to *that user's* own
 already-running instance (a reload, a second tab, a second component)
-instead of failing with 'Pipeline is already running.' — it never crosses
-user boundaries.
+instead of failing with 'Pipeline is already running.' — with the default
+token it never crosses user boundaries. (A custom token is looked up by its
+value alone; see below.)
 
 To run two instances of one pipeline for the same user at once (a second
 tab, say), give each `use()` its own `token`: the server then keys the task
@@ -915,13 +916,18 @@ on that token instead of the hash. Use an unguessable value that keeps the
 `tk_` prefix (`tk_` plus a UUID, for example): the value is the run's private
 token (full control for anyone who presents it), tokens share one namespace
 across every user of the server, and a token without the prefix cannot serve
-as a private token on webhook or dropper endpoints. Keep the tokens you
-chose: both instances get the same `pk_` public authorization key, and
-`getTaskToken()` is keyed by `projectId` and source, so each resolves to only
-one of the instances. Monitor subscriptions are keyed the same way: both
-instances' events arrive in one subscription, and a few minutes after one
-instance ends the shared subscription is dropped, so resubscribe. The run
-log is not built for two instances of one identity; treat it as unreliable.
+as a private token on webhook or dropper endpoints. With `useExisting`, a
+token that matches a running task attaches to it, whoever started it: one
+more reason the value must be unguessable. Keep the tokens you chose: both
+instances get the same `pk_` public authorization key, and a webhook call or
+dropper upload that uses it always reaches the instance that started first
+(to send data to one specific instance, use its `tk_` token); `getTaskToken()`
+is keyed by `projectId` and source, so it returns only one of them. Monitor
+subscriptions are keyed the same way: both instances' events arrive in one
+subscription (each event's `body.__id` names the emitting run, best effort),
+and a few minutes after one instance ends the shared subscription is
+dropped, so resubscribe. The run log is not built for two instances of one
+identity; treat it as unreliable.
 
 **Per-user tasks (the default, and the only behavior `use()` can produce):**
 

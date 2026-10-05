@@ -1104,7 +1104,7 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
 - Start once with `client.use(filepath='...')` and reuse the returned token; pass
   `use_existing=True` in long-running services to avoid `Pipeline already running`. A task
   is keyed by owner + `project_id` + source, so to run the same pipe more than once at a
-  time give each `use()` its own unguessable `token`.
+  time give each `use()` its own unguessable `tk_` token.
 - **Never block the async event loop** (`input()`, `readFileSync()`, `time.sleep()`): a
   blocked loop starves the websocket keepalive and the connection dies after ~60s idle with
   `Connection closed` / `Connection timeout`. Use the async I/O patterns in

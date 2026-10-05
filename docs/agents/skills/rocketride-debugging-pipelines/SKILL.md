@@ -42,7 +42,7 @@ fix to the right phase. No re-running until the cause is identified and the fix 
 - `input has unknown lane` (validate) → lane mismatch; add a converter or pick compatible nodes.
 - `KeyError: '<key>'` → response key vs `laneName` mismatch; read `result_types`.
 - `Pipeline is already running.` → `use_existing=True` or `terminate()` first; a second instance of
-  the same pipe needs its own `token` (SDK `use()` or `rocketride start --token`; not MCP).
+  the same pipe needs its own unguessable `tk_` token (SDK `use()` or `rocketride start --token`; not MCP).
 - `Invalid API key` / a `project_id` rejection → config fix.
 
 ## Red flags

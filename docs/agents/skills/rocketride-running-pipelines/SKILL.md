@@ -37,7 +37,7 @@ state that truthfully, you have not earned the run — do the missing step inste
    `{task_token, projectId, source}`. **Keep `projectId` + `source`** — they key the run-log
    tools if debugging is needed. Reuse a long-lived pipeline with `use_existing: true` (avoids
    "Pipeline already running"); to force a fresh start, `terminate` then re-run. Two instances
-   of one pipe at once need their own `token` each, through the SDK's `use()` or
+   of one pipe at once need their own unguessable `tk_` token each, through the SDK's `use()` or
    `rocketride start --token` (`run_pipeline` has no token parameter).
 2. **Push input** — pick the tool by the **source** node:
    - Raw text/data → `send_data` (`input` is a **string** — serialize JSON). Result inline.
