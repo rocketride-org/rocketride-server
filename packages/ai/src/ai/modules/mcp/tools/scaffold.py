@@ -230,7 +230,7 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
         'provider': name,
         'files': files,
         'next_steps': [
-            'Write these files under the workspace passed as --node_path.',
+            'Write these files under the workspace nodes directory.',
             f'Reference the node in a .pipe as "provider": "{name}", since the provider is the protocol.',
             'Restart the engine: node manifests are read once at startup.',
         ],
