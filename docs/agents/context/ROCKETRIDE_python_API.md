@@ -1030,7 +1030,7 @@ print(f'{page["total"]} tasks, showing {len(page["rows"])}')
 
 `client.database` issues raw SQL or Cypher directly against a database pipeline node (via the node's tool functions), **bypassing the LLM translation layer** the default `chat()` flow uses — and its safety checks: you are responsible for the statements you pass. On every method, `node_id=''` broadcasts to all tool-lane nodes and the first database node handles it. Empty token/sql/session_id raise `ValueError`; server failures raise `RuntimeError`.
 
-- `async database.query(*, token: str, sql: str, node_id: str = '', session_id: str = '', params: list | dict | None = None) -> Dict[str, Any]` — execute a raw SQL/Cypher statement. `params` binds positional placeholders for SQL nodes (e.g. `[1, 'foo']` for `$1`, `$2`), or named placeholders for graph (Cypher) nodes as a dict (e.g. `{'rows': [...]}` for `UNWIND $rows`; bound values need no escaping and do not count toward the graph node's query-length limit); pass a `session_id` from `begin_transaction` to run inside that transaction. Returns `{'rows': [...], 'affected_rows': int}`.
+- `async database.query(*, token: str, sql: str, node_id: str = '', session_id: str = '', params: list | dict | None = None) -> Dict[str, Any]` — execute a raw SQL/Cypher statement. `params` binds positional placeholders for SQL nodes (e.g. `[1, 'foo']` for `$1`, `$2`), or named placeholders for the built-in `rocketride_graph` node as a dict (e.g. `{'rows': [...]}` for `UNWIND $rows`; `graph_neo4j` / `graph_falkordb` reject params; bound values need no escaping and do not count toward the graph node's query-length limit); pass a `session_id` from `begin_transaction` to run inside that transaction. Returns `{'rows': [...], 'affected_rows': int}`.
 - `async database.begin_transaction(*, token: str, node_id: str = '') -> Dict[str, Any]` — begin a transaction; returns a dict containing the `session_id` to thread through subsequent `query`/`commit`/`rollback` calls.
 - `async database.commit(*, token: str, session_id: str, node_id: str = '') -> Dict[str, Any]` — commit an open transaction. Returns `{'ok': True}` on success.
 - `async database.rollback(*, token: str, session_id: str, node_id: str = '') -> Dict[str, Any]` — roll back an open transaction, discarding its changes.
@@ -1045,6 +1045,18 @@ try:
 except Exception:
     await client.database.rollback(token=token, session_id=session)
     raise
+```
+
+**Graph bulk upsert** (`rocketride_graph`, see Pattern 14 in ROCKETRIDE_PIPELINES.md) — named
+params, and MERGE then a separate `MATCH ... SET`:
+
+```python
+rows = [{'id': 1, 'name': 'a'}, {'id': 2, 'name': 'b'}]
+graph = {'token': token, 'node_id': 'rocketride_graph_1'}
+await client.database.query(**graph, sql='UNWIND $rows AS row MERGE (:Item {id: row.id})', params={'rows': rows})
+await client.database.query(
+    **graph, sql='UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name', params={'rows': rows}
+)
 ```
 
 ## 14. CLI

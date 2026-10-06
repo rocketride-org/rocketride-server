@@ -668,6 +668,24 @@ connection is REQUIRED (it crafts Cypher from the question). Config is profile-b
 `database: "neo4j"`; `rocketride_graph` (built-in) needs no external server. Their classType
 also includes `tool`, so an agent can control a graph store as a tool instead.
 
+**Writing to a graph store** goes through its `execute` tool (node config
+`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. On `rocketride_graph`
+(Apache AGE 1.5.0):
+
+- Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
+  Cypher text: no escaping, and bound values do not count toward the 10,000-character query
+  limit. Only `rocketride_graph` accepts `params`; `graph_neo4j` / `graph_falkordb` reject them.
+- A bulk upsert is TWO calls. AGE applies SET / REMOVE / DELETE only to the first node or edge a
+  MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is rejected:
+
+  ```text
+  call 1:  UNWIND $rows AS row MERGE (:Item {id: row.id})
+  call 2:  UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name
+  ```
+
+- Remove repeated keys from `$rows` before the MERGE call: `UNWIND ... MERGE` creates one node
+  per row even when keys repeat.
+
 ### Pattern 15: Memory options
 
 Three distinct mechanisms — choose deliberately:

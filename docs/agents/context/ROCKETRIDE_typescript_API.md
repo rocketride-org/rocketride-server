@@ -943,7 +943,7 @@ Typed wrapper for subscriptions, Stripe checkout, credit wallets, and usage.
 
 Direct SQL/Cypher execution against a database pipeline node, bypassing the LLM translation layer that `chat()` uses (and its safety checks — you own the statements you send).
 
-- `query(options): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>` (`rows: unknown[][]` when `rowMode: 'array'`) — execute a raw SQL or Cypher statement. Options: `token` and `sql` (required, non-empty); `nodeId?` (empty broadcasts to all tool-lane nodes — the first database node handles it); `sessionId?` (run within a transaction session); `params?: unknown[] | Record<string, unknown>` (an array of positional parameters for SQL nodes, e.g. `[1, 'foo']` for `$1`, `$2`; an object keyed by placeholder name for graph (Cypher) nodes, e.g. `{ rows: [...] }` for `UNWIND $rows` — bound values need no escaping and do not count toward the graph node's query-length limit); `rowMode?: 'object' | 'array'` (`'array'` returns positional `unknown[][]` rows, which is what ORM drivers need — duplicate column names in joins survive)
+- `query(options): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>` (`rows: unknown[][]` when `rowMode: 'array'`) — execute a raw SQL or Cypher statement. Options: `token` and `sql` (required, non-empty); `nodeId?` (empty broadcasts to all tool-lane nodes — the first database node handles it); `sessionId?` (run within a transaction session); `params?: unknown[] | Record<string, unknown>` (an array of positional parameters for SQL nodes, e.g. `[1, 'foo']` for `$1`, `$2`; an object keyed by placeholder name for the built-in `rocketride_graph` node, e.g. `{ rows: [...] }` for `UNWIND $rows` (`graph_neo4j` / `graph_falkordb` reject params) — bound values need no escaping and do not count toward the graph node's query-length limit); `rowMode?: 'object' | 'array'` (`'array'` returns positional `unknown[][]` rows, which is what ORM drivers need — duplicate column names in joins survive)
 - `beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>` — begin a transaction; thread the returned `session_id` through subsequent `query`/`commit`/`rollback` calls
 - `commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>` / `rollback(...)` — same shape
 - `dialect(options: { token: string; nodeId?: string }): Promise<DatabaseDialect>` — discover the underlying engine (`DatabaseDialect.POSTGRES | MYSQL | NEO4J`); branch on SQL syntax differences or detect a graph DB
@@ -992,6 +992,16 @@ try {
 	await client.database.rollback({ token, sessionId: session_id });
 	throw err;
 }
+```
+
+**Graph bulk upsert** (`rocketride_graph`, see Pattern 14 in ROCKETRIDE_PIPELINES.md) — named
+params, and MERGE then a separate `MATCH ... SET`:
+
+```typescript
+const rows = [{ id: 1, name: 'a' }, { id: 2, name: 'b' }];
+const graph = { token, nodeId: 'rocketride_graph_1' };
+await client.database.query({ ...graph, sql: 'UNWIND $rows AS row MERGE (:Item {id: row.id})', params: { rows } });
+await client.database.query({ ...graph, sql: 'UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name', params: { rows } });
 ```
 
 Pin `nodeId` on every call of a transaction when the pipeline has more than one database node — broadcasts may land on different nodes.
