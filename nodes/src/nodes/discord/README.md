@@ -40,7 +40,7 @@ When `true`, the bot only processes messages in which it is directly @mentioned;
 
 ### guildIds / channelIds
 
-Server and channel allowlists. When non-empty, only messages from the listed guild/channel IDs are processed; leave both empty to listen everywhere the bot has access. IDs are matched as strings.
+Server and channel allowlists. When non-empty, only messages from the listed guild/channel IDs are processed; leave both empty to listen everywhere the bot has access. IDs are matched as strings. Direct messages are answered only while both lists are empty; setting either one stops DMs. Setting `guildIds` is recommended in production, together with turning off **Public Bot** (see Authentication), because with it empty the bot answers in any server it is added to.
 
 ### Attachments and events
 
@@ -85,9 +85,10 @@ This node requires a Discord bot token. Create a bot in the [Discord Developer P
 3. Go to **Bot** and click **Add Bot**.
 4. Under **TOKEN**, click **Copy** to get the bot token (keep it secret).
 5. Enable **Message Content Intent** under **Privileged Gateway Intents**. Also enable **Server Members Intent** when using member metadata.
-6. Add the bot to your servers with the OAuth2 URL generator (`bot` scope plus the permissions listed under Notes).
+6. Still under **Bot**, turn off **Public Bot** unless anyone should be able to add the bot to their own server. A new application is public by default.
+7. Add the bot to your servers with the OAuth2 URL generator (`bot` scope plus the permissions listed under Notes).
 
-Paste the token into the `discord.botToken` field. A missing token, an invalid token, or a missing Message Content Intent fails the source with an actionable status rather than idling silently.
+Paste the token into the `discord.botToken` field. In production, also set `guildIds` to the servers the bot should serve: with it empty (the default) the bot answers in every server it is added to, and the node says so in the task's warnings at start. A missing token, an invalid token, or a missing Message Content Intent fails the source with an actionable status rather than idling silently.
 
 ## Notes
 

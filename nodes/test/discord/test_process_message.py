@@ -2019,3 +2019,50 @@ class TestDeliveryAndShutdownEdges:
 
         endpoint._process_message.assert_not_awaited()
         assert endpoint._inflight == set()
+
+
+def _start(endpoint, after=None):
+    """Run the real ``_startup`` with the Gateway client faked out.
+
+    Args:
+        endpoint: An endpoint whose config fields are already set.
+        after: Optional coroutine function run on the same loop once started.
+    """
+
+    async def _go():
+        with (
+            mock.patch.object(_ENDPOINT_MODULE.commands, 'Bot', mock.Mock()),
+            mock.patch.object(endpoint, '_bot_runner', mock.AsyncMock()),
+        ):
+            await endpoint._startup()
+            if after is not None:
+                return await after()
+
+    return asyncio.run(_go())
+
+
+class TestOpenBotWarning:
+    """A bot with no server allowlist answers wherever it is added."""
+
+    @staticmethod
+    def _endpoint(guild_ids):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._bot_token = 'token'
+        endpoint._guild_ids = guild_ids
+        return endpoint
+
+    def test_an_empty_guild_list_warns_once_at_start(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            _start(self._endpoint([]))
+
+        warn.assert_called_once()
+        text = warn.call_args.args[0]
+        assert 'any server it is added to' in text
+        assert 'guildIds' in text
+        assert 'Public Bot' in text
+
+    def test_a_guild_list_raises_no_warning(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            _start(self._endpoint(['123']))
+
+        warn.assert_not_called()

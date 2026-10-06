@@ -514,6 +514,14 @@ class IEndpoint(IEndpointBase):
             monitorStatus(config_error)
             raise RuntimeError(config_error)
 
+        if not getattr(self, '_guild_ids', []):
+            # Valid, and the default, but a new Discord application is a Public
+            # Bot: anyone can add it to their server and it will answer there.
+            _config_warning(
+                'Discord: guildIds is empty, so the bot will answer in any server it is added to; '
+                'set guildIds and turn off Public Bot in the Developer Portal'
+            )
+
         intents = discord.Intents.default()
         intents.message_content = True
         intents.guilds = True
