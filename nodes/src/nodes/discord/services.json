@@ -368,7 +368,7 @@
 		"discord.sanitizeReplies": {
 			"type": "boolean",
 			"title": "Sanitize Replies",
-			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it.",
+			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it. Error answers (an engine or provider error, a traceback) are never posted, whether or not this is on.",
 			"default": false,
 			"optional": true
 		},

@@ -1611,12 +1611,26 @@ class TestErrorReplies:
         assert endpoint._send_response.await_count == 0
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
 
-    def test_with_sanitizing_off_the_text_is_posted_exactly_as_before(self):
-        endpoint = self._endpoint([self.ERROR], sanitize=False, retries=0)
+    @pytest.mark.parametrize('answer', [ERROR, '**LLM error** — X: y', 'LLM error: y'])
+    def test_an_error_is_never_posted_even_with_sanitizing_off(self, answer):
+        """Review of #2547: a raw provider error can carry account details.
+
+        The check ran only inside ``sanitizeReplies``, which is off by default,
+        so with default settings the engine's ``**LLM error**`` text was posted.
+        """
+        endpoint = self._endpoint([answer], sanitize=False, retries=0)
 
         asyncio.run(endpoint._process_message(_make_message(content='question')))
 
-        assert _sent_reply(endpoint) == self.ERROR
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
+
+    def test_with_sanitizing_off_scratchpad_is_still_posted_as_is(self):
+        endpoint = self._endpoint(['Thought: leaked'], sanitize=False, retries=0)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == 'Thought: leaked'
 
     def test_a_real_answer_is_unaffected(self):
         endpoint = self._endpoint(['Read the task log to see the error that was raised.'])

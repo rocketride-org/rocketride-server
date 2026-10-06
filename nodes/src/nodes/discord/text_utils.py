@@ -74,8 +74,9 @@ _ERROR_SIGNATURES = (
     # an arbitrary word (``Note:``).
     re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\b', re.IGNORECASE),
     # The engine's LLM layer reports a provider failure as the answer itself:
-    # ``**LLM error** — ValueError: An error occurred with the API.``
-    re.compile(r'^\s*\*\*LLM error\*\*'),
+    # ``**LLM error** — ValueError: An error occurred with the API.``, and the
+    # RocketRide agent as ``LLM error: <exception>`` (no bold).
+    re.compile(r'^\s*(?:\*\*)?LLM error(?:\*\*)?\s*[:—–-]'),
     # ...and the sentence its mapped exception carries, when that sentence is the
     # whole answer (prose that merely mentions API errors is not matched).
     re.compile(r'^\s*(?:\w+Error:\s*)?an error occurred with the api\.?\s*$', re.IGNORECASE),

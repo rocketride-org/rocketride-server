@@ -615,6 +615,12 @@ class TestLooksLikeError:
         assert looks_like_error('**LLM error** — ValueError: An error occurred with the API.') is True
         assert looks_like_error('  **LLM error**: Rate limit exceeded. Please try again later.') is True
 
+    def test_the_agent_llm_error_without_bold_is_an_error(self):
+        # Review of #2547: the RocketRide agent reports ``LLM error: {exc}``.
+        assert looks_like_error('LLM error: y') is True
+        assert looks_like_error('LLM error - quota exceeded') is True
+        assert looks_like_error('**LLM error** — X: y') is True
+
     def test_the_bare_api_error_sentence_is_an_error(self):
         assert looks_like_error('An error occurred with the API.') is True
         assert looks_like_error('ValueError: An error occurred with the API.') is True

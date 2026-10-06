@@ -1866,15 +1866,17 @@ class IEndpoint(IEndpointBase):
                         if att_reply and not reply:
                             reply = att_reply
 
-                if getattr(self, '_sanitize_replies', False):
-                    if reply and looks_like_error(reply):
-                        # An engine or model failure arrived as the "answer" (a
-                        # provider error, a traceback). It is not a transient
-                        # non-answer, so it is neither relayed nor retried.
-                        debug(f'Discord: suppressed an error-looking answer for {message.id}: {reply[:160]}')
-                        await self._emit_no_reply_event(metadata, 'model_error')
-                        return
+                if reply and looks_like_error(reply):
+                    # An engine or model failure arrived as the "answer" (a
+                    # provider error, a traceback). Whatever sanitizeReplies
+                    # says: a raw provider exception can carry account details
+                    # or internal URLs. It is not a transient non-answer, so it
+                    # is neither relayed nor retried.
+                    debug(f'Discord: suppressed an error-looking answer for {message.id}: {reply[:160]}')
+                    await self._emit_no_reply_event(metadata, 'model_error')
+                    return
 
+                if getattr(self, '_sanitize_replies', False):
                     # Leaked agent scratchpad is not an answer: post the hand-off
                     # line when it escalated, otherwise ask once more (a ReAct agent
                     # that stopped at "Thought:" usually answers on a second run)
