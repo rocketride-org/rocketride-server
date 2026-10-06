@@ -45,6 +45,13 @@ text_utils = _load_text_utils()
 chunk_message = text_utils.chunk_message
 guess_media_type = text_utils.guess_media_type
 should_process_message = text_utils.should_process_message
+format_thread_transcript = text_utils.format_thread_transcript
+with_thread_context = text_utils.with_thread_context
+find_marker = text_utils.find_marker
+sanitize_reply = text_utils.sanitize_reply
+looks_like_error = text_utils.looks_like_error
+inject_role_mention = text_utils.inject_role_mention
+is_aimed_at_someone_else = text_utils.is_aimed_at_someone_else
 DISCORD_MESSAGE_CHAR_LIMIT = text_utils.DISCORD_MESSAGE_CHAR_LIMIT
 
 
@@ -292,6 +299,231 @@ class TestGuessMediaType:
         assert guess_media_type('mystery.xyz', ' ; x=y') == 'application/octet-stream'
 
 
+class TestThreadTranscript:
+    """The thread-context transcript mirrors the support bot's threadTranscript."""
+
+    def test_lines_are_name_colon_content_oldest_first(self):
+        transcript = format_thread_transcript(
+            [('ada', 'first question'), ('Support Bot', 'the answer'), ('ada', 'follow-up')]
+        )
+        assert transcript == 'ada: first question\nSupport Bot: the answer\nada: follow-up'
+
+    def test_blank_content_is_dropped_and_content_is_stripped(self):
+        transcript = format_thread_transcript([('ada', '  padded  '), ('bob', '   '), ('cid', '')])
+        assert transcript == 'ada: padded'
+
+    def test_empty_entries_give_empty_transcript(self):
+        assert format_thread_transcript([]) == ''
+
+    def test_oversized_transcript_keeps_the_tail_with_an_ellipsis(self):
+        entries = [('ada', 'x' * 100) for _ in range(10)]
+        transcript = format_thread_transcript(entries, max_chars=200)
+        assert transcript.startswith('…\n')
+        assert len(transcript) == 202  # the ellipsis prefix plus exactly max_chars
+        assert transcript.endswith('x' * 100)  # the newest line survives
+
+    def test_transcript_at_the_cap_is_untouched(self):
+        transcript = format_thread_transcript([('a', 'x' * 8)], max_chars=11)
+        assert transcript == 'a: ' + 'x' * 8
+
+    def test_context_framing_and_no_op_without_transcript(self):
+        framed = with_thread_context('how do I stop it?', 'ada: how do I start?')
+        assert framed == (
+            "User's latest message: how do I stop it?\n\n"
+            'Earlier in this thread (oldest first, for context):\nada: how do I start?'
+        )
+        assert with_thread_context('plain question', '') == 'plain question'
+
+
+class TestMarkersAndSanitize:
+    """Escalation-marker detection and the reply sanitizer (sanitizeReply)."""
+
+    MARKERS = ['<@&900000000000000202>', 'ESCALATED']
+
+    def test_find_marker_returns_first_configured_match(self):
+        assert find_marker('please <@&900000000000000202> look', self.MARKERS) == '<@&900000000000000202>'
+        assert find_marker('ESCALATED and <@&900000000000000202>', self.MARKERS) == '<@&900000000000000202>'
+        assert find_marker('ESCALATED only', self.MARKERS) == 'ESCALATED'
+        assert find_marker('nothing here', self.MARKERS) is None
+        assert find_marker('', self.MARKERS) is None
+        assert find_marker('anything', []) is None
+
+    def test_plain_answer_is_untouched_apart_from_trimming(self):
+        assert sanitize_reply('  A clean answer.  ', self.MARKERS) == 'A clean answer.'
+        assert sanitize_reply('', self.MARKERS) == ''
+        assert sanitize_reply(None, self.MARKERS) == ''
+
+    def test_final_answer_keeps_only_what_follows_the_last_one(self):
+        raw = 'Thought: I should search\nFinal Answer: first\nObservation: hm\nfinal answer: the real answer'
+        assert sanitize_reply(raw, self.MARKERS) == 'the real answer'
+
+    def test_empty_final_answer_falls_back_to_the_text_above_it(self):
+        # An empty tail must not blank a usable answer.
+        assert sanitize_reply('Here is the answer.\nFinal Answer:   ', self.MARKERS) == (
+            'Here is the answer.\nFinal Answer:'
+        )
+
+    def test_reasoning_only_without_marker_is_suppressed(self):
+        for raw in (
+            'Thought: I should look this up',
+            'action: search(docs)',
+            'Action Input: {"q": "x"}',
+            'Observation: nothing found',
+            'Reasoning: unclear',
+        ):
+            assert sanitize_reply(raw, self.MARKERS) == '', raw
+
+    def test_reasoning_with_marker_becomes_a_handoff_that_keeps_the_marker(self):
+        raw = 'Thought: I should bring in <@&900000000000000202> for this'
+        assert sanitize_reply(raw, self.MARKERS) == (
+            "Thanks for flagging this — I've looped in the team to take a look. <@&900000000000000202>"
+        )
+
+    def test_reasoning_after_final_answer_extraction_is_still_scratchpad(self):
+        raw = 'Thought: step one\nFinal Answer: Observation: nothing to add'
+        assert sanitize_reply(raw, self.MARKERS) == ''
+
+    def test_a_final_json_envelope_is_decoded_to_its_content(self):
+        """The agent sometimes wraps its answer in {"type":"final","content":"..."}."""
+        raw = 'Thought: done\n{"type": "final", "content": "Deploy with `rocketride deploy`."}'
+        assert sanitize_reply(raw, self.MARKERS) == 'Deploy with `rocketride deploy`.'
+
+    def test_escapes_inside_the_envelope_are_decoded(self):
+        raw = '{"type":"final","content":"line one\\nline two \\"quoted\\""}'
+        assert sanitize_reply(raw, self.MARKERS) == 'line one\nline two "quoted"'
+
+    def test_the_envelope_wins_over_a_final_answer_above_it(self):
+        raw = 'Final Answer: the scratchpad one\n{"type": "final", "content": "the real one"}'
+        assert sanitize_reply(raw, self.MARKERS) == 'the real one'
+
+    def test_an_undecodable_envelope_falls_back_to_the_captured_text(self):
+        raw = '{"type": "final", "content": "bad \\q escape"}'
+        assert sanitize_reply(raw, self.MARKERS) == 'bad \\q escape'
+
+    def test_text_without_an_envelope_is_untouched(self):
+        raw = 'Here is a JSON example: {"type": "config", "content": "x"}'
+        assert sanitize_reply(raw, self.MARKERS) == raw
+
+
+class TestLooksLikeError:
+    """Engine/model failures that arrive as the answer text (looksLikeError)."""
+
+    def test_the_api_error_sentence_is_an_error(self):
+        assert looks_like_error('An error occurred with the OpenAI API: timeout') is True
+        assert looks_like_error('an error occurred with the anthropic api') is True
+
+    def test_the_engine_llm_error_answer_is_an_error(self):
+        # Live F40: the engine's LLM layer turned a provider failure into this
+        # answer text, and it was posted to Discord with sanitizeReplies on.
+        assert looks_like_error('**LLM error** — ValueError: An error occurred with the API.') is True
+        assert looks_like_error('  **LLM error**: Rate limit exceeded. Please try again later.') is True
+
+    def test_the_bare_api_error_sentence_is_an_error(self):
+        assert looks_like_error('An error occurred with the API.') is True
+        assert looks_like_error('ValueError: An error occurred with the API.') is True
+
+    def test_prose_about_api_errors_is_not_an_error(self):
+        assert looks_like_error('If an error occurred with the API call, check your key and retry.') is False
+        assert looks_like_error('The log once said **LLM error**; here is what it means.') is False
+
+    def test_an_engine_stack_frame_is_an_error(self):
+        assert looks_like_error('... raised in chat.py:412 while answering') is True
+        assert looks_like_error('agent.py:77 blew up') is True
+
+    def test_run_failed_and_a_traceback_are_errors(self):
+        assert looks_like_error('_run failed after 2 attempts') is True
+        assert looks_like_error('Traceback (most recent call last):\n  File "x"') is True
+
+    def test_an_exception_or_error_prefix_is_an_error(self):
+        assert looks_like_error('Exception: something went wrong') is True
+        assert looks_like_error('   \n Error: something went wrong') is True
+        # Not a prefix: the words may legitimately open a sentence about errors.
+        assert looks_like_error('Errors happen; here is how to read them.') is False
+
+    def test_an_api_error_code_anywhere_is_an_error(self):
+        real = (
+            "Exception: Error code: 429 - {'error': {'message': "
+            "'You have no credits remaining...', 'type': 'insufficient_quota'}}"
+        )
+        assert looks_like_error(real) is True
+        assert looks_like_error('the server replied Error code: 503') is True
+        # Three digits is the API shape; a version or a count is not.
+        assert looks_like_error('error code: 42 in the docs') is False
+
+    def test_a_normal_answer_is_not_an_error(self):
+        for text in (
+            '',
+            'Use `rocketride validate` to check the pipeline.',
+            'If the node errors, read the task log — error handling is in the docs.',
+            'Set error_mode to strict in chat.py to see more.',
+        ):
+            assert looks_like_error(text) is False, text
+
+
+class TestInjectRoleMention:
+    """The literal team alias becomes a real role mention (injectRoleMention)."""
+
+    def test_the_alias_becomes_the_role_mention(self):
+        assert inject_role_mention('I am looping in @RocketRide team.', '@RocketRide team', '<@&77>') == (
+            'I am looping in <@&77>.'
+        )
+
+    def test_matching_is_case_insensitive_and_whitespace_tolerant(self):
+        text = 'ping @rocketride   team and @RocketRide\nteam again'
+        assert inject_role_mention(text, '@RocketRide team', '<@&77>') == 'ping <@&77> and <@&77> again'
+
+    def test_an_empty_alias_or_mention_changes_nothing(self):
+        text = 'escalating to @RocketRide team'
+        assert inject_role_mention(text, '', '<@&77>') == text
+        assert inject_role_mention(text, '@RocketRide team', '') == text
+        assert inject_role_mention('', '@RocketRide team', '<@&77>') == ''
+
+    def test_regex_metacharacters_in_the_alias_are_literal(self):
+        assert inject_role_mention('ask the a.b team now', 'a.b team', '<@&77>') == 'ask the <@&77> now'
+        assert inject_role_mention('ask the axb team now', 'a.b team', '<@&77>') == 'ask the axb team now'
+
+
+class TestIsAimedAtSomeoneElse:
+    """The aimed-elsewhere decision table (isAimedAtSomeoneElse)."""
+
+    @staticmethod
+    def _aimed(**overrides):
+        kwargs = dict(
+            is_bot_mentioned=False,
+            mentioned_user_ids=[],
+            bot_user_id='999',
+            role_mention_count=0,
+            is_reply=False,
+            reply_target_is_bot=None,
+        )
+        kwargs.update(overrides)
+        return is_aimed_at_someone_else(**kwargs)
+
+    def test_plain_message_is_for_the_bot(self):
+        assert self._aimed() is False
+
+    def test_bot_mention_always_wins(self):
+        assert self._aimed(is_bot_mentioned=True, mentioned_user_ids=['5', '999'], role_mention_count=1) is False
+        assert self._aimed(is_bot_mentioned=True, is_reply=True, reply_target_is_bot=False) is False
+
+    def test_another_user_mention_is_aimed_elsewhere(self):
+        assert self._aimed(mentioned_user_ids=['5']) is True
+
+    def test_role_mention_is_aimed_elsewhere(self):
+        assert self._aimed(role_mention_count=1) is True
+
+    def test_reply_to_the_bot_is_for_the_bot(self):
+        assert self._aimed(is_reply=True, reply_target_is_bot=True) is False
+
+    def test_reply_to_somebody_else_is_aimed_elsewhere(self):
+        assert self._aimed(is_reply=True, reply_target_is_bot=False) is True
+
+    def test_unfetchable_reference_stays_aimed_elsewhere(self):
+        # The referenced message could not be fetched: the bot's behavior is to
+        # treat it as somebody else's conversation.
+        assert self._aimed(is_reply=True, reply_target_is_bot=None) is True
+
+
 class TestServicesJsonSchema:
     """Validate the shipped services.json contract."""
 
@@ -337,15 +569,36 @@ class TestServicesJsonSchema:
             'discord.emitNoReply',
             'discord.emitOutbound',
             'discord.includeMemberMetadata',
+            'discord.backfillLimit',
+            'discord.threadHistoryLimit',
+            'discord.threadHistoryMaxChars',
+            'discord.escalationPause',
+            'discord.escalationMarkers',
+            'discord.ignoreAimedAtOthers',
+            'discord.ackEmoji',
+            'discord.feedbackReactions',
+            'discord.feedbackEmojis',
+            'discord.sanitizeReplies',
+            'discord.teamMentionAlias',
             'discord.numberChunks',
         ]
         for field in required:
             assert field in schema['fields'], f'missing field: {field}'
 
-    def test_opt_in_fields_are_registered_and_off_by_default(self, schema):
-        """The opt-in behaviors must be reachable in the UI and default to off."""
+    def test_parity_fields_are_registered_and_off_by_default(self, schema):
+        """The new behaviors must be reachable in the UI and default to off."""
         properties = schema['fields']['Pipe.source.parameters']['properties']
         defaults = {
+            'discord.threadHistoryLimit': 0,
+            'discord.threadHistoryMaxChars': 6000,
+            'discord.escalationPause': False,
+            'discord.escalationMarkers': [],
+            'discord.ignoreAimedAtOthers': False,
+            'discord.ackEmoji': '',
+            'discord.feedbackReactions': False,
+            'discord.feedbackEmojis': ['✅', '❌'],
+            'discord.sanitizeReplies': False,
+            'discord.teamMentionAlias': '',
             'discord.numberChunks': False,
         }
         for field, default in defaults.items():
@@ -354,7 +607,7 @@ class TestServicesJsonSchema:
 
     def test_new_opt_in_fields_are_typed_and_optional(self, schema):
         """A field the UI cannot leave alone is not opt-in."""
-        for field, kind in (('discord.numberChunks', 'boolean'),):
+        for field, kind in (('discord.teamMentionAlias', 'string'), ('discord.numberChunks', 'boolean')):
             declared = schema['fields'][field]
             assert declared['type'] == kind
             assert declared['optional'] is True

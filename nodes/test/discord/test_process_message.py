@@ -27,6 +27,7 @@ import json
 import os
 import sys
 import threading
+import time
 import types
 from unittest import mock
 
@@ -186,14 +187,32 @@ def _make_endpoint(*, send_responses=True, merge_attachments=True):
     endpoint._process_attachment = mock.AsyncMock()
     # A real _send_response result: _process_message reads ``messageIds`` to
     # tell a posted reply from one that could not be sent.
-    endpoint._send_response = mock.AsyncMock(return_value={'messageIds': ['900'], 'destination': 'reply'})
+    endpoint._send_response = mock.AsyncMock(
+        return_value={'messageIds': ['900'], 'destination': 'reply', 'threadId': None, 'messages': []}
+    )
     endpoint._emit_no_reply = False
     endpoint._emit_outbound = False
     endpoint._include_member_metadata = False
     endpoint._bot = mock.Mock()
     endpoint._bot.user.id = 999
+    # Parity behaviors (all opt-in); tests turn on what they exercise.
+    endpoint._thread_history_limit = 0
+    endpoint._thread_history_max_chars = 6000
+    endpoint._escalation_pause = False
+    endpoint._escalation_markers = []
+    endpoint._ignore_aimed_at_others = False
+    endpoint._ack_emoji = ''
+    endpoint._feedback_reactions = False
+    endpoint._feedback_emojis = []
+    endpoint._sanitize_replies = False
+    # Off here so each existing hygiene test keeps asking exactly once; the
+    # retry tests below opt in (production defaults to 1).
+    endpoint._non_answer_retries = 0
+    endpoint._team_mention_alias = ''
     endpoint._number_chunks = False
     endpoint._allowed_mention_role_ids = []
+    endpoint._paused_threads = set()
+    endpoint._resolved_threads = set()
     return endpoint
 
 
@@ -420,6 +439,7 @@ class TestAttachmentMerge:
         # Nothing the user typed: the SSE payload falls back to the folded text.
         kwargs = endpoint._run_text_pipeline.call_args.kwargs
         assert kwargs['sse_text'] == text
+        assert kwargs['context_chars'] == len(text)
         assert _sent_reply(endpoint) == 'text-answer'
 
     def test_reply_falls_back_to_the_attachment_answer(self):
@@ -461,6 +481,28 @@ class TestAttachmentMerge:
         text, meta = self._text_call(endpoint)
         assert text == 'check this'
         assert meta['groupSize'] == 1
+
+    def test_thread_context_still_wraps_the_merged_question(self):
+        endpoint = self._endpoint()
+        endpoint._thread_history_limit = 25
+        endpoint._bot.user.display_name = 'Support Bot'
+        thread = _FakeThread(321, [_FakeHistoryMessage(1, 'the first question', 7, author_name='ada')])
+        message = self._message('and this file?', _attachment('flow.pipe', b'source: discord'))
+        message.channel = thread
+        message.id = 555
+
+        asyncio.run(endpoint._process_message(message))
+
+        text, _meta = self._text_call(endpoint)
+        assert text == (
+            "User's latest message: and this file?\n\n"
+            'Earlier in this thread (oldest first, for context):\n'
+            'ada: the first question\n\n'
+            'Contents of attached file "flow.pipe":\n```\nsource: discord\n```'
+        )
+        kwargs = endpoint._run_text_pipeline.call_args.kwargs
+        assert kwargs['sse_text'] == 'and this file?'  # SSE keeps the user's own words
+        assert kwargs['context_chars'] == len(text) - len('and this file?')
 
     def test_merge_off_keeps_one_object_per_attachment(self):
         endpoint = self._endpoint(merge=False)
@@ -675,20 +717,974 @@ class TestMetadataAndEvents:
 
 
 # ---------------------------------------------------------------------------
-# Reactions: the bot's own are ignored, the rest are scoped like messages
+# Support-bot parity behaviors (thread context, pause, ack, feedback, hygiene)
 # ---------------------------------------------------------------------------
 
 
-class _FakeThread(discord.Thread):
-    """A thread channel: an id and the channel it hangs off."""
+class _FakeHistoryMessage:
+    """A prior thread message as the node reads it (author, content, mentions)."""
 
-    def __init__(self, thread_id, parent_id=10):
+    def __init__(self, message_id, content, author_id, *, mentions=(), system=False, author_name=None):
+        self.id = message_id
+        self.content = content
+        self.author = types.SimpleNamespace(id=author_id, name=author_name or f'user{author_id}', bot=False)
+        self.mentions = list(mentions)
+        self._system = system
+
+    def is_system(self):
+        return self._system
+
+
+class _FakeThread(discord.Thread):
+    """A thread channel with a canned history (newest first, as Discord sends)."""
+
+    def __init__(self, thread_id, history=(), parent_id=10):
         self.id = thread_id
         self.parent_id = parent_id
+        self._history = list(history)
+        self.history_limits = []
+        self.history_before = []
+
+    def history(self, limit=None, before=None, **_kwargs):
+        self.history_limits.append(limit)
+        self.history_before.append(getattr(before, 'id', None))
+        items = self._history
+        if before is not None:
+            # Discord returns only messages older than ``before``, and
+            # snowflakes are monotonic, so the id order is the time order.
+            items = [item for item in items if item.id < before.id]
+        items = items[:limit] if limit else list(items)
+
+        async def _iterate():
+            for item in items:
+                yield item
+
+        return _iterate()
+
+
+def _thread_message(endpoint, thread, *, content='latest question', mentions=()):
+    message = _make_message(content=content)
+    message.channel = thread
+    message.id = 555
+    message.mentions = list(mentions)
+    del endpoint  # only here to keep call sites symmetric
+    return message
+
+
+class TestThreadHistoryContext:
+    """threadHistoryLimit carries the earlier thread messages as context."""
+
+    @staticmethod
+    def _endpoint(**attrs):
+        endpoint = _make_endpoint()
+        endpoint._run_with_optional_typing = IEndpoint._run_with_optional_typing.__get__(endpoint)
+        endpoint._run_text_pipeline = mock.Mock(return_value='')
+        endpoint._bot.user.display_name = 'Support Bot'
+        for name, value in attrs.items():
+            setattr(endpoint, name, value)
+        return endpoint
+
+    @staticmethod
+    def _history():
+        return [
+            _FakeHistoryMessage(3, 'the earlier answer', 999),  # the bot
+            _FakeHistoryMessage(2, '   ', 7),  # blank: dropped
+            _FakeHistoryMessage(1, 'the first question', 7, author_name='ada'),
+        ]
+
+    def test_context_prepended_for_a_thread_when_enabled(self):
+        endpoint = self._endpoint(_thread_history_limit=25)
+        thread = _FakeThread(321, self._history())
+        message = _thread_message(endpoint, thread, content='and how do I stop it?')
+
+        asyncio.run(endpoint._process_message(message))
+
+        text = endpoint._run_text_pipeline.call_args.args[0]
+        assert text == (
+            "User's latest message: and how do I stop it?\n\n"
+            'Earlier in this thread (oldest first, for context):\n'
+            'ada: the first question\nSupport Bot: the earlier answer'
+        )
+        assert thread.history_limits == [25]  # the configured limit, once
+
+    def test_the_limit_counts_only_earlier_messages(self):
+        """``threadHistoryLimit=N`` must give N messages of context, not N-1.
+
+        Fetching the newest N included the message being answered, so the
+        transcript only ever carried N-1 earlier messages (and none at all at
+        ``threadHistoryLimit=1``). The fetch is bounded by ``before`` instead.
+        """
+        endpoint = self._endpoint(_thread_history_limit=2)
+        thread = _FakeThread(
+            321,
+            [
+                _FakeHistoryMessage(556, 'a later message', 7, author_name='ada'),
+                _FakeHistoryMessage(554, 'third', 7, author_name='ada'),
+                _FakeHistoryMessage(553, 'second', 7, author_name='ada'),
+                _FakeHistoryMessage(552, 'first', 7, author_name='ada'),
+            ],
+        )
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='now what?')))
+
+        transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
+        assert transcript == 'ada: second\nada: third'
+        assert thread.history_before == [555], 'the fetch must stop at the current message'
+
+    def test_no_context_when_disabled_or_outside_a_thread(self):
+        endpoint = self._endpoint(_thread_history_limit=0)
+        thread = _FakeThread(321, self._history())
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='plain')))
+        assert endpoint._run_text_pipeline.call_args.args[0] == 'plain'
+        assert thread.history_limits == [], 'history must not be fetched when disabled'
+
+        endpoint = self._endpoint(_thread_history_limit=25)
+        asyncio.run(endpoint._process_message(_make_message(content='plain channel message')))
+        assert endpoint._run_text_pipeline.call_args.args[0] == 'plain channel message'
+
+    def test_current_message_excluded_and_transcript_capped(self):
+        endpoint = self._endpoint(_thread_history_limit=25, _thread_history_max_chars=40)
+        history = [_FakeHistoryMessage(555, 'the current message', 7)] + self._history()
+        thread = _FakeThread(321, history)
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+
+        text = endpoint._run_text_pipeline.call_args.args[0]
+        assert 'the current message' not in text
+        transcript = text.split('for context):\n', 1)[1]
+        assert transcript.startswith('…\n') and len(transcript) == 42
+
+    def test_history_failure_is_best_effort(self):
+        endpoint = self._endpoint(_thread_history_limit=25)
+
+        class _Broken(_FakeThread):
+            def history(self, limit=None, **kwargs):
+                raise RuntimeError('missing Read Message History')
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _Broken(321), content='still asked')))
+
+        assert endpoint._run_text_pipeline.call_args.args[0] == 'still asked'
+
+    def test_sse_payload_keeps_the_original_text_and_reports_context_size(self):
+        module = sys.modules['_discord_node.IEndpoint']
+        endpoint = IEndpoint.__new__(IEndpoint)
+        pipe = mock.Mock()
+        pipe.pipeId = 7
+        target = mock.Mock()
+        target.getPipe.return_value = pipe
+        endpoint.target = target
+        entry = mock.Mock()
+        entry.response.toDict.return_value = {'answers': ['ok']}
+        fake_engine = types.ModuleType('rocketlib.engine')
+        fake_engine.monitorSSE = mock.Mock()
+
+        with (
+            mock.patch.object(module, 'getObject', return_value=entry),
+            mock.patch.dict(sys.modules, {'rocketlib.engine': fake_engine}),
+        ):
+            endpoint._run_text_pipeline(
+                "User's latest message: q\n\n...context...",
+                44,
+                55,
+                {'correlationId': '55'},
+                sse_text='q',
+                context_chars=11,
+            )
+
+        payload = fake_engine.monitorSSE.call_args.args[2]
+        assert payload['text'] == 'q', 'SSE must show what the user actually wrote'
+        assert payload['contextChars'] == 11
+        assert pipe.writeText.call_args.args[0].startswith("User's latest message: q")
+
+
+class TestEscalationPause:
+    """A thread that escalated stays quiet until the bot is mentioned again."""
+
+    @staticmethod
+    def _endpoint(**attrs):
+        endpoint = _make_endpoint()
+        endpoint._escalation_pause = True
+        endpoint._escalation_markers = ['<@&77>']
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        for name, value in attrs.items():
+            setattr(endpoint, name, value)
+        return endpoint
+
+    def test_paused_thread_drops_without_mention_and_resumes_with_one(self):
+        endpoint = self._endpoint()
+        endpoint._paused_threads = {'321'}
+        endpoint._resolved_threads = {'321'}  # already reconciled
+        thread = _FakeThread(321)
+        message = _thread_message(endpoint, thread)
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_not_awaited()  # nothing ingested
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'paused'
+        assert endpoint._paused_threads == {'321'}
+
+        message.mentions = [endpoint._bot.user]
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_awaited_once()  # processed
+        assert endpoint._paused_threads == set(), 'a mention must unpause the thread'
+
+    def test_pause_is_reconstructed_from_thread_history(self):
+        endpoint = self._endpoint()
+        thread = _FakeThread(
+            321,
+            [
+                _FakeHistoryMessage(3, 'I have looped in <@&77>', 999),  # bot escalated
+                _FakeHistoryMessage(2, 'any update?', 7),
+                _FakeHistoryMessage(1, 'first question', 7),
+            ],
+        )
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+
+        assert endpoint._paused_threads == {'321'}
+        assert endpoint._resolved_threads == {'321'}
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'paused'
+        endpoint._run_with_optional_typing.assert_not_awaited()
+        assert thread.history_limits == [50]
+
+    def test_a_mention_after_the_escalation_resumes_the_thread(self):
+        endpoint = self._endpoint()
+        thread = _FakeThread(
+            321,
+            [
+                _FakeHistoryMessage(3, 'hey <@999> one more thing', 7, mentions=[endpoint._bot.user]),
+                _FakeHistoryMessage(2, 'I have looped in <@&77>', 999),
+                _FakeHistoryMessage(1, 'first question', 7),
+            ],
+        )
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+
+        assert endpoint._paused_threads == set()
+        endpoint._run_with_optional_typing.assert_awaited_once()
+
+    def test_history_is_reconciled_once_per_thread(self):
+        endpoint = self._endpoint()
+        thread = _FakeThread(321, [_FakeHistoryMessage(1, 'plain history', 7)])
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+
+        assert thread.history_limits == [50], 'reconciliation must not repeat per message'
+
+    def test_an_unreadable_history_is_retried_on_the_next_message(self):
+        """A failed fetch is "unknown", not "not paused" — it must not stick.
+
+        Marking the thread resolved on a failure froze it as un-paused for the
+        rest of the process, so a thread a human had taken over kept getting
+        answered. The message in hand is still answered (nothing is known
+        against it), but the next one reconciles again.
+        """
+        endpoint = self._endpoint()
+        escalated = [_FakeHistoryMessage(3, 'I have looped in <@&77>', 999)]
+
+        class _FlakyThread(_FakeThread):
+            def history(self, limit=None, **kwargs):
+                if not self.history_limits:
+                    self.history_limits.append(limit)
+                    raise RuntimeError('missing Read Message History')
+                return super().history(limit=limit, **kwargs)
+
+        thread = _FlakyThread(321, escalated)
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+
+        assert endpoint._resolved_threads == set(), 'a failed fetch must not resolve the thread'
+        assert endpoint._paused_threads == set()
+        endpoint._run_with_optional_typing.assert_awaited_once()  # answered anyway
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+
+        assert endpoint._paused_threads == {'321'}, 'the second message must reconcile again'
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'paused'
+
+    def test_posting_a_marker_answer_into_a_thread_pauses_it(self):
+        endpoint = self._endpoint()
+        endpoint._resolved_threads = {'321'}
+        endpoint._run_with_optional_typing = mock.AsyncMock(return_value='escalating to <@&77> now')
+        endpoint._send_response = mock.AsyncMock(
+            return_value={'messageIds': ['900'], 'destination': 'thread', 'threadId': '321', 'messages': []}
+        )
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert endpoint._paused_threads == {'321'}
+
+    def test_a_plain_answer_leaves_the_thread_open(self):
+        endpoint = self._endpoint()
+        endpoint._resolved_threads = {'321'}
+        endpoint._run_with_optional_typing = mock.AsyncMock(return_value='here is the answer')
+        endpoint._send_response = mock.AsyncMock(
+            return_value={'messageIds': ['900'], 'destination': 'thread', 'threadId': '321', 'messages': []}
+        )
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert endpoint._paused_threads == set()
+
+    def test_allowed_mention_roles_count_as_markers(self):
+        endpoint = self._endpoint(_escalation_markers=[], _allowed_mention_role_ids=['88'])
+        assert endpoint._effective_markers() == ['<@&88>']
+
+    def test_pause_state_is_ignored_when_the_behavior_is_off(self):
+        endpoint = self._endpoint(_escalation_pause=False)
+        endpoint._paused_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        endpoint._run_with_optional_typing.assert_awaited_once()
+
+
+class TestAimedAtSomeoneElse:
+    """A message aimed at somebody else is acknowledged, not answered."""
+
+    @staticmethod
+    def _endpoint(**attrs):
+        endpoint = _make_endpoint()
+        endpoint._ignore_aimed_at_others = True
+        endpoint._ack_emoji = '\N{EYES}'
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        for name, value in attrs.items():
+            setattr(endpoint, name, value)
+        return endpoint
+
+    def test_ack_reaction_added_and_processing_skipped(self):
+        endpoint = self._endpoint()
+        message = _make_message(content='hey @someone look at this')
+        message.mentions = [types.SimpleNamespace(id=5)]
+        message.add_reaction = mock.AsyncMock()
+
+        asyncio.run(endpoint._process_message(message))
+
+        message.add_reaction.assert_awaited_once_with('\N{EYES}')
+        endpoint._run_with_optional_typing.assert_not_awaited()
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'aimed_elsewhere'
+
+    def test_failed_reaction_still_skips(self):
+        endpoint = self._endpoint()
+        message = _make_message(content='hey @someone')
+        message.mentions = [types.SimpleNamespace(id=5)]
+        message.add_reaction = mock.AsyncMock(side_effect=RuntimeError('missing Add Reactions'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_not_awaited()
+
+    def test_no_reaction_without_a_configured_emoji(self):
+        endpoint = self._endpoint(_ack_emoji='')
+        message = _make_message(content='hey @someone')
+        message.mentions = [types.SimpleNamespace(id=5)]
+        message.add_reaction = mock.AsyncMock()
+
+        asyncio.run(endpoint._process_message(message))
+
+        message.add_reaction.assert_not_awaited()
+        endpoint._run_with_optional_typing.assert_not_awaited()
+
+    def test_a_mention_of_the_bot_is_answered(self):
+        endpoint = self._endpoint()
+        message = _make_message(content='hey bot')
+        message.mentions = [endpoint._bot.user, types.SimpleNamespace(id=5)]
+        message.add_reaction = mock.AsyncMock()
+
+        asyncio.run(endpoint._process_message(message))
+
+        message.add_reaction.assert_not_awaited()
+        endpoint._run_with_optional_typing.assert_awaited_once()
+
+    @staticmethod
+    def _reply(*, resolved=None, cached=None, fetched=None, fetch_error=None):
+        """A reply as discord.py delivers it: the target on ``reference``, never a method.
+
+        discord.py has no ``Message.fetch_reference``; deleting it from the mock
+        makes any code that still calls it fail the test instead of passing.
+        """
+        message = _make_message(content='a reply')
+        del message.fetch_reference
+        message.reference = types.SimpleNamespace(message_id=42, resolved=resolved, cached_message=cached)
+        message.channel.fetch_message = mock.AsyncMock(return_value=fetched, side_effect=fetch_error)
+        message.add_reaction = mock.AsyncMock()
+        return message
+
+    @staticmethod
+    def _author(user_id):
+        target = mock.Mock()
+        target.author.id = user_id
+        return target
+
+    def test_a_reply_to_the_bot_is_answered(self):
+        # Live review of #1503: the node called Message.fetch_reference, which does
+        # not exist, so every reply looked aimed at someone else.
+        endpoint = self._endpoint()
+        message = self._reply(resolved=self._author(999))
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_awaited_once()
+        message.add_reaction.assert_not_awaited()
+        message.channel.fetch_message.assert_not_awaited()  # resolved needs no API call
+
+    def test_a_reply_to_someone_else_is_acknowledged(self):
+        endpoint = self._endpoint()
+        message = self._reply(resolved=self._author(5))
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_not_awaited()
+        message.add_reaction.assert_awaited_once()
+
+    def test_the_cached_message_is_used_when_not_resolved(self):
+        endpoint = self._endpoint()
+        message = self._reply(cached=self._author(999))
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_awaited_once()
+        message.channel.fetch_message.assert_not_awaited()
+
+    def test_the_target_is_fetched_by_id_as_a_last_resort(self):
+        endpoint = self._endpoint()
+        message = self._reply(fetched=self._author(999))
+
+        asyncio.run(endpoint._process_message(message))
+
+        message.channel.fetch_message.assert_awaited_once_with(42)
+        endpoint._run_with_optional_typing.assert_awaited_once()
+
+    def test_a_deleted_target_is_fetched_and_an_unknown_target_is_someone_else(self):
+        # discord.py resolves a deleted target to DeletedReferencedMessage, which
+        # has no author; the fetch then fails, and the reply counts as aimed elsewhere.
+        endpoint = self._endpoint()
+        message = self._reply(resolved=types.SimpleNamespace(id=42), fetch_error=RuntimeError('404 Unknown Message'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        message.channel.fetch_message.assert_awaited_once_with(42)
+        endpoint._run_with_optional_typing.assert_not_awaited()
+        message.add_reaction.assert_awaited_once()
+
+    def test_aimed_elsewhere_in_a_thread_pauses_it(self):
+        endpoint = self._endpoint(_escalation_pause=True, _escalation_markers=['<@&77>'])
+        endpoint._resolved_threads = {'321'}
+        message = _thread_message(endpoint, _FakeThread(321))
+        message.mentions = [types.SimpleNamespace(id=5)]
+        message.add_reaction = mock.AsyncMock()
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert endpoint._paused_threads == {'321'}
+
+
+class TestFeedbackReactions:
+    """Feedback affordances land on the last posted chunk."""
+
+    @staticmethod
+    def _sent(message_id):
+        sent = mock.Mock()
+        sent.id = message_id
+        sent.add_reaction = mock.AsyncMock()
+        return sent
+
+    def test_reactions_on_the_last_chunk_only_and_reported_outbound(self):
+        endpoint = _make_endpoint()
+        endpoint._feedback_reactions = True
+        endpoint._feedback_emojis = ['\N{WHITE HEAVY CHECK MARK}', '\N{CROSS MARK}']
+        endpoint._emit_outbound = True
+        endpoint._emit_outbound_event = mock.AsyncMock()
+        first, last = self._sent(901), self._sent(902)
+        endpoint._send_response = mock.AsyncMock(
+            return_value={
+                'messageIds': ['901', '902'],
+                'destination': 'channel',
+                'threadId': None,
+                'messages': [first, last],
+            }
+        )
+        endpoint._run_with_optional_typing = mock.AsyncMock(return_value='a long answer')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert [call.args[0] for call in last.add_reaction.await_args_list] == [
+            '\N{WHITE HEAVY CHECK MARK}',
+            '\N{CROSS MARK}',
+        ]
+        first.add_reaction.assert_not_awaited()
+        outbound = endpoint._emit_outbound_event.await_args.args[3]
+        assert outbound['feedbackEmojis'] == ['\N{WHITE HEAVY CHECK MARK}', '\N{CROSS MARK}']
+
+    def test_failed_reaction_is_best_effort_and_not_reported(self):
+        endpoint = _make_endpoint()
+        endpoint._feedback_reactions = True
+        endpoint._feedback_emojis = ['\N{WHITE HEAVY CHECK MARK}']
+        last = self._sent(902)
+        last.add_reaction = mock.AsyncMock(side_effect=RuntimeError('missing Add Reactions'))
+        outbound = {'messageIds': ['902'], 'destination': 'channel', 'threadId': None, 'messages': [last]}
+        endpoint._send_response = mock.AsyncMock(return_value=outbound)
+        endpoint._run_with_optional_typing = mock.AsyncMock(return_value='an answer')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert 'feedbackEmojis' not in outbound
+
+    def test_nothing_is_reacted_to_when_the_behavior_is_off(self):
+        endpoint = _make_endpoint()
+        last = self._sent(902)
+        endpoint._send_response = mock.AsyncMock(
+            return_value={'messageIds': ['902'], 'destination': 'channel', 'threadId': None, 'messages': [last]}
+        )
+        endpoint._run_with_optional_typing = mock.AsyncMock(return_value='an answer')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        last.add_reaction.assert_not_awaited()
+
+
+class TestReplyHygiene:
+    """sanitizeReplies strips leaked agent scratchpad before anything is posted."""
+
+    @staticmethod
+    def _endpoint(answer):
+        endpoint = _make_endpoint()
+        endpoint._sanitize_replies = True
+        endpoint._escalation_markers = ['<@&77>']
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        endpoint._run_with_optional_typing = mock.AsyncMock(return_value=answer)
+        return endpoint
+
+    def test_final_answer_is_posted_without_the_scratchpad(self):
+        endpoint = self._endpoint('Thought: I should look\nFinal Answer: the clean answer')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == 'the clean answer'
+
+    def test_reasoning_only_posts_nothing_and_reports_non_answer(self):
+        endpoint = self._endpoint('Thought: I have no idea what to do here')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
+
+    def test_reasoning_with_a_marker_becomes_a_handoff(self):
+        endpoint = self._endpoint('Thought: bring in <@&77> for this one')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == ("Thanks for flagging this — I've looped in the team to take a look. <@&77>")
+
+    def test_a_plain_answer_is_posted_unchanged_when_disabled(self):
+        endpoint = self._endpoint('  Thought: leaked  ')
+        endpoint._sanitize_replies = False
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == '  Thought: leaked  '
+
+
+class TestErrorReplies:
+    """An engine/model failure that arrives as the answer is never relayed."""
+
+    # The real one: a quota error that reached a user as the bot's reply.
+    ERROR = "Exception: Error code: 429 - {'error': {'message': 'You have no credits remaining...'}}"
+
+    @staticmethod
+    def _endpoint(answers, *, retries=1, sanitize=True):
+        endpoint = _make_endpoint()
+        endpoint._sanitize_replies = sanitize
+        endpoint._non_answer_retries = retries
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        endpoint._run_with_optional_typing = IEndpoint._run_with_optional_typing.__get__(endpoint)
+        endpoint._run_text_pipeline = mock.Mock(side_effect=list(answers))
+        return endpoint
+
+    def test_an_error_answer_is_suppressed_and_reported_as_a_model_error(self):
+        endpoint = self._endpoint([self.ERROR])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
+
+    def test_an_error_answer_is_not_retried(self):
+        endpoint = self._endpoint([self.ERROR, 'a real answer'], retries=2)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 1, 'an error is not a transient non-answer'
+        assert endpoint._send_response.await_count == 0
+
+    def test_a_traceback_is_suppressed_too(self):
+        endpoint = self._endpoint(['Traceback (most recent call last):\n  File "chat.py", line 4'])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
+
+    def test_an_error_produced_by_a_retry_is_suppressed_as_well(self):
+        endpoint = self._endpoint(['Thought: still thinking', self.ERROR, 'never asked'], retries=2)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 2  # the error ends the retries
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
+
+    def test_with_sanitizing_off_the_text_is_posted_exactly_as_before(self):
+        endpoint = self._endpoint([self.ERROR], sanitize=False, retries=0)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == self.ERROR
+
+    def test_a_real_answer_is_unaffected(self):
+        endpoint = self._endpoint(['Read the task log to see the error that was raised.'])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == 'Read the task log to see the error that was raised.'
+
+
+class TestTeamMentionAlias:
+    """teamMentionAlias turns the literal team name into a real role ping."""
+
+    @staticmethod
+    def _endpoint(answer, **attrs):
+        endpoint = _make_endpoint()
+        endpoint._team_mention_alias = '@RocketRide team'
+        endpoint._allowed_mention_role_ids = ['77']
+        endpoint._run_with_optional_typing = mock.AsyncMock(return_value=answer)
+        for name, value in attrs.items():
+            setattr(endpoint, name, value)
+        return endpoint
+
+    def test_the_alias_is_replaced_before_posting(self):
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == 'Looping in <@&77> now.'
+
+    def test_the_first_allowed_role_is_the_one_pinged(self):
+        endpoint = self._endpoint('ping @RocketRide team', _allowed_mention_role_ids=['77', '88'])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == 'ping <@&77>'
+
+    def test_injection_happens_before_the_scratchpad_check(self):
+        # Leaked reasoning that escalated becomes the hand-off line only if the
+        # alias is already a real marker by the time the sanitizer runs.
+        endpoint = self._endpoint('Thought: I should bring in @RocketRide team', _sanitize_replies=True)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == ("Thanks for flagging this — I've looped in the team to take a look. <@&77>")
+
+    def test_the_injected_mention_pauses_the_thread(self):
+        endpoint = self._endpoint('Handing this to @RocketRide team', _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+        endpoint._send_response = mock.AsyncMock(
+            return_value={'messageIds': ['900'], 'destination': 'thread', 'threadId': '321', 'messages': []}
+        )
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert endpoint._paused_threads == {'321'}
+
+    def test_without_an_allowed_role_there_is_nothing_to_ping(self):
+        endpoint = self._endpoint('ping @RocketRide team', _allowed_mention_role_ids=[])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == 'ping @RocketRide team'
+
+    def test_the_shipped_default_changes_nothing(self):
+        assert IEndpoint._team_mention_alias == ''
+        endpoint = self._endpoint('ping @RocketRide team', _team_mention_alias='')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == 'ping @RocketRide team'
+
+    def test_services_json_declares_the_field(self):
+        schema = _load_services_json()
+
+        field = schema['fields']['discord.teamMentionAlias']
+        assert field['default'] == ''
+        assert 'discord.teamMentionAlias' in schema['fields']['Pipe.source.parameters']['properties']
+
+
+class TestNonAnswerRetry:
+    """A reply that sanitizes to nothing is asked again before giving up."""
+
+    @staticmethod
+    def _endpoint(answers, *, retries=1):
+        endpoint = _make_endpoint()
+        endpoint._sanitize_replies = True
+        endpoint._non_answer_retries = retries
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        # The real text-pass path, with only the pipeline call faked, so the
+        # object names the retry pushes are visible.
+        endpoint._run_with_optional_typing = IEndpoint._run_with_optional_typing.__get__(endpoint)
+        endpoint._run_text_pipeline = mock.Mock(side_effect=list(answers))
+        return endpoint
+
+    @staticmethod
+    def _object_names(endpoint):
+        """The object name each ``_run_text_pipeline`` call pushed (None = default)."""
+        calls = endpoint._run_text_pipeline.call_args_list
+        return [call.args[4] if len(call.args) > 4 else None for call in calls]
+
+    def test_scratchpad_then_a_real_answer_posts_once(self):
+        endpoint = self._endpoint(['Thought: I need to confirm that pipelines can do both', 'the real answer'])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 2
+        assert self._object_names(endpoint) == [None, '2:retry1']
+        assert endpoint._send_response.await_count == 1
+        assert _sent_reply(endpoint) == 'the real answer'
+        endpoint._emit_no_reply_event.assert_not_awaited()
+
+    def test_the_retry_repeats_the_question_verbatim_and_is_marked(self):
+        endpoint = self._endpoint(['Thought: still thinking', 'the real answer'])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        first, retry = endpoint._run_text_pipeline.call_args_list
+        assert retry.args[:4] == first.args[:4]  # same text, channel, message, metadata
+        assert retry.kwargs['sse_text'] == first.kwargs['sse_text']
+        assert retry.kwargs['context_chars'] == first.kwargs['context_chars']
+        assert retry.kwargs['retry'] == 1
+        assert 'retry' not in first.kwargs  # the original run is unmarked
+
+    def test_scratchpad_twice_gives_up_with_non_answer(self):
+        endpoint = self._endpoint(['Thought: one', 'Thought: two'])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 2  # the original plus one retry
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
+
+    def test_zero_retries_is_todays_behaviour(self):
+        endpoint = self._endpoint(['Thought: one', 'never asked'], retries=0)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 1
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
+
+    def test_a_third_attempt_runs_when_configured(self):
+        endpoint = self._endpoint(['Thought: one', 'Thought: two', 'the real answer'], retries=2)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert self._object_names(endpoint) == [None, '2:retry1', '2:retry2']
+        assert _sent_reply(endpoint) == 'the real answer'
+
+    def test_a_merged_question_is_reused_on_the_retry(self):
+        endpoint = self._endpoint(['Thought: hmm', 'the real answer'])
+        endpoint._max_attachment_bytes = 1024
+        endpoint._process_attachment = IEndpoint._process_attachment.__get__(endpoint)
+        endpoint._run_binary_pipeline = mock.Mock(return_value='image-answer')
+        message = _make_message(content='why does this fail?')
+        message.attachments = [_attachment('shot.png', b'\x89PNG', content_type='image/png')]
+
+        asyncio.run(endpoint._process_message(message))
+
+        first, retry = endpoint._run_text_pipeline.call_args_list
+        assert 'What the pipeline found in the attached image "shot.png":' in first.args[0]
+        assert retry.args[:4] == first.args[:4]  # the folded question is not rebuilt
+        assert retry.args[4] == '2:retry1'
+        assert endpoint._run_binary_pipeline.call_count == 1  # the image is not re-ingested
+        assert _sent_reply(endpoint) == 'the real answer'
+
+    def test_an_attachment_only_message_has_no_text_pass_to_retry(self):
+        endpoint = _make_endpoint(merge_attachments=False)
+        endpoint._sanitize_replies = True
+        endpoint._non_answer_retries = 2
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        endpoint._run_text_pipeline = mock.Mock()
+        endpoint._process_attachment = mock.AsyncMock(return_value='Thought: still thinking')
+
+        asyncio.run(endpoint._process_message(_make_message(attachment_count=1)))
+
+        endpoint._run_text_pipeline.assert_not_called()
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
+
+    def test_sse_payload_marks_the_retry_run_only(self):
+        module = sys.modules['_discord_node.IEndpoint']
+        endpoint = IEndpoint.__new__(IEndpoint)
+        pipe = mock.Mock()
+        pipe.pipeId = 7
+        target = mock.Mock()
+        target.getPipe.return_value = pipe
+        endpoint.target = target
+        entry = mock.Mock()
+        entry.response.toDict.return_value = {'answers': ['ok']}
+        fake_engine = types.ModuleType('rocketlib.engine')
+        fake_engine.monitorSSE = mock.Mock()
+
+        with (
+            mock.patch.object(module, 'getObject', return_value=entry),
+            mock.patch.dict(sys.modules, {'rocketlib.engine': fake_engine}),
+        ):
+            endpoint._run_text_pipeline('q', 44, 55, {'correlationId': '55'})
+            endpoint._run_text_pipeline('q', 44, 55, {'correlationId': '55'}, '55:retry1', retry=1)
+
+        original, retried = (call.args[2] for call in fake_engine.monitorSSE.call_args_list)
+        assert 'retry' not in original
+        assert retried['retry'] == 1
+        assert (retried['lane'], retried['text'], retried['contextChars']) == ('text', 'q', 0)
+
+    def test_retrying_once_is_the_shipped_default(self):
+        assert IEndpoint._non_answer_retries == 1
+
+    def test_services_json_declares_the_field(self):
+        schema = _load_services_json()
+
+        field = schema['fields']['discord.nonAnswerRetries']
+        assert field['default'] == 1
+        assert (field['minimum'], field['maximum']) == (0, 3)
+        assert 'discord.nonAnswerRetries' in schema['fields']['Pipe.source.parameters']['properties']
+
+
+class TestEmptyAnswerRetry:
+    """An empty text pass is asked again too, not only one that sanitizes away."""
+
+    @staticmethod
+    def _endpoint(answers, *, retries=1, sanitize=True, merge=True):
+        endpoint = _make_endpoint(merge_attachments=merge)
+        endpoint._sanitize_replies = sanitize
+        endpoint._non_answer_retries = retries
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        endpoint._run_with_optional_typing = IEndpoint._run_with_optional_typing.__get__(endpoint)
+        endpoint._run_text_pipeline = mock.Mock(side_effect=list(answers))
+        return endpoint
+
+    def test_an_empty_answer_is_retried_and_the_second_run_is_posted(self):
+        endpoint = self._endpoint(['', 'the real answer'])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 2
+        assert TestNonAnswerRetry._object_names(endpoint) == [None, '2:retry1']
+        assert _sent_reply(endpoint) == 'the real answer'
+        endpoint._emit_no_reply_event.assert_not_awaited()
+
+    def test_empty_twice_keeps_todays_no_answer_reason(self):
+        endpoint = self._endpoint(['', ''])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 2
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'no_answer'
+
+    def test_a_processing_error_is_never_retried(self):
+        # The pipeline failed for this message; re-running it just repeats the
+        # failure, and the error is the outcome worth reporting.
+        endpoint = self._endpoint([], retries=2)
+
+        def _fail(*args, **_kwargs):
+            args[3]['_pipelineError'] = 'Failed to open a data pipe'
+            return ''
+
+        endpoint._run_text_pipeline = mock.Mock(side_effect=_fail)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 1
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'Failed to open a data pipe'
+
+    def test_nothing_is_retried_when_sanitizing_is_off(self):
+        endpoint = self._endpoint(['', 'never asked'], sanitize=False)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 1
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'no_answer'
+
+    def test_an_attachment_only_message_has_no_text_pass_to_retry(self):
+        endpoint = self._endpoint([], merge=False, retries=2)
+        endpoint._run_text_pipeline = mock.Mock(return_value='')
+        endpoint._process_attachment = mock.AsyncMock(return_value='')
+
+        asyncio.run(endpoint._process_message(_make_message(attachment_count=1)))
+
+        endpoint._run_text_pipeline.assert_not_called()
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'no_answer'
+
+
+class TestNoReplyPayload:
+    """A skipped message is still observable: its text travels with the no_reply."""
+
+    @staticmethod
+    def _endpoint(**attrs):
+        endpoint = _make_endpoint()
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = IEndpoint._emit_no_reply_event.__get__(endpoint)
+        endpoint._emit_event_pipeline = mock.Mock()
+        for name, value in attrs.items():
+            setattr(endpoint, name, value)
+        return endpoint
+
+    @staticmethod
+    def _emitted(endpoint):
+        _metadata, event_type, payload = endpoint._emit_event_pipeline.call_args.args
+        return event_type, payload
+
+    def test_a_paused_thread_records_the_message_that_was_ignored(self):
+        # A team member answering inside a paused thread is the signal a human
+        # took over; with no `message` event the no_reply is the only record.
+        endpoint = self._endpoint(_escalation_pause=True, _escalation_markers=['<@&77>'])
+        endpoint._paused_threads = {'321'}
+        endpoint._resolved_threads = {'321'}
+        message = _thread_message(endpoint, _FakeThread(321), content='I will take this one')
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert self._emitted(endpoint) == ('no_reply', {'reason': 'paused', 'text': 'I will take this one'})
+
+    def test_an_aimed_elsewhere_message_records_its_text_too(self):
+        endpoint = self._endpoint(_ignore_aimed_at_others=True)
+        message = _make_message(content='hey @someone, any idea?')
+        message.mentions = [types.SimpleNamespace(id=5)]
+        message.add_reaction = mock.AsyncMock()
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert self._emitted(endpoint) == ('no_reply', {'reason': 'aimed_elsewhere', 'text': 'hey @someone, any idea?'})
+
+    def test_other_no_reply_reasons_keep_their_payload(self):
+        endpoint = self._endpoint()
+        endpoint._run_with_optional_typing = mock.AsyncMock(return_value='')
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert self._emitted(endpoint) == ('no_reply', {'reason': 'no_answer'})
 
 
 class TestOwnReactionsIgnored:
-    """The node's own reactions never surface as user feedback."""
+    """The node's own feedback emojis never surface as user feedback."""
 
     @staticmethod
     def _endpoint():
@@ -897,6 +1893,85 @@ class TestReactionScoping:
         endpoint._emit_event_pipeline.assert_called_once()
 
 
+class TestThreadSerialization:
+    """escalationPause only works if a thread's messages are handled in order."""
+
+    @staticmethod
+    def _endpoint(*, escalation_pause=True):
+        endpoint = _make_endpoint()
+        endpoint._escalation_pause = escalation_pause
+        endpoint._escalation_markers = ['<@&77>']
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        endpoint._send_response = mock.AsyncMock(
+            return_value={'messageIds': ['900'], 'destination': 'thread', 'threadId': '321', 'messages': []}
+        )
+        endpoint._resolved_threads = {'321'}
+        endpoint._inflight = set()
+        endpoint._ignore_bots = True
+        endpoint._require_mention = False
+        endpoint._require_mention_channel_ids = []
+        endpoint._allowed_bot_ids = []
+        endpoint._guild_ids = []
+        endpoint._channel_ids = []
+
+        answers = ['escalating to <@&77> now', 'and here is a second answer']
+
+        async def _answer(_message, _factory):
+            # Two suspension points: without serialization the follow-up's
+            # pause check runs here, before the first answer is posted.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            return answers.pop(0)
+
+        endpoint._run_with_optional_typing = mock.AsyncMock(side_effect=_answer)
+        return endpoint
+
+    @staticmethod
+    def _messages(thread):
+        messages = []
+        for index, (message_id, content) in enumerate(((601, 'my build is broken'), (602, 'any update?'))):
+            message = _make_message(content=content)
+            message.id = message_id
+            message.channel = thread
+            messages.append(message)
+            del index
+        return messages
+
+    @staticmethod
+    async def _drive(endpoint, messages):
+        for message in messages:
+            await endpoint._on_message(message)
+        while endpoint._inflight:
+            await asyncio.gather(*list(endpoint._inflight), return_exceptions=True)
+
+    def test_a_follow_up_sees_the_pause_the_first_answer_created(self):
+        endpoint = self._endpoint()
+        thread = _FakeThread(321)
+
+        asyncio.run(self._drive(endpoint, self._messages(thread)))
+
+        assert endpoint._send_response.await_count == 1, 'the follow-up must not be answered too'
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'paused'
+        assert endpoint._paused_threads == {'321'}
+
+    def test_the_lock_is_dropped_once_the_thread_is_idle(self):
+        endpoint = self._endpoint()
+
+        asyncio.run(self._drive(endpoint, self._messages(_FakeThread(321))))
+
+        assert endpoint._thread_locks == {}
+
+    def test_with_the_pause_off_processing_stays_concurrent(self):
+        endpoint = self._endpoint(escalation_pause=False)
+        thread = _FakeThread(321)
+
+        asyncio.run(self._drive(endpoint, self._messages(thread)))
+
+        assert endpoint._send_response.await_count == 2
+        assert getattr(endpoint, '_thread_locks', {}) == {}
+
+
 class TestSendFailure:
     """An answer that could not be posted is reported, not silently dropped."""
 
@@ -913,7 +1988,7 @@ class TestSendFailure:
 
     @staticmethod
     def _outbound(message_ids):
-        return {'messageIds': message_ids, 'destination': 'reply'}
+        return {'messageIds': message_ids, 'destination': 'reply', 'threadId': None, 'messages': []}
 
     def test_a_reply_that_posted_nothing_is_reported(self):
         endpoint = self._endpoint(self._outbound([]))
@@ -978,6 +2053,57 @@ class TestNoReplyReasonLength:
         assert endpoint._emit_event_pipeline.call_args.args[2] == {'reason': 'no_answer'}
 
 
+class TestBackfill:
+    """One unreadable channel must not cost the rest of the backfill."""
+
+    class _Channel:
+        def __init__(self, channel_id, contents=(), *, broken=False):
+            self.id = channel_id
+            self._contents = list(contents)
+            self._broken = broken
+
+        def history(self, limit=None, **_kwargs):
+            if self._broken:
+                raise RuntimeError('missing Read Message History')
+
+            async def _iterate():
+                for item in self._contents[:limit]:
+                    yield item
+
+            return _iterate()
+
+    @staticmethod
+    def _endpoint(channels):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._backfill_limit = 5
+        endpoint._channel_ids = [str(channel_id) for channel_id in channels]
+        endpoint._bot = mock.Mock()
+        endpoint._bot.get_channel = mock.Mock(side_effect=lambda channel_id: channels.get(channel_id))
+        endpoint._on_message = mock.AsyncMock()
+        return endpoint
+
+    def test_a_broken_channel_is_skipped_and_the_rest_are_replayed(self):
+        channels = {
+            1: self._Channel(1, ['a2', 'a1']),
+            2: self._Channel(2, broken=True),
+            3: self._Channel(3, ['c1']),
+        }
+        endpoint = self._endpoint(channels)
+
+        asyncio.run(endpoint._run_backfill())
+
+        replayed = [call.args[0] for call in endpoint._on_message.await_args_list]
+        assert replayed == ['a1', 'a2', 'c1'], 'oldest first, and channel 3 still runs'
+
+    def test_every_channel_is_replayed_when_all_are_readable(self):
+        channels = {1: self._Channel(1, ['a1']), 2: self._Channel(2, ['b1'])}
+        endpoint = self._endpoint(channels)
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert [call.args[0] for call in endpoint._on_message.await_args_list] == ['a1', 'b1']
+
+
 class TestNumericAndMentionConfig:
     """``_run``'s config block, as the engine actually delivers values."""
 
@@ -1018,12 +2144,15 @@ class TestNumericAndMentionConfig:
             endpoint._thread_name_max_length,
             endpoint._thread_auto_archive_minutes,
             endpoint._text_attachment_max_chars,
+            endpoint._backfill_limit,
+            endpoint._thread_history_limit,
+            endpoint._thread_history_max_chars,
         )
 
     def test_the_shipped_defaults_are_unchanged(self):
         endpoint = self._parse({})
 
-        assert self._numbers(endpoint) == (26214400, 90, 0, 12000)
+        assert self._numbers(endpoint) == (26214400, 90, 0, 12000, 0, 0, 6000)
         assert endpoint._reply_mode == 'reply'
         assert endpoint._thread_name == 'Pipeline Response'
 
@@ -1034,10 +2163,13 @@ class TestNumericAndMentionConfig:
                 'threadNameMaxLength': self._Proxy('40'),
                 'threadAutoArchiveMinutes': self._Proxy('1440'),
                 'textAttachmentMaxChars': self._Proxy('5000'),
+                'backfillLimit': self._Proxy('7'),
+                'threadHistoryLimit': self._Proxy('12'),
+                'threadHistoryMaxChars': self._Proxy('900'),
             }
         )
 
-        assert self._numbers(endpoint) == (1048576, 40, 1440, 5000)
+        assert self._numbers(endpoint) == (1048576, 40, 1440, 5000, 7, 12, 900)
         assert all(isinstance(value, int) for value in self._numbers(endpoint))
 
     def test_text_settings_are_real_strings(self):
@@ -1053,16 +2185,19 @@ class TestNumericAndMentionConfig:
                 'threadNameMaxLength': None,
                 'threadAutoArchiveMinutes': '',
                 'textAttachmentMaxChars': object(),
+                'backfillLimit': 'none',
+                'threadHistoryLimit': [],
+                'threadHistoryMaxChars': 'all of it',
             }
         )
 
-        assert self._numbers(endpoint) == (26214400, 90, 0, 12000)
+        assert self._numbers(endpoint) == (26214400, 90, 0, 12000, 0, 0, 6000)
 
     def test_a_float_is_truncated_not_rejected(self):
-        endpoint = self._parse({'threadNameMaxLength': 12.0, 'textAttachmentMaxChars': '7.9'})
+        endpoint = self._parse({'threadHistoryLimit': 12.0, 'backfillLimit': '7.9'})
 
-        assert endpoint._thread_name_max_length == 12
-        assert endpoint._text_attachment_max_chars == 7
+        assert endpoint._thread_history_limit == 12
+        assert endpoint._backfill_limit == 7
 
     @pytest.mark.parametrize(('configured', 'expected'), [(500, 100), (101, 100), (100, 100), (1, 1), (0, 1), (-5, 1)])
     def test_the_thread_name_length_is_clamped_to_what_discord_accepts(self, configured, expected):
@@ -1409,6 +2544,7 @@ class TestOutboundSends:
         assert message.create_thread.await_count == 1
         assert message.reply.await_count > 1, 'every chunk must still be posted'
         assert outbound['destination'] == 'reply'
+        assert outbound['threadId'] is None
         assert len(outbound['messageIds']) == message.reply.await_count
 
     def test_thread_name_uses_the_first_attachment_when_there_is_no_text(self):
@@ -1564,6 +2700,16 @@ class TestConfigCoercion:
         # ...and sometimes as a one-element list holding that JSON text.
         assert IEndpoint._as_str_list(['["900000000000000201"]']) == ['900000000000000201']
         assert IEndpoint._as_str_list(['["1","2"]', '3']) == ['1', '2', '3']
+
+    def test_phrases_are_kept_whole_when_split_is_off(self):
+        # Escalation markers are sentences; splitting them would turn "to" into a marker.
+        phrase = 'Escalated to the RocketRide team.'
+        assert IEndpoint._as_str_list(phrase, split=False) == [phrase]
+        assert IEndpoint._as_str_list([phrase, '@RocketRide team'], split=False) == [phrase, '@RocketRide team']
+        assert IEndpoint._as_str_list('["Escalated to the RocketRide team."]', split=False) == [phrase]
+        assert IEndpoint._as_str_list(['["a b", "c"]'], split=False) == ['a b', 'c']
+        assert IEndpoint._as_str_list('', split=False) == []
+        assert IEndpoint._as_str_list(('a', 'b')) == ['a', 'b']
 
     def test_bare_string_is_single_element_not_per_character(self):
         assert IEndpoint._as_str_list('123456') == ['123456']
@@ -1858,3 +3004,66 @@ class TestOnMessageGating:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestPipelineTimeout:
+    """pipelineTimeoutSeconds: opt-in give-up on a pipeline that does not answer."""
+
+    @staticmethod
+    def _endpoint(seconds, delay):
+        endpoint = _make_endpoint()
+        endpoint._pipeline_timeout_seconds = seconds
+        endpoint._emit_no_reply = True
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+        endpoint._run_with_optional_typing = IEndpoint._run_with_optional_typing.__get__(endpoint)
+
+        def slow(*args, **kwargs):
+            time.sleep(delay)
+            return 'late answer'
+
+        endpoint._run_text_pipeline = mock.Mock(side_effect=slow)
+        return endpoint
+
+    def test_off_by_default(self):
+        assert IEndpoint._pipeline_timeout_seconds == 0
+
+    def test_off_waits_for_a_slow_answer(self):
+        endpoint = self._endpoint(0, 0.3)
+
+        asyncio.run(endpoint._process_message(_make_message(content='q')))
+
+        assert _sent_reply(endpoint) == 'late answer'
+        endpoint._emit_no_reply_event.assert_not_awaited()
+
+    def test_an_answer_inside_the_limit_is_posted(self):
+        endpoint = self._endpoint(5, 0.1)
+
+        asyncio.run(endpoint._process_message(_make_message(content='q')))
+
+        assert _sent_reply(endpoint) == 'late answer'
+
+    def test_a_slow_pipeline_is_given_up_with_timeout(self):
+        endpoint = self._endpoint(0.2, 0.8)
+
+        asyncio.run(endpoint._process_message(_make_message(content='q')))
+
+        assert endpoint._send_response.await_count == 0, 'the late answer must be dropped'
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'timeout'
+
+    def test_an_attachment_timeout_is_not_swallowed(self):
+        endpoint = _make_endpoint()
+        endpoint._process_attachment = IEndpoint._process_attachment.__get__(endpoint)
+        endpoint._max_attachment_bytes = 10_000
+        endpoint._run_with_optional_typing = mock.AsyncMock(side_effect=_ENDPOINT_MODULE.PipelineTimeout('timeout'))
+        attachment = _attachment('a.png', b'png', content_type='image/png')
+
+        with pytest.raises(_ENDPOINT_MODULE.PipelineTimeout):
+            asyncio.run(endpoint._process_attachment(_make_message(), attachment, {}, 0))
+
+    def test_services_json_declares_the_field_off(self):
+        schema = _load_services_json()
+
+        field = schema['fields']['discord.pipelineTimeoutSeconds']
+        assert field['default'] == 0
+        assert field['minimum'] == 0
+        assert 'discord.pipelineTimeoutSeconds' in schema['fields']['Pipe.source.parameters']['properties']

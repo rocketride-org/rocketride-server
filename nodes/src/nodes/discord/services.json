@@ -278,6 +278,102 @@
 			"default": false,
 			"optional": true
 		},
+		"discord.backfillLimit": {
+			"type": "number",
+			"title": "Backfill Limit",
+			"description": "Most-recent messages to process per readable channel at startup. Zero disables backfill.",
+			"default": 0,
+			"optional": true
+		},
+		"discord.threadHistoryLimit": {
+			"type": "number",
+			"title": "Thread History Limit",
+			"description": "Prior thread messages fetched as conversation context for a message in a thread. Zero disables it.",
+			"default": 0,
+			"optional": true
+		},
+		"discord.threadHistoryMaxChars": {
+			"type": "number",
+			"title": "Thread History Max Characters",
+			"description": "Maximum characters of thread transcript passed as context; the oldest lines are dropped first.",
+			"default": 6000,
+			"optional": true
+		},
+		"discord.escalationPause": {
+			"type": "boolean",
+			"title": "Pause After Escalation",
+			"description": "After an answer containing an escalation marker is posted into a thread, stay quiet in that thread until the bot is mentioned again.",
+			"default": false,
+			"optional": true
+		},
+		"discord.escalationMarkers": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Escalation Markers",
+			"description": "Text markers that mark an answer as escalated (for example a team role mention). Allowed Mention Role IDs are added automatically.",
+			"default": [],
+			"optional": true
+		},
+		"discord.teamMentionAlias": {
+			"type": "string",
+			"title": "Team Mention Alias",
+			"description": "Literal team name the pipeline writes when it hands a question over, for example \"@RocketRide team\". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Empty leaves answers untouched.",
+			"default": "",
+			"optional": true
+		},
+		"discord.ignoreAimedAtOthers": {
+			"type": "boolean",
+			"title": "Ignore Messages Aimed At Others",
+			"description": "Skip messages that mention another user or role, or reply to a message the bot did not write, unless the bot is mentioned.",
+			"default": false,
+			"optional": true
+		},
+		"discord.ackEmoji": {
+			"type": "string",
+			"title": "Acknowledgement Emoji",
+			"description": "Emoji added to a message that is skipped as aimed at somebody else. Empty adds no reaction.",
+			"default": "",
+			"optional": true
+		},
+		"discord.feedbackReactions": {
+			"type": "boolean",
+			"title": "Feedback Reactions",
+			"description": "Add feedback emojis to the last posted answer chunk so readers can grade it in one click.",
+			"default": false,
+			"optional": true
+		},
+		"discord.feedbackEmojis": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Feedback Emojis",
+			"description": "Emojis added, in order, to the last posted answer chunk when Feedback Reactions is enabled.",
+			"default": ["✅", "❌"],
+			"optional": true
+		},
+		"discord.sanitizeReplies": {
+			"type": "boolean",
+			"title": "Sanitize Replies",
+			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it.",
+			"default": false,
+			"optional": true
+		},
+		"discord.nonAnswerRetries": {
+			"type": "number",
+			"title": "Retries on a non-answer",
+			"description": "When Sanitize Replies strips the whole reply (the pipeline returned only agent scratchpad such as Thought: lines), re-run the text pass up to this many times before giving up. Zero never retries.",
+			"default": 1,
+			"minimum": 0,
+			"maximum": 3,
+			"optional": true
+		},
+		"discord.pipelineTimeoutSeconds": {
+			"type": "number",
+			"title": "Pipeline Timeout (seconds)",
+			"description": "Give up on a message whose pipeline has not answered after this many seconds and report a no_reply with reason timeout instead of posting. Each pipeline run (the question, each attachment, each retry) gets this long. The run itself is not stopped: it finishes in the background and its late answer is dropped. Zero (default) waits as long as it takes.",
+			"default": 0,
+			"minimum": 0,
+			"optional": true
+		},
 		"Pipe.source.parameters": {
 			"section": "parameters",
 			"title": "Discord Bot Configuration",
@@ -305,7 +401,20 @@
 				"discord.emitReactions",
 				"discord.emitNoReply",
 				"discord.emitOutbound",
-				"discord.includeMemberMetadata"
+				"discord.includeMemberMetadata",
+				"discord.backfillLimit",
+				"discord.threadHistoryLimit",
+				"discord.threadHistoryMaxChars",
+				"discord.escalationPause",
+				"discord.escalationMarkers",
+				"discord.teamMentionAlias",
+				"discord.ignoreAimedAtOthers",
+				"discord.ackEmoji",
+				"discord.feedbackReactions",
+				"discord.feedbackEmojis",
+				"discord.sanitizeReplies",
+				"discord.nonAnswerRetries",
+				"discord.pipelineTimeoutSeconds"
 			]
 		}
 	},
