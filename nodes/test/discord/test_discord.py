@@ -630,6 +630,7 @@ class TestLooksLikeError:
 
     def test_run_failed_and_a_traceback_are_errors(self):
         assert looks_like_error('_run failed after 2 attempts') is True
+        assert looks_like_error('agent base _run failed run_id=42') is True
         assert looks_like_error('Traceback (most recent call last):\n  File "x"') is True
         assert looks_like_error('  \nTraceback (most recent call last):\n  File "x"') is True
 
@@ -641,6 +642,20 @@ class TestLooksLikeError:
             'A provider reply of `Error code: 429` means your quota is used up.',
         ):
             assert looks_like_error(text) is False, text
+
+    def test_run_failed_in_prose_is_not_an_error(self):
+        # Review of #2547: users paste the engine log line and ask about it.
+        text = 'Your log shows that task_run failed because the token expired. Regenerate it.'
+        assert looks_like_error(text) is False
+
+    def test_only_an_exception_name_may_label_an_error_code(self):
+        assert looks_like_error('Note: Error code: 429 means you were rate limited') is False
+        assert looks_like_error('RateLimitError: Error code: 429') is True
+        assert looks_like_error('APIStatusException: Error code: 500') is True
+
+    def test_the_line_after_a_leading_code_block_is_not_the_opening(self):
+        text = '```\nrocketride run app.pipe\n```\nError: this happens because the key is missing.'
+        assert looks_like_error(text) is False
 
     def test_an_error_inside_a_code_fence_is_not_an_error(self):
         for text in (

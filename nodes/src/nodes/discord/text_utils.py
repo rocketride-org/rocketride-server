@@ -53,18 +53,26 @@ _FINAL_JSON = re.compile(r'\{\s*"type"\s*:\s*"final"\s*,\s*"content"\s*:\s*"((?:
 # A fenced code block, or an unclosed fence running to the end of the text.
 _CODE_FENCE = re.compile(r'```.*?(?:```|\Z)', re.DOTALL)
 
+# What a code block becomes before the error checks: a line of its own, so the
+# text after a leading block is not mistaken for the opening of the reply.
+_CODE_PLACEHOLDER = '\n[code]\n'
+
 # Engine and model failures can surface as the "answer" text — a provider API
 # error, a Python traceback, an engine stack frame, a bare exception line, or an
 # HTTP status from the provider. None of those may ever reach Discord. Each
-# shape is matched only where the reply opens with it (code fences are removed
-# first), so a support answer that quotes the user's error is still posted.
+# shape is matched only where the reply opens with it (each code fence is
+# replaced by a placeholder line first), so a support answer that quotes the
+# user's error is still posted.
 _ERROR_SIGNATURES = (
     re.compile(r'^\s*an error occurred with the \w+ api\b', re.IGNORECASE),
     re.compile(r'^\s*[\w./\\-]*\b(chat|agent)\.py:\d+', re.IGNORECASE),
-    re.compile(r'_run failed\b', re.IGNORECASE),
+    # The engine's own log line is ``agent base _run failed run_id=...``.
+    re.compile(r'^\s*(?:agent\s+base\s+)?_run failed\b', re.IGNORECASE),
     re.compile(r'^\s*Traceback \(most recent call last\)', re.IGNORECASE),
     re.compile(r'^\s*(Exception|Error)\s*:', re.IGNORECASE),
-    re.compile(r'^\s*(?:\w+\s*:\s*)?Error code:\s*\d{3}\b', re.IGNORECASE),
+    # Optionally labelled by an exception name (``RateLimitError:``), never by
+    # an arbitrary word (``Note:``).
+    re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\b', re.IGNORECASE),
     # The engine's LLM layer reports a provider failure as the answer itself:
     # ``**LLM error** — ValueError: An error occurred with the API.``
     re.compile(r'^\s*\*\*LLM error\*\*'),
@@ -711,7 +719,7 @@ def looks_like_error(text: str) -> bool:
     """
     if not text:
         return False
-    text = _CODE_FENCE.sub('', text)
+    text = _CODE_FENCE.sub(_CODE_PLACEHOLDER, text)
     return any(pattern.search(text) for pattern in _ERROR_SIGNATURES)
 
 

@@ -143,11 +143,11 @@ The same switch stops an engine or model failure from being relayed as an answer
 - opens with the engine's `**LLM error**` prefix;
 - is only the sentence `An error occurred with the API.` (optionally after an exception name such as `ValueError:`);
 - opens with `an error occurred with the <x> api`, a `chat.py:NN` / `agent.py:NN` engine frame, or `Traceback (most recent call last)`;
-- contains `_run failed`;
+- opens with `_run failed` (or the engine's `agent base _run failed` log line);
 - opens with `Exception:` or `Error:`;
-- opens with a provider status such as `Error code: 429` (optionally after an exception name).
+- opens with a provider status such as `Error code: 429` (optionally after an exception name such as `RateLimitError:`, never after another word such as `Note:`).
 
-Code fences are removed before these checks, and apart from `_run failed` each shape counts only where the reply opens with it, so an answer that quotes the user's error or traceback is still posted.
+Each code block is replaced by a placeholder line before these checks, so the text after a leading code block is not taken as the reply's opening, and every shape counts only where the reply opens with it, so an answer that quotes the user's error or traceback is still posted.
 
 Such a reply is not posted and not retried: it is logged and reported as `no_reply` with reason `model_error`. A retry's answer is checked the same way, and an error there ends the retries. With `sanitizeReplies` off, nothing is inspected and whatever the pipeline returned is posted, as before.
 
