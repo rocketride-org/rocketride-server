@@ -178,6 +178,9 @@ class DataConn(DAPConn):
         # Connection shutdown event
         self._shutdown_event = asyncio.Event()
 
+        # Requests this task sent to the engine, awaiting their response by seq
+        self._pending: Dict[int, asyncio.Future] = {}
+
         # Start cleanup task for zombie pipes
         self._monitor_task = asyncio.create_task(self._monitor_pipes())
 
@@ -185,6 +188,76 @@ class DataConn(DAPConn):
         self.debug_message(
             f'Initializing data connection (concurrency limit deferred, zombie timeout {self._pipe_timeout}s)...'
         )
+
+    async def on_connected(self, connection_info: Optional[str] = None) -> None:
+        """Hand this connection to ``task_channel`` once the socket is accepted.
+
+        Args:
+            connection_info: The peer, as the transport reports it.
+        """
+        await super().on_connected(connection_info)
+        from .channel import task_channel
+
+        task_channel.attach(self)
+
+    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
+        """Resolve a response to one of this task's requests; route anything else as before.
+
+        Args:
+            message: The parsed DAP message.
+        """
+        if message is not None and message.get('type') == 'response':
+            future = self._pending.pop(message.get('request_seq'), None)
+            if future is not None and not future.done():
+                future.set_result(message)
+            return
+        await super().on_receive(message)
+
+    async def send_request(
+        self,
+        command: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        *,
+        data: Optional[bytes] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Send a request to the engine and wait for its response.
+
+        Args:
+            command: The command name.
+            arguments: The command's arguments.
+            data: Binary payload, sent as a DAP binary frame.
+            timeout: Seconds to wait, or ``None`` for no limit.
+
+        Returns:
+            dict: The response message.
+
+        Raises:
+            ConnectionError: The socket is not open or closed while waiting.
+            asyncio.TimeoutError: No response within ``timeout``.
+        """
+        request = self.build_request(command, arguments=dict(arguments or {}))
+        if data is not None:
+            request['arguments']['data'] = data
+
+        future = asyncio.get_running_loop().create_future()
+        self._pending[request['seq']] = future
+        try:
+            await self.send(request)
+            return await asyncio.wait_for(future, timeout)
+        finally:
+            self._pending.pop(request['seq'], None)
+
+    def fail_pending(self, error: Exception) -> None:
+        """Fail every request still waiting for a response.
+
+        Args:
+            error: The exception each waiter receives.
+        """
+        pending, self._pending = self._pending, {}
+        for future in pending.values():
+            if not future.done():
+                future.set_exception(error)
 
     async def _ensure_pipe_sem(self) -> asyncio.Semaphore:
         """Lazy-init `_thread_count` + `_pipe_sem` once `state.target` is bound.

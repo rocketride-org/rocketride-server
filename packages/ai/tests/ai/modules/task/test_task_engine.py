@@ -99,6 +99,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
+    # Channel state __init__ would have set
+    Task._reset_channel_state(t)
     return t
 
 
@@ -1783,7 +1785,8 @@ async def test_data_connection_presents_the_token(monkeypatch):
 
     ((uri, kwargs),) = transports
     assert uri == 'ws://127.0.0.1:20001/task/data'
-    assert kwargs['headers'] == {'Authorization': 'Bearer run-token'}
+    assert kwargs['headers']['Authorization'] == 'Bearer run-token'
+    assert kwargs['headers']['X-Channel-Id']
 
 
 async def test_data_request_without_a_token_fails_at_once(monkeypatch):

@@ -6,6 +6,7 @@ from rocketride.core import TransportBase, TransportWebSocket
 # These are not included in the client distribution
 # but are only for the backend
 from .dap_conn import DAPConn
+from .transport_hooked import TransportWebSocketHooked
 from .transport_stdio import TransportStdio
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     'TransportBase',
     'TransportStdio',
     'TransportWebSocket',
+    'TransportWebSocketHooked',
 ]

@@ -17,14 +17,15 @@ Primary Responsibilities:
 Designed for integration with a FastAPI application and built on top of the ai.web debug server stack.
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 import hashlib
 import hmac
 from fastapi import WebSocket
 from dataclasses import dataclass
 from starlette.websockets import WebSocketState
 from rocketlib import IEndpointBase
-from ai.common.dap import DAPBase, TransportWebSocket
+from ai.common.dap import DAPBase, TransportWebSocketHooked
+from .channel import task_channel
 from .data_conn import DataConn
 
 if TYPE_CHECKING:
@@ -32,6 +33,28 @@ if TYPE_CHECKING:
 
 # Close code for a refused connection; before accept the client sees HTTP 403
 CONST_DATA_REFUSED = 1008
+
+# Handshake header naming the engine's connection; the task echoes it when the connection ends
+CONST_CHANNEL_ID_HEADER = 'x-channel-id'
+
+
+def token_matches(presented: str, token_sha256: Optional[str]) -> bool:
+    """
+    Tell whether ``presented`` is the run's channel token.
+
+    Args:
+        presented: The credential a client sent.
+        token_sha256: Hex SHA-256 of the run's token; ``None`` matches nothing.
+
+    Returns:
+        bool: True when ``sha256(presented)`` equals ``token_sha256``.
+    """
+    if not token_sha256:
+        return False
+    digest = hashlib.sha256(presented.encode('utf-8')).hexdigest()
+
+    # Bytes, so a malformed non-ASCII expected value is a mismatch rather than a TypeError
+    return hmac.compare_digest(digest.encode('ascii'), token_sha256.encode('utf-8'))
 
 
 @dataclass
@@ -61,7 +84,13 @@ class DataServer(DAPBase):
         Client (Data Tools) → ALB → DataServer → Backend Data Engine
     """
 
-    def __init__(self, server: 'WebServer', token_sha256: Optional[str] = None, **kwargs) -> None:
+    def __init__(
+        self,
+        server: 'WebServer',
+        token_sha256: Optional[str] = None,
+        on_closed: Optional[Callable[[Optional[str]], None]] = None,
+        **kwargs,
+    ) -> None:
         """Initialize the DataServer with a back-reference for lazy target lookup.
 
         For sourceless pipelines (agentic, etc.) ``state.target`` is never
@@ -72,6 +101,8 @@ class DataServer(DAPBase):
             server: The parent WebServer; used for lazy ``state.target`` reads.
             token_sha256: Hex SHA-256 of the run's channel token, which a
                 connection must present; ``None`` refuses every connection.
+            on_closed: Called with the engine's connection id when an accepted
+                connection ends while the server still listens.
             **kwargs: Additional arguments passed to the parent ``DAPBase``.
         """
         # Hold the server reference for lazy target lookup.
@@ -79,6 +110,9 @@ class DataServer(DAPBase):
 
         # Only the token's hash is known here; None fails closed
         self._token_sha256 = token_sha256
+
+        # Tells the engine to reconnect; see listen()
+        self._on_closed = on_closed
 
         # Socket currently holding the channel (one live connection at a time)
         self._live: Optional[WebSocket] = None
@@ -133,14 +167,18 @@ class DataServer(DAPBase):
             bool: True when the SHA-256 of the presented token is this run's;
             False otherwise, and always False when the server has no hash.
         """
-        if not self._token_sha256:
-            return False
-
         presented = websocket.headers.get('authorization', '').removeprefix('Bearer ').strip()
-        digest = hashlib.sha256(presented.encode('utf-8')).hexdigest()
+        return token_matches(presented, self._token_sha256)
 
-        # Bytes, so a malformed non-ASCII expected value is a mismatch rather than a TypeError
-        return hmac.compare_digest(digest.encode('ascii'), self._token_sha256.encode('utf-8'))
+    def _listening(self) -> bool:
+        """
+        Tell whether this task's web server is still accepting connections.
+
+        Returns:
+            bool: True while uvicorn has bound its socket and no stop is pending.
+        """
+        uvicorn = getattr(self._server, 'server', None)
+        return bool(getattr(uvicorn, 'started', False)) and not getattr(uvicorn, 'should_exit', False)
 
     def _channel_busy(self) -> bool:
         """
@@ -187,9 +225,13 @@ class DataServer(DAPBase):
         # Claim the channel before the first await, so a concurrent handshake sees it
         self._live = websocket
 
+        # The engine names each connection; the close signal echoes the name
+        channel_id = websocket.headers.get(CONST_CHANNEL_ID_HEADER)
+
         try:
-            # Create the transport and accept the connection
-            transport = TransportWebSocket()
+            # Create the transport and accept the connection; `conn` is bound
+            # on the next line, long before the hook can fire
+            transport = TransportWebSocketHooked(on_closing=lambda: self._closing(conn, channel_id))
 
             # Allocate a new connection
             conn = DataConn(server=self, transport=transport)
@@ -208,3 +250,20 @@ class DataServer(DAPBase):
             # A newer connection may already hold the channel
             if self._live is websocket:
                 self._live = None
+
+    async def _closing(self, conn: DataConn, channel_id: Optional[str]) -> None:
+        """
+        React to the socket closing, before its handlers are drained.
+
+        The task's own pending requests fail now, and the engine is told to
+        reconnect — but only while this server still listens, or the signal
+        would call it to a port the task no longer holds.
+
+        Args:
+            conn (DataConn): The connection whose socket closed.
+            channel_id (Optional[str]): The engine's name for it, from the handshake.
+        """
+        conn.fail_pending(ConnectionError('the engine disconnected'))
+        task_channel.detach(conn)
+        if self._on_closed is not None and self._listening():
+            self._on_closed(channel_id)

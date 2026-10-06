@@ -83,7 +83,11 @@ The engine binds to `localhost` by default:
 - **Task data ports** — each running pipeline listens on `localhost`, on a port
   from a pool starting at 20000, for the engine only. It accepts a connection
   only with that pipeline run's own token, which the engine keeps and replaces
-  on every start; the pipeline's process is given only a hash of it.
+  on every start; the pipeline's process is given only a hash of it. The
+  engine connects as soon as the process reports its listener, and over that
+  connection the process may ask the engine only for the commands the engine
+  registered for it — none ship today; node delivery will be the first. Its
+  HTTP endpoint (`/status`) accepts that token and nothing else.
 
 Only the source-node HTTP port needs to be accessible to external callers when
 you're using a webhook-based source. Port 5565 is a management interface;

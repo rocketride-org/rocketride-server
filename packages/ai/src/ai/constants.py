@@ -154,6 +154,20 @@ CONST_DATA_SHUTDOWN_TIMEOUT = 30.0  # seconds to wait for data connection shutdo
 CONST_DATA_OPEN_TARGET_WAIT = 5.0  # seconds `_open` waits for source to bind `state.target`
 
 # =============================================================================
+# Task Channel (requests from a task to the engine over /task/data)
+# =============================================================================
+CONST_CHANNEL_CHUNK = 1024 * 1024  # bytes per frame; a larger reply is pulled in chunks
+CONST_CHANNEL_MAX_INLINE = 64 * 1024 * 1024  # largest reply assembled in memory without a sink
+CONST_CHANNEL_CONNECT_TIMEOUT = 30.0  # seconds a task's request waits for the engine's connection
+CONST_CHANNEL_REQUEST_TIMEOUT = 30.0  # seconds for one exchange (a request, or one chunk read)
+CONST_CHANNEL_HANDLER_TIMEOUT = 60.0  # seconds a command handler may run on the engine
+CONST_CHANNEL_STREAM_IDLE = 60.0  # seconds an unread stream lives on the engine
+CONST_CHANNEL_MAX_INFLIGHT = 8  # task requests in flight per connection
+CONST_CHANNEL_DATA_WAIT = 5.0  # seconds _send_data waits for the signalled connection
+CONST_CHANNEL_DIAL_LIMIT = 10  # dials per task per CONST_CHANNEL_DIAL_WINDOW
+CONST_CHANNEL_DIAL_WINDOW = 60.0  # seconds
+
+# =============================================================================
 # HTTP/Stream Configuration
 # =============================================================================
 CONST_HTTP_CHUNK_SIZE = 64 * 1024  # bytes per chunk for streaming data (64KB)

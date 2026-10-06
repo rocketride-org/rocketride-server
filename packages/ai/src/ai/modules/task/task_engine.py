@@ -39,8 +39,9 @@ import hashlib
 import secrets
 import shlex
 import shutil
-from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
-from tenacity import retry, stop_after_attempt, wait_fixed
+from collections import deque
+from typing import TYPE_CHECKING, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, args as startup_args
 from ai.constants import (
@@ -54,11 +55,16 @@ from ai.constants import (
     CONST_STATUS_HISTORY_LIMIT,
     CONST_ANALYTICS_SLOWEST_DOCS,
     CONST_TASK_DATA_PATH,
+    CONST_CHANNEL_DATA_WAIT,
+    CONST_CHANNEL_DIAL_LIMIT,
+    CONST_CHANNEL_DIAL_WINDOW,
+    CONST_CHANNEL_MAX_INFLIGHT,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
+from ai.modules.task.task_channel import ChannelStreams, handle as handle_channel_request
 from rocketride import (
     TASK_STATUS,
     TASK_STATUS_FLOW,
@@ -468,19 +474,59 @@ class Task(DAPBase):
             await self._parent_task._terminated()
 
     class TaskData(DAPClient):
-        """DAP client for data communication with pipeline."""
+        """DAP client for data communication with pipeline; also answers the task's own requests."""
 
-        def __init__(self, parent_task: 'Task', **kwargs):
-            """Initialize the data client with parent task integration."""
+        def __init__(self, parent_task: 'Task', channel_id: str, **kwargs):
+            """Initialize the data client with parent task integration.
+
+            Args:
+                parent_task: The task this connection belongs to.
+                channel_id: The id sent on the handshake; the task names it when the connection ends.
+                **kwargs: Passed to ``DAPClient``.
+            """
             self._parent_task = parent_task
+            self.channel_id = channel_id
+            # Replies the task is pulling in chunks, and the handlers answering it
+            self.streams = ChannelStreams()
+            self._handlers: set = set()
             super().__init__(**kwargs)
+
+        async def on_receive(self, message: Dict[str, Any]) -> None:
+            """Answer a request from the task in its own task; route the rest as before.
+
+            Handlers run outside the transport's message tasks so a drain on
+            disconnect never waits for them.
+
+            Args:
+                message: The parsed DAP message.
+            """
+            if message.get('type') != 'request':
+                await super().on_receive(message)
+                return
+            if len(self._handlers) >= CONST_CHANNEL_MAX_INFLIGHT:
+                await self._send(self.build_error(message, 'busy'))
+                return
+            handler = asyncio.create_task(self._parent_task._on_channel_request(self, message))
+            self._handlers.add(handler)
+            handler.add_done_callback(self._handlers.discard)
+
+        def cancel_handlers(self) -> None:
+            """Cancel the handlers still answering the task and drop its streams."""
+            for handler in list(self._handlers):
+                handler.cancel()
+            self._handlers.clear()
+            self.streams.close_all()
 
         async def on_disconnected(self, reason=None, has_error=False):
             """
-            Handle unusual disconnection on the data channel.
+            Handle disconnection on the data channel.
+
+            Nothing the task asked can be answered any more, and the parent
+            forgets this client — only if it is still the current one.
             """
-            # Clear it so the next time we come through, we try again
-            self._parent_task._data_client = None
+            self.cancel_handlers()
+            self._parent_task._on_data_client_gone(self)
+            await super().on_disconnected(reason, has_error)
 
     def __init__(
         self,
@@ -602,9 +648,10 @@ class Task(DAPBase):
         # Data communication
         self._data_lock: asyncio.Lock = asyncio.Lock()
         self._data_port: Optional[int] = None
-        self._data_client: DAPClient = None
+        self._data_client: Optional[Task.TaskData] = None
         # Per-run credential for the child's /task/data, separate from self.token
         self._data_token: Optional[str] = None
+        self._reset_channel_state()
 
         # Status broadcasting
         self._status_update_task: Optional[asyncio.Task] = None
@@ -979,12 +1026,191 @@ class Task(DAPBase):
         except Exception:
             return False
 
+    def _reset_channel_state(self) -> None:
+        """Forget the previous run's channel: ``restart_task`` reuses this object."""
+        # Set once the task has reported its listener; from then on the engine dials only on its signal
+        self._channel_signalled = False
+        # Startup-only commands are answered until the task reports it is loading the pipeline
+        self._channel_startup_open = True
+        # Set while a data client is connected
+        self._data_connected = asyncio.Event()
+        # The dial in progress, and the signal that arrived during it
+        self._dial_task: Optional[asyncio.Task] = None
+        self._dial_pending: Optional[Tuple[Optional[str]]] = None
+        # Dial times inside the rate-limit window
+        self._dial_times: Deque[float] = deque()
+
+    def _data_uri(self) -> str:
+        """The address of this run's ``/task/data``; the runtime decides it, never the task.
+
+        Returns:
+            str: The websocket URI.
+        """
+        return f'ws://127.0.0.1:{self._data_port}/task/data'
+
+    def _on_channel_signal(self, state: Optional[str], channel_id: Optional[str]) -> None:
+        """React to a ``>CHN*`` line from the task.
+
+        ``2`` closes the startup phase. ``1`` asks for a connection: dial when
+        there is no client, or when the signal names the current client (it
+        is dead); ignore anything else, so a repeated or forged line never
+        closes a live connection.
+
+        Args:
+            state: ``'1'`` or ``'2'``.
+            channel_id: The connection the task says has ended, or ``None``.
+        """
+        if state == '2':
+            self._channel_startup_open = False
+            return
+        if state != '1':
+            return
+        self._channel_signalled = True
+        if self._is_terminating:
+            return
+        if self._dial_task is not None and not self._dial_task.done():
+            # Coalesce: re-checked by the rule once the dial is over
+            self._dial_pending = (channel_id,)
+            return
+
+        client = self._data_client
+        if client is not None and channel_id != client.channel_id:
+            return
+
+        now = time.monotonic()
+        while self._dial_times and self._dial_times[0] < now - CONST_CHANNEL_DIAL_WINDOW:
+            self._dial_times.popleft()
+        if len(self._dial_times) >= CONST_CHANNEL_DIAL_LIMIT:
+            self.debug_message(f'WARNING: data channel dial limit reached for task {self.id}; ignoring the signal')
+            return
+        self._dial_times.append(now)
+        self._dial_task = asyncio.create_task(self._open_data_channel(stale=client))
+        self._dial_task.add_done_callback(self._after_dial)
+
+    def _after_dial(self, _dial: asyncio.Task) -> None:
+        """Re-check the signal that arrived during the dial, now that none is in progress.
+
+        Args:
+            _dial: The finished dial task.
+        """
+        pending, self._dial_pending = self._dial_pending, None
+        if pending is not None and not self._is_terminating:
+            self._on_channel_signal('1', pending[0])
+
+    async def _open_data_channel(self, stale: Optional['Task.TaskData']) -> None:
+        """Replace ``stale`` (if any) with a fresh connection to the task.
+
+        Args:
+            stale: The client the task reported dead, to close first; or ``None``.
+        """
+        async with self._data_lock:
+            if self._is_terminating or not self._data_token:
+                return
+            if stale is not None:
+                self._on_data_client_gone(stale)
+                stale.cancel_handlers()
+                try:
+                    await stale.disconnect()
+                except Exception as e:
+                    self.debug_message(f'Error closing the stale data client: {e}')
+            try:
+                client = await self._dial()
+            except Exception as e:
+                self.debug_message(f'Data channel dial failed: {e}')
+                return
+            self._data_client = client
+            self._data_connected.set()
+
+    @staticmethod
+    def _dial_refused(error: BaseException) -> bool:
+        """Tell whether a connect error is the task refusing the handshake (HTTP 403).
+
+        The SDK re-raises the handshake failure as a ``ConnectionError`` with
+        the library's text, so the status is read off the message.
+
+        Args:
+            error: The exception ``connect()`` raised.
+
+        Returns:
+            bool: True for a refusal, which a retry cannot fix.
+        """
+        return 'HTTP 403' in str(error)
+
+    async def _dial(self) -> 'Task.TaskData':
+        """Open a connection to the task's ``/task/data``, retrying a refused connect.
+
+        There is a race condition: the C++ engine emits the ">SVC*1" readiness
+        signal slightly before the child process's uvicorn server has finished
+        binding to its port. This means the first connection attempt may hit a
+        "Connection refused" error. We retry up to 10 times (150ms apart) to
+        give uvicorn time to start accepting connections. A 403 is not retried.
+
+        Returns:
+            Task.TaskData: The connected client.
+
+        Raises:
+            Exception: The last connect error.
+        """
+        channel_id = secrets.token_hex(8)
+        uri = self._data_uri()
+
+        @retry(
+            stop=stop_after_attempt(10),
+            wait=wait_fixed(0.15),
+            reraise=True,
+            retry=retry_if_exception(lambda e: not Task._dial_refused(e)),
+            before_sleep=lambda retry_state: self.debug_message(
+                f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'
+            ),
+        )
+        async def _connect_data_client():
+            # Don't retry if subprocess has died
+            if self._engine_process and self._engine_process.returncode is not None:
+                raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
+            headers = {'Authorization': f'Bearer {self._data_token}', 'X-Channel-Id': channel_id}
+            transport = TransportWebSocket(uri, headers=headers)
+            name = f'DATA-{self.id}'
+            client = Task.TaskData(parent_task=self, channel_id=channel_id, module=name, transport=transport)
+            await client.connect()
+            return client
+
+        return await _connect_data_client()
+
+    def _on_data_client_gone(self, client: 'Task.TaskData') -> None:
+        """Forget ``client`` if it is still the current one; a newer one stays.
+
+        Args:
+            client: The client that disconnected.
+        """
+        if self._data_client is client:
+            self._data_client = None
+            self._data_connected.clear()
+
+    async def _on_channel_request(self, client: 'Task.TaskData', message: Dict[str, Any]) -> None:
+        """Answer one request the task sent over ``client``.
+
+        Args:
+            client: The connection the request arrived on.
+            message: The DAP request.
+        """
+        if self._is_terminating:
+            response = client.build_error(message, 'closed')
+        else:
+            response = await handle_channel_request(
+                self, client, client.streams, message, startup_open=self._channel_startup_open
+            )
+        try:
+            await client._send(response)
+        except Exception as e:
+            self.debug_message(f'Could not answer the task: {e}')
+
     async def _send_data(self, data: Dict[str, Any]) -> None:
         """
         Send data requests to task's data communication channel.
 
-        The connection is opened on first use and presents the run's channel
-        token on the handshake.
+        A task that reported its listener is connected on that signal; this
+        waits for that connection and never dials by itself. A task that did
+        not report (an older ``node.py``) is connected on first use.
 
         Args:
             data: Data processing request
@@ -1002,40 +1228,25 @@ class Task(DAPBase):
         if self._is_terminating:
             raise RuntimeError('Task is terminating, cannot process data requests')
 
-        # Thread-safe data channel access
-        async with self._data_lock:
-            # Establish the data WebSocket connection on first use.
-            # There is a race condition: the C++ engine emits the ">SVC*1" readiness
-            # signal slightly before the child process's uvicorn server has finished
-            # binding to its port. This means the first connection attempt may hit a
-            # "Connection refused" error. We retry up to 10 times (150ms apart) to
-            # give uvicorn time to start accepting connections.
-            if not self._data_client:
-                # No token: the run never started or was torn down while we waited for the lock
-                if not self._data_token:
-                    raise RuntimeError('Task is not running, cannot open the data channel')
-
-                uri = f'ws://127.0.0.1:{self._data_port}/task/data'
-
-                @retry(
-                    stop=stop_after_attempt(10),
-                    wait=wait_fixed(0.15),
-                    reraise=True,
-                    before_sleep=lambda retry_state: self.debug_message(
-                        f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'
-                    ),
-                )
-                async def _connect_data_client():
-                    # Don't retry if subprocess has died
-                    if self._engine_process and self._engine_process.returncode is not None:
-                        raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
-                    transport = TransportWebSocket(uri, headers={'Authorization': f'Bearer {self._data_token}'})
-                    name = f'DATA-{self.id}'
-                    client = Task.TaskData(parent_task=self, module=name, transport=transport)
-                    await client.connect()
-                    return client
-
-                self._data_client = await _connect_data_client()
+        if self._channel_signalled:
+            # Outside the lock: the dial that will set it runs under the lock
+            try:
+                await asyncio.wait_for(self._data_connected.wait(), CONST_CHANNEL_DATA_WAIT)
+            except asyncio.TimeoutError:
+                raise RuntimeError('The task has no data connection') from None
+            client = self._data_client
+            if client is None:
+                raise RuntimeError('The task has no data connection')
+        else:
+            # Thread-safe data channel access
+            async with self._data_lock:
+                if not self._data_client:
+                    # No token: the run never started or was torn down while we waited for the lock
+                    if not self._data_token:
+                        raise RuntimeError('Task is not running, cannot open the data channel')
+                    self._data_client = await self._dial()
+                    self._data_connected.set()
+                client = self._data_client
 
         # Get the arguments
         args = data.get('arguments', {})
@@ -1058,7 +1269,7 @@ class Task(DAPBase):
         # the originating chat forever.  dap_request() builds a fresh envelope via
         # build_request() which allocates a unique seq from _data_client._next_seq()
         # so each outbound message has its own correlation slot.
-        response = await self._data_client.dap_request(
+        response = await client.dap_request(
             command=data['command'],
             arguments=args,
             token=args.get('token'),
@@ -1066,7 +1277,7 @@ class Task(DAPBase):
 
         # Propagate subprocess failures so callers don't silently
         # receive success for a failed operation.
-        if self._data_client.did_fail(response):
+        if client.did_fail(response):
             raise RuntimeError(response.get('message', 'Data request failed'))
 
         return response
@@ -1167,14 +1378,27 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up stdio: {e}')
 
         try:
+            if self._dial_task and not self._dial_task.done():
+                self._dial_task.cancel()
+                try:
+                    await self._dial_task
+                except BaseException:
+                    pass
+            self._dial_task = None
+        except Exception as e:
+            self.debug_message(f'Error cancelling the data channel dial: {e}')
+
+        try:
             if self._data_client:
                 try:
+                    self._data_client.cancel_handlers()
                     await self._data_client.disconnect()
                     self.debug_message('Data client cleaned up')
                 except Exception as e:
                     self.debug_message(f'Error cleaning up data client: {e}')
                 finally:
                     self._data_client = None
+                    self._data_connected.clear()
         except Exception as e:
             self.debug_message(f'Error cleaning up data client: {e}')
 
@@ -1745,6 +1969,11 @@ class Task(DAPBase):
         event_type = message.get('event', '')
         body = message.get('body', {})
 
+        # Channel signals are for this Task alone: not forwarded, not activity
+        if event_type == 'apaevt_channel':
+            self._on_channel_signal(body.get('state'), body.get('id'))
+            return
+
         # Pipeline events count as dev-task activity; deploy uses ttl as a run window.
         if self._run_kind == 'dev' and event_type.startswith('apaevt_'):
             self.reset_idle_timer()
@@ -1753,6 +1982,10 @@ class Task(DAPBase):
         if event_type == 'apaevt_status_state':
             service_up = body.get('service', False)
             self._status.serviceUp = service_up
+
+            # A running pipeline is past its startup, whether or not the task said so
+            if service_up:
+                self._channel_startup_open = False
 
             # Gate billing accumulation on pipeline readiness so users
             # are not charged for startup time (model loading, deps, etc.)
@@ -2287,6 +2520,7 @@ class Task(DAPBase):
             self._stop_requested = False
             self._stop_reason = None
             self._is_terminating = False
+            self._reset_channel_state()
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
