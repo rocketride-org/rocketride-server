@@ -871,8 +871,14 @@ class IEndpoint(IEndpointBase):
                     if channel is not None:
                         channels.append(channel)
             else:
+                # Every visible text channel, but only in allowed guilds: the
+                # gate would drop the rest anyway, after their history was read.
+                guild_ids = getattr(self, '_guild_ids', []) or []
                 channels = [
-                    channel for channel in self._bot.get_all_channels() if isinstance(channel, discord.TextChannel)
+                    channel
+                    for channel in self._bot.get_all_channels()
+                    if isinstance(channel, discord.TextChannel)
+                    and (not guild_ids or str(getattr(getattr(channel, 'guild', None), 'id', None)) in guild_ids)
                 ]
         except Exception as e:
             debug(f'Discord backfill error: {e}')

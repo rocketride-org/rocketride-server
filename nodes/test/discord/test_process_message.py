@@ -2125,6 +2125,41 @@ class TestBackfill:
         replayed = [call.args[0] for call in endpoint._on_message.await_args_list]
         assert replayed == ['a1', 'a2', 'c1'], 'oldest first, and channel 3 still runs'
 
+    def test_without_a_channel_allowlist_only_allowed_guilds_are_read(self):
+        # With no channelIds, backfill walks every text channel the bot can see;
+        # channels in guilds outside guildIds must not even have history read.
+        read = []
+
+        class _GuildChannel(discord.TextChannel):
+            def __init__(self, channel_id, guild_id, contents):
+                self.id = channel_id
+                self.guild = types.SimpleNamespace(id=guild_id)
+                self._contents = contents
+
+            def history(self, limit=None, **_kwargs):
+                read.append(self.id)
+
+                async def _iterate():
+                    for item in self._contents[:limit]:
+                        yield item
+
+                return _iterate()
+
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._backfill_limit = 5
+        endpoint._channel_ids = []
+        endpoint._guild_ids = ['10']
+        endpoint._bot = mock.Mock()
+        endpoint._bot.get_all_channels = mock.Mock(
+            return_value=[_GuildChannel(1, 10, ['in-scope']), _GuildChannel(2, 20, ['other-guild'])]
+        )
+        endpoint._on_message = mock.AsyncMock()
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert read == [1]
+        assert [call.args[0] for call in endpoint._on_message.await_args_list] == ['in-scope']
+
     def test_every_channel_is_replayed_when_all_are_readable(self):
         channels = {1: self._Channel(1, ['a1']), 2: self._Channel(2, ['b1'])}
         endpoint = self._endpoint(channels)
