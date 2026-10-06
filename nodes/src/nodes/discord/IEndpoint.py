@@ -435,8 +435,36 @@ class IEndpoint(IEndpointBase):
         """
         try:
             return int(float(str(value)))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError: 'inf' and '1e400' parse as floats no int holds.
             return default
+
+    @staticmethod
+    def _as_bool(value: Any, default: bool) -> bool:
+        """Coerce a boolean config value, falling back to ``default``.
+
+        A real bool passes through. Anything else (a string-like engine
+        proxy included) is read through ``str()``, so ``'false'`` is False
+        rather than a truthy non-empty string.
+
+        Args:
+            value (Any): The raw config value.
+            default (bool): Used when the value is missing or unrecognised.
+
+        Returns:
+            bool: True for ``true``/``1``/``yes``/``on``, False for
+                ``false``/``0``/``no``/``off`` (any case), else ``default``.
+        """
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        text = str(value).strip().lower()
+        if text in ('true', '1', 'yes', 'on'):
+            return True
+        if text in ('false', '0', 'no', 'off'):
+            return False
+        return default
 
     @classmethod
     def _snowflake_ids(cls, value: Any, field: str) -> List[str]:
@@ -511,12 +539,12 @@ class IEndpoint(IEndpointBase):
         self._allowed_mention_user_ids = self._snowflake_ids(
             config.get('allowedMentionUserIds'), 'allowedMentionUserIds'
         )
-        self._ignore_bots = config.get('ignoreBots', True)
-        self._require_mention = config.get('requireMention', False)
+        self._ignore_bots = self._as_bool(config.get('ignoreBots'), True)
+        self._require_mention = self._as_bool(config.get('requireMention'), False)
         # Engine-provided strings may be proxies; this one is compared to
         # literals and the numbers below are used where only an int works.
         self._reply_mode = str(config.get('replyMode') or 'reply')
-        self._show_typing = config.get('showTyping', True)
+        self._show_typing = self._as_bool(config.get('showTyping'), True)
         # Zero or below would skip every attachment with only a debug line.
         self._max_attachment_bytes = max(
             1, min(MAX_ATTACHMENT_BYTES, self._as_int(config.get('maxAttachmentBytes'), 26214400))
@@ -524,13 +552,13 @@ class IEndpoint(IEndpointBase):
         self._max_concurrent_messages = max(
             1, min(MAX_CONCURRENT_MESSAGES, self._as_int(config.get('maxConcurrentMessages'), 4))
         )
-        self._send_responses = config.get('sendResponses', True)
+        self._send_responses = self._as_bool(config.get('sendResponses'), True)
         self._thread_name = str(config.get('threadName') or 'Pipeline Response')
         self._thread_name_max_length = max(
             1, min(THREAD_NAME_MAX_CHARS, self._as_int(config.get('threadNameMaxLength'), 90))
         )
         self._thread_auto_archive_minutes = self._as_int(config.get('threadAutoArchiveMinutes'), 0)
-        self._number_chunks = config.get('numberChunks', False)
+        self._number_chunks = self._as_bool(config.get('numberChunks'), False)
         # Compared with os.path.splitext, which keeps the dot: 'md' and '.md'
         # both have to match a.md.
         self._text_attachment_extensions = [
@@ -544,11 +572,11 @@ class IEndpoint(IEndpointBase):
             if extension
         ]
         self._text_attachment_max_chars = self._as_int(config.get('textAttachmentMaxChars'), 12000)
-        self._merge_attachments = config.get('mergeAttachments', False)
-        self._emit_reactions = config.get('emitReactions', False)
-        self._emit_no_reply = config.get('emitNoReply', False)
-        self._emit_outbound = config.get('emitOutbound', False)
-        self._include_member_metadata = config.get('includeMemberMetadata', False)
+        self._merge_attachments = self._as_bool(config.get('mergeAttachments'), False)
+        self._emit_reactions = self._as_bool(config.get('emitReactions'), False)
+        self._emit_no_reply = self._as_bool(config.get('emitNoReply'), False)
+        self._emit_outbound = self._as_bool(config.get('emitOutbound'), False)
+        self._include_member_metadata = self._as_bool(config.get('includeMemberMetadata'), False)
         debug(f'Discord _run: token_present={bool(self._bot_token)} reply_mode={self._reply_mode!r}')
 
         # Discover the shared server lazily — node.py assigns its module-level

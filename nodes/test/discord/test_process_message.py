@@ -1239,6 +1239,73 @@ class TestNumericAndMentionConfig:
 
         assert self._numbers(endpoint) == (26214400, 90, 0, 12000)
 
+    @pytest.mark.parametrize('value', ['inf', '-inf', '1e400', _Proxy('1e400')])
+    def test_an_overflowing_number_falls_back_to_its_default(self, value):
+        endpoint = self._parse({'maxAttachmentBytes': value, 'textAttachmentMaxChars': value})
+
+        assert endpoint._max_attachment_bytes == 26214400
+        assert endpoint._text_attachment_max_chars == 12000
+
+    _BOOLEANS = {
+        'ignoreBots': ('_ignore_bots', True),
+        'requireMention': ('_require_mention', False),
+        'showTyping': ('_show_typing', True),
+        'sendResponses': ('_send_responses', True),
+        'numberChunks': ('_number_chunks', False),
+        'mergeAttachments': ('_merge_attachments', False),
+        'emitReactions': ('_emit_reactions', False),
+        'emitNoReply': ('_emit_no_reply', False),
+        'emitOutbound': ('_emit_outbound', False),
+        'includeMemberMetadata': ('_include_member_metadata', False),
+    }
+
+    def test_boolean_defaults_are_unchanged(self):
+        endpoint = self._parse({})
+
+        for attribute, default in self._BOOLEANS.values():
+            assert getattr(endpoint, attribute) is default, attribute
+
+    def test_a_proxy_false_is_false(self):
+        """A string-like ``'false'`` used to read as True."""
+        endpoint = self._parse({'sendResponses': self._Proxy('false'), 'requireMention': self._Proxy('false')})
+
+        assert endpoint._send_responses is False
+        assert endpoint._require_mention is False
+
+    def test_a_proxy_true_is_true(self):
+        endpoint = self._parse({'sendResponses': self._Proxy('TRUE'), 'requireMention': self._Proxy(' true ')})
+
+        assert endpoint._send_responses is True
+        assert endpoint._require_mention is True
+
+    @pytest.mark.parametrize(
+        ('value', 'expected'),
+        [
+            (True, True),
+            (False, False),
+            ('true', True),
+            ('False', False),
+            ('1', True),
+            ('0', False),
+            ('yes', True),
+            ('NO', False),
+            ('on', True),
+            ('off', False),
+        ],
+    )
+    def test_every_boolean_setting_is_coerced(self, value, expected):
+        endpoint = self._parse({field: value for field in self._BOOLEANS})
+
+        for attribute, _default in self._BOOLEANS.values():
+            assert getattr(endpoint, attribute) is expected, attribute
+
+    @pytest.mark.parametrize('value', [None, '', 'maybe', object()])
+    def test_an_unusable_boolean_falls_back_to_its_default(self, value):
+        endpoint = self._parse({field: value for field in self._BOOLEANS})
+
+        for attribute, default in self._BOOLEANS.values():
+            assert getattr(endpoint, attribute) is default, attribute
+
     def test_a_float_is_truncated_not_rejected(self):
         endpoint = self._parse({'threadNameMaxLength': 12.0, 'textAttachmentMaxChars': '7.9'})
 
