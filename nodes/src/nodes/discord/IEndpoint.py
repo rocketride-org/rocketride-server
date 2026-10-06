@@ -917,8 +917,20 @@ class IEndpoint(IEndpointBase):
         return bool(getattr(user, 'bot', False))
 
     async def _on_raw_reaction(self, payload, added: bool):
-        """Emit one raw reaction event when reaction capture is enabled."""
+        """Emit one raw reaction event when reaction capture is enabled.
+
+        Args:
+            payload: The raw reaction payload.
+            added (bool): True for an add, False for a remove.
+
+        Returns:
+            None
+        """
         if not getattr(self, '_emit_reactions', False):
+            return
+        # The Gateway keeps delivering reactions while _shutdown waits for
+        # in-flight messages; an emit started now would outlive the pipeline.
+        if getattr(self, '_closing', False):
             return
         bot_user = getattr(getattr(self, '_bot', None), 'user', None)
         # The node's own reactions are not feedback: emitting them would have
@@ -928,6 +940,9 @@ class IEndpoint(IEndpointBase):
         member = getattr(payload, 'member', None)
         channel = self._bot.get_channel(payload.channel_id) if self._bot is not None else None
         is_thread = isinstance(channel, discord.Thread)
+        # Used for the gate and the emitted metadata alike: ``payload.member``
+        # is None on a removal, so it alone would call every bot a human.
+        reactor_is_bot = self._reactor_is_bot(payload, added)
 
         # A reaction is scoped exactly like a message: without this the
         # allowlists and ignoreBots applied to questions but not to the
@@ -941,7 +956,7 @@ class IEndpoint(IEndpointBase):
         if not should_process_message(
             author_id=payload.user_id,
             bot_user_id=getattr(bot_user, 'id', None),
-            author_is_bot=self._reactor_is_bot(payload, added),
+            author_is_bot=reactor_is_bot,
             ignore_bots=getattr(self, '_ignore_bots', True),
             guild_id=getattr(payload, 'guild_id', None),
             channel_id=payload.channel_id,
@@ -963,7 +978,7 @@ class IEndpoint(IEndpointBase):
             'guildId': str(payload.guild_id) if getattr(payload, 'guild_id', None) is not None else None,
             'createdAt': None,
             'authorId': str(payload.user_id),
-            'authorIsBot': bool(getattr(member, 'bot', False)),
+            'authorIsBot': reactor_is_bot,
             'authorDisplayName': getattr(member, 'display_name', None)
             if getattr(self, '_include_member_metadata', False)
             else None,
@@ -979,6 +994,8 @@ class IEndpoint(IEndpointBase):
             'groupIndex': 0,
             'groupSize': 1,
         }
+        if getattr(self, '_closing', False):
+            return
         await asyncio.to_thread(
             self._emit_event_pipeline,
             metadata,

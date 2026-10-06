@@ -1027,6 +1027,56 @@ class TestReactionScoping:
 
         endpoint._emit_event_pipeline.assert_called_once()
 
+    def test_an_allowlisted_bot_removal_reports_a_bot_author(self):
+        """``payload.member`` is None on a removal; the user cache says it is a bot."""
+        endpoint = self._endpoint(_allowed_bot_ids=['8'])
+        endpoint._bot.get_user = mock.Mock(return_value=types.SimpleNamespace(id=8, bot=True))
+
+        asyncio.run(endpoint._on_raw_reaction(self._payload(user_id=8), False))
+
+        metadata = endpoint._emit_event_pipeline.call_args.args[0]
+        assert metadata['authorIsBot'] is True
+
+    def test_a_human_reaction_reports_a_human_author(self):
+        endpoint = self._endpoint()
+
+        asyncio.run(endpoint._on_raw_reaction(self._payload(), False))
+
+        assert endpoint._emit_event_pipeline.call_args.args[0]['authorIsBot'] is False
+
+
+class TestReactionsDuringShutdown:
+    """Once shutdown has begun, a reaction must not reach the pipeline."""
+
+    @staticmethod
+    def _endpoint():
+        endpoint = TestReactionScoping._endpoint()
+        endpoint._closing = False
+        return endpoint
+
+    def test_a_reaction_after_shutdown_began_emits_nothing(self):
+        endpoint = self._endpoint()
+        endpoint._closing = True
+
+        asyncio.run(endpoint._on_raw_reaction(TestReactionScoping._payload(), True))
+        asyncio.run(endpoint._on_raw_reaction(TestReactionScoping._payload(), False))
+
+        endpoint._emit_event_pipeline.assert_not_called()
+
+    def test_shutdown_beginning_mid_handler_stops_the_emit(self):
+        """The flag is checked again right before the emit."""
+        endpoint = self._endpoint()
+
+        def resolve_channel(_channel_id):
+            endpoint._closing = True
+            return None
+
+        endpoint._bot.get_channel = mock.Mock(side_effect=resolve_channel)
+
+        asyncio.run(endpoint._on_raw_reaction(TestReactionScoping._payload(), True))
+
+        endpoint._emit_event_pipeline.assert_not_called()
+
 
 class TestSendFailure:
     """An answer that could not be posted is reported, not silently dropped."""
