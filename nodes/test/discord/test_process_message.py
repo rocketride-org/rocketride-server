@@ -494,7 +494,7 @@ class TestAttachmentMerge:
 
 
 class TestMetadataAndEvents:
-    """Object identity, metadata, and optional events stay consistent."""
+    """Object identity, metadata, and optional event capture stay consistent."""
 
     @staticmethod
     def _pipeline_endpoint():
@@ -733,7 +733,7 @@ class TestOwnReactionsIgnored:
         assert payload['added'] is True
 
     def test_a_reaction_is_stamped_once_with_occurred_at(self):
-        """One timestamp, in the broadcast itself, so every consumer keys it the same."""
+        """One timestamp, in the broadcast itself, so live capture and a later log import key it the same."""
         import time as _time
 
         endpoint = self._endpoint()
@@ -948,7 +948,7 @@ class TestSendFailure:
 
 
 class TestNoReplyReasonLength:
-    """A ``no_reply`` reason can come from an exception message, so it is bounded."""
+    """A ``no_reply`` reason is part of the capture key, so it is bounded."""
 
     @staticmethod
     def _endpoint():
