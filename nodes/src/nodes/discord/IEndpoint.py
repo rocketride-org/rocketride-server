@@ -1464,6 +1464,20 @@ class IEndpoint(IEndpointBase):
         text: str,
         outbound: Optional[Dict[str, Any]],
     ):
+        """Emit one ``outbound`` event for an answer, when emitOutbound is on.
+
+        Args:
+            message (discord.Message): The message the answer is for.
+            metadata (Dict[str, Any]): The message's metadata contract.
+            text (str): The answer text.
+            outbound (Optional[Dict[str, Any]]): What ``_send_response``
+                returned, or ``{'messageIds': [], 'destination': 'suppressed'}``
+                when sendResponses is off; None falls back to no ids and the
+                configured reply mode. A missing ``complete`` counts as True.
+
+        Returns:
+            None
+        """
         if not getattr(self, '_emit_outbound', False):
             return
         details = outbound or {'messageIds': [], 'destination': self._reply_mode}
@@ -1498,7 +1512,14 @@ class IEndpoint(IEndpointBase):
             response (str): The pipeline answer text.
 
         Returns:
-            None
+            Dict[str, Any]: What was posted, with these keys:
+                ``messageIds`` (List[str]): the ids of the posted messages, in
+                order; empty when nothing was posted.
+                ``destination`` (str): where the first chunk went (``reply``,
+                ``thread`` or ``channel``), or the configured reply mode when
+                nothing was posted.
+                ``complete`` (bool): False when a chunk failed and the rest
+                were abandoned, so Discord shows only part of the answer.
         """
         thread = None
         sent_ids: List[str] = []
@@ -1579,6 +1600,21 @@ class IEndpoint(IEndpointBase):
         sent_ids: Optional[List[str]],
         destinations: Optional[List[str]],
     ):
+        """Record one posted chunk in the caller's collectors.
+
+        Args:
+            sent: The message Discord returned for the chunk; its id is kept
+                when it has one.
+            destination (str): Where the chunk went (``reply``, ``thread`` or
+                ``channel``).
+            sent_ids (Optional[List[str]]): Collects posted message ids; None
+                to skip.
+            destinations (Optional[List[str]]): Collects the destination of
+                every chunk; None to skip.
+
+        Returns:
+            None
+        """
         if sent_ids is not None and sent is not None and getattr(sent, 'id', None) is not None:
             sent_ids.append(str(sent.id))
         if destinations is not None:
