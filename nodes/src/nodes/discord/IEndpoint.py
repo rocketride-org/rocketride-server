@@ -1165,7 +1165,7 @@ class IEndpoint(IEndpointBase):
     def _send_sse(pipe, event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any]):
         """Broadcast the object as a real-time ``apaevt_sse`` event of type ``discord``.
 
-        Lets a UI (for example the Discord Dashboard app) follow questions,
+        Lets a UI (for example a dashboard app) follow questions,
         answers, no-reply outcomes and reactions live. Pipeline traces never
         carry tag-lane data or tag metadata, so SSE is the only channel that
         exposes the node's metadata contract to a subscriber. Best-effort: a

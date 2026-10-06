@@ -14,8 +14,8 @@ own environment.
 
 The module skips unless ``DISCORD_LIVE=1``, ``ROCKETRIDE_URI`` is set and its
 host:port accepts a connection, and the driver token can be read; see the
-README for the id map (``engine`` block of ``~/.secrets/rocketride-discord-live.json``,
-every key overridable by ``DISCORD_E2E_<KEY>``).
+README for the id map (``engine`` block of the file ``DISCORD_LIVE_IDS_FILE``
+names, every key overridable by ``DISCORD_E2E_<KEY>``).
 
 Each test posts one driver message (E04 posts its follow-up as a second),
 prefixed ``[e2e <id>]``, at least ``E2E_POST_THROTTLE_SECONDS`` apart; the
@@ -111,8 +111,8 @@ def test_e01_engine_spawns_node(engine, engine_config):
 def test_e02_metadata_visible_downstream(engine, engine_config, driver_bot):
     """The node's ``message`` and ``outbound`` events reach an SSE subscriber.
 
-    The whole eval-capture design (events keyed by ``correlationId``) rests on
-    this: the metadata never appears in a pipeline trace, only here.
+    Any subscriber that keys events by ``correlationId`` rests on this: the
+    metadata never appears in a pipeline trace, only here.
     """
     _running(engine, engine_config, 'reply')
     posted = driver_bot.post('[e2e E02] Which SDKs can drive a RocketRide pipeline?')

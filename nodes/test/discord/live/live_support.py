@@ -55,9 +55,10 @@ POST_THROTTLE_SECONDS = 1.5
 # L3 drives a real LLM pipeline: one driver message at a time, well spaced.
 E2E_POST_THROTTLE_SECONDS = 3.0
 
-_SECRETS_DIR = os.path.expanduser('~/.secrets')
-_TOKEN_FILE = os.path.join(_SECRETS_DIR, 'rocketride-discord-bot.json')
-_IDS_FILE = os.path.join(_SECRETS_DIR, 'rocketride-discord-live.json')
+# Where the bot token (``{"token": "..."}``) and the live id map live. Both are
+# read from the environment only; the repo carries no default location.
+TOKEN_FILE_ENV = 'DISCORD_LIVE_TOKEN_FILE'
+IDS_FILE_ENV = 'DISCORD_LIVE_IDS_FILE'
 
 _NODE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../src/nodes/discord'))
 _SERVICES_JSON = os.path.join(_NODE_DIR, 'services.json')
@@ -75,15 +76,35 @@ live_only = pytest.mark.skipif(
 # -----------------------------------------------------------------------------
 
 
+def _env_path(name: str) -> str:
+    """The file path an environment variable names, or '' when it is unset."""
+    value = os.environ.get(name, '').strip()
+    return os.path.expanduser(value) if value else ''
+
+
+def token_file() -> str:
+    return _env_path(TOKEN_FILE_ENV)
+
+
 def load_token() -> str:
     """Return the bot token. Never log, print, or assert on the value."""
-    with open(_TOKEN_FILE, encoding='utf-8') as handle:
+    path = token_file()
+    if not path:
+        raise FileNotFoundError(f'{TOKEN_FILE_ENV} is not set')
+    with open(path, encoding='utf-8') as handle:
         return json.load(handle)['token']
 
 
 def load_ids() -> Dict[str, str]:
-    """Return the live id map; empty strings mean 'not provided'."""
-    with open(_IDS_FILE, encoding='utf-8') as handle:
+    """Return the live id map; empty strings mean 'not provided'.
+
+    Raises:
+        FileNotFoundError: ``DISCORD_LIVE_IDS_FILE`` is unset or names no file.
+    """
+    path = _env_path(IDS_FILE_ENV)
+    if not path:
+        raise FileNotFoundError(f'{IDS_FILE_ENV} is not set')
+    with open(path, encoding='utf-8') as handle:
         return json.load(handle)
 
 
@@ -409,7 +430,6 @@ def make_endpoint(bot, *, target: Optional[StubTarget] = None, **overrides):
     endpoint._shutdown_event = threading.Event()
     endpoint._fatal_error = None
     endpoint._closing = False
-    endpoint._backfill_done = False
     return endpoint
 
 
@@ -448,23 +468,6 @@ def with_author(message: discord.Message, author) -> discord.Message:
 def _is_plain_message(message: discord.Message) -> bool:
     """True for an ordinary post or reply (not a thread-starter/system marker)."""
     return message.type in (discord.MessageType.default, discord.MessageType.reply)
-
-
-class BotProxy:
-    """The real bot with a different ``user`` identity.
-
-    Used where the node must fetch messages itself (backfill) so the harness
-    cannot re-author them: the proxy makes the node believe *it* is somebody
-    else, so its own history stops looking like own-messages. Everything else
-    (``get_channel``, HTTP, cache) is the real bot.
-    """
-
-    def __init__(self, bot, user_id: int):
-        self._bot = bot
-        self.user = SynthUser(user_id, is_bot=True, display_name='proxy-self')
-
-    def __getattr__(self, name):
-        return getattr(self._bot, name)
 
 
 # -----------------------------------------------------------------------------
@@ -671,22 +674,6 @@ class LiveBot:
         time.sleep(settle)
         posted = self.bot_messages(channel, after_id)
         assert posted == [], f'expected silence, found {[m.content[:60] for m in posted]}'
-
-    def reactions_on(self, channel, message_id: int, expected: int = 1, timeout: float = 20) -> List[str]:
-        """Poll a message until it carries ``expected`` reactions; returns the emojis.
-
-        Reactions the *node* adds (acknowledgement, feedback affordances) are
-        only visible after a refetch, and Discord occasionally lags a second
-        behind the API call that created them.
-        """
-        deadline = time.time() + timeout
-        emojis: List[str] = []
-        while True:
-            message = self.fetch(channel, message_id)
-            emojis = [str(reaction.emoji) for reaction in message.reactions]
-            if len(emojis) >= expected or time.time() >= deadline:
-                return emojis
-            time.sleep(1.0)
 
     def drain_reactions(self):
         self.raw_reactions = []
@@ -1153,12 +1140,6 @@ class DriverBot:
         self._posted.append(message)
         return message
 
-    def react(self, message: discord.Message, emoji: str, remove: bool = False):
-        if remove:
-            self.run(message.remove_reaction(emoji, self.client.user))
-        else:
-            self.run(message.add_reaction(emoji))
-
     def delete(self, message: discord.Message):
         self.run(message.delete())
 
@@ -1288,8 +1269,14 @@ def live_bot():
     """One connected bot per session; cleans up every posted message at the end."""
     if os.environ.get(LIVE_ENV_FLAG) != '1':
         pytest.skip(f'{LIVE_ENV_FLAG}=1 not set')
-    if not os.path.exists(_TOKEN_FILE):
-        pytest.skip(f'bot token file missing: {_TOKEN_FILE}')
+    if not token_file():
+        pytest.skip(f'{TOKEN_FILE_ENV} not set (path of a JSON file holding the bot token)')
+    if not os.path.exists(token_file()):
+        pytest.skip(f'{TOKEN_FILE_ENV} names a file that does not exist')
+    ids = live_ids()
+    missing = [key for key in ('guildId', 'primaryChannelId', 'guestChannelId', 'botUserId') if not ids.get(key)]
+    if missing:
+        pytest.skip(f'live ids missing: {", ".join(missing)} (set {IDS_FILE_ENV} or DISCORD_LIVE_<KEY> for each)')
     harness = LiveBot().start()
     try:
         yield harness

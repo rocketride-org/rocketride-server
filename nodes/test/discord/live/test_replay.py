@@ -3,27 +3,27 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""L2 replay (R01..R10): the Rocket Ralph regression seeds as real messages.
+"""L2 replay (R01..R10): the seed questions as real messages.
 
-The ten seed questions in ``replay_seeds.md`` (vendored copy of
-``eval/replay-seeds.md`` from the reference bot repo) are posted into the live
-test channel and driven through the node.
+The ten made-up questions in ``replay_seeds.md`` are posted into the live test
+channel and driven through the node.
 
 At this layer the *pipeline is stubbed*, so only plumbing is asserted: each seed
 must produce exactly one text-lane object with the right ``messageId`` /
 ``correlationId`` / ``channelId`` / ``eventType``, and exactly one reply posted
-in ``reply`` mode. Answer *content* grading is L3 (see ``test_engine_e2e.py``
-and section 4 of ``.context/discord-test-plan.md``).
+in ``reply`` mode. Answers from a real model are exercised at L3 (see
+``test_engine_e2e.py``).
 
-No second bot identity is configured (``driverTokenFile`` empty), so each seed
-is posted by the bot under test and fed to ``_process_message`` directly —
-option 2 of the plan's driver-identity choices. Verdicts are written to
-``.context/replay-runs/<timestamp>.jsonl``.
+Each seed is posted by the bot under test and fed to ``_process_message``
+directly, so no second bot identity is needed. Verdicts are written as JSONL to
+``DISCORD_LIVE_RESULTS_DIR`` (default: a ``discord-replay-runs`` folder in the
+system temp directory).
 """
 
 import json
 import os
 import re
+import tempfile
 import time
 from datetime import datetime, timezone
 from typing import Dict, List
@@ -35,8 +35,7 @@ from .live_support import StubTarget, live_only, make_endpoint
 pytestmark = live_only
 
 _SEEDS_FILE = os.path.join(os.path.dirname(__file__), 'replay_seeds.md')
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../..'))
-_RUN_DIR = os.path.join(_REPO_ROOT, '.context', 'replay-runs')
+_RUN_DIR = os.environ.get('DISCORD_LIVE_RESULTS_DIR', '') or os.path.join(tempfile.gettempdir(), 'discord-replay-runs')
 
 
 def parse_seeds(path: str = _SEEDS_FILE) -> List[Dict[str, str]]:
@@ -66,7 +65,7 @@ SEEDS = parse_seeds()
 
 
 def test_seed_table_parsed():
-    """The vendored seed table still yields the ten expected regression seeds."""
+    """The seed table still yields the ten expected seeds."""
     assert [seed['id'] for seed in SEEDS] == [f'R{index:02d}' for index in range(1, 11)]
     assert all(seed['question'] for seed in SEEDS)
 
