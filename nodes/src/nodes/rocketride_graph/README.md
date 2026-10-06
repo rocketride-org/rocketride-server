@@ -109,7 +109,8 @@ This node runs on the RocketRide engine host and does not support remote
 execution. The engine host must have access to the signed-in RocketRide
 identity used to resolve the tenant DSN; on a server without a RocketRide cloud
 database (a local engine, or a self-hosted engine with no database broker) the
-task fails at start with a message that says so. The tenant database must
+task fails at start with a message that says so; use a connection-configured
+node such as graph_neo4j or graph_falkordb there. The tenant database must
 already have Apache AGE installed and contain the configured graph. Read paths are
 intentionally read-only; raw execution remains disabled until explicitly
 enabled.

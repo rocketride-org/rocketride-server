@@ -143,7 +143,8 @@ class IGlobal(GraphGlobalBase):
                 if cur.fetchone() is None:
                     warning(f'AGE graph {graph!r} does not exist yet in the tenant database')
         except NotImplementedError as e:
-            # The OSS account stub: no cloud sign-in available.
+            # No database broker on this engine (a server-process caller;
+            # inside a task the engine turns this into a ValueError reason).
             warning(str(e))
         except Exception as e:
             warning(str(e).strip().splitlines()[0] if str(e).strip() else repr(e))

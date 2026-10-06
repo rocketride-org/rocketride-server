@@ -134,7 +134,8 @@ def resolve_rocketride_dsn() -> str:
     2. ``Account.resolve_db_dsn(client_id)`` — fallback for callers running
        inside the server process (or tests injecting a fake account). On an
        engine with no database broker this raises ``NotImplementedError``
-       (no cloud database configured).
+       (no cloud database configured), or the identity ``ValueError`` first
+       when ``ROCKETRIDE_CLIENT_ID`` is unset.
 
     Returns the raw DSN (URL form, directly usable by ``psycopg2.connect``).
     Callers that need a SQLAlchemy engine URL should wrap the result in

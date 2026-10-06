@@ -699,9 +699,10 @@ class Task(DAPBase):
     # for this task:' so it must read as the continuation of that sentence.
     _NO_CLOUD_DB_REASON = (
         'this server has no RocketRide cloud database (no database broker is configured). '
-        'The rocketride_sql, rocketride_vector and rocketride_graph nodes need RocketRide Cloud '
-        'or a self-hosted engine with a database broker; on this server use a database node '
-        'with its own connection settings, such as db_postgres'
+        'The rocketride_sql, rocketride_vector and rocketride_graph nodes need a server with a '
+        'RocketRide cloud database (RocketRide Cloud, or a self-hosted engine with a database '
+        'broker); on this server use a node with its own connection settings instead '
+        '(db_postgres, store_postgres, graph_neo4j)'
     )
 
     def _pipeline_uses_rocketride_db(self) -> bool:
@@ -748,11 +749,11 @@ class Task(DAPBase):
 
         # Resolve the per-tenant DSN server-side (the SaaS account context
         # exists only in this process) and hand it to the node subprocess via
-        # env — the same delivery mechanism as ROCKETRIDE_CLIENT_ID. Scoped to
-        # pipelines that actually contain one of the DB nodes so unrelated
-        # tasks never trigger provisioning. Resolution failure is non-fatal
-        # here: the node surfaces its own clear error, with the failure reason
-        # passed down so it isn't misreported as a sign-in problem.
+        # env. Scoped to pipelines that actually contain one of the DB nodes
+        # so unrelated tasks never trigger provisioning. Resolution failure is
+        # non-fatal here: the node surfaces its own clear error, with the
+        # failure reason passed down so it isn't misreported as a missing
+        # identity.
         if self._pipeline_uses_rocketride_db():
             try:
                 from ai.account import account
@@ -769,8 +770,9 @@ class Task(DAPBase):
                 # Broker env not configured (open-source default). Pass a
                 # reason down so the node reports the missing cloud database
                 # instead of the identity env var it would otherwise check
-                # (#2463). Not logged: this is the normal state on an engine
-                # without a broker, not a failure.
+                # (#2463). Debug-level only: normal on a local engine, but a
+                # Cloud pod missing its broker env should leave a trace here.
+                self.debug_message('RocketRide DB DSN not resolved: no database broker configured on this engine')
                 subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = self._NO_CLOUD_DB_REASON
             except Exception as e:
                 self.debug_message(f'RocketRide DB DSN resolution failed: {e}')

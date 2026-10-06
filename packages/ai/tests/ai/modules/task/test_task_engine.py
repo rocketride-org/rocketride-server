@@ -910,8 +910,9 @@ async def test_subprocess_env_unconfigured_account_reports_missing_cloud_db(monk
     assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == Task._NO_CLOUD_DB_REASON
     assert 'this server has no RocketRide cloud database' in env['ROCKETRIDE_DB_RESOLVE_ERROR']
     assert 'ROCKETRIDE_CLIENT_ID' not in env['ROCKETRIDE_DB_RESOLVE_ERROR']
-    # The normal state on an engine without a broker, not a failure to log.
-    t.debug_message.assert_not_called()
+    # One debug line, so a Cloud pod missing its broker env leaves a trace.
+    t.debug_message.assert_called_once()
+    assert 'no database broker' in t.debug_message.call_args.args[0]
 
 
 # ---------------------------------------------------------------------------
