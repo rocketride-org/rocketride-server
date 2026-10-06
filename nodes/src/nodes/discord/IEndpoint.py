@@ -1418,14 +1418,31 @@ class IEndpoint(IEndpointBase):
             return False
         return bot_user in mentions
 
+    def _is_bot_named_in_text(self, message: discord.Message) -> bool:
+        """True when the message text itself holds ``<@bot>`` / ``<@!bot>``.
+
+        Discord's Reply (with its ping on, the default) adds the replied-to
+        author to ``mentions`` without any mention in the text, so a plain reply
+        to one of the bot's messages would count as a mention. Resuming a paused
+        thread needs somebody to actually ask the bot back in, so it reads
+        ``raw_mentions`` (the ids discord.py parses from the content) instead.
+        """
+        bot_user_id = getattr(getattr(getattr(self, '_bot', None), 'user', None), 'id', None)
+        if bot_user_id is None:
+            return False
+        raw_mentions = getattr(message, 'raw_mentions', []) or []
+        if not isinstance(raw_mentions, (list, tuple)):
+            return False
+        return bot_user_id in raw_mentions
+
     async def _paused_from_history(self, thread) -> Optional[bool]:
         """Reconstruct a thread's escalation pause from its recent history.
 
         Mirrors the support bot's ``isPausedFromHistory``: walk the last 50
         messages oldest first; a bot message carrying an escalation marker
-        pauses, a later non-bot message that @mentions the bot resumes. Used the
-        first time this process sees a thread, so a restart does not resume a
-        conversation a human took over.
+        pauses, a later non-bot message whose text @mentions the bot resumes
+        (a reply ping alone does not). Used the first time this process sees a
+        thread, so a restart does not resume a conversation a human took over.
 
         Args:
             thread (discord.Thread): The thread to reconcile.
@@ -1454,7 +1471,7 @@ class IEndpoint(IEndpointBase):
             if getattr(author, 'id', None) == bot_user_id:
                 if find_marker(getattr(item, 'content', '') or '', markers):
                     paused = True
-            elif self._is_bot_mentioned(item):
+            elif self._is_bot_named_in_text(item):
                 paused = False
         return paused
 
@@ -1631,7 +1648,7 @@ class IEndpoint(IEndpointBase):
             if reconciled:
                 resolved.add(thread_id)
             if is_paused:
-                if not self._is_bot_mentioned(message):
+                if not self._is_bot_named_in_text(message):
                     return 'paused'
                 paused.discard(thread_id)  # the user re-engaged the bot
                 debug(f'Discord: thread {thread_id} re-engaged by mention')

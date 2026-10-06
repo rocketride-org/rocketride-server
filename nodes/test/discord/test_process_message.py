@@ -239,6 +239,7 @@ def _make_message(*, content='', attachment_count=0):
     message.author.bot = False
     message.guild = None
     message.mentions = []
+    message.raw_mentions = []
     message.role_mentions = []
     message.reference = None
     message.created_at = None
@@ -855,11 +856,16 @@ class TestMetadataAndEvents:
 class _FakeHistoryMessage:
     """A prior thread message as the node reads it (author, content, mentions)."""
 
-    def __init__(self, message_id, content, author_id, *, mentions=(), system=False, author_name=None):
+    def __init__(
+        self, message_id, content, author_id, *, mentions=(), raw_mentions=None, system=False, author_name=None
+    ):
         self.id = message_id
         self.content = content
         self.author = types.SimpleNamespace(id=author_id, name=author_name or f'user{author_id}', bot=False)
         self.mentions = list(mentions)
+        # discord.py parses ``raw_mentions`` from the text; a reply ping adds the
+        # replied-to author to ``mentions`` only. By default the text has them all.
+        self.raw_mentions = [user.id for user in self.mentions] if raw_mentions is None else list(raw_mentions)
         self._system = system
 
     def is_system(self):
@@ -1056,10 +1062,47 @@ class TestEscalationPause:
         assert endpoint._paused_threads == {'321'}
 
         message.mentions = [endpoint._bot.user]
+        message.raw_mentions = [999]
         asyncio.run(endpoint._process_message(message))
 
         endpoint._run_with_optional_typing.assert_awaited_once()  # processed
         assert endpoint._paused_threads == set(), 'a mention must unpause the thread'
+
+    def test_a_reply_ping_does_not_resume_a_paused_thread(self):
+        """Discord's Reply (ping on) puts the bot in ``mentions``, not in the text.
+
+        Replying "ok thanks" to the bot's hand-off line is not asking the bot
+        back in; only an explicit ``<@bot>`` in the text resumes the thread.
+        """
+        endpoint = self._endpoint()
+        endpoint._paused_threads = {'321'}
+        endpoint._resolved_threads = {'321'}
+        message = _thread_message(endpoint, _FakeThread(321), content='ok thanks')
+        message.mentions = [endpoint._bot.user]
+        message.raw_mentions = []
+        message.reference = types.SimpleNamespace(message_id=3, resolved=None, cached_message=None)
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_not_awaited()
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'paused'
+        assert endpoint._paused_threads == {'321'}
+
+    def test_a_reply_ping_in_history_does_not_resume_after_a_restart(self):
+        endpoint = self._endpoint()
+        thread = _FakeThread(
+            321,
+            [
+                _FakeHistoryMessage(3, 'ok thanks', 7, mentions=[endpoint._bot.user], raw_mentions=()),
+                _FakeHistoryMessage(2, 'I have looped in <@&77>', 999),
+                _FakeHistoryMessage(1, 'first question', 7),
+            ],
+        )
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+
+        assert endpoint._paused_threads == {'321'}
+        endpoint._run_with_optional_typing.assert_not_awaited()
 
     def test_pause_is_reconstructed_from_thread_history(self):
         endpoint = self._endpoint()
