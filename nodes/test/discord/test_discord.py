@@ -393,8 +393,26 @@ class TestMarkersAndSanitize:
         assert sanitize_reply(raw, self.MARKERS) == 'line one\nline two "quoted"'
 
     def test_the_envelope_wins_over_a_final_answer_above_it(self):
-        raw = 'Final Answer: the scratchpad one\n{"type": "final", "content": "the real one"}'
+        raw = 'Thought: done\nFinal Answer: the scratchpad one\n{"type": "final", "content": "the real one"}'
         assert sanitize_reply(raw, self.MARKERS) == 'the real one'
+
+    def test_an_envelope_inside_an_answer_is_left_alone(self):
+        # Only a whole-reply envelope (or one closing a scratchpad) is the agent's
+        # wrapper; an answer that shows one as an example keeps its text.
+        for raw in (
+            'Your agent returned {"type": "final", "content": "x"} instead of plain text.',
+            'The runtime emits:\n```json\n{"type": "final", "content": "x"}\n```\nso parse it first.',
+            '{"type": "final", "content": "x"} is the shape to expect.',
+        ):
+            assert sanitize_reply(raw, self.MARKERS) == raw, raw
+
+    def test_final_answer_inside_a_code_fence_is_not_trimmed(self):
+        raw = 'A ReAct agent ends like this:\n```\nThought: done\nFinal Answer: 42\n```\nThe node keeps the tail.'
+        assert sanitize_reply(raw, self.MARKERS) == raw
+
+    def test_prose_that_mentions_final_answer_is_not_trimmed(self):
+        raw = 'Look for the Final Answer: line in the trace; everything above it is reasoning.'
+        assert sanitize_reply(raw, self.MARKERS) == raw
 
     def test_an_undecodable_envelope_falls_back_to_the_captured_text(self):
         raw = '{"type": "final", "content": "bad \\q escape"}'
@@ -426,13 +444,34 @@ class TestLooksLikeError:
         assert looks_like_error('If an error occurred with the API call, check your key and retry.') is False
         assert looks_like_error('The log once said **LLM error**; here is what it means.') is False
 
-    def test_an_engine_stack_frame_is_an_error(self):
-        assert looks_like_error('... raised in chat.py:412 while answering') is True
+    def test_an_engine_stack_frame_at_the_start_is_an_error(self):
+        assert looks_like_error('chat.py:412 raised while answering') is True
         assert looks_like_error('agent.py:77 blew up') is True
+        assert looks_like_error('nodes/llm/chat.py:412: ValueError') is True
 
     def test_run_failed_and_a_traceback_are_errors(self):
         assert looks_like_error('_run failed after 2 attempts') is True
         assert looks_like_error('Traceback (most recent call last):\n  File "x"') is True
+        assert looks_like_error('  \nTraceback (most recent call last):\n  File "x"') is True
+
+    def test_an_answer_that_quotes_an_error_is_not_an_error(self):
+        for text in (
+            'That line from chat.py:412 is where the model call is made; check your key.',
+            'If you see "an error occurred with the OpenAI API", your key has expired.',
+            'Your log ends with Traceback (most recent call last), so the node crashed; see below.',
+            'A provider reply of `Error code: 429` means your quota is used up.',
+        ):
+            assert looks_like_error(text) is False, text
+
+    def test_an_error_inside_a_code_fence_is_not_an_error(self):
+        for text in (
+            'Your log shows:\n```\nTraceback (most recent call last):\n  File "x"\nValueError\n```\n'
+            'This means the key is missing.',
+            '```\nError code: 401 - invalid key\n```\nYour API key is wrong; create a new one.',
+            '```python\nraise RuntimeError("_run failed")\n```\nThat is the line that raised.',
+            '```\nAn error occurred with the OpenAI API: timeout\n```\nRetry with a longer timeout.',
+        ):
+            assert looks_like_error(text) is False, text
 
     def test_an_exception_or_error_prefix_is_an_error(self):
         assert looks_like_error('Exception: something went wrong') is True
@@ -440,13 +479,16 @@ class TestLooksLikeError:
         # Not a prefix: the words may legitimately open a sentence about errors.
         assert looks_like_error('Errors happen; here is how to read them.') is False
 
-    def test_an_api_error_code_anywhere_is_an_error(self):
+    def test_an_api_error_code_at_the_start_is_an_error(self):
         real = (
             "Exception: Error code: 429 - {'error': {'message': "
             "'You have no credits remaining...', 'type': 'insufficient_quota'}}"
         )
         assert looks_like_error(real) is True
-        assert looks_like_error('the server replied Error code: 503') is True
+        assert looks_like_error("Error code: 429 - {'error': {'message': 'quota'}}") is True
+        assert looks_like_error('RateLimitError: Error code: 429') is True
+        # Quoted in an answer, it is part of the explanation.
+        assert looks_like_error('the server replied Error code: 503, so retry later') is False
         # Three digits is the API shape; a version or a count is not.
         assert looks_like_error('error code: 42 in the docs') is False
 

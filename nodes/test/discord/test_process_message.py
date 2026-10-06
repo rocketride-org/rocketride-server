@@ -1355,6 +1355,26 @@ class TestErrorReplies:
 
         assert _sent_reply(endpoint) == 'Read the task log to see the error that was raised.'
 
+    def test_an_answer_that_quotes_the_users_traceback_is_posted(self):
+        answer = (
+            'Your log shows:\n```\nTraceback (most recent call last):\n  File "chat.py", line 4\n'
+            "Exception: Error code: 429 - {'error': 'insufficient_quota'}\n```\n"
+            'That means your provider account is out of credits; add some and retry.'
+        )
+        endpoint = self._endpoint([answer])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == answer
+
+    def test_an_answer_that_quotes_an_error_code_in_prose_is_posted(self):
+        answer = 'An `Error code: 401` from the provider means the API key is wrong; create a new one.'
+        endpoint = self._endpoint([answer])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == answer
+
 
 class TestTeamMentionAlias:
     """teamMentionAlias turns the literal team name into a real role ping."""

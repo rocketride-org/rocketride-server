@@ -74,15 +74,18 @@ A message skipped for either reason (`paused` or `aimed_elsewhere`) is never ing
 
 **Feedback reactions**. With `feedbackReactions` enabled, the node adds each emoji in `feedbackEmojis` (default ✅ then ❌), in order, to the **last** posted chunk of an answer, so a reader grades it in one click. Failures are logged and never affect the reply; the emojis actually applied appear as `feedbackEmojis` on the `outbound` event.
 
-**Reply hygiene**. With `sanitizeReplies` enabled, an answer wrapped in a `{"type": "final", "content": "..."}` envelope is unwrapped to its decoded content first (an envelope whose JSON escapes do not decode falls back to the raw captured string). The result is then trimmed to what follows the last `Final Answer:`; if it still opens with `Thought:`, `Action:`, `Action Input:`, `Observation:`, or `Reasoning:` it is leaked agent scratchpad rather than an answer, and it is replaced by a short hand-off line that keeps the escalation marker when one is present, or suppressed entirely (with a `no_reply` event, reason `non_answer`) when there is none. Sanitizing happens before chunking, so nothing partial is ever posted.
+**Reply hygiene**. With `sanitizeReplies` enabled, an answer wrapped in a `{"type": "final", "content": "..."}` envelope is unwrapped to its decoded content first (an envelope whose JSON escapes do not decode falls back to the raw captured string). Only an envelope that is the whole reply, or that ends a reply opening with a scratchpad label, is unwrapped; an answer that shows one as an example is left alone. The result is then trimmed to what follows the last `Final Answer:` that starts a line outside a code fence, so prose or a code sample that mentions the label is not cut; if it still opens with `Thought:`, `Action:`, `Action Input:`, `Observation:`, or `Reasoning:` it is leaked agent scratchpad rather than an answer, and it is replaced by a short hand-off line that keeps the escalation marker when one is present, or suppressed entirely (with a `no_reply` event, reason `non_answer`) when there is none. Sanitizing happens before chunking, so nothing partial is ever posted.
 
 The same switch stops an engine or model failure from being relayed as an answer. A reply is treated as an error when it:
 
 - opens with the engine's `**LLM error**` prefix;
 - is only the sentence `An error occurred with the API.` (optionally after an exception name such as `ValueError:`);
-- contains `an error occurred with the <x> api`, a `chat.py:NN` / `agent.py:NN` engine frame, `_run failed`, or `Traceback (most recent call last)`;
+- opens with `an error occurred with the <x> api`, a `chat.py:NN` / `agent.py:NN` engine frame, or `Traceback (most recent call last)`;
+- contains `_run failed`;
 - opens with `Exception:` or `Error:`;
-- carries a provider status such as `Error code: 429`.
+- opens with a provider status such as `Error code: 429` (optionally after an exception name).
+
+Code fences are removed before these checks, and apart from `_run failed` each shape counts only where the reply opens with it, so an answer that quotes the user's error or traceback is still posted.
 
 Such a reply is not posted and not retried: it is logged and reported as `no_reply` with reason `model_error`. A retry's answer is checked the same way, and an error there ends the retries. With `sanitizeReplies` off, nothing is inspected and whatever the pipeline returned is posted, as before.
 

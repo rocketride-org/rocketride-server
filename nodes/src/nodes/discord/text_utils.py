@@ -39,22 +39,30 @@ THREAD_HISTORY_MAX_CHARS: int = 6000
 # A reply that still opens with one of these labels is leaked agent scratchpad
 # ("Thought: ...", "Action Input: ...") rather than a user-facing answer.
 _OPENS_WITH_REASONING = re.compile(r'^\s*(Thought|Action(?:\s+Input)?|Observation|Reasoning)\s*:', re.IGNORECASE)
-_FINAL_ANSWER = re.compile(r'Final Answer\s*:\s*', re.IGNORECASE)
+# Only at the start of a line: prose that mentions the label is not trimmed.
+_FINAL_ANSWER = re.compile(r'^[ \t]*Final Answer\s*:\s*', re.IGNORECASE | re.MULTILINE)
 
 # Some agent runtimes wrap the finished answer in a small JSON envelope instead
-# of writing it out: ``{"type": "final", "content": "<escaped string>"}``.
+# of writing it out: ``{"type": "final", "content": "<escaped string>"}``. It is
+# unwrapped only when it is the whole reply, or the end of a reply that opens as
+# scratchpad; an answer that shows one as an example is left alone.
 _FINAL_JSON = re.compile(r'\{\s*"type"\s*:\s*"final"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}')
+
+# A fenced code block, or an unclosed fence running to the end of the text.
+_CODE_FENCE = re.compile(r'```.*?(?:```|\Z)', re.DOTALL)
 
 # Engine and model failures can surface as the "answer" text — a provider API
 # error, a Python traceback, an engine stack frame, a bare exception line, or an
-# HTTP status from the provider. None of those may ever reach Discord.
+# HTTP status from the provider. None of those may ever reach Discord. Each
+# shape is matched only where the reply opens with it (code fences are removed
+# first), so a support answer that quotes the user's error is still posted.
 _ERROR_SIGNATURES = (
-    re.compile(r'an error occurred with the \w+ api\b', re.IGNORECASE),
-    re.compile(r'\b(chat|agent)\.py:\d+', re.IGNORECASE),
+    re.compile(r'^\s*an error occurred with the \w+ api\b', re.IGNORECASE),
+    re.compile(r'^\s*[\w./\\-]*\b(chat|agent)\.py:\d+', re.IGNORECASE),
     re.compile(r'_run failed\b', re.IGNORECASE),
-    re.compile(r'Traceback \(most recent call last\)', re.IGNORECASE),
+    re.compile(r'^\s*Traceback \(most recent call last\)', re.IGNORECASE),
     re.compile(r'^\s*(Exception|Error)\s*:', re.IGNORECASE),
-    re.compile(r'Error code:\s*\d{3}\b', re.IGNORECASE),
+    re.compile(r'^\s*(?:\w+\s*:\s*)?Error code:\s*\d{3}\b', re.IGNORECASE),
     # The engine's LLM layer reports a provider failure as the answer itself:
     # ``**LLM error** — ValueError: An error occurred with the API.``
     re.compile(r'^\s*\*\*LLM error\*\*'),
@@ -522,7 +530,14 @@ def looks_like_error(text: str) -> bool:
     """
     if not text:
         return False
+    text = _CODE_FENCE.sub('', text)
     return any(pattern.search(text) for pattern in _ERROR_SIGNATURES)
+
+
+def _outside_code_fences(text: str, matches) -> list:
+    """Keep only the regex matches that do not start inside a fenced code block."""
+    fences = [fence.span() for fence in _CODE_FENCE.finditer(text)]
+    return [match for match in matches if not any(start <= match.start() < end for start, end in fences)]
 
 
 def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
@@ -574,6 +589,10 @@ def sanitize_reply(text: str, markers: Sequence[str]) -> str:
         return result
 
     envelope = _FINAL_JSON.search(result)
+    if envelope and (
+        envelope.end() != len(result) or (envelope.start() != 0 and not _OPENS_WITH_REASONING.match(result))
+    ):
+        envelope = None
     if envelope:
         captured = envelope.group(1)
         try:
@@ -585,7 +604,7 @@ def sanitize_reply(text: str, markers: Sequence[str]) -> str:
         if not result:
             return result
 
-    marks = list(_FINAL_ANSWER.finditer(result))
+    marks = _outside_code_fences(result, _FINAL_ANSWER.finditer(result))
     if marks:
         after = result[marks[-1].end() :].strip()
         if after:
