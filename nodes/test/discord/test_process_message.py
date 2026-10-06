@@ -980,6 +980,17 @@ class TestThreadHistoryContext:
         asyncio.run(endpoint._process_message(_make_message(content='plain channel message')))
         assert endpoint._run_text_pipeline.call_args.args[0] == 'plain channel message'
 
+    def test_zero_max_chars_turns_the_context_off_like_the_other_numbers(self):
+        # Review of #2547: 0 turned the cap off, while every other new number
+        # treats 0 as "off".
+        endpoint = self._endpoint(_thread_history_limit=25, _thread_history_max_chars=0)
+        thread = _FakeThread(321, self._history())
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='plain')))
+
+        assert endpoint._run_text_pipeline.call_args.args[0] == 'plain'
+        assert thread.history_limits == [], 'nothing is fetched for a context that is off'
+
     def test_current_message_excluded_and_transcript_capped(self):
         endpoint = self._endpoint(_thread_history_limit=25, _thread_history_max_chars=40)
         history = [_FakeHistoryMessage(555, 'the current message', 7)] + self._history()
@@ -2980,6 +2991,29 @@ class TestNumericAndMentionConfig:
             0,
             0,
         )
+
+    def test_the_support_numbers_are_clamped_to_their_maximum(self):
+        """Review of #2547: threadHistoryLimit 10000 paged 100 history requests per message."""
+        endpoint = self._parse(
+            {'backfillLimit': self._Proxy('5000'), 'threadHistoryLimit': '10000', 'threadHistoryMaxChars': 999999}
+        )
+
+        assert (endpoint._backfill_limit, endpoint._thread_history_limit, endpoint._thread_history_max_chars) == (
+            100,
+            100,
+            20000,
+        )
+
+    @pytest.mark.parametrize(
+        ('field', 'maximum'),
+        [('backfillLimit', 100), ('threadHistoryLimit', 100), ('threadHistoryMaxChars', 20000)],
+    )
+    def test_the_schema_bounds_the_support_numbers(self, field, maximum):
+        declared = _load_services_json()['fields'][f'discord.{field}']
+
+        assert declared['minimum'] == 0
+        assert declared['maximum'] == maximum
+        assert declared['minimum'] <= declared['default'] <= declared['maximum']
 
     def test_phrase_lists_keep_spaces_and_commas_inside_an_entry(self):
         marker = 'Escalated to the team, please wait'

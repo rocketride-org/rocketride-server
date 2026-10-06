@@ -99,6 +99,13 @@ MAX_NO_REPLY_REASON_CHARS = 200
 MAX_CONCURRENT_MESSAGES = 32
 MAX_ATTACHMENT_BYTES = 104857600
 
+# Upper bounds for the support-bot numbers (the schema declares the same).
+# Each history fetch pages 100 messages at a time, and every backfilled
+# message runs a pipeline at startup, per channel.
+MAX_BACKFILL_LIMIT = 100
+MAX_THREAD_HISTORY_LIMIT = 100
+MAX_THREAD_HISTORY_MAX_CHARS = 20000
+
 # How many handled message ids are remembered. Shared by the live path and
 # backfill, so a message seen by both (or redelivered) is processed once;
 # bounded so a long-running bot does not grow it forever.
@@ -661,11 +668,15 @@ class IEndpoint(IEndpointBase):
         self._emit_no_reply = parse_bool(config.get('emitNoReply'), False)
         self._emit_outbound = parse_bool(config.get('emitOutbound'), False)
         self._include_member_metadata = parse_bool(config.get('includeMemberMetadata'), False)
-        # Zero (the default) turns each of these off, so a negative value
-        # means the same.
-        self._backfill_limit = max(0, self._as_int(config.get('backfillLimit'), 0))
-        self._thread_history_limit = max(0, self._as_int(config.get('threadHistoryLimit'), 0))
-        self._thread_history_max_chars = max(0, self._as_int(config.get('threadHistoryMaxChars'), 6000))
+        # Zero turns each of these off (a negative value means the same), and
+        # each is clamped to the schema's maximum.
+        self._backfill_limit = max(0, min(MAX_BACKFILL_LIMIT, self._as_int(config.get('backfillLimit'), 0)))
+        self._thread_history_limit = max(
+            0, min(MAX_THREAD_HISTORY_LIMIT, self._as_int(config.get('threadHistoryLimit'), 0))
+        )
+        self._thread_history_max_chars = max(
+            0, min(MAX_THREAD_HISTORY_MAX_CHARS, self._as_int(config.get('threadHistoryMaxChars'), 6000))
+        )
         self._escalation_pause = parse_bool(config.get('escalationPause'), False)
         self._escalation_markers = self._as_str_list(
             config.get('escalationMarkers'), field='escalationMarkers', split=False
@@ -1540,7 +1551,9 @@ class IEndpoint(IEndpointBase):
             str: The transcript, or '' when there is nothing usable.
         """
         limit = getattr(self, '_thread_history_limit', 0)
-        if limit <= 0:
+        max_chars = getattr(self, '_thread_history_max_chars', 6000)
+        # Either number at zero turns the context off.
+        if limit <= 0 or max_chars <= 0:
             return ''
         bot_user = getattr(getattr(self, '_bot', None), 'user', None)
         bot_user_id = getattr(bot_user, 'id', None)
@@ -1585,7 +1598,7 @@ class IEndpoint(IEndpointBase):
             else:
                 name = getattr(author, 'name', None) or 'user'
             entries.append((str(name), str(content)))
-        return format_thread_transcript(entries, getattr(self, '_thread_history_max_chars', 6000))
+        return format_thread_transcript(entries, max_chars)
 
     @staticmethod
     async def _thread_starter(starter: Any, thread: Any) -> Any:

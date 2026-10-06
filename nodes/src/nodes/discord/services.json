@@ -296,22 +296,28 @@
 		"discord.backfillLimit": {
 			"type": "number",
 			"title": "Backfill Limit",
-			"description": "Most-recent messages to process per readable channel at startup. Zero disables backfill.",
+			"description": "Most-recent messages to process per readable channel at startup, at most 100. Zero disables backfill.",
 			"default": 0,
+			"minimum": 0,
+			"maximum": 100,
 			"optional": true
 		},
 		"discord.threadHistoryLimit": {
 			"type": "number",
 			"title": "Thread History Limit",
-			"description": "Prior thread messages fetched as conversation context for a message in a thread. Zero disables it.",
+			"description": "Prior thread messages fetched as conversation context for a message in a thread, at most 100. Zero disables it.",
 			"default": 0,
+			"minimum": 0,
+			"maximum": 100,
 			"optional": true
 		},
 		"discord.threadHistoryMaxChars": {
 			"type": "number",
 			"title": "Thread History Max Characters",
-			"description": "Maximum characters of thread transcript passed as context; the oldest lines are dropped first.",
+			"description": "Maximum characters of thread transcript passed as context, at most 20000; the oldest lines are dropped first. Zero disables the context, like Thread History Limit.",
 			"default": 6000,
+			"minimum": 0,
+			"maximum": 20000,
 			"optional": true
 		},
 		"discord.escalationPause": {
