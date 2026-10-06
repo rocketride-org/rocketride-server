@@ -48,7 +48,7 @@ Instructions are inserted as separate planning-prompt instruction blocks on ever
 
 ### Max Waves
 
-This integer is the maximum number of planning iterations before the node switches to a best-effort synthesis pass. The default is `10`, with allowed values from `1` to `50`. Lower it when predictable latency or tool usage matters more than continued exploration; raise it only for tasks that genuinely need several plan-and-execute rounds. A reply with neither an answer nor a usable call is sent back once, saying what was wrong; if the second reply is no better, the loop ends early and uses synthesis rather than consuming additional waves.
+This integer is the maximum number of planning iterations before the node switches to a best-effort synthesis pass. The default is `10`, with allowed values from `1` to `50`. Lower it when predictable latency or tool usage matters more than continued exploration; raise it only for tasks that genuinely need several plan-and-execute rounds. A malformed empty plan also ends the loop early and uses synthesis rather than consuming additional waves.
 
 ### Require tool call
 
@@ -58,7 +58,7 @@ Off by default, this guard requires the run to invoke at least one real tool bef
 
 ### Wave execution and failure handling
 
-The LLM returns either a final answer or a list of `{tool, args}` calls. Each reply is checked before the loop acts on it: `done` written as text counts by its meaning (`"false"` is not done), OpenAI-style calls (`name` plus `arguments` as JSON text) are accepted, and a call that cannot be read is skipped and reported to the model in the next prompt. A reply that sets `done` and also asks for calls runs the calls first; its answer stands only if every call succeeds. Regular calls in that list run concurrently, capped at eight worker threads. A tool failure becomes an error result for the next planning step rather than aborting the whole run. If the wave limit is reached, or a response contains neither a usable answer nor a usable call even after the planner asks once more, the node makes a final LLM synthesis request from the accumulated result summaries.
+The LLM returns either a final answer or a list of `{tool, args}` calls. Regular calls in that list run concurrently, capped at eight worker threads. A tool failure becomes an error result for the next planning step rather than aborting the whole run. If the wave limit is reached, or a response contains neither `done` nor any tool calls, the node makes a final LLM synthesis request from the accumulated result summaries.
 
 The executor defines a 120-second per-call timeout constant, but its submitted futures are not awaited with that timeout in this implementation. Do not rely on that constant to terminate a slow tool call.
 
