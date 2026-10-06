@@ -665,8 +665,9 @@ All three share the shape: `questions` in; `table`, `text`, `answers` out; an `l
 connection is REQUIRED (it crafts Cypher from the question). Config is profile-based —
 `graph_falkordb` profile `default` takes `host`, `port`, `graph`, and a `db_description`
 (describe the schema so the LLM writes good Cypher); `graph_neo4j` defaults
-`database: "neo4j"`; `rocketride_graph` (built in on RocketRide Cloud) needs no external server. Their classType
-also includes `tool`, so an agent can control a graph store as a tool instead.
+`database: "neo4j"`; `rocketride_graph` (built-in, RocketRide Cloud only) needs no external
+server. Their classType also includes `tool`, so an agent can control a graph store as a tool
+instead.
 
 ### Pattern 15: Memory options
 
