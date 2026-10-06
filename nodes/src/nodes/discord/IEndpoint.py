@@ -717,6 +717,10 @@ class IEndpoint(IEndpointBase):
         Returns:
             None
         """
+        # Once shutdown has started it has already taken stock of the work in
+        # flight; a task started now would never be awaited.
+        if getattr(self, '_closing', False):
+            return
         try:
             # Discord's own notices (joins, pins, boosts, "started a thread")
             # are not questions, and a message with neither text nor a file has
@@ -921,6 +925,17 @@ class IEndpoint(IEndpointBase):
                 answered.add(str(getattr(message, 'id', None)))
             seen_bot_post = seen_bot_post or is_bot
         return answered
+
+    @staticmethod
+    def _question_text(message: discord.Message) -> str:
+        """The message's own text, or '' when it is only whitespace.
+
+        The intake gate strips the text to decide whether a message has
+        anything to ask; processing must see the same answer, or blank text
+        next to a file runs a text pass of its own.
+        """
+        content = message.content if isinstance(message.content, str) else str(message.content or '')
+        return content if content.strip() else ''
 
     def _message_metadata(self, message: discord.Message) -> Dict[str, Any]:
         """Build the stable downstream metadata contract for one message."""
@@ -1436,7 +1451,8 @@ class IEndpoint(IEndpointBase):
             or attachment.size <= self._max_attachment_bytes
         ]
         merge = bool(getattr(self, '_merge_attachments', False)) and bool(message.attachments)
-        group_size = (1 if message.content else 0) + len(eligible_attachments)
+        question = self._question_text(message)
+        group_size = (1 if question else 0) + len(eligible_attachments)
         group_index = 0
         processing_errors: List[str] = []
         try:
@@ -1461,7 +1477,7 @@ class IEndpoint(IEndpointBase):
                 reply = await self._process_merged(message, metadata, eligible_attachments, processing_errors)
                 text_pass = metadata.pop('_textPass', None)
             else:
-                if message.content:
+                if question:
                     text_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
                     group_index += 1
                     # In a thread, carry the earlier conversation as context. The SSE
@@ -1470,7 +1486,7 @@ class IEndpoint(IEndpointBase):
                     transcript = (
                         await self._thread_transcript(message) if isinstance(message.channel, discord.Thread) else ''
                     )
-                    pipeline_text = with_thread_context(message.content, transcript)
+                    pipeline_text = with_thread_context(question, transcript)
                     text_reply = await self._run_with_optional_typing(
                         message,
                         lambda: self._run_pipeline(
@@ -1479,7 +1495,7 @@ class IEndpoint(IEndpointBase):
                             message.channel.id,
                             message.id,
                             text_meta,
-                            sse_text=message.content,
+                            sse_text=question,
                             context_chars=len(transcript),
                         ),
                     )
@@ -1490,7 +1506,7 @@ class IEndpoint(IEndpointBase):
                     text_pass = {
                         'text': pipeline_text,
                         'meta': text_meta,
-                        'sseText': message.content,
+                        'sseText': question,
                         'contextChars': len(transcript),
                     }
 
@@ -1616,7 +1632,8 @@ class IEndpoint(IEndpointBase):
         # case that can still fall through (no text, no text file, and no
         # attachment answered) leaves the count one high on objects already
         # pushed, and behaves as it did before otherwise.
-        text_pass = bool(message.content or blocks or eligible_binaries)
+        question = self._question_text(message)
+        text_pass = bool(question or blocks or eligible_binaries)
         group_size = (1 if text_pass else 0) + len(eligible_binaries)
         group_index = 1 if text_pass else 0
         first_answer = ''
@@ -1634,18 +1651,16 @@ class IEndpoint(IEndpointBase):
             kind = attachment_kind(guess_media_type(attachment.filename, attachment.content_type or ''))
             blocks.append(fold_binary_answer(kind, attachment.filename, att_reply))
 
-        if not message.content and not blocks:
+        if not question and not blocks:
             return first_answer
 
         text_meta = dict(metadata, groupIndex=0, groupSize=group_size)
         # Thread context is carried exactly as it is without attachments: only
         # a message the user actually typed gets the transcript framing.
         transcript = (
-            await self._thread_transcript(message)
-            if message.content and isinstance(message.channel, discord.Thread)
-            else ''
+            await self._thread_transcript(message) if question and isinstance(message.channel, discord.Thread) else ''
         )
-        pipeline_text = compose_merged_question(with_thread_context(message.content, transcript), blocks)
+        pipeline_text = compose_merged_question(with_thread_context(question, transcript), blocks)
         text_reply = await self._run_with_optional_typing(
             message,
             lambda: self._run_pipeline(
@@ -1654,8 +1669,8 @@ class IEndpoint(IEndpointBase):
                 message.channel.id,
                 message.id,
                 text_meta,
-                sse_text=message.content or pipeline_text,
-                context_chars=len(pipeline_text) - len(message.content),
+                sse_text=question or pipeline_text,
+                context_chars=len(pipeline_text) - len(question),
             ),
         )
         if text_meta.get('_pipelineError'):
@@ -1667,8 +1682,8 @@ class IEndpoint(IEndpointBase):
         metadata['_textPass'] = {
             'text': pipeline_text,
             'meta': text_meta,
-            'sseText': message.content or pipeline_text,
-            'contextChars': len(pipeline_text) - len(message.content),
+            'sseText': question or pipeline_text,
+            'contextChars': len(pipeline_text) - len(question),
         }
         return text_reply or first_answer
 
@@ -2178,6 +2193,7 @@ class IEndpoint(IEndpointBase):
         payload: Dict[str, Any] = {
             'messageIds': details['messageIds'],
             'destination': details['destination'],
+            'complete': bool(details.get('complete', True)),
             'text': text,
         }
         if details.get('feedbackEmojis'):
@@ -2213,6 +2229,9 @@ class IEndpoint(IEndpointBase):
         sent_ids: List[str] = []
         destinations: List[str] = []
         sent_messages: List[Any] = []
+        # Earlier chunks may already be on Discord when a later one fails, so
+        # "some ids came back" is not "the whole answer was posted".
+        complete = True
         for chunk in chunk_message(response, number=bool(getattr(self, '_number_chunks', False))):
             try:
                 thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations, sent_messages)
@@ -2227,9 +2246,11 @@ class IEndpoint(IEndpointBase):
                     thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations, sent_messages)
                 except Exception as e2:
                     debug(f'Discord: send retry failed, abandoning remaining chunks: {e2}')
+                    complete = False
                     break
             except Exception as e:
                 debug(f'Discord: send failed, abandoning remaining chunks: {e}')
+                complete = False
                 break
         destination = destinations[0] if destinations else self._reply_mode
         # ``messages`` and ``threadId`` stay internal (the escalation pause and
@@ -2237,6 +2258,7 @@ class IEndpoint(IEndpointBase):
         return {
             'messageIds': sent_ids,
             'destination': destination,
+            'complete': complete,
             'threadId': str(thread.id) if thread is not None and getattr(thread, 'id', None) is not None else None,
             'messages': sent_messages,
         }
