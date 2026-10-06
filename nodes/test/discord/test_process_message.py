@@ -2588,9 +2588,13 @@ class TestConcurrentMessages:
         assert parse({'maxAttachmentBytes': 1024})._max_attachment_bytes == 1024
 
     @pytest.mark.parametrize('configured', [0, -5, TestNumericAndMentionConfig._Proxy('-1')])
-    def test_the_attachment_size_is_at_least_one_byte(self, configured):
-        # Zero or below used to skip every attachment, with only a debug line.
-        assert TestNumericAndMentionConfig._parse({'maxAttachmentBytes': configured})._max_attachment_bytes == 1
+    def test_a_non_positive_attachment_size_means_the_default(self, configured):
+        # Zero or below skipped every attachment, and so did the 1-byte floor
+        # that replaced it: either way the value cannot be meant literally.
+        assert TestNumericAndMentionConfig._parse({'maxAttachmentBytes': configured})._max_attachment_bytes == 26214400
+
+    def test_a_one_byte_attachment_size_is_kept(self):
+        assert TestNumericAndMentionConfig._parse({'maxAttachmentBytes': 1})._max_attachment_bytes == 1
 
     def test_the_schema_sets_the_attachment_size_minimum(self):
         assert _load_services_json()['fields']['discord.maxAttachmentBytes']['minimum'] == 1

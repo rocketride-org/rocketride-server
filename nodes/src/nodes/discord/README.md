@@ -56,7 +56,7 @@ Server and channel allowlists. When non-empty, only messages from the listed gui
 
 ### Max Attachment Size (bytes)
 
-Attachments larger than this (default 25 MB, at least 1 byte, at most 100 MB; a value outside that range is clamped to it) are skipped without being downloaded; the reported size is checked before the file is fetched.
+Attachments larger than this (default 25 MB, at most 100 MB; a larger value is clamped to 100 MB, and `0` or a negative value means the default) are skipped without being downloaded; the reported size is checked before the file is fetched.
 
 ### Max Concurrent Messages
 

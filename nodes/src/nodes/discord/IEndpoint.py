@@ -568,10 +568,12 @@ class IEndpoint(IEndpointBase):
         # literals and the numbers below are used where only an int works.
         self._reply_mode = str(config.get('replyMode') or 'reply')
         self._show_typing = parse_bool(config.get('showTyping'), True)
-        # Zero or below would skip every attachment with only a debug line.
-        self._max_attachment_bytes = max(
-            1, min(MAX_ATTACHMENT_BYTES, self._as_int(config.get('maxAttachmentBytes'), 26214400))
-        )
+        # Zero or below would skip every attachment with only a debug line, so
+        # it means "not set" and the default applies, as in ``config_int``.
+        max_attachment_bytes = self._as_int(config.get('maxAttachmentBytes'), 26214400)
+        if max_attachment_bytes <= 0:
+            max_attachment_bytes = 26214400
+        self._max_attachment_bytes = min(MAX_ATTACHMENT_BYTES, max_attachment_bytes)
         self._max_concurrent_messages = max(
             1, min(MAX_CONCURRENT_MESSAGES, self._as_int(config.get('maxConcurrentMessages'), 4))
         )
