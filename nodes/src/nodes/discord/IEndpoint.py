@@ -121,7 +121,16 @@ def _unresolved_variable(value: Any) -> Optional[str]:
 _NUMERIC_ID = re.compile(r'[0-9]+')
 
 # A channel, role or user mention pasted where its id belongs.
-_MENTION_WRAPPER = re.compile(r'<(?:#|@&|@!?)([0-9]+)>')
+_MENTION_WRAPPER = re.compile(r'<(#|@&|@!?)([0-9]+)>')
+_MENTION_KIND = {'#': 'channel', '@&': 'role', '@': 'user', '@!': 'user'}
+
+# What each list holds, as a mention kind; a server has no mention form.
+_LIST_ID_KIND = {
+    'guildIds': ('server', None),
+    'channelIds': ('channel', 'channel'),
+    'requireMentionChannelIds': ('channel', 'channel'),
+    'allowedBotIds': ('bot user', 'user'),
+}
 
 
 def _is_numeric_id(item: str) -> bool:
@@ -137,11 +146,22 @@ def _non_numeric_id(field: str, item: str) -> str:
         item (str): The offending entry.
 
     Returns:
-        str: For example ``guildIds has '<#123>', which is not a numeric
-            Discord id; use 123, the id inside the mention``.
+        str: For example ``channelIds has '<#123>', which is not a numeric
+            Discord id; use 123, the id inside the mention``. A mention of
+            another kind (a role in a channel list, anything in the server
+            list) never suggests its digits: they are the id of something else.
     """
+    noun, mention_kind = _LIST_ID_KIND.get(field, ('', None))
     wrapped = _MENTION_WRAPPER.fullmatch(item)
-    hint = f'use {wrapped.group(1)}, the id inside the mention' if wrapped else 'use the numeric id'
+    if wrapped is None:
+        hint = 'use the numeric id'
+    else:
+        kind = _MENTION_KIND[wrapped.group(1)]
+        if kind == mention_kind:
+            hint = f'use {wrapped.group(2)}, the id inside the mention'
+        else:
+            target = f'a {noun} id' if noun else 'an id'
+            hint = f'that is a {kind} mention, not {target}; use the numeric id'
     return f'{field} has {item!r}, which is not a numeric Discord id; {hint}'
 
 
@@ -1053,22 +1073,29 @@ class IEndpoint(IEndpointBase):
             'groupIndex': 0,
             'groupSize': 1,
         }
-        if getattr(self, '_closing', False):
-            return
-        await asyncio.to_thread(
-            self._emit_event_pipeline,
-            metadata,
-            'reaction',
-            # occurredAt is stamped once, here, so every consumer of this event — the
-            # broadcast and a later import from the task log — keys the same
-            # reaction identically.
-            {
-                'emoji': str(payload.emoji),
-                'added': added,
-                'userId': str(payload.user_id),
-                'occurredAt': int(time.time() * 1000),
-            },
+        # Tracked like a message handler, so _shutdown waits for an emit that is
+        # already under way instead of tearing the endpoint down beneath it.
+        emit = asyncio.ensure_future(
+            asyncio.to_thread(
+                self._emit_event_pipeline,
+                metadata,
+                'reaction',
+                # occurredAt is stamped once, here, so every consumer of this event — the
+                # broadcast and a later import from the task log — keys the same
+                # reaction identically.
+                {
+                    'emoji': str(payload.emoji),
+                    'added': added,
+                    'userId': str(payload.user_id),
+                    'occurredAt': int(time.time() * 1000),
+                },
+            )
         )
+        inflight = getattr(self, '_inflight', None)
+        if inflight is not None:
+            inflight.add(emit)
+            emit.add_done_callback(inflight.discard)
+        await emit
 
     async def _process_message(self, message: discord.Message):
         """Route a message to the pipeline and send back its answer.
@@ -1637,7 +1664,21 @@ class IEndpoint(IEndpointBase):
             self.target.putPipe(pipe)
 
     def _emit_event_pipeline(self, metadata: Dict[str, Any], event_type: str, payload: Dict[str, Any]):
-        """Emit a small tagged JSON event object without waiting for an answer."""
+        """Emit a small tagged JSON event object without waiting for an answer.
+
+        The object goes out on the ``tags`` lane with the URL
+        ``discord://<channel_id>/<message_id>/<event_type>`` and the name
+        ``<message_id>:<event_type>``, and is broadcast as an ``apaevt_sse``
+        event. Blocking; called through ``asyncio.to_thread``.
+
+        Args:
+            metadata (Dict[str, Any]): The message's metadata contract.
+            event_type (str): ``reaction``, ``no_reply`` or ``outbound``.
+            payload (Dict[str, Any]): The event-specific fields.
+
+        Returns:
+            None
+        """
         event_meta = dict(metadata, eventType=event_type)
         message_id = event_meta.get('messageId') or event_meta.get('correlationId') or 'event'
         channel_id = event_meta.get('channelId') or 'unknown'
@@ -1676,6 +1717,9 @@ class IEndpoint(IEndpointBase):
         Args:
             metadata (Dict[str, Any]): The message's metadata contract.
             reason (str): Why nothing was posted.
+
+        Returns:
+            None
         """
         if not getattr(self, '_emit_no_reply', False):
             return

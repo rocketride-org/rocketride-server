@@ -1063,19 +1063,32 @@ class TestReactionsDuringShutdown:
 
         endpoint._emit_event_pipeline.assert_not_called()
 
-    def test_shutdown_beginning_mid_handler_stops_the_emit(self):
-        """The flag is checked again right before the emit."""
+    def test_shutdown_waits_for_a_reaction_emit_already_under_way(self):
         endpoint = self._endpoint()
+        endpoint._inflight = set()
+        endpoint._bot.close = mock.AsyncMock()
+        endpoint._bot_task = None
+        entered, release = threading.Event(), threading.Event()
 
-        def resolve_channel(_channel_id):
-            endpoint._closing = True
-            return None
+        def blocking_emit(*_args, **_kwargs):
+            entered.set()
+            release.wait(5)
 
-        endpoint._bot.get_channel = mock.Mock(side_effect=resolve_channel)
+        endpoint._emit_event_pipeline = mock.Mock(side_effect=blocking_emit)
 
-        asyncio.run(endpoint._on_raw_reaction(TestReactionScoping._payload(), True))
+        async def scenario():
+            handler = asyncio.ensure_future(endpoint._on_raw_reaction(TestReactionScoping._payload(), True))
+            while not entered.is_set():
+                await asyncio.sleep(0.01)
+            shutdown = asyncio.ensure_future(endpoint._shutdown())
+            await asyncio.sleep(0.2)
+            waited = not shutdown.done()
+            release.set()
+            await asyncio.wait_for(shutdown, 5)
+            await handler
+            return waited
 
-        endpoint._emit_event_pipeline.assert_not_called()
+        assert asyncio.run(scenario()) is True, 'shutdown must wait for the emit already under way'
 
 
 class TestSendFailure:
@@ -2035,15 +2048,30 @@ class TestNumericIds:
         assert error.startswith(f'Discord Bot: {field} ')
         assert 'numeric' in error
 
-    @pytest.mark.parametrize('field', _FIELDS)
-    @pytest.mark.parametrize(
-        ('value', 'digits'), [('<#123>', '123'), ('<@&456>', '456'), ('<@789>', '789'), ('<@!321>', '321')]
-    )
-    def test_a_pasted_mention_suggests_the_id_inside_it(self, field, value, digits):
-        error = IEndpoint._list_config_error({field: [value]})
+    @pytest.mark.parametrize('field', ['channelIds', 'requireMentionChannelIds'])
+    def test_a_pasted_channel_mention_in_a_channel_list_suggests_its_id(self, field):
+        error = IEndpoint._list_config_error({field: ['<#123>']})
 
-        assert repr(value) in error
-        assert f'use {digits}' in error
+        assert "'<#123>'" in error
+        assert 'use 123' in error
+
+    @pytest.mark.parametrize(
+        ('field', 'value', 'kind'),
+        [
+            ('channelIds', '<@&456>', 'role'),
+            ('requireMentionChannelIds', '<@789>', 'user'),
+            ('guildIds', '<#123>', 'channel'),
+            ('guildIds', '<@!1>', 'user'),
+        ],
+    )
+    def test_a_mention_of_the_wrong_kind_never_suggests_its_digits(self, field, value, kind):
+        # Its digits are the id of something else; following that hint would
+        # leave a valid-looking list that matches nothing.
+        error = IEndpoint._list_config_error({field: [value]})
+        digits = ''.join(ch for ch in value if ch.isdigit())
+
+        assert f'use {digits}' not in error
+        assert f'{kind} mention' in error
 
     @pytest.mark.parametrize('field', _FIELDS)
     def test_a_unicode_digit_is_not_an_id(self, field):
