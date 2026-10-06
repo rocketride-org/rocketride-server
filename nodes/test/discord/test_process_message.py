@@ -1814,6 +1814,48 @@ class TestUnsetListVariables:
         )
 
 
+class TestEmptyResolvingLists:
+    """A list that was set but resolves to no ids must not mean "everywhere"."""
+
+    _FIELDS = ['guildIds', 'channelIds', 'requireMentionChannelIds']
+
+    @staticmethod
+    def _message(field):
+        return f'Discord Bot: {field} is set but resolves to no ids (an empty variable?); fix the setting or remove it'
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    @pytest.mark.parametrize('value', [[''], ['  '], '[""]', '["  "]', ['[""]'], ['', '  ']])
+    def test_a_set_but_blank_list_is_fatal(self, field, value):
+        # A set ${ROCKETRIDE_X} whose value is empty arrives as "".
+        assert IEndpoint._list_config_error({field: value}) == self._message(field)
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    def test_the_start_fails_with_the_reason(self, field):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', field: ['']})
+
+        with pytest.raises(RuntimeError, match=f'{field} is set but resolves to no ids'):
+            _start(endpoint)
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    @pytest.mark.parametrize('value', [None, [], '', '[]', ['[]']])
+    def test_a_genuinely_empty_list_still_means_all(self, field, value):
+        assert IEndpoint._list_config_error({field: value}) is None
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    @pytest.mark.parametrize('value', [None, [], '', '[]', ['[]']])
+    def test_a_genuinely_empty_list_still_starts(self, field, value):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', field: value})
+
+        _start(endpoint)
+
+    def test_a_missing_list_still_starts(self):
+        assert IEndpoint._list_config_error({}) is None
+        _start(TestNumericAndMentionConfig._parse({'botToken': 'token'}))
+
+    def test_a_blank_item_next_to_a_real_id_is_fine(self):
+        assert IEndpoint._list_config_error({'guildIds': ['123', '']}) is None
+
+
 class TestOptionalTyping:
     """The pipeline awaitable runs exactly once regardless of typing errors."""
 

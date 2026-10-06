@@ -149,6 +149,32 @@ def _broken_json_text(value: Any) -> Optional[str]:
     return None
 
 
+def _raw_item_count(value: Any) -> int:
+    """How many items a list setting was given, blank ones included.
+
+    A JSON-text item (the engine's encoding of an array) counts the items it
+    holds, so ``'[]'`` and ``['[]']`` count none while ``'[""]'`` counts one.
+    """
+    if not value:
+        return 0
+    items = list(value) if isinstance(value, (list, tuple)) else [value]
+    count = 0
+    for item in items:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text.startswith('['):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, list):
+                count += len(parsed)
+                continue
+        count += 1
+    return count
+
+
 class IEndpoint(IEndpointBase):
     """
     IEndpoint for the Discord Bot source node.
@@ -319,15 +345,26 @@ class IEndpoint(IEndpointBase):
         bot connected but answering nothing, or for the mention-channel list
         answering without the mention it was meant to require, so the start
         fails with the reason. Other lists only warn.
+
+        A list that was given items but resolves to no ids (a set
+        ``${ROCKETRIDE_X}`` whose value is empty arrives as ``""``) fails too:
+        an empty list means "everywhere", which is not what was configured.
         """
         for field in ('guildIds', 'channelIds', 'requireMentionChannelIds'):
-            text = _broken_json_text(config.get(field))
+            value = config.get(field)
+            text = _broken_json_text(value)
             if text is not None:
                 return f'Discord Bot: {field} is not valid JSON ({text[:80]!r}); fix the setting'
-            for item in cls._as_str_list(config.get(field), field=field):
+            ids = cls._as_str_list(value, field=field)
+            for item in ids:
                 problem = _unresolved_variable(item)
                 if problem:
                     return f'Discord Bot: {field} uses {problem}'
+            if not ids and _raw_item_count(value):
+                return (
+                    f'Discord Bot: {field} is set but resolves to no ids (an empty variable?); '
+                    f'fix the setting or remove it'
+                )
         return None
 
     @staticmethod
