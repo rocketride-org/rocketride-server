@@ -36,7 +36,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import DBAPIError
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
-from ai.common.database.db_instance_base import DatabaseInstanceBase
+from ai.common.database.db_instance_base import DatabaseInstanceBase, MissingLlmError
 from ai.common.schema import Question
 from ai.common.utils import parse_bool
 
@@ -1224,3 +1224,36 @@ def test_write_questions_without_llm_reports_the_cause_on_the_lanes():
 
     assert fake_instance.text_written.startswith('No LLM is connected to this TestDB node')
     assert fake_instance.answer_written.getJson()['error'] == fake_instance.text_written
+
+
+@pytest.mark.parametrize('lanes', [['table'], []])
+def test_write_questions_without_llm_raises_when_no_lane_carries_the_error(lanes):
+    """With no text/answers listener, the missing LLM reaches the caller as an error.
+
+    A table-only pipeline has no lane for an error message, so the failure goes
+    through the engine's error path instead of vanishing into the log.
+    """
+    inst = _sql_instance(_FakeGlobal(max_attempts=1))
+    fake_instance = _LaneInstanceWithoutLlm(lanes=lanes)
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('all users')
+
+    with pytest.raises(MissingLlmError, match='No LLM is connected to this TestDB node'):
+        inst.writeQuestions(question)
+    assert fake_instance.table_written is None
+
+
+def test_write_questions_without_llm_does_not_raise_when_text_is_wired():
+    inst = _sql_instance(_FakeGlobal(max_attempts=1))
+    fake_instance = _LaneInstanceWithoutLlm(lanes=['text', 'table'])
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('all users')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written.startswith('No LLM is connected')
+    assert fake_instance.table_written is None

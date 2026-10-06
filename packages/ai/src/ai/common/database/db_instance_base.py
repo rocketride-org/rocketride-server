@@ -1052,8 +1052,12 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             self._emit(result, lanes, executed=executed)
 
         except MissingLlmError as e:
-            # The reader of the text/answers lanes needs this cause, not only the log.
+            # The caller needs this cause, not only the log: on the text/answers
+            # lanes when one is wired, otherwise through the engine's error path
+            # (a table-only pipeline has no lane that carries an error message).
             error(f'Error handling question: {e}')
+            if 'text' not in lanes and 'answers' not in lanes:
+                raise
             self._emitError(str(e), lanes)
         except Exception as e:
             error(f'Error handling question: {e}')
