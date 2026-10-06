@@ -226,6 +226,12 @@ def _message_part(metadata: Dict[str, Any], payload: Dict[str, Any]) -> str:
     return f'{lane}:{index}'
 
 
+# The no_reply reasons the node emits as fixed codes (see IEndpoint).
+NO_REPLY_REASON_CODES = frozenset(
+    {'no_answer', 'non_answer', 'model_error', 'send_failed', 'paused', 'aimed_elsewhere', 'timeout'}
+)
+
+
 def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any], now: datetime) -> str:
     """Return the disambiguator for the ``(message_id, event_type)`` pair.
 
@@ -238,8 +244,10 @@ def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any
       appended for a retried pass, which is a genuinely separate pipeline run
       with its own answer.
     * ``outbound``  -- one reply per message. The chunk ids are in the payload.
-    * ``no_reply``  -- the reason, because one message can be skipped for
-      different reasons across runs (paused, then aimed_elsewhere).
+    * ``no_reply``  -- the reason code, because one message can be skipped for
+      different reasons across runs (paused, then aimed_elsewhere); a reason
+      that is exception text becomes ``error``, since that text can differ
+      between deliveries of the same message.
     * ``reaction``  -- user, emoji, direction and time: the same person can
       add, remove and re-add the same emoji, and all three are real events.
 
@@ -247,7 +255,11 @@ def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any
     """
     key = ''
     if event_type == 'no_reply':
-        key = str(payload.get('reason') or '')
+        # A known reason is its own key. Anything else is exception text that
+        # can differ between deliveries of one message, so it shares one stable
+        # key; the text itself stays in the payload.
+        reason = str(payload.get('reason') or '')
+        key = reason if reason in NO_REPLY_REASON_CODES else 'error'
     elif event_type == 'reaction':
         direction = 'add' if payload.get('added') else 'remove'
         user_id = payload.get('userId') or ''
@@ -430,6 +442,7 @@ class CaptureWriter:
         self._disabled = False
         self._failures = 0
         self._dropped = 0
+        self._dropped_lock = threading.Lock()
         self._last_failure_warn = 0.0
         self._last_drop_warn = 0.0
 
@@ -516,11 +529,14 @@ class CaptureWriter:
             # The NEW row is what goes, not the oldest: the queue is ordered,
             # and dropping from the front would keep a reply whose question
             # was discarded.
-            self._dropped += 1
+            # Events are submitted from several worker threads at once.
+            with self._dropped_lock:
+                self._dropped += 1
+                dropped = self._dropped
             self._warn_throttled(
                 '_last_drop_warn',
                 f'Discord capture: the queue is full ({QUEUE_MAX_ROWS} rows); '
-                f'{self._dropped} event(s) dropped and not retried.',
+                f'{dropped} event(s) dropped and not retried.',
             )
 
     # -----------------------------------------------------------------------

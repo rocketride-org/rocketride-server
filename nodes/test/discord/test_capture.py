@@ -194,6 +194,23 @@ class TestCaptureRowColumns:
 class TestCaptureRowEventKeys:
     """The ``event_key`` rules, which are what the unique key dedupes on."""
 
+    @pytest.mark.parametrize(
+        'reason', ['no_answer', 'non_answer', 'model_error', 'send_failed', 'paused', 'aimed_elsewhere', 'timeout']
+    )
+    def test_a_known_no_reply_reason_is_its_own_key(self, reason):
+        row = capture_row('no_reply', _metadata(), {'reason': reason}, source='s', now=NOW)
+
+        assert row['event_key'] == reason
+
+    def test_an_exception_reason_gets_one_stable_key(self):
+        # The reason can be exception text that differs between deliveries of
+        # the same message; keyed by that text, a redelivery inserted again.
+        first = capture_row('no_reply', _metadata(), {'reason': 'Timeout after 30.01s'}, source='s', now=NOW)
+        again = capture_row('no_reply', _metadata(), {'reason': 'Timeout after 31.77s'}, source='s', now=NOW)
+
+        assert first['event_key'] == again['event_key'] == 'error'
+        assert json.loads(first['payload'])['reason'] == 'Timeout after 30.01s'  # the text is kept
+
     def test_the_text_pass_is_keyed_text(self):
         row = capture_row('message', _metadata(), {'lane': 'text', 'text': 'x'}, source='s', now=NOW)
         assert row['event_key'] == 'text'
@@ -263,11 +280,11 @@ class TestCaptureRowEventKeys:
         )
         assert row['event_key'] == f'7007:❌:remove:{NOW_MS}'
 
-    def test_a_runaway_reason_is_clipped_to_the_key_budget(self):
-        """A reason built from an exception must not blow up the dedupe key."""
+    def test_a_runaway_reason_never_reaches_the_key(self):
+        """A reason built from an exception must not become the dedupe key."""
         row = capture_row('no_reply', _metadata(), {'reason': 'x' * 5000}, source='s', now=NOW)
 
-        assert row['event_key'] == 'x' * capture.MAX_EVENT_KEY_CHARS
+        assert row['event_key'] == 'error'
 
     def test_a_reply_or_no_reply_to_a_channel_question_carries_the_question_as_thread(self):
         """outbound/no_reply carry the QUESTION's metadata, so they belong to the thread it roots."""
@@ -822,6 +839,21 @@ class TestWriterQueue:
 
         assert QUEUE_MAX_ROWS == 1000
         assert writer.dropped == 50
+
+    def test_concurrent_drops_are_all_counted(self):
+        # Events are submitted from several worker threads at once.
+        writer = _writer(_FakeTarget(_FakePipe()), [])
+        writer._thread = object()
+        for _ in range(QUEUE_MAX_ROWS):
+            writer.submit(_row())
+
+        threads = [threading.Thread(target=lambda: [writer.submit(_row()) for _ in range(500)]) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert writer.dropped == 8 * 500
 
     def test_a_full_queue_drops_the_new_row_not_the_queued_ones(self):
         """Dropping the oldest would lose the question and keep the reply."""
