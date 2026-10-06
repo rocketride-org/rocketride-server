@@ -721,6 +721,18 @@ def _outside_code_fences(text: str, matches) -> list:
     return [match for match in matches if not any(start <= match.start() < end for start, end in fences)]
 
 
+def _alias_pattern(alias: str) -> Optional['re.Pattern']:
+    """The regex that finds the team alias in an answer, or None for no alias.
+
+    Case-insensitive, and whitespace inside the alias matches any run of
+    whitespace, so a line break between the words still hits.
+    """
+    tokens = [re.escape(token) for token in (alias or '').split()]
+    if not tokens:
+        return None
+    return re.compile(r'\s+'.join(tokens), re.IGNORECASE)
+
+
 def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
     """Turn the literal team name the model wrote into a real role mention.
 
@@ -739,15 +751,44 @@ def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
     """
     if not text or not alias or not role_mention:
         return text
-    tokens = [re.escape(token) for token in alias.split()]
-    if not tokens:
+    pattern = _alias_pattern(alias)
+    if pattern is None:
         return text
     # A lambda, not the string itself: a replacement is a template, and a
     # backslash in it would otherwise be read as a group reference.
-    return re.sub(r'\s+'.join(tokens), lambda _match: role_mention, text, flags=re.IGNORECASE)
+    return pattern.sub(lambda _match: role_mention, text)
 
 
-def sanitize_reply(text: str, markers: Sequence[str]) -> str:
+def _handoff_marker(scratchpad: str, markers: Sequence[str], alias: str) -> Optional[str]:
+    """The escalation marker on a scratchpad's final hand-off line, if any.
+
+    Only the last non-empty line counts, and only when it is not itself a
+    reasoning line: a ``Thought:`` that merely names the team ("I could hand
+    off to the team, but...") is not a hand-off.
+
+    Args:
+        scratchpad (str): A reply that opens with a reasoning label.
+        markers (Sequence[str]): The effective escalation markers.
+        alias (str): The team alias, which also counts as a marker here.
+
+    Returns:
+        Optional[str]: The marker found (the alias as configured, with its
+            whitespace collapsed, when only the alias is there), else None.
+    """
+    lines = [line for line in scratchpad.split('\n') if line.strip()]
+    if not lines or _OPENS_WITH_REASONING.match(lines[-1]):
+        return None
+    last = lines[-1]
+    marker = find_marker(last, markers)
+    if marker:
+        return marker
+    pattern = _alias_pattern(alias)
+    if pattern is not None and pattern.search(last):
+        return ' '.join(alias.split())
+    return None
+
+
+def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
     """Strip leaked agent scratchpad from a reply before it is posted.
 
     Mirrors the support bot's ``sanitizeReply`` (plus its ``extractFinalText``):
@@ -755,12 +796,17 @@ def sanitize_reply(text: str, markers: Sequence[str]) -> str:
     - unwrap a ``{"type": "final", "content": "..."}`` envelope;
     - keep only what follows the LAST ``Final Answer:`` (when non-empty);
     - if the result still opens with a reasoning label it is scratchpad, not an
-      answer: with an escalation marker present it becomes a short hand-off line
-      that keeps the marker, otherwise it becomes '' so nothing is posted.
+      answer: when its final line (the last non-empty one, not itself a
+      reasoning line) carries an escalation marker it becomes a short hand-off
+      line that keeps the marker, otherwise it becomes '' so nothing is posted.
+
+    The team alias is not turned into a role mention here: the caller does that
+    on the text it finally posts, so reasoning that names the team never pings.
 
     Args:
         text (str): The raw pipeline answer.
         markers (Sequence[str]): The effective escalation markers.
+        alias (str): The team alias, counted as a marker on the hand-off line.
 
     Returns:
         str: The reply to post, or '' when there is no real answer.
@@ -792,7 +838,7 @@ def sanitize_reply(text: str, markers: Sequence[str]) -> str:
             result = after
 
     if _OPENS_WITH_REASONING.match(result):
-        marker = find_marker(result, markers)
+        marker = _handoff_marker(result, markers, alias)
         if marker:
             return f"Thanks for flagging this — I've looped in the team to take a look. {marker}"
         return ''

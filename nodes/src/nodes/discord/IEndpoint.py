@@ -1387,6 +1387,12 @@ class IEndpoint(IEndpointBase):
                 markers.append(marker)
         return markers
 
+    def _handoff_alias(self) -> str:
+        """The team alias, when there is a role to turn it into (else '')."""
+        alias = getattr(self, '_team_mention_alias', '')
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return alias if alias and role_ids else ''
+
     def _with_team_mention(self, text: str) -> str:
         """Turn the configured team alias in an answer into a real role mention.
 
@@ -1820,11 +1826,6 @@ class IEndpoint(IEndpointBase):
                         if att_reply and not reply:
                             reply = att_reply
 
-                # The literal team alias becomes a real role mention before anything
-                # else reads the answer: escalation-marker detection, the sanitizer
-                # and the posted text must all see the mention that pings the team.
-                reply = self._with_team_mention(reply)
-
                 if getattr(self, '_sanitize_replies', False):
                     if reply and looks_like_error(reply):
                         # An engine or model failure arrived as the "answer" (a
@@ -1840,7 +1841,7 @@ class IEndpoint(IEndpointBase):
                     # before staying quiet. An empty answer is transient in the same
                     # way, so it is retried too — unless the pipeline itself failed
                     # for this message, where asking again only repeats the failure.
-                    sanitized = sanitize_reply(reply, self._effective_markers()) if reply else ''
+                    sanitized = sanitize_reply(reply, self._effective_markers(), self._handoff_alias()) if reply else ''
                     if not sanitized and text_pass is not None and (reply or not processing_errors):
                         retry_errors: List[str] = []
                         sanitized = await self._retry_non_answer(message, text_pass, retry_errors)
@@ -1852,6 +1853,12 @@ class IEndpoint(IEndpointBase):
                         await self._emit_no_reply_event(metadata, 'non_answer')
                         return
                     reply = sanitized
+
+                # The literal team alias becomes a real role mention only in the
+                # text that is posted, after sanitizing: reasoning that merely
+                # names the team must never ping it. Escalation detection after
+                # the send sees the injected mention.
+                reply = self._with_team_mention(reply)
 
                 if reply and self._send_responses:
                     outbound = await self._send_response(message, reply)
@@ -2045,13 +2052,13 @@ class IEndpoint(IEndpointBase):
                     retry=attempt,
                 ),
             )
-            answer = self._with_team_mention(self._answer_text(answer))
+            answer = self._answer_text(answer)
             if answer and looks_like_error(answer):
                 debug(f'Discord: retry {attempt} for {message.id} returned an error, not an answer')
                 if errors is not None:
                     errors.append('model_error')
                 return ''
-            reply = sanitize_reply(answer, markers) if answer else ''
+            reply = sanitize_reply(answer, markers, self._handoff_alias()) if answer else ''
             if reply:
                 return reply
         return ''

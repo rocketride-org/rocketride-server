@@ -1472,7 +1472,7 @@ class TestReplyHygiene:
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
 
     def test_reasoning_with_a_marker_becomes_a_handoff(self):
-        endpoint = self._endpoint('Thought: bring in <@&77> for this one')
+        endpoint = self._endpoint('Thought: this needs a human\nBringing in <@&77> for this one.')
 
         asyncio.run(endpoint._process_message(_make_message(content='question')))
 
@@ -1599,14 +1599,43 @@ class TestTeamMentionAlias:
 
         assert _sent_reply(endpoint) == 'ping <@&77>'
 
-    def test_injection_happens_before_the_scratchpad_check(self):
-        # Leaked reasoning that escalated becomes the hand-off line only if the
-        # alias is already a real marker by the time the sanitizer runs.
-        endpoint = self._endpoint('Thought: I should bring in @RocketRide team', _sanitize_replies=True)
+    def test_a_scratchpad_ending_in_the_alias_hands_off_with_a_ping(self):
+        endpoint = self._endpoint(
+            'Thought: this needs a human\nI am bringing in @RocketRide team.', _sanitize_replies=True
+        )
 
         asyncio.run(endpoint._process_message(_make_message(content='question')))
 
         assert _sent_reply(endpoint) == ("Thanks for flagging this — I've looped in the team to take a look. <@&77>")
+
+    def test_a_scratchpad_that_only_mentions_the_team_is_not_a_handoff(self):
+        """Review of #2547: leaked reasoning naming the team pinged it and paused the thread."""
+        endpoint = self._endpoint(
+            'Thought: I could hand off to the RocketRide team but I can answer this myself.\nAction: search',
+            _team_mention_alias='RocketRide team',
+            _sanitize_replies=True,
+            _escalation_pause=True,
+            _emit_no_reply=True,
+            _emit_no_reply_event=mock.AsyncMock(),
+        )
+        endpoint._resolved_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert endpoint._send_response.await_count == 0, 'nothing is posted, so nobody is pinged'
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
+        assert endpoint._paused_threads == set()
+
+    def test_the_alias_is_injected_only_into_the_posted_text(self):
+        # The sanitizer sees the alias as the model wrote it; only the text that
+        # is finally posted carries the role mention.
+        endpoint = self._endpoint(
+            'Thought: hm\nFinal Answer: Ask @RocketRide team about billing.', _sanitize_replies=True
+        )
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == 'Ask <@&77> about billing.'
 
     def test_the_injected_mention_pauses_the_thread(self):
         endpoint = self._endpoint('Handing this to @RocketRide team', _escalation_pause=True)

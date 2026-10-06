@@ -533,9 +533,29 @@ class TestMarkersAndSanitize:
             assert sanitize_reply(raw, self.MARKERS) == '', raw
 
     def test_reasoning_with_marker_becomes_a_handoff_that_keeps_the_marker(self):
-        raw = 'Thought: I should bring in <@&900000000000000202> for this'
+        raw = 'Thought: this needs a human\nI am handing this over to <@&900000000000000202>.'
         assert sanitize_reply(raw, self.MARKERS) == (
             "Thanks for flagging this — I've looped in the team to take a look. <@&900000000000000202>"
+        )
+
+    def test_a_marker_in_thought_text_is_not_a_handoff(self):
+        """Only the final hand-off line counts; reasoning that names the team does not."""
+        for raw in (
+            'Thought: I should bring in <@&900000000000000202> for this',
+            'Thought: I could hand off to <@&900000000000000202> but I can answer this myself.\nAction: search',
+            'Thought: maybe ESCALATED?\nObservation: no, the docs cover it',
+        ):
+            assert sanitize_reply(raw, self.MARKERS) == '', raw
+
+    def test_a_scratchpad_that_only_mentions_the_team_alias_is_not_a_handoff(self):
+        # Review of #2547: this became a role ping and paused the thread.
+        raw = 'Thought: I could hand off to the RocketRide team but I can answer this myself.\nAction: search'
+        assert sanitize_reply(raw, self.MARKERS, alias='RocketRide team') == ''
+
+    def test_a_scratchpad_ending_in_the_team_alias_hands_off_to_it(self):
+        raw = 'Thought: this needs a human\nI am looping in the rocketride  team.'
+        assert sanitize_reply(raw, self.MARKERS, alias='RocketRide team') == (
+            "Thanks for flagging this — I've looped in the team to take a look. RocketRide team"
         )
 
     def test_reasoning_after_final_answer_extraction_is_still_scratchpad(self):
