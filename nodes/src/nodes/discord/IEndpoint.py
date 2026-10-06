@@ -119,11 +119,17 @@ def _unresolved_variable(value: Any) -> Optional[str]:
 
 
 # A Discord id is plain ASCII digits. ``str.isdigit`` is not enough: it accepts
-# '²', which ``int()`` then rejects.
-_NUMERIC_ID = re.compile(r'[0-9]+')
+# '²', which ``int()`` then rejects. A snowflake is a 64-bit integer, so at most
+# 20 digits: two ids pasted together are not one.
+_NUMERIC_ID = re.compile(r'[0-9]{1,20}')
+
+# Messages about a list entry show at most this many of its characters. The
+# entry may be a bot token or a secret ${ROCKETRIDE_*} value pasted by mistake,
+# and the message reaches the task status, the start error and the logs.
+_SHOWN_ENTRY_CHARS = 12
 
 # A channel, role or user mention pasted where its id belongs.
-_MENTION_WRAPPER = re.compile(r'<(#|@&|@!?)([0-9]+)>')
+_MENTION_WRAPPER = re.compile(r'<(#|@&|@!?)([0-9]{1,20})>')
 _MENTION_KIND = {'#': 'channel', '@&': 'role', '@': 'user', '@!': 'user'}
 
 # What each list holds, as a mention kind; a server has no mention form.
@@ -136,8 +142,24 @@ _LIST_ID_KIND = {
 
 
 def _is_numeric_id(item: str) -> bool:
-    """Whether a list entry is an id Discord could have issued (ASCII digits only)."""
-    return _NUMERIC_ID.fullmatch(item) is not None
+    """Whether a list entry is an id Discord could have issued (ASCII digits, 64-bit)."""
+    return _NUMERIC_ID.fullmatch(item) is not None and int(item) < 2**64
+
+
+def _shown_entry(item: str) -> str:
+    """Quote a list entry for a message without ever echoing a secret in full.
+
+    Args:
+        item (str): The entry.
+
+    Returns:
+        str: The quoted entry, whole when it is a mention (``<#123>``) or at
+            most ``_SHOWN_ENTRY_CHARS`` long, else its first
+            ``_SHOWN_ENTRY_CHARS`` characters followed by ``…``.
+    """
+    if len(item) <= _SHOWN_ENTRY_CHARS or _MENTION_WRAPPER.fullmatch(item):
+        return repr(item)
+    return repr(item[:_SHOWN_ENTRY_CHARS] + '…')
 
 
 def _non_numeric_id(field: str, item: str) -> str:
@@ -164,7 +186,7 @@ def _non_numeric_id(field: str, item: str) -> str:
         else:
             target = f'a {noun} id' if noun else 'an id'
             hint = f'that is a {kind} mention, not {target}; use the numeric id'
-    return f'{field} has {item!r}, which is not a numeric Discord id; {hint}'
+    return f'{field} has {_shown_entry(item)}, which is not a numeric Discord id; {hint}'
 
 
 def _engine_warning(message: str) -> None:
@@ -389,7 +411,7 @@ class IEndpoint(IEndpointBase):
                     # Read as plain text below, which matches nothing it was
                     # meant to: say so, or an allowlist silently rejects all.
                     _config_warning(
-                        f'Discord: {field or "a list setting"} is not valid JSON ({text[:80]!r}); '
+                        f'Discord: {field or "a list setting"} is not valid JSON ({_shown_entry(text)}); '
                         f'it is read as plain text. Fix the setting.'
                     )
                 if isinstance(parsed, list):
@@ -430,7 +452,7 @@ class IEndpoint(IEndpointBase):
             value = config.get(field)
             text = _broken_json_text(value)
             if text is not None:
-                return f'Discord Bot: {field} is not valid JSON ({text[:80]!r}); fix the setting'
+                return f'Discord Bot: {field} is not valid JSON ({_shown_entry(text)}); fix the setting'
             ids = cls._as_str_list(value, field=field)
             for item in ids:
                 problem = _unresolved_variable(item)
@@ -495,7 +517,7 @@ class IEndpoint(IEndpointBase):
                 # hear about it: the mention it was meant to allow never pings.
                 _config_warning(f'Discord: {field} uses {problem}; the entry is ignored')
             else:
-                debug(f'Discord: ignoring {field} entry {item!r} - not a numeric Discord id')
+                debug(f'Discord: ignoring {field} entry {_shown_entry(item)} - not a numeric Discord id')
         return ids
 
     def _run(self):

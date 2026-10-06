@@ -2124,6 +2124,81 @@ class TestNumericIds:
 
         warn.assert_not_called()
 
+    # A bot token (or a secret-valued ${ROCKETRIDE_*}) pasted into an id list.
+    _SECRET = 'secret-value-' + 'z' * 40
+    _CLIPPED = "'secret-value…'"
+
+    @pytest.mark.parametrize('field', ['guildIds', 'channelIds', 'requireMentionChannelIds'])
+    def test_a_secret_in_an_id_list_is_clipped_in_the_start_error(self, field):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', field: [self._SECRET]})
+
+        with pytest.raises(RuntimeError) as raised:
+            _start(endpoint)
+
+        assert self._CLIPPED in str(raised.value)
+        assert self._SECRET not in str(raised.value)
+        assert self._SECRET[:13] not in str(raised.value)
+
+    def test_a_secret_in_allowed_bot_ids_is_clipped_in_the_warning(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            TestNumericAndMentionConfig._parse({'allowedBotIds': [self._SECRET]})
+
+        warn.assert_called_once()
+        assert self._CLIPPED in warn.call_args.args[0]
+        assert self._SECRET[:13] not in warn.call_args.args[0]
+
+    @pytest.mark.parametrize('field', ['allowedMentionRoleIds', 'allowedMentionUserIds'])
+    def test_a_secret_in_a_mention_allowlist_is_clipped_in_the_debug_line(self, field):
+        with mock.patch.object(_ENDPOINT_MODULE, 'debug') as log:
+            TestNumericAndMentionConfig._parse({field: [self._SECRET]})
+
+        logged = ' '.join(str(call.args[0]) for call in log.call_args_list)
+        assert self._CLIPPED in logged
+        assert self._SECRET[:13] not in logged
+
+    @pytest.mark.parametrize('field', ['guildIds', 'channelIds'])
+    def test_a_secret_in_broken_json_is_clipped(self, field):
+        value = '["' + self._SECRET
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            error = IEndpoint._list_config_error({field: value})
+            IEndpoint._as_str_list(value, field=field)
+
+        for text in (error, warn.call_args.args[0]):
+            assert "'[\"secret-val…'" in text
+            assert self._SECRET[:11] not in text
+
+    def test_an_entry_of_twelve_characters_is_shown_whole(self):
+        assert "'general-chat'" in IEndpoint._list_config_error({'channelIds': ['general-chat']})
+
+    def test_a_long_mention_wrapper_is_still_shown_whole_with_its_hint(self):
+        mention = '<#123456789012345678>'
+        error = IEndpoint._list_config_error({'channelIds': [mention]})
+
+        assert repr(mention) in error
+        assert 'use 123456789012345678, the id inside the mention' in error
+
+    def test_a_mention_wrapping_too_many_digits_is_clipped_with_the_plain_hint(self):
+        mention = '<#' + '1' * 40 + '>'
+        error = IEndpoint._list_config_error({'channelIds': [mention]})
+
+        assert repr(mention[:12] + '…') in error
+        assert mention not in error
+        assert error.endswith('; use the numeric id')
+
+    @pytest.mark.parametrize('value', ['1' * 36, '123456789012345678' * 2, '18446744073709551616', '1' * 21])
+    def test_an_id_too_long_for_discord_is_rejected(self, value):
+        error = IEndpoint._list_config_error({'channelIds': [value]})
+
+        assert error is not None and 'not a numeric Discord id' in error
+        endpoint = TestNumericAndMentionConfig._parse({'allowedMentionUserIds': [value, '555']})
+        assert endpoint._allowed_mention_user_ids == ['555']
+
+    @pytest.mark.parametrize('value', ['18446744073709551615', '123456789012345678', '1234567890123456789'])
+    def test_an_id_discord_could_issue_passes(self, value):
+        assert IEndpoint._list_config_error({'channelIds': [value], 'guildIds': [value]}) is None
+        endpoint = TestNumericAndMentionConfig._parse({'allowedMentionUserIds': [value]})
+        assert endpoint._allowed_mention_user_ids == [value]
+
 
 class TestOptionalTyping:
     """The pipeline awaitable runs exactly once regardless of typing errors."""
