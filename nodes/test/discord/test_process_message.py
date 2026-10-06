@@ -422,6 +422,16 @@ class TestAttachmentMerge:
         assert kwargs['sse_text'] == text
         assert _sent_reply(endpoint) == 'text-answer'
 
+    def test_whitespace_only_text_counts_as_no_message(self):
+        # Only spaces next to a file is not a question: frame it like file-only.
+        endpoint = self._endpoint()
+        message = self._message('  \n\t ', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        text, _meta = self._text_call(endpoint)
+        assert text.startswith('The user shared the following file(s) with no message.')
+
     def test_reply_falls_back_to_the_attachment_answer(self):
         endpoint = self._endpoint(text_answer='')
         message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
@@ -1858,3 +1868,87 @@ class TestOnMessageGating:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestDeliveryAndShutdownEdges:
+    """Whitespace-only text, partial delivery, and messages during shutdown."""
+
+    def test_whitespace_only_text_runs_no_text_pass(self):
+        endpoint = _make_endpoint(merge_attachments=False)
+        endpoint._process_attachment = mock.AsyncMock(return_value='')
+        message = _make_message(content='   \n ', attachment_count=1)
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_not_awaited()  # no text pass for blank text
+        meta = endpoint._process_attachment.await_args.args[2]
+        assert meta['groupSize'] == 1
+
+    @staticmethod
+    def _sender(fail_on=None):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._reply_mode = 'channel'
+        endpoint._allowed_mention_role_ids = []
+        endpoint._allowed_mention_user_ids = []
+        endpoint._number_chunks = False
+        message = mock.Mock()
+        sent = []
+
+        async def send(chunk, **kwargs):
+            if fail_on is not None and len(sent) == fail_on:
+                raise RuntimeError('Missing Permissions')
+            posted = mock.Mock()
+            posted.id = 900 + len(sent)
+            sent.append(posted)
+            return posted
+
+        message.channel.send = send
+        return endpoint, message
+
+    def test_a_complete_delivery_says_so(self):
+        endpoint, message = self._sender()
+
+        outbound = asyncio.run(endpoint._send_response(message, 'Line\n' * 500))
+
+        assert outbound['complete'] is True
+        assert len(outbound['messageIds']) > 1
+
+    def test_a_partial_delivery_is_marked_incomplete(self):
+        # A later chunk failed: the earlier chunks are on Discord, the rest is not.
+        endpoint, message = self._sender(fail_on=1)
+
+        outbound = asyncio.run(endpoint._send_response(message, 'Line\n' * 500))
+
+        assert len(outbound['messageIds']) == 1
+        assert outbound['complete'] is False
+
+    def test_the_outbound_event_carries_completeness(self):
+        endpoint = _make_endpoint()
+        endpoint._emit_outbound = True
+        endpoint._emit_event_pipeline = mock.Mock()
+
+        asyncio.run(
+            endpoint._emit_outbound_event(
+                _make_message(content='q'),
+                {},
+                'the answer',
+                {'messageIds': ['900'], 'destination': 'channel', 'complete': False},
+            )
+        )
+
+        payload = endpoint._emit_event_pipeline.call_args.args[2]
+        assert payload['complete'] is False
+
+    def test_a_message_during_shutdown_starts_no_task(self):
+        endpoint = _make_endpoint()
+        endpoint._closing = True
+        endpoint._inflight = set()
+        endpoint._process_message = mock.AsyncMock()
+        endpoint._guild_ids, endpoint._channel_ids = [], []
+        endpoint._require_mention = False
+        endpoint._ignore_bots = True
+
+        asyncio.run(endpoint._on_message(_make_message(content='late question'), wait=True))
+
+        endpoint._process_message.assert_not_awaited()
+        assert endpoint._inflight == set()

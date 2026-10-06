@@ -638,6 +638,10 @@ class IEndpoint(IEndpointBase):
         Returns:
             None
         """
+        # Once shutdown has started it has already taken stock of the work in
+        # flight; a task started now would never be awaited.
+        if getattr(self, '_closing', False):
+            return
         try:
             # Discord's own notices (joins, pins, boosts, "started a thread")
             # are not questions, and a message with neither text nor a file has
@@ -686,6 +690,17 @@ class IEndpoint(IEndpointBase):
                 await task
         except Exception as e:
             debug(f'Discord _on_message: EXCEPTION {e}')
+
+    @staticmethod
+    def _question_text(message: discord.Message) -> str:
+        """The message's own text, or '' when it is only whitespace.
+
+        The intake gate strips the text to decide whether a message has
+        anything to ask; processing must see the same answer, or blank text
+        next to a file runs a text pass of its own.
+        """
+        content = message.content if isinstance(message.content, str) else str(message.content or '')
+        return content if content.strip() else ''
 
     def _message_metadata(self, message: discord.Message) -> Dict[str, Any]:
         """Build the stable downstream metadata contract for one message."""
@@ -866,7 +881,8 @@ class IEndpoint(IEndpointBase):
             or attachment.size <= self._max_attachment_bytes
         ]
         merge = bool(getattr(self, '_merge_attachments', False)) and bool(message.attachments)
-        group_size = (1 if message.content else 0) + len(eligible_attachments)
+        question = self._question_text(message)
+        group_size = (1 if question else 0) + len(eligible_attachments)
         group_index = 0
         processing_errors: List[str] = []
         try:
@@ -875,14 +891,14 @@ class IEndpoint(IEndpointBase):
             if merge:
                 reply = await self._process_merged(message, metadata, eligible_attachments, processing_errors)
             else:
-                if message.content:
+                if question:
                     text_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
                     group_index += 1
                     text_reply = await self._run_with_optional_typing(
                         message,
                         lambda: asyncio.to_thread(
                             self._run_text_pipeline,
-                            message.content,
+                            question,
                             message.channel.id,
                             message.id,
                             text_meta,
@@ -977,7 +993,8 @@ class IEndpoint(IEndpointBase):
         # case that can still fall through (no text, no text file, and no
         # attachment answered) leaves the count one high on objects already
         # pushed, and behaves as it did before otherwise.
-        text_pass = bool(message.content or blocks or eligible_binaries)
+        question = self._question_text(message)
+        text_pass = bool(question or blocks or eligible_binaries)
         group_size = (1 if text_pass else 0) + len(eligible_binaries)
         group_index = 1 if text_pass else 0
         first_answer = ''
@@ -995,11 +1012,11 @@ class IEndpoint(IEndpointBase):
             kind = attachment_kind(guess_media_type(attachment.filename, attachment.content_type or ''))
             blocks.append(fold_binary_answer(kind, attachment.filename, att_reply))
 
-        if not message.content and not blocks:
+        if not question and not blocks:
             return first_answer
 
         text_meta = dict(metadata, groupIndex=0, groupSize=group_size)
-        pipeline_text = compose_merged_question(message.content, blocks)
+        pipeline_text = compose_merged_question(question, blocks)
         text_reply = await self._run_with_optional_typing(
             message,
             lambda: asyncio.to_thread(
@@ -1008,7 +1025,7 @@ class IEndpoint(IEndpointBase):
                 message.channel.id,
                 message.id,
                 text_meta,
-                sse_text=message.content or pipeline_text,
+                sse_text=question or pipeline_text,
             ),
         )
         if text_meta.get('_pipelineError'):
@@ -1472,6 +1489,7 @@ class IEndpoint(IEndpointBase):
         payload: Dict[str, Any] = {
             'messageIds': details['messageIds'],
             'destination': details['destination'],
+            'complete': bool(details.get('complete', True)),
             'text': text,
         }
         await asyncio.to_thread(
@@ -1504,6 +1522,9 @@ class IEndpoint(IEndpointBase):
         thread = None
         sent_ids: List[str] = []
         destinations: List[str] = []
+        # Earlier chunks may already be on Discord when a later one fails, so
+        # "some ids came back" is not "the whole answer was posted".
+        complete = True
         for chunk in chunk_message(response, number=bool(getattr(self, '_number_chunks', False))):
             try:
                 thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations)
@@ -1518,12 +1539,14 @@ class IEndpoint(IEndpointBase):
                     thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations)
                 except Exception as e2:
                     debug(f'Discord: send retry failed, abandoning remaining chunks: {e2}')
+                    complete = False
                     break
             except Exception as e:
                 debug(f'Discord: send failed, abandoning remaining chunks: {e}')
+                complete = False
                 break
         destination = destinations[0] if destinations else self._reply_mode
-        return {'messageIds': sent_ids, 'destination': destination}
+        return {'messageIds': sent_ids, 'destination': destination, 'complete': complete}
 
     def _allowed_mentions(self):
         """Build the outbound mention allowlist; never permit everyone/here."""
