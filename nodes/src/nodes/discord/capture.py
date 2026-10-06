@@ -113,6 +113,13 @@ MAX_EVENT_KEY_CHARS = 200
 # column rather than a guard against injection.
 _SOURCE_LABEL_RE = re.compile(r'^[A-Za-z0-9_.:+@-]{1,128}$')
 
+# The capture SQL (BIGSERIAL, JSONB, ON CONFLICT, CAST(... AS jsonb)) is
+# PostgreSQL's. What a database node's ``dialect`` tool answers for it.
+POSTGRES_DIALECTS = ('postgres', 'postgresql')
+
+# How PostgreSQL words an INSERT into a table that does not exist.
+_MISSING_TABLE_RE = re.compile(r'relation "[^"]*" does not exist')
+
 # Sentinel the worker loop reads as "the queue is drained, you may stop".
 _STOP = object()
 
@@ -327,8 +334,8 @@ def row_params(row: Dict[str, Any]) -> List[Any]:
     return [row[name] for name in COLUMNS]
 
 
-def _invoke_param(payload: Dict[str, Any]):
-    """Build the engine's ``execute`` tool invocation for ``payload``.
+def _invoke_param(payload: Dict[str, Any], tool_name: str = 'execute'):
+    """Build the engine's tool invocation of ``tool_name`` for ``payload``.
 
     Imported here rather than at module scope so this module stays loadable
     without the engine runtime, and so tests can replace one small function
@@ -336,7 +343,7 @@ def _invoke_param(payload: Dict[str, Any]):
     """
     from rocketlib.types import IInvokeTool  # type: ignore  # engine-only module
 
-    return IInvokeTool.Invoke(tool_name='execute', input=payload)
+    return IInvokeTool.Invoke(tool_name=tool_name, input=payload)
 
 
 def _control_envelope(param: Any):
@@ -359,6 +366,17 @@ def _engine_warning(message: str) -> None:
     warning(message)
 
 
+def _is_missing_table(exc: BaseException) -> bool:
+    """Return True when a failed INSERT failed because the table does not exist.
+
+    PostgreSQL reports it as SQLSTATE 42P01, ``relation "<name>" does not
+    exist``; the database node passes the driver's message through, so the
+    text is what reaches this side of the pipe.
+    """
+    text = str(exc)
+    return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or '42P01' in text
+
+
 def _short_error(exc: BaseException) -> str:
     """Return the first line of an exception, bounded, for a log line."""
     text = str(exc).strip().splitlines()
@@ -370,8 +388,8 @@ class CaptureWriter:
 
     One writer per node process. ``submit`` is called from whichever thread is
     handling a Discord event and never blocks; a single daemon thread borrows
-    a pipe, resolves the database node once, creates the table once, and runs
-    the INSERTs.
+    a pipe, resolves the database node and checks it is PostgreSQL once, and
+    runs the INSERTs, creating the table only when an INSERT finds it missing.
 
     Args:
         target: The endpoint target to borrow pipes from (``getPipe`` /
@@ -405,7 +423,7 @@ class CaptureWriter:
 
         self._queue: queue.Queue = queue.Queue(maxsize=QUEUE_MAX_ROWS)
         self._thread: Optional[threading.Thread] = None
-        self._created = False
+        self._dialect_checked = False
         self._disabled = False
         self._failures = 0
         self._dropped = 0
@@ -519,13 +537,19 @@ class CaptureWriter:
             node_id = self._resolve_node_id(pipe)
             if node_id is None:
                 return
-            if not self._created:
-                # Before the first INSERT, and only marked done once it has
-                # actually succeeded -- a CREATE that failed because nothing
-                # answered must not leave the table assumed to exist.
+            if not self._dialect_checked and not self._check_dialect(pipe, node_id):
+                return
+            try:
+                self._invoke(pipe, node_id, INSERT_SQL(self._table), row_params(row))
+            except Exception as e:
+                # INSERT first, DDL only for a table that is really missing: a
+                # database user allowed only to INSERT into an existing table
+                # must never need CREATE rights. A CREATE that fails is a
+                # failed write, so the next row tries it again.
+                if not _is_missing_table(e):
+                    raise
                 self._invoke(pipe, node_id, CREATE_TABLE_SQL(self._table), None)
-                self._created = True
-            self._invoke(pipe, node_id, INSERT_SQL(self._table), row_params(row))
+                self._invoke(pipe, node_id, INSERT_SQL(self._table), row_params(row))
         except Exception as e:
             self._on_failure(row, e)
         else:
@@ -539,7 +563,11 @@ class CaptureWriter:
         payload: Dict[str, Any] = {'sql': sql}
         if params is not None:
             payload['params'] = params
-        param = _invoke_param(payload)
+        return self._call_tool(pipe, node_id, 'execute', payload)
+
+    def _call_tool(self, pipe: Any, node_id: str, tool_name: str, payload: Dict[str, Any]) -> Any:
+        """Call ``tool_name`` on ``node_id`` over ``pipe`` and return its output."""
+        param = _invoke_param(payload, tool_name)
         invoke = getattr(pipe, 'invoke', None)
         if callable(invoke):
             invoke(param, component_id=node_id)
@@ -550,6 +578,26 @@ class CaptureWriter:
             # what the patch does — wrap the operation and send it over control.
             pipe.control(getattr(param, 'lane', 'tool'), _control_envelope(param), nodeId=node_id)
         return getattr(param, 'output', None)
+
+    def _check_dialect(self, pipe: Any, node_id: str) -> bool:
+        """Ask the database node its dialect once; True when it is PostgreSQL.
+
+        The capture SQL is PostgreSQL's, so any other database would fail
+        every row. Capture is turned off with one warning instead. A failed
+        call raises and counts as a failed write, and the next row asks again.
+        """
+        output = self._call_tool(pipe, node_id, 'dialect', {})
+        dialect = output.get('dialect') if isinstance(output, dict) else getattr(output, 'dialect', None)
+        dialect = str(dialect or '')
+        self._dialect_checked = True
+        if dialect.lower() in POSTGRES_DIALECTS:
+            return True
+        self._disabled = True
+        self._warn(
+            f'Discord capture: {node_id} is a {dialect or "unknown"!r} database, and capture writes to '
+            f'PostgreSQL only; capture is off for this run.'
+        )
+        return False
 
     def _resolve_node_id(self, pipe: Any) -> Optional[str]:
         """Return the database component id to write to, resolving it once.

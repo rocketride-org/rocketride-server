@@ -438,23 +438,49 @@ class _FakeParam:
 
 
 class _FakePipe:
-    """A pipe that records invokes and reports one connected tool node."""
+    """A pipe that records invokes and reports one connected tool node.
 
-    def __init__(self, node_ids=('db_1',), fail=None):
+    It stands in for a PostgreSQL database node: ``dialect`` answers
+    ``dialect`` (recorded in ``dialect_calls``, not ``calls``), and while the
+    table does not exist an INSERT fails the way PostgreSQL reports it.
+    """
+
+    def __init__(self, node_ids=('db_1',), fail=None, dialect='postgres', table_exists=True, create_fails=None):
         self.node_ids = list(node_ids)
         self.calls = []
+        self.dialect_calls = []
         self.controller_queries = 0
         self.fail = fail
+        self.dialect = dialect
+        self.table_exists = table_exists
+        self.create_fails = create_fails
 
     def getControllerNodeIds(self, classType):
         self.controller_queries += 1
         assert classType == 'tool'
         return list(self.node_ids)
 
-    def invoke(self, param, component_id=''):
-        self.calls.append((component_id, param.tool_name, dict(param.input)))
+    def _answer(self, param, component_id):
+        if param.tool_name == 'dialect':
+            self.dialect_calls.append(component_id)
+            param.output = {'dialect': self.dialect}
+            return
         if self.fail is not None:
             raise self.fail
+        sql = param.input['sql']
+        if 'CREATE TABLE' in sql:
+            if self.create_fails is not None:
+                raise self.create_fails
+            self.table_exists = True
+        elif not self.table_exists:
+            raise RuntimeError(
+                'SQL execution failed: (psycopg.errors.UndefinedTable) relation "discord_events" does not exist'
+            )
+
+    def invoke(self, param, component_id=''):
+        if param.tool_name != 'dialect':
+            self.calls.append((component_id, param.tool_name, dict(param.input)))
+        self._answer(param, component_id)
         return param.output
 
 
@@ -482,8 +508,12 @@ def invoke_param(monkeypatch):
     Both copies of the module: the one loaded bare for the pure tests, and
     the one IEndpoint imported inside its synthetic package.
     """
-    monkeypatch.setattr(capture, '_invoke_param', lambda payload: _FakeParam('execute', payload))
-    monkeypatch.setattr(endpoint_capture, '_invoke_param', lambda payload: _FakeParam('execute', payload))
+
+    def fake(payload, tool_name='execute'):
+        return _FakeParam(tool_name, payload)
+
+    monkeypatch.setattr(capture, '_invoke_param', fake)
+    monkeypatch.setattr(endpoint_capture, '_invoke_param', fake)
 
 
 def _writer(target, warnings, **kwargs):
@@ -509,11 +539,9 @@ class TestWriterWrites:
 
         writer._write_one(_row())
 
-        create, insert = pipe.calls
-        assert create[0] == 'db_1'
-        assert create[1] == 'execute'
-        assert create[2]['sql'] == CREATE_TABLE_SQL('discord_events')
+        (insert,) = pipe.calls
         assert insert[0] == 'db_1'
+        assert insert[1] == 'execute'
         assert insert[2]['sql'] == INSERT_SQL('discord_events')
         assert warnings == []
 
@@ -524,7 +552,7 @@ class TestWriterWrites:
 
         writer._write_one(row)
 
-        params = pipe.calls[1][2]['params']
+        params = pipe.calls[0][2]['params']
         assert params == [
             'message',
             '1001',
@@ -540,27 +568,57 @@ class TestWriterWrites:
             'discord:discord_1',
         ]
 
-    def test_create_table_runs_once_however_many_rows_follow(self):
-        pipe = _FakePipe()
-        writer = _writer(_FakeTarget(pipe), [])
+    def test_an_existing_table_gets_inserts_and_no_ddl(self):
+        """A database user that may only INSERT must never be asked to CREATE."""
+        pipe = _FakePipe(table_exists=True)
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
 
         for _ in range(3):
             writer._write_one(_row())
 
-        creates = [call for call in pipe.calls if 'CREATE TABLE' in call[2]['sql']]
-        assert len(creates) == 1
-        assert len(pipe.calls) == 4
+        assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')] * 3
+        assert warnings == []
 
-    def test_create_table_is_retried_until_it_succeeds(self):
-        """A table that was never created must not be assumed to exist."""
+    def test_a_missing_table_is_created_once_then_the_insert_is_retried(self):
+        pipe = _FakePipe(table_exists=False)
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+        writer._write_one(_row())
+
+        assert [call[2]['sql'] for call in pipe.calls] == [
+            INSERT_SQL('discord_events'),
+            CREATE_TABLE_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+        ]
+        assert warnings == []
+        assert writer.failures == 0
+
+    def test_a_failed_create_is_a_failed_write_and_is_tried_again_next_row(self):
+        """A table that could not be created must not be assumed to exist."""
+        pipe = _FakePipe(table_exists=False, create_fails=RuntimeError('permission denied for schema public'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+        pipe.create_fails = None
+        writer._write_one(_row())
+
+        assert sum(1 for call in pipe.calls if 'CREATE TABLE' in call[2]['sql']) == 2
+        assert 'permission denied' in warnings[0]
+        assert pipe.table_exists is True
+
+    def test_an_insert_failing_for_another_reason_runs_no_ddl(self):
         pipe = _FakePipe(fail=RuntimeError('connection refused'))
         writer = _writer(_FakeTarget(pipe), [])
 
         writer._write_one(_row())
-        pipe.fail = None
-        writer._write_one(_row())
 
-        assert sum(1 for call in pipe.calls if 'CREATE TABLE' in call[2]['sql']) == 2
+        assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')]
+        assert writer.failures == 1
 
     def test_the_pipe_is_returned_even_when_the_write_raises(self):
         """A leaked pipe starves the answering path, which is the whole point."""
@@ -577,7 +635,7 @@ class TestWriterWrites:
 
         writer._write_one(_row())
 
-        assert 'bot_events' in pipe.calls[1][2]['sql']
+        assert 'bot_events' in pipe.calls[0][2]['sql']
 
 
 class TestWriterNodeResolution:
@@ -599,6 +657,31 @@ class TestWriterNodeResolution:
         writer._write_one(_row())
 
         assert pipe.controller_queries == 1
+
+    def test_the_dialect_is_asked_once_of_the_resolved_node(self):
+        pipe = _FakePipe(node_ids=('db_7',))
+        writer = _writer(_FakeTarget(pipe), [])
+
+        writer._write_one(_row())
+        writer._write_one(_row())
+
+        assert pipe.dialect_calls == ['db_7']
+
+    @pytest.mark.parametrize('dialect', ['mysql', 'clickhouse', 'neo4j'])
+    def test_a_non_postgres_dialect_disables_capture_with_one_warning(self, dialect):
+        """The capture SQL is PostgreSQL's; on anything else it would fail every row."""
+        pipe = _FakePipe(dialect=dialect)
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+        writer._write_one(_row())
+
+        assert pipe.calls == []
+        assert writer.disabled is True
+        assert len(warnings) == 1
+        assert dialect in warnings[0]
+        assert 'PostgreSQL' in warnings[0]
 
     def test_a_configured_node_id_wins_and_skips_the_lookup(self):
         pipe = _FakePipe(node_ids=('db_1', 'db_2'))
@@ -779,10 +862,7 @@ class TestWriterThread:
         writer.submit(_row())
         writer.stop(timeout=5.0)
 
-        assert [call[2]['sql'] for call in pipe.calls] == [
-            CREATE_TABLE_SQL('discord_events'),
-            INSERT_SQL('discord_events'),
-        ]
+        assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')]
         assert target.borrowed == target.returned == 1
 
     def test_the_worker_thread_is_a_daemon(self):
@@ -1229,6 +1309,12 @@ class TestServicesJson:
         for option in ('emitOutbound', 'emitNoReply', 'emitReactions'):
             assert option in description, option
 
+    def test_the_capture_events_description_says_postgres_only_and_the_rights(self, schema):
+        description = schema['fields']['discord.captureEvents']['description']
+        assert 'PostgreSQL only' in description
+        assert 'INSERT' in description
+        assert 'CREATE' in description
+
     def test_the_capture_source_description_gives_the_real_default(self, schema):
         """``endpoint.key`` is the node's logical type, so the default is discord:discord."""
         description = schema['fields']['discord.captureSource']['description']
@@ -1285,9 +1371,9 @@ class _ControlOnlyPipe(_FakePipe):
 
     def control(self, lane, envelope, nodeId=''):
         param = envelope.param
-        self.calls.append((nodeId, param.tool_name, dict(param.input), lane))
-        if self.fail is not None:
-            raise self.fail
+        if param.tool_name != 'dialect':
+            self.calls.append((nodeId, param.tool_name, dict(param.input), lane))
+        self._answer(param, nodeId)
 
 
 class _FakeEnvelope:
@@ -1306,8 +1392,9 @@ def test_a_pipe_without_invoke_is_driven_through_control(monkeypatch):
 
     writer._write_one(_row())
 
-    create, insert = pipe.calls
-    assert create[0] == 'db_1' and create[1] == 'execute' and create[3] == 'tool'
+    (insert,) = pipe.calls
+    assert insert[0] == 'db_1' and insert[1] == 'execute' and insert[3] == 'tool'
+    assert pipe.dialect_calls == ['db_1']
     assert insert[2]['sql'] == INSERT_SQL('discord_events')
     assert len(insert[2]['params']) == 12
     assert warnings == []
