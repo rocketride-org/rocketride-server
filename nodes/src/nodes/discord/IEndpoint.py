@@ -532,11 +532,12 @@ class IEndpoint(IEndpointBase):
             monitorStatus(config_error)
             raise RuntimeError(config_error)
 
-        if not getattr(self, '_guild_ids', []):
+        if not getattr(self, '_guild_ids', []) and not getattr(self, '_channel_ids', []):
             # Valid, and the default, but a new Discord application is a Public
             # Bot: anyone can add it to their server and it will answer there.
+            # A channel list alone already limits it (and refuses DMs).
             _config_warning(
-                'Discord: guildIds is empty, so the bot will answer in any server it is added to; '
+                'Discord: guildIds and channelIds are empty, so the bot will answer in any server it is added to; '
                 'set guildIds and turn off Public Bot in the Developer Portal'
             )
 

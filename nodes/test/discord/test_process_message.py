@@ -2145,11 +2145,26 @@ class TestOpenBotWarning:
     """A bot with no server allowlist answers wherever it is added."""
 
     @staticmethod
-    def _endpoint(guild_ids):
+    def _endpoint(guild_ids, channel_ids=None):
         endpoint = IEndpoint.__new__(IEndpoint)
         endpoint._bot_token = 'token'
         endpoint._guild_ids = guild_ids
+        endpoint._channel_ids = channel_ids or []
         return endpoint
+
+    def test_a_channel_list_alone_raises_no_warning(self):
+        # Only the listed channels (and their threads) are answered, and DMs
+        # are refused: the bot does not answer in any server it joins.
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            _start(self._endpoint([], ['456']))
+
+        warn.assert_not_called()
+
+    def test_both_lists_empty_warns(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            _start(self._endpoint([], []))
+
+        warn.assert_called_once()
 
     def test_an_empty_guild_list_warns_once_at_start(self):
         with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
