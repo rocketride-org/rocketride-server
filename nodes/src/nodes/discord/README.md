@@ -68,7 +68,7 @@ Reaction capture requires the reactions intent and covers human reactions only: 
 
 ### maxAttachmentBytes
 
-Attachments larger than this (default 25 MB, at most 100 MB) are skipped without being downloaded; the reported size is checked before the file is fetched. At most `maxConcurrentMessages` messages (default 4, 1 to 32) are processed at once, downloads included, so memory stays bounded; further messages wait their turn rather than being dropped.
+Attachments larger than this (default 25 MB, at most 100 MB) are skipped without being downloaded; the reported size is checked before the file is fetched. At most `maxConcurrentMessages` messages (default 4, 1 to 32) are processed at once, downloads included, so memory stays bounded; further messages wait their turn rather than being dropped. The limit is shared by every server and channel the bot serves, so slow pipelines delay all of them, and a message waiting for its turn shows no typing indicator yet. Values above the size of the default thread pool the pipeline calls run on (`min(32, CPU count + 4)`) do not make more pipelines run in parallel.
 
 ### ignoreBots / sendResponses / showTyping
 

@@ -2211,6 +2211,44 @@ class TestConcurrentMessages:
         assert running['peak'] == 2
         assert endpoint._send_response.await_count == 7
 
+    @pytest.mark.parametrize('emit_no_reply', [False, True])
+    def test_a_message_queued_for_a_slot_is_skipped_once_shutdown_began(self, emit_no_reply):
+        endpoint = _make_endpoint(merge_attachments=False)
+        endpoint._bot_token = 'token'
+        endpoint._guild_ids = ['1']
+        endpoint._max_concurrent_messages = 1
+        endpoint._emit_no_reply = emit_no_reply
+        endpoint._emit_event_pipeline = mock.Mock()
+        asked = []
+
+        async def scenario():
+            release = asyncio.Event()
+
+            async def pipeline(message, _factory):
+                asked.append(message.content)
+                await release.wait()
+                return 'answer'
+
+            endpoint._run_with_optional_typing = pipeline
+            first = asyncio.create_task(endpoint._process_message(_make_message(content='first')))
+            await asyncio.sleep(0)
+            queued = asyncio.create_task(endpoint._process_message(_make_message(content='queued')))
+            await asyncio.sleep(0)
+            # What _shutdown does first, while the queued message still waits.
+            endpoint._closing = True
+            release.set()
+            await asyncio.gather(first, queued)
+
+        _start(endpoint, scenario)
+
+        assert asked == ['first']
+        assert endpoint._send_response.await_count == 1
+        events = [call.args[1:] for call in endpoint._emit_event_pipeline.call_args_list]
+        if emit_no_reply:
+            assert events == [('no_reply', {'reason': 'shutdown'})]
+        else:
+            assert events == []
+
     def test_services_json_declares_the_settings(self):
         schema = _load_services_json()
         field = schema['fields']['discord.maxConcurrentMessages']

@@ -930,6 +930,11 @@ class IEndpoint(IEndpointBase):
         slots = getattr(self, '_message_slots', None)
         async with slots if slots is not None else contextlib.nullcontext():
             metadata = self._message_metadata(message)
+            if getattr(self, '_closing', False):
+                # Shutdown began while this message waited for a slot: it must
+                # not download, run the pipeline or reply after that point.
+                await self._emit_no_reply_event(metadata, 'shutdown')
+                return
             eligible_attachments = [
                 attachment
                 for attachment in message.attachments
