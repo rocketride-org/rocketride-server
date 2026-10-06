@@ -17,8 +17,10 @@ library during test collection.
 import codecs
 import importlib.util
 import json
+import mimetypes
 import os
 import re
+from unittest import mock
 
 import pytest
 
@@ -289,6 +291,19 @@ class TestGuessMediaType:
         # mimetypes says audio/x-wav; the node's own table answers first.
         assert guess_media_type('clip.wav') == 'audio/wav'
         assert guess_media_type('song.mp3') == 'audio/mpeg'
+
+    def test_the_fallback_uses_python_built_in_table_only(self):
+        # On Windows the registry says application/vnd.ms-excel for .csv and
+        # video/vnd.dlna.mpeg-tts for .ts (TypeScript, as often as not).
+        assert guess_media_type('data.csv') == 'text/csv'
+        assert not guess_media_type('app.ts').startswith('video/')
+
+    def test_the_host_mime_table_is_never_consulted(self):
+        host = mock.Mock(return_value=('application/vnd.ms-excel', None))
+        with mock.patch.object(mimetypes, 'guess_type', host), mock.patch.object(mimetypes, '_db', None):
+            assert guess_media_type('data.csv') == 'text/csv'
+            assert guess_media_type('app.ts') == 'application/octet-stream'
+        host.assert_not_called()
 
     def test_case_insensitive_extension(self):
         assert guess_media_type('Photo.JPG') == 'image/jpeg'

@@ -72,6 +72,13 @@ _EXT_TO_MIME = {
     '.zip': 'application/zip',
 }
 
+# Python's built-in MIME table only. The module-level ``mimetypes.guess_type``
+# also reads the Windows registry and /etc/mime.types, so the same file routed
+# differently per host (on Windows .csv is application/vnd.ms-excel and .ts
+# video/vnd.dlna.mpeg-tts). A fresh ``MimeTypes()`` is filled from the built-in
+# defaults alone; the system files go into the module's own global table.
+_BUILTIN_MIME_TYPES = mimetypes.MimeTypes()
+
 
 def _hard_split(text: str, max_length: int) -> List[str]:
     """Split text into fixed-size pieces, each at most ``max_length`` chars."""
@@ -456,8 +463,8 @@ def guess_media_type(filename: str, content_type: str = '') -> str:
 
     Returns:
         str: A MIME type string: the reported type, else the node's own
-            extension table, else Python's ``mimetypes``, else
-            'application/octet-stream'.
+            extension table, else Python's built-in ``mimetypes`` table (never
+            the host's), else 'application/octet-stream'.
     """
     if content_type:
         # Normalize to lowercase without parameters (e.g. '; charset=utf-8').
@@ -474,4 +481,4 @@ def guess_media_type(filename: str, content_type: str = '') -> str:
             return mime_type
     # Anything the table does not list (.m4a, .flac, ...) would otherwise go
     # to the tags lane whatever it is: ask Python's MIME table before giving up.
-    return mimetypes.guess_type(filename_lower)[0] or 'application/octet-stream'
+    return _BUILTIN_MIME_TYPES.guess_type(filename_lower)[0] or 'application/octet-stream'
