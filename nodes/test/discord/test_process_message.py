@@ -2066,3 +2066,61 @@ class TestOpenBotWarning:
             _start(self._endpoint(['123']))
 
         warn.assert_not_called()
+
+
+class TestConcurrentMessages:
+    """maxConcurrentMessages bounds how many messages are processed at once."""
+
+    def test_the_default_and_the_clamp(self):
+        parse = TestNumericAndMentionConfig._parse
+        assert parse({})._max_concurrent_messages == 4
+        assert parse({'maxConcurrentMessages': TestNumericAndMentionConfig._Proxy('8')})._max_concurrent_messages == 8
+        assert parse({'maxConcurrentMessages': 0})._max_concurrent_messages == 1
+        assert parse({'maxConcurrentMessages': -3})._max_concurrent_messages == 1
+        assert parse({'maxConcurrentMessages': 500})._max_concurrent_messages == 32
+        assert parse({'maxConcurrentMessages': 'lots'})._max_concurrent_messages == 4
+
+    def test_the_attachment_size_is_clamped_to_its_maximum(self):
+        parse = TestNumericAndMentionConfig._parse
+        assert parse({'maxAttachmentBytes': 10**12})._max_attachment_bytes == 104857600
+        assert parse({'maxAttachmentBytes': 104857600})._max_attachment_bytes == 104857600
+        assert parse({'maxAttachmentBytes': 1024})._max_attachment_bytes == 1024
+
+    def test_no_more_than_the_limit_run_at_once_and_none_are_dropped(self):
+        endpoint = _make_endpoint(merge_attachments=False)
+        endpoint._bot_token = 'token'
+        endpoint._guild_ids = ['1']
+        endpoint._max_concurrent_messages = 2
+        running = {'now': 0, 'peak': 0}
+
+        async def pipeline(_message, _factory):
+            running['now'] += 1
+            running['peak'] = max(running['peak'], running['now'])
+            await asyncio.sleep(0.01)
+            running['now'] -= 1
+            return 'answer'
+
+        endpoint._run_with_optional_typing = pipeline
+
+        async def flood():
+            messages = [_make_message(content=f'question {index}') for index in range(7)]
+            await asyncio.gather(*(endpoint._process_message(message) for message in messages))
+
+        _start(endpoint, flood)
+
+        assert running['peak'] == 2
+        assert endpoint._send_response.await_count == 7
+
+    def test_services_json_declares_the_settings(self):
+        schema = _load_services_json()
+        field = schema['fields']['discord.maxConcurrentMessages']
+        assert field['type'] == 'number'
+        assert (field['default'], field['minimum'], field['maximum']) == (4, 1, 32)
+        assert field['title'] and field['description']
+        assert 'discord.maxConcurrentMessages' in schema['fields']['Pipe.source.parameters']['properties']
+        assert schema['fields']['discord.maxAttachmentBytes']['maximum'] == 104857600
+
+        with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
+            lines = handle.read().split('\n')
+        index = next(i for i, line in enumerate(lines) if line.strip().startswith('"discord.maxConcurrentMessages":'))
+        assert lines[index - 1].strip() == '//', 'the new field has no // comment block above it'

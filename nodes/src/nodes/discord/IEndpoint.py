@@ -22,6 +22,7 @@
 # =============================================================================
 
 import asyncio
+import contextlib
 import time
 import json
 import os
@@ -75,6 +76,12 @@ THREAD_NAME_MAX_CHARS = 100
 # at the one place every reason passes through, so a runaway string cannot
 # reach the emitted event.
 MAX_NO_REPLY_REASON_CHARS = 200
+
+# Upper bounds for maxConcurrentMessages and maxAttachmentBytes (the schema
+# declares the same): every message being processed holds its downloaded
+# attachments in memory until the pipeline answers.
+MAX_CONCURRENT_MESSAGES = 32
+MAX_ATTACHMENT_BYTES = 104857600
 
 
 # A ``${NAME}`` the engine could not resolve reaches the node as literal text.
@@ -172,6 +179,10 @@ class IEndpoint(IEndpointBase):
     _reply_mode: str = 'reply'
     _show_typing: bool = True
     _max_attachment_bytes: int = 26214400
+    _max_concurrent_messages: int = 4
+    # Created in _startup on the loop that runs the handlers; bounds how many
+    # _process_message bodies run at once.
+    _message_slots: Optional[asyncio.Semaphore] = None
     _send_responses: bool = True
     _thread_name: str = 'Pipeline Response'
     _thread_name_max_length: int = 90
@@ -415,7 +426,10 @@ class IEndpoint(IEndpointBase):
         # literals and the numbers below are used where only an int works.
         self._reply_mode = str(config.get('replyMode') or 'reply')
         self._show_typing = config.get('showTyping', True)
-        self._max_attachment_bytes = self._as_int(config.get('maxAttachmentBytes'), 26214400)
+        self._max_attachment_bytes = min(MAX_ATTACHMENT_BYTES, self._as_int(config.get('maxAttachmentBytes'), 26214400))
+        self._max_concurrent_messages = max(
+            1, min(MAX_CONCURRENT_MESSAGES, self._as_int(config.get('maxConcurrentMessages'), 4))
+        )
         self._send_responses = config.get('sendResponses', True)
         self._thread_name = str(config.get('threadName') or 'Pipeline Response')
         self._thread_name_max_length = max(
@@ -493,6 +507,8 @@ class IEndpoint(IEndpointBase):
         self._inflight = set()
         self._fatal_error = None
         self._closing = False
+        # Messages past the limit wait for a slot; none are dropped.
+        self._message_slots = asyncio.Semaphore(self._max_concurrent_messages)
 
         if not self._bot_token:
             # Fail fast: a source with no token can never receive messages, so
@@ -897,78 +913,86 @@ class IEndpoint(IEndpointBase):
         Returns:
             None
         """
-        metadata = self._message_metadata(message)
-        eligible_attachments = [
-            attachment
-            for attachment in message.attachments
-            if not isinstance(getattr(attachment, 'size', None), (int, float))
-            or attachment.size <= self._max_attachment_bytes
-        ]
-        merge = bool(getattr(self, '_merge_attachments', False)) and bool(message.attachments)
-        question = self._question_text(message)
-        group_size = (1 if question else 0) + len(eligible_attachments)
-        group_index = 0
-        processing_errors: List[str] = []
-        try:
-            reply = ''
+        # Each message holds its downloaded attachments until the pipeline
+        # answers: bound how many are in here at once. Later ones wait.
+        slots = getattr(self, '_message_slots', None)
+        async with slots if slots is not None else contextlib.nullcontext():
+            metadata = self._message_metadata(message)
+            eligible_attachments = [
+                attachment
+                for attachment in message.attachments
+                if not isinstance(getattr(attachment, 'size', None), (int, float))
+                or attachment.size <= self._max_attachment_bytes
+            ]
+            merge = bool(getattr(self, '_merge_attachments', False)) and bool(message.attachments)
+            question = self._question_text(message)
+            group_size = (1 if question else 0) + len(eligible_attachments)
+            group_index = 0
+            processing_errors: List[str] = []
+            try:
+                reply = ''
 
-            if merge:
-                reply = await self._process_merged(message, metadata, eligible_attachments, processing_errors)
-            else:
-                if question:
-                    text_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
-                    group_index += 1
-                    text_reply = await self._run_with_optional_typing(
-                        message,
-                        lambda: asyncio.to_thread(
-                            self._run_text_pipeline,
-                            question,
-                            message.channel.id,
-                            message.id,
-                            text_meta,
-                        ),
-                    )
-                    if text_reply:
-                        reply = text_reply
-                    if text_meta.get('_pipelineError'):
-                        processing_errors.append(text_meta.pop('_pipelineError'))
-
-                # A single Discord message can carry up to 10 attachments. As a
-                # source node we ingest every one (each is downloaded, routed, and
-                # counted via monitorCompleted); only the first non-empty answer is
-                # kept for the reply.
-                for attachment_index, attachment in enumerate(message.attachments):
-                    attachment_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
-                    if attachment in eligible_attachments:
-                        group_index += 1
-                    att_reply = await self._process_attachment(message, attachment, attachment_meta, attachment_index)
-                    if attachment_meta.get('_pipelineError'):
-                        processing_errors.append(attachment_meta.pop('_pipelineError'))
-                    if att_reply and not reply:
-                        reply = att_reply
-
-            if reply and self._send_responses:
-                outbound = await self._send_response(message, reply)
-                if outbound.get('messageIds'):
-                    if getattr(self, '_emit_outbound', False):
-                        await self._emit_outbound_event(message, metadata, reply, outbound)
+                if merge:
+                    reply = await self._process_merged(message, metadata, eligible_attachments, processing_errors)
                 else:
-                    # There was an answer and posting it was wanted, but every
-                    # chunk failed (a missing Send Messages permission, a
-                    # deleted channel). Without this the question has a
-                    # ``message`` event and no outcome at all.
-                    await self._emit_no_reply_event(metadata, 'send_failed')
-            elif reply and getattr(self, '_emit_outbound', False):
-                # sendResponses is off: still make the answer observable downstream
-                await self._emit_outbound_event(
-                    message, metadata, reply, {'messageIds': [], 'destination': 'suppressed'}
-                )
-            elif not reply and getattr(self, '_emit_no_reply', False):
-                await self._emit_no_reply_event(metadata, processing_errors[0] if processing_errors else 'no_answer')
-        except Exception as e:
-            debug(f'Discord _process_message: EXCEPTION {e}')
-            if getattr(self, '_emit_no_reply', False):
-                await self._emit_no_reply_event(metadata, str(e))
+                    if question:
+                        text_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
+                        group_index += 1
+                        text_reply = await self._run_with_optional_typing(
+                            message,
+                            lambda: asyncio.to_thread(
+                                self._run_text_pipeline,
+                                question,
+                                message.channel.id,
+                                message.id,
+                                text_meta,
+                            ),
+                        )
+                        if text_reply:
+                            reply = text_reply
+                        if text_meta.get('_pipelineError'):
+                            processing_errors.append(text_meta.pop('_pipelineError'))
+
+                    # A single Discord message can carry up to 10 attachments. As a
+                    # source node we ingest every one (each is downloaded, routed, and
+                    # counted via monitorCompleted); only the first non-empty answer is
+                    # kept for the reply.
+                    for attachment_index, attachment in enumerate(message.attachments):
+                        attachment_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
+                        if attachment in eligible_attachments:
+                            group_index += 1
+                        att_reply = await self._process_attachment(
+                            message, attachment, attachment_meta, attachment_index
+                        )
+                        if attachment_meta.get('_pipelineError'):
+                            processing_errors.append(attachment_meta.pop('_pipelineError'))
+                        if att_reply and not reply:
+                            reply = att_reply
+
+                if reply and self._send_responses:
+                    outbound = await self._send_response(message, reply)
+                    if outbound.get('messageIds'):
+                        if getattr(self, '_emit_outbound', False):
+                            await self._emit_outbound_event(message, metadata, reply, outbound)
+                    else:
+                        # There was an answer and posting it was wanted, but every
+                        # chunk failed (a missing Send Messages permission, a
+                        # deleted channel). Without this the question has a
+                        # ``message`` event and no outcome at all.
+                        await self._emit_no_reply_event(metadata, 'send_failed')
+                elif reply and getattr(self, '_emit_outbound', False):
+                    # sendResponses is off: still make the answer observable downstream
+                    await self._emit_outbound_event(
+                        message, metadata, reply, {'messageIds': [], 'destination': 'suppressed'}
+                    )
+                elif not reply and getattr(self, '_emit_no_reply', False):
+                    await self._emit_no_reply_event(
+                        metadata, processing_errors[0] if processing_errors else 'no_answer'
+                    )
+            except Exception as e:
+                debug(f'Discord _process_message: EXCEPTION {e}')
+                if getattr(self, '_emit_no_reply', False):
+                    await self._emit_no_reply_event(metadata, str(e))
 
     async def _process_merged(
         self,

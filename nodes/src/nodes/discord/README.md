@@ -68,7 +68,7 @@ Reaction capture requires the reactions intent and covers human reactions only: 
 
 ### maxAttachmentBytes
 
-Attachments larger than this (default 25 MB) are skipped without being downloaded; the reported size is checked before the file is fetched.
+Attachments larger than this (default 25 MB, at most 100 MB) are skipped without being downloaded; the reported size is checked before the file is fetched. At most `maxConcurrentMessages` messages (default 4, 1 to 32) are processed at once, downloads included, so memory stays bounded; further messages wait their turn rather than being dropped.
 
 ### ignoreBots / sendResponses / showTyping
 

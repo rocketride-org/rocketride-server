@@ -150,8 +150,23 @@
 		"discord.maxAttachmentBytes": {
 			"type": "number",
 			"title": "Max Attachment Size (bytes)",
-			"description": "Maximum size of attachments to download. Larger files are skipped. Default 25 MB.",
-			"default": 26214400
+			"description": "Maximum size of attachments to download. Larger files are skipped. Default 25 MB, at most 100 MB.",
+			"default": 26214400,
+			"maximum": 104857600
+		},
+		//
+		// Bounds how many messages are processed at once (download, pipeline
+		// and reply); each holds its downloaded attachments in memory until
+		// the pipeline answers. Further messages wait their turn.
+		//
+		"discord.maxConcurrentMessages": {
+			"type": "number",
+			"title": "Max Concurrent Messages",
+			"description": "How many messages are processed at once. Further messages wait their turn; none are dropped.",
+			"default": 4,
+			"minimum": 1,
+			"maximum": 32,
+			"optional": true
 		},
 		"discord.sendResponses": {
 			"type": "boolean",
@@ -290,6 +305,7 @@
 				"discord.replyMode",
 				"discord.showTyping",
 				"discord.maxAttachmentBytes",
+				"discord.maxConcurrentMessages",
 				"discord.sendResponses",
 				"discord.requireMentionChannelIds",
 				"discord.allowedBotIds",
