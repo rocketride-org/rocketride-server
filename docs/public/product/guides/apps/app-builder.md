@@ -106,6 +106,16 @@ Two verbs, and they are not the same:
   the same move: repoint, never rebuild. There is no org-wide rung; an
   org-wide audience is a team your admin maintains.
 
+A deploy returns as soon as the server accepts the upload; the version
+can be published, and served, only once its server build finishes. The
+version card shows the build's progress (`queued`, `building`, …) until
+then. Once you publish, **Where this app is live** on the Deploy tab shows
+what a browser in each audience actually gets: `serving`, or why not
+(`not serving: still building`, `not serving: build failed`, `disabled`,
+`in review`). The dashboard says which version you would get right now.
+Every open App Builder updates when a build lands or anyone in your
+organization publishes or disables a version.
+
 A deploy packs the app folder plus any folders listed under
 `appManifest.include`, and nothing else. Every `include` entry must exist.
 
