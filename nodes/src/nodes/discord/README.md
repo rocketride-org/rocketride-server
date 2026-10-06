@@ -233,14 +233,14 @@ Binary attachments are never broadcast, only their MIME type and size. Every eve
 | `discord.backfillLimit` | `number` | **Backfill Limit**<br/>Most-recent messages to process per readable channel at startup. Zero disables backfill. | `0` |
 | `discord.botToken` | `string` | **Bot Token**<br/>Discord bot token from the Developer Portal (keep this secret - do not share) |  |
 | `discord.channelIds` | `array` | **Channel IDs**<br/>List of channel IDs to listen to. Leave empty to listen to all channels. | `[]` |
-| `discord.emitNoReply` | `boolean` | **Emit No Reply Events**<br/>Emit an event when processing produces no answer or raises an error. The reason is no_answer, send_failed or shutdown; any other value is an error message clipped to 200 characters. | `false` |
+| `discord.emitNoReply` | `boolean` | **Emit No Reply Events**<br/>Emit an event when processing produces no answer or raises an error. The reason is no_answer, send_failed, shutdown, paused, aimed_elsewhere, non_answer, model_error or timeout; any other value is an error message clipped to 200 characters. | `false` |
 | `discord.emitOutbound` | `boolean` | **Emit Outbound Events**<br/>Emit an event after posting a pipeline response to Discord. | `false` |
 | `discord.emitReactions` | `boolean` | **Emit Reactions**<br/>Emit raw reaction add and remove events into the pipeline. | `false` |
 | `discord.escalationMarkers` | `array` | **Escalation Markers**<br/>Text markers that mark an answer as escalated (for example a team role mention). Allowed Mention Role IDs are added automatically. | `[]` |
 | `discord.escalationPause` | `boolean` | **Pause After Escalation**<br/>After an answer containing an escalation marker is posted into a thread, stay quiet in that thread until the bot is mentioned again. | `false` |
 | `discord.feedbackEmojis` | `array` | **Feedback Emojis**<br/>Emojis added, in order, to the last posted answer chunk when Feedback Reactions is enabled. | `["✅","❌"]` |
 | `discord.feedbackReactions` | `boolean` | **Feedback Reactions**<br/>Add feedback emojis to the last posted answer chunk so readers can grade it in one click. | `false` |
-| `discord.guildIds` | `array` | **Server IDs (Guild IDs)**<br/>List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in. |  |
+| `discord.guildIds` | `array` | **Server IDs (Guild IDs)**<br/>List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in. | `[]` |
 | `discord.ignoreAimedAtOthers` | `boolean` | **Ignore Messages Aimed At Others**<br/>Skip messages that mention another user or role, or reply to a message the bot did not write, unless the bot is mentioned. | `false` |
 | `discord.ignoreBots` | `boolean` | **Ignore Bot Messages**<br/>If true (default), messages from other bots are ignored to prevent loops. | `true` |
 | `discord.includeMemberMetadata` | `boolean` | **Include Member Metadata**<br/>Include display names and role IDs; requires the Discord members intent. | `false` |
@@ -257,8 +257,8 @@ Binary attachments are never broadcast, only their MIME type and size. Every eve
 | `discord.sendResponses` | `boolean` | **Send Responses**<br/>If true, the bot sends pipeline answers back to Discord. If false, only processes messages. | `true` |
 | `discord.showTyping` | `boolean` | **Show Typing Indicator**<br/>If true, show a typing indicator while processing the pipeline. | `true` |
 | `discord.teamMentionAlias` | `string` | **Team Mention Alias**<br/>Literal team name the pipeline writes when it hands a question over, for example "@RocketRide team". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Empty leaves answers untouched. | `""` |
-| `discord.textAttachmentExtensions` | `array` | **Text Attachment Extensions**<br/>Filename extensions decoded as UTF-8 and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object. | `[]` |
-| `discord.textAttachmentMaxChars` | `number` | **Text Attachment Max Characters**<br/>Maximum decoded characters folded into the text lane per attachment. | `12000` |
+| `discord.textAttachmentExtensions` | `array` | **Text Attachment Extensions**<br/>Filename extensions decoded as text (UTF-8, or UTF-16 when the file starts with a UTF-16 byte order mark) and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object. | `[]` |
+| `discord.textAttachmentMaxChars` | `number` | **Text Attachment Max Characters**<br/>Maximum decoded characters folded into the text lane per attachment. 0 means no limit. | `12000` |
 | `discord.threadAutoArchiveMinutes` | `number` | **Thread Auto Archive Minutes**<br/>Discord auto-archive duration, in minutes, for response threads the node creates. Discord accepts only 60, 1440, 4320 or 10080; 0 (the default) uses the channel's own default. | `0` |
 | `discord.threadHistoryLimit` | `number` | **Thread History Limit**<br/>Prior thread messages fetched as conversation context for a message in a thread. Zero disables it. | `0` |
 | `discord.threadHistoryMaxChars` | `number` | **Thread History Max Characters**<br/>Maximum characters of thread transcript passed as context; the oldest lines are dropped first. | `6000` |
