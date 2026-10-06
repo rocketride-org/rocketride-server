@@ -31,9 +31,9 @@ class IInstance(IInstanceBase):
     """
     Instance class for the TwelveLabs node.
 
-    Buffers incoming video chunks, writes them to a temporary file on stream end,
-    submits the file to TwelveLabs with the configured instructions, and outputs
-    the returned text.
+    Streams incoming video chunks straight to a temporary file, submits the
+    file to TwelveLabs with the configured instructions, and outputs the
+    returned text.
     """
 
     IGlobal: IGlobal
@@ -42,7 +42,8 @@ class IInstance(IInstanceBase):
         """
         Initialize the instance.
         """
-        self._video_chunks = []
+        self._tmp_path = None
+        self._tmp_file = None
         self._mime_type = ''
 
     def writeVideo(self, action: int, mimeType: str, buffer: bytes) -> None:
@@ -54,35 +55,58 @@ class IInstance(IInstanceBase):
             mimeType: The MIME type of the video.
             buffer: The video data.
         """
-        # TODO: refactor memory buffering to file buffering
         if action == AVI_ACTION.BEGIN:
-            self._video_chunks = []
+            # A file still open here belongs to a stream the engine displaced
+            # without an END (e.g. a prior stream that never declared a byte
+            # count to settle against) - release it before starting the new one.
+            self._discard_tmp_file()
             self._mime_type = mimeType
+            suffix = self._suffix_for_mime(mimeType)
+            fd, self._tmp_path = tempfile.mkstemp(suffix=suffix)
+            self._tmp_file = os.fdopen(fd, 'wb')
 
         elif action == AVI_ACTION.WRITE:
-            self._video_chunks.append(buffer)
+            if self._tmp_file is not None and buffer:
+                self._tmp_file.write(buffer)
 
         elif action == AVI_ACTION.END:
             self._submit_video()
 
+    def closing(self) -> None:
+        """Release a stream still open when the instance is torn down (no END arrived)."""
+        self._discard_tmp_file()
+
+    def _discard_tmp_file(self) -> None:
+        """Close and delete any temp file left over from an incomplete stream."""
+        if self._tmp_file is not None:
+            try:
+                self._tmp_file.close()
+            except OSError as e:
+                debug(f'TwelveLabs: failed to close temp file: {e}')
+            self._tmp_file = None
+        if self._tmp_path and os.path.exists(self._tmp_path):
+            try:
+                os.unlink(self._tmp_path)
+            except OSError as e:
+                debug(f'TwelveLabs: failed to delete temp file: {e}')
+        self._tmp_path = None
+
     def _submit_video(self) -> None:
-        """Write buffered video to a temp file, submit to TwelveLabs, output text."""
+        """Close the temp file, submit it to TwelveLabs, output text."""
         from . import twelvelabs_driver
 
-        suffix = self._suffix_for_mime(self._mime_type)
-        tmp_path = None
+        if self._tmp_file is None:
+            return
 
         try:
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode='wb') as f:
-                tmp_path = os.path.realpath(f.name)
-                for chunk in self._video_chunks:
-                    f.write(chunk)
+            self._tmp_file.close()
+            self._tmp_file = None
 
-            debug(f'TwelveLabs: submitting {tmp_path} ({len(self._video_chunks)} chunks)')
+            debug(f'TwelveLabs: submitting {self._tmp_path}')
 
             text = twelvelabs_driver.process_video(
                 self.IGlobal.api_key,
-                tmp_path,
+                self._tmp_path,
                 self.IGlobal.instructions,
             )
 
@@ -90,12 +114,7 @@ class IInstance(IInstanceBase):
                 self.instance.writeText(text if text else 'No data from TwelveLabs')
 
         finally:
-            self._video_chunks = []
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.unlink(tmp_path)
-                except OSError as e:
-                    debug(f'TwelveLabs: failed to delete temp file: {e}')
+            self._discard_tmp_file()
 
     @staticmethod
     def _suffix_for_mime(mime_type: str) -> str:
