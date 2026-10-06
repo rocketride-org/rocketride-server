@@ -108,7 +108,7 @@ class TestCaptureRowColumns:
         )
         assert row['event_type'] == 'message'
         assert row['message_id'] == '1001'
-        assert row['event_key'] == ''
+        assert row['event_key'] == 'text'
         assert row['thread_id'] == '1001'
         assert row['channel_id'] == '2002'
         assert row['guild_id'] == '3003'
@@ -195,14 +195,35 @@ class TestCaptureRowColumns:
 class TestCaptureRowEventKeys:
     """The ``event_key`` rules, which are what the unique key dedupes on."""
 
-    def test_a_plain_message_has_an_empty_key(self):
-        row = capture_row('message', _metadata(), {'text': 'x'}, source='s', now=NOW)
-        assert row['event_key'] == ''
+    def test_the_text_pass_is_keyed_text(self):
+        row = capture_row('message', _metadata(), {'lane': 'text', 'text': 'x'}, source='s', now=NOW)
+        assert row['event_key'] == 'text'
 
     def test_a_retried_text_pass_is_keyed_by_its_attempt(self):
         """Each retry is a separate pipeline run and must not collapse into one row."""
-        row = capture_row('message', _metadata(), {'text': 'x', 'retry': 2}, source='s', now=NOW)
-        assert row['event_key'] == 'retry:2'
+        row = capture_row('message', _metadata(), {'lane': 'text', 'text': 'x', 'retry': 2}, source='s', now=NOW)
+        assert row['event_key'] == 'text:retry:2'
+
+    def test_an_attachment_is_keyed_by_its_lane_and_group_index(self):
+        row = capture_row(
+            'message',
+            _metadata(groupIndex=1, groupSize=2),
+            {'lane': 'binary', 'mimeType': 'image/png', 'size': 3},
+            source='s',
+            now=NOW,
+        )
+        assert row['event_key'] == 'binary:1'
+
+    def test_a_text_attachment_is_not_keyed_like_the_text_pass(self):
+        """With mergeAttachments off a text file is its own text-lane object."""
+        row = capture_row(
+            'message',
+            _metadata(groupIndex=1, groupSize=2),
+            {'lane': 'text', 'text': '[attachment notes.txt]\nhi'},
+            source='s',
+            now=NOW,
+        )
+        assert row['event_key'] == 'text:1'
 
     def test_an_outbound_event_has_an_empty_key(self):
         """One reply per message; the chunk ids live in the payload."""
@@ -507,7 +528,7 @@ class TestWriterWrites:
         assert params == [
             'message',
             '1001',
-            '',
+            'text',
             '1001',
             '2002',
             '3003',
@@ -1080,6 +1101,83 @@ class TestEndpointCaptureWiring:
         endpoint._stop_capture()
         endpoint._stop_capture()
         assert endpoint._capture is None
+
+
+def _kept_rows(pipe):
+    """The INSERTs a real table keeps: ``ON CONFLICT DO NOTHING`` on the dedupe key."""
+    kept = {}
+    for call in pipe.calls:
+        if 'INSERT INTO' not in call[2]['sql']:
+            continue
+        params = call[2]['params']
+        kept.setdefault((params[1], params[0], params[2]), params)
+    return list(kept.values())
+
+
+class TestEveryMessagePartIsKept:
+    """A message's text pass and each attachment are separate rows under the dedupe key."""
+
+    @staticmethod
+    def _text(endpoint, group_index, group_size):
+        endpoint._run_text_pipeline('hello', 2002, 1001, _metadata(groupIndex=group_index, groupSize=group_size))
+
+    @staticmethod
+    def _attachment(endpoint, group_index, group_size):
+        endpoint._run_binary_pipeline(
+            b'%PDF-1.4', 'application/pdf', 6006, 2002, 1001, 0, _metadata(groupIndex=group_index, groupSize=group_size)
+        )
+
+    def test_text_then_attachment_gives_two_rows(self):
+        """With mergeAttachments off the text pass runs first, the attachment after it."""
+        pipe = _PipelinePipe()
+        endpoint = _endpoint(pipe, capture_events=True)
+        try:
+            self._text(endpoint, 0, 2)
+            self._attachment(endpoint, 1, 2)
+        finally:
+            endpoint._stop_capture()
+
+        kept = _kept_rows(pipe)
+        assert [(row[0], row[2]) for row in kept] == [('message', 'text'), ('message', 'binary:1')]
+        assert kept[0][9] == 'hello'
+
+    def test_attachment_then_merged_text_gives_two_rows(self):
+        """With mergeAttachments on the attachment runs first, the merged question after it."""
+        pipe = _PipelinePipe()
+        endpoint = _endpoint(pipe, capture_events=True)
+        try:
+            self._attachment(endpoint, 1, 2)
+            self._text(endpoint, 0, 2)
+        finally:
+            endpoint._stop_capture()
+
+        kept = _kept_rows(pipe)
+        assert [(row[0], row[2]) for row in kept] == [('message', 'binary:1'), ('message', 'text')]
+        assert kept[1][9] == 'hello'
+
+    def test_the_same_message_emitted_twice_still_dedupes(self):
+        """A redelivered Gateway event produces the same keys, so nothing is added."""
+        pipe = _PipelinePipe()
+        endpoint = _endpoint(pipe, capture_events=True)
+        try:
+            for _ in range(2):
+                self._text(endpoint, 0, 2)
+                self._attachment(endpoint, 1, 2)
+        finally:
+            endpoint._stop_capture()
+
+        assert len(_kept_rows(pipe)) == 2
+
+    def test_a_retried_text_pass_gets_its_own_row(self):
+        pipe = _PipelinePipe()
+        endpoint = _endpoint(pipe, capture_events=True)
+        try:
+            endpoint._capture_event('message', _metadata(), {'lane': 'text', 'text': 'hello'})
+            endpoint._capture_event('message', _metadata(), {'lane': 'text', 'text': 'hello', 'retry': 1})
+        finally:
+            endpoint._stop_capture()
+
+        assert [row[2] for row in _kept_rows(pipe)] == ['text', 'text:retry:1']
 
 
 # ===========================================================================

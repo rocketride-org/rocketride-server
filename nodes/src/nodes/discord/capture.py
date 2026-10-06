@@ -201,14 +201,35 @@ def _clip(value: Any) -> Optional[str]:
     return str(value)[:MAX_TEXT_CHARS]
 
 
-def _event_key(event_type: str, payload: Dict[str, Any], now: datetime) -> str:
+def _message_part(metadata: Dict[str, Any], payload: Dict[str, Any]) -> str:
+    """Name which part of one Discord message a ``message`` event is.
+
+    A message with attachments opens one object per part, all with the same
+    message id: the text pass at ``groupIndex`` 0 and each attachment at its
+    own index. Both come from the broadcast body, so a key rebuilt later from
+    the task's run log comes out the same.
+    """
+    lane = str(payload.get('lane') or 'text')
+    try:
+        index = int(metadata.get('groupIndex') or 0)
+    except (TypeError, ValueError):
+        index = 0
+    if lane == 'text' and index == 0:
+        return 'text'
+    return f'{lane}:{index}'
+
+
+def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any], now: datetime) -> str:
     """Return the disambiguator for the ``(message_id, event_type)`` pair.
 
     The unique key is what makes the log idempotent, so each event type says
     exactly what counts as "the same event twice":
 
-    * ``message``   -- one per message, unless it is a retried text pass; each
-      retry is a genuinely separate pipeline run with its own answer.
+    * ``message``   -- one per part of the message: ``text`` for the text
+      pass, ``<lane>:<groupIndex>`` for each attachment (``binary:1``,
+      ``text:2`` for a text file asked about on its own), with ``:retry:<n>``
+      appended for a retried pass, which is a genuinely separate pipeline run
+      with its own answer.
     * ``outbound``  -- one reply per message. The chunk ids are in the payload.
     * ``no_reply``  -- the reason, because one message can be skipped for
       different reasons across runs (paused, then aimed_elsewhere).
@@ -232,9 +253,10 @@ def _event_key(event_type: str, payload: Dict[str, Any], now: datetime) -> str:
         )
         key = f'{user_id}:{emoji}:{direction}:{when}'
     elif event_type == 'message':
+        key = _message_part(metadata, payload)
         retry = payload.get('retry')
         if retry:
-            key = f'retry:{int(retry)}'
+            key = f'{key}:retry:{int(retry)}'
     return key[:MAX_EVENT_KEY_CHARS]
 
 
@@ -285,7 +307,7 @@ def capture_row(
     return {
         'event_type': event_type,
         'message_id': message_id,
-        'event_key': _event_key(event_type, payload, now),
+        'event_key': _event_key(event_type, metadata, payload, now),
         'thread_id': thread_id,
         'channel_id': _opt_text(metadata.get('channelId')),
         'guild_id': _opt_text(metadata.get('guildId')),
