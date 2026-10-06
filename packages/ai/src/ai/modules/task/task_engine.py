@@ -1033,6 +1033,10 @@ class Task(DAPBase):
             # "Connection refused" error. We retry up to 10 times (150ms apart) to
             # give uvicorn time to start accepting connections.
             if not self._data_client:
+                # No token: the run never started or was torn down while we waited for the lock
+                if not self._data_token:
+                    raise RuntimeError('Task is not running, cannot open the data channel')
+
                 uri = f'ws://127.0.0.1:{self._data_port}/task/data'
 
                 @retry(

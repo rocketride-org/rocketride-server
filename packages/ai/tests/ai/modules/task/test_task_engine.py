@@ -1828,3 +1828,24 @@ async def test_data_connection_presents_the_token(monkeypatch):
     ((uri, kwargs),) = transports
     assert uri == 'ws://127.0.0.1:20001/task/data'
     assert kwargs['headers'] == {'Authorization': 'Bearer run-token'}
+
+
+async def test_data_request_without_a_token_fails_at_once(monkeypatch):
+    """A request that outlived the run fails clearly, with no retries and no ``Bearer None``."""
+    from ai.modules.task import task_engine
+
+    transport = MagicMock(name='TransportWebSocket')
+    monkeypatch.setattr(task_engine, 'TransportWebSocket', transport)
+
+    t = _task()
+    t._is_terminating = False
+    t._data_lock = asyncio.Lock()
+    t._data_client = None
+    t._data_port = None
+    t._data_token = None
+    t._engine_process = None
+
+    with pytest.raises(RuntimeError, match='not running'):
+        await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+
+    transport.assert_not_called()
