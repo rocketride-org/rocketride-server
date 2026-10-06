@@ -517,7 +517,10 @@ class IEndpoint(IEndpointBase):
         # literals and the numbers below are used where only an int works.
         self._reply_mode = str(config.get('replyMode') or 'reply')
         self._show_typing = config.get('showTyping', True)
-        self._max_attachment_bytes = min(MAX_ATTACHMENT_BYTES, self._as_int(config.get('maxAttachmentBytes'), 26214400))
+        # Zero or below would skip every attachment with only a debug line.
+        self._max_attachment_bytes = max(
+            1, min(MAX_ATTACHMENT_BYTES, self._as_int(config.get('maxAttachmentBytes'), 26214400))
+        )
         self._max_concurrent_messages = max(
             1, min(MAX_CONCURRENT_MESSAGES, self._as_int(config.get('maxConcurrentMessages'), 4))
         )
@@ -528,9 +531,17 @@ class IEndpoint(IEndpointBase):
         )
         self._thread_auto_archive_minutes = self._as_int(config.get('threadAutoArchiveMinutes'), 0)
         self._number_chunks = config.get('numberChunks', False)
+        # Compared with os.path.splitext, which keeps the dot: 'md' and '.md'
+        # both have to match a.md.
         self._text_attachment_extensions = [
-            value.lower()
-            for value in self._as_str_list(config.get('textAttachmentExtensions', []), field='textAttachmentExtensions')
+            '.' + extension.lower()
+            for extension in (
+                value.strip().lstrip('.')
+                for value in self._as_str_list(
+                    config.get('textAttachmentExtensions', []), field='textAttachmentExtensions'
+                )
+            )
+            if extension
         ]
         self._text_attachment_max_chars = self._as_int(config.get('textAttachmentMaxChars'), 12000)
         self._merge_attachments = config.get('mergeAttachments', False)

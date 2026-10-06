@@ -2406,6 +2406,34 @@ class TestConcurrentMessages:
         assert parse({'maxAttachmentBytes': 104857600})._max_attachment_bytes == 104857600
         assert parse({'maxAttachmentBytes': 1024})._max_attachment_bytes == 1024
 
+    @pytest.mark.parametrize('configured', [0, -5, TestNumericAndMentionConfig._Proxy('-1')])
+    def test_the_attachment_size_is_at_least_one_byte(self, configured):
+        # Zero or below used to skip every attachment, with only a debug line.
+        assert TestNumericAndMentionConfig._parse({'maxAttachmentBytes': configured})._max_attachment_bytes == 1
+
+    def test_the_schema_sets_the_attachment_size_minimum(self):
+        assert _load_services_json()['fields']['discord.maxAttachmentBytes']['minimum'] == 1
+
+    @pytest.mark.parametrize(
+        ('configured', 'expected'),
+        [
+            (['md'], ['.md']),
+            (['.MD', ' json '], ['.md', '.json']),
+            (['..log', '.'], ['.log']),
+            ('["txt", ".csv"]', ['.txt', '.csv']),
+        ],
+    )
+    def test_text_extensions_are_normalised(self, configured, expected):
+        endpoint = TestNumericAndMentionConfig._parse({'textAttachmentExtensions': configured})
+
+        assert endpoint._text_attachment_extensions == expected
+
+    def test_an_extension_without_a_dot_still_marks_a_file_as_text(self):
+        endpoint = TestNumericAndMentionConfig._parse({'textAttachmentExtensions': ['md']})
+
+        assert endpoint._is_text_attachment(_attachment('a.md', b'# hi')) is True
+        assert endpoint._is_text_attachment(_attachment('a.bin', b'x')) is False
+
     def test_no_more_than_the_limit_run_at_once_and_none_are_dropped(self):
         endpoint = _make_endpoint(merge_attachments=False)
         endpoint._bot_token = 'token'

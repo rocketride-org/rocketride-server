@@ -152,6 +152,7 @@
 			"title": "Max Attachment Size (bytes)",
 			"description": "Maximum size of attachments to download. Larger files are skipped. Default 25 MB, at most 100 MB.",
 			"default": 26214400,
+			"minimum": 1,
 			"maximum": 104857600
 		},
 		//
