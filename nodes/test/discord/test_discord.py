@@ -310,8 +310,8 @@ class TestGuessMediaType:
         assert guess_media_type('clip.mkv') == 'video/x-matroska'
 
     def test_types_python_knows_route_by_extension(self):
-        assert guess_media_type('clip.aac').startswith('audio/')
-        assert guess_media_type('note.opus').startswith('audio/')
+        # Not in the node's own table, so only the built-in fallback routes them.
+        assert '.avi' not in text_utils._EXT_TO_MIME and '.bmp' not in text_utils._EXT_TO_MIME
         assert guess_media_type('movie.avi').startswith('video/')
         assert guess_media_type('scan.bmp').startswith('image/')
 

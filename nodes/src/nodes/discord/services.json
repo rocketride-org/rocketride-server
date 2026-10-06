@@ -106,21 +106,19 @@
 		},
 		"discord.guildIds": {
 			"type": "array",
-			"items": {
-				"type": "string"
-			},
+			"items": {"type": "string"},
 			"title": "Server IDs (Guild IDs)",
 			"description": "List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in.",
-			"optional": true
+			"optional": true,
+			"default": []
 		},
 		"discord.channelIds": {
 			"type": "array",
-			"items": {
-				"type": "string"
-			},
+			"items": {"type": "string"},
 			"title": "Channel IDs",
 			"description": "List of channel IDs to listen to. Leave empty to listen to all channels.",
-			"optional": true
+			"optional": true,
+			"default": []
 		},
 		"discord.ignoreBots": {
 			"type": "boolean",
@@ -248,7 +246,7 @@
 			"type": "array",
 			"items": {"type": "string"},
 			"title": "Text Attachment Extensions",
-			"description": "Filename extensions decoded as UTF-8 and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object.",
+			"description": "Filename extensions decoded as text (UTF-8, or UTF-16 when the file starts with a UTF-16 byte order mark) and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object.",
 			"default": [],
 			"optional": true
 		},
@@ -277,7 +275,7 @@
 		"discord.emitNoReply": {
 			"type": "boolean",
 			"title": "Emit No Reply Events",
-			"description": "Emit an event when processing produces no answer or raises an error.",
+			"description": "Emit an event when processing produces no answer or raises an error. The reason is no_answer, send_failed or shutdown; any other value is an error message clipped to 200 characters.",
 			"default": false,
 			"optional": true
 		},

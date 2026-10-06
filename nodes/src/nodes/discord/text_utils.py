@@ -514,6 +514,6 @@ def guess_media_type(filename: str, content_type: str = '') -> str:
     for ext, mime_type in _EXT_TO_MIME.items():
         if filename_lower.endswith(ext):
             return mime_type
-    # Anything the table does not list (.m4a, .flac, ...) would otherwise go
+    # Anything the table does not list (.avi, .bmp, ...) would otherwise go
     # to the tags lane whatever it is: ask Python's MIME table before giving up.
     return _BUILTIN_MIME_TYPES.guess_type(filename_lower)[0] or 'application/octet-stream'
