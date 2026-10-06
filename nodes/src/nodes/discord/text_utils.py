@@ -27,6 +27,7 @@ These functions have no discord.py dependency so they can be unit-tested
 directly without a Gateway connection or the discord.py package installed.
 """
 
+import mimetypes
 import re
 from typing import List, Optional, Sequence
 
@@ -55,9 +56,15 @@ _EXT_TO_MIME = {
     '.mp3': 'audio/mpeg',
     '.wav': 'audio/wav',
     '.ogg': 'audio/ogg',
+    # Common on Discord, but only some hosts' MIME tables know them.
+    '.m4a': 'audio/mp4',
+    '.flac': 'audio/flac',
+    '.opus': 'audio/opus',
+    '.aac': 'audio/aac',
     '.mp4': 'video/mp4',
     '.webm': 'video/webm',
     '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska',
     '.pdf': 'application/pdf',
     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -441,7 +448,9 @@ def guess_media_type(filename: str, content_type: str = '') -> str:
         content_type (str): The reported content type, if any (takes priority).
 
     Returns:
-        str: A MIME type string, defaulting to 'application/octet-stream'.
+        str: A MIME type string: the reported type, else the node's own
+            extension table, else Python's ``mimetypes``, else
+            'application/octet-stream'.
     """
     if content_type:
         # Normalize to lowercase without parameters (e.g. '; charset=utf-8').
@@ -456,4 +465,6 @@ def guess_media_type(filename: str, content_type: str = '') -> str:
     for ext, mime_type in _EXT_TO_MIME.items():
         if filename_lower.endswith(ext):
             return mime_type
-    return 'application/octet-stream'
+    # Anything the table does not list (.m4a, .flac, ...) would otherwise go
+    # to the tags lane whatever it is: ask Python's MIME table before giving up.
+    return mimetypes.guess_type(filename_lower)[0] or 'application/octet-stream'

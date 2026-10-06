@@ -265,8 +265,29 @@ class TestGuessMediaType:
         assert guess_media_type('archive.zip') == 'application/zip'
 
     def test_unknown_defaults_to_octet_stream(self):
-        assert guess_media_type('file.xyz') == 'application/octet-stream'
+        # '.xyz' is a registered chemistry type in many system MIME tables, so
+        # an extension no table knows stands in for "unknown".
+        assert guess_media_type('file.qqzz') == 'application/octet-stream'
         assert guess_media_type('noext') == 'application/octet-stream'
+
+    def test_common_discord_audio_and_video_route_on_every_host(self):
+        # In the node's own table, so routing does not depend on the host's
+        # MIME files (a bare CI image has none for these).
+        assert guess_media_type('voice.m4a') == 'audio/mp4'
+        assert guess_media_type('track.flac') == 'audio/flac'
+        assert guess_media_type('call.opus') == 'audio/opus'
+        assert guess_media_type('clip.mkv') == 'video/x-matroska'
+
+    def test_types_python_knows_route_by_extension(self):
+        assert guess_media_type('clip.aac').startswith('audio/')
+        assert guess_media_type('note.opus').startswith('audio/')
+        assert guess_media_type('movie.avi').startswith('video/')
+        assert guess_media_type('scan.bmp').startswith('image/')
+
+    def test_the_table_still_wins_over_the_fallback(self):
+        # mimetypes says audio/x-wav; the node's own table answers first.
+        assert guess_media_type('clip.wav') == 'audio/wav'
+        assert guess_media_type('song.mp3') == 'audio/mpeg'
 
     def test_case_insensitive_extension(self):
         assert guess_media_type('Photo.JPG') == 'image/jpeg'
@@ -289,7 +310,8 @@ class TestGuessMediaType:
         # A present-but-empty-after-normalization content type must not win;
         # fall through to the filename extension.
         assert guess_media_type('photo.jpg', '   ; charset=utf-8') == 'image/jpeg'
-        assert guess_media_type('mystery.xyz', ' ; x=y') == 'application/octet-stream'
+        assert guess_media_type('mystery.qqzz', ' ; x=y') == 'application/octet-stream'
+        assert guess_media_type('voice.opus', ' ; x=y').startswith('audio/')
 
 
 class TestTextAttachmentHelpers:

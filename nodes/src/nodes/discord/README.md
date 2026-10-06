@@ -109,7 +109,7 @@ Paste the token into the `discord.botToken` field. In production, also set `guil
 ### Attachments and MIME detection
 
 - Each attachment's reported size is checked against `maxAttachmentBytes` before download; oversized files are skipped with a debug log.
-- Files are routed by MIME type: the node uses Discord's reported `content_type` first (lowercased, with any `; charset=...` parameters stripped) and falls back to the file extension (e.g. `.pdf` maps to `application/pdf`); anything unrecognized defaults to `application/octet-stream` and flows to the `tags` lane.
+- Files are routed by MIME type: the node uses Discord's reported `content_type` first (lowercased, with any `; charset=...` parameters stripped) and falls back to the file extension: first the node's own table (e.g. `.pdf` maps to `application/pdf`), then Python's `mimetypes` (so `.m4a` or `.flac` reach the `audio` lane, where the host's MIME table knows them); anything still unrecognized defaults to `application/octet-stream` and flows to the `tags` lane.
 - When `textAttachmentExtensions` lists any extension, those files and `text/*` MIME attachments are decoded with invalid UTF-8 ignored, capped by `textAttachmentMaxChars` (`0` means no limit), framed with their filename, and sent through the text lane — folded into the message's own text pass while `mergeAttachments` is on, or as their own object when it is off. Both paths decode the same way: a file with a NUL byte (binary content, or a UTF-16 file) is not text. With merging off it is routed as a binary object instead; with merging on it is skipped.
 
 ### Reliability and limits
