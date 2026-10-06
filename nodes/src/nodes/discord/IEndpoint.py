@@ -280,7 +280,7 @@ class IEndpoint(IEndpointBase):
         self._run()
 
     @staticmethod
-    def _as_str_list(value: Any, field: str = '') -> List[str]:
+    def _as_str_list(value: Any, field: str = '', split: bool = True) -> List[str]:
         """Coerce a config value into a list of strings.
 
         Guards against a bare string (which would otherwise iterate into a
@@ -291,6 +291,9 @@ class IEndpoint(IEndpointBase):
             value (Any): The raw config value (expected: list of ids).
             field (str): The setting's name, for the warning a value that
                 looks like JSON but does not parse produces.
+            split (bool): Split each item on commas and whitespace (ids).
+                False keeps every item whole (phrases); items are still
+                stripped and blank ones dropped either way.
 
         Returns:
             List[str]: The strings, or an empty list.
@@ -298,6 +301,12 @@ class IEndpoint(IEndpointBase):
         if not value:
             return []
         items = list(value) if isinstance(value, (list, tuple)) else [value]
+
+        def parts(text: str) -> List[str]:
+            if not split:
+                return [text] if text else []
+            return [part for part in re.split(r'[,\s]+', text) if part]
+
         out: List[str] = []
         for item in items:
             if item is None:
@@ -330,9 +339,9 @@ class IEndpoint(IEndpointBase):
                     # Each item gets the same strip + split as a bare string,
                     # so '[" 123 "]' and '["123,456"]' read as ids too.
                     for parsed_item in parsed:
-                        out.extend(part for part in re.split(r'[,\s]+', str(parsed_item).strip()) if part)
+                        out.extend(parts(str(parsed_item).strip()))
                     continue
-            out.extend(part for part in re.split(r'[,\s]+', text) if part)
+            out.extend(parts(text))
         return out
 
     @classmethod

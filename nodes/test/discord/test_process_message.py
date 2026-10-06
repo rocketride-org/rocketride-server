@@ -1682,6 +1682,22 @@ class TestConfigCoercion:
     def test_bare_string_is_single_element_not_per_character(self):
         assert IEndpoint._as_str_list('123456') == ['123456']
 
+    _PHRASES = '["Escalated to the RocketRide team.", " x ", ""]'
+
+    def test_split_is_on_by_default(self):
+        words = ['Escalated', 'to', 'the', 'RocketRide', 'team.', 'x']
+        assert IEndpoint._as_str_list(self._PHRASES) == words
+        assert IEndpoint._as_str_list([self._PHRASES]) == words
+        assert IEndpoint._as_str_list('a b, c') == ['a', 'b', 'c']
+
+    def test_split_off_keeps_phrases_whole(self):
+        phrases = ['Escalated to the RocketRide team.', 'x']
+        assert IEndpoint._as_str_list(self._PHRASES, split=False) == phrases
+        assert IEndpoint._as_str_list([self._PHRASES], split=False) == phrases
+        assert IEndpoint._as_str_list('  a b, c  ', split=False) == ['a b, c']
+        assert IEndpoint._as_str_list(['one phrase', ' ', 2], split=False) == ['one phrase', '2']
+        assert IEndpoint._as_str_list('', split=False) == []
+
     def test_broken_json_is_reported_with_the_field_name(self):
         # Live F38: '["123"' became the literal id '["123"' and the allowlist
         # rejected everyone, with nothing in the task's warnings.
