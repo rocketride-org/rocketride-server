@@ -232,6 +232,34 @@ class TestChunkMessage:
         assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
         assert ''.join(chunks).replace('\n``````\n', '').count('y') == 5000
 
+    @staticmethod
+    def _paragraph(length, word='setup'):
+        """Prose of about ``length`` characters with no newline in it."""
+        sentence = f'This explains one step of the {word} in plain words. '
+        return (sentence * (length // len(sentence) + 1))[:length].rstrip()
+
+    def test_prose_before_a_code_block_is_not_cut_mid_word(self):
+        # Reviewer reproduction: two long paragraphs, then a short code block.
+        # Any fence sends the whole reply down the fenced path, which used to
+        # cut the second paragraph at the exact character count.
+        text = self._paragraph(868) + '\n\n' + self._paragraph(1550) + '\n\n```\nprint("hi")\n```'
+        chunks = chunk_message(text)
+
+        assert len(chunks) == 2
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert ' '.join(chunks).split() == text.split(), 'a word was cut in two'
+        assert chunks[0].rstrip().endswith('.'), 'prefer a sentence end'
+        assert ''.join(chunks) == text
+        assert all(chunk.count('```') % 2 == 0 for chunk in chunks)
+
+    def test_prose_with_no_sentence_end_breaks_at_whitespace(self):
+        text = ('word ' * 600).rstrip() + '\n```\ncode\n```'
+        chunks = chunk_message(text)
+
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert ' '.join(chunks).split() == text.split()
+        assert ''.join(chunks) == text
+
     def test_a_numbered_last_chunk_has_no_trailing_blank_lines(self):
         # Live F12: the answer's trailing newlines sat between the closing fence
         # and the label as blank lines.

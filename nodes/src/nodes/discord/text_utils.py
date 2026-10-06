@@ -224,6 +224,35 @@ def _safe_fence_boundary(text: str, start: int, end: int) -> int:
     return end
 
 
+def _prose_boundary(text: str, start: int, end: int, is_open: bool, language: str, position: int) -> int:
+    """Pick a word boundary in ``text[start:end]`` to cut a chunk at.
+
+    Args:
+        text (str): The whole reply.
+        start (int): The earliest acceptable cut (the window's midpoint).
+        end (int): The cut by character count.
+        is_open (bool): Whether a fence is open at ``position``.
+        language (str): The open fence's language marker.
+        position (int): Where the chunk starts.
+
+    Returns:
+        int: Just past the last sentence end (``.``, ``!`` or ``?`` followed
+            by whitespace), else just past the last whitespace, in the range;
+            ``end`` when there is neither or that cut would fall inside a
+            code block.
+    """
+    window = text[start:end]
+    candidates = [match.end() for match in re.finditer(r'[.!?]\s', window)]
+    if not candidates:
+        candidates = [match.end() for match in re.finditer(r'\s', window)]
+    if not candidates:
+        return end
+    cut = start + candidates[-1]
+    if cut >= end or _fence_state(text[position:cut], is_open, language)[0]:
+        return end
+    return cut
+
+
 def _chunk_fenced_message(text: str, max_length: int) -> List[str]:
     """Hard-split fenced text while balancing fences in every emitted chunk."""
     if max_length <= 0:
@@ -264,6 +293,12 @@ def _chunk_fenced_message(text: str, max_length: int) -> List[str]:
             if newline > position + capacity // 2:
                 end = newline
                 line_break = True
+            elif not _fence_state(text[position:end], is_open, language)[0]:
+                # Prose outside a code block (a reply only takes this path
+                # because it holds a fence somewhere): break after the last
+                # sentence end, else the last whitespace, in the second half
+                # rather than in the middle of a word.
+                end = _prose_boundary(text, position + capacity // 2, end, is_open, language, position)
         end = _safe_fence_boundary(text, position, end)
         if end <= position:
             end = min(len(text), position + 1)
