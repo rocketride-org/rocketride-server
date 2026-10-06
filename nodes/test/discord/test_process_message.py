@@ -2104,6 +2104,151 @@ class TestBackfill:
         assert [call.args[0] for call in endpoint._on_message.await_args_list] == ['a1', 'b1']
 
 
+class _HistoryItem:
+    """A fetched history message: the fields backfill reads to spot an answered one."""
+
+    def __init__(self, message_id, *, author_id=1, replies_to=None, thread=None):
+        self.id = message_id
+        self.author = mock.Mock()
+        self.author.id = author_id
+        self.reference = None
+        if replies_to is not None:
+            self.reference = mock.Mock()
+            self.reference.message_id = replies_to
+        self.thread = thread
+
+    def __repr__(self):
+        return f'<msg {self.id}>'
+
+
+class TestBackfillSkipsAnsweredMessages:
+    """A restart must not answer again what the bot already answered."""
+
+    BOT_ID = 999
+
+    def _endpoint(self, history, *, reply_mode='reply'):
+        channel = TestBackfill._Channel(1, history)
+        endpoint = TestBackfill._endpoint({1: channel})
+        endpoint._backfill_limit = 50
+        endpoint._reply_mode = reply_mode
+        endpoint._bot.user.id = self.BOT_ID
+        return endpoint
+
+    @staticmethod
+    def _replayed(endpoint):
+        return [call.args[0].id for call in endpoint._on_message.await_args_list]
+
+    def test_thread_mode_skips_a_message_that_already_has_a_thread(self):
+        # Newest first, as channel.history returns it.
+        history = [_HistoryItem(3), _HistoryItem(2, thread=mock.Mock()), _HistoryItem(1)]
+        endpoint = self._endpoint(history, reply_mode='thread')
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert self._replayed(endpoint) == [1, 3]
+
+    def test_a_message_the_bot_replied_to_is_skipped(self):
+        history = [
+            _HistoryItem(4),
+            _HistoryItem(3, author_id=self.BOT_ID, replies_to=2),
+            _HistoryItem(2),
+            _HistoryItem(1),
+        ]
+        endpoint = self._endpoint(history)
+
+        asyncio.run(endpoint._run_backfill())
+
+        # The bot's own message 3 reaches the normal gate, which drops it.
+        assert self._replayed(endpoint) == [1, 3, 4]
+
+    def test_a_reply_from_someone_else_does_not_count_as_an_answer(self):
+        history = [_HistoryItem(3, author_id=5, replies_to=2), _HistoryItem(2)]
+        endpoint = self._endpoint(history)
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert self._replayed(endpoint) == [2, 3]
+
+    def test_channel_mode_skips_everything_before_the_bots_last_post(self):
+        history = [
+            _HistoryItem(5),
+            _HistoryItem(4, author_id=self.BOT_ID),
+            _HistoryItem(3),
+            _HistoryItem(2, author_id=self.BOT_ID),
+            _HistoryItem(1),
+        ]
+        endpoint = self._endpoint(history, reply_mode='channel')
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert self._replayed(endpoint) == [4, 5]
+
+    def test_channel_mode_with_no_bot_post_replays_the_window(self):
+        history = [_HistoryItem(2), _HistoryItem(1)]
+        endpoint = self._endpoint(history, reply_mode='channel')
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert self._replayed(endpoint) == [1, 2]
+
+
+class TestHandledMessageIds:
+    """One message is processed once, whether it arrives live, by backfill, or both."""
+
+    @staticmethod
+    def _endpoint():
+        endpoint, _bot_user = TestOnMessageGating._endpoint()
+        endpoint._require_mention = False
+        return endpoint
+
+    @staticmethod
+    def _message(message_id):
+        message = TestOnMessageGating._message(mentions=[])
+        message.id = message_id
+        message.content = 'a question'
+        return message
+
+    def test_a_message_seen_live_and_then_in_backfill_is_processed_once(self):
+        endpoint = self._endpoint()
+        message = self._message(42)
+        endpoint._backfill_limit = 5
+        endpoint._reply_mode = 'reply'
+        endpoint._channel_ids = ['20']
+        endpoint._bot.get_channel = mock.Mock(return_value=TestBackfill._Channel(20, [message]))
+
+        async def scenario():
+            await endpoint._on_message(message)
+            await asyncio.gather(*list(endpoint._inflight), return_exceptions=True)
+            await endpoint._run_backfill()
+
+        asyncio.run(scenario())
+
+        endpoint._process_message.assert_awaited_once()
+
+    def test_a_redelivered_message_is_processed_once(self):
+        endpoint = self._endpoint()
+
+        async def scenario():
+            await endpoint._on_message(self._message(42), wait=True)
+            await endpoint._on_message(self._message(42), wait=True)
+            await endpoint._on_message(self._message(43), wait=True)
+
+        asyncio.run(scenario())
+
+        assert endpoint._process_message.await_count == 2
+
+    def test_the_set_is_bounded_and_forgets_the_oldest_ids(self):
+        endpoint = self._endpoint()
+        limit = _ENDPOINT_MODULE.HANDLED_MESSAGE_IDS_LIMIT
+
+        for message_id in range(limit + 1):
+            assert endpoint._mark_handled(message_id)
+
+        assert len(endpoint._handled_message_ids) == limit
+        assert not endpoint._mark_handled(limit), 'a recent id is still remembered'
+        assert endpoint._mark_handled(0), 'the oldest id was dropped to keep the bound'
+
+
 class TestNumericAndMentionConfig:
     """``_run``'s config block, as the engine actually delivers values."""
 

@@ -22,6 +22,7 @@
 # =============================================================================
 
 import asyncio
+import collections
 import time
 import json
 import os
@@ -82,6 +83,11 @@ THREAD_NAME_MAX_CHARS = 100
 # at the one place every reason passes through, so a runaway string cannot
 # reach the emitted event.
 MAX_NO_REPLY_REASON_CHARS = 200
+
+# How many handled message ids are remembered. Shared by the live path and
+# backfill, so a message seen by both (or redelivered) is processed once;
+# bounded so a long-running bot does not grow it forever.
+HANDLED_MESSAGE_IDS_LIMIT = 1000
 
 
 class PipelineTimeout(Exception):
@@ -531,6 +537,7 @@ class IEndpoint(IEndpointBase):
         self._fatal_error = None
         self._closing = False
         self._backfill_done = False
+        self._handled_message_ids = collections.OrderedDict()
         self._pause_state()
 
         if not self._bot_token:
@@ -735,6 +742,8 @@ class IEndpoint(IEndpointBase):
                 is_mentioned=bool(bot_user is not None and bot_user in message.mentions),
             ):
                 return
+            if not self._mark_handled(message.id):
+                return
 
             task = asyncio.create_task(self._process_serialized(message))
             self._inflight.add(task)
@@ -743,6 +752,28 @@ class IEndpoint(IEndpointBase):
                 await task
         except Exception as e:
             debug(f'Discord _on_message: EXCEPTION {e}')
+
+    def _mark_handled(self, message_id: Any) -> bool:
+        """Remember a message id; False when it was already handled.
+
+        Keeps only the most recent :data:`HANDLED_MESSAGE_IDS_LIMIT` ids.
+
+        Args:
+            message_id (Any): The Discord message id.
+
+        Returns:
+            bool: True the first time an id is seen, False after that.
+        """
+        handled = getattr(self, '_handled_message_ids', None)
+        if handled is None:
+            handled = self._handled_message_ids = collections.OrderedDict()
+        key = str(message_id)
+        if key in handled:
+            return False
+        handled[key] = True
+        while len(handled) > HANDLED_MESSAGE_IDS_LIMIT:
+            handled.popitem(last=False)
+        return True
 
     def _thread_lock(self, thread_id: str) -> asyncio.Lock:
         """Borrow the serialization lock for one thread, creating it on demand.
@@ -834,10 +865,47 @@ class IEndpoint(IEndpointBase):
             # cancel the backfill for every channel after it.
             try:
                 messages = [message async for message in channel.history(limit=self._backfill_limit)]
+                answered = self._answered_in_history(messages)
                 for message in reversed(messages):
+                    if str(getattr(message, 'id', None)) in answered:
+                        continue
                     await self._on_message(message, wait=True)
             except Exception as e:
                 debug(f'Discord backfill: skipping channel {getattr(channel, "id", "?")}: {e}')
+
+    def _answered_in_history(self, messages: List[Any]) -> set:
+        """Ids in a fetched backfill window that the bot already answered.
+
+        Uses only the window backfill fetched (newest first), so no extra API
+        call is made per message. A message counts as answered when it has a
+        thread (thread mode), when a bot message in the window replies to it,
+        or, in channel mode, when the bot posted in the channel after it.
+
+        Args:
+            messages (List[Any]): The channel history, newest first.
+
+        Returns:
+            set: The ids (as strings) to skip.
+        """
+        bot_user = getattr(getattr(self, '_bot', None), 'user', None)
+        bot_id = getattr(bot_user, 'id', None)
+        reply_mode = getattr(self, '_reply_mode', 'reply')
+        answered = set()
+        seen_bot_post = False
+        for message in messages:
+            author_id = getattr(getattr(message, 'author', None), 'id', None)
+            is_bot = bot_id is not None and author_id == bot_id
+            if is_bot:
+                reference = getattr(message, 'reference', None)
+                replied_to = getattr(reference, 'message_id', None)
+                if replied_to is not None:
+                    answered.add(str(replied_to))
+            if reply_mode == 'channel' and seen_bot_post:
+                answered.add(str(getattr(message, 'id', None)))
+            if reply_mode == 'thread' and getattr(message, 'thread', None) is not None:
+                answered.add(str(getattr(message, 'id', None)))
+            seen_bot_post = seen_bot_post or is_bot
+        return answered
 
     def _message_metadata(self, message: discord.Message) -> Dict[str, Any]:
         """Build the stable downstream metadata contract for one message."""
