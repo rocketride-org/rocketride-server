@@ -76,6 +76,15 @@ async def broadcast_deploy_changed(server: Any, org_id: str, team_id: str, proje
         action: What changed ('publish', 'deploy', 'run', 'errored',
             a state name, ...) — advisory; receivers re-fetch either way.
     """
+    # The server's OWN cache invalidation rides the same signal: an app's
+    # serving verdicts (shell.py) go stale on any deployment change of it.
+    # Separate try — a failed drop must never cost the org its broadcast.
+    try:
+        from ai.modules.shell.shell import invalidate_app_serving
+
+        invalidate_app_serving(project_id)
+    except Exception as e:
+        error(f'[DEPLOY] {team_id}/{project_id}: serving-cache invalidation failed: {e}')
     try:
         # Local import: rocketride is the client SDK package — imported
         # lazily so module import never depends on it.

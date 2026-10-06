@@ -49,6 +49,7 @@ from ai.account import account as account_singleton
 from ai.account import dev_overlay
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
+    _serving_block_of,
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
@@ -1213,6 +1214,91 @@ async def test_where_lists_visible_rows_with_deployment_states(registry):
     }
 
 
+@pytest.mark.asyncio
+async def test_where_marks_serving_and_why_not(registry):
+    """#2461: each pin says whether a browser is actually served, and if not
+    why — the same gate the manifest walk applies. A disabled binding stays
+    listed (republishing revives it) but reads as not serving.
+    """
+    registry.add_version(1, '1.0.0', state='ready')
+    registry.add_version(2, '1.1.0', state='ready', build='building')
+    registry.seed_publish(AUD_USER, 1)
+    registry.seed_publish(AUD_TEAM, 2)
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', registry._key(AUD_PUBLIC))]['state'] = 'disabled'
+
+    result = await handle_deploy_app(_FakeConn(teams=_TEAMS), _request('where'))
+
+    by_rung = {p['rung']: p for p in result['body']['pins']}
+    assert {k: by_rung['personal'][k] for k in ('enabled', 'serving', 'reason')} == {
+        'enabled': True,
+        'serving': True,
+        'reason': '',
+    }
+    assert {k: by_rung['team'][k] for k in ('enabled', 'serving', 'reason')} == {
+        'enabled': True,
+        'serving': False,
+        'reason': 'building',
+    }
+    assert {k: by_rung['public'][k] for k in ('enabled', 'serving', 'reason')} == {
+        'enabled': False,
+        'serving': False,
+        'reason': 'disabled',
+    }
+
+
+@pytest.mark.asyncio
+async def test_where_serves_you_follows_precedence(registry):
+    """The ``servesYou`` pin is the one the caller's own resolution picks: the
+    most specific SERVING audience. Disabling it hands the caller the next one.
+    """
+    registry.add_version(1, '1.0.0', state='ready')
+    registry.add_version(2, '2.0.0', state='ready')
+    registry.seed_publish(AUD_USER, 1)
+    registry.seed_publish(AUD_PUBLIC, 2)
+    conn = _FakeConn(teams=_TEAMS)
+
+    pins = (await handle_deploy_app(conn, _request('where')))['body']['pins']
+    assert [p['rung'] for p in pins if p['servesYou']] == ['personal']
+
+    registry.publishes[('acme.brandy', registry._key(AUD_USER))]['state'] = 'disabled'
+    pins = (await handle_deploy_app(conn, _request('where')))['body']['pins']
+    assert [p['rung'] for p in pins if p['servesYou']] == ['public']
+
+
+@pytest.mark.asyncio
+async def test_where_serves_you_matches_resolver_across_two_teams(registry):
+    """Two team pins on different versions: exactly one serves the caller,
+    and it is the version the manifest walk actually hands them.
+    """
+    registry.add_version(1, '1.0.0', state='ready')
+    registry.add_version(2, '2.0.0', state='ready')
+    teams = [{'id': 't1', 'name': 'Development'}, {'id': 't2', 'name': 'QA'}]
+    registry.seed_publish({'type': 'team', 'id': 't1'}, 1)
+    registry.seed_publish({'type': 'team', 'id': 't2'}, 2)
+
+    pins = (await handle_deploy_app(_FakeConn(teams=teams), _request('where')))['body']['pins']
+    resolved = await resolve_app_pins('org1', 'u1', ['t1', 't2'])
+
+    winners = [p for p in pins if p['servesYou']]
+    assert len(winners) == 1
+    assert winners[0]['version'] == resolved[0]['registryVersion']
+
+
+@pytest.mark.asyncio
+async def test_where_serves_you_respects_required_permissions(registry):
+    """A serving pin gated on a permission the caller lacks does not serve
+    THEM — the catalog's requiredPermissions rule applies to servesYou.
+    """
+    registry.add_version(1, '1.0.0', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', registry._key(AUD_PUBLIC))]['snapshot']['requiredPermissions'] = ['app.finance']
+
+    pins = (await handle_deploy_app(_FakeConn(teams=_TEAMS), _request('where')))['body']['pins']
+
+    assert (pins[0]['serving'], pins[0]['servesYou']) == (True, False)
+
+
 # =============================================================================
 # DISABLE / REMOVE — audience state flips
 # =============================================================================
@@ -1228,6 +1314,35 @@ async def test_disable_flips_the_audience_row(registry):
     result = await handle_deploy_app(conn, _request('disable', target='@team/Development'))
     assert result['success'] is True
     assert result['body']['publish']['state'] == 'disabled'
+
+
+@pytest.mark.asyncio
+async def test_publish_disable_remove_push_the_rail_invalidation(registry, quiet_push):
+    """#2461: every binding change pushes the org-scoped apaevt_deploy, so
+    every open App Builder (not only the actor's) re-fetches, and the
+    server's serving cache for the app is dropped on the same signal.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+    broadcasts = []
+
+    async def broadcast_server_event(event_type, message, org_id=None, user_id=None):
+        broadcasts.append((message['event'], message['body']['projectId'], message['body']['action'], org_id))
+
+    dev._server = SimpleNamespace(broadcast_server_event=broadcast_server_event, _connections={})
+
+    for sub, args in (
+        ('publish', {'version': 1, 'target': '@team/Development'}),
+        ('disable', {'target': '@team/Development'}),
+        ('remove', {'target': '@team/Development'}),
+    ):
+        assert (await handle_deploy_app(dev, _request(sub, **args)))['success'] is True
+
+    assert broadcasts == [
+        ('apaevt_deploy', 'acme.brandy', 'publish', 'org1'),
+        ('apaevt_deploy', 'acme.brandy', 'disable', 'org1'),
+        ('apaevt_deploy', 'acme.brandy', 'remove', 'org1'),
+    ]
 
 
 # =============================================================================
@@ -1414,6 +1529,35 @@ async def test_resolve_app_pins_skips_unbuilt_versions(registry):
 # =============================================================================
 # RESOLVE — the manifest scope walk (user > team > public; serving gate)
 # =============================================================================
+
+
+def _binding(audience, binding='enabled', deployment='ready', build='ok'):
+    """One joined publish row as the backends return it."""
+    return {'state': binding, 'audience': dict(audience), 'artifactState': deployment, 'artifactBuild': build}
+
+
+@pytest.mark.parametrize(
+    'row, ladder, expected',
+    [
+        (_binding(AUD_USER), True, ''),
+        # The owner's own switch outranks every other cause.
+        (_binding(AUD_USER, binding='disabled', deployment='failed', build='failed'), True, 'disabled'),
+        (_binding(AUD_TEAM, deployment='failed'), True, 'failed'),
+        (_binding(AUD_PUBLIC, deployment='submit'), True, 'in-review'),
+        (_binding(AUD_PUBLIC, deployment='rejected'), True, 'rejected'),
+        (_binding(AUD_PUBLIC, deployment='private'), True, 'not-approved'),
+        # No review ladder: public serves like an internal rung.
+        (_binding(AUD_PUBLIC, deployment='private'), False, ''),
+        # Internal rungs serve anything but a failed deployment.
+        (_binding(AUD_TEAM, deployment='submit'), True, ''),
+        (_binding(AUD_USER, build='failed'), True, 'build-failed'),
+        (_binding(AUD_USER, build='building'), True, 'building'),
+        (_binding(AUD_USER, build=''), True, 'building'),
+    ],
+)
+def test_serving_block_of_names_why_a_binding_does_not_serve(row, ladder, expected):
+    """#2461: one gate decides serving for the manifest AND the owner's view."""
+    assert _serving_block_of(row, ladder) == expected
 
 
 @pytest.mark.asyncio
