@@ -823,7 +823,18 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         Returns the parsed JSON dict from the LLM with keys ``isValid`` and
         ``query``.
+
+        Raises:
+            ValueError: no LLM is connected to the node.
         """
+        # The llm connection is optional: only natural-language questions use
+        # it, while raw SQL through the execute tool never does.
+        if not self.instance.getControllerNodeIds('llm'):
+            raise ValueError(
+                f'No LLM is connected to this {self._db_display_name()} node. '
+                'Natural-language questions need an llm connection; raw SQL through '
+                'the execute tool (client.database.query) works without one.'
+            )
 
         def describe_schema(schema: dict) -> str:
             """Format the db_schema dict into a concise text block for the LLM."""

@@ -20,7 +20,7 @@ An agent flow: `load_data` the rows, `build_index` on the text column, then `get
 
 | Connection | Required | Description |
 | ---------- | -------- | ----------- |
-| `llm`      | yes      | LLM used to generate SQL from natural language |
+| `llm`      | no       | LLM used to generate SQL from natural language; not needed for execute (raw SQL) |
 
 ## Lanes
 

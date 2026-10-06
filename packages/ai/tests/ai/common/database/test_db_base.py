@@ -1152,3 +1152,49 @@ def test_testable_global_satisfies_abc_contract():
     """The two abstract methods are implemented in the test subclass."""
     # If the ABC wasn't satisfied, instantiating would raise TypeError.
     _TestableGlobal.__new__(_TestableGlobal)
+
+
+# ---------------------------------------------------------------------------
+# Optional llm connection
+# ---------------------------------------------------------------------------
+
+
+class _InstanceWithLlms:
+    """Stand-in for IFilterInstance that reports which llm nodes are connected."""
+
+    def __init__(self, llm_node_ids):
+        self._llm_node_ids = llm_node_ids
+        self.asked = False
+
+    def getControllerNodeIds(self, class_type):
+        return list(self._llm_node_ids) if class_type == 'llm' else []
+
+    def invoke(self, *args, **kwargs):
+        self.asked = True
+        raise RuntimeError('stop after the LLM call')
+
+
+def test_question_without_llm_names_the_cause_and_the_raw_sql_path():
+    """With no llm connected, a question fails with a clear message, not an engine error.
+
+    The connection is optional because execute (raw SQL) never uses it, so the
+    message also tells the caller what still works.
+    """
+    inst = _sql_instance(None)
+    inst.instance = _InstanceWithLlms([])
+
+    with pytest.raises(ValueError, match='No LLM is connected to this TestDB node') as excinfo:
+        inst._buildSQLQueryOnce('all users')
+
+    assert 'execute' in str(excinfo.value)
+    assert inst.instance.asked is False
+
+
+def test_question_with_llm_reaches_the_llm():
+    inst = _sql_instance(SimpleNamespace(db_schema={}, db_description='', dialect='testdb', max_validation_attempts=1))
+    inst.instance = _InstanceWithLlms(['llm_openai_1'])
+
+    with pytest.raises(RuntimeError, match='stop after the LLM call'):
+        inst._buildSQLQueryOnce('all users')
+
+    assert inst.instance.asked is True

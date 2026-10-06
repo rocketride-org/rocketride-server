@@ -387,9 +387,13 @@ LLM/tool/memory node declares which component invokes it — `from` points at th
 - Tool components (classType `tool`) have empty `lanes` (`{}`): never wired via data lanes,
   only via `control`.
 - Invoke is not agent-only: `summarization`, `extract_data`, `extract_facts`, `dictionary`,
-  `preprocessor_llm`, `tool_chartjs`, the SQL nodes (`db_postgres`, `db_mysql`,
-  `db_clickhouse`, `db_supabase`, `db_arango`, `db_hotdata`, `rocketride_sql`, `aparavi_aql`)
-  and the graph stores all REQUIRE an `llm` control connection.
+  `preprocessor_llm`, `tool_chartjs`, `aparavi_aql` and the graph stores all REQUIRE an
+  `llm` control connection.
+- The SQL nodes (`db_postgres`, `db_mysql`, `db_clickhouse`, `db_hotdata`, `rocketride_sql`)
+  use an `llm` connection only to turn natural-language questions into SQL. Raw SQL through
+  their `execute` tool (`client.database.query`) needs no LLM, so a pipeline that only stores
+  or reads data with SQL should wire no LLM and no agent. Storing through an agent ties every
+  save to that agent's LLM provider and key: a missing key stops the save.
 
 ### Invoke requirements by agent type
 
@@ -1011,7 +1015,7 @@ Two Postgres providers, two different jobs; mixing them up fails validation:
 | --- | --- | --- |
 | Role | Vector store INSIDE your Postgres (pgvector extension) | Text-to-SQL over existing tables |
 | Lanes | `documents` in (terminal); `questions` in → `documents`/`answers`/`questions` | `questions` in → `table`/`text`/`answers` |
-| LLM | No `llm` port — never wire `control` to it | REQUIRES an `llm` control connection (writes the SQL; `max_attempts` retries via EXPLAIN; `allow_execute` off by default) |
+| LLM | No `llm` port — never wire `control` to it | `llm` control connection only for natural-language questions (writes the SQL; `max_attempts` retries via EXPLAIN); raw SQL through `execute` needs none (`allow_execute` off by default) |
 | Config | profile `local`: `host`, `port`, `user`, `password`, `database`, `collection` (table name), `similarity` (`cosine`/`l2`/`inner_product`); needs `embedding_transformer` in front of BOTH lanes | profile `default`: `host`, `user`, `password`, `database`, `table`, `db_description` (describe the schema — better SQL) |
 
 Wiring is identical to `qdrant` (Starter 2 / Pattern 3) — only the config block changes:
@@ -1030,7 +1034,7 @@ you already operate Postgres.
 | You need | Family | Providers | Wiring shape |
 | --- | --- | --- | --- |
 | 'Find content like this' — semantic similarity over chunks | Vector | `qdrant`, `postgres` (pgvector), `pinecone`, `milvus`, `chroma`, `weaviate`, `rocketride_vector` (built-in) | `documents` in via embedding (ingest); `questions` in via embedding (search). No LLM port |
-| Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase`, `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED (crafts SQL). No ingestion lanes — data already lives in the DB |
+| Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase`, `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control for natural-language questions (crafts SQL), not needed for raw SQL via `execute`. No ingestion lanes — data already lives in the DB |
 | 'How is A connected to B' — relationship traversal | Graph | `graph_neo4j`, `graph_falkordb`, `rocketride_graph` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED (crafts Cypher). Queries an EXISTING graph (Pattern 14) |
 
 Rules of thumb: unstructured documents you must search → vector (Patterns 1/3). Numbers,

@@ -25,7 +25,7 @@ no data-ingestion input.
 
 | Connection | Required | Description |
 | --- | --- | --- |
-| `llm` | yes | LLM used to craft SQL queries from questions |
+| `llm` | no | LLM used to craft SQL queries from questions; not needed for execute (raw SQL) |
 
 ## Lanes
 
