@@ -2302,6 +2302,14 @@ class TestNumericAndMentionConfig:
             endpoint._run()
         return endpoint
 
+    @pytest.mark.parametrize('raw, expected', [('0', 0), ('3', 3), ('9', 3), ('-2', 0), ('lots', 1)])
+    def test_non_answer_retries_from_an_engine_proxy(self, raw, expected):
+        # The engine's number proxies are string-like with no __int__, so int()
+        # on them failed and every configured value fell back to 1.
+        endpoint = self._parse({'nonAnswerRetries': self._Proxy(raw)})
+
+        assert endpoint._non_answer_retries == expected
+
     @staticmethod
     def _numbers(endpoint):
         return (

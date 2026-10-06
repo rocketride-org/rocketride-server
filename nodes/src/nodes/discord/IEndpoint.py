@@ -472,10 +472,8 @@ class IEndpoint(IEndpointBase):
         )
         self._sanitize_replies = config.get('sanitizeReplies', False)
         # Clamped to the schema's 0..3; a malformed value falls back to the default.
-        try:
-            self._non_answer_retries = max(0, min(3, int(config.get('nonAnswerRetries', 1))))
-        except (TypeError, ValueError):
-            self._non_answer_retries = 1
+        # _as_int, not int(): engine number proxies are string-like with no __int__.
+        self._non_answer_retries = max(0, min(3, self._as_int(config.get('nonAnswerRetries'), 1)))
         # Off (0) unless set: a pipeline is otherwise waited for as long as it takes.
         try:
             self._pipeline_timeout_seconds = max(0.0, float(str(config.get('pipelineTimeoutSeconds') or 0)))
