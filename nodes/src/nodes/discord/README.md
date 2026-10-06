@@ -48,9 +48,10 @@ Server and channel allowlists. When non-empty, only messages from the listed gui
 
 ### What message text is broadcast and stored
 
-The node puts Discord message text into the `apaevt_sse` bodies, and therefore into the task's run log, in exactly three places:
+The node puts Discord message text into the `apaevt_sse` bodies, and therefore into the task's run log, in exactly four places:
 
 - the question text, in the `text` field of each `message` event for the text lane (clipped at 2000 characters). With `mergeAttachments` on, a message that has no text of its own carries the merged question instead, which includes the folded text-file contents and what the pipeline found in the other attachments;
+- the decoded contents of each text-like attachment (one `textAttachmentExtensions` selects), framed with its filename, in the `text` field of its own `message` event when `mergeAttachments` is off (clipped at 2000 characters);
 - the answer text, in the `text` field of each `outbound` event (only when `emitOutbound` is on);
 - the text of a message the node skipped, in the `text` field of its `no_reply` event (reasons `paused` and `aimed_elsewhere`, only when `emitNoReply` is on, clipped at 2000 characters). These are usually messages between people — a team member answering inside a paused thread, or users talking to each other — so conversations the bot does not take part in are broadcast and kept in the run log too.
 
