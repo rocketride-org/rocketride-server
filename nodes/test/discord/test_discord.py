@@ -725,6 +725,37 @@ class TestInjectRoleMention:
         assert inject_role_mention('ask the axb team now', 'a.b team', '<@&77>') == 'ask the axb team now'
 
 
+class TestAliasAndMarkerBoundaries:
+    """Review of #2547: each wrong hit garbled the answer and sent a real ping."""
+
+    def test_the_alias_inside_a_longer_word_is_left_alone(self):
+        assert inject_role_mention('Our Support team is supportive.', 'Support', '<@&1>') == (
+            'Our <@&1> team is supportive.'
+        )
+        assert inject_role_mention('@RocketRide teams', '@RocketRide team', '<@&1>') == '@RocketRide teams'
+
+    def test_the_alias_inside_a_url_is_left_alone(self):
+        text = 'See https://x.com/support/page for details.'
+        assert inject_role_mention(text, 'Support', '<@&1>') == text
+
+    def test_the_alias_inside_a_code_block_is_left_alone(self):
+        text = 'Run:\n```\nnotify Support\n```\nthen ask Support.'
+        assert inject_role_mention(text, 'Support', '<@&1>') == 'Run:\n```\nnotify Support\n```\nthen ask <@&1>.'
+
+    def test_a_marker_inside_a_code_block_does_not_count(self):
+        assert find_marker('The log says:\n```\nESCALATED\n```\nso it was handled.', ['ESCALATED']) is None
+        assert find_marker('```\nping <@&77>\n```', ['<@&77>']) is None
+
+    def test_a_marker_inside_a_longer_word_does_not_count(self):
+        assert find_marker('NOTESCALATED yet', ['ESCALATED']) is None
+        assert find_marker('ESCALATEDLY', ['ESCALATED']) is None
+        assert find_marker('ESCALATED.', ['ESCALATED']) == 'ESCALATED'
+
+    def test_a_role_mention_marker_needs_no_word_boundary(self):
+        # A mention is delimited by its own brackets.
+        assert find_marker("ask<@&77>'s members", ['<@&77>']) == '<@&77>'
+
+
 class TestIsAimedAtSomeoneElse:
     """The aimed-elsewhere decision table (isAimedAtSomeoneElse)."""
 

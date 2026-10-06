@@ -687,7 +687,10 @@ def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
     """Return the first configured escalation marker present in ``text``.
 
     The support bot tests a single team role mention; the node generalizes that
-    to a configured list (plus the outbound-allowlisted role mentions).
+    to a configured list (plus the outbound-allowlisted role mentions). A marker
+    counts only as a whole word (``ESCALATED`` is not found in ``NOTESCALATED``;
+    an edge that is punctuation, as in ``<@&id>``, needs no boundary) and only
+    outside fenced code blocks.
 
     Args:
         text (str): The text to inspect (typically a pipeline answer).
@@ -699,7 +702,12 @@ def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
     if not text:
         return None
     for marker in markers or ():
-        if marker and marker in text:
+        if not marker:
+            continue
+        lead = r'(?<![\w/])' if re.match(r'\w', marker[0]) else ''
+        trail = r'(?!\w)' if re.match(r'\w', marker[-1]) else ''
+        pattern = re.compile(lead + re.escape(marker) + trail)
+        if _outside_code_fences(text, pattern.finditer(text)):
             return marker
     return None
 
@@ -734,12 +742,14 @@ def _alias_pattern(alias: str) -> Optional['re.Pattern']:
     """The regex that finds the team alias in an answer, or None for no alias.
 
     Case-insensitive, and whitespace inside the alias matches any run of
-    whitespace, so a line break between the words still hits.
+    whitespace, so a line break between the words still hits. Only a whole
+    word counts: not inside a longer word (``Support`` in ``supportive``) or a
+    URL path (``/support/``).
     """
     tokens = [re.escape(token) for token in (alias or '').split()]
     if not tokens:
         return None
-    return re.compile(r'\s+'.join(tokens), re.IGNORECASE)
+    return re.compile(r'(?<![\w/])' + r'\s+'.join(tokens) + r'(?!\w)', re.IGNORECASE)
 
 
 def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
@@ -749,6 +759,8 @@ def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
     hand off to "@RocketRide team", which Discord renders as plain text and
     pings nobody. Matching is case-insensitive, and whitespace inside the alias
     matches any run of whitespace so a line break between the words still hits.
+    Only whole-word occurrences outside fenced code blocks are replaced, since
+    each replacement garbles the text it hits and sends a real ping.
 
     Args:
         text (str): The pipeline answer.
@@ -763,9 +775,10 @@ def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
     pattern = _alias_pattern(alias)
     if pattern is None:
         return text
-    # A lambda, not the string itself: a replacement is a template, and a
+    outside = {match.start() for match in _outside_code_fences(text, pattern.finditer(text))}
+    # A function, not the string itself: a replacement is a template, and a
     # backslash in it would otherwise be read as a group reference.
-    return pattern.sub(lambda _match: role_mention, text)
+    return pattern.sub(lambda match: role_mention if match.start() in outside else match.group(0), text)
 
 
 def _handoff_marker(scratchpad: str, markers: Sequence[str], alias: str) -> Optional[str]:
