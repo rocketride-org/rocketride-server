@@ -254,8 +254,9 @@
 		"discord.textAttachmentMaxChars": {
 			"type": "number",
 			"title": "Text Attachment Max Characters",
-			"description": "Maximum decoded characters folded into the text lane per attachment.",
+			"description": "Maximum decoded characters folded into the text lane per attachment. 0 means no limit.",
 			"default": 12000,
+			"minimum": 0,
 			"optional": true
 		},
 		"discord.mergeAttachments": {

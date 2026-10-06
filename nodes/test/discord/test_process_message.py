@@ -339,6 +339,63 @@ class TestProcessMessageAttachments:
         endpoint._run_binary_pipeline.assert_not_called()
 
 
+class TestTextAttachmentDecoding:
+    """Merge on or off, a text attachment is decoded and capped the same way."""
+
+    @staticmethod
+    def _unmerged(max_chars):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._max_attachment_bytes = 1024
+        endpoint._show_typing = False
+        endpoint._text_attachment_extensions = ['.txt']
+        endpoint._text_attachment_max_chars = max_chars
+        endpoint._run_text_pipeline = mock.Mock(return_value='text-answer')
+        endpoint._run_binary_pipeline = mock.Mock(return_value='binary-answer')
+        return endpoint
+
+    @pytest.mark.parametrize('max_chars', [0, -1])
+    def test_merge_off_a_cap_of_zero_or_less_keeps_everything(self, max_chars):
+        endpoint = self._unmerged(max_chars)
+        attachment = _attachment('notes.txt', b'abcdefgh', content_type='text/plain')
+
+        asyncio.run(endpoint._process_attachment(_make_message(), attachment, {}, 0))
+
+        assert endpoint._run_text_pipeline.call_args.args[0] == '[attachment notes.txt]\nabcdefgh'
+
+    @pytest.mark.parametrize('data', [b'ok\x00binary', 'hello'.encode('utf-16')])
+    def test_merge_off_a_nul_byte_means_binary_not_text(self, data):
+        endpoint = self._unmerged(12000)
+        attachment = _attachment('notes.txt', data, content_type='text/plain')
+
+        result = asyncio.run(endpoint._process_attachment(_make_message(), attachment, {}, 0))
+
+        endpoint._run_text_pipeline.assert_not_called()
+        assert endpoint._run_binary_pipeline.call_args.args[0] == data
+        assert result == 'binary-answer'
+
+    def test_merge_on_a_cap_of_zero_keeps_everything(self):
+        endpoint = TestAttachmentMerge._endpoint()
+        endpoint._text_attachment_max_chars = 0
+        message = TestAttachmentMerge._message('look', _attachment('notes.txt', b'abcdefgh', content_type='text/plain'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        text, _meta = TestAttachmentMerge._text_call(endpoint)
+        assert '```\nabcdefgh\n```' in text
+        assert 'truncated' not in text
+
+    def test_merge_on_a_utf16_file_is_skipped_as_binary(self):
+        endpoint = TestAttachmentMerge._endpoint()
+        message = TestAttachmentMerge._message(
+            'look', _attachment('notes.txt', 'hello'.encode('utf-16'), content_type='text/plain')
+        )
+
+        asyncio.run(endpoint._process_message(message))
+
+        text, _meta = TestAttachmentMerge._text_call(endpoint)
+        assert text == 'look'
+
+
 class TestAttachmentMerge:
     """mergeAttachments folds files into one question so one answer sees everything."""
 

@@ -52,7 +52,9 @@ from discord.ext import commands
 from .text_utils import (
     attachment_kind,
     chunk_message,
+    clip_attachment_text,
     compose_merged_question,
+    decode_text_attachment,
     fold_binary_answer,
     fold_text_attachment,
     guess_media_type,
@@ -1134,8 +1136,8 @@ class IEndpoint(IEndpointBase):
             return ''
         if not file_data:
             return ''
-        decoded = file_data.decode('utf-8', errors='ignore')
-        if '\x00' in decoded:
+        decoded = decode_text_attachment(file_data)
+        if decoded is None:
             debug(f'Discord: skipping attachment {attachment.filename} (binary content)')
             return ''
         return fold_text_attachment(attachment.filename, decoded, getattr(self, '_text_attachment_max_chars', 12000))
@@ -1203,9 +1205,11 @@ class IEndpoint(IEndpointBase):
                 return ''
             if meta is None:
                 meta = self._message_metadata(message)
-            if self._is_text_attachment(attachment):
-                decoded = file_data.decode('utf-8', errors='ignore')
-                decoded = decoded[: getattr(self, '_text_attachment_max_chars', 12000)]
+            # Same decode and cap as the merged path; a file with a NUL byte
+            # is binary content and goes down the binary path below.
+            decoded = decode_text_attachment(file_data) if self._is_text_attachment(attachment) else None
+            if decoded is not None:
+                decoded = clip_attachment_text(decoded, getattr(self, '_text_attachment_max_chars', 12000))
                 framed = f'[attachment {attachment.filename}]\n{decoded}'
                 return await self._run_with_optional_typing(
                     message,

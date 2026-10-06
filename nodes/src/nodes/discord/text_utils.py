@@ -344,6 +344,38 @@ def attachment_kind(mime_type: str) -> str:
     return 'file'
 
 
+def decode_text_attachment(data: bytes) -> Optional[str]:
+    """Decode a text-like attachment, or say it holds binary content.
+
+    The one decode both attachment paths use (merged or not), so a file is
+    text on one path exactly when it is text on the other.
+
+    Args:
+        data (bytes): The downloaded file.
+
+    Returns:
+        Optional[str]: The UTF-8 text with invalid bytes ignored, or None when
+            the file has a NUL byte: binary content, or a UTF-16 file, which
+            decoded as UTF-8 would be a NUL between every character.
+    """
+    if b'\x00' in data:
+        return None
+    return data.decode('utf-8', errors='ignore')
+
+
+def clip_attachment_text(text: str, max_chars: int) -> str:
+    """Apply the ``textAttachmentMaxChars`` cap to decoded attachment text.
+
+    Args:
+        text (str): The decoded text.
+        max_chars (int): Maximum characters kept. Zero or less keeps everything.
+
+    Returns:
+        str: The text, cut to ``max_chars`` when the cap applies.
+    """
+    return text[:max_chars] if max_chars > 0 else text
+
+
 def fold_text_attachment(name: str, content: str, max_chars: int = 12000) -> str:
     """Render a text-like attachment as a fenced block for the merged question.
 
@@ -360,9 +392,9 @@ def fold_text_attachment(name: str, content: str, max_chars: int = 12000) -> str
     Returns:
         str: The block to fold into the question.
     """
-    text = content
-    if max_chars > 0 and len(text) > max_chars:
-        text = text[:max_chars] + _ATTACHMENT_TRUNCATION_SUFFIX
+    text = clip_attachment_text(content, max_chars)
+    if len(text) < len(content):
+        text += _ATTACHMENT_TRUNCATION_SUFFIX
     return f'Contents of attached file "{name}":\n```\n{text}\n```'
 
 

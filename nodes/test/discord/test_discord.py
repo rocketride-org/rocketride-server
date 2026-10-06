@@ -292,6 +292,29 @@ class TestGuessMediaType:
         assert guess_media_type('mystery.xyz', ' ; x=y') == 'application/octet-stream'
 
 
+class TestTextAttachmentHelpers:
+    """The one decode helper and cap rule both attachment paths share."""
+
+    def test_utf8_is_decoded_and_invalid_bytes_ignored(self):
+        assert text_utils.decode_text_attachment(b'caf\xc3\xa9 \xff ok') == 'café  ok'
+
+    def test_a_nul_byte_means_binary(self):
+        assert text_utils.decode_text_attachment(b'ok\x00binary') is None
+        assert text_utils.decode_text_attachment('hello'.encode('utf-16')) is None
+
+    def test_the_cap(self):
+        clip = text_utils.clip_attachment_text
+        assert clip('abcdefgh', 3) == 'abc'
+        assert clip('abcdefgh', 0) == 'abcdefgh'
+        assert clip('abcdefgh', -1) == 'abcdefgh'
+        assert clip('abc', 10) == 'abc'
+
+    def test_the_folded_block_follows_the_same_cap(self):
+        fold = text_utils.fold_text_attachment
+        assert fold('a.txt', 'abcdefgh', 3) == 'Contents of attached file "a.txt":\n```\nabc\n… (truncated)\n```'
+        assert fold('a.txt', 'abcdefgh', 0) == 'Contents of attached file "a.txt":\n```\nabcdefgh\n```'
+
+
 class TestServicesJsonSchema:
     """Validate the shipped services.json contract."""
 
@@ -386,6 +409,10 @@ class TestServicesJsonSchema:
         assert values == [0, 60, 1440, 4320, 10080]
         assert all(isinstance(option[1], str) and option[1] for option in field['enum'])
         assert field['default'] in values
+
+    def test_text_attachment_max_chars_cannot_be_negative(self, schema):
+        """0 means no limit; a negative cap has no meaning."""
+        assert schema['fields']['discord.textAttachmentMaxChars']['minimum'] == 0
 
     def test_bot_token_is_secure(self, schema):
         assert schema['fields']['discord.botToken'].get('secure') is True
