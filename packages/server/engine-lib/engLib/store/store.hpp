@@ -76,13 +76,6 @@
 
 #include "./filters/bottom/bottom.hpp"
 
-#include "./endpoints/msServices/outlook/constants.hpp"
-#include "./endpoints/msServices/msConnector/MsConnector.hpp"
-#include "./endpoints/msServices/msConnector/MsSharepointConnector/MsSharepointConnector.hpp"
-#include "./endpoints/msServices/msConnector/MsEmailConnector/MsEmailConnector.hpp"
-#include "./endpoints/msServices/msConnector/MsEmailConnector/MsEmailContainer.hpp"
-#include "./endpoints/msServices/sharepoint/base.hpp"
-#include "./endpoints/msServices/outlook/base.hpp"
 
 #include "./pipeline/validate_pipeline.hpp"
 

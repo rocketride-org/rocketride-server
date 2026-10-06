@@ -162,7 +162,7 @@ function projectLine(message: TaskEventMessage): LogLine | null {
 
 	// Lifecycle markers — run boundaries, restarts, clock anomalies.
 	const action = String(body.action ?? '');
-	const detail = body.outcome ? ` (${String(body.outcome)})` : body.detail ? ` — ${String(body.detail)}` : '';
+	const detail = body.outcome ? ` (${String(body.outcome)})` : body.detail ? `: ${String(body.detail)}` : '';
 	return { key: message.body.logSeq, time, text: `── ${action}${detail} ──`, style: styles.lifecycle };
 }
 
@@ -272,7 +272,7 @@ export const LogPane: React.FC<ILogPaneProps> = ({ events, downloadBase, truncat
 	const notices: string[] = [];
 	if (truncatedBefore !== undefined) {
 		const from = new Date(truncatedBefore * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-		notices.push(`Showing events from ${from} — earlier output is not loaded. Download Log for the complete run.`);
+		notices.push(`Showing events from ${from}. Earlier output is not loaded. Download Log for the complete run.`);
 	}
 	if (capped > 0) {
 		notices.push(`Showing the last ${DISPLAY_LINE_CAP.toLocaleString()} lines (${capped.toLocaleString()} earlier hidden). Download Log for the complete run.`);

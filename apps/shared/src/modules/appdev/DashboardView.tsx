@@ -497,7 +497,7 @@ function deriveStatus(
 		const semver = newest.version ? ` (${newest.version})` : '';
 		const stateStory: Record<string, string> = {
 			private: 'it is a private draft, ready for internal use',
-			submit: 'it is in review right now — the verdict will land here and in the conversation below',
+			submit: 'it is in review right now, and the verdict will land here and in the conversation below',
 			ready: 'it passed review and is approved',
 			rejected: 'it was rejected in review',
 			failed: 'its server build failed, so it never became servable',
@@ -514,7 +514,7 @@ function deriveStatus(
 					: (stateStory[newest.state ?? ''] ?? 'its state is unknown');
 		lines.push({
 			tone: 'plain',
-			text: `Your latest version is v${newest.registryVersion}${semver}, deployed${when}${who} — ${story}.`,
+			text: `Your latest version is v${newest.registryVersion}${semver}, deployed${when}${who}; ${story}.`,
 		});
 	}
 
@@ -530,28 +530,28 @@ function deriveStatus(
 	if (watch?.state === 'error') {
 		lines.push({
 			tone: 'error',
-			text: `Heads up: your local build is failing — ${watch.reason || 'see the Console for details'}. The preview and your next deploy both depend on it.`,
+			text: `Heads up: your local build is failing (${watch.reason || 'see the Console for details'}). The preview and your next deploy both depend on it.`,
 			stage: 'design',
 		});
 	}
 	if (newest && buildStateOf(newest) === 'failed') {
 		lines.push({
 			tone: 'error',
-			text: `v${newest.registryVersion} failed its server build — click the failed badge on its card in Deploy to read the build log, then fix the source and deploy a new version. A version whose build failed can never be published or reviewed.`,
+			text: `v${newest.registryVersion} failed its server build. Click the failed badge on its card in Deploy to read the build log, then fix the source and deploy a new version. A version whose build failed can never be published or reviewed.`,
 			stage: 'deploy',
 		});
 	}
 	if (newest?.state === 'failed') {
 		lines.push({
 			tone: 'error',
-			text: 'Check the build output in the Console, fix the error, and deploy again — a failed version cannot be published or reviewed.',
+			text: 'Check the build output in the Console, fix the error, and deploy again. A failed version cannot be published or reviewed.',
 			stage: 'design',
 		});
 	}
 	if (newest?.state === 'rejected') {
 		lines.push({
 			tone: 'error',
-			text: 'Read the notes from the reviewer in the conversation below, fix what they flagged, and deploy a new version — a rejection is final for that version.',
+			text: 'Read the notes from the reviewer in the conversation below, fix what they flagged, and deploy a new version. A rejection is final for that version.',
 		});
 	}
 	// The two readiness bars separately — a broken PACKAGE blocks everything
@@ -575,7 +575,7 @@ function deriveStatus(
 	}
 	const lastReply = [...history].reverse().find((e) => e.action === 'reply');
 	if (lastReply?.data?.side === 'admin') {
-		lines.push({ tone: 'warn', text: 'The reviewer sent you a message — it is waiting in the conversation below.' });
+		lines.push({ tone: 'warn', text: 'The reviewer sent you a message. It is waiting in the conversation below.' });
 	}
 
 	// ── Next steps: what you might do from here. Only a version whose
@@ -585,7 +585,7 @@ function deriveStatus(
 	if (newest && newestBuild === 'running') {
 		lines.push({
 			tone: 'plain',
-			text: 'Hang tight — once the build finishes, you can publish it or submit it for review.',
+			text: 'Hang tight. Once the build finishes, you can publish it or submit it for review.',
 		});
 	} else if (newest && newestBuild === 'failed') {
 		// The error sentence above already says what to do; no cheerful
@@ -593,11 +593,11 @@ function deriveStatus(
 	} else if (newest?.state === 'ready' && publicPin?.registryVersion !== newest.registryVersion) {
 		lines.push({
 			tone: 'plain',
-			text: `All is well — v${newest.registryVersion} is approved. If you want, publish it to @public and the store starts serving it.`,
+			text: `All is well: v${newest.registryVersion} is approved. If you want, publish it to @public and the store starts serving it.`,
 			stage: 'deploy',
 		});
 	} else if (newest?.state === 'ready') {
-		lines.push({ tone: 'plain', text: 'All is well — the store is serving your approved version. Nothing needs doing.' });
+		lines.push({ tone: 'plain', text: 'All is well: the store is serving your approved version. Nothing needs doing.' });
 	} else if (newest?.state === 'private') {
 		const behindPublic = publicPin && publicPin.registryVersion < newest.registryVersion;
 		lines.push({
@@ -610,7 +610,7 @@ function deriveStatus(
 	} else if (newest?.state === 'submit') {
 		lines.push({
 			tone: 'plain',
-			text: 'Nothing needs doing while the review runs — you can keep working; deploying a new version simply withdraws this submission.',
+			text: 'Nothing needs doing while the review runs. You can keep working; deploying a new version simply withdraws this submission.',
 		});
 	}
 
@@ -776,13 +776,13 @@ export const DashboardView: React.FC<IDashboardViewProps> = ({ host, app, readOn
 			{/* View header — title + one-line purpose */}
 			<div style={styles.head}>
 				<div style={styles.h1}>{app.name}</div>
-				<div style={styles.sub}>Dashboard — where things stand with this app, the conversation with the reviewer, and what you might do next.</div>
+				<div style={styles.sub}>Dashboard: where things stand with this app, the conversation with the reviewer, and what you might do next.</div>
 			</div>
 
 			{/* Server-side facts unavailable — the cards below stay on their empty states */}
 			{loadError ? (
 				<div style={styles.loadBanner}>
-					<Banner variant="info">Not connected to a RocketRide server — {loadError}. Server-side status appears here once connected.</Banner>
+					<Banner variant="info">Not connected to a RocketRide server: {loadError}. Server-side status appears here once connected.</Banner>
 				</div>
 			) : null}
 
@@ -874,7 +874,7 @@ export const DashboardView: React.FC<IDashboardViewProps> = ({ host, app, readOn
 												<div style={styles.tlWhen}>{formatAt(entry.at)}</div>
 												<div style={styles.tlWhat}>{`${entry.version != null ? `v${entry.version} ` : ''}${streamLabel(entry)}`}</div>
 												{note ? <div style={styles.tlNote}>&ldquo;{note}&rdquo;</div> : null}
-												{buildFailed ? <div style={styles.tlFail}>the server build failed — this version can never serve</div> : null}
+												{buildFailed ? <div style={styles.tlFail}>the server build failed, so this version can never serve</div> : null}
 												{actor ? <div style={styles.tlBy}>by {actor}</div> : null}
 												{showLog ? (
 													<div style={styles.tlAction}>
@@ -915,7 +915,7 @@ export const DashboardView: React.FC<IDashboardViewProps> = ({ host, app, readOn
 								) : null}
 							</>
 						) : (
-							<div style={styles.replyHint}>Replying is not wired up on this host yet — the thread is read-only here.</div>
+							<div style={styles.replyHint}>Replying is not wired up on this host yet, so the thread is read-only here.</div>
 						)}
 					</Card>
 				</div>

@@ -39,7 +39,7 @@ connections. Widen it only behind TLS and authentication (see
 - **Platform:** `linux/amd64` only. On Apple Silicon add
   `--platform linux/amd64` (Docker runs it under emulation — fine for
   development; the VS Code extension does the same).
-- **Runs as non-root** (user `rocketride`), listens on **5565**, and starts
+- **Runs as non-root** (user `rocketride`, uid 1000), listens on **5565**, and starts
   the engine bound to all container interfaces — the port mapping above is
   what controls actual exposure.
 - **Signed:** images are cosign-signed from CI. Verify keyless:
@@ -68,7 +68,8 @@ The engine reads configuration from its environment — pass variables with
 
 The engine writes runtime data to `/opt/data` (declared as a volume). Mount a
 named volume or host path there — it's the only path that needs to survive
-container replacement, and the one to back up.
+container replacement, and the one to back up. It must be writable by uid 1000;
+the engine checks at startup and refuses to start, naming the fix, if it is not.
 
 ## Health and upgrades
 
@@ -90,6 +91,17 @@ docker pull ghcr.io/rocketride-org/rocketride-engine:latest
 docker rm -f rocketride-engine
 # re-run the docker run command above
 ```
+
+Upgrading from an image that ran as a system user (uid 999): the existing volume
+still belongs to that user, so the new engine cannot write to it and exits with
+`/opt/data is not writable by uid 1000`. Hand the volume over once, before
+starting the new image:
+
+```bash
+docker run --rm -v rocketride-data:/opt/data alpine chown -R 1000:1000 /opt/data
+```
+
+For a host path, run `sudo chown -R 1000:1000 <path>` instead.
 
 ## Compose
 

@@ -52,7 +52,7 @@ Default: **Llama 3.3** (`llama3_3`).
 
 ## Configuration
 
-Pick a profile to prefill the Ollama model, context limit, and server URL. Use `custom` to supply another Ollama tag, context token count, and endpoint; its initial context value is 16,385 tokens.
+Pick a profile to prefill the Ollama model, context limit, and server URL. Use `custom` to supply another Ollama tag, context token count, output limit, and endpoint; its initial context value is 16,385 tokens and its output limit 4,096.
 
 ### Server base URL
 
@@ -79,6 +79,7 @@ The OpenAI client requires a non-empty API key, so the node sends the placeholde
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `model` | `string` | **Model**<br/>Ollama model |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `ollama.profile` | `string` | **Model**<br/>LLM model | `"llama3_3"` |
 | `reasoning_effort` | `string` | **Reasoning Effort**<br/>Optional reasoning budget for reasoning models: low, medium, or high. Leave unset to let reasoning models auto-use 'low'; a value set here always wins. Ignored by non-reasoning models. |  |

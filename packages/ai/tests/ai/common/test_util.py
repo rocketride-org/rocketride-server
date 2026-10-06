@@ -210,6 +210,209 @@ def test_parse_json_does_not_blame_budget_when_json_actually_arrived(raw):
         util.parseJson(raw)
 
 
+@pytest.mark.parametrize(
+    ('raw', 'expected'),
+    [
+        ('Here is my plan:\n```json\n{"a": 1}\n```\nHope that helps!', {'a': 1}),
+        ('Sure.\n```json\n[1, 2]\n```', [1, 2]),
+        ('```json\n{"a": 1}\n```\nLet me know if you need more.', {'a': 1}),
+        ('{"a": 1}\n\nThis plan reads the file first.', {'a': 1}),
+        (
+            'I\'ll create the package and tests.{"thought": "write", "tool_calls": []}',
+            {'thought': 'write', 'tool_calls': []},
+        ),
+        ('Step [1/3]: read the stylesheet.\n```json\n{"a": 1}\n```', {'a': 1}),
+        ('I\'ll embed it with {{memory.ref:wave-0.r0:markdown_table}}.\n```json\n{"a": 1}\n```', {'a': 1}),
+        ('```json\n{"a": 1}\n```\n\n1. Read the stylesheet first.', {'a': 1}),
+        ('Here is the plan:\n```\n{"a": 1}\n```', {'a': 1}),
+        ('{"a": 1}\n\n2) Then compile the project.', {'a': 1}),
+        ('{"a": 1}\nNote: the stylesheet is read first.', {'a': 1}),
+    ],
+    ids=[
+        'sentence-around-fence',
+        'sentence-before-fence',
+        'remark-after-fence',
+        'remark-after-object',
+        'sentence-then-bare-object',
+        'bracket-in-prose-before-fence',
+        'memory-ref-tag-before-fence',
+        'numbered-remark-after-fence',
+        'sentence-then-plain-fence',
+        'numbered-remark-with-a-parenthesis',
+        'remark-with-a-label',
+    ],
+)
+def test_parse_json_reads_a_reply_wrapped_in_prose(raw, expected):
+    """A polite sentence around the JSON is not a broken reply.
+
+    Each of these used to fail the parse, and ChatBase.chat then paid a repair round
+    trip for a reply that held valid JSON all along.
+    """
+    assert util.parseJson(raw) == expected
+
+
+def test_parse_json_keeps_backticks_inside_a_prose_wrapped_reply():
+    """A code fence inside a JSON string is data, not the end of the block."""
+    raw = 'Here you go:\n```json\n{"done": true, "answer": "Use ```python\\nprint(1)\\n``` here"}\n```\nDone.'
+
+    assert util.parseJson(raw) == {'done': True, 'answer': 'Use ```python\nprint(1)\n``` here'}
+
+
+def test_parse_json_never_takes_a_draft_from_unfinished_reasoning():
+    """Prose, then a <think> block that never closes: a JSON fence inside it is a draft, not the answer."""
+    draft = '{"tool_calls": [{"tool": "workspace.write", "args": {"path": "a", "content": "draft"}}]}'
+    raw = f'Preface\n<think>Considering this plan:\n```json\n{draft}\n```\nbut maybe'
+
+    with pytest.raises(ValueError):
+        util.parseJson(raw)
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        '{"tool_calls": [{"tool": "workspace.write"}]}\n<think>Actually, I should reconsider this write',
+        '```json\n{"tool_calls": [{"tool": "workspace.write"}]}\n```\n<think>Actually, wait',
+    ],
+    ids=['bare', 'fenced'],
+)
+def test_parse_json_rejects_a_value_followed_by_unfinished_reasoning(raw):
+    """JSON, then reasoning that never closes: the model may be reconsidering it, so it is a draft."""
+    with pytest.raises(ValueError):
+        util.parseJson(raw)
+
+
+def test_parse_json_ignores_an_example_object_in_the_middle_of_prose():
+    """An object followed by more prose is an example, not the reply."""
+    with pytest.raises(ValueError):
+        util.parseJson('The reply looks like {"done": true}, and I will write it next.')
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        '[{"name": "Alice"}], {"name": "Bob"}]',
+        '{"a": 1} {"b": 2}',
+        '{"a": 1}, and {"b": 2} is the other option.',
+        '{"a": 1} 42',
+        '{"a": 1}\ntrue',
+        'Here:\n```json\n[{"name": "Alice"}], {"name": "Bob"}]\n```',
+        'Plan A:\n```json\n{"a": 1}\n```\nPlan B:\n```json\n{"b": 2}\n```',
+        'Here are the rows: [{"name": "Alice"}], [{"name": "Bob"}]',
+        'Two objects: {"a": 1} {"b": 2}',
+        '{"a": 1}\n```json\n42\n```',
+        '{"a": 1}\n```json\n"text"\n```',
+        'Rows:\n```\n[{"name": "Alice"}]\n```\n```json\n[{"name": "Bob"}]\n```',
+        'Rows: [{"name": "Alice"}]\n```json\n[{"name": "Bob"}]\n```',
+        'Rows: [{"name": "Alice"}], null, [{"name": "Bob"}]',
+        'Rows: [{"name": "Alice"}], "and", [{"name": "Bob"}]',
+        'Rows: [{"name": "Alice"}] and [{"name": "Bob"}]',
+        'Rows: [{"name": "Alice"}], NaN, [{"name": "Bob"}]',
+        'Not {"done": true}, since the file is unread. {"thought": "read", "tool_calls": []}',
+        'true {"done": true, "answer": "finished"}',
+        'Rows: [{"name": "Alice",\n```json\n{"name": "Bob"}\n```',
+        'Example only:\n```text\n{"done": true, "answer": "example"}\n```',
+        'Example only:\n```python\n{"tool_calls": [{"tool": "workspace.write"}]}\n```',
+        'Example: {"done": true, "answer": "example"}\n```',
+        '{"done": true, "answer": "A"}\n"Use B instead"\nDone.',
+        '{"a": 1}\ntrue\nThat is all.',
+        '{"a": 1}\n42 rows were skipped.',
+        '```json\n{"a": 1}\n```\n"Use B instead" Done.',
+        '{"done": true, "answer": "A"}\n"Use B instead". Done.',
+        '{"done": true, "answer": "A"}\n"Use B instead\nDone.',
+        '{"a": 1}\ntrue. That is all.',
+        'Scores: [1, 2,\n```json\n[3, 4]\n```',
+        'Flags: [true, false,\n```json\n[true]\n```',
+        '{"done": true, "answer": "A"}\nCorrection:\n"B"',
+        '{"done": true, "answer": "A"}\nCorrection:\n"B',
+        '{"a": 1}\nUse this instead: 42',
+        'Scores: [1e3, 2e3,\n```json\n[3, 4]\n```',
+        'Scores: [-1.5E+2,\n```json\n[3]\n```',
+        '{"a": 1}\nDone.\n```',
+        'Scores: [1\n```json\n[2, 3]\n```',
+        'Flags: [true\n```json\n[false]\n```',
+        '{"price": 10}\nCorrect price: 20 USD.',
+        '{"a": 1}\nUse this instead: 42, it is newer.',
+    ],
+    ids=[
+        'array-closed-early',
+        'two-values',
+        'value-then-prose-with-value',
+        'value-then-number',
+        'value-then-true',
+        'fenced-array-closed-early',
+        'two-fenced-blocks',
+        'prose-then-two-arrays',
+        'prose-then-two-objects',
+        'bare-value-then-fenced-number',
+        'bare-value-then-fenced-string',
+        'unlabelled-fence-then-json-fence',
+        'bare-value-then-json-fence',
+        'null-between-values',
+        'string-between-values',
+        'words-between-values',
+        'nan-between-values',
+        'example-then-reply',
+        'scalar-before-value',
+        'unfinished-array-before-json-fence',
+        'example-in-a-text-fence',
+        'example-in-a-python-fence',
+        'closing-fence-with-no-opener',
+        'value-then-string-then-prose',
+        'value-then-true-then-prose',
+        'value-then-number-then-prose',
+        'fenced-value-then-string-then-prose',
+        'value-then-string-then-punctuation',
+        'value-then-unfinished-string',
+        'value-then-true-then-punctuation',
+        'unfinished-number-array-before-json-fence',
+        'unfinished-literal-array-before-json-fence',
+        'value-then-label-then-string',
+        'value-then-label-then-unfinished-string',
+        'value-then-label-and-number-on-one-line',
+        'unfinished-exponent-array-before-json-fence',
+        'unfinished-signed-exponent-array-before-json-fence',
+        'bare-value-remark-then-unopened-fence',
+        'unfinished-number-array-without-a-comma-before-json-fence',
+        'unfinished-literal-array-without-a-comma-before-json-fence',
+        'value-then-label-then-number-and-words',
+        'value-then-label-then-number-comma-and-words',
+    ],
+)
+def test_parse_json_never_keeps_part_of_a_broken_reply(raw):
+    """A value followed by more JSON is broken, not a reply plus a remark.
+
+    Keeping the first value would drop the rest without a word (Bob's row, the second
+    plan). The parse must fail, so ChatBase.chat asks for a repair.
+    """
+    with pytest.raises(ValueError):
+        util.parseJson(raw)
+
+
+@pytest.mark.parametrize(
+    'raw',
+    [
+        'Here are the rows: [{"name": "Alice"}, {"name": "Bob"}',
+        'Here is the user: {"user": {"name": "Bob"}',
+        'Compare [A, B] first. {"done": true, "answer": "A"}',
+    ],
+    ids=['array-cut-off', 'object-cut-off', 'unreadable-bracket-before'],
+)
+def test_parse_json_never_takes_an_inner_object_for_the_reply(raw):
+    """A value cut off part way ends with complete inner objects; none of them is the reply.
+
+    Once a start does not decode, everything after it may be inside that value, so the
+    search stops there. A reply with an unreadable bracket in its prose is repaired too:
+    that costs a round trip, while a wrong answer would cost the task.
+    """
+    with pytest.raises(ValueError):
+        util.parseJson(raw)
+
+
+def test_parse_json_still_rejects_prose_with_no_json():
+    with pytest.raises(ValueError):
+        util.parseJson('I will read the file first, then decide.')
+
+
 def test_parse_json_keeps_inner_backticks_in_string_value():
     """Triple-backticks inside a JSON string value must NOT be treated as fences."""
     raw = '{"answer": "see ```python\\nprint(1)\\n``` here"}'

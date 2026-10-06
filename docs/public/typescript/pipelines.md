@@ -19,7 +19,8 @@ control call takes it.
 const { token } = await client.use({ filepath: './pipeline.pipe', ttl: 3600 });
 ```
 
-Beyond `filepath`/`pipeline`, the options accept `source`, `threads`,
+Beyond `filepath`/`pipeline`, the options accept `token` (a custom task token;
+the server generates one when omitted), `source`, `threads`,
 `useExisting`, `args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
 [run log](/clients/typescript/logs)), `name` (a display name for the task), and
 `env` (per-run variable overrides). Pass the pipeline config **as-is** — do not

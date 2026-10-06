@@ -147,12 +147,9 @@ function parseArgs(args) {
 			// client:update); beats ROCKETRIDE_URI from .config/.env.
 			options.shell = arg.substring('--shell='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
-			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
-			const paths = require('./lib/paths');
-			paths.BUILD_ROOT = path.join(options.overlayRoot, 'build');
-			paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
-			process.env.ROCKETRIDE_BUILD_ROOT = paths.BUILD_ROOT;
-			process.env.ROCKETRIDE_DIST_ROOT = paths.DIST_ROOT;
+			const overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
+			options.overlayRoot = overlayRoot === path.resolve(ROOT) ? null : overlayRoot;
+			require('./lib/paths').setOverlayRoot(options.overlayRoot);
 		} else if (arg.startsWith('--simulate-gpus=') || arg.startsWith('--simulate_gpus=')) {
 			options.simulateGpus = parseInt(arg.split('=')[1], 10);
 		} else if (arg === '--nodownload') {

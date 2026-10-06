@@ -91,7 +91,7 @@ async function readPkg(folder: string): Promise<PkgFile> {
 	const raw = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
 	const pkg = JSON.parse(raw) as PkgFile['pkg'];
 	if (!pkg.appManifest?.id) {
-		throw new Error(`No appManifest.id in ${uri.fsPath} — not an app project.`);
+		throw new Error(`No appManifest.id in ${uri.fsPath}. Not an app project.`);
 	}
 	return { uri, raw, pkg };
 }

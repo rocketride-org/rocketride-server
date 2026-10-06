@@ -36,9 +36,9 @@ export const documentsModelEntry: IGalleryEntry = {
 	blurb: 'The app-owned document / editor / group model behind the document UI: VS Code semantics (dirty tracking, splits, per-editor viewports) as one React-subscribable store.',
 	doc: `One \`Documents\` instance per app, created over the app's VFS and optionally bound to the workspace for persistence. Everything document-shaped flows through it:
 
-- **Documents** — one per URI, in-memory \`content\`, \`dirty\`/\`version\`/\`isNew\` tracking; static (non-VFS) documents for monitors and webviews.
-- **Editors** — views onto a document with independent scroll/cursor/view state; the same document can be open in several panes.
-- **Groups & layout** — editor groups arranged in a binary split tree (\`LayoutLeaf\` / \`LayoutSplit\`), rendered by \`DocSplitLayout\`.
+- **Documents**: one per URI, in-memory \`content\`, \`dirty\`/\`version\`/\`isNew\` tracking; static (non-VFS) documents for monitors and webviews.
+- **Editors**: views onto a document with independent scroll/cursor/view state; the same document can be open in several panes.
+- **Groups & layout**: editor groups arranged in a binary split tree (\`LayoutLeaf\` / \`LayoutSplit\`), rendered by \`DocSplitLayout\`.
 
 React binding is \`docs.useStore()\` (tear-free \`useSyncExternalStore\`); non-React code uses \`getState()\` / \`subscribe()\`. With a \`WorkspaceBinding\` the model restores from workspace appState and debounce-saves every change.`,
 	docNote: 'The APP owns the instance - create ONE Documents per app and pass it down; DocTabs and DocSplitLayout only read from and dispatch to it.',

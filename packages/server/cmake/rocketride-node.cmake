@@ -103,7 +103,7 @@ function(rocketride_add_node targetName)
     # The loader resolves a node library relative to the engine executable, so
     # it has to land in dist/server/nodes/<node-dir>
     get_filename_component(nodeDir ${CMAKE_CURRENT_SOURCE_DIR} NAME)
-    set(distDir "${ROCKETRIDE_PROJECT_ROOT}/dist/server/nodes/${nodeDir}")
+    set(distDir "${ROCKETRIDE_DIST_DIR}/nodes/${nodeDir}")
 
     if(ROCKETRIDE_CMAKE_KITS)
         add_custom_command(TARGET ${targetName} POST_BUILD

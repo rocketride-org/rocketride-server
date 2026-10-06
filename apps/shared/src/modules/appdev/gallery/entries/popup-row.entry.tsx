@@ -64,7 +64,7 @@ export const popupRowEntry: IGalleryEntry = {
 	name: 'PopupRow',
 	group: 'content',
 	blurb: 'A single clickable item inside a popup menu: the hover-highlighted flex row used by every kebab / footer / context menu.',
-	doc: `The row is intentionally minimal — content is free-form children (icon + label + chevron), so it composes into any popup body. Pair it with \`useFixedPopupPosition\` for the anchored container and \`useClickOutside\` for dismissal.`,
+	doc: `The row is intentionally minimal: content is free-form children (icon + label + chevron), so it composes into any popup body. Pair it with \`useFixedPopupPosition\` for the anchored container and \`useClickOutside\` for dismissal.`,
 	demo: PopupRowDemo,
 	code: `import { PopupRow, BxCog, BxTrash } from 'shell';
 

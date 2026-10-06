@@ -896,7 +896,7 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane, code
 									>
 										<button
 											style={layout === l ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
-											title={`${label} layout: ${selected.name} ${selected.width} x ${selected.height} — hover for resolutions`}
+											title={`${label} layout: ${selected.name} ${selected.width} x ${selected.height} (hover for resolutions)`}
 											onClick={() => setLayout(l)}
 										>{icon}</button>
 										{openMenu === l && (
@@ -935,7 +935,7 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane, code
 						<label
 							style={fitMode ? { ...styles.zoomControl, ...styles.ctlDisabled } : styles.zoomControl}
 							title={fitMode
-								? 'Zoom is driven by Fit — toggle Fit off to zoom manually.'
+								? 'Zoom is driven by Fit. Toggle Fit off to zoom manually.'
 								: 'Preview zoom: absolute scale, 100% = actual size. Drag the gray canvas to pan when zoomed in. Double-click the slider for 100%.'}
 						>
 							Zoom
@@ -970,7 +970,7 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane, code
 								...(fitMode ? styles.ctlDisabled : null),
 							}}
 							title={fitMode
-								? 'The hand tool is driven by Fit — toggle Fit off to pan.'
+								? 'The hand tool is driven by Fit. Toggle Fit off to pan.'
 								: 'Hand tool: drag anywhere on the preview to pan, even over the app. The app is not interactive while active.'}
 							disabled={fitMode}
 							onClick={() => setHandTool((h) => !h)}
@@ -1098,7 +1098,7 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane, code
 					<LogList
 						rows={logRows}
 						emptyTitle="No output yet"
-						emptyDescription="Everything lands here as the app runs — console.log / warn / error from the preview, runtime and build errors, and shell platform events."
+						emptyDescription="Everything lands here as the app runs: console.log / warn / error from the preview, runtime and build errors, and shell platform events."
 					/>
 				</div>
 			)}

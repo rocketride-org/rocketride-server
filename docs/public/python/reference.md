@@ -102,7 +102,7 @@ surface (`rocketride/drizzle`), plus a deprecated Sequelize binding.
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL through the pipeline's `execute` tool function; returns `{rows, affected_rows}`. |
+| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL or Cypher through the pipeline's `execute` tool function; `params` is a positional list for SQL nodes, or a dict keyed by placeholder name for graph (Cypher) nodes; returns `{rows, affected_rows}`. |
 | `database.begin_transaction` | `async def begin_transaction(*, token, node_id='') -> dict` | Open a transaction (`begin` tool function); returns `{session_id}`. |
 | `database.commit` | `async def commit(*, token, session_id, node_id='') -> dict` | Commit the open transaction. |
 | `database.rollback` | `async def rollback(*, token, session_id, node_id='') -> dict` | Roll back the open transaction. |
@@ -116,6 +116,7 @@ See [Deployments](/clients/python/deploy) for the model.
 | --- | --- | --- |
 | `deploy.add` | `async def add(self, pipeline=None, *, kind='pipe', data=None, metadata=None, comment=None, deploy_to=None) -> PublishResult` | `PublishResult` |
 | `deploy.add_app` | `async def add_app(self, app_root, *, workspace_root=None, comment=None, metadata=None, on_progress=None) -> PublishResult` | `PublishResult` |
+| `deploy.create_app` | `async def create_app(self, slug, *, workspace_root=None, template='Blank', display_name=None, developer_id=None, sidebar=False, status_footer=True, doc_tabs=False, install=True, server_base_url=None, on_progress=None) -> dict` | `{appId, folder, files, vendored, installed}` |
 | `deploy.verify_app` | `async def verify_app(self, app_root, *, workspace_root=None) -> AppVerifyReport` | `AppVerifyReport` |
 | `deploy.deploy` | `async def deploy(self, project_id, version, team_id) -> Deployment` | `Deployment` |
 | `deploy.list` | `async def list(self, *, team_id=None, page=None, page_size=None, search=None, filters=None, sort=None) -> DeployListResult` | `DeployListResult` |
@@ -136,20 +137,24 @@ See [Deployments](/clients/python/deploy) for the model.
 ### App publish ladder
 
 See [Deployments](/clients/python/deploy#app-publish-ladder) for the model.
-Only `deploy.add` and `deploy.add_app` live on `client.deploy`; the unprefixed
-verbs below are methods on the client itself (`client.publish_app(...)`).
+The `deploy.`-prefixed verbs below (`add`, `add_app`, `create_app`, `verify_app`)
+live on `client.deploy`; the unprefixed verbs are methods on the client itself
+(`client.publish_app(...)`).
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
 | `deploy.add` | `async def add(self, pipeline=None, *, kind='pipe', data=None, metadata=None, comment=None, deploy_to=None) -> PublishResult` | The ONE rail door (on the `client.deploy` namespace): deploy any kind of object as the next immutable registry version. `kind='pipe'` (default) takes a `pipeline` dict; `kind='app'` takes ONE `data` zip of the app's SOURCE (the server performs the build; client-produced binaries are never trusted), retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
 | `deploy.add_app` | `async def add_app(self, app_root, *, workspace_root=None, comment=None, metadata=None, on_progress=None) -> PublishResult` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `on_progress` narrates one line per step. Deploying activates nothing — bind an audience with `publish_app` afterwards. |
+| `deploy.create_app` | `async def create_app(self, slug, *, workspace_root=None, template='Blank', display_name=None, developer_id=None, sidebar=False, status_footer=True, doc_tabs=False, install=True, server_base_url=None, on_progress=None) -> dict` | Scaffold a new app in the workspace — the programmatic twin of the App Builder's New App wizard, rendering the identical templates. Writes `./apps/<slug>`, vendors the connected server's shell + client packages, and runs the workspace install. The id becomes `<developerId>.<slug>`. Scaffolding only — the lifecycle (`verify_app` → `add_app` → `publish_app`) follows. Returns the TypeScript `CreatedApp` keys (`appId`, `folder`, `files`, `vendored`, `installed`). |
 | `deploy.verify_app` | `async def verify_app(self, app_root, *, workspace_root=None) -> AppVerifyReport` | The no-side-effect precheck for `add_app` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
-| `list_deployments` | `async def list_deployments(self, app_id) -> list[dict]` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
+| `list_deployments` | `async def list_deployments(self, app_id) -> list[dict]` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry (`registryVersion`, `appVersion`, `sha256`, `publishedAt`, `author`, `message`, `state`, `buildStatus`, `buildPhase`, `buildEndedAt`, `rungs`) carries its deployment `state`, its build lifecycle (`buildStatus` — 'ok' = servable — plus the `buildPhase` it reached and `buildEndedAt`, which is always present: epoch seconds, or `None` until the build ends), and the `rungs` naming the audiences bound to it. No error text rides the rail: read it with `build_log`. |
 | `submit_app` | `async def submit_app(self, app_id, registry_version) -> dict` | Submit a deployed version for review — flips the deployment `private` → `submit`. |
 | `withdraw_app` | `async def withdraw_app(self, app_id, registry_version) -> dict` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private`, the version leaves the admin queue and history records `withdrawn`. Only a version in `submit` withdraws. Developer-org + namespace gated, like submit. |
 | `reply_app` | `async def reply_app(self, app_id, message, registry_version=None) -> dict` | Append a developer message to the app's review thread — rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated, like submit. |
 | `build_log` | `async def build_log(self, app_id, registry_version) -> dict` | One version's durable server build log — the full phase-by-phase output stored beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; empty `log` = none. Developer-org gated. |
 | `publish_app` | `async def publish_app(self, app_id, registry_version, target) -> dict` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. '@public' requires the deployment be `ready`; '@me'/'@team' accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector; publishing your own app requires the id to be in your namespace. |
+| `remove_app_publish` | `async def remove_app_publish(self, app_id, target) -> dict` | Remove an audience binding — the app stops serving to that audience and the row leaves the where-live listing. SOFT: registry versions and audit history survive; publishing to the audience again revives it. Returns the final `publish` binding row (state `removed`). |
+| `disable_app_publish` | `async def disable_app_publish(self, app_id, target) -> dict` | Disable an audience binding — serving stops, but the row STAYS in the where-live listing marked `disabled` (a visible off switch), unlike `remove_app_publish`. Publishing any version to that audience re-enables it. Returns the `publish` binding row (state `disabled`). |
 | `where_app` | `async def where_app(self, app_id) -> list[dict]` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound deployment's review state. |
 
 Serving needs no verb: a version's bundle loads from the stable
@@ -224,6 +229,7 @@ Question(
     type: QuestionType = QuestionType.QUESTION,
     filter: DocFilter = None,
     expectJson: bool = False,
+    cachePrefix: bool = False,
     role: str = '',
 )
 ```
@@ -240,6 +246,7 @@ Question(
 | `addDocuments` | `addDocuments(self, documents: Doc \| List[Doc])` | Adds documents for the AI to reference. |
 | `addGoal` | `addGoal(self, goal: str)` | Adds a goal statement for the AI. |
 | `getPrompt` | `getPrompt(self, has_previous_json_failed: bool = False) -> str` | Returns the full prompt (internal). |
+| `cachePrefix` | field, default `False` | Set to `True` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
 
 ## Answer
 
@@ -266,7 +273,7 @@ From `rocketride.schema`. Parses chat response content — see
 - **QuestionHistory**: `{ 'role': str, 'content': str }`.
 - **QuestionExample**: `{ 'given': str, 'result': str }`.
 - **QuestionType** / **QuestionText**: question kind enum and text wrapper from `rocketride.schema`.
-- **Deploy types**: `DeployArtifact`, `Deployment`, `DeploymentSchedule`, `DeployActor`, `DeployHistoryEntry`, `PublishResult`, `DeployListResult`, `DeployVersionsResult`, `DeployHistoryResult`, `SchedulePreview` (from `rocketride.types`).
+- **Deploy types**: `DeployArtifact`, `Deployment`, `DeploymentSchedule`, `DeployActor`, `DeployHistoryEntry`, `PublishResult`, `DeployListResult`, `DeployVersionsResult`, `DeployHistoryResult`, `SchedulePreview`, `AppVerifyReport`, `AppVerifyCheck` (from `rocketride.types`).
 
 ### Additional client surface
 

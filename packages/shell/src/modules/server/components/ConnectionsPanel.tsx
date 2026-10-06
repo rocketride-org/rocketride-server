@@ -264,7 +264,7 @@ export const ConnectionsPanel: React.FC<IConnectionsPanelProps> = ({ connections
 				field: 'clientId',
 				rrType: 'string',
 				rrDefault: true,
-				rrDescription: 'Account identifier of the authenticated client (null before auth completes); the cell shows the handshake client name — falling back to this id, then the connection number — over the connection number line.',
+				rrDescription: 'Account identifier of the authenticated client (null before auth completes); the cell shows the handshake client name (falling back to this id, then the connection number) over the connection number line.',
 				headerSort: true,
 				// Two-line cell: display name over the connection-number line.
 				formatter: (cell: CellComponent) => nameCellEl(cell.getRow().getData() as ConnectionRow),

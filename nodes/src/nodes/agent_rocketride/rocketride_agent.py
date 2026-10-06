@@ -124,16 +124,15 @@ class RocketRideDriver(AgentBase):
             debug(f'rocketride wave wave_num={wave_num} run_id={run_id}')
             self.sendSSE(context, 'thinking', message=f'Planning step {wave_num + 1}...')
 
-            # Run the planner — one LLM call with all tool descriptions.
-            # Returns either {"done": true, "answer": "..."} or {"tool_calls": [...]}
-            # or {} if the LLM response was malformed.
+            # Run the planner — one LLM call with all tool descriptions, checked
+            # by normalize_plan. Returns a plan with a bool "done" and a clean
+            # "tool_calls" list, or only the problems if even a second try was unusable.
             try:
                 result = plan_wave(
                     agent_base=self,
                     context=context,
                     question=question,
                     waves=waves,
-                    instructions=self._instructions,
                     current_scratch=current_scratch,
                 )
             except Exception as exc:
@@ -181,19 +180,18 @@ class RocketRideDriver(AgentBase):
             # Done — resolve answer refs and return
             # ------------------------------------------------------------------
 
-            if result.get('done'):
-                self.sendSSE(context, 'thinking', message='Generating final answer...')
-                answer = safe_str(result.get('answer', ''))
-
-                # Resolve {{memory.ref:key:format:path}} references in the answer.
-                # The LLM may reference bulk data (large tables, arrays) via these
-                # template tags rather than embedding it inline.  resolve_answer_refs
-                # fetches each referenced key from memory, applies the JMESPath
-                # extraction and formatter, and substitutes the result into the answer
-                # string — all without the LLM ever having seen the raw data.
-                answer = resolve_answer_refs(answer, agent_base=self, context=context)
+            tool_calls = result.get('tool_calls') or []
+            if result.get('done') and not tool_calls:
                 debug(f'rocketride wave done wave_num={wave_num} run_id={run_id}')
-                return answer, trace
+                # Problems in a final reply (an unusable "remove") reach no later
+                # prompt, so the trace keeps them.
+                notes = [
+                    {'tool': 'reply-check', 'key': f'wave-{wave_num}.check{i}', 'note': f'Ignored: {problem}'}
+                    for i, problem in enumerate(result.get('problems') or [])
+                ]
+                if notes:
+                    waves.append({'wave_num': wave_num, 'calls': [], 'results': notes})
+                return self._final_answer(result, context), trace
 
             # ------------------------------------------------------------------
             # Execute tool calls
@@ -202,9 +200,17 @@ class RocketRideDriver(AgentBase):
             # Guard against a malformed response where tool_calls is missing or
             # empty but done is also not set.  This would cause an infinite loop
             # of empty iterations — stop early and let synthesis handle it.
-            tool_calls = result.get('tool_calls') or []
-            if not isinstance(tool_calls, list) or not tool_calls:
+            if not tool_calls:
                 debug(f'rocketride wave empty plan wave_num={wave_num} run_id={run_id}, stopping')
+                # Why the reply was unusable goes on record (the trace, and the fallback
+                # answer's prompt), so a dropped call does not vanish silently.
+                problems = result.get('problems') or []
+                if problems:
+                    results = [
+                        {'tool': 'reply-check', 'key': f'wave-{wave_num}.check{i}', 'error': f'Skipped: {problem}'}
+                        for i, problem in enumerate(problems)
+                    ]
+                    waves.append({'wave_num': wave_num, 'calls': [], 'results': results})
                 break
 
             # Inform the UI which tools are about to run this wave
@@ -218,8 +224,27 @@ class RocketRideDriver(AgentBase):
             # returned.  The summary is what gets injected into the next prompt
             # as context; the full result stays in memory for later peek access.
             results = execute_wave(tool_calls, agent_base=self, context=context, wave_name=f'wave-{wave_num}')
+
+            # Calls the planner had to drop from this reply are listed with the
+            # results, as errors, so the model sees what did not run and why.
+            # Problems with "remove" only tidy memory, so they are notes, not errors.
+            for i, problem in enumerate(result.get('problems') or []):
+                key = f'wave-{wave_num}.check{i}'
+                if problem.startswith('remove'):
+                    results.append({'tool': 'reply-check', 'key': key, 'note': f'Ignored: {problem}'})
+                else:
+                    results.append({'tool': 'reply-check', 'key': key, 'error': f'Skipped: {problem}'})
+
             waves.append({'wave_num': wave_num, 'calls': tool_calls, 'results': results})
             self.sendSSE(context, 'thinking', message=f'Step {wave_num + 1} complete', results=len(results))
+
+            # A reply that both asked for calls and set done=true: the calls have
+            # run, and if every one succeeded its answer stands, with no extra
+            # round. If any failed (raised, or returned a failure) or was skipped,
+            # the model sees why and goes on.
+            if result.get('done') and not any(r.get('error') or r.get('failed') for r in results):
+                debug(f'rocketride wave done after its calls wave_num={wave_num} run_id={run_id}')
+                return self._final_answer(result, context), trace
 
         # ------------------------------------------------------------------
         # Synthesis fallback — max waves reached without done=true
@@ -232,6 +257,23 @@ class RocketRideDriver(AgentBase):
         debug(f'rocketride wave max waves reached run_id={run_id}, synthesizing final answer')
         self.sendSSE(context, 'thinking', message='Synthesizing final answer...')
         return self._synthesize(question=question, waves=waves, context=context), trace
+
+    # ------------------------------------------------------------------
+    # Final answer
+    # ------------------------------------------------------------------
+
+    def _final_answer(self, result: Dict[str, Any], context: AgentContext) -> str:
+        """Return the answer of a done=true plan, with its memory refs filled in."""
+        self.sendSSE(context, 'thinking', message='Generating final answer...')
+        answer = safe_str(result.get('answer', ''))
+
+        # Resolve {{memory.ref:key:format:path}} references in the answer.
+        # The LLM may reference bulk data (large tables, arrays) via these
+        # template tags rather than embedding it inline.  resolve_answer_refs
+        # fetches each referenced key from memory, applies the JMESPath
+        # extraction and formatter, and substitutes the result into the answer
+        # string — all without the LLM ever having seen the raw data.
+        return resolve_answer_refs(answer, agent_base=self, context=context)
 
     # ------------------------------------------------------------------
     # Final synthesis (fallback when max waves exhausted)
@@ -262,6 +304,10 @@ class RocketRideDriver(AgentBase):
                 tool = r.get('tool', '?')
                 if r.get('error'):
                     lines.append(f'- {tool}: ERROR — {r["error"]}')
+                elif r.get('failed'):
+                    # The call returned, but its result says it failed: the summary's
+                    # sample may not show where, so the fallback must not read it as success.
+                    lines.append(f'- {tool}: FAILED (the result reports a failure) — {r.get("summary", "")}')
                 else:
                     lines.append(f'- {tool}: {r.get("summary", "")}')
 

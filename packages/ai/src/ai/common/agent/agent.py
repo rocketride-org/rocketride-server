@@ -159,7 +159,6 @@ class AgentBase(ABC):
             except Exception:
                 return safe_str(value)
 
-        task_id = None
         # Bound before the try so the guard/error handlers can read them even if
         # a failure occurs before the context is built or `_run` returns.
         context = None
@@ -174,15 +173,11 @@ class AgentBase(ABC):
                 for inst in self._instructions:
                     question.addInstruction('Additional Instruction', inst.strip())
 
-                # Get the jobs taskId — kept as a local variable inside the
-                # try/except so a missing/inaccessible jobConfig produces a
-                # graceful error answer instead of an unhandled AttributeError.
-                # Not on AgentContext: task_id is the same for every IInstance
-                # of a pipeline, so it serves no purpose as run scaffolding.
-                try:
-                    task_id = iInstance.IEndpoint.endpoint.jobConfig.get('taskId')
-                except Exception:
-                    task_id = None
+                # The task's id is deliberately not read here. It is the task's
+                # private control token (tk_...): whoever holds it can stop the
+                # task or send it data. This payload is what a parent agent hands
+                # to its model when this agent runs as its tool, so it must never
+                # carry the token.
 
                 # Build the per-call context inline.  Channels come from the
                 # cached host; metadata is stamped fresh per call.
@@ -232,8 +227,11 @@ class AgentBase(ABC):
                     },
                     'stack': [],
                 }
-                if task_id:
-                    answer_payload['meta']['task_id'] = task_id
+                # Why the run stopped (e.g. done, max_waves), when the driver's trace
+                # says: a parent agent can then tell a forced answer from a finished one.
+                stop_reason = raw.get('stop_reason') if isinstance(raw, dict) else None
+                if isinstance(stop_reason, str) and stop_reason:
+                    answer_payload['meta']['stop_reason'] = stop_reason
 
                 stack: List[Dict[str, Any]] = []
                 stack.append(
@@ -260,7 +258,9 @@ class AgentBase(ABC):
                         'started_at': started_at,
                         'ended_at': ended_at,
                         'tool_calls': 0,
-                        **({'task_id': task_id} if task_id else {}),
+                        # The run's own reason (often "done") does not stand: its answer
+                        # was refused. The stack's guard entry says why.
+                        'stop_reason': 'error',
                     },
                     'stack': [
                         {
@@ -288,7 +288,7 @@ class AgentBase(ABC):
                         'started_at': started_at,
                         'ended_at': ended_at,
                         'tool_calls': len(context.invoked_tools) if context is not None else 0,
-                        **({'task_id': task_id} if task_id else {}),
+                        'stop_reason': 'error',
                     },
                     'stack': [],
                 }

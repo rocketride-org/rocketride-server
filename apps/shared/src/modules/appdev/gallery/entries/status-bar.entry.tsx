@@ -39,7 +39,7 @@ export const statusBarEntry: IGalleryEntry = {
 	name: 'StatusBar',
 	group: 'chrome',
 	blurb: 'The bottom bar with the GLOBAL connection status: app name on the left, connection dot + label when authenticated, Ready / Offline on the right.',
-	doc: `There is ONE connection state for the whole shell — never per-app or per-tab — and the StatusBar is its single visual home. An app REACTS to the same global state via \`useShellConnection()\` (e.g. disabling actions while offline) instead of inventing a second status UI.
+	doc: `There is ONE connection state for the whole shell, never per-app or per-tab, and the StatusBar is its single visual home. An app REACTS to the same global state via \`useShellConnection()\` (e.g. disabling actions while offline) instead of inventing a second status UI.
 
 In VS Code the equivalent is a native status-bar contribution outside the webview.`,
 	docNote: 'Never mount the StatusBar and never build a per-app status strip. Per-item state belongs in the view as a StatusBadge; view-level messages are a Banner.',

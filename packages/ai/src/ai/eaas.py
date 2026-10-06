@@ -36,10 +36,13 @@ if _sys.path and (_sys.path[0].endswith('ai') or _sys.path[0].endswith('ai\\') o
 
 import argparse
 import asyncio
+import os
+import tempfile
 from typing import Any, Dict
 
 from rocketlib import warning
 
+from ai.constants import CONST_TASK_DATA_PATH
 from ai.proc_privacy import make_process_private, should_make_private
 from ai.web import WebServer
 
@@ -55,6 +58,27 @@ def _make_engine_private() -> None:
         make_process_private()
     except Exception as e:
         warning(f'could not make the engine process private: {e}')
+
+
+def _require_writable_task_data(path: str = CONST_TASK_DATA_PATH) -> None:
+    """Refuse to serve when tasks could not write their data.
+
+    In the self-hosted image this is the /opt/data volume. One created by an older
+    image belongs to that image's user (uid 999), not uid 1000: the server would look
+    healthy and every pipeline would fail with Permission denied.
+    """
+    try:
+        os.makedirs(path, exist_ok=True)
+        # A real write: os.access does not see read-only mounts
+        with tempfile.NamedTemporaryFile(dir=path):
+            pass
+    except OSError as e:
+        uid, gid = os.getuid(), os.getgid()
+        raise SystemExit(
+            f'{path} is not writable by uid {uid}: {e}\n'
+            f'A volume created by an older image is owned by its old user. Fix it once with:\n'
+            f'  docker run --rm -v <volume>:{path} alpine chown -R {uid}:{gid} {path}'
+        )
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -157,6 +181,8 @@ async def run(config: Dict[str, Any] = None) -> None:
         print(f'  Model Server: {config["modelserver"]}')
     if config.get('verbose'):
         print('  Verbose logging: enabled')
+
+    _require_writable_task_data()
 
     # Create the server
     server = WebServer(config=config, standardEndpoints=False)

@@ -61,6 +61,7 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      container: ${{ steps.filter.outputs.container }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
@@ -76,6 +77,18 @@ jobs:
               - 'builder.cmd'
               - '.github/workflows/**'
               - 'package.json'
+              - 'docker/**'
+            # What the node image is made of beyond the engine itself
+            container:
+              - 'docker/**'
+              - 'nodes/scripts/tasks.js'
+              - 'nodes/**/requirement*.txt'
+              - 'nodes/**/overrides.txt'
+              - 'packages/ai/**/requirement*.txt'
+              - 'packages/ai/**/overrides.txt'
+              - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
+              - 'packages/server/scripts/tasks.js'
+              - '.github/workflows/_build.yaml'
 
   # ---------------------------------------------------------------------------
   #  Helm lint + schema validation (only on PRs touching deploy/helm/**)
@@ -147,6 +160,7 @@ jobs:
                 || contains(fromJSON('["develop", "stage", "main"]'), github.event.pull_request.base.ref)
                 || startsWith(github.event.pull_request.base.ref, 'release/')
                 || contains(github.event.pull_request.labels.*.name, 'ci:test') }}
+      container_test: ${{ github.event_name != 'pull_request' || needs.changes.outputs.container == 'true' }}
     secrets: inherit
 
   # ---------------------------------------------------------------------------
@@ -195,7 +209,9 @@ jobs:
       fail-fast: false
       matrix:
         dockerfile:
+          - Dockerfile.engine-base
           - Dockerfile.engine
+          - Dockerfile.node
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

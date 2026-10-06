@@ -16,11 +16,15 @@ the version gaps. This package is that translation, as a **pure transform**
    not regex. Extracts RETURN projection, write clauses, `$params`,
    variable-length depth bounds, invoked functions.
 2. **Firewall** ([firewall.py](firewall.py)) — resource caps on **both**
-   paths (query length, variable-length depth, statement timeout); semantic
+   paths (query length, variable-length depth, statement timeout, size of the
+   bound `$parameter` JSON — values bound as params skip the parser and the
+   query-length cap; a prepared statement survives ROLLBACK, so the caller
+   frees it inside the transaction when EXECUTE fails, see
+   `TranslatedQuery.prepared_name`); semantic
    read-only rules (no writes, no CALL) on the **safe** path only.
 3. **Dialect** ([capabilities.py](capabilities.py)) — capability table keyed
-   by AGE version: `SUPPORTED` / `EMULATE` (rewrite hook; framework only in
-   v1) / `REJECT` (fail loud pre-flight) / `TBD` (unverified: passes through,
+   by AGE version: `SUPPORTED` / `EMULATE` (same-meaning rewrite, re-analyzed
+   before emit) / `REJECT` (fail loud pre-flight) / `TBD` (unverified: passes through,
    AGE's own error surfaces via EXPLAIN/execute). Verify TBD cells against
    the live instance and promote them.
 4. **Emit** ([emit.py](emit.py)) — `cypher()` envelope with a
@@ -58,6 +62,33 @@ Probed against a container on the live pin (PG 16.14 + AGE 1.5.0 + pgvector
   execute CREATE TABLE in a read-only transaction").
 - `datetime()` does not exist on 1.5.0 (`ag_catalog.age_datetime` missing)
   → capability REJECT.
+- `SET` / `REMOVE` / `DELETE` reach only the **first** entity a `MERGE`
+  creates in a statement; changes to every other entity a MERGE creates are
+  **not stored** while `RETURN` shows them: the 2nd and later rows of an
+  `UNWIND` or multi-row `MATCH`, the entity of a second MERGE, the far node and
+  the edge of a path MERGE (an edge a MERGE creates never keeps a SET), and
+  repeated SETs on a created node. Entities a MERGE *matched*, variables bound
+  before the first MERGE, and properties inside the MERGE pattern are stored.
+  → capability REJECT (`merge_write`): after the first MERGE, a write may only
+  target a variable bound before it, or the node of a single-node MERGE that
+  opens the query while no `MATCH`/`UNWIND`/`CALL` has multiplied rows (one
+  row, so it is the first entity created). The bulk-upsert form is MERGE, then
+  a separate `UNWIND $rows ... MATCH ... SET` call.
+- MERGE matches on every property in its pattern: with an edge `{prop: 1}`
+  already present, `MERGE (a)-[:REL {prop: 2}]->(b)` creates a second edge. So
+  the rejection message points to a separate `SET` call first.
+- An empty-list `x IN []` (also `[ /*c*/ ]`, `([])`) matches every row; under
+  `NOT`, `AND` or in `RETURN` it fails with `cache lookup failed for type 0`.
+  An empty list passed as a `$parameter` evaluates correctly → capability
+  EMULATE (`empty_list_in`), rewritten to `false`; the query keeps its
+  `$parameter` names, so a removed `$who IN []` does not break the params check.
+- `UNWIND $rows AS r MERGE (:L {id: r.id})` creates one node per row even
+  when rows repeat a key (MERGE does not see nodes created earlier in the
+  same statement): de-duplicate the list before binding it.
+
+Both gaps above have canary tests in `nodes/test/test_rocketride_graph_full.py`
+that run the shape on AGE directly: when a canary fails after an AGE upgrade,
+the gap is fixed upstream and its capability cell can go.
 
 ## Vendored code
 
@@ -95,6 +126,5 @@ antlr4 -v 4.13.2 -Dlanguage=Python3 -visitor -o _agtype/gen _agtype/Agtype.g4
   (`syntax error at or near ...`) while plain `MERGE` on the same graph
   succeeds, so all four are promoted to `REJECT` with actionable messages.
   No `TBD` cells remain in the 1.5.0 table.
-- `EMULATE` rewrites (framework hook exists, no emulations implemented).
 - Capability routing to FalkorDB/Neo4j for AGE-can't-do workloads (own
   effort, per the design).

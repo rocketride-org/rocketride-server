@@ -19,6 +19,13 @@ cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 get_filename_component(ROCKETRIDE_PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(ROCKETRIDE_PACKAGES_DIR "${ROCKETRIDE_PROJECT_ROOT}/packages")
 
+if(ROCKETRIDE_OVERLAY_ROOT)
+    get_filename_component(ROCKETRIDE_OVERLAY_ROOT "${ROCKETRIDE_OVERLAY_ROOT}" ABSOLUTE)
+    set(ROCKETRIDE_DIST_DIR "${ROCKETRIDE_OVERLAY_ROOT}/dist/server")
+else()
+    set(ROCKETRIDE_DIST_DIR "${ROCKETRIDE_PROJECT_ROOT}/dist/server")
+endif()
+
 # -----------------------------------------------------------------------------
 # IDE target grouping
 # -----------------------------------------------------------------------------
@@ -35,6 +42,8 @@ message(STATUS "      version   : ${CMAKE_VERSION}")
 message(STATUS "      generator : ${CMAKE_GENERATOR}")
 message(STATUS "      compiler  : ${CMAKE_CXX_COMPILER}")
 message(STATUS "Project root    : ${ROCKETRIDE_PROJECT_ROOT}")
+message(STATUS "Overlay root    : ${ROCKETRIDE_OVERLAY_ROOT}")
+message(STATUS "Dist dir        : ${ROCKETRIDE_DIST_DIR}")
 
 # -----------------------------------------------------------------------------
 # Build time measurement (optional)
@@ -168,11 +177,27 @@ add_subdirectory(engine-mod)
 add_subdirectory(engine)
 
 # C++ nodes
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/hash ${CMAKE_BINARY_DIR}/nodes/hash)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/parse ${CMAKE_BINARY_DIR}/nodes/parse)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/indexer ${CMAKE_BINARY_DIR}/nodes/indexer)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/objstore ${CMAKE_BINARY_DIR}/nodes/objstore)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/azure ${CMAKE_BINARY_DIR}/nodes/azure)
+set(nodeNamesSeen "")
+
+foreach(nodesRoot ${ROCKETRIDE_OVERLAY_ROOT} ${ROCKETRIDE_PROJECT_ROOT})
+    file(GLOB nodeDirs LIST_DIRECTORIES true "${nodesRoot}/nodes/src/nodes/*")
+
+    foreach(nodeDir ${nodeDirs})
+        if(NOT IS_DIRECTORY ${nodeDir})
+            continue()
+        endif()
+
+        get_filename_component(nodeName ${nodeDir} NAME)
+
+        if(NOT nodeName IN_LIST nodeNamesSeen)
+            list(APPEND nodeNamesSeen ${nodeName})
+
+            if(EXISTS ${nodeDir}/CMakeLists.txt)
+                add_subdirectory(${nodeDir} ${CMAKE_BINARY_DIR}/nodes/${nodeName})
+            endif()
+        endif()
+    endforeach()
+endforeach()
 
 # -----------------------------------------------------------------------------
 # Testing configuration

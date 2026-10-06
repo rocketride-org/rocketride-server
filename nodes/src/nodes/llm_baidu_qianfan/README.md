@@ -89,7 +89,7 @@ see [Why some providers need their own key](https://github.com/rocketride-org/ro
 | `baidu_qianfan.profile` | `string` | **Model**<br/>Baidu Qianfan model selection | `"ernie-4-5-turbo-128k"` |
 | `baidu_qianfan.serverbase` | `string` | **Base URL**<br/>Qianfan OpenAI-compatible API endpoint. | `"https://qianfan.baidubce.com/v2"` |
 | `model` | `string` | **Model**<br/>Baidu Qianfan model name |  |
-| `modelOutputTokens` | `number` | **Output Tokens**<br/>Maximum generated tokens |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Maximum generated tokens |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Maximum context length in tokens |  |
 
 ## Dependencies

@@ -107,3 +107,83 @@ def test_responses_no_text_falls_back_to_invoke():
     chat._raw_client = _RawClient()
     result = chat._chat_string_responses('q', on_chunk=lambda t: None, emitted={'any': False})
     assert result == 'fallback answer'
+
+
+def _out_of_budget_chat():
+    """A chat whose Responses stream ends at max_output_tokens with no text, and whose fallback answers."""
+
+    class _Details:
+        reason = 'max_output_tokens'
+
+    class _Response:
+        status = 'incomplete'
+        incomplete_details = _Details()
+        usage = None
+
+    class _IncompleteEvent:
+        type = 'response.incomplete'
+        response = _Response()
+
+    class _Responses:
+        def create(self, **kwargs):
+            return iter([_IncompleteEvent()])
+
+    class _RawClient:
+        responses = _Responses()
+
+    llm = _FakeLLM([_Piece('fallback answer')])
+    chat = _Chat(llm)
+    chat._raw_client = _RawClient()
+    return chat, llm
+
+
+def test_responses_out_of_budget_json_call_does_not_pay_for_a_second_call():
+    """For a JSON call, a reply cut off by max_output_tokens before any text gets no non-streaming retry.
+
+    The fallback exists for a failed stream. Here the stream worked and the model ran out of
+    budget; resending the same request with the same budget gets the same nothing, so
+    ChatBase.chat gets '' and names the cause.
+    """
+    from ai.common.chat import _EXPECT_JSON_VAR
+
+    chat, llm = _out_of_budget_chat()
+    finishes = []
+    token = _EXPECT_JSON_VAR.set(True)
+    try:
+        result = chat._chat_string_responses('q', on_finish=finishes.append, emitted={'any': False})
+    finally:
+        _EXPECT_JSON_VAR.reset(token)
+
+    assert result == ''
+    assert llm.kwargs is None, 'the fallback invoke ran'
+    assert finishes == ['max_output_tokens']
+
+
+def test_responses_out_of_budget_plain_call_keeps_the_fallback():
+    """A plain-text call is unchanged: it still gets the fallback's answer."""
+    chat, _ = _out_of_budget_chat()
+
+    assert chat._chat_string_responses('q', emitted={'any': False}) == 'fallback answer'
+
+
+def test_chat_marks_only_json_calls():
+    """chat() publishes expectJson to the model path for exactly the duration of its calls."""
+    from ai.common.chat import _EXPECT_JSON_VAR
+    from ai.common.schema import Question
+
+    seen = []
+
+    class _Recording(_Chat):
+        def chat_string(self, prompt, **kwargs):
+            seen.append(_EXPECT_JSON_VAR.get())
+            return '{"a": 1}'
+
+    json_q, text_q = Question(expectJson=True), Question()
+    json_q.addQuestion('x')
+    text_q.addQuestion('x')
+    chat = _Recording(_FakeLLM([_Piece('')]))
+    chat.chat(json_q)
+    chat.chat(text_q)
+
+    assert seen == [True, False]
+    assert _EXPECT_JSON_VAR.get() is False
