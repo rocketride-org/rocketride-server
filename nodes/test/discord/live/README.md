@@ -9,20 +9,38 @@ is off unless `DISCORD_LIVE=1` is set; a normal run collects and skips them.
 
 | Layer | File | What is real | What is stubbed |
 |---|---|---|---|
-| L1 live I/O | `test_live_io.py` (D01..D15) | Discord, the node | engine and pipeline |
+| L1 live I/O | `test_live_io.py` (D01..D19) | Discord, the node | engine and pipeline |
 | L2 replay | `test_replay.py` (R01..R10) | Discord, the node | engine and pipeline |
 | L3 engine e2e | `test_engine_e2e.py` (E01..E06) | Discord, the node, the engine, a real model | nothing |
 | L4 full engine suite | `test_engine_full.py` | Discord, the node, the engine | the model (`fake_llm.py`) or none (`echo` pipe) |
 
 - **L1** drives `_on_message` (gating) and `_process_message` directly on a real
   bot connection: reply modes, mention and channel gating, outbound mentions,
-  attachments, metadata, chunking, events, typing, fatal startup paths.
+  attachments, metadata, chunking, events, typing, fatal startup paths, and the
+  support behaviours: thread history as context (D16), the escalation pause
+  (D17), acknowledging a message aimed at someone else (D18) and feedback
+  reactions (D19).
 - **L2** posts the ten made-up questions in `replay_seeds.md` and checks the
   plumbing: one correlated text object in, one reply out.
 - **L3** has a real engine spawn the node from `engine_min.pipe`; a second bot
   (the driver) posts questions and reads back what the node posted.
-- **L4** walks every base feature, success and failure, through real pipelines
-  on the engine, driven by the same driver bot.
+- **L4** walks every feature, success and failure, through real pipelines on
+  the engine, driven by the same driver bot. The support behaviour cases are:
+
+  | Case | Feature |
+  |---|---|
+  | F14 | `teamMentionAlias` rewritten to the first allowlisted role |
+  | F20 | `threadHistoryLimit` / `threadHistoryMaxChars` |
+  | F21, F22 | `escalationPause`: pause, team reply on `no_reply`, resume on mention, pause rebuilt after a restart |
+  | F23, F23b | `ignoreAimedAtOthers` / `ackEmoji`; a reply to the bot is still answered |
+  | F24 | `feedbackReactions` with `emitReactions` |
+  | F25 | `sanitizeReplies`: envelope, scratchpad, error text, empty answer |
+  | F26 | `nonAnswerRetries` |
+  | F35 | `backfillLimit` with an unreadable channel |
+  | F40 | the model endpoint rejecting every call |
+  | F41b | `pipelineTimeoutSeconds` |
+  | F45 | engine restarted mid-thread (needs `DISCORD_E2E_ENGINE_DIR`) |
+  | F46 | one realistic AI run on a saved pipe (needs `DISCORD_E2E_AI_PIPE`) |
 
 ## How to run
 
@@ -63,6 +81,8 @@ path, id or token is stored in the repo.
 | `DISCORD_E2E_<KEY>` | L3, L4 | overrides one key of the id map's `engine` block, e.g. `DISCORD_E2E_SUPPORTCHANNELID` |
 | `DISCORD_E2E_FULL` | L4 | `1` to run the full suite |
 | `DISCORD_E2E_ENGINE_LOG` | L4, optional | engine log file, grepped for evidence |
+| `DISCORD_E2E_ENGINE_DIR` | L4, optional | engine install directory; F45 kills and restarts the engine from it |
+| `DISCORD_E2E_AI_PIPE` | L4, optional | a saved AI pipe with a discord source, for F46; Slack tool and database components are removed before it runs |
 | `DISCORD_E2E_RESULTS_DIR` | L4, optional | where result rows are written (default: system temp directory) |
 | `DISCORD_LIVE_RESULTS_DIR` | L2, optional | where replay verdicts are written (default: system temp directory) |
 
@@ -114,6 +134,4 @@ resolves `${ROCKETRIDE_DISCORD_*}` in the pipes from its own environment.
 - Grading answer content: L2 checks plumbing only, and L3 checks a few fixed
   expectations of a real model.
 - E06 (an event branch landing in a vector store) is a placeholder that skips.
-- The behaviours that ship in follow-up changes (thread history, escalation
-  pause, reply sanitizing, retries, timeouts, backfill, event capture) are not
-  exercised here.
+- Event capture ships in a follow-up change and is not exercised here.
