@@ -62,6 +62,7 @@ def _make_discord_stub():
     discord.Attachment = type('Attachment', (), {})
     discord.Thread = type('Thread', (), {})
     discord.TextChannel = type('TextChannel', (), {})
+    discord.MessageType = types.SimpleNamespace(default=0, thread_starter_message=21)
 
     class _Object:
         def __init__(self, *, id):
@@ -1001,6 +1002,60 @@ class TestThreadHistoryContext:
         asyncio.run(endpoint._process_message(_thread_message(endpoint, _Broken(321), content='still asked')))
 
         assert endpoint._run_text_pipeline.call_args.args[0] == 'still asked'
+
+    @staticmethod
+    def _starter(*, resolved=None, cached=None):
+        """Discord's first message in a thread made from a message: no text, a reference."""
+        starter = _FakeHistoryMessage(500, '', 999)
+        starter.type = discord.MessageType.thread_starter_message
+        starter.reference = types.SimpleNamespace(message_id=321, resolved=resolved, cached_message=cached)
+        return starter
+
+    def test_thread_mode_carries_the_original_question(self):
+        """Review of #2547: in thread mode the question lives in the parent channel.
+
+        The thread opens with a ``thread_starter_message`` that has no text, so
+        the model saw its own answer and the follow-up but never the question.
+        """
+        endpoint = self._endpoint(_thread_history_limit=10)
+        question = _FakeHistoryMessage(321, 'Q1: how do I install it?', 7, author_name='ada')
+        thread = _FakeThread(
+            321,
+            [
+                _FakeHistoryMessage(501, 'Run the installer.', 999),
+                self._starter(resolved=question),
+            ],
+        )
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='what about Windows?')))
+
+        transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
+        assert transcript == 'ada: Q1: how do I install it?\nSupport Bot: Run the installer.'
+
+    def test_the_starter_falls_back_to_the_cache_and_then_the_parent_channel(self):
+        endpoint = self._endpoint(_thread_history_limit=10)
+        question = _FakeHistoryMessage(321, 'Q1 from the cache', 7, author_name='ada')
+        thread = _FakeThread(321, [self._starter(cached=question)])
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+        assert endpoint._run_text_pipeline.call_args.args[0].endswith('ada: Q1 from the cache')
+
+        endpoint = self._endpoint(_thread_history_limit=10)
+        thread = _FakeThread(321, [self._starter()])
+        fetched = _FakeHistoryMessage(321, 'Q1 fetched', 7, author_name='ada')
+        thread.parent = types.SimpleNamespace(fetch_message=mock.AsyncMock(return_value=fetched))
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread)))
+        thread.parent.fetch_message.assert_awaited_once_with(321)
+        assert endpoint._run_text_pipeline.call_args.args[0].endswith('ada: Q1 fetched')
+
+    def test_an_unreadable_starter_is_skipped(self):
+        endpoint = self._endpoint(_thread_history_limit=10)
+        thread = _FakeThread(321, [_FakeHistoryMessage(501, 'Run the installer.', 999), self._starter()])
+        thread.parent = types.SimpleNamespace(fetch_message=mock.AsyncMock(side_effect=RuntimeError('404')))
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='and Windows?')))
+
+        transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
+        assert transcript == 'Support Bot: Run the installer.'
 
     def test_sse_payload_keeps_the_original_text_and_reports_context_size(self):
         module = sys.modules['_discord_node.IEndpoint']

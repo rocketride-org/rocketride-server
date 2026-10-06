@@ -1512,11 +1512,19 @@ class IEndpoint(IEndpointBase):
             debug(f'Discord: thread history fetch failed: {e}')
             return ''
 
+        starter_type = getattr(getattr(discord, 'MessageType', None), 'thread_starter_message', None)
         entries = []
         for item in reversed(history):  # Discord returns newest first
             # ``before`` already excludes it; kept as a harmless guard.
             if getattr(item, 'id', None) == message.id:
                 continue
+            if starter_type is not None and getattr(item, 'type', None) == starter_type:
+                # A thread made from a message (``thread`` reply mode) opens
+                # with an empty starter that only references that message, so
+                # the question itself lives in the parent channel.
+                item = await self._thread_starter(item, message.channel)
+                if item is None:
+                    continue
             is_system = getattr(item, 'is_system', None)
             if callable(is_system) and is_system():
                 continue
@@ -1530,6 +1538,32 @@ class IEndpoint(IEndpointBase):
                 name = getattr(author, 'name', None) or 'user'
             entries.append((str(name), str(content)))
         return format_thread_transcript(entries, getattr(self, '_thread_history_max_chars', 6000))
+
+    @staticmethod
+    async def _thread_starter(starter: Any, thread: Any) -> Any:
+        """The parent-channel message a thread's starter message stands for.
+
+        Tried in the order discord.py offers it: the referenced message sent
+        along by the Gateway, discord.py's cache, then a fetch from the parent
+        channel (a thread made from a message shares that message's id).
+
+        Args:
+            starter (Any): The ``thread_starter_message`` item.
+            thread (Any): The thread it opens.
+
+        Returns:
+            Any: The original message, or None when it cannot be read (it is
+                then left out of the transcript).
+        """
+        reference = getattr(starter, 'reference', None)
+        for candidate in (getattr(reference, 'resolved', None), getattr(reference, 'cached_message', None)):
+            if candidate is not None and getattr(candidate, 'author', None) is not None:
+                return candidate
+        try:
+            return await thread.parent.fetch_message(thread.id)
+        except Exception as e:
+            debug(f'Discord: could not read the message thread {getattr(thread, "id", "?")} was started from: {e}')
+            return None
 
     @staticmethod
     async def _replied_to_message(message: discord.Message) -> Any:
