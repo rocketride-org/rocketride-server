@@ -1656,6 +1656,33 @@ class TestErrorReplies:
         assert endpoint._send_response.await_count == 0
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
 
+    # A provider error the agent wrapped as its final answer.
+    WRAPPED = (
+        'Thought: done\nFinal Answer: Error code: 401 - key sk-1',
+        '{"type":"final","content":"Error code: 401 - key sk-1"}',
+    )
+
+    @pytest.mark.parametrize('sanitize', [True, False])
+    @pytest.mark.parametrize('answer', WRAPPED)
+    def test_a_wrapped_error_is_never_posted(self, answer, sanitize):
+        """The error check ran only on the raw reply, before the wrapper was taken off."""
+        endpoint = self._endpoint([answer], sanitize=sanitize, retries=0)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
+
+    @pytest.mark.parametrize('answer', WRAPPED)
+    def test_a_wrapped_error_from_a_retry_is_never_posted(self, answer):
+        endpoint = self._endpoint(['Thought: still thinking', answer, 'never asked'], retries=2)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 2
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
+
     def test_with_sanitizing_off_scratchpad_is_still_posted_as_is(self):
         endpoint = self._endpoint(['Thought: leaked'], sanitize=False, retries=0)
 

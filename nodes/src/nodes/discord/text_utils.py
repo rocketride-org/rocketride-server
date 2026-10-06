@@ -733,6 +733,10 @@ def looks_like_error(text: str) -> bool:
     and a provider status such as ``Error code: 429``. The caller suppresses
     these instead of relaying them to Discord.
 
+    Both the reply and the final text an agent wrapped in it (the last
+    ``Final Answer:``, or a ``{"type": "final"}`` envelope) are checked, so a
+    wrapped error is caught however the reply is posted.
+
     Args:
         text (str): The candidate reply.
 
@@ -741,8 +745,15 @@ def looks_like_error(text: str) -> bool:
     """
     if not text:
         return False
-    text = _CODE_FENCE.sub(_CODE_PLACEHOLDER, text)
-    return any(pattern.search(text) for pattern in _ERROR_SIGNATURES)
+    candidates = [text]
+    final, _found = _extract_final(text)
+    if final and final != text:
+        candidates.append(final)
+    for candidate in candidates:
+        candidate = _CODE_FENCE.sub(_CODE_PLACEHOLDER, candidate)
+        if any(pattern.search(candidate) for pattern in _ERROR_SIGNATURES):
+            return True
+    return False
 
 
 def _outside_code_fences(text: str, matches) -> list:
@@ -839,6 +850,51 @@ def _handoff_marker(scratchpad: str, markers: Sequence[str], alias: str) -> Opti
     return None
 
 
+def _extract_final(text: str) -> Tuple[str, bool]:
+    """The final text an agent wrapped its answer in, else the reply itself.
+
+    Unwraps a ``{"type": "final", "content": "..."}`` envelope (when it is the
+    whole reply, or the end of a reply that opens as scratchpad), then keeps
+    only what follows the LAST ``Final Answer:`` outside code (when non-empty).
+
+    Args:
+        text (str): The raw pipeline answer.
+
+    Returns:
+        Tuple[str, bool]: The stripped text, and whether an envelope or a
+            non-empty ``Final Answer:`` supplied it.
+    """
+    result = (text or '').strip()
+    if not result:
+        return result, False
+    found = False
+
+    envelope = _FINAL_JSON.search(result)
+    if envelope and (
+        envelope.end() != len(result) or (envelope.start() != 0 and not _OPENS_WITH_REASONING.match(result))
+    ):
+        envelope = None
+    if envelope:
+        captured = envelope.group(1)
+        try:
+            result = json.loads(f'"{captured}"')
+        except ValueError:
+            # An envelope we cannot decode still told us where the answer is.
+            result = captured
+        result = result.strip()
+        found = True
+        if not result:
+            return result, found
+
+    marks = _outside_code_fences(result, _FINAL_ANSWER.finditer(result))
+    if marks:
+        after = result[marks[-1].end() :].strip()
+        if after:
+            result = after
+            found = True
+    return result, found
+
+
 def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
     """Strip leaked agent scratchpad from a reply before it is posted.
 
@@ -862,31 +918,9 @@ def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
     Returns:
         str: The reply to post, or '' when there is no real answer.
     """
-    result = (text or '').strip()
+    result, _found = _extract_final(text)
     if not result:
         return result
-
-    envelope = _FINAL_JSON.search(result)
-    if envelope and (
-        envelope.end() != len(result) or (envelope.start() != 0 and not _OPENS_WITH_REASONING.match(result))
-    ):
-        envelope = None
-    if envelope:
-        captured = envelope.group(1)
-        try:
-            result = json.loads(f'"{captured}"')
-        except ValueError:
-            # An envelope we cannot decode still told us where the answer is.
-            result = captured
-        result = result.strip()
-        if not result:
-            return result
-
-    marks = _outside_code_fences(result, _FINAL_ANSWER.finditer(result))
-    if marks:
-        after = result[marks[-1].end() :].strip()
-        if after:
-            result = after
 
     if _OPENS_WITH_REASONING.match(result):
         marker = _handoff_marker(result, markers, alias)

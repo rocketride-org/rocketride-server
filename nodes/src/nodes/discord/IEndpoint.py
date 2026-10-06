@@ -2178,12 +2178,14 @@ class IEndpoint(IEndpointBase):
                 ),
             )
             answer = self._answer_text(answer)
-            if answer and looks_like_error(answer):
+            reply = sanitize_reply(answer, markers, self._handoff_alias()) if answer else ''
+            # The raw answer and what sanitizing left of it: either may be the
+            # error once the agent's wrapper is gone.
+            if (answer and looks_like_error(answer)) or (reply and looks_like_error(reply)):
                 debug(f'Discord: retry {attempt} for {message.id} returned an error, not an answer')
                 if errors is not None:
                     errors.append('model_error')
                 return ''
-            reply = sanitize_reply(answer, markers, self._handoff_alias()) if answer else ''
             if reply:
                 return reply
         return ''

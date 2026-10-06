@@ -704,6 +704,14 @@ class TestLooksLikeError:
         # Three digits is the API shape; a version or a count is not.
         assert looks_like_error('error code: 42 in the docs') is False
 
+    def test_an_error_wrapped_as_the_final_answer_is_an_error(self):
+        for text in (
+            'Thought: done\nFinal Answer: Error code: 401 - key sk-1',
+            '{"type":"final","content":"Error code: 401 - key sk-1"}',
+            'Thought: done\n{"type": "final", "content": "**LLM error** — X: y"}',
+        ):
+            assert looks_like_error(text) is True, text
+
     def test_a_normal_answer_is_not_an_error(self):
         for text in (
             '',
