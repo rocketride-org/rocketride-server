@@ -168,11 +168,11 @@ Binary attachments are never broadcast, only their MIME type and size. Every eve
 | `discord.allowedMentionRoleIds` | `array` | **Allowed Mention Role IDs**<br/>Role IDs that outbound pipeline responses may mention. | `[]` |
 | `discord.allowedMentionUserIds` | `array` | **Allowed Mention User IDs**<br/>User IDs that outbound pipeline responses may mention. | `[]` |
 | `discord.botToken` | `string` | **Bot Token**<br/>Discord bot token from the Developer Portal (keep this secret - do not share) |  |
-| `discord.channelIds` | `array` | **Channel IDs**<br/>List of channel IDs to listen to. Leave empty to listen to all channels. |  |
-| `discord.emitNoReply` | `boolean` | **Emit No Reply Events**<br/>Emit an event when processing produces no answer or raises an error. | `false` |
+| `discord.channelIds` | `array` | **Channel IDs**<br/>List of channel IDs to listen to. Leave empty to listen to all channels. | `[]` |
+| `discord.emitNoReply` | `boolean` | **Emit No Reply Events**<br/>Emit an event when processing produces no answer or raises an error. The reason is no_answer, send_failed or shutdown; any other value is an error message clipped to 200 characters. | `false` |
 | `discord.emitOutbound` | `boolean` | **Emit Outbound Events**<br/>Emit an event after posting a pipeline response to Discord. | `false` |
 | `discord.emitReactions` | `boolean` | **Emit Reactions**<br/>Emit raw reaction add and remove events into the pipeline. | `false` |
-| `discord.guildIds` | `array` | **Server IDs (Guild IDs)**<br/>List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in. |  |
+| `discord.guildIds` | `array` | **Server IDs (Guild IDs)**<br/>List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in. | `[]` |
 | `discord.ignoreBots` | `boolean` | **Ignore Bot Messages**<br/>If true (default), messages from other bots are ignored to prevent loops. | `true` |
 | `discord.includeMemberMetadata` | `boolean` | **Include Member Metadata**<br/>Include display names and role IDs; requires the Discord members intent. | `false` |
 | `discord.maxAttachmentBytes` | `number` | **Max Attachment Size (bytes)**<br/>Maximum size of attachments to download. Larger files are skipped. Default 25 MB, at most 100 MB. | `26214400` |
@@ -184,7 +184,7 @@ Binary attachments are never broadcast, only their MIME type and size. Every eve
 | `discord.requireMentionChannelIds` | `array` | **Require Mention Channel IDs**<br/>Channels (or thread parent channels) where a direct bot mention is always required. | `[]` |
 | `discord.sendResponses` | `boolean` | **Send Responses**<br/>If true, the bot sends pipeline answers back to Discord. If false, only processes messages. | `true` |
 | `discord.showTyping` | `boolean` | **Show Typing Indicator**<br/>If true, show a typing indicator while processing the pipeline. | `true` |
-| `discord.textAttachmentExtensions` | `array` | **Text Attachment Extensions**<br/>Filename extensions decoded as UTF-8 and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object. | `[]` |
+| `discord.textAttachmentExtensions` | `array` | **Text Attachment Extensions**<br/>Filename extensions decoded as text (UTF-8, or UTF-16 when the file starts with a UTF-16 byte order mark) and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object. | `[]` |
 | `discord.textAttachmentMaxChars` | `number` | **Text Attachment Max Characters**<br/>Maximum decoded characters folded into the text lane per attachment. 0 means no limit. | `12000` |
 | `discord.threadAutoArchiveMinutes` | `number` | **Thread Auto Archive Minutes**<br/>Discord auto-archive duration, in minutes, for response threads the node creates. Discord accepts only 60, 1440, 4320 or 10080; 0 (the default) uses the channel's own default. | `0` |
 | `discord.threadName` | `string` | **Thread Name**<br/>Name template for response threads. {content} is replaced with the triggering message text. | `"Pipeline Response"` |
