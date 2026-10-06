@@ -77,6 +77,18 @@ except ImportError:
 from .transport import TransportBase
 
 
+def _headers_keyword() -> str:
+    """
+    Return the websockets.connect keyword that carries extra handshake headers.
+
+    Returns:
+        str: ``additional_headers`` for websockets 14 and later, ``extra_headers`` before.
+    """
+    # websockets 14 replaced the legacy client and renamed the keyword
+    major = int(websockets.__version__.split('.')[0])
+    return 'additional_headers' if major >= 14 else 'extra_headers'
+
+
 class TransportWebSocket(TransportBase):
     """
     WebSocket transport implementation for DAP protocol communication.
@@ -120,12 +132,19 @@ class TransportWebSocket(TransportBase):
     propagates exceptions. The caller (accept or _run_receive_task) owns cleanup.
     """
 
-    def __init__(self, uri: str = CONST_DEFAULT_SERVICE, **kwargs) -> None:
+    def __init__(
+        self,
+        uri: str = CONST_DEFAULT_SERVICE,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+        **kwargs,
+    ) -> None:
         """
         Initialize WebSocket transport.
 
         Args:
             uri: WebSocket URI for client connections (e.g., "http://localhost:8080")
+            headers: Extra HTTP headers sent on the client handshake, e.g. ``Authorization``
             **kwargs: Additional configuration including authentication
         """
         super().__init__()
@@ -133,6 +152,7 @@ class TransportWebSocket(TransportBase):
         self._websocket: Union[object, None] = None
         self._receive_task = None
         self._uri = uri
+        self._headers = headers
         self._message_tasks: set = set()
         self._draining: bool = False
 
@@ -374,7 +394,10 @@ class TransportWebSocket(TransportBase):
             # Convert ms to seconds for websockets library, or use default
             effective_open_timeout = timeout / 1000.0 if timeout is not None else CONST_SOCKET_TIMEOUT
 
-            # Connect without auth on upgrade; first DAP message must be auth
+            # Only callers that set headers pass the keyword
+            header_kwargs = {_headers_keyword(): self._headers} if self._headers else {}
+
+            # Auth rides the first DAP message unless the caller set handshake headers
             self._websocket = await websockets.connect(
                 self._uri,
                 ping_interval=CONST_WS_PING_INTERVAL,
@@ -383,6 +406,7 @@ class TransportWebSocket(TransportBase):
                 open_timeout=effective_open_timeout,
                 max_size=250 * 1024 * 1024,  # 250MB max message size
                 compression=None,
+                **header_kwargs,
             )
 
             self._connected = True
