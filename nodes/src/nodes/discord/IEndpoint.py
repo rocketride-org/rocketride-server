@@ -116,6 +116,35 @@ def _unresolved_variable(value: Any) -> Optional[str]:
     return f'{problem} (only ROCKETRIDE_* server variables are resolved)'
 
 
+# A Discord id is plain ASCII digits. ``str.isdigit`` is not enough: it accepts
+# '²', which ``int()`` then rejects.
+_NUMERIC_ID = re.compile(r'[0-9]+')
+
+# A channel, role or user mention pasted where its id belongs.
+_MENTION_WRAPPER = re.compile(r'<(?:#|@&|@!?)([0-9]+)>')
+
+
+def _is_numeric_id(item: str) -> bool:
+    """Whether a list entry is an id Discord could have issued (ASCII digits only)."""
+    return _NUMERIC_ID.fullmatch(item) is not None
+
+
+def _non_numeric_id(field: str, item: str) -> str:
+    """Name a list entry that is not a numeric id, with a hint at the fix.
+
+    Args:
+        field (str): The setting's name.
+        item (str): The offending entry.
+
+    Returns:
+        str: For example ``guildIds has '<#123>', which is not a numeric
+            Discord id; use 123, the id inside the mention``.
+    """
+    wrapped = _MENTION_WRAPPER.fullmatch(item)
+    hint = f'use {wrapped.group(1)}, the id inside the mention' if wrapped else 'use the numeric id'
+    return f'{field} has {item!r}, which is not a numeric Discord id; {hint}'
+
+
 def _engine_warning(message: str) -> None:
     """Log through the engine's logger when there is one."""
     try:
@@ -358,6 +387,16 @@ class IEndpoint(IEndpointBase):
         A list that was given items but resolves to no ids (a set
         ``${ROCKETRIDE_X}`` whose value is empty arrives as ``""``) fails too:
         an empty list means "everywhere", which is not what was configured.
+
+        Any other entry that is not plain ASCII digits (a pasted ``<#123>``,
+        a channel or server name) matches nothing in the same way, so it
+        fails the start too, naming the entry.
+
+        Args:
+            config (Dict[str, Any]): The Discord config block.
+
+        Returns:
+            Optional[str]: The error to fail the start with, or None.
         """
         for field in ('guildIds', 'channelIds', 'requireMentionChannelIds'):
             value = config.get(field)
@@ -369,6 +408,8 @@ class IEndpoint(IEndpointBase):
                 problem = _unresolved_variable(item)
                 if problem:
                     return f'Discord Bot: {field} uses {problem}'
+                if not _is_numeric_id(item):
+                    return f'Discord Bot: {_non_numeric_id(field, item)}'
             if not ids and _raw_item_count(value):
                 return (
                     f'Discord Bot: {field} is set but resolves to no ids (an empty variable?); '
@@ -404,8 +445,8 @@ class IEndpoint(IEndpointBase):
         ``_allowed_mentions`` turns every entry into ``int(...)``, and that
         call sits inside the per-chunk send: one non-numeric entry (a role
         name, a pasted ``<@&123>``) raised for every chunk of every answer, so
-        a single typo silenced the bot completely. Bad entries are dropped
-        with a debug line instead.
+        a single typo silenced the bot completely. Bad entries (anything but
+        plain ASCII digits) are dropped with a debug line instead.
 
         Args:
             value (Any): The raw config value.
@@ -416,7 +457,7 @@ class IEndpoint(IEndpointBase):
         """
         ids: List[str] = []
         for item in cls._as_str_list(value, field=field):
-            if item.isdigit():
+            if _is_numeric_id(item):
                 ids.append(item)
                 continue
             problem = _unresolved_variable(item)
@@ -459,6 +500,8 @@ class IEndpoint(IEndpointBase):
                 # Not fatal (an unmatched entry only keeps a bot out), but the
                 # bot it was meant to let through is ignored: say so.
                 _config_warning(f'Discord: allowedBotIds uses {problem}; the entry matches no bot')
+            elif not _is_numeric_id(item):
+                _config_warning(f'Discord: {_non_numeric_id("allowedBotIds", item)}; the entry matches no bot')
         self._config_error = self._list_config_error(config)
         # Mention allowlists are the one config the outbound path cannot
         # tolerate garbage in, so a non-numeric entry is dropped here.

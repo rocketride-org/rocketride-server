@@ -1902,6 +1902,73 @@ class TestEmptyResolvingLists:
         assert IEndpoint._list_config_error({'guildIds': ['123', '']}) is None
 
 
+class TestNumericIds:
+    """Every id list holds plain ASCII digits; anything else is named, not matched."""
+
+    _FIELDS = ['guildIds', 'channelIds', 'requireMentionChannelIds']
+
+    @pytest.mark.parametrize(
+        ('field', 'value'),
+        [('requireMentionChannelIds', ['<#123>']), ('channelIds', ['general']), ('guildIds', ['My Server'])],
+    )
+    def test_a_non_numeric_entry_fails_the_start_naming_its_field(self, field, value):
+        error = IEndpoint._list_config_error({field: value})
+
+        assert error is not None
+        assert error.startswith(f'Discord Bot: {field} ')
+        assert 'numeric' in error
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    @pytest.mark.parametrize(
+        ('value', 'digits'), [('<#123>', '123'), ('<@&456>', '456'), ('<@789>', '789'), ('<@!321>', '321')]
+    )
+    def test_a_pasted_mention_suggests_the_id_inside_it(self, field, value, digits):
+        error = IEndpoint._list_config_error({field: [value]})
+
+        assert repr(value) in error
+        assert f'use {digits}' in error
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    def test_a_unicode_digit_is_not_an_id(self, field):
+        # '²'.isdigit() is True, but int('²') raises.
+        error = IEndpoint._list_config_error({field: ['123²']})
+
+        assert error is not None and field in error
+
+    def test_the_start_fails_with_the_reason(self):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', 'channelIds': ['general']})
+
+        with pytest.raises(RuntimeError, match="channelIds has 'general', which is not a numeric"):
+            _start(endpoint)
+
+    def test_numeric_ids_still_pass(self):
+        config = {'guildIds': ['123'], 'channelIds': '["456", "789"]', 'requireMentionChannelIds': '1, 2'}
+
+        assert IEndpoint._list_config_error(config) is None
+
+    def test_a_unicode_digit_mention_id_is_dropped_and_sends_still_build(self):
+        endpoint = TestNumericAndMentionConfig._parse({'allowedMentionUserIds': ['123²', '555']})
+
+        assert endpoint._allowed_mention_user_ids == ['555']
+        assert [obj.id for obj in endpoint._allowed_mentions().users] == [555]
+
+    def test_a_non_numeric_allowed_bot_id_warns_but_does_not_fail(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            endpoint = TestNumericAndMentionConfig._parse({'allowedBotIds': ['<@42>', '123²', '77']})
+
+        assert IEndpoint._list_config_error({'allowedBotIds': ['<@42>']}) is None
+        assert '77' in endpoint._allowed_bot_ids
+        assert warn.call_count == 2
+        assert all('allowedBotIds' in call.args[0] for call in warn.call_args_list)
+        assert 'use 42' in warn.call_args_list[0].args[0]
+
+    def test_a_numeric_allowed_bot_id_does_not_warn(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            TestNumericAndMentionConfig._parse({'allowedBotIds': ['77', '88']})
+
+        warn.assert_not_called()
+
+
 class TestOptionalTyping:
     """The pipeline awaitable runs exactly once regardless of typing errors."""
 
