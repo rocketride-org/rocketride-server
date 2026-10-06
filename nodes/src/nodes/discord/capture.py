@@ -423,6 +423,9 @@ class CaptureWriter:
 
         self._queue: queue.Queue = queue.Queue(maxsize=QUEUE_MAX_ROWS)
         self._thread: Optional[threading.Thread] = None
+        # Set by stop() once the writer has had its chance to drain: the worker
+        # then borrows no more pipes, and drops and counts what is left.
+        self._stopping = threading.Event()
         self._dialect_checked = False
         self._disabled = False
         self._failures = 0
@@ -474,26 +477,34 @@ class CaptureWriter:
         self._thread.start()
 
     def stop(self, timeout: float = 2.0) -> None:
-        """Drain what is queued, then stop the worker. Safe to call twice."""
+        """Drain what is queued, then stop the worker. Safe to call twice.
+
+        The worker gets ``timeout`` to drain. If it is still busy after that
+        (a write stuck on the database), it is told to stop: once the stuck
+        call returns it borrows no more pipes, drops the rows still queued and
+        reports exactly how many. The thread is a daemon, so a call that never
+        returns cannot keep the process alive either.
+        """
         thread = self._thread
         if thread is None:
             return
         # Cleared first so anything still handling a Discord event stops
         # queueing rows the worker is no longer going to read.
         self._thread = None
-        stop_queued = True
         try:
             self._queue.put(_STOP, timeout=max(0.0, timeout))
         except queue.Full:
-            # A full queue means well over `timeout` of work is outstanding;
-            # the thread is a daemon, so leaving it is the bounded choice.
-            stop_queued = False
+            # A full queue means well over `timeout` of work is outstanding:
+            # stop now rather than wait for room the worker may never make.
+            self._stopping.set()
         thread.join(timeout)
         if thread.is_alive():
-            # Still busy (a write stuck on the database): whatever is queued is
-            # lost when the process exits, so say how much rather than nothing.
-            unwritten = max(0, self._queue.qsize() - (1 if stop_queued else 0))
-            self._warn(f'Discord capture: stopped with about {unwritten} row(s) unwritten (the writer was still busy)')
+            self._stopping.set()
+            # Said now, because the stuck call may never return to report the
+            # exact count; the worker adds that if it does.
+            self._warn(
+                f'Discord capture: still writing at stop; about {self._queue.qsize()} queued row(s) will be dropped'
+            )
 
     def submit(self, row: Dict[str, Any]) -> None:
         """Queue one row. Never blocks, never raises."""
@@ -517,15 +528,32 @@ class CaptureWriter:
     # -----------------------------------------------------------------------
 
     def _run(self) -> None:
-        """Pull rows until the stop sentinel. Never lets an exception escape."""
+        """Pull rows until the stop sentinel or ``stop()``. Never lets an exception escape."""
         while True:
             row = self._queue.get()
             if row is _STOP:
+                return
+            # Checked before every write, so nothing borrows a pipe once the
+            # node has stopped.
+            if self._stopping.is_set():
+                self._drop_remaining(row)
                 return
             try:
                 self._write_one(row)
             except Exception as e:  # pragma: no cover - _write_one handles its own
                 self._warn(f'Discord capture: writer thread error: {_short_error(e)}')
+
+    def _drop_remaining(self, row: Any) -> None:
+        """Drop ``row`` and everything still queued, and say exactly how many."""
+        unwritten = 1
+        while True:
+            try:
+                row = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if row is not _STOP:
+                unwritten += 1
+        self._warn(f'Discord capture: stopped with {unwritten} row(s) unwritten (the writer was still busy)')
 
     def _write_one(self, row: Dict[str, Any]) -> None:
         """Write one row through the database node's ``execute`` tool."""

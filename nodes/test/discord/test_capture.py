@@ -34,7 +34,6 @@ import queue
 import re
 import sys
 import threading
-import time
 import types
 from datetime import datetime, timezone
 from unittest import mock
@@ -484,6 +483,21 @@ class _FakePipe:
         return param.output
 
 
+class _StuckPipe(_FakePipe):
+    """A database whose INSERT hangs until ``release`` is set."""
+
+    def __init__(self, release, **kwargs):
+        super().__init__(**kwargs)
+        self.release = release
+        self.entered = threading.Event()
+
+    def invoke(self, param, component_id=''):
+        if param.tool_name == 'execute':
+            self.entered.set()
+            self.release.wait(5)
+        return super().invoke(param, component_id)
+
+
 class _FakeTarget:
     """The endpoint target the writer borrows its pipe from."""
 
@@ -874,25 +888,55 @@ class TestWriterThread:
         finally:
             writer.stop(timeout=5.0)
 
-    def test_stop_reports_rows_it_could_not_write(self):
-        # A write stuck on the database outlives stop(); the worker is a daemon,
-        # so its queued rows are lost on exit. stop() says how many.
-        warnings = []
-        writer = _writer(_FakeTarget(_FakePipe()), warnings)
+    def test_stopping_during_a_stuck_write_ends_the_worker_once_the_write_returns(self):
+        """No pipe is borrowed after stop(), and the rows left behind are counted exactly."""
         release = threading.Event()
-        writer._write_one = lambda row: release.wait(5)
+        pipe = _StuckPipe(release)
+        target = _FakeTarget(pipe)
+        warnings = []
+        writer = _writer(target, warnings)
         writer.start()
+        thread = writer._thread
         try:
             for _ in range(3):
                 writer.submit(_row())
-            deadline = time.time() + 2
-            while writer._queue.qsize() != 2 and time.time() < deadline:
-                time.sleep(0.01)  # the worker has taken the first row and is stuck on it
+            assert pipe.entered.wait(2)  # the worker has taken the first row and is stuck on it
             writer.stop(timeout=0.2)
+            assert thread.is_alive()
         finally:
             release.set()
+        thread.join(5)
 
-        assert any('about 2 row(s) unwritten' in warning for warning in warnings), warnings
+        assert not thread.is_alive()
+        assert target.borrowed == target.returned == 1
+        assert [warning for warning in warnings if 'unwritten' in warning] == [
+            'Discord capture: stopped with 2 row(s) unwritten (the writer was still busy)'
+        ]
+
+    def test_a_full_queue_still_lets_the_worker_end(self):
+        release = threading.Event()
+        pipe = _StuckPipe(release)
+        target = _FakeTarget(pipe)
+        warnings = []
+        writer = _writer(target, warnings)
+        writer.start()
+        thread = writer._thread
+        try:
+            writer.submit(_row())
+            assert pipe.entered.wait(2)
+            for _ in range(QUEUE_MAX_ROWS):
+                writer.submit(_row())
+            assert writer._queue.full()
+            writer.stop(timeout=0.1)
+        finally:
+            release.set()
+        thread.join(5)
+
+        assert not thread.is_alive()
+        assert target.borrowed == 1
+        assert f'Discord capture: stopped with {QUEUE_MAX_ROWS} row(s) unwritten (the writer was still busy)' in (
+            warnings
+        )
 
     def test_a_clean_stop_reports_nothing_unwritten(self):
         warnings = []
