@@ -272,8 +272,8 @@ def test_static_asset_verdicts_record_their_app(monkeypatch):
     assert [entry['appId'] for entry in shell_mod._app_auth_cache.values()] == ['app.x']
 
 
-def test_broadcast_deploy_changed_invalidates_and_survives_failure(monkeypatch):
-    """Every deployment mutation flows through broadcast_deploy_changed, so it
+def test_broadcast_app_changed_invalidates_and_survives_failure(monkeypatch):
+    """Every APP deployment change flows through broadcast_app_changed, so it
     drops the app's serving verdicts — best-effort: a failing invalidation
     never stops the org's rail broadcast.
     """
@@ -284,12 +284,29 @@ def test_broadcast_deploy_changed_invalidates_and_survives_failure(monkeypatch):
         raise RuntimeError('cache gone')
 
     async def broadcast_server_event(event_type, message, org_id=None):
-        sent.append(message['body']['projectId'])
+        sent.append((message['body']['projectId'], message['body']['action']))
 
     monkeypatch.setattr(shell_mod, 'invalidate_app_serving', failing_invalidate)
     server = SimpleNamespace(broadcast_server_event=broadcast_server_event)
 
-    asyncio.run(deploy_events.broadcast_deploy_changed(server, 'org1', '', 'app.x', 'publish'))
+    asyncio.run(deploy_events.broadcast_app_changed(server, 'org1', 'app.x', 'publish'))
 
     assert seen == ['app.x']
-    assert sent == ['app.x']
+    assert sent == [('app.x', 'publish')]
+
+
+def test_pipeline_deploy_change_leaves_app_caches_alone(monkeypatch):
+    """A PIPELINE's project id is user-chosen: any org could name a scheduled
+    pipe after another tenant's app id. Pipeline deploy events must never
+    drop an app's shared serving verdicts — only app producers do.
+    """
+    seen = []
+    monkeypatch.setattr(shell_mod, 'invalidate_app_serving', seen.append)
+
+    async def broadcast_server_event(event_type, message, org_id=None):
+        pass
+
+    server = SimpleNamespace(broadcast_server_event=broadcast_server_event)
+    asyncio.run(deploy_events.broadcast_deploy_changed(server, 'org9', 'team9', 'rocketride.chat', 'run'))
+
+    assert seen == []

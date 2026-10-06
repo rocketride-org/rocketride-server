@@ -1036,9 +1036,9 @@ async def _binding_changed(conn: Any, home: str, app_id: str, action: str) -> No
     failed push never fails the binding change it announces.
     """
     try:
-        from ai.modules.task.deploy_events import broadcast_deploy_changed
+        from ai.modules.task.deploy_events import broadcast_app_changed
 
-        await broadcast_deploy_changed(conn._server, home, '', app_id, action)
+        await broadcast_app_changed(conn._server, home, app_id, action)
     except Exception as exc:
         debug(f'[app_deploy] deploy-change push failed: {exc}')
 
@@ -1167,9 +1167,11 @@ async def _where_of(
     walk applies: ``enabled`` (the binding's own state — a disabled binding
     stays listed, republishing revives it), ``serving`` plus ``reason`` (''
     when serving, else why not: see _serving_block_of), and ``servesYou`` —
-    the one pin the caller's own published resolution picks (most specific
-    serving audience whose requiredPermissions they hold; the App Builder
-    dev-preview overlay is deliberately not part of it).
+    the one pin the caller's own published resolution picks: the scope-walk
+    WINNER among serving pins, dropped (no fallback to a less specific pin,
+    exactly as the catalog drops it) when serving enforces requiredPermissions
+    (SaaS) and the caller lacks them. The App Builder dev-preview overlay is
+    deliberately not part of it.
     """
     rows = [r for r in await _visible_rows_of(conn, account, org_id, app_id) if r.get('orgId') == home]
     if not developer and account.review_ladder:
@@ -1178,11 +1180,13 @@ async def _where_of(
         ]
 
     blocks = [_serving_block_of(row, account.review_ladder) for row in rows]
-    caller_perms = set(getattr(conn._account_info, 'sysPermissions', None) or [])
-    reachable = [
-        row for row, block in zip(rows, blocks) if not block and _holds_required_permissions(row, caller_perms)
-    ]
-    winner = _precedence_sorted(reachable)[-1] if reachable else None
+    serving_rows = [row for row, block in zip(rows, blocks) if not block]
+    winner = _precedence_sorted(serving_rows)[-1] if serving_rows else None
+    # Only SaaS enforces requiredPermissions (the catalog + the serve
+    # route); OSS serving is open, so a gated app still reaches the caller.
+    if winner is not None and 'saas' in getattr(account, 'capabilities', ()):
+        if not _holds_required_permissions(winner, set(getattr(conn._account_info, 'sysPermissions', None) or [])):
+            winner = None
 
     pins: List[Dict[str, Any]] = []
     for row, block in zip(rows, blocks):

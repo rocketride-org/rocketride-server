@@ -1092,11 +1092,16 @@ class _EventConn:
 
 
 @pytest.mark.asyncio
-async def test_review_transitions_push_both_signals(registry, quiet_push):
+async def test_review_transitions_push_both_signals(registry, quiet_push, monkeypatch):
     """submit/withdraw push the org-scoped rail invalidation AND the typed
     app:statusChanged event — delivered to the owning org and to cross-org
-    reviewers (sys.app/sys.admin), never to strangers or task sockets.
+    reviewers (sys.app/sys.admin), never to strangers or task sockets — and
+    drop the app's server-side serving verdicts (#2461).
     """
+    import ai.modules.shell.shell as shell_mod
+
+    invalidated = []
+    monkeypatch.setattr(shell_mod, 'invalidate_app_serving', invalidated.append)
     registry.add_version(1, '1.0.0', publisher_id='u1', state='private')
     dev = _FakeConn(teams=_TEAMS, developer_id='acme')
 
@@ -1141,6 +1146,7 @@ async def test_review_transitions_push_both_signals(registry, quiet_push):
     assert reviewer.events == [('app:statusChanged', withdraw_body)]
     assert stranger.events == []
     assert task_socket.events == []
+    assert invalidated == ['acme.brandy', 'acme.brandy']
 
 
 @pytest.mark.asyncio
@@ -1286,17 +1292,42 @@ async def test_where_serves_you_matches_resolver_across_two_teams(registry):
 
 
 @pytest.mark.asyncio
-async def test_where_serves_you_respects_required_permissions(registry):
-    """A serving pin gated on a permission the caller lacks does not serve
-    THEM — the catalog's requiredPermissions rule applies to servesYou.
+async def test_where_serves_you_ignores_permissions_where_serving_does(registry, monkeypatch):
+    """OSS never enforces requiredPermissions (open serving, no catalog gate),
+    so a gated app still serves the caller — servesYou must say so rather
+    than "you wouldn't get any published version".
     """
+    monkeypatch.setattr(account_singleton, 'capabilities', ('oss',), raising=False)
     registry.add_version(1, '1.0.0', state='ready')
     registry.seed_publish(AUD_PUBLIC, 1)
     registry.publishes[('acme.brandy', registry._key(AUD_PUBLIC))]['snapshot']['requiredPermissions'] = ['app.finance']
 
     pins = (await handle_deploy_app(_FakeConn(teams=_TEAMS), _request('where')))['body']['pins']
 
-    assert (pins[0]['serving'], pins[0]['servesYou']) == (True, False)
+    assert (pins[0]['serving'], pins[0]['servesYou']) == (True, True)
+
+
+@pytest.mark.asyncio
+async def test_where_serves_you_gates_the_winner_on_saas(registry, monkeypatch):
+    """SaaS resolves the WINNER first and the catalog then drops it when the
+    caller lacks its requiredPermissions — a less specific pin is never
+    handed out instead. servesYou mirrors that: a gated @me hides the team
+    pin's version too; holding the permission serves @me.
+    """
+    monkeypatch.setattr(account_singleton, 'capabilities', ('saas',), raising=False)
+    registry.add_version(1, '1.0.0', state='ready')
+    registry.add_version(2, '2.0.0', state='ready')
+    registry.seed_publish(AUD_TEAM, 1)
+    registry.seed_publish(AUD_USER, 2)
+    registry.publishes[('acme.brandy', registry._key(AUD_USER))]['snapshot']['requiredPermissions'] = ['app.finance']
+    conn = _FakeConn(teams=_TEAMS)
+
+    pins = (await handle_deploy_app(conn, _request('where')))['body']['pins']
+    assert [p['rung'] for p in pins if p['servesYou']] == []
+
+    conn._account_info.sysPermissions = ['app.finance']
+    pins = (await handle_deploy_app(conn, _request('where')))['body']['pins']
+    assert [p['rung'] for p in pins if p['servesYou']] == ['personal']
 
 
 # =============================================================================
@@ -1317,11 +1348,15 @@ async def test_disable_flips_the_audience_row(registry):
 
 
 @pytest.mark.asyncio
-async def test_publish_disable_remove_push_the_rail_invalidation(registry, quiet_push):
+async def test_publish_disable_remove_push_the_rail_invalidation(registry, quiet_push, monkeypatch):
     """#2461: every binding change pushes the org-scoped apaevt_deploy, so
     every open App Builder (not only the actor's) re-fetches, and the
     server's serving cache for the app is dropped on the same signal.
     """
+    import ai.modules.shell.shell as shell_mod
+
+    invalidated = []
+    monkeypatch.setattr(shell_mod, 'invalidate_app_serving', invalidated.append)
     registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
     dev = _FakeConn(teams=_TEAMS, developer_id='acme')
     broadcasts = []
@@ -1343,6 +1378,7 @@ async def test_publish_disable_remove_push_the_rail_invalidation(registry, quiet
         ('apaevt_deploy', 'acme.brandy', 'disable', 'org1'),
         ('apaevt_deploy', 'acme.brandy', 'remove', 'org1'),
     ]
+    assert invalidated == ['acme.brandy'] * 3
 
 
 # =============================================================================

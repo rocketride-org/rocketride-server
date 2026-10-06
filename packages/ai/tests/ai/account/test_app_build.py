@@ -793,6 +793,33 @@ async def test_build_feed_batches_and_scopes():
 
 
 @pytest.mark.asyncio
+async def test_build_stamp_drops_the_apps_serving_verdicts(monkeypatch):
+    """#2461: a build stamp (a version just became servable, or failed) drops
+    the app's cached serving verdicts — a session that asked for the version
+    while it was building is served on its next request — and pushes the
+    org's rail invalidation.
+    """
+    import ai.modules.shell.shell as shell_mod
+
+    invalidated, events = [], []
+    monkeypatch.setattr(shell_mod, 'invalidate_app_serving', invalidated.append)
+
+    async def deployments_set_build(org_id, app_id, version, build):
+        return None
+
+    monkeypatch.setattr(account_singleton, 'deployments_set_build', deployments_set_build, raising=False)
+
+    class _Server:
+        async def broadcast_server_event(self, event_type, message, org_id=None):
+            events.append((message['event'], message['body']['projectId'], message['body']['action'], org_id))
+
+    await app_build.AppBuildWorker(server=_Server())._stamp('org1', 'acme.brandy', 1, {'status': 'ok'})
+
+    assert invalidated == ['acme.brandy']
+    assert events == [('apaevt_deploy', 'acme.brandy', 'build', 'org1')]
+
+
+@pytest.mark.asyncio
 async def test_exec_streams_lines_live():
     """The REAL _exec hands each output line to on_line as it arrives and
     still returns the full transcript + exit code (the feed's data source).

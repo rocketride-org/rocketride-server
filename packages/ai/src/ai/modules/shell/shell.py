@@ -578,7 +578,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
 def invalidate_app_serving(app_id: str) -> None:
     """Drop every cached serving verdict for one app, across all callers.
 
-    Called on every deployment change (``broadcast_deploy_changed`` — build
+    Called on every APP deployment change (``broadcast_app_changed`` — build
     stamps, publish/disable/remove, review transitions): the next request
     for the app re-resolves instead of answering from a verdict the change
     made stale. Without it a caller that asked for a version while it was
