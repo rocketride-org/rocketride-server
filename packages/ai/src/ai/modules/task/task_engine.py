@@ -693,6 +693,17 @@ class Task(DAPBase):
     # therefore need ROCKETRIDE_DB_DSN injected into the task subprocess.
     _ROCKETRIDE_DB_PROVIDERS = frozenset({'rocketride_sql', 'rocketride_vector', 'rocketride_graph'})
 
+    # Reason handed to the node subprocess when this engine has no database
+    # broker (a local engine, or a self-hosted one without the broker env).
+    # The node prefixes it with 'RocketRide cloud database is not available
+    # for this task:' so it must read as the continuation of that sentence.
+    _NO_CLOUD_DB_REASON = (
+        'this server has no RocketRide cloud database (no database broker is configured). '
+        'The rocketride_sql, rocketride_vector and rocketride_graph nodes need RocketRide Cloud '
+        'or a self-hosted engine with a database broker; on this server use a database node '
+        'with its own connection settings, such as db_postgres'
+    )
+
     def _pipeline_uses_rocketride_db(self) -> bool:
         """True when any pipeline component is a RocketRide cloud DB node."""
         components = self._pipeline.get('components') or []
@@ -755,9 +766,12 @@ class Task(DAPBase):
                 dsn = await account.resolve_db_dsn(self.org_id or self.client_id)
                 subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
             except NotImplementedError:
-                # Broker env not configured (open-source default) — the
-                # node raises the sign-in message itself.
-                pass
+                # Broker env not configured (open-source default). Pass a
+                # reason down so the node reports the missing cloud database
+                # instead of the identity env var it would otherwise check
+                # (#2463). Not logged: this is the normal state on an engine
+                # without a broker, not a failure.
+                subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = self._NO_CLOUD_DB_REASON
             except Exception as e:
                 self.debug_message(f'RocketRide DB DSN resolution failed: {e}')
                 reason = (str(e).strip().splitlines() or [repr(e)])[0]

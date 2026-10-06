@@ -127,7 +127,7 @@ class TestDsnHelpers:
 class TestClientId:
     def test_missing_env_raises(self, monkeypatch):
         monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
-        with pytest.raises(ValueError, match='signed-in RocketRide cloud identity'):
+        with pytest.raises(ValueError, match='no signed-in RocketRide identity is available'):
             rrdb.current_client_id()
 
     def test_present_env_returned_stripped(self, monkeypatch):
@@ -168,8 +168,29 @@ class TestResolveRocketrideDsn:
         self._install_fake_account(monkeypatch, fake)
         monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
         monkeypatch.setenv(rrdb.DB_RESOLVE_ERROR_ENV, 'DB broker request failed: HTTP 503')
-        with pytest.raises(ValueError, match='HTTP 503'):
+        with pytest.raises(
+            ValueError, match='cloud database is not available for this task: DB broker request failed: HTTP 503'
+        ):
             rrdb.resolve_rocketride_dsn()
+
+    def test_resolve_error_env_reports_missing_cloud_database(self, monkeypatch):
+        """An engine without a broker passes the reason down the same way (#2463):
+        the node names the missing cloud database, not the identity env var.
+        """
+
+        async def fake(client_id):  # pragma: no cover - must not be reached
+            raise AssertionError('account must not be consulted when a resolve error is present')
+
+        self._install_fake_account(monkeypatch, fake)
+        monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
+        monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
+        monkeypatch.setenv(
+            rrdb.DB_RESOLVE_ERROR_ENV, 'this server has no RocketRide cloud database (no database broker is configured)'
+        )
+        with pytest.raises(ValueError) as excinfo:
+            rrdb.resolve_rocketride_dsn()
+        assert 'this server has no RocketRide cloud database' in str(excinfo.value)
+        assert rrdb.CLIENT_ID_ENV not in str(excinfo.value)
 
     def test_empty_env_dsn_falls_back_to_account(self, monkeypatch):
         async def fake(client_id):
@@ -254,9 +275,9 @@ class TestAccountStub:
         monkeypatch.setitem(sys.modules, 'ai.account.oss', oss_mod)
         return base_mod.AccountBase, oss_mod.Account
 
-    def test_oss_stub_raises_cloud_signin_message(self, account_cls):
+    def test_oss_stub_raises_no_cloud_db_message(self, account_cls):
         _, account = account_cls
-        with pytest.raises(NotImplementedError, match='require signing into RocketRide cloud'):
+        with pytest.raises(NotImplementedError, match='no RocketRide cloud database is configured on this server'):
             asyncio.run(account().resolve_db_dsn('tenant-42'))
 
     def test_base_default_raises(self, account_cls):

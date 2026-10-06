@@ -351,7 +351,7 @@ class Account(AccountBase):
     # audit() is inherited from AccountBase as a no-op — OSS has no database.
 
     # resolve_db_dsn is inherited from AccountBase: env-gated broker call
-    # (ROCKETRIDE_DB_BROKER_URL/_TOKEN); raises the cloud-sign-in error when
+    # (ROCKETRIDE_DB_BROKER_URL/_TOKEN); raises NotImplementedError when
     # the environment is not configured — the open-source default.
 
     # =========================================================================

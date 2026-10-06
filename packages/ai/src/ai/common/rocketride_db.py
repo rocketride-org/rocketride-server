@@ -58,9 +58,10 @@ CLIENT_ID_ENV = 'ROCKETRIDE_CLIENT_ID'
 # pipelines that contain RocketRide cloud DB nodes.
 DB_DSN_ENV = 'ROCKETRIDE_DB_DSN'
 
-# When server-side resolution fails (e.g. a broker outage), the task engine
-# passes the reason down here instead of a DSN, so the node can report the
-# real cause rather than the misleading "sign into RocketRide cloud" error.
+# When server-side resolution fails (e.g. a broker outage), or the engine has
+# no database broker at all, the task engine passes the reason down here
+# instead of a DSN, so the node can report the real cause rather than a
+# missing-identity error that nothing the user does can fix.
 DB_RESOLVE_ERROR_ENV = 'ROCKETRIDE_DB_RESOLVE_ERROR'
 
 
@@ -89,14 +90,16 @@ def current_client_id() -> str:
     """Return the authenticated ``client_id`` for the running task.
 
     Raises:
-        ValueError: if the identity env var is missing — which normally means
-            the node is running outside the task engine, or the connection is
-            not signed into RocketRide cloud.
+        ValueError: if the identity env var is missing. Inside a task the
+            engine delivers a DSN or a resolve error before this is reached,
+            so this normally means a server-process caller or a test without
+            an identity.
     """
     client_id = os.environ.get(CLIENT_ID_ENV, '').strip()
     if not client_id:
         raise ValueError(
-            f'{CLIENT_ID_ENV} is not set; RocketRide cloud DB nodes require a signed-in RocketRide cloud identity'
+            f'no signed-in RocketRide identity is available ({CLIENT_ID_ENV} is not set); '
+            'RocketRide cloud database nodes resolve their database from the identity of the task that runs them'
         )
     return client_id
 
@@ -130,7 +133,8 @@ def resolve_rocketride_dsn() -> str:
        OSS account) and injects it here at task start.
     2. ``Account.resolve_db_dsn(client_id)`` — fallback for callers running
        inside the server process (or tests injecting a fake account). On an
-       unconfigured open-source build this raises the cloud-sign-in error.
+       engine with no database broker this raises ``NotImplementedError``
+       (no cloud database configured).
 
     Returns the raw DSN (URL form, directly usable by ``psycopg2.connect``).
     Callers that need a SQLAlchemy engine URL should wrap the result in
@@ -140,13 +144,13 @@ def resolve_rocketride_dsn() -> str:
     if injected:
         return injected
 
-    # Server-side resolution was attempted and failed: report that failure,
-    # not the sign-in error the account fallback below would produce (the
-    # task engine scrubs the broker env from node subprocesses, so the
-    # fallback cannot succeed here anyway).
+    # Server-side resolution was attempted and failed, or the engine has no
+    # database broker: report that reason, not the missing-identity error the
+    # account fallback below would produce (the task engine scrubs the broker
+    # env from node subprocesses, so the fallback cannot succeed here anyway).
     resolve_error = os.environ.get(DB_RESOLVE_ERROR_ENV, '').strip()
     if resolve_error:
-        raise ValueError(f'RocketRide cloud database resolution failed at task start: {resolve_error}')
+        raise ValueError(f'RocketRide cloud database is not available for this task: {resolve_error}')
 
     # Lazy import: ai.common is imported very early, and ai.account pulls in the
     # OSS/SaaS overlay — importing at module load risks a cycle.

@@ -894,14 +894,24 @@ async def test_subprocess_env_stale_dsn_does_not_survive_broker_failure(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_subprocess_env_unconfigured_account_is_nonfatal(monkeypatch):
+async def test_subprocess_env_unconfigured_account_reports_missing_cloud_db(monkeypatch):
+    """No broker on this engine (#2463): still non-fatal, but the node gets a
+    reason that names the missing cloud database, so it does not fall back to
+    the ROCKETRIDE_CLIENT_ID message nothing documents.
+    """
+
     async def fake_resolve(client_id):
-        raise NotImplementedError('sign in')
+        raise NotImplementedError('no RocketRide cloud database is configured on this server')
 
     _patch_resolve(monkeypatch, fake_resolve)
-    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
+    t = _env_task(pipeline=_DB_PIPELINE)
+    env = await Task._build_subprocess_env(t)
     assert 'ROCKETRIDE_DB_DSN' not in env
-    assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == Task._NO_CLOUD_DB_REASON
+    assert 'this server has no RocketRide cloud database' in env['ROCKETRIDE_DB_RESOLVE_ERROR']
+    assert 'ROCKETRIDE_CLIENT_ID' not in env['ROCKETRIDE_DB_RESOLVE_ERROR']
+    # The normal state on an engine without a broker, not a failure to log.
+    t.debug_message.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

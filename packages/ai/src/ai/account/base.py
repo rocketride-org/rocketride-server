@@ -376,7 +376,10 @@ class AccountBase(ABC):
         broker_url = os.environ.get('ROCKETRIDE_DB_BROKER_URL', '').strip()
         broker_token = os.environ.get('ROCKETRIDE_DB_BROKER_TOKEN', '').strip()
         if not broker_url or not broker_token:
-            raise NotImplementedError('RocketRide cloud DB nodes require signing into RocketRide cloud')
+            raise NotImplementedError(
+                'no RocketRide cloud database is configured on this server '
+                '(ROCKETRIDE_DB_BROKER_URL and ROCKETRIDE_DB_BROKER_TOKEN are not set)'
+            )
         if not client_id or not client_id.strip():
             raise ValueError('resolve_db_dsn requires a non-empty client_id')
         self._check_broker_url(broker_url)
