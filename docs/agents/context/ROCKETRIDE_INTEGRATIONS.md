@@ -548,21 +548,46 @@ content_type}` — `json` is auto-parsed when the response is JSON, otherwise `n
 |---|---|---|
 | `allowGET` ... `allowDELETE` | `true` | Per-method toggles |
 | `allowHEAD`, `allowOPTIONS` | `false` | Off by default |
-| `urlWhitelist` | empty | Regex patterns the URL must match. **Empty allows ALL URLs** (a config warning reminds you) |
+| `urlWhitelist` | empty | Rows of `{ "whitelistPattern": "<regex>" }` the final URL must match. **Empty allows ALL public URLs** (a config warning reminds you); mandatory, exact https hosts only, while `authType` is set |
+| `authType` | `none` | Credential sent with every request: `none`, `bearer` (`authToken`), `basic` (`authUsername` + `authPassword`), or `api_key` (`authHeaderName` + `authHeaderValue`, header only) |
+| `defaultHeaders` | empty | Rows of `{ "headerName", "headerValue" }` sent with every request; a per-call header of the same name wins. `Authorization`, `Proxy-Authorization`, `Cookie`, `Host` refused |
 | `rateLimitPerSecond` | `10` | Token-bucket per-second cap |
 | `rateLimitPerMinute` | `100` | Broader throttle |
 | `maxConcurrentRequests` | `5` | In-flight cap |
 
-These live directly in the node's `config`
-(e.g. `"config": { "type": "tool_http_request", "urlWhitelist": ["^https://api\\.example\\.com/"] }`).
-For production, always set `urlWhitelist` — and check the logs after editing it: an
-invalid regex is *skipped with a warning*, silently widening the restriction. When a rate
-limit is hit the call fails immediately with a retry hint rather than queueing; set all
-three limits to `0` to disable rate limiting entirely.
+These live directly in the node's `config`, e.g.
+`"config": { "type": "tool_http_request", "urlWhitelist": [{ "whitelistPattern": "^https://api\\.example\\.com/" }] }`.
+For production, always set `urlWhitelist`; an invalid regex fails config validation
+rather than widening the restriction. When a rate limit is hit the call fails immediately
+with a retry hint rather than queueing; set all three limits to `0` to disable rate
+limiting entirely.
 
-To call your own API with a secret, prefer passing the credential through the agent's
-instructions via a `${ROCKETRIDE_*}` substitution or an `api_key` auth object — never
-hardcode secrets in the pipeline JSON.
+To call an API with a secret, put the credential in the node config and reference it as a
+`${ROCKETRIDE_*}` placeholder: the engine substitutes it from the org/team/user environment
+when the pipeline starts, so it never reaches the browser, the agent, or the pipeline JSON.
+
+```json
+{
+	"id": "tool_http_request_1",
+	"provider": "tool_http_request",
+	"config": {
+		"type": "tool_http_request",
+		"authType": "bearer",
+		"authToken": "${ROCKETRIDE_GITHUB_TOKEN}",
+		"urlWhitelist": [{ "whitelistPattern": "^https://api\\.github\\.com(?:/|$)" }],
+		"defaultHeaders": [{ "headerName": "Accept", "headerValue": "application/vnd.github+json" }]
+	},
+	"control": [{ "classType": "tool", "from": "agent_rocketride_1" }]
+}
+```
+
+With `authType` set, the node refuses to start without an exact-host `https://` whitelist
+(a configured token must not be sendable to any host the agent names), fails loudly if the
+placeholder did not resolve, and rejects per-call `bearer_token`, `basic_auth`, `auth`, or
+`Authorization` headers so the agent cannot swap the credential. To fetch tokened and
+anonymous hosts from the same agent, attach two `tool_http_request` nodes with different
+`serverName` values. Never hardcode secrets in the pipeline JSON, and do not route them
+through the agent's instructions: that puts the secret in the model context.
 
 ### Deterministic: `tool_n8n` as a pipeline step
 

@@ -14,6 +14,8 @@ This node provides one controlled HTTP client for an agent and has no pipeline l
 it when the agent must call a public API endpoint directly; use a product-specific tool when
 that service already has a dedicated node and richer operations. Method switches, URL
 patterns, the network boundary, and rate limits are enforced before every request.
+Credentials come either per call or from the node configuration, where `${ROCKETRIDE_*}`
+placeholders resolve on the engine so the secret never reaches the caller.
 
 ## As a tool
 
@@ -30,6 +32,11 @@ headers, query parameters, path parameters, timeout, advanced authentication and
 objects, plus `body_json`, `bearer_token`, and `basic_auth` shortcuts. A completed
 response—including a non-2xx HTTP response—returns `status_code`, `status_text`,
 `headers`, `body`, `json`, `elapsed_ms`, and `content_type`.
+
+When Authentication is configured on the node, that credential is added to every request
+and per-call credentials (`bearer_token`, `basic_auth`, an `auth` object other than
+`none`, or an `Authorization` header) are rejected, so an agent cannot replace it.
+Configured default headers are sent too; a per-call header of the same name wins.
 
 Invalid input, disabled methods, whitelist rejection, rate-limit rejection, and transport
 errors raise tool errors. A parsed JSON field is null when the response type is not JSON-like
@@ -51,8 +58,39 @@ access to a URL where mutation is possible.
 
 An empty whitelist allows every public URL; non-public network destinations remain blocked
 either way. Non-empty patterns are matched against the request URL, so anchor them when the
-endpoint scope must be exact, for example `^https://api.example.com/`. Path-parameter
+endpoint scope must be exact, for example `^https://api\.example\.com/`. Path-parameter
 replacements are percent-encoded to remain a single URL path segment.
+
+While Authentication is set the whitelist is mandatory, and every pattern must start with
+`https://` followed by a literal host with escaped dots. Whole-authority forms such as
+`^https://[^/]+/`, plain `http://`, and alternations are refused at startup, because a
+configured credential would otherwise travel to any host the agent names.
+
+### Authentication
+
+`Authentication` selects the credential sent with every request: `none` (default; the
+caller supplies auth per call), `bearer` (`Bearer token`, sent as `Authorization: Bearer
+...`), `basic` (`Basic auth username` and `Basic auth password`), or `api_key` (`API key
+header name` and `API key value`, for example `X-API-Key`). Put a `${ROCKETRIDE_*}`
+placeholder in the secret field, such as `${ROCKETRIDE_GITHUB_TOKEN}`, and set that
+variable in the org, team, or user environment; the engine substitutes it when the
+pipeline is resolved, so the value never reaches the browser or the agent.
+
+Three rules apply as soon as the type is not `none`. The selected fields must be complete:
+an empty token or a placeholder that did not resolve fails the node at startup, naming
+the variable, instead of sending an anonymous request. The URL whitelist must hold at
+least one exact-host `https://` pattern. Per-call credentials are rejected. Fields that
+belong to another type are ignored with a warning. The credential is only ever sent as a
+header, never as a query parameter, and never to a redirect target.
+
+### Default headers
+
+Rows of header name and value sent with every request, for example `Accept:
+application/vnd.github+json` or `X-GitHub-Api-Version: 2022-11-28`. A per-call header
+with the same name (matched case-insensitively) replaces the default. `Authorization`,
+`Proxy-Authorization`, `Cookie`, and `Host` are refused here; credentials belong in the
+Authentication fields. Blank rows are ignored. A value without a name, a duplicate name,
+or an unresolved `${ROCKETRIDE_*}` placeholder fails startup.
 
 ### Network boundary
 
@@ -69,9 +107,15 @@ limiting; otherwise each configured value is clamped to at least one.
 
 ## Authentication
 
-This node has no stored service credential: provide credentials per request. The simple
-shortcuts set bearer or Basic authentication when the equivalent advanced object is absent.
-Advanced authentication supports `none`, `basic`, `bearer`, and an API key placed in a
+The node needs whatever the target API accepts: a bearer token (for GitHub, a fine-grained
+personal access token carrying only the permissions the agent's calls need), a Basic
+username and password, or an API key header. Store the secret as a `ROCKETRIDE_*` variable
+in the org, team, or user environment and reference it from the matching Authentication
+field as `${ROCKETRIDE_NAME}`; never paste the value into the pipeline itself.
+
+Per-call credentials remain available while Authentication is `none`. The simple shortcuts
+set bearer or Basic authentication when the equivalent advanced object is absent, and the
+advanced `auth` object supports `none`, `basic`, `bearer`, and an API key placed in a
 header or query parameter.
 
 ## Notes
@@ -113,6 +157,10 @@ Four security guardrails are enforced before every request:
 - **Rate limiting**: token-bucket limits per second and per minute, plus a concurrency
   cap. On by default (10/s, 100/min, 5 concurrent).
 
+A credential configured on the node (bearer, Basic, or API key header; `${ROCKETRIDE_*}`
+placeholders resolve on the engine) is applied to every request. It makes the whitelist
+mandatory and turns per-call credentials into an error.
+
 ---
 
 ### Configuration
@@ -129,7 +177,16 @@ Four security guardrails are enforced before every request:
 | `allowHEAD` | boolean | Default false.  |
 | `allowOPTIONS` | boolean | Default false.  |
 | `whitelistPattern` | string | Default empty.  |
-| `urlWhitelist` | array | Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked. |
+| `urlWhitelist` | array | Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked. Mandatory, exact https hosts only, while `authType` is not `none`. |
+| `authType` | string | Default "none". Credential sent with every request: `none`, `bearer`, `basic`, or `api_key`. |
+| `authToken` | string | Bearer token for `authType: bearer`. Secure; use a `${ROCKETRIDE_*}` placeholder. |
+| `authUsername` | string | Username for `authType: basic`. |
+| `authPassword` | string | Password for `authType: basic`. Secure. |
+| `authHeaderName` | string | Header carrying the key for `authType: api_key`, e.g. `X-API-Key`. |
+| `authHeaderValue` | string | Key sent in that header. Secure. |
+| `headerName` | string | Default empty. Name column of a `defaultHeaders` row. |
+| `headerValue` | string | Default empty. Value column of a `defaultHeaders` row. |
+| `defaultHeaders` | array | Headers sent with every request; a per-call header of the same name replaces one. `Authorization`, `Proxy-Authorization`, `Cookie`, and `Host` are refused. |
 | `rateLimitPerSecond` | number | Default 10. Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. |
 | `rateLimitPerMinute` | number | Default 100. Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. |
 | `maxConcurrentRequests` | number | Default 5. Maximum number of HTTP requests that can be in-flight simultaneously. |
@@ -161,7 +218,9 @@ placeholder rows are ignored; a whitelist made only of them allows all public de
 ### Convenience shortcuts
 
 These cover the common cases without the verbose `auth` / `body` objects. Each shortcut
-is only applied when the corresponding advanced field is not also set.
+is only applied when the corresponding advanced field is not also set. When the node is
+configured with authentication, `bearer_token`, `basic_auth`, an `auth` object other than
+`none`, and an `Authorization` header are rejected.
 
 | Parameter      | Description                                                                 |
 |----------------|-----------------------------------------------------------------------------|
@@ -212,6 +271,11 @@ The `auth` object supports `type`: `none`, `basic`, `bearer`, or `api_key`.
 
 For the common cases, the `bearer_token` and `basic_auth` shortcuts are simpler and
 expand to the same thing.
+
+The same three types (API key as a header only) can be fixed in the node config via
+`authType` and the matching `auth*` fields, with `${ROCKETRIDE_*}` placeholders resolved
+on the engine. A configured credential replaces per-call auth entirely and requires an
+exact-host https whitelist.
 
 ---
 

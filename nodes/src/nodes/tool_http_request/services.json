@@ -9,7 +9,7 @@
 	"prefix": "http",
 	"icon": "http.svg",
 	"documentation": "https://docs.rocketride.org/nodes/tool_http_request",
-	"description": ["Makes HTTP requests to public API endpoints, like curl for agents.", "The agent provides the full request (method, URL, headers, body, auth).", "The node blocks non-public network destinations, returns 3xx responses without following them automatically, and enforces URL patterns and enabled HTTP methods."],
+	"description": ["Makes HTTP requests to public API endpoints, like curl for agents.", "The agent provides the request (method, URL, headers, body); credentials come per call or from the node config, where ${ROCKETRIDE_*} placeholders resolve on the engine.", "The node blocks non-public network destinations, returns 3xx responses without following them automatically, and enforces URL patterns and enabled HTTP methods."],
 	"tile": ["Tool: ${parameters.http_request.serverName}.http_request"],
 	"lanes": {},
 	"preconfig": {
@@ -112,6 +112,88 @@
 			}
 		},
 
+		"http_request.authType": {
+			"type": "string",
+			"title": "Authentication",
+			"description": "Credential applied to every request this node sends. Set it here with a ${ROCKETRIDE_*} placeholder (resolved on the engine from the org, team, and user environment) instead of passing tokens per call. When set, the URL whitelist must name at least one exact https host, and per-call auth is rejected.",
+			"default": "none",
+			"enum": [
+				["none", "None (caller supplies auth per request)"],
+				["bearer", "Bearer token"],
+				["basic", "Basic (username + password)"],
+				["api_key", "API key header"]
+			]
+		},
+		"http_request.authToken": {
+			"type": "string",
+			"title": "Bearer token",
+			"description": "Sent as \"Authorization: Bearer <token>\" when Authentication is Bearer token. Use a placeholder such as ${ROCKETRIDE_GITHUB_TOKEN} so the secret never leaves the engine.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"http_request.authUsername": {
+			"type": "string",
+			"title": "Basic auth username",
+			"description": "Used when Authentication is Basic.",
+			"default": "",
+			"optional": true
+		},
+		"http_request.authPassword": {
+			"type": "string",
+			"title": "Basic auth password",
+			"description": "Used when Authentication is Basic. A ${ROCKETRIDE_*} placeholder keeps it on the engine.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"http_request.authHeaderName": {
+			"type": "string",
+			"title": "API key header name",
+			"description": "Header that carries the key when Authentication is API key header, e.g. X-API-Key.",
+			"default": "",
+			"optional": true
+		},
+		"http_request.authHeaderValue": {
+			"type": "string",
+			"title": "API key value",
+			"description": "Value sent in the API key header. A ${ROCKETRIDE_*} placeholder keeps it on the engine.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+
+		"http_request.headerName": {
+			"type": "string",
+			"title": "Header name",
+			"default": ""
+		},
+		"http_request.headerValue": {
+			"type": "string",
+			"title": "Header value",
+			"default": ""
+		},
+		"http_request.defaultHeaders": {
+			"title": "Default headers",
+			"description": "Headers sent with every request, e.g. Accept or X-GitHub-Api-Version. A per-call header with the same name (case-insensitive) replaces the default. Authorization, Proxy-Authorization, Cookie, and Host are not allowed here; credentials belong in the Authentication fields. Blank rows are ignored.",
+			"type": "array",
+			"optional": true,
+			"minItems": 0,
+			"items": {
+				"type": "object",
+				"properties": ["http_request.headerName", "http_request.headerValue"]
+			}
+		},
+
 		"http_request.rateLimitPerSecond": {
 			"type": "number",
 			"title": "Max requests per second",
@@ -135,7 +217,7 @@
 		{
 			"section": "Pipe",
 			"title": "HTTP Request",
-			"properties": ["type", "http_request.allowGET", "http_request.allowPOST", "http_request.allowPUT", "http_request.allowPATCH", "http_request.allowDELETE", "http_request.allowHEAD", "http_request.allowOPTIONS", "http_request.urlWhitelist", "http_request.rateLimitPerSecond", "http_request.rateLimitPerMinute", "http_request.maxConcurrentRequests"]
+			"properties": ["type", "http_request.allowGET", "http_request.allowPOST", "http_request.allowPUT", "http_request.allowPATCH", "http_request.allowDELETE", "http_request.allowHEAD", "http_request.allowOPTIONS", "http_request.urlWhitelist", "http_request.authType", "http_request.authToken", "http_request.authUsername", "http_request.authPassword", "http_request.authHeaderName", "http_request.authHeaderValue", "http_request.defaultHeaders", "http_request.rateLimitPerSecond", "http_request.rateLimitPerMinute", "http_request.maxConcurrentRequests"]
 		}
 	]
 }

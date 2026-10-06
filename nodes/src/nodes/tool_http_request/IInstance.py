@@ -26,7 +26,8 @@ HTTP Request tool node instance.
 
 Exposes a single ``http_request`` tool that can call public HTTP API endpoints.
 Security guardrails (allowed methods, URL whitelist, and public-network-only
-destinations) are enforced before every request.
+destinations) are enforced before every request. A credential configured on
+the node replaces per-call auth; default headers are merged under the call's.
 """
 
 from __future__ import annotations
@@ -434,6 +435,7 @@ class IInstance(IInstanceBase):
             'For JSON bodies, pass "body_json" as a JSON object (e.g. {"name": "foo"}) — it is serialized automatically. '
             'For bearer auth, pass "bearer_token" as a string. '
             'For basic auth, pass "basic_auth": {"username": "...", "password": "..."}. '
+            'If the node is configured with authentication it is applied automatically; do not pass auth then. '
             'Non-public network destinations are blocked, and redirects are returned without being followed. '
             'Optional: "headers", "query_params", "path_params", "timeout" (seconds, default 30, max 300).'
         ),
@@ -442,6 +444,12 @@ class IInstance(IInstanceBase):
         """Make an HTTP request with security guardrails."""
         if not isinstance(args, dict):
             raise ValueError('Tool input must be a JSON object (dict)')
+
+        # A configured credential is the only credential: reject per-call auth
+        # before shortcuts fold it into the canonical ``auth`` object.
+        config_auth = self.IGlobal.config_auth
+        if config_auth is not None:
+            _reject_per_call_auth(args, config_auth)
 
         # Expand convenience shortcuts into canonical form
         _normalize_shortcuts(args)
@@ -461,8 +469,8 @@ class IInstance(IInstanceBase):
                 method=args.get('method', 'GET'),
                 query_params=args.get('query_params'),
                 path_params=args.get('path_params'),
-                headers=args.get('headers'),
-                auth=args.get('auth'),
+                headers=_merge_headers(self.IGlobal.default_headers, args.get('headers')),
+                auth=config_auth if config_auth is not None else args.get('auth'),
                 body=args.get('body'),
                 timeout=args.get('timeout'),
             )
@@ -500,6 +508,10 @@ class IInstance(IInstanceBase):
             _pattern_matches_canonical_url(pattern, resolved_url) for pattern in self.IGlobal.url_patterns
         ):
             raise ValueError('URL does not match any allowed URL pattern.')
+
+        headers = args.get('headers')
+        if headers is not None and not isinstance(headers, dict):
+            raise ValueError('headers must be a JSON object')
 
         auth = args.get('auth')
         if auth is not None:
@@ -540,6 +552,45 @@ class IInstance(IInstanceBase):
                     )
 
         return resolved_url
+
+
+def _reject_per_call_auth(args, config_auth):
+    """Refuse any caller-supplied credential while the node carries its own.
+
+    Covers the shortcuts, the advanced ``auth`` object (``type: none`` is
+    harmless and allowed), the ``Authorization`` header, and the header the
+    configured API key occupies, so the caller can neither replace nor
+    shadow the configured credential.
+    """
+    supplied = [key for key in ('bearer_token', 'basic_auth') if args.get(key) is not None]
+    auth = args.get('auth')
+    if auth is not None and not (isinstance(auth, dict) and str(auth.get('type', 'none')).strip().lower() == 'none'):
+        supplied.append('auth')
+
+    reserved = {'authorization'}
+    if config_auth.get('type') == 'api_key':
+        reserved.add(str(config_auth['api_key']['key']).lower())
+    headers = args.get('headers')
+    if isinstance(headers, dict):
+        supplied.extend(f'headers.{name}' for name in headers if isinstance(name, str) and name.lower() in reserved)
+
+    if supplied:
+        raise ValueError(
+            f'This node sends its configured authentication; per-call credentials ({", ".join(supplied)}) are not allowed'
+        )
+
+
+def _merge_headers(defaults, per_call):
+    """Per-call headers replace same-named defaults, case-insensitively."""
+    merged = dict(defaults or {})
+    if not per_call:
+        return merged
+    for name, value in per_call.items():
+        lowered = name.lower() if isinstance(name, str) else name
+        for existing in [key for key in merged if isinstance(key, str) and key.lower() == lowered]:
+            del merged[existing]
+        merged[name] = value
+    return merged
 
 
 def _normalize_shortcuts(args):
