@@ -260,6 +260,29 @@ jobs:
       - run: ruff format --check
 
   # ---------------------------------------------------------------------------
+  #  ESLint — build scripts (scripts/ and every module's scripts/ tree).
+  #  Mirrors the local lefthook hook, like ruff-check above. The eslint
+  #  version is pinned by pnpm-lock.yaml.
+  # ---------------------------------------------------------------------------
+  eslint-scripts:
+    name: ESLint (build scripts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint:scripts
+
+  # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream
   #  gitleaks-action v2 requires a paid GITLEAKS_LICENSE for org-owned repos;
   #  the binary itself is MIT-licensed and free. Mirrors the local lefthook hook.
@@ -379,7 +402,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks, shell-contract]
+    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, eslint-scripts, gitleaks, shell-contract]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -393,7 +416,7 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
             exit 1
           fi
           # A stacked pull request builds without tests, so CI OK stays red and it
@@ -403,7 +426,7 @@ jobs:
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.

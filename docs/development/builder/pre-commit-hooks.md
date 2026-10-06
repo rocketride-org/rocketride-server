@@ -19,8 +19,11 @@ When you `git commit`, Lefthook runs these checks **sequentially** on staged fil
 | **gitleaks**    | staged   | Scans for leaked secrets/keys     |
 | **ruff check**  | `*.py`   | Lints Python                      |
 | **ruff format** | `*.py`   | Checks Python formatting          |
+| **eslint-scripts** | `**/scripts/**/*.{js,cjs,mjs}` | Lints build scripts (the builder and every module's `scripts/` tree) |
 
-> **Note:** ESLint and Prettier hooks are temporarily disabled in lefthook and will be re-enabled later alongside CI workflow integration.
+`eslint-scripts` is mirrored in CI by the `eslint-scripts` job; run the same check over every build script with `pnpm run lint:scripts`. Build scripts are limited to 120 columns (tabs count as 4); Prettier wraps code to that width (`npx prettier --write <file>`), and long strings, template literals and comments have to be split by hand.
+
+> **Note:** Repo-wide ESLint and Prettier hooks are temporarily disabled in lefthook and will be re-enabled later alongside CI workflow integration.
 
 All checks run in **check mode only**: they report errors but do not auto-fix. Fix issues manually before committing.
 
@@ -60,7 +63,7 @@ Create a `lefthook-local.yml` (gitignored) to add or override hooks for your mac
 ```yaml
 pre-commit:
   commands:
-    eslint:
+    eslint-scripts:
       skip: true # disable eslint locally
 ```
 

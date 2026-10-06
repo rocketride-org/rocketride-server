@@ -7,6 +7,15 @@
     "bracketSpacing": true,
     "arrowParens": "always",
     "endOfLine": "auto",
-    "bracketSameLine": false
+    "bracketSameLine": false,
+    "overrides": [
+        {
+            "files": "**/scripts/**/*.{js,cjs,mjs}",
+            "options": {
+                "printWidth": 120,
+                "tabWidth": 4
+            }
+        }
+    ]
 }
 
