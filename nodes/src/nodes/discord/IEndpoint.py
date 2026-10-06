@@ -24,6 +24,7 @@
 import asyncio
 import collections
 import concurrent.futures
+import contextlib
 import contextvars
 import functools
 import time
@@ -31,7 +32,7 @@ import json
 import os
 import re
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from rocketlib import (
     IEndpointBase,
@@ -52,10 +53,14 @@ depends(requirements)
 import discord
 from discord.ext import commands
 
+from ai.common.utils import parse_bool
+
 from .text_utils import (
     attachment_kind,
     chunk_message,
+    clip_attachment_text,
     compose_merged_question,
+    decode_text_attachment,
     find_marker,
     fold_binary_answer,
     fold_text_attachment,
@@ -87,6 +92,12 @@ THREAD_NAME_MAX_CHARS = 100
 # reach the emitted event.
 MAX_NO_REPLY_REASON_CHARS = 200
 
+# Upper bounds for maxConcurrentMessages and maxAttachmentBytes (the schema
+# declares the same): every message being processed holds its downloaded
+# attachments in memory until the pipeline answers.
+MAX_CONCURRENT_MESSAGES = 32
+MAX_ATTACHMENT_BYTES = 104857600
+
 # How many handled message ids are remembered. Shared by the live path and
 # backfill, so a message seen by both (or redelivered) is processed once;
 # bounded so a long-running bot does not grow it forever.
@@ -103,6 +114,103 @@ class PipelineTimeout(Exception):
 
 # A ``${NAME}`` the engine could not resolve reaches the node as literal text.
 _UNRESOLVED_VARIABLE = re.compile(r'^\$\{([A-Za-z0-9_]+)\}$')
+
+# The engine resolves only ``ROCKETRIDE_*`` variables; any other ``${NAME}``
+# is replaced with this literal (see ``resolve_pipeline_env``).
+_REDACTED_VARIABLE = '<REDACTED>'
+
+
+def _unresolved_variable(value: Any) -> Optional[str]:
+    """Describe the variable a setting value failed to resolve, else None.
+
+    Args:
+        value (Any): One setting value (the token, or one list entry).
+
+    Returns:
+        Optional[str]: A clause naming the problem, for example
+            ``the variable NAME, which is not set on this server (...)``, or
+            None when the value is not an unresolved variable.
+    """
+    text = str(value).strip()
+    if text == _REDACTED_VARIABLE:
+        problem = 'a variable without the ROCKETRIDE_ prefix, which the engine does not resolve'
+    else:
+        unresolved = _UNRESOLVED_VARIABLE.match(text)
+        if not unresolved:
+            return None
+        problem = f'the variable {unresolved.group(1)}, which is not set on this server'
+    return f'{problem} (only ROCKETRIDE_* server variables are resolved)'
+
+
+# A Discord id is plain ASCII digits. ``str.isdigit`` is not enough: it accepts
+# '²', which ``int()`` then rejects. A snowflake is a 64-bit integer, so at most
+# 20 digits: two ids pasted together are not one.
+_NUMERIC_ID = re.compile(r'[0-9]{1,20}')
+
+# Messages about a list entry show at most this many of its characters. The
+# entry may be a bot token or a secret ${ROCKETRIDE_*} value pasted by mistake,
+# and the message reaches the task status, the start error and the logs.
+_SHOWN_ENTRY_CHARS = 12
+
+# A channel, role or user mention pasted where its id belongs.
+_MENTION_WRAPPER = re.compile(r'<(#|@&|@!?)([0-9]{1,20})>')
+_MENTION_KIND = {'#': 'channel', '@&': 'role', '@': 'user', '@!': 'user'}
+
+# What each list holds, as a mention kind; a server has no mention form.
+_LIST_ID_KIND = {
+    'guildIds': ('server', None),
+    'channelIds': ('channel', 'channel'),
+    'requireMentionChannelIds': ('channel', 'channel'),
+    'allowedBotIds': ('bot user', 'user'),
+}
+
+
+def _is_numeric_id(item: str) -> bool:
+    """Whether a list entry is an id Discord could have issued (ASCII digits, 64-bit)."""
+    return _NUMERIC_ID.fullmatch(item) is not None and int(item) < 2**64
+
+
+def _shown_entry(item: str) -> str:
+    """Quote a list entry for a message without ever echoing a secret in full.
+
+    Args:
+        item (str): The entry.
+
+    Returns:
+        str: The quoted entry, whole when it is a mention (``<#123>``) or at
+            most ``_SHOWN_ENTRY_CHARS`` long, else its first
+            ``_SHOWN_ENTRY_CHARS`` characters followed by ``…``.
+    """
+    if len(item) <= _SHOWN_ENTRY_CHARS or _MENTION_WRAPPER.fullmatch(item):
+        return repr(item)
+    return repr(item[:_SHOWN_ENTRY_CHARS] + '…')
+
+
+def _non_numeric_id(field: str, item: str) -> str:
+    """Name a list entry that is not a numeric id, with a hint at the fix.
+
+    Args:
+        field (str): The setting's name.
+        item (str): The offending entry.
+
+    Returns:
+        str: For example ``channelIds has '<#123>', which is not a numeric
+            Discord id; use 123, the id inside the mention``. A mention of
+            another kind (a role in a channel list, anything in the server
+            list) never suggests its digits: they are the id of something else.
+    """
+    noun, mention_kind = _LIST_ID_KIND.get(field, ('', None))
+    wrapped = _MENTION_WRAPPER.fullmatch(item)
+    if wrapped is None:
+        hint = 'use the numeric id'
+    else:
+        kind = _MENTION_KIND[wrapped.group(1)]
+        if kind == mention_kind:
+            hint = f'use {wrapped.group(2)}, the id inside the mention'
+        else:
+            target = f'a {noun} id' if noun else 'an id'
+            hint = f'that is a {kind} mention, not {target}; use the numeric id'
+    return f'{field} has {_shown_entry(item)}, which is not a numeric Discord id; {hint}'
 
 
 def _engine_warning(message: str) -> None:
@@ -138,6 +246,38 @@ def _broken_json_text(value: Any) -> Optional[str]:
     return None
 
 
+def _raw_item_count(value: Any) -> int:
+    """How many items a list setting was given, blank ones included.
+
+    A JSON-text item (the engine's encoding of an array) counts the items it
+    holds, so ``'[]'`` and ``['[]']`` count none while ``'[""]'`` counts one.
+
+    Args:
+        value (Any): The raw config value of a list setting.
+
+    Returns:
+        int: The number of items given, blank ones included.
+    """
+    if not value:
+        return 0
+    items = list(value) if isinstance(value, (list, tuple)) else [value]
+    count = 0
+    for item in items:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text.startswith('['):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, list):
+                count += len(parsed)
+                continue
+        count += 1
+    return count
+
+
 class IEndpoint(IEndpointBase):
     """
     IEndpoint for the Discord Bot source node.
@@ -170,6 +310,10 @@ class IEndpoint(IEndpointBase):
     _reply_mode: str = 'reply'
     _show_typing: bool = True
     _max_attachment_bytes: int = 26214400
+    _max_concurrent_messages: int = 4
+    # Created in _startup on the loop that runs the handlers; bounds how many
+    # _process_message bodies run at once.
+    _message_slots: Optional[asyncio.Semaphore] = None
     _send_responses: bool = True
     _thread_name: str = 'Pipeline Response'
     _thread_name_max_length: int = 90
@@ -261,7 +405,7 @@ class IEndpoint(IEndpointBase):
         self._run()
 
     @staticmethod
-    def _as_str_list(value: Any, split: bool = True, field: str = '') -> List[str]:
+    def _as_str_list(value: Any, field: str = '', split: bool = True) -> List[str]:
         """Coerce a config value into a list of strings.
 
         Guards against a bare string (which would otherwise iterate into a
@@ -270,12 +414,11 @@ class IEndpoint(IEndpointBase):
 
         Args:
             value (Any): The raw config value (expected: list of ids).
-            split (bool): Split a bare (non-JSON) string on commas and
-                whitespace. Right for ids and extensions; wrong for phrases
-                such as escalation markers, which pass ``split=False`` so
-                "Escalated to the RocketRide team." stays one marker.
             field (str): The setting's name, for the warning a value that
                 looks like JSON but does not parse produces.
+            split (bool): Split each item on commas and whitespace (ids).
+                False keeps every item whole (phrases); items are still
+                stripped and blank ones dropped either way.
 
         Returns:
             List[str]: The strings, or an empty list.
@@ -283,6 +426,12 @@ class IEndpoint(IEndpointBase):
         if not value:
             return []
         items = list(value) if isinstance(value, (list, tuple)) else [value]
+
+        def parts(text: str) -> List[str]:
+            if not split:
+                return [text] if text else []
+            return [part for part in re.split(r'[,\s]+', text) if part]
+
         out: List[str] = []
         for item in items:
             if item is None:
@@ -308,37 +457,60 @@ class IEndpoint(IEndpointBase):
                     # Read as plain text below, which matches nothing it was
                     # meant to: say so, or an allowlist silently rejects all.
                     _config_warning(
-                        f'Discord: {field or "a list setting"} is not valid JSON ({text[:80]!r}); '
+                        f'Discord: {field or "a list setting"} is not valid JSON ({_shown_entry(text)}); '
                         f'it is read as plain text. Fix the setting.'
                     )
                 if isinstance(parsed, list):
-                    out.extend(str(v) for v in parsed if str(v).strip())
+                    # Each item gets the same strip + split as a bare string,
+                    # so '[" 123 "]' and '["123,456"]' read as ids too.
+                    for parsed_item in parsed:
+                        out.extend(parts(str(parsed_item).strip()))
                     continue
-            if split:
-                out.extend(part for part in re.split(r'[,\s]+', text) if part)
-            else:
-                out.append(text)
+            out.extend(parts(text))
         return out
 
     @classmethod
     def _list_config_error(cls, config: Dict[str, Any]) -> Optional[str]:
-        """A fatal problem in the guild or channel allowlist, else None.
+        """A fatal problem in the guild, channel or mention-channel list, else None.
 
-        Broken JSON in either, or a ``${NAME}`` the engine could not resolve
-        (it arrives as literal text and becomes an id that matches nothing),
-        leaves the bot connected but answering nothing, so the start fails
-        with the reason. Other lists only warn.
+        Broken JSON in any of the three lists, or a ``${NAME}`` the engine
+        could not resolve in any of the three (it arrives as literal text, or
+        as ``<REDACTED>``, and becomes an id that matches nothing), leaves the
+        bot connected but answering nothing, or for the mention-channel list
+        answering without the mention it was meant to require, so the start
+        fails with the reason. Other lists only warn.
+
+        A list that was given items but resolves to no ids (a set
+        ``${ROCKETRIDE_X}`` whose value is empty arrives as ``""``) fails too:
+        an empty list means "everywhere", which is not what was configured.
+
+        Any other entry that is not plain ASCII digits (a pasted ``<#123>``,
+        a channel or server name) matches nothing in the same way, so it
+        fails the start too, naming the entry.
+
+        Args:
+            config (Dict[str, Any]): The Discord config block.
+
+        Returns:
+            Optional[str]: The error to fail the start with, or None.
         """
-        for field in ('guildIds', 'channelIds'):
-            text = _broken_json_text(config.get(field))
+        for field in ('guildIds', 'channelIds', 'requireMentionChannelIds'):
+            value = config.get(field)
+            text = _broken_json_text(value)
             if text is not None:
-                return f'Discord Bot: {field} is not valid JSON ({text[:80]!r}); fix the setting'
-            for item in cls._as_str_list(config.get(field), field=field):
-                unresolved = _UNRESOLVED_VARIABLE.match(item)
-                if unresolved:
-                    return (
-                        f'Discord Bot: {field} uses the variable {unresolved.group(1)}, which is not set on this server'
-                    )
+                return f'Discord Bot: {field} is not valid JSON ({_shown_entry(text)}); fix the setting'
+            ids = cls._as_str_list(value, field=field)
+            for item in ids:
+                problem = _unresolved_variable(item)
+                if problem:
+                    return f'Discord Bot: {field} uses {problem}'
+                if not _is_numeric_id(item):
+                    return f'Discord Bot: {_non_numeric_id(field, item)}'
+            if not ids and _raw_item_count(value):
+                return (
+                    f'Discord Bot: {field} is set but resolves to no ids (an empty variable?); '
+                    f'fix the setting or remove it'
+                )
         return None
 
     @staticmethod
@@ -359,7 +531,8 @@ class IEndpoint(IEndpointBase):
         """
         try:
             return int(float(str(value)))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError: 'inf' and '1e400' parse as floats no int holds.
             return default
 
     @classmethod
@@ -369,8 +542,8 @@ class IEndpoint(IEndpointBase):
         ``_allowed_mentions`` turns every entry into ``int(...)``, and that
         call sits inside the per-chunk send: one non-numeric entry (a role
         name, a pasted ``<@&123>``) raised for every chunk of every answer, so
-        a single typo silenced the bot completely. Bad entries are dropped
-        with a debug line instead.
+        a single typo silenced the bot completely. Bad entries (anything but
+        plain ASCII digits) are dropped with a debug line instead.
 
         Args:
             value (Any): The raw config value.
@@ -381,19 +554,16 @@ class IEndpoint(IEndpointBase):
         """
         ids: List[str] = []
         for item in cls._as_str_list(value, field=field):
-            if item.isdigit():
+            if _is_numeric_id(item):
                 ids.append(item)
                 continue
-            unresolved = _UNRESOLVED_VARIABLE.match(item)
-            if unresolved:
+            problem = _unresolved_variable(item)
+            if problem:
                 # Dropped like any non-numeric entry, but an operator has to
                 # hear about it: the mention it was meant to allow never pings.
-                _config_warning(
-                    f'Discord: {field} uses the variable {unresolved.group(1)}, which is not set on this server; '
-                    f'the entry is ignored'
-                )
+                _config_warning(f'Discord: {field} uses {problem}; the entry is ignored')
             else:
-                debug(f'Discord: ignoring {field} entry {item!r} - not a numeric Discord id')
+                debug(f'Discord: ignoring {field} entry {_shown_entry(item)} - not a numeric Discord id')
         return ids
 
     def _run(self):
@@ -421,6 +591,14 @@ class IEndpoint(IEndpointBase):
             config.get('requireMentionChannelIds'), field='requireMentionChannelIds'
         )
         self._allowed_bot_ids = self._as_str_list(config.get('allowedBotIds'), field='allowedBotIds')
+        for item in self._allowed_bot_ids:
+            problem = _unresolved_variable(item)
+            if problem:
+                # Not fatal (an unmatched entry only keeps a bot out), but the
+                # bot it was meant to let through is ignored: say so.
+                _config_warning(f'Discord: allowedBotIds uses {problem}; the entry matches no bot')
+            elif not _is_numeric_id(item):
+                _config_warning(f'Discord: {_non_numeric_id("allowedBotIds", item)}; the entry matches no bot')
         self._config_error = self._list_config_error(config)
         # Mention allowlists are the one config the outbound path cannot
         # tolerate garbage in, so a non-numeric entry is dropped here.
@@ -430,47 +608,65 @@ class IEndpoint(IEndpointBase):
         self._allowed_mention_user_ids = self._snowflake_ids(
             config.get('allowedMentionUserIds'), 'allowedMentionUserIds'
         )
-        self._ignore_bots = config.get('ignoreBots', True)
-        self._require_mention = config.get('requireMention', False)
+        self._ignore_bots = parse_bool(config.get('ignoreBots'), True)
+        self._require_mention = parse_bool(config.get('requireMention'), False)
         # Engine-provided strings may be proxies; this one is compared to
         # literals and the numbers below are used where only an int works.
         self._reply_mode = str(config.get('replyMode') or 'reply')
-        self._show_typing = config.get('showTyping', True)
-        self._max_attachment_bytes = self._as_int(config.get('maxAttachmentBytes'), 26214400)
-        self._send_responses = config.get('sendResponses', True)
+        self._show_typing = parse_bool(config.get('showTyping'), True)
+        # Zero or below would skip every attachment with only a debug line, so
+        # it means "not set" and the default applies, as in ``config_int``.
+        max_attachment_bytes = self._as_int(config.get('maxAttachmentBytes'), 26214400)
+        if max_attachment_bytes <= 0:
+            max_attachment_bytes = 26214400
+        self._max_attachment_bytes = min(MAX_ATTACHMENT_BYTES, max_attachment_bytes)
+        self._max_concurrent_messages = max(
+            1, min(MAX_CONCURRENT_MESSAGES, self._as_int(config.get('maxConcurrentMessages'), 4))
+        )
+        self._send_responses = parse_bool(config.get('sendResponses'), True)
         self._thread_name = str(config.get('threadName') or 'Pipeline Response')
         self._thread_name_max_length = max(
             1, min(THREAD_NAME_MAX_CHARS, self._as_int(config.get('threadNameMaxLength'), 90))
         )
         self._thread_auto_archive_minutes = self._as_int(config.get('threadAutoArchiveMinutes'), 0)
-        self._number_chunks = config.get('numberChunks', False)
+        self._number_chunks = parse_bool(config.get('numberChunks'), False)
+        # Compared with os.path.splitext, which keeps the dot: 'md' and '.md'
+        # both have to match a.md.
         self._text_attachment_extensions = [
-            value.lower()
-            for value in self._as_str_list(config.get('textAttachmentExtensions', []), field='textAttachmentExtensions')
+            '.' + extension.lower()
+            for extension in (
+                value.strip().lstrip('.')
+                for value in self._as_str_list(
+                    config.get('textAttachmentExtensions', []), field='textAttachmentExtensions'
+                )
+            )
+            if extension
         ]
         self._text_attachment_max_chars = self._as_int(config.get('textAttachmentMaxChars'), 12000)
-        self._merge_attachments = config.get('mergeAttachments', False)
-        self._emit_reactions = config.get('emitReactions', False)
-        self._emit_no_reply = config.get('emitNoReply', False)
-        self._emit_outbound = config.get('emitOutbound', False)
-        self._include_member_metadata = config.get('includeMemberMetadata', False)
-        self._backfill_limit = self._as_int(config.get('backfillLimit'), 0)
-        self._thread_history_limit = self._as_int(config.get('threadHistoryLimit'), 0)
-        self._thread_history_max_chars = self._as_int(config.get('threadHistoryMaxChars'), 6000)
-        self._escalation_pause = config.get('escalationPause', False)
+        self._merge_attachments = parse_bool(config.get('mergeAttachments'), False)
+        self._emit_reactions = parse_bool(config.get('emitReactions'), False)
+        self._emit_no_reply = parse_bool(config.get('emitNoReply'), False)
+        self._emit_outbound = parse_bool(config.get('emitOutbound'), False)
+        self._include_member_metadata = parse_bool(config.get('includeMemberMetadata'), False)
+        # Zero (the default) turns each of these off, so a negative value
+        # means the same.
+        self._backfill_limit = max(0, self._as_int(config.get('backfillLimit'), 0))
+        self._thread_history_limit = max(0, self._as_int(config.get('threadHistoryLimit'), 0))
+        self._thread_history_max_chars = max(0, self._as_int(config.get('threadHistoryMaxChars'), 6000))
+        self._escalation_pause = parse_bool(config.get('escalationPause'), False)
         self._escalation_markers = self._as_str_list(
-            config.get('escalationMarkers'), split=False, field='escalationMarkers'
+            config.get('escalationMarkers'), field='escalationMarkers', split=False
         )
         # Engine-provided strings may be proxies; this one becomes a regex.
         self._team_mention_alias = str(config.get('teamMentionAlias', '') or '')
-        self._ignore_aimed_at_others = config.get('ignoreAimedAtOthers', False)
+        self._ignore_aimed_at_others = parse_bool(config.get('ignoreAimedAtOthers'), False)
         # Engine-provided strings may be proxies; discord.py needs a real str.
         self._ack_emoji = str(config.get('ackEmoji', '') or '')
-        self._feedback_reactions = config.get('feedbackReactions', False)
+        self._feedback_reactions = parse_bool(config.get('feedbackReactions'), False)
         self._feedback_emojis = self._as_str_list(
-            config.get('feedbackEmojis', ['✅', '❌']), split=False, field='feedbackEmojis'
+            config.get('feedbackEmojis', ['✅', '❌']), field='feedbackEmojis', split=False
         )
-        self._sanitize_replies = config.get('sanitizeReplies', False)
+        self._sanitize_replies = parse_bool(config.get('sanitizeReplies'), False)
         # Clamped to the schema's 0..3; a malformed value falls back to the default.
         # _as_int, not int(): engine number proxies are string-like with no __int__.
         self._non_answer_retries = max(0, min(3, self._as_int(config.get('nonAnswerRetries'), 1)))
@@ -541,6 +737,8 @@ class IEndpoint(IEndpointBase):
         self._inflight = set()
         self._fatal_error = None
         self._closing = False
+        # Messages past the limit wait for a slot; none are dropped.
+        self._message_slots = asyncio.Semaphore(self._max_concurrent_messages)
         self._backfill_done = False
         self._handled_message_ids = collections.OrderedDict()
         self._pipeline_executor = concurrent.futures.ThreadPoolExecutor(
@@ -555,11 +753,12 @@ class IEndpoint(IEndpointBase):
             monitorStatus('Discord Bot: missing bot token')
             raise RuntimeError('Discord Bot: missing bot token')
 
-        unresolved = _UNRESOLVED_VARIABLE.match(str(self._bot_token).strip())
-        if unresolved:
-            # The engine passes an unknown ${NAME} through as text; Discord would
-            # only say "invalid token", which points at the wrong fix.
-            message = f'Discord Bot: the bot token variable {unresolved.group(1)} is not set on this server'
+        problem = _unresolved_variable(self._bot_token)
+        if problem:
+            # The engine passes an unset ${ROCKETRIDE_*} through as text and
+            # any other ${NAME} as <REDACTED>; Discord would only say "invalid
+            # token", which points at the wrong fix.
+            message = f'Discord Bot: the bot token uses {problem}'
             monitorStatus(message)
             raise RuntimeError(message)
 
@@ -567,6 +766,15 @@ class IEndpoint(IEndpointBase):
         if config_error:
             monitorStatus(config_error)
             raise RuntimeError(config_error)
+
+        if not getattr(self, '_guild_ids', []) and not getattr(self, '_channel_ids', []):
+            # Valid, and the default, but a new Discord application is a Public
+            # Bot: anyone can add it to their server and it will answer there.
+            # A channel list alone already limits it (and refuses DMs).
+            _config_warning(
+                'Discord: guildIds and channelIds are empty, so the bot will answer in any server it is added to; '
+                'set guildIds and turn off Public Bot in the Developer Portal'
+            )
 
         intents = discord.Intents.default()
         intents.message_content = True
@@ -713,6 +921,8 @@ class IEndpoint(IEndpointBase):
 
         Args:
             message (discord.Message): The incoming Gateway message.
+            wait (bool): Await the processing task before returning instead
+                of leaving it to run in the background (used by tests).
 
         Returns:
             None
@@ -939,9 +1149,31 @@ class IEndpoint(IEndpointBase):
         The intake gate strips the text to decide whether a message has
         anything to ask; processing must see the same answer, or blank text
         next to a file runs a text pass of its own.
+
+        Args:
+            message (discord.Message): The incoming message.
+
+        Returns:
+            str: The message text, or '' when it is empty or only whitespace.
         """
         content = message.content if isinstance(message.content, str) else str(message.content or '')
         return content if content.strip() else ''
+
+    @staticmethod
+    def _answer_text(answer: Any) -> str:
+        """A pipeline answer, or '' when it is only whitespace.
+
+        Answers are chosen by truthiness, so a blank one (``'\\n'``) would
+        otherwise win over a real answer from a later lane.
+
+        Args:
+            answer (Any): One pipeline answer.
+
+        Returns:
+            str: The answer text, or '' when it is empty or only whitespace.
+        """
+        text = answer if isinstance(answer, str) else str(answer or '')
+        return text if text.strip() else ''
 
     def _message_metadata(self, message: discord.Message) -> Dict[str, Any]:
         """Build the stable downstream metadata contract for one message."""
@@ -1016,8 +1248,20 @@ class IEndpoint(IEndpointBase):
         return bool(getattr(user, 'bot', False))
 
     async def _on_raw_reaction(self, payload, added: bool):
-        """Emit one raw reaction event when reaction capture is enabled."""
+        """Emit one raw reaction event when reaction capture is enabled.
+
+        Args:
+            payload: The raw reaction payload.
+            added (bool): True for an add, False for a remove.
+
+        Returns:
+            None
+        """
         if not getattr(self, '_emit_reactions', False):
+            return
+        # The Gateway keeps delivering reactions while _shutdown waits for
+        # in-flight messages; an emit started now would outlive the pipeline.
+        if getattr(self, '_closing', False):
             return
         bot_user = getattr(getattr(self, '_bot', None), 'user', None)
         # The node's own feedback reactions (feedbackReactions adds ✅/❌ to every
@@ -1028,6 +1272,9 @@ class IEndpoint(IEndpointBase):
         member = getattr(payload, 'member', None)
         channel = self._bot.get_channel(payload.channel_id) if self._bot is not None else None
         is_thread = isinstance(channel, discord.Thread)
+        # Used for the gate and the emitted metadata alike: ``payload.member``
+        # is None on a removal, so it alone would call every bot a human.
+        reactor_is_bot = self._reactor_is_bot(payload, added)
 
         # A reaction is scoped exactly like a message: without this the
         # allowlists and ignoreBots applied to questions but not to the
@@ -1041,7 +1288,7 @@ class IEndpoint(IEndpointBase):
         if not should_process_message(
             author_id=payload.user_id,
             bot_user_id=getattr(bot_user, 'id', None),
-            author_is_bot=self._reactor_is_bot(payload, added),
+            author_is_bot=reactor_is_bot,
             ignore_bots=getattr(self, '_ignore_bots', True),
             guild_id=getattr(payload, 'guild_id', None),
             channel_id=payload.channel_id,
@@ -1063,7 +1310,7 @@ class IEndpoint(IEndpointBase):
             'guildId': str(payload.guild_id) if getattr(payload, 'guild_id', None) is not None else None,
             'createdAt': None,
             'authorId': str(payload.user_id),
-            'authorIsBot': bool(getattr(member, 'bot', False)),
+            'authorIsBot': reactor_is_bot,
             'authorDisplayName': getattr(member, 'display_name', None)
             if getattr(self, '_include_member_metadata', False)
             else None,
@@ -1079,20 +1326,29 @@ class IEndpoint(IEndpointBase):
             'groupIndex': 0,
             'groupSize': 1,
         }
-        await asyncio.to_thread(
-            self._emit_event_pipeline,
-            metadata,
-            'reaction',
-            # occurredAt is stamped once, here, so every consumer of this event — the
-            # broadcast and a later import from the task log — keys the same
-            # reaction identically.
-            {
-                'emoji': str(payload.emoji),
-                'added': added,
-                'userId': str(payload.user_id),
-                'occurredAt': int(time.time() * 1000),
-            },
+        # Tracked like a message handler, so _shutdown waits for an emit that is
+        # already under way instead of tearing the endpoint down beneath it.
+        emit = asyncio.ensure_future(
+            asyncio.to_thread(
+                self._emit_event_pipeline,
+                metadata,
+                'reaction',
+                # occurredAt is stamped once, here, so every consumer of this event — the
+                # broadcast and a later import from the task log — keys the same
+                # reaction identically.
+                {
+                    'emoji': str(payload.emoji),
+                    'added': added,
+                    'userId': str(payload.user_id),
+                    'occurredAt': int(time.time() * 1000),
+                },
+            )
         )
+        inflight = getattr(self, '_inflight', None)
+        if inflight is not None:
+            inflight.add(emit)
+            emit.add_done_callback(inflight.discard)
+        await emit
 
     # -------------------------------------------------------------------------
     # Support-bot parity behaviors (all opt-in)
@@ -1330,7 +1586,7 @@ class IEndpoint(IEndpointBase):
             await message.add_reaction(emoji)
             return True
         except Exception as e:
-            debug(f'Discord: reaction {emoji!r} failed (grant "Add Reactions"): {e}')
+            debug(f'Discord: reaction {_shown_entry(str(emoji))} failed (grant "Add Reactions"): {e}')
             return False
 
     async def _skip_reason(self, message: discord.Message) -> Optional[str]:
@@ -1395,7 +1651,8 @@ class IEndpoint(IEndpointBase):
 
         Pauses the thread when the posted answer escalated (it carries an
         escalation marker), and adds the configured feedback affordances to the
-        last posted chunk. Both are best-effort and never fail the reply.
+        last posted chunk when the whole answer went out. Both are best-effort
+        and never fail the reply.
 
         Args:
             message (discord.Message): The originating message.
@@ -1417,7 +1674,9 @@ class IEndpoint(IEndpointBase):
                 self._pause_state()[0].add(str(thread_id))
                 debug(f'Discord: escalated - thread {thread_id} paused')
 
-        if getattr(self, '_feedback_reactions', False):
+        # A partial delivery (``complete`` False) has no last chunk of the
+        # answer to grade: the reactions would land on a cut-off message.
+        if getattr(self, '_feedback_reactions', False) and outbound.get('complete', True):
             sent_messages = outbound.get('messages') or []
             if not sent_messages:
                 return
@@ -1432,8 +1691,8 @@ class IEndpoint(IEndpointBase):
         """Route a message to the pipeline and send back its answer.
 
         With ``mergeAttachments`` on a message that carries text
-        plus attachments produces ONE answer that has seen everything, the way
-        the support bot did: text-like files are folded into the question,
+        plus attachments produces ONE answer that has seen everything:
+        text-like files are folded into the question,
         image/audio/video/other attachments still run as their own lane objects
         first, and their answers are folded in as context before the single
         text pass whose answer is posted. With it off, text and attachments are
@@ -1449,147 +1708,163 @@ class IEndpoint(IEndpointBase):
         Returns:
             None
         """
-        metadata = self._message_metadata(message)
-        eligible_attachments = [
-            attachment
-            for attachment in message.attachments
-            if not isinstance(getattr(attachment, 'size', None), (int, float))
-            or attachment.size <= self._max_attachment_bytes
-        ]
-        merge = bool(getattr(self, '_merge_attachments', False)) and bool(message.attachments)
-        question = self._question_text(message)
-        group_size = (1 if question else 0) + len(eligible_attachments)
-        group_index = 0
-        processing_errors: List[str] = []
-        try:
-            # Paused thread / message aimed at somebody else: stay quiet without
-            # ingesting anything, exactly as the support bot does.
-            skip_reason = await self._skip_reason(message)
-            if skip_reason is not None:
-                # The message itself still travels with the event: a team
-                # member answering inside a paused thread is the signal that a
-                # human took over, and no ``message`` event is emitted for it.
-                content = message.content if isinstance(message.content, str) else str(message.content or '')
-                await self._emit_no_reply_event(metadata, skip_reason, text=content[:2000])
+        # Each message holds its downloaded attachments until the pipeline
+        # answers: bound how many are in here at once. Later ones wait.
+        slots = getattr(self, '_message_slots', None)
+        async with slots if slots is not None else contextlib.nullcontext():
+            metadata = self._message_metadata(message)
+            if getattr(self, '_closing', False):
+                # Shutdown began while this message waited for a slot: it must
+                # not download, run the pipeline or reply after that point.
+                await self._emit_no_reply_event(metadata, 'shutdown')
                 return
-
-            reply = ''
-            # What it would take to ask the text pass again; None when this
-            # message never had one (attachments only). Set by whichever branch
-            # below ran it, and consumed by the non-answer retry.
-            text_pass: Optional[Dict[str, Any]] = None
-
-            if merge:
-                reply = await self._process_merged(message, metadata, eligible_attachments, processing_errors)
-                text_pass = metadata.pop('_textPass', None)
-            else:
-                if question:
-                    text_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
-                    group_index += 1
-                    # In a thread, carry the earlier conversation as context. The SSE
-                    # payload keeps the user's own words (plus how much context was
-                    # added) so a UI still shows the question that was asked.
-                    transcript = (
-                        await self._thread_transcript(message) if isinstance(message.channel, discord.Thread) else ''
-                    )
-                    pipeline_text = with_thread_context(question, transcript)
-                    text_reply = await self._run_with_optional_typing(
-                        message,
-                        lambda: self._run_pipeline(
-                            self._run_text_pipeline,
-                            pipeline_text,
-                            message.channel.id,
-                            message.id,
-                            text_meta,
-                            sse_text=question,
-                            context_chars=len(transcript),
-                        ),
-                    )
-                    if text_reply:
-                        reply = text_reply
-                    if text_meta.get('_pipelineError'):
-                        processing_errors.append(text_meta.pop('_pipelineError'))
-                    text_pass = {
-                        'text': pipeline_text,
-                        'meta': text_meta,
-                        'sseText': question,
-                        'contextChars': len(transcript),
-                    }
-
-                # A single Discord message can carry up to 10 attachments. As a
-                # source node we ingest every one (each is downloaded, routed, and
-                # counted via monitorCompleted); only the first non-empty answer is
-                # kept for the reply.
-                for attachment_index, attachment in enumerate(message.attachments):
-                    attachment_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
-                    if attachment in eligible_attachments:
-                        group_index += 1
-                    att_reply = await self._process_attachment(message, attachment, attachment_meta, attachment_index)
-                    if attachment_meta.get('_pipelineError'):
-                        processing_errors.append(attachment_meta.pop('_pipelineError'))
-                    if att_reply and not reply:
-                        reply = att_reply
-
-            # The literal team alias becomes a real role mention before anything
-            # else reads the answer: escalation-marker detection, the sanitizer
-            # and the posted text must all see the mention that pings the team.
-            reply = self._with_team_mention(reply)
-
-            if getattr(self, '_sanitize_replies', False):
-                if reply and looks_like_error(reply):
-                    # An engine or model failure arrived as the "answer" (a
-                    # provider error, a traceback). It is not a transient
-                    # non-answer, so it is neither relayed nor retried.
-                    debug(f'Discord: suppressed an error-looking answer for {message.id}: {reply[:160]}')
-                    await self._emit_no_reply_event(metadata, 'model_error')
+            eligible_attachments = [
+                attachment
+                for attachment in message.attachments
+                if not isinstance(getattr(attachment, 'size', None), (int, float))
+                or attachment.size <= self._max_attachment_bytes
+            ]
+            merge = bool(getattr(self, '_merge_attachments', False)) and bool(message.attachments)
+            question = self._question_text(message)
+            group_size = (1 if question else 0) + len(eligible_attachments)
+            group_index = 0
+            processing_errors: List[str] = []
+            try:
+                # Paused thread / message aimed at somebody else: stay quiet without
+                # ingesting anything, exactly as the support bot does.
+                skip_reason = await self._skip_reason(message)
+                if skip_reason is not None:
+                    # The message itself still travels with the event: a team
+                    # member answering inside a paused thread is the signal that a
+                    # human took over, and no ``message`` event is emitted for it.
+                    content = message.content if isinstance(message.content, str) else str(message.content or '')
+                    await self._emit_no_reply_event(metadata, skip_reason, text=content[:2000])
                     return
 
-                # Leaked agent scratchpad is not an answer: post the hand-off
-                # line when it escalated, otherwise ask once more (a ReAct agent
-                # that stopped at "Thought:" usually answers on a second run)
-                # before staying quiet. An empty answer is transient in the same
-                # way, so it is retried too — unless the pipeline itself failed
-                # for this message, where asking again only repeats the failure.
-                sanitized = sanitize_reply(reply, self._effective_markers()) if reply else ''
-                if not sanitized and text_pass is not None and (reply or not processing_errors):
-                    retry_errors: List[str] = []
-                    sanitized = await self._retry_non_answer(message, text_pass, retry_errors)
-                    if retry_errors:
+                reply = ''
+                # What it would take to ask the text pass again; None when this
+                # message never had one (attachments only). Set by whichever branch
+                # below ran it, and consumed by the non-answer retry.
+                text_pass: Optional[Dict[str, Any]] = None
+
+                if merge:
+                    reply = await self._process_merged(message, metadata, eligible_attachments, processing_errors)
+                    text_pass = metadata.pop('_textPass', None)
+                else:
+                    if question:
+                        text_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
+                        group_index += 1
+                        # In a thread, carry the earlier conversation as context. The SSE
+                        # payload keeps the user's own words (plus how much context was
+                        # added) so a UI still shows the question that was asked.
+                        transcript = (
+                            await self._thread_transcript(message)
+                            if isinstance(message.channel, discord.Thread)
+                            else ''
+                        )
+                        pipeline_text = with_thread_context(question, transcript)
+                        text_reply = await self._run_with_optional_typing(
+                            message,
+                            lambda: self._run_pipeline(
+                                self._run_text_pipeline,
+                                pipeline_text,
+                                message.channel.id,
+                                message.id,
+                                text_meta,
+                                sse_text=question,
+                                context_chars=len(transcript),
+                            ),
+                        )
+                        text_reply = self._answer_text(text_reply)
+                        if text_reply:
+                            reply = text_reply
+                        if text_meta.get('_pipelineError'):
+                            processing_errors.append(text_meta.pop('_pipelineError'))
+                        text_pass = {
+                            'text': pipeline_text,
+                            'meta': text_meta,
+                            'sseText': question,
+                            'contextChars': len(transcript),
+                        }
+
+                    # A single Discord message can carry up to 10 attachments. As a
+                    # source node we ingest every one (each is downloaded, routed, and
+                    # counted via monitorCompleted); only the first non-empty answer is
+                    # kept for the reply.
+                    for attachment_index, attachment in enumerate(message.attachments):
+                        attachment_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
+                        if attachment in eligible_attachments:
+                            group_index += 1
+                        att_reply = self._answer_text(
+                            await self._process_attachment(message, attachment, attachment_meta, attachment_index)
+                        )
+                        if attachment_meta.get('_pipelineError'):
+                            processing_errors.append(attachment_meta.pop('_pipelineError'))
+                        if att_reply and not reply:
+                            reply = att_reply
+
+                # The literal team alias becomes a real role mention before anything
+                # else reads the answer: escalation-marker detection, the sanitizer
+                # and the posted text must all see the mention that pings the team.
+                reply = self._with_team_mention(reply)
+
+                if getattr(self, '_sanitize_replies', False):
+                    if reply and looks_like_error(reply):
+                        # An engine or model failure arrived as the "answer" (a
+                        # provider error, a traceback). It is not a transient
+                        # non-answer, so it is neither relayed nor retried.
+                        debug(f'Discord: suppressed an error-looking answer for {message.id}: {reply[:160]}')
                         await self._emit_no_reply_event(metadata, 'model_error')
                         return
-                if reply and not sanitized:
-                    # The pipeline did answer; nothing in it was postable.
-                    await self._emit_no_reply_event(metadata, 'non_answer')
-                    return
-                reply = sanitized
 
-            if reply and self._send_responses:
-                outbound = await self._send_response(message, reply)
-                if getattr(self, '_escalation_pause', False) or getattr(self, '_feedback_reactions', False):
-                    await self._after_send(message, reply, outbound)
-                if outbound.get('messageIds'):
-                    if getattr(self, '_emit_outbound', False):
-                        await self._emit_outbound_event(message, metadata, reply, outbound)
-                else:
-                    # There was an answer and posting it was wanted, but every
-                    # chunk failed (a missing Send Messages permission, a
-                    # deleted channel). Without this the question has a
-                    # ``message`` event and no outcome at all.
-                    await self._emit_no_reply_event(metadata, 'send_failed')
-            elif reply and getattr(self, '_emit_outbound', False):
-                # sendResponses is off: still make the answer observable downstream
-                await self._emit_outbound_event(
-                    message, metadata, reply, {'messageIds': [], 'destination': 'suppressed'}
-                )
-            elif not reply and getattr(self, '_emit_no_reply', False):
-                await self._emit_no_reply_event(metadata, processing_errors[0] if processing_errors else 'no_answer')
-        except PipelineTimeout as e:
-            debug(f'Discord: {e} for {message.id}; its late answer will be dropped')
-            await self._emit_no_reply_event(metadata, 'timeout')
-        except Exception as e:
-            debug(f'Discord _process_message: EXCEPTION {e}')
-            if getattr(self, '_emit_no_reply', False):
-                await self._emit_no_reply_event(metadata, str(e))
+                    # Leaked agent scratchpad is not an answer: post the hand-off
+                    # line when it escalated, otherwise ask once more (a ReAct agent
+                    # that stopped at "Thought:" usually answers on a second run)
+                    # before staying quiet. An empty answer is transient in the same
+                    # way, so it is retried too — unless the pipeline itself failed
+                    # for this message, where asking again only repeats the failure.
+                    sanitized = sanitize_reply(reply, self._effective_markers()) if reply else ''
+                    if not sanitized and text_pass is not None and (reply or not processing_errors):
+                        retry_errors: List[str] = []
+                        sanitized = await self._retry_non_answer(message, text_pass, retry_errors)
+                        if retry_errors:
+                            await self._emit_no_reply_event(metadata, 'model_error')
+                            return
+                    if reply and not sanitized:
+                        # The pipeline did answer; nothing in it was postable.
+                        await self._emit_no_reply_event(metadata, 'non_answer')
+                        return
+                    reply = sanitized
+
+                if reply and self._send_responses:
+                    outbound = await self._send_response(message, reply)
+                    if getattr(self, '_escalation_pause', False) or getattr(self, '_feedback_reactions', False):
+                        await self._after_send(message, reply, outbound)
+                    if outbound.get('messageIds'):
+                        if getattr(self, '_emit_outbound', False):
+                            await self._emit_outbound_event(message, metadata, reply, outbound)
+                    else:
+                        # There was an answer and posting it was wanted, but every
+                        # chunk failed (a missing Send Messages permission, a
+                        # deleted channel). Without this the question has a
+                        # ``message`` event and no outcome at all.
+                        await self._emit_no_reply_event(metadata, 'send_failed')
+                elif reply and getattr(self, '_emit_outbound', False):
+                    # sendResponses is off: still make the answer observable downstream
+                    await self._emit_outbound_event(
+                        message, metadata, reply, {'messageIds': [], 'destination': 'suppressed'}
+                    )
+                elif not reply and getattr(self, '_emit_no_reply', False):
+                    await self._emit_no_reply_event(
+                        metadata, processing_errors[0] if processing_errors else 'no_answer'
+                    )
+            except PipelineTimeout as e:
+                debug(f'Discord: {e} for {message.id}; its late answer will be dropped')
+                await self._emit_no_reply_event(metadata, 'timeout')
+            except Exception as e:
+                debug(f'Discord _process_message: EXCEPTION {e}')
+                if getattr(self, '_emit_no_reply', False):
+                    await self._emit_no_reply_event(metadata, str(e))
 
     async def _process_merged(
         self,
@@ -1600,8 +1875,7 @@ class IEndpoint(IEndpointBase):
     ) -> str:
         """Answer a message with attachments in a single text pass.
 
-        Mirrors the support bot's ``collectParts`` / ``combineIfNeeded``:
-        text-like files are folded into the question, every other attachment
+        Text-like files are folded into the question, every other attachment
         still becomes its own lane object (same lane, same metadata, same SSE
         event as when merging is off) and its answer is folded in as context.
         The one text pass that follows is the reply; if it produces nothing the
@@ -1625,13 +1899,20 @@ class IEndpoint(IEndpointBase):
                 # Oversized files go here too: _process_attachment skips them
                 # with a debug log, as it does when merging is off.
                 binaries.append((attachment_index, attachment))
-        eligible_binaries = [item for item in binaries if item[1] in eligible_attachments]
 
         blocks: List[str] = []
-        for _attachment_index, attachment in text_like:
-            block = await self._folded_text_attachment(attachment, processing_errors)
+        downloaded: Dict[int, bytes] = {}
+        for attachment_index, attachment in text_like:
+            block, binary_data = await self._folded_text_attachment(attachment, processing_errors)
             if block:
                 blocks.append(block)
+            elif binary_data is not None:
+                # Binary content after all: its own lane object, as it is with
+                # merging off, instead of being dropped.
+                binaries.append((attachment_index, attachment))
+                downloaded[attachment_index] = binary_data
+        binaries.sort(key=lambda item: item[0])
+        eligible_binaries = [item for item in binaries if item[1] in eligible_attachments]
 
         # groupSize has to be on the objects pushed below, before the text pass
         # has happened: anything foldable means a text pass is coming. The one
@@ -1647,7 +1928,15 @@ class IEndpoint(IEndpointBase):
             attachment_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
             if attachment in eligible_attachments:
                 group_index += 1
-            att_reply = await self._process_attachment(message, attachment, attachment_meta, attachment_index)
+            att_reply = self._answer_text(
+                await self._process_attachment(
+                    message,
+                    attachment,
+                    attachment_meta,
+                    attachment_index,
+                    file_data=downloaded.get(attachment_index),
+                )
+            )
             if attachment_meta.get('_pipelineError'):
                 processing_errors.append(attachment_meta.pop('_pipelineError'))
             if not att_reply:
@@ -1691,7 +1980,7 @@ class IEndpoint(IEndpointBase):
             'sseText': question or pipeline_text,
             'contextChars': len(pipeline_text) - len(question),
         }
-        return text_reply or first_answer
+        return self._answer_text(text_reply) or first_answer
 
     async def _retry_non_answer(
         self,
@@ -1739,7 +2028,7 @@ class IEndpoint(IEndpointBase):
                     retry=attempt,
                 ),
             )
-            answer = self._with_team_mention(answer)
+            answer = self._with_team_mention(self._answer_text(answer))
             if answer and looks_like_error(answer):
                 debug(f'Discord: retry {attempt} for {message.id} returned an error, not an answer')
                 if errors is not None:
@@ -1769,33 +2058,38 @@ class IEndpoint(IEndpointBase):
         extension = os.path.splitext(attachment.filename)[1].lower()
         return mime_type.startswith('text/') or extension in extensions
 
-    async def _folded_text_attachment(self, attachment: discord.Attachment, processing_errors: List[str]) -> str:
+    async def _folded_text_attachment(
+        self, attachment: discord.Attachment, processing_errors: List[str]
+    ) -> Tuple[str, Optional[bytes]]:
         """Download one text-like attachment and render it for the question.
 
         The caller has already applied the size cap; this applies the character
-        cap and drops files that turn out to hold binary content, as the
-        support bot does.
+        cap and hands back a file that turns out to hold binary content, so it
+        can be routed like any other binary attachment.
 
         Args:
             attachment (discord.Attachment): A text-like attachment.
             processing_errors (List[str]): Collects a failed download's error.
 
         Returns:
-            str: The block to fold in, or '' when the file is unusable.
+            Tuple[str, Optional[bytes]]: The block to fold in ('' when there
+                is none), and the downloaded bytes when the file is binary
+                content (else None).
         """
         try:
             file_data = await attachment.read()
         except Exception as e:
             debug(f'Discord: attachment {attachment.filename} error: {e}')
             processing_errors.append(str(e))
-            return ''
+            return '', None
         if not file_data:
-            return ''
-        decoded = file_data.decode('utf-8', errors='ignore')
-        if '\x00' in decoded:
-            debug(f'Discord: skipping attachment {attachment.filename} (binary content)')
-            return ''
-        return fold_text_attachment(attachment.filename, decoded, getattr(self, '_text_attachment_max_chars', 12000))
+            return '', None
+        decoded = decode_text_attachment(file_data)
+        if decoded is None:
+            debug(f'Discord: attachment {attachment.filename} holds binary content; routing it as binary')
+            return '', file_data
+        block = fold_text_attachment(attachment.filename, decoded, getattr(self, '_text_attachment_max_chars', 12000))
+        return block, None
 
     async def _run_pipeline(self, func: Callable, *args, **kwargs):
         """Run one blocking pipeline call on the node's own bounded pool.
@@ -1894,12 +2188,21 @@ class IEndpoint(IEndpointBase):
         attachment: discord.Attachment,
         meta: Optional[Dict[str, Any]] = None,
         attachment_index: int = 0,
+        file_data: Optional[bytes] = None,
     ) -> str:
         """Download one attachment and route it to the matching lane.
 
         Args:
             message (discord.Message): The parent message (for entry URL).
             attachment (discord.Attachment): The attachment to download.
+            meta (Optional[Dict[str, Any]]): The object's metadata contract
+                (group index and size already set); built from the message
+                when None. A pipeline or download error is recorded on it
+                as ``_pipelineError``.
+            attachment_index (int): The attachment's position in the
+                message (object name ``<message_id>:<index>``).
+            file_data (Optional[bytes]): The bytes, when the caller already
+                downloaded them; not fetched again.
 
         Returns:
             str: The first pipeline answer, or '' if skipped or none produced.
@@ -1911,14 +2214,17 @@ class IEndpoint(IEndpointBase):
                 )
                 return ''
             mime_type = guess_media_type(attachment.filename, attachment.content_type or '')
-            file_data = await attachment.read()
+            if file_data is None:
+                file_data = await attachment.read()
             if not file_data:
                 return ''
             if meta is None:
                 meta = self._message_metadata(message)
-            if self._is_text_attachment(attachment):
-                decoded = file_data.decode('utf-8', errors='ignore')
-                decoded = decoded[: getattr(self, '_text_attachment_max_chars', 12000)]
+            # Same decode and cap as the merged path; a file with a NUL byte
+            # is binary content and goes down the binary path below.
+            decoded = decode_text_attachment(file_data) if self._is_text_attachment(attachment) else None
+            if decoded is not None:
+                decoded = clip_attachment_text(decoded, getattr(self, '_text_attachment_max_chars', 12000))
                 framed = f'[attachment {attachment.filename}]\n{decoded}'
                 return await self._run_with_optional_typing(
                     message,
@@ -1965,6 +2271,13 @@ class IEndpoint(IEndpointBase):
         metadata dict to the object flowing through the pipe (see
         ``IServiceFilterPipe``); it does not touch the entry's url/name. Called
         best-effort so a pipe implementation without it never breaks ingestion.
+
+        Args:
+            pipe (Any): The engine pipe the object is being written to.
+            metadata (Dict[str, Any]): The per-object metadata contract.
+
+        Returns:
+            None
         """
         try:
             pipe.sendTagMetadata(metadata)
@@ -1981,6 +2294,15 @@ class IEndpoint(IEndpointBase):
         exposes the node's metadata contract to a subscriber. Best-effort: a
         missing ``rocketlib.engine`` (unit tests) or pipe id never breaks
         ingestion.
+
+        Args:
+            pipe (Any): The engine pipe, for its ``pipeId``.
+            event_type (str): ``message``, ``reaction``, ``no_reply`` or ``outbound``.
+            metadata (Dict[str, Any]): The per-object metadata contract.
+            payload (Dict[str, Any]): The event-specific fields.
+
+        Returns:
+            None
         """
         try:
             from rocketlib.engine import monitorSSE  # type: ignore  # engine-only module
@@ -2020,6 +2342,12 @@ class IEndpoint(IEndpointBase):
             text (str): The message text.
             channel_id (int): The originating channel id (entry URL).
             message_id (int): The originating message id (entry URL).
+            meta (Dict[str, Any]): The object's metadata contract; a
+                pipeline error is recorded on it as ``_pipelineError``.
+            object_name (Optional[str]): The entry name; the message id
+                when None (a text attachment passes ``<message_id>:<index>``).
+            attachment_id (Optional[int]): Appended to the entry URL for a
+                text attachment; None for the message's own text.
             sse_text (Optional[str]): Text to broadcast instead of ``text`` —
                 the user's own message when thread context was prepended.
             context_chars (int): Size of the prepended thread transcript.
@@ -2082,8 +2410,13 @@ class IEndpoint(IEndpointBase):
         Args:
             file_data (bytes): The raw attachment bytes.
             mime_type (str): The attachment MIME type (selects the lane).
-            attachment_id (int): The attachment id (entry URL / name).
+            attachment_id (int): The attachment id (entry URL).
             channel_id (int): The originating channel id (entry URL).
+            message_id (int): The originating message id (entry URL and name).
+            attachment_index (int): The attachment's position in the message
+                (entry name ``<message_id>:<index>``).
+            meta (Dict[str, Any]): The object's metadata contract; a
+                pipeline error is recorded on it as ``_pipelineError``.
 
         Returns:
             str: The first pipeline answer, or '' on error / no answers.
@@ -2135,7 +2468,21 @@ class IEndpoint(IEndpointBase):
             self.target.putPipe(pipe)
 
     def _emit_event_pipeline(self, metadata: Dict[str, Any], event_type: str, payload: Dict[str, Any]):
-        """Emit a small tagged JSON event object without waiting for an answer."""
+        """Emit a small tagged JSON event object without waiting for an answer.
+
+        The object goes out on the ``tags`` lane with the URL
+        ``discord://<channel_id>/<message_id>/<event_type>`` and the name
+        ``<message_id>:<event_type>``, and is broadcast as an ``apaevt_sse``
+        event. Blocking; called through ``asyncio.to_thread``.
+
+        Args:
+            metadata (Dict[str, Any]): The message's metadata contract.
+            event_type (str): ``reaction``, ``no_reply`` or ``outbound``.
+            payload (Dict[str, Any]): The event-specific fields.
+
+        Returns:
+            None
+        """
         event_meta = dict(metadata, eventType=event_type)
         message_id = event_meta.get('messageId') or event_meta.get('correlationId') or 'event'
         channel_id = event_meta.get('channelId') or 'unknown'
@@ -2178,6 +2525,9 @@ class IEndpoint(IEndpointBase):
                 skipped without being ingested — nothing else records it. Left
                 off every other reason, whose question is already on a
                 ``message`` event.
+
+        Returns:
+            None
         """
         if not getattr(self, '_emit_no_reply', False):
             return
@@ -2193,6 +2543,20 @@ class IEndpoint(IEndpointBase):
         text: str,
         outbound: Optional[Dict[str, Any]],
     ):
+        """Emit one ``outbound`` event for an answer, when emitOutbound is on.
+
+        Args:
+            message (discord.Message): The message the answer is for.
+            metadata (Dict[str, Any]): The message's metadata contract.
+            text (str): The answer text.
+            outbound (Optional[Dict[str, Any]]): What ``_send_response``
+                returned, or ``{'messageIds': [], 'destination': 'suppressed'}``
+                when sendResponses is off; None falls back to no ids and the
+                configured reply mode. A missing ``complete`` counts as True.
+
+        Returns:
+            None
+        """
         if not getattr(self, '_emit_outbound', False):
             return
         details = outbound or {'messageIds': [], 'destination': self._reply_mode}
@@ -2229,7 +2593,14 @@ class IEndpoint(IEndpointBase):
             response (str): The pipeline answer text.
 
         Returns:
-            None
+            Dict[str, Any]: What was posted, with these keys:
+                ``messageIds`` (List[str]): the ids of the posted messages, in
+                order; empty when nothing was posted.
+                ``destination`` (str): where the first chunk went (``reply``,
+                ``thread`` or ``channel``), or the configured reply mode when
+                nothing was posted.
+                ``complete`` (bool): False when a chunk failed and the rest
+                were abandoned, so Discord shows only part of the answer.
         """
         thread = None
         sent_ids: List[str] = []
@@ -2238,7 +2609,14 @@ class IEndpoint(IEndpointBase):
         # Earlier chunks may already be on Discord when a later one fails, so
         # "some ids came back" is not "the whole answer was posted".
         complete = True
-        for chunk in chunk_message(response, number=bool(getattr(self, '_number_chunks', False))):
+        # A blank chunk is not a message Discord accepts; zero chunks left is
+        # nothing to send, not a failed send.
+        chunks = [
+            chunk
+            for chunk in chunk_message(response, number=bool(getattr(self, '_number_chunks', False)))
+            if chunk.strip()
+        ]
+        for chunk in chunks:
             try:
                 thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations, sent_messages)
             except discord.RateLimited as e:
@@ -2286,8 +2664,7 @@ class IEndpoint(IEndpointBase):
 
         ``{content}`` is the triggering message's text; a message that carries
         only files has none, so the first attachment's filename stands in for
-        it (the support bot's ``text || firstAttachment.name || 'Support'``).
-        The resolved name is capped by ``threadNameMaxLength``, and the node's
+        it. The resolved name is capped by ``threadNameMaxLength``, and the node's
         own default is used when nothing is left.
 
         Args:
@@ -2313,6 +2690,21 @@ class IEndpoint(IEndpointBase):
         destinations: Optional[List[str]],
         sent_messages: Optional[List[Any]] = None,
     ):
+        """Record one posted chunk in the caller's collectors.
+
+        Args:
+            sent: The message Discord returned for the chunk; its id is kept
+                when it has one.
+            destination (str): Where the chunk went (``reply``, ``thread`` or
+                ``channel``).
+            sent_ids (Optional[List[str]]): Collects posted message ids; None
+                to skip.
+            destinations (Optional[List[str]]): Collects the destination of
+                every chunk; None to skip.
+
+        Returns:
+            None
+        """
         if sent_ids is not None and sent is not None and getattr(sent, 'id', None) is not None:
             sent_ids.append(str(sent.id))
         if destinations is not None:

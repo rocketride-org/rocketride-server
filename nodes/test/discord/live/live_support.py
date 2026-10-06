@@ -959,7 +959,7 @@ class EngineSession:
 
         Any task already started by this session is terminated first: the pipe's
         bot token is the *same* identity, and two Gateway sessions on one token
-        answer every message twice (see "Engine findings" in the README).
+        answer every message twice.
         """
         self.terminate()
         self.events.clear()

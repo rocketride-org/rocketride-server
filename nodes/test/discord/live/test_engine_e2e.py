@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""L3 engine end-to-end tests (E01..E06).
+"""L3 engine end-to-end tests (E01..E04).
 
 The layer L1/L2 deliberately stub out: a **real** RocketRide engine spawns the
 discord node from ``engine_min.pipe``, a real pipeline (prompt -> OpenAI ->
@@ -34,16 +34,13 @@ from .live_support import (
     engine_reachable,
     live_only,
     load_engine_config,
-    tcp_open,
 )
 from .test_live_io import METADATA_KEYS
 
 pytestmark = live_only
 
 PIPE_PATH = os.path.join(os.path.dirname(__file__), 'engine_min.pipe')
-ESCALATION_LINE = 'Escalated to the RocketRide team.'
 TASK_STATE_RUNNING = 3
-QDRANT_PORT = 6333
 
 
 def _gate_reason() -> str:
@@ -178,39 +175,3 @@ def test_e04_thread_followup_reaches_pipeline(engine, engine_config, driver_bot)
     assert str(metadata['threadId']) == str(thread.id)
     assert str(metadata['parentChannelId']) == engine_config['supportChannelId']
     print(f'\nE04 thread {thread.id} {thread.name!r}; follow-up answered by {second.id}')
-
-
-# ---------------------------------------------------------------------------
-# E05 — escalation
-# ---------------------------------------------------------------------------
-
-
-@requires_engine
-def test_e05_escalation_line_without_ping(engine, engine_config, driver_bot):
-    """A question that needs a human ends with the escalation line and pings nobody."""
-    _running(engine, engine_config, 'reply')
-    posted = driver_bot.post('[e2e E05] What is my invoice total this month?')
-    answer = driver_bot.wait_for_answer(driver_bot.channel, posted, timeout=60, match=_is_reply_to(posted))
-    assert answer is not None, 'no escalation reply within 60s'
-    lines = [line.strip() for line in answer.content.strip().splitlines() if line.strip()]
-    assert lines[-1] == ESCALATION_LINE, f'reply does not end with the escalation line: {lines[-1]!r}'
-    assert answer.role_mentions == []
-    assert answer.mention_everyone is False
-    print(f'\nE05 reply {answer.id}: {answer.content[-120:]!r}')
-
-
-# ---------------------------------------------------------------------------
-# E06 — eval-capture branch (needs a local Qdrant)
-# ---------------------------------------------------------------------------
-
-
-@requires_engine
-@pytest.mark.skipif(
-    not tcp_open('localhost', QDRANT_PORT, timeout=2), reason='capture pipe needs a Qdrant on port 6333'
-)
-def test_e06_event_branch_lands_in_store(engine, engine_config, driver_bot):
-    """reaction, no_reply and outbound events land in the store branch with matching correlationId."""
-    # TODO: discord-eval-capture.pipe — run it alongside the support pipe, post
-    # one driver message, then assert the event lane's reaction / no_reply /
-    # outbound records reach the Qdrant collection keyed by correlationId.
-    pytest.skip('TODO: discord-eval-capture.pipe is not wired into the harness yet')
