@@ -29,7 +29,29 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeDirAndParents, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, writeFileEnsure, syncDir, formatSyncStats, stat, absolutizeImageLinks } = require('../../../scripts/lib');
+const {
+	execCommand,
+	removeDirs,
+	removeDirAndParents,
+	removeMatching,
+	PROJECT_ROOT,
+	BUILD_ROOT,
+	DIST_ROOT,
+	hasSourceChanged,
+	saveSourceHash,
+	setState,
+	exists,
+	copyFile,
+	mkdir,
+	rm,
+	readFile,
+	writeFile,
+	writeFileEnsure,
+	syncDir,
+	formatSyncStats,
+	stat,
+	absolutizeImageLinks,
+} = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
@@ -61,7 +83,10 @@ const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'v
 // =============================================================================
 
 async function hasVscodeOrSharedUiChanged() {
-	const [vscode, sharedUi] = await Promise.all([hasSourceChanged(SRC_DIR, SRC_HASH_KEY), hasSourceChanged(SHARED_UI_SRC, SHARED_UI_HASH_KEY)]);
+	const [vscode, sharedUi] = await Promise.all([
+		hasSourceChanged(SRC_DIR, SRC_HASH_KEY),
+		hasSourceChanged(SHARED_UI_SRC, SHARED_UI_HASH_KEY),
+	]);
 	return {
 		changed: vscode.changed || sharedUi.changed,
 		srcHash: vscode.hash,
@@ -167,7 +192,21 @@ function makeStageFilesAction() {
 			const pkg = JSON.parse(await readFile(pkgPath));
 			pkg.main = './rocketride.js';
 			pkg.icon = 'rocketride-dark-icon.png';
-			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'shell.tgz', 'rocketride-client.tgz', 'devServerGuard.cjs', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
+			pkg.files = [
+				'rocketride.js',
+				'rocketride.js.map',
+				'webview/**',
+				'shell.tgz',
+				'rocketride-client.tgz',
+				'devServerGuard.cjs',
+				'rocketride-dark-icon.png',
+				'rocketride-light-icon.png',
+				'docker.svg',
+				'onprem.svg',
+				'package.json',
+				'LICENSE',
+				'README.md',
+			];
 			const stagedPkg = JSON.stringify(pkg, null, 2);
 			const manifestChanged = !buildHasManifest || String(await readFile(stagedPkgPath)) !== stagedPkg;
 
@@ -193,7 +232,9 @@ function makeStageFilesAction() {
 				// rocketride-1.9.0.tgz above rocketride-1.10.0.tgz, silently
 				// shipping a stale offline fallback across digit boundaries.
 				const clientTgzs = await glob('rocketride-*.tgz', { cwd: clientTgzDir, nodir: true, absolute: true });
-				const stamped = await Promise.all(clientTgzs.map(async (file) => ({ file, mtime: (await stat(file)).mtimeMs })));
+				const stamped = await Promise.all(
+					clientTgzs.map(async (file) => ({ file, mtime: (await stat(file)).mtimeMs }))
+				);
 				stamped.sort((a, b) => a.mtime - b.mtime);
 				const newest = stamped.length > 0 ? stamped[stamped.length - 1].file : undefined;
 				if (newest) {
@@ -242,10 +283,16 @@ function makeStageFilesAction() {
 			}
 			await copyFile(path.join(PROJECT_ROOT, 'LICENSE'), path.join(BUILD_DIR, 'LICENSE'));
 			if (!(await exists(README_DEST))) {
-				throw new Error(`README.md missing at ${README_DEST} — the marketplace README is tracked source in apps/vscode/`);
+				throw new Error(
+					`README.md missing at ${README_DEST} — the marketplace README is tracked source in apps/vscode/`
+				);
 			}
-			// Relative image links become raw-GitHub URLs on main: the marketplace renders the README with no repo behind it.
-			await writeFileEnsure(path.join(BUILD_DIR, 'README.md'), absolutizeImageLinks(await readFile(README_DEST, 'utf8'), 'apps/vscode'));
+			// Relative image links become raw-GitHub URLs on main: the marketplace renders the
+			// README with no repo behind it.
+			await writeFileEnsure(
+				path.join(BUILD_DIR, 'README.md'),
+				absolutizeImageLinks(await readFile(README_DEST, 'utf8'), 'apps/vscode')
+			);
 
 			// A stale docs/ staging from a pre-/client/docs build must not
 			// ride into future packs — agent docs are served by the engine
@@ -267,7 +314,9 @@ function makePackageVsixAction() {
 			const { changed } = await hasVscodeOrSharedUiChanged();
 
 			// Check if .vsix already exists
-			const vsixFiles = (await exists(VSCODE_DIST_DIR)) ? await glob('*.vsix', { cwd: VSCODE_DIST_DIR, nodir: true, absolute: true }) : [];
+			const vsixFiles = (await exists(VSCODE_DIST_DIR))
+				? await glob('*.vsix', { cwd: VSCODE_DIST_DIR, nodir: true, absolute: true })
+				: [];
 
 			if (!changed && vsixFiles.length > 0) {
 				// Packaging is skipped, but the served copy still heals — the
@@ -319,8 +368,15 @@ function makeTestAction() {
 			// resolve the same workspace-installed tsx loader used by shared:test.
 			// `--import` takes a URL: a bare Windows path (D:\...) is rejected by the ESM
 			// loader as an unsupported 'd:' protocol, so pass a file:// URL on every platform.
-			const tsxLoader = pathToFileURL(require.resolve('tsx', { paths: [path.join(PROJECT_ROOT, 'apps', 'shared')] })).href;
-			await execCommand('node', ['--import', tsxLoader, '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
+			const tsxLoader = pathToFileURL(
+				// Resolved from apps/shared via `paths`, which the lint rule cannot follow
+				// eslint-disable-next-line n/no-missing-require
+				require.resolve('tsx', { paths: [path.join(PROJECT_ROOT, 'apps', 'shared')] })
+			).href;
+			await execCommand('node', ['--import', tsxLoader, '--test', '--test-reporter=spec', ...testFiles], {
+				task,
+				cwd: APP_ROOT,
+			});
 		},
 	};
 }
@@ -363,7 +419,16 @@ module.exports = {
 				// Builds gate on drift CHECKS only (silent unless they fail);
 				// unit tests (shared:test) run under test targets, never as
 				// build steps — a normal build must not stream test output.
-				steps: ['shell:build', 'client-docs:agent', 'shared:check-gallery-tokens', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: [
+					'shell:build',
+					'client-docs:agent',
+					'shared:check-gallery-tokens',
+					'vscode:build-webview',
+					'vscode:compile-typescript',
+					'vscode:bundle-extension',
+					'vscode:stage-files',
+					'vscode:package-vsix',
+				],
 			}),
 		},
 		{
@@ -371,7 +436,12 @@ module.exports = {
 			action: () => ({
 				description: 'Clean vscode',
 				run: async (ctx, task) => {
-					await removeDirs([BUILD_DIR, path.join(APP_ROOT, 'dist'), path.join(APP_ROOT, 'out'), VSCODE_DIST_DIR]);
+					await removeDirs([
+						BUILD_DIR,
+						path.join(APP_ROOT, 'dist'),
+						path.join(APP_ROOT, 'out'),
+						VSCODE_DIST_DIR,
+					]);
 					await removeDirAndParents(PROJECT_ROOT, [SERVER_STATIC_DIR]);
 					await removeMatching(APP_ROOT, '.vsix');
 					await setState(SRC_HASH_KEY, null);

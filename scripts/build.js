@@ -281,7 +281,8 @@ Options:
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
   --list-modules      List all registered modules
-  --list-skipped[=CAT] Node test tasks: list the tests that will be skipped (CAT: hardware|remote|env|libs|marker) and run nothing
+  --list-skipped[=CAT] Node test tasks: list the tests that will be skipped
+                      (CAT: hardware|remote|env|libs|marker) and run nothing
   --log=FILE          Write output to FILE (grouped by module)
   --models="args"     Pass arguments to sync_models (can be repeated)
   --modelserver[=ADDR] Enable model server mode; bare = start local, =port or =host:port = use existing
@@ -293,7 +294,8 @@ Options:
   --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
   --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated)
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
-  --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt, requirements.hash and the satisfied/ verdicts)
+  --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt,
+                      requirements.hash and the satisfied/ verdicts)
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
@@ -361,9 +363,9 @@ async function main() {
 	// =========================================================================
 	// Install node deps so module tasks.js can be loaded
 	// =========================================================================
-	let Listr;
+	// listr2 stands in for every dependency: if it loads, the install is done
 	try {
-		Listr = require('listr2').Listr;
+		require('listr2');
 	} catch {
 		console.log('Installing dependencies (fresh clone)...\n');
 		try {
@@ -372,7 +374,7 @@ async function main() {
 		} catch {
 			process.exit(1);
 		}
-		Listr = require('listr2').Listr;
+		require('listr2');
 	}
 
 	// Run deps check silently (only outputs if install needed)
@@ -386,8 +388,9 @@ async function main() {
 	const { clearLog, writeLog, hasLogEntries } = require('./lib/log');
 
 	logModule = { writeLog, hasLogEntries };
-	process.on('SIGINT', () => handleTermination('SIGINT'));
-	process.on('SIGTERM', () => handleTermination('SIGTERM'));
+	// handleTermination ends in process.exit, so nothing waits on it
+	process.on('SIGINT', () => void handleTermination('SIGINT'));
+	process.on('SIGTERM', () => void handleTermination('SIGTERM'));
 
 	// C++/VS setup (Windows) and C++ toolchain (Linux/Mac) run only when compiling the engine
 	// (server:setup-tools in the server build path). Not needed if using a prebuilt engine.
@@ -528,4 +531,4 @@ async function main() {
 	}
 }
 
-main();
+void main();

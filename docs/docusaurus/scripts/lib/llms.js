@@ -25,7 +25,8 @@ const SITE_URL = 'https://docs.rocketride.org';
 const CATEGORY_DESCRIPTIONS = {
 	Sources: 'Bring data into a pipeline: webhooks, chat, file and database readers, and cloud connectors.',
 	LLMs: 'Call large language models for generation, chat, summarization, and reasoning across many providers.',
-	'Vision & Image': 'Analyze and transform images: vision models, OCR, thumbnails, cleanup, and accessibility descriptions.',
+	'Vision & Image':
+		'Analyze and transform images: vision models, OCR, thumbnails, cleanup, and accessibility descriptions.',
 	Audio: 'Work with audio: transcription, text-to-speech, and playback.',
 	Video: 'Process video: frame extraction, embeddings, and video understanding.',
 	Text: 'Operate on text: summarization, extraction, named-entity recognition, and anonymization.',
@@ -42,7 +43,7 @@ const CATEGORY_DESCRIPTIONS = {
 	Guardrails: 'Validate and constrain inputs and outputs for safety and policy.',
 	Outputs: 'Send results out of the pipeline: responses, files, and external systems.',
 	Infrastructure: 'Plumbing that supports execution rather than transforming data.',
-	Other: 'Nodes that do not fall into a single category above.'
+	Other: 'Nodes that do not fall into a single category above.',
 };
 
 // Authored prose that frames the generated catalog. The node list itself is
@@ -54,7 +55,7 @@ const OVERVIEW_INTRO = [
 	'together and the [engine](/concepts/runtime-engine) runs them.',
 	'',
 	'This page explains how a node is structured on disk and how the runtime loads and',
-	'executes it, then catalogs every node that ships with the toolchain, grouped by type.'
+	'executes it, then catalogs every node that ships with the toolchain, grouped by type.',
 ].join('\n');
 
 const ANATOMY_PROSE = [
@@ -71,7 +72,7 @@ const ANATOMY_PROSE = [
 	'  *_client.py       # provider/client implementation detail',
 	'  requirements.txt  # Python dependencies, installed on demand',
 	'  <name>.svg        # canvas icon',
-	'  README.md         # co-located documentation (rendered as this node\'s page)',
+	"  README.md         # co-located documentation (rendered as this node's page)",
 	'```',
 	'',
 	'The **`services.json`** manifest is the contract the engine reads. Its key fields:',
@@ -79,18 +80,20 @@ const ANATOMY_PROSE = [
 	'| Field | Purpose |',
 	'| --- | --- |',
 	'| `title` | Display name on the canvas and in this catalog. |',
-	'| `protocol` | The node\'s URL scheme, e.g. `llm_openai://`. |',
-	'| `classType` | The kind of work the node does (`llm`, `store`, `tool`, …). Governs how it wires into the graph. |',
+	"| `protocol` | The node's URL scheme, e.g. `llm_openai://`. |",
+	'| `classType` | The kind of work the node does (`llm`, `store`, `tool`, …). ' +
+		'Governs how it wires into the graph. |',
 	'| `capabilities` | Flags that change engine behaviour, e.g. `invoke`. |',
-	'| `register` | How the engine registers the node: `filter` (transforms data in the graph) or `endpoint` (an edge connector). |',
+	'| `register` | How the engine registers the node: `filter` (transforms data in the graph) ' +
+		'or `endpoint` (an edge connector). |',
 	'| `node` / `path` | The runtime (`python`) and module (`nodes.llm_openai`) the engine instantiates. |',
 	'| `prefix` | Prefix swapped when converting between URLs and module paths. |',
 	'| `description` | Prose shown in the editor. |',
 	'| `config` | The configuration schema: the fields a pipeline author fills in. |',
 	'',
-	'A node\'s public contract is its `classType`, config schema, and the input/output',
+	"A node's public contract is its `classType`, config schema, and the input/output",
 	'lanes it supports. The [pipeline JSON reference](/reference/pipeline-reference) documents how a',
-	'node is referenced from a `.pipe` file (`id`, `provider`, `config`, `input`).'
+	'node is referenced from a `.pipe` file (`id`, `provider`, `config`, `input`).',
 ].join('\n');
 
 const RUNTIME_PROSE = [
@@ -107,11 +110,11 @@ const RUNTIME_PROSE = [
 	'   data through **lanes**; `agent`, `tool`, `llm`, and `memory` nodes participate in',
 	'   **control** connections (see [Agents & tools](/concepts/agents-tools-skills)).',
 	'4. **Execution.** The engine drives the graph from sources to targets, passing each',
-	'   node\'s output along its lanes. `capabilities` flags toggle engine features such as',
+	"   node's output along its lanes. `capabilities` flags toggle engine features such as",
 	'   `invoke`. See the [execution model](/concepts/execution-model) for how data flows.',
 	'',
 	'Because behaviour lives in `provider` + `config`, swapping which model or store a',
-	'pipeline uses is a config edit, not a code change.'
+	'pipeline uses is a config edit, not a code change.',
 ].join('\n');
 
 /**
@@ -155,7 +158,11 @@ function nodeCatalogMarkdown(nodes) {
 	lines.push(ANATOMY_PROSE, '');
 	lines.push(RUNTIME_PROSE, '');
 	lines.push('## Node types', '');
-	lines.push(`${nodes.length} nodes across ${ordered.length} types. Every node declares a`, 'class type in its manifest; the catalog below is grouped by it.', '');
+	lines.push(
+		`${nodes.length} nodes across ${ordered.length} types. Every node declares a`,
+		'class type in its manifest; the catalog below is grouped by it.',
+		''
+	);
 	for (const [label, group] of ordered) {
 		lines.push(`### ${label}`, '');
 		lines.push(CATEGORY_DESCRIPTIONS[label] || `${label} nodes.`, '');

@@ -19,7 +19,8 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const USES_RE = /^\s*(?:-\s*)?uses:\s*(["']?)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^@\s#]+)?)@([0-9a-f]{40})\1(?:\s+#\s*(\S+))?\s*$/;
+const USES_RE =
+	/^\s*(?:-\s*)?uses:\s*(["']?)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^@\s#]+)?)@([0-9a-f]{40})\1(?:\s+#\s*(\S+))?\s*$/;
 const VERSION_RE = /^v\d+(?:\.\d+){0,2}(?:[-+][0-9A-Za-z.-]+)?$/;
 
 /** Parse remotely hosted, SHA-pinned actions from one workflow. */
@@ -47,7 +48,10 @@ export async function verifyPins(pins, resolveTag) {
 	await Promise.all(
 		pins.map(async (pin) => {
 			if (!pin.version) {
-				errors.push({ ...pin, message: `${pin.action}@${pin.sha} is missing a version comment (for example, # v4).` });
+				errors.push({
+					...pin,
+					message: `${pin.action}@${pin.sha} is missing a version comment (for example, # v4).`,
+				});
 				return;
 			}
 			if (!VERSION_RE.test(pin.version)) {
@@ -64,7 +68,10 @@ export async function verifyPins(pins, resolveTag) {
 					});
 				}
 			} catch (error) {
-				errors.push({ ...pin, message: `Could not resolve ${pin.repository}@${pin.version}: ${error.message}` });
+				errors.push({
+					...pin,
+					message: `Could not resolve ${pin.repository}@${pin.version}: ${error.message}`,
+				});
 			}
 		})
 	);
@@ -76,7 +83,11 @@ export async function resolveGitHubTag(repository, version) {
 	const remote = `https://github.com/${repository}.git`;
 	const majorOnly = /^v\d+$/.test(version);
 	const patterns = majorOnly ? [`refs/tags/${version}*`] : [`refs/tags/${version}`, `refs/tags/${version}^{}`];
-	const { stdout } = await execFileAsync('git', ['ls-remote', '--tags', remote, ...patterns], { encoding: 'utf8', timeout: 30_000, windowsHide: true });
+	const { stdout } = await execFileAsync('git', ['ls-remote', '--tags', remote, ...patterns], {
+		encoding: 'utf8',
+		timeout: 30_000,
+		windowsHide: true,
+	});
 	const refs = new Map(
 		stdout
 			.trim()
@@ -102,7 +113,9 @@ export async function resolveGitHubTag(repository, version) {
 async function workflowFiles(root) {
 	const workflowDir = path.join(root, '.github', 'workflows');
 	const entries = await fs.readdir(workflowDir, { withFileTypes: true });
-	return entries.filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name)).map((entry) => path.join(workflowDir, entry.name));
+	return entries
+		.filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name))
+		.map((entry) => path.join(workflowDir, entry.name));
 }
 
 /**
@@ -164,7 +177,10 @@ async function main() {
 		process.exitCode = 1;
 		return;
 	}
-	console.log(`Verified ${pins.length} action pins across ${sources.length} workflow and composite-action files against ${cache.size} upstream tags.`);
+	console.log(
+		`Verified ${pins.length} action pins across ${sources.length} workflow and composite-action files ` +
+			`against ${cache.size} upstream tags.`
+	);
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

@@ -56,9 +56,7 @@ describe('svgo-auto-currentcolor — rewrites monochrome SVGs', () => {
 	});
 
 	test('single stroke color across multiple paths', () => {
-		const out = run(
-			wrap('<path stroke="#fff" d="M0 0L10 10"/><path stroke="#fff" d="M0 10L10 0"/>'),
-		);
+		const out = run(wrap('<path stroke="#fff" d="M0 0L10 10"/><path stroke="#fff" d="M0 10L10 0"/>'));
 		const matches = out.match(/stroke="currentColor"/g) ?? [];
 		assert.equal(matches.length, 2);
 		assert.doesNotMatch(out, /stroke="#fff"/);
@@ -71,9 +69,7 @@ describe('svgo-auto-currentcolor — rewrites monochrome SVGs', () => {
 	});
 
 	test('single fill defined inside an embedded <style> block', () => {
-		const input = wrap(
-			'<style>.cls-1 { fill: #222; }</style><path class="cls-1" d="M0 0h10v10H0z"/>',
-		);
+		const input = wrap('<style>.cls-1 { fill: #222; }</style><path class="cls-1" d="M0 0h10v10H0z"/>');
 		const out = run(input);
 		assert.match(out, /fill:\s*currentColor/);
 		assert.doesNotMatch(out, /#222/);
@@ -84,7 +80,7 @@ describe('svgo-auto-currentcolor — rewrites monochrome SVGs', () => {
 			'<style>.cls-1 { fill: #444; }</style>' +
 				'<path fill="#444" d="M0 0L1 1"/>' +
 				'<path style="fill: #444" d="M2 2L3 3"/>' +
-				'<path class="cls-1" d="M4 4L5 5"/>',
+				'<path class="cls-1" d="M4 4L5 5"/>'
 		);
 		const out = run(input);
 		assert.doesNotMatch(out, /#444/);
@@ -109,7 +105,7 @@ describe('svgo-auto-currentcolor — rewrites monochrome SVGs', () => {
 	test('single color with multiple opacity values still counts as one color', () => {
 		const input = wrap(
 			'<path fill="#000" fill-opacity="0.5" d="M0 0h5v5H0z"/>' +
-				'<path fill="#000" fill-opacity="1" d="M5 5h5v5H5z"/>',
+				'<path fill="#000" fill-opacity="1" d="M5 5h5v5H5z"/>'
 		);
 		const out = run(input);
 		const matches = out.match(/fill="currentColor"/g) ?? [];
@@ -143,7 +139,7 @@ describe('svgo-auto-currentcolor — leaves multicolor SVGs alone', () => {
 	test('linearGradient forces multicolor treatment', () => {
 		const input = wrap(
 			'<defs><linearGradient id="g"><stop stop-color="#000"/></linearGradient></defs>' +
-				'<path fill="#000" d="M0 0L1 1"/>',
+				'<path fill="#000" d="M0 0L1 1"/>'
 		);
 		const out = run(input);
 		assert.match(out, /fill="#000"/);
@@ -153,7 +149,7 @@ describe('svgo-auto-currentcolor — leaves multicolor SVGs alone', () => {
 	test('radialGradient forces multicolor treatment', () => {
 		const input = wrap(
 			'<defs><radialGradient id="g"><stop stop-color="#000"/></radialGradient></defs>' +
-				'<path fill="#000" d="M0 0L1 1"/>',
+				'<path fill="#000" d="M0 0L1 1"/>'
 		);
 		const out = run(input);
 		assert.match(out, /fill="#000"/);
@@ -163,7 +159,7 @@ describe('svgo-auto-currentcolor — leaves multicolor SVGs alone', () => {
 	test('pattern element forces multicolor treatment', () => {
 		const input = wrap(
 			'<defs><pattern id="p" width="4" height="4"><path fill="#000" d="M0 0L1 1"/></pattern></defs>' +
-				'<path fill="#000" d="M0 0L1 1"/>',
+				'<path fill="#000" d="M0 0L1 1"/>'
 		);
 		const out = run(input);
 		// At least one #000 remains (pattern blocks rewrite).
@@ -237,9 +233,7 @@ describe('svgo-auto-currentcolor — ignored values do not count as colors', () 
 	});
 
 	test('fill="currentColor" is ignored when counting; other color is the unique color', () => {
-		const input = wrap(
-			'<path fill="currentColor" d="M0 0L1 1"/><path fill="#222" d="M1 1L2 2"/>',
-		);
+		const input = wrap('<path fill="currentColor" d="M0 0L1 1"/><path fill="#222" d="M1 1L2 2"/>');
 		const out = run(input);
 		// Both should end up as currentColor (one already was, the other gets rewritten).
 		const matches = out.match(/fill="currentColor"/g) ?? [];

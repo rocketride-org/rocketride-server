@@ -90,11 +90,22 @@ function resolveWindowsCommand(command, cwd, env) {
  * @param {boolean} options.collect - If true, returns output string directly instead of object
  * @param {string} options.logModule - Module name for log collection (e.g., 'client-python:test')
  * @param {boolean} options.verbose - If true, print command and args to console (e.g. for builder --verbose).
- * @param {string} options.stdio - If 'inherit', child stdout/stderr go to process. If 'ignore', child stdio are disconnected. Otherwise uses pipe for task/log collection.
+ * @param {string} options.stdio - If 'inherit', child stdout/stderr go to process. If 'ignore', child stdio
+ *   are disconnected. Otherwise uses pipe for task/log collection.
  * @returns {Promise<string|{stdout: string, stderr: string, code: number}>}
  */
 async function execCommand(command, args, options = {}) {
-	const { cwd = process.cwd(), task = null, env = process.env, onOutput = null, collect = false, logModule = null, verbose = false, stdio = undefined, silent = false } = options;
+	const {
+		cwd = process.cwd(),
+		task = null,
+		env = process.env,
+		onOutput = null,
+		collect = false,
+		logModule = null,
+		verbose = false,
+		stdio = undefined,
+		silent = false,
+	} = options;
 	const inherit = stdio === 'inherit';
 	const ignoreStdio = stdio === 'ignore';
 
@@ -127,7 +138,9 @@ async function execCommand(command, args, options = {}) {
 		}
 	}
 
-	const exactCommandLine = [spawnCmd, ...spawnArgs].map((a) => (typeof a === 'string' && a.includes(' ') ? `"${a}"` : String(a))).join(' ');
+	const exactCommandLine = [spawnCmd, ...spawnArgs]
+		.map((a) => (typeof a === 'string' && a.includes(' ') ? `"${a}"` : String(a)))
+		.join(' ');
 
 	if (verbose) {
 		const line = `$ ${exactCommandLine}`;
@@ -176,7 +189,10 @@ async function execCommand(command, args, options = {}) {
 				shell: false,
 				env,
 				stdio: ignoreStdio ? 'ignore' : inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-				...(process.platform === 'win32' && { windowsHide: true, ...(windowsVerbatim && { windowsVerbatimArguments: true }) }),
+				...(process.platform === 'win32' && {
+					windowsHide: true,
+					...(windowsVerbatim && { windowsVerbatimArguments: true }),
+				}),
 			});
 		} catch (err) {
 			logExecFailure('spawn threw', err);
@@ -205,10 +221,19 @@ async function execCommand(command, args, options = {}) {
 				logOutput(effectiveLogModule, `[Exit code: ${code}]`);
 			}
 			if (code !== 0) {
-				const msg = inherit || ignoreStdio ? `Command failed (exit ${code})` : `Command failed (exit ${code}):\n${allOutput.slice(-2000)}`;
+				const msg =
+					inherit || ignoreStdio
+						? `Command failed (exit ${code})`
+						: `Command failed (exit ${code}):\n${allOutput.slice(-2000)}`;
 				reject(new Error(msg));
 			} else {
-				resolve(inherit || ignoreStdio ? { code: 0 } : collect ? allOutput : { stdout: allOutput, stderr: '', code: 0 });
+				resolve(
+					inherit || ignoreStdio
+						? { code: 0 }
+						: collect
+							? allOutput
+							: { stdout: allOutput, stderr: '', code: 0 }
+				);
 			}
 		});
 

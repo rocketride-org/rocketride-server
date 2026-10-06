@@ -74,12 +74,16 @@ const esbuild = require('esbuild');
  * @returns {{ file: string, version: number }} Snapshot path + version.
  */
 function newestFrozenContract() {
-	const versions = fs.readdirSync(VERSIONS_DIR)
+	const versions = fs
+		.readdirSync(VERSIONS_DIR)
 		.map((name) => /^v(\d+)\.d\.ts$/.exec(name))
 		.filter(Boolean)
 		.map((m) => Number(m[1]))
 		.sort((a, b) => b - a);
-	if (versions.length === 0) throw new Error(`pack-shell: no frozen shell-api versions in ${VERSIONS_DIR} — run ./builder shell:freeze first`);
+	if (versions.length === 0)
+		throw new Error(
+			`pack-shell: no frozen shell-api versions in ${VERSIONS_DIR} — run ./builder shell:freeze first`
+		);
 	return { file: path.join(VERSIONS_DIR, `v${versions[0]}.d.ts`), version: versions[0] };
 }
 
@@ -178,7 +182,10 @@ async function packShell(options = {}) {
 	const sdkRoot = path.join(REPO_ROOT, 'packages', 'client-typescript');
 	// The SDK's types entry (package.json "types") — the barrel lives under
 	// dist/types/client/, not at the dist/types root.
-	if (!fs.existsSync(path.join(sdkRoot, 'dist', 'types', 'client', 'index.d.ts'))) throw new Error('pack-shell: packages/client-typescript/dist is missing — run ./builder client-typescript:build first');
+	if (!fs.existsSync(path.join(sdkRoot, 'dist', 'types', 'client', 'index.d.ts')))
+		throw new Error(
+			'pack-shell: packages/client-typescript/dist is missing — run ./builder client-typescript:build first'
+		);
 	const sdkPkg = JSON.parse(fs.readFileSync(path.join(sdkRoot, 'package.json'), 'utf8'));
 	vendorSdkInto(sdkRoot, path.join(STAGE_DIR, 'node_modules', 'rocketride'));
 

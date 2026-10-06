@@ -86,12 +86,38 @@ function makeStampAction() {
 
 			// step: stamp both language twins from the same source of truth
 			let changed = false;
-			changed = stampLiteral(TS_DEFAULTS, /export const DEFAULT_ZITADEL_URL = '[^']*'/, `export const DEFAULT_ZITADEL_URL = '${zitadelUrl}'`, 'DEFAULT_ZITADEL_URL') || changed;
-			changed = stampLiteral(TS_DEFAULTS, /export const DEFAULT_CLI_CLIENT_ID = '[^']*'/, `export const DEFAULT_CLI_CLIENT_ID = '${cliClientId}'`, 'DEFAULT_CLI_CLIENT_ID') || changed;
-			changed = stampLiteral(PY_DEFAULTS, /DEFAULT_ZITADEL_URL = '[^']*'/, `DEFAULT_ZITADEL_URL = '${zitadelUrl}'`, 'DEFAULT_ZITADEL_URL') || changed;
-			changed = stampLiteral(PY_DEFAULTS, /DEFAULT_CLI_CLIENT_ID = '[^']*'/, `DEFAULT_CLI_CLIENT_ID = '${cliClientId}'`, 'DEFAULT_CLI_CLIENT_ID') || changed;
+			changed =
+				stampLiteral(
+					TS_DEFAULTS,
+					/export const DEFAULT_ZITADEL_URL = '[^']*'/,
+					`export const DEFAULT_ZITADEL_URL = '${zitadelUrl}'`,
+					'DEFAULT_ZITADEL_URL'
+				) || changed;
+			changed =
+				stampLiteral(
+					TS_DEFAULTS,
+					/export const DEFAULT_CLI_CLIENT_ID = '[^']*'/,
+					`export const DEFAULT_CLI_CLIENT_ID = '${cliClientId}'`,
+					'DEFAULT_CLI_CLIENT_ID'
+				) || changed;
+			changed =
+				stampLiteral(
+					PY_DEFAULTS,
+					/DEFAULT_ZITADEL_URL = '[^']*'/,
+					`DEFAULT_ZITADEL_URL = '${zitadelUrl}'`,
+					'DEFAULT_ZITADEL_URL'
+				) || changed;
+			changed =
+				stampLiteral(
+					PY_DEFAULTS,
+					/DEFAULT_CLI_CLIENT_ID = '[^']*'/,
+					`DEFAULT_CLI_CLIENT_ID = '${cliClientId}'`,
+					'DEFAULT_CLI_CLIENT_ID'
+				) || changed;
 
-			task.output = changed ? `Stamped auth defaults from .config (${cliClientId ? 'CLI sign-in enabled' : 'no CLI client id'})` : 'Auth defaults already current';
+			task.output = changed
+				? `Stamped auth defaults from .config (${cliClientId ? 'CLI sign-in enabled' : 'no CLI client id'})`
+				: 'Auth defaults already current';
 		},
 	};
 }

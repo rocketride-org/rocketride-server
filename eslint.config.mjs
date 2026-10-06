@@ -144,7 +144,9 @@ export default tseslint.config(
 			// not each package's own.
 			'n/no-missing-require': 'error',
 			'n/no-missing-import': 'error',
-			'n/no-unsupported-features/node-builtins': ['error', { version: '>=20.0.0', allowExperimental: true }],
+			// test.describe: the plugin dates it to 20.13, but node:test has
+			// exported describe since 18
+			'n/no-unsupported-features/node-builtins': ['error', { version: '>=20.0.0', allowExperimental: true, ignores: ['test.describe'] }],
 			'n/no-deprecated-api': 'error',
 
 			// Plain JS: the core rule, not the TypeScript one

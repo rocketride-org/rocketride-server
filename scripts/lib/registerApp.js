@@ -41,13 +41,13 @@
 
 'use strict';
 
-const fs   = require('node:fs');
+const fs = require('node:fs');
 const path = require('node:path');
 const { BUILD_ROOT, DIST_ROOT, setState } = require('./index');
 
 const BUILD_APPS_JSON = path.join(BUILD_ROOT, 'apps.json');
-const DIST_APPS_JSON  = path.join(DIST_ROOT, 'server', 'static', 'apps.json');
-const APPS_BASE       = process.env.APPS_BASE_URL ?? 'apps';
+const DIST_APPS_JSON = path.join(DIST_ROOT, 'server', 'static', 'apps.json');
+const APPS_BASE = process.env.APPS_BASE_URL ?? 'apps';
 
 // Single source of truth for the shell contract version (freeze auto-writes it).
 const APIVER_TS = path.join(__dirname, '..', '..', 'packages', 'shell', 'src', 'apiver.ts');
@@ -120,10 +120,7 @@ function writeManifest(filePath, manifest) {
  */
 function upsert(manifest, entry) {
 	return {
-		apps: [
-			...manifest.apps.filter(a => a.id !== entry.id),
-			entry,
-		],
+		apps: [...manifest.apps.filter((a) => a.id !== entry.id), entry],
 	};
 }
 
@@ -155,8 +152,9 @@ function toModuleId(appId) {
 function assertSafeAppId(appId) {
 	if (typeof appId !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(appId) || appId.includes('..') || /^\.+$/.test(appId)) {
 		throw new Error(
-			`App id "${appId}" is not a valid slug. `
-			+ 'Must contain only letters, digits, ".", "-" and "_" (no path separators, no ".." segments, not all dots).'
+			`App id "${appId}" is not a valid slug. ` +
+				'Must contain only letters, digits, ".", "-" and "_" ' +
+				'(no path separators, no ".." segments, not all dots).'
 		);
 	}
 }
@@ -213,8 +211,7 @@ function registerApp(appRoot) {
 			const shellApiVersion = readShellApiVersion();
 
 			// Resolve app mode — default based on stripeProductId presence
-			const mode = appManifest.mode
-				?? (appManifest.stripeProductId ? 'subscription' : 'free');
+			const mode = appManifest.mode ?? (appManifest.stripeProductId ? 'subscription' : 'free');
 
 			// Note: subscription/paywall apps get their stripeProductId at runtime
 			// via seed_apps → ensure_stripe_billing, not at build time.
@@ -222,8 +219,8 @@ function registerApp(appRoot) {
 			// Validate mode value
 			if (!['free', 'subscription', 'paywall'].includes(mode)) {
 				throw new Error(
-					`App "${appManifest.id}" has invalid mode="${mode}". `
-					+ 'Must be "free", "subscription", or "paywall".'
+					`App "${appManifest.id}" has invalid mode="${mode}". ` +
+						'Must be "free", "subscription", or "paywall".'
 				);
 			}
 
@@ -233,25 +230,29 @@ function registerApp(appRoot) {
 			// unique, and every schema needs a valid JSON type.
 			const configuration = appManifest.contributes?.configuration ?? null;
 			if (configuration) {
-				if (typeof configuration !== 'object' || Array.isArray(configuration)
-					|| typeof configuration.properties !== 'object' || Array.isArray(configuration.properties)) {
+				if (
+					typeof configuration !== 'object' ||
+					Array.isArray(configuration) ||
+					typeof configuration.properties !== 'object' ||
+					Array.isArray(configuration.properties)
+				) {
 					throw new Error(
-						`App "${appManifest.id}" has an invalid contributes.configuration. `
-						+ 'Expected { title?, properties: { "<appId>.<setting>": { type, ... } } }.'
+						`App "${appManifest.id}" has an invalid contributes.configuration. ` +
+							'Expected { title?, properties: { "<appId>.<setting>": { type, ... } } }.'
 					);
 				}
 				const validTypes = ['string', 'number', 'integer', 'boolean'];
 				for (const [key, schema] of Object.entries(configuration.properties)) {
 					if (!key.startsWith(`${appManifest.id}.`)) {
 						throw new Error(
-							`App "${appManifest.id}" setting "${key}" must be prefixed with the app id `
-							+ `("${appManifest.id}.<settingName>") so setting keys are globally unique.`
+							`App "${appManifest.id}" setting "${key}" must be prefixed with the app id ` +
+								`("${appManifest.id}.<settingName>") so setting keys are globally unique.`
 						);
 					}
 					if (!schema || !validTypes.includes(schema.type)) {
 						throw new Error(
-							`App "${appManifest.id}" setting "${key}" has invalid type `
-							+ `"${schema && schema.type}". Must be one of: ${validTypes.join(', ')}.`
+							`App "${appManifest.id}" setting "${key}" has invalid type ` +
+								`"${schema && schema.type}". Must be one of: ${validTypes.join(', ')}.`
 						);
 					}
 				}
@@ -269,8 +270,8 @@ function registerApp(appRoot) {
 				for (const s of shells) {
 					if (!valid.includes(s)) {
 						throw new Error(
-							`App "${appManifest.id}" has invalid shell="${s}". `
-							+ `Must be one of: ${valid.join(', ')}.`
+							`App "${appManifest.id}" has invalid shell="${s}". ` +
+								`Must be one of: ${valid.join(', ')}.`
 						);
 					}
 				}
@@ -317,21 +318,21 @@ function registerApp(appRoot) {
 
 			// Build the apps.json entry
 			const appEntry = {
-				id:            appManifest.id,
+				id: appManifest.id,
 				moduleId,
-				publisher:     appManifest.publisher ?? '',
-				name:          appManifest.name,
-				description:   appManifest.description ?? '',
+				publisher: appManifest.publisher ?? '',
+				name: appManifest.name,
+				description: appManifest.description ?? '',
 				// Built-in app version (package.json) — surfaces on the desktop
 				// tile version chip; SaaS marketplace apps get theirs from the
 				// active AppVersion row in enrich_apps instead.
 				...(pkg.version ? { version: pkg.version } : {}),
 				readme,
 				icon,
-				categories:    appManifest.categories ?? [],
+				categories: appManifest.categories ?? [],
 				// Settings contribution (VSCode contributes.configuration shape)
 				...(configuration ? { configuration } : {}),
-				entry:         `/${APPS_BASE}/${servedName}/remoteEntry.js`,
+				entry: `/${APPS_BASE}/${servedName}/remoteEntry.js`,
 				// Shell contract version this app was built against (for prune analysis).
 				...(shellApiVersion !== null ? { shellApiVersion } : {}),
 				// App monetization mode
@@ -351,9 +352,9 @@ function registerApp(appRoot) {
 				// Include billing section (plans array) for seed_apps to provision Stripe products
 				...(appManifest.billing ? { billing: appManifest.billing } : {}),
 				// Permission-gated apps — user must hold ALL listed sysPermissions to see the app
-				...(Array.isArray(appManifest.requiredPermissions)
-					&& appManifest.requiredPermissions.length
-					&& appManifest.requiredPermissions.every((p) => typeof p === 'string' && p.length > 0)
+				...(Array.isArray(appManifest.requiredPermissions) &&
+				appManifest.requiredPermissions.length &&
+				appManifest.requiredPermissions.every((p) => typeof p === 'string' && p.length > 0)
 					? { requiredPermissions: appManifest.requiredPermissions }
 					: {}),
 			};
@@ -369,7 +370,9 @@ function registerApp(appRoot) {
 
 			// Success line last; accumulated warnings surface above it instead of
 			// being clobbered by it.
-			task.output = [...warnings, `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`].join('\n');
+			task.output = [...warnings, `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`].join(
+				'\n'
+			);
 		},
 	};
 }

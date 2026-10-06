@@ -93,7 +93,9 @@ function makePrettierAction(options = {}) {
 						providers.push(extraArgs[i + 1]);
 					}
 				}
-				targetFiles = providers.filter((p) => SERVICES_JSON_PATHS[p]).map((p) => path.join(PROJECT_ROOT, SERVICES_JSON_PATHS[p]));
+				targetFiles = providers
+					.filter((p) => SERVICES_JSON_PATHS[p])
+					.map((p) => path.join(PROJECT_ROOT, SERVICES_JSON_PATHS[p]));
 			}
 
 			if (targetFiles.length === 0) {

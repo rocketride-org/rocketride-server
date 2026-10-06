@@ -31,7 +31,29 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
-const { execCommand, runPytest, syncDir, formatSyncStats, removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, mkdir, copyFile, exists, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState, parseServerAddress } = require('../../../scripts/lib');
+const {
+	execCommand,
+	runPytest,
+	syncDir,
+	formatSyncStats,
+	removeDirs,
+	removeMatching,
+	removeDirAndParents,
+	PROJECT_ROOT,
+	BUILD_ROOT,
+	DIST_ROOT,
+	mkdir,
+	copyFile,
+	exists,
+	startServer,
+	stopServer,
+	bracket,
+	parallel,
+	hasSourceChanged,
+	saveSourceHash,
+	setState,
+	parseServerAddress,
+} = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'rocketride');
@@ -52,7 +74,14 @@ const COMMON_SRC_DIR = path.join(PROJECT_ROOT, 'packages', 'client-common', 'pyt
 const SERVER_COMMON_DIR = path.join(SERVER_DIR, 'rocketride_common');
 
 // Glob patterns to ignore when copying to build
-const IGNORE = ['**/node_modules/**', '**/__pycache__/**', '**/.pytest_cache/**', '**/tests/**', '**/.git/**', '**/scripts/**'];
+const IGNORE = [
+	'**/node_modules/**',
+	'**/__pycache__/**',
+	'**/.pytest_cache/**',
+	'**/tests/**',
+	'**/.git/**',
+	'**/scripts/**',
+];
 
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(SERVER_DIR, 'engine');
@@ -97,7 +126,9 @@ function makeWheelSourceAction() {
 			// Stage the shared library as a second top-level package under
 			// src/ — pyproject's packages.find(where=["src"]) picks it up, so
 			// the ONE shipped wheel carries both packages.
-			const commonStats = await syncDir(COMMON_SRC_DIR, path.join(BUILD_DIR, 'src', 'rocketride_common'), { ignore: IGNORE });
+			const commonStats = await syncDir(COMMON_SRC_DIR, path.join(BUILD_DIR, 'src', 'rocketride_common'), {
+				ignore: IGNORE,
+			});
 			task.output = `${formatSyncStats(stats)} (+common ${formatSyncStats(commonStats)})`;
 		},
 	};
@@ -122,7 +153,10 @@ function makeWheelBuildAction() {
 
 			// engine.exe uses an isolated environment - cwd must be dist/server
 			await mkdir(DIST_DIR);
-			await execCommand(ENGINE, ['-m', 'build', '--no-isolation', BUILD_DIR, '--outdir', DIST_DIR], { task, cwd: SERVER_DIR });
+			await execCommand(ENGINE, ['-m', 'build', '--no-isolation', BUILD_DIR, '--outdir', DIST_DIR], {
+				task,
+				cwd: SERVER_DIR,
+			});
 
 			// Save hashes after successful build
 			await saveSourceHash(SRC_HASH_KEY, hash);
@@ -151,7 +185,8 @@ function makeStartTestServerAction(options = {}) {
 				task.output = `Using existing server at ${parsed.uri}`;
 				return { port: parsed.port, server: null, serverUri: parsed.uri };
 			}
-			// Use existing server when ROCKETRIDE_URI is set (e.g. for debugging: start server yourself, then run tests)
+			// Use existing server when ROCKETRIDE_URI is set (e.g. for debugging: start server
+			// yourself, then run tests)
 			const envUri = process.env.ROCKETRIDE_URI;
 			if (envUri) {
 				try {
@@ -225,7 +260,11 @@ function makeSetupTestDepsAction() {
 		run: async (ctx, task) => {
 			task.output = `Installing client-python test deps (${TEST_REQUIREMENTS})...`;
 			// engine.exe uses an isolated environment - cwd must be dist/server
-			await execCommand(ENGINE, ['-c', 'import sys; from depends import depends; depends(sys.argv[1])', TEST_REQUIREMENTS], { task, cwd: SERVER_DIR });
+			await execCommand(
+				ENGINE,
+				['-c', 'import sys; from depends import depends; depends(sys.argv[1])', TEST_REQUIREMENTS],
+				{ task, cwd: SERVER_DIR }
+			);
 		},
 	};
 }
@@ -293,7 +332,16 @@ module.exports = {
 			name: 'client-python:build',
 			action: () => ({
 				description: 'Build client-python',
-				steps: ['server:build', 'client-docs:agent', 'client-common:stamp', 'client-python:sync-source', 'client-python:wheel-source', 'client-python:copy-readme', 'client-python:wheel-build', 'client-python:sync'],
+				steps: [
+					'server:build',
+					'client-docs:agent',
+					'client-common:stamp',
+					'client-python:sync-source',
+					'client-python:wheel-source',
+					'client-python:copy-readme',
+					'client-python:wheel-build',
+					'client-python:sync',
+				],
 			}),
 		},
 		{
@@ -323,7 +371,12 @@ module.exports = {
 				description: 'Cleaning client-python',
 				run: async (ctx, task) => {
 					await removeDirs([path.join(PACKAGE_DIR, 'build'), path.join(PACKAGE_DIR, 'dist')]);
-					await removeDirAndParents(PROJECT_ROOT, [BUILD_DIR, DIST_DIR, SERVER_CLIENTS_DIR, SERVER_STATIC_DIR]);
+					await removeDirAndParents(PROJECT_ROOT, [
+						BUILD_DIR,
+						DIST_DIR,
+						SERVER_CLIENTS_DIR,
+						SERVER_STATIC_DIR,
+					]);
 					await removeMatching(PACKAGE_DIR, '.egg-info');
 					await removeMatching(path.join(PACKAGE_DIR, 'src'), '.egg-info');
 					await setState(SRC_HASH_KEY, null);
