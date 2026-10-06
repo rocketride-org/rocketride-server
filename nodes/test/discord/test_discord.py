@@ -359,6 +359,21 @@ class TestServicesJsonSchema:
         assert fields['discord.textAttachmentExtensions']['default'] == []
         assert fields['discord.threadAutoArchiveMinutes']['default'] == 0
 
+    def test_thread_name_length_is_bounded_by_what_discord_accepts(self, schema):
+        """Discord rejects a thread name longer than 100 characters."""
+        field = schema['fields']['discord.threadNameMaxLength']
+        assert field['minimum'] == 1
+        assert field['maximum'] == 100
+        assert field['minimum'] <= field['default'] <= field['maximum']
+
+    def test_thread_archive_minutes_offers_only_the_durations_discord_accepts(self, schema):
+        """Any other duration is a 400 from Discord, so the UI offers only these."""
+        field = schema['fields']['discord.threadAutoArchiveMinutes']
+        values = [option[0] for option in field['enum']]
+        assert values == [0, 60, 1440, 4320, 10080]
+        assert all(isinstance(option[1], str) and option[1] for option in field['enum'])
+        assert field['default'] in values
+
     def test_bot_token_is_secure(self, schema):
         assert schema['fields']['discord.botToken'].get('secure') is True
 

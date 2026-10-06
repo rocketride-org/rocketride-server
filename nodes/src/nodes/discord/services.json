@@ -134,15 +134,24 @@
 		"discord.threadNameMaxLength": {
 			"type": "number",
 			"title": "Thread Name Max Length",
-			"description": "Maximum number of characters in a resolved response thread name.",
+			"description": "Maximum number of characters in a resolved response thread name. Discord accepts 1 to 100.",
 			"default": 90,
+			"minimum": 1,
+			"maximum": 100,
 			"optional": true
 		},
 		"discord.threadAutoArchiveMinutes": {
 			"type": "number",
 			"title": "Thread Auto Archive Minutes",
-			"description": "Discord auto-archive duration, in minutes, for response threads the node creates: 60, 1440, 4320 or 10080. 0 (the default) uses the channel's own default.",
+			"description": "Discord auto-archive duration, in minutes, for response threads the node creates. Discord accepts only 60, 1440, 4320 or 10080; 0 (the default) uses the channel's own default.",
 			"default": 0,
+			"enum": [
+				[0, "Channel default"],
+				[60, "1 hour"],
+				[1440, "24 hours"],
+				[4320, "3 days"],
+				[10080, "1 week"]
+			],
 			"optional": true
 		},
 		"discord.numberChunks": {

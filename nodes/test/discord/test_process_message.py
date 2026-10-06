@@ -1057,6 +1057,18 @@ class TestNumericAndMentionConfig:
         assert endpoint._thread_name_max_length == 12
         assert endpoint._text_attachment_max_chars == 7
 
+    @pytest.mark.parametrize(('configured', 'expected'), [(500, 100), (101, 100), (100, 100), (1, 1), (0, 1), (-5, 1)])
+    def test_the_thread_name_length_is_clamped_to_what_discord_accepts(self, configured, expected):
+        endpoint = self._parse({'threadNameMaxLength': self._Proxy(str(configured))})
+
+        assert endpoint._thread_name_max_length == expected
+
+    def test_a_clamped_thread_name_fits_discord(self):
+        endpoint = self._parse({'threadNameMaxLength': 500, 'threadName': '{content}'})
+        message = _make_message(content='x' * 300)
+
+        assert len(endpoint._thread_name_for(message)) == 100
+
     def test_only_numeric_mention_ids_survive(self):
         """One typo used to raise inside every send, so nothing was posted."""
         endpoint = self._parse(

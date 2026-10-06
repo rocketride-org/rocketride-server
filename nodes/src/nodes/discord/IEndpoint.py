@@ -68,6 +68,9 @@ _THREAD_FALLBACK = object()
 # value is dropped and the channel's own default applies instead.
 THREAD_ARCHIVE_DURATIONS = (60, 1440, 4320, 10080)
 
+# Discord rejects a thread name outside 1..100 characters.
+THREAD_NAME_MAX_CHARS = 100
+
 # Some ``no_reply`` reasons are built from an exception message. Clipped here,
 # at the one place every reason passes through, so a runaway string cannot
 # reach the emitted event.
@@ -383,7 +386,9 @@ class IEndpoint(IEndpointBase):
         self._max_attachment_bytes = self._as_int(config.get('maxAttachmentBytes'), 26214400)
         self._send_responses = config.get('sendResponses', True)
         self._thread_name = str(config.get('threadName') or 'Pipeline Response')
-        self._thread_name_max_length = self._as_int(config.get('threadNameMaxLength'), 90)
+        self._thread_name_max_length = max(
+            1, min(THREAD_NAME_MAX_CHARS, self._as_int(config.get('threadNameMaxLength'), 90))
+        )
         self._thread_auto_archive_minutes = self._as_int(config.get('threadAutoArchiveMinutes'), 0)
         self._number_chunks = config.get('numberChunks', False)
         self._text_attachment_extensions = [
