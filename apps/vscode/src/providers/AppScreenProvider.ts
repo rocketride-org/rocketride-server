@@ -934,6 +934,17 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 					this.panels.get(b.appId)?.webview.postMessage({ type: 'appdev:accountChanged' });
 				}
 			}
+			// Deployment change (apaevt_deploy, org-scoped invalidation): a
+			// build landed or anyone in the org published/disabled/removed a
+			// binding of an app with an open panel. The panel re-fetches its
+			// rail and where-live serving states (#2461). An app's deploy
+			// events carry the app id as projectId.
+			if (event.event === 'apaevt_deploy' && event.body) {
+				const b = event.body as { projectId?: string };
+				if (b.projectId && this.panels.has(b.projectId)) {
+					this.panels.get(b.projectId)?.webview.postMessage({ type: 'appdev:deployChanged', appId: b.projectId });
+				}
+			}
 			const row = {
 				time: AppScreenProvider.feedTime(),
 				name: String(event.event),

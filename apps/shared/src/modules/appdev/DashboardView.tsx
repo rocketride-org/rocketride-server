@@ -55,6 +55,7 @@ import { InputField } from 'shell';
 import { Modal } from 'shell';
 import { StatusBadge } from 'shell';
 import type { AppBuilderStage, AppHistoryEntry, AppSummary, AppVersionInfo, BuildStatusTick, IAppBuilderHost, PreflightCheck, RungPin, WatchStatus } from './types';
+import { liveBadgeOf, servingSentenceOf, youSentenceOf } from './servingStatus';
 
 // =============================================================================
 // TYPES
@@ -427,6 +428,13 @@ function streamLabel(entry: AppHistoryEntry): string {
 // HELPERS
 // =============================================================================
 
+/** A "Where it's live" pin badge: 'live' only when a browser in that
+ * audience is actually served (#2461), otherwise why not. */
+const LiveBadge: React.FC<{ pin: RungPin }> = ({ pin }) => {
+	const badge = liveBadgeOf(pin);
+	return <StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>;
+};
+
 /**
  * Classify a version's server build word. The build status is a SEPARATE
  * axis from the review state — a 'private' draft whose build failed can
@@ -519,9 +527,12 @@ function deriveStatus(
 	}
 
 	// ── What is serving where, in one sentence ───────────────────────────
+	// Only what a browser is actually served counts as serving (#2461):
+	// an audience set to a version that is not served says so, and why.
 	if (pins.length > 0) {
-		const serving = pins.map((p) => `${p.handle} serves v${p.registryVersion}${p.version ? ` (${p.version})` : ''}`).join(', ');
-		lines.push({ tone: 'plain', text: `Right now ${serving}.` });
+		lines.push({ tone: 'plain', text: servingSentenceOf(pins) });
+		const you = youSentenceOf(pins);
+		if (you) lines.push({ tone: 'plain', text: you });
 	} else if (newest) {
 		lines.push({ tone: 'plain', text: 'It is not being served to anyone yet.' });
 	}
@@ -718,6 +729,11 @@ export const DashboardView: React.FC<IDashboardViewProps> = ({ host, app, readOn
 		if (tick.status === '' || tick.status === 'failed') void refresh();
 	}), [host.subscribeBuildStatus, refresh]);
 
+	// Deployment changes of this app from ANY session in the org (a build
+	// landed, a binding was published/disabled/removed): re-fetch so the
+	// serving story never goes stale (#2461).
+	useEffect(() => host.subscribeDeployChanged?.(() => void refresh()), [host, refresh]);
+
 	// The rail with the live ticker overlaid — the freshest build word wins
 	// ('' is the success terminal and reads as servable).
 	const liveVersions = useMemo(
@@ -816,9 +832,7 @@ export const DashboardView: React.FC<IDashboardViewProps> = ({ host, app, readOn
 								<div key={pin.handle} style={i === 0 ? { ...styles.pinRow, ...styles.pinRowFirst } : styles.pinRow}>
 									<span style={styles.pinHandle}>{pin.handle}</span>
 									<span style={styles.pinVersion}>v{pin.registryVersion}{pin.version ? ` · ${pin.version}` : ''}</span>
-									<StatusBadge variant={pin.state === 'pending' ? 'muted' : 'info'}>
-										{pin.state === 'enabled' ? 'live' : pin.state === 'approved' ? 'live' : 'in review'}
-									</StatusBadge>
+									<LiveBadge pin={pin} />
 									<span style={styles.pinAudience}>{pin.audience}</span>
 								</div>
 							))
