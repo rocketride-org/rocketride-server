@@ -194,7 +194,7 @@ class TestChunkMessage:
         text = 'word ' * 800
         numbered = chunk_message(text, number=True)
         stripped = [re.sub(r'\n\n\*\(\d+/\d+\)\*$', '', chunk) for chunk in numbered]
-        assert ''.join(stripped).split() == text.split()
+        assert ' '.join(stripped).split() == text.split()
 
     def test_code_fence_is_balanced_across_chunks(self):
         text = 'Intro\n```python\n' + ('print("long code line")\n' * 10) + '```\nOutro'
@@ -259,6 +259,64 @@ class TestChunkMessage:
         assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
         assert ' '.join(chunks).split() == text.split()
         assert ''.join(chunks) == text
+
+    @staticmethod
+    def _assert_fenced_split(chunks, text, language):
+        """The guarantees every split of a fenced reply in ``language`` keeps."""
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert all(chunk.count('```') % 2 == 0 for chunk in chunks)
+        for chunk in chunks:
+            assert set(re.findall(r'```(\w*)', chunk)) <= {'', language}, f'split language name: {chunk[-40:]!r}'
+            assert not re.search(r'```\w*\n```$', chunk), f'empty code block: {chunk[-40:]!r}'
+        assert ''.join(chunks).replace(f'\n``````{language}\n', '\n') == text
+
+    def test_a_cut_never_splits_a_fence_language_name(self):
+        # Reviewer reproduction: the window ended inside '```javascript', so
+        # chunk 1 ended with '```javascri' and chunk 2's code began with 'pt'.
+        text = 'word ' * 397 + '```javascript\n' + 'let x = 1;\n' * 300 + '```'
+        chunks = chunk_message(text)
+
+        self._assert_fenced_split(chunks, text, 'javascript')
+        assert not any(line == 'pt' for chunk in chunks for line in chunk.splitlines())
+
+    @pytest.mark.parametrize('words', range(388, 401))
+    def test_an_opener_line_near_the_limit_moves_to_the_next_chunk(self, words):
+        # The opener line ends a few characters before (or right at) the cut:
+        # chunk 1 used to end with the opener and a synthetic close, an empty
+        # code block, or with the language name cut in two.
+        text = 'word ' * words + '```python\n' + 'x = 1\n' * 400 + '```'
+        chunks = chunk_message(text)
+
+        self._assert_fenced_split(chunks, text, 'python')
+
+    def test_a_long_line_without_a_fence_breaks_at_whitespace(self):
+        # No newline and no sentence end: the cut used to land at the exact
+        # character count, in the middle of a word.
+        text = 'abcdef ' * 600
+        chunks = chunk_message(text)
+
+        assert len(chunks) > 1
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert ' '.join(chunks).split() == text.split(), 'a word was cut in two'
+
+    @pytest.mark.parametrize('max_length', [0, -1])
+    @pytest.mark.parametrize('number', [False, True])
+    def test_a_non_positive_limit_yields_no_chunks(self, max_length, number):
+        # A cap of zero used to loop forever while splitting the long line.
+        assert chunk_message('ab cd', max_length, number=number) == []
+
+    @pytest.mark.parametrize('intro', ['Here is the code:\n', 'Intro '])
+    def test_a_first_code_line_too_long_to_fit_does_not_move_the_cut_to_the_fence(self, intro):
+        # Moving the block to the next chunk cannot help when its first code
+        # line overflows that chunk too: chunk 1 was just the intro.
+        text = intro + '```js\n' + 'x' * 5000 + '\n```'
+        chunks = chunk_message(text)
+
+        assert len(chunks[0]) > DISCORD_MESSAGE_CHAR_LIMIT // 2, f'short first chunk: {chunks[0]!r}'
+        assert chunks[0].startswith(intro + '```js\n')
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert all(chunk.count('```') % 2 == 0 for chunk in chunks)
+        assert ''.join(chunks).replace('\n``````js\n', '') == text
 
     def test_a_numbered_last_chunk_has_no_trailing_blank_lines(self):
         # Live F12: the answer's trailing newlines sat between the closing fence

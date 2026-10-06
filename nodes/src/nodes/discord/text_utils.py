@@ -84,6 +84,31 @@ def _hard_split(text: str, max_length: int) -> List[str]:
     return [text[i : i + max_length] for i in range(0, len(text), max_length)]
 
 
+def _split_long_line(text: str, max_length: int) -> List[str]:
+    """Split one line with no fence into pieces of at most ``max_length`` chars.
+
+    Each cut falls after the last sentence end, else the last whitespace, in
+    the second half of the window (see :func:`_prose_boundary`), and at the
+    exact character count only when there is neither.
+
+    Args:
+        text (str): The line, longer than ``max_length``.
+        max_length (int): The maximum piece length; must be positive.
+
+    Returns:
+        List[str]: The pieces in order; joined they give ``text`` back.
+    """
+    pieces: List[str] = []
+    position = 0
+    while len(text) - position > max_length:
+        end = position + max_length
+        cut = _prose_boundary(text, position + max_length // 2, end, False, '', position)
+        pieces.append(text[position:cut])
+        position = cut
+    pieces.append(text[position:])
+    return pieces
+
+
 def _chunk_label(index: int, total: int) -> str:
     """The ``*(i/n)*`` marker appended to one chunk of a numbered reply."""
     return f'\n\n*({index}/{total})*'
@@ -139,9 +164,10 @@ def chunk_message(text: str, max_length: int = DISCORD_MESSAGE_CHAR_LIMIT, numbe
     """Split text into chunks that each fit within Discord's per-message limit.
 
     Splits on newline boundaries first, then on sentence boundaries for any
-    line that still exceeds the limit, and finally hard-splits any single
-    token/sentence that is itself longer than ``max_length`` (e.g. a long URL
-    with no whitespace). Every returned chunk is guaranteed to be at most
+    line that still exceeds the limit. A single sentence that is itself longer
+    than ``max_length`` is cut at a sentence end or whitespace in the second
+    half of each window, and by character count only when there is neither
+    (e.g. a long URL). Every returned chunk is guaranteed to be at most
     ``max_length`` characters.
 
     Args:
@@ -151,8 +177,11 @@ def chunk_message(text: str, max_length: int = DISCORD_MESSAGE_CHAR_LIMIT, numbe
             more than one message. A single chunk is never labeled.
 
     Returns:
-        List[str]: Non-empty chunks, each at most ``max_length`` characters.
+        List[str]: Non-empty chunks, each at most ``max_length`` characters;
+            empty when ``max_length`` is zero or less.
     """
+    if max_length <= 0:
+        return []
     if number:
         return _numbered_chunks(text, max_length)
 
@@ -185,11 +214,12 @@ def chunk_message(text: str, max_length: int = DISCORD_MESSAGE_CHAR_LIMIT, numbe
         sentence = ''
         for part in re.split(r'(?<=[.!?])\s+', line):
             if len(part) > max_length:
-                # A single sentence/token exceeds the limit — flush and hard-split.
+                # A single sentence/token exceeds the limit — flush and split
+                # at whitespace, or by character count when there is none.
                 if sentence:
                     chunks.append(sentence.rstrip())
                     sentence = ''
-                chunks.extend(_hard_split(part, max_length))
+                chunks.extend(piece.rstrip() for piece in _split_long_line(part, max_length))
             elif len(sentence) + len(part) + 1 <= max_length:
                 sentence += part + ' '
             else:
@@ -218,6 +248,42 @@ def _fence_state(fragment: str, is_open: bool, language: str) -> tuple:
             line_end = len(fragment)
         language = fragment[match.end() : line_end].strip()
     return is_open, language
+
+
+def _opener_offset(fragment: str, is_open: bool) -> int:
+    """Where in ``fragment`` the code block still open at its end was opened.
+
+    Args:
+        fragment (str): The text to scan, from the start of a chunk.
+        is_open (bool): Whether a fence is open at the start of ``fragment``.
+
+    Returns:
+        int: The offset of that block's opening backticks; -1 when no block is
+            open at the end, or the open one began before ``fragment``.
+    """
+    opener = -1
+    for match in re.finditer(r'```', fragment):
+        opener = -1 if is_open else match.start()
+        is_open = not is_open
+    return opener if is_open else -1
+
+
+def _ends_opener_line(text: str, position: int, newline: int, is_open: bool) -> bool:
+    """Whether the newline at ``newline`` ends a line that opens a code block.
+
+    Args:
+        text (str): The whole reply.
+        position (int): Where the chunk starts.
+        newline (int): The offset of a newline in ``text`` after ``position``.
+        is_open (bool): Whether a fence is open at ``position``.
+
+    Returns:
+        bool: True when a block opened between ``position`` and ``newline``
+            is still open at ``newline`` and its opening backticks sit on the
+            line that newline ends; cutting there would leave an empty block.
+    """
+    opener = _opener_offset(text[position:newline], is_open)
+    return opener >= 0 and '\n' not in text[position + opener : newline]
 
 
 def _safe_fence_boundary(text: str, start: int, end: int) -> int:
@@ -286,15 +352,33 @@ def _chunk_fenced_message(text: str, max_length: int) -> List[str]:
         reserved_close = 4
         capacity = max(1, max_length - len(prefix) - reserved_close)
         end = min(len(text), position + capacity)
+        # A block opened in this window whose opener line and first code line
+        # do not both fit starts the next chunk instead: cutting inside it
+        # would split the language name or leave an empty code block behind.
+        # Only when they fit there, though; otherwise moving the cut would just
+        # send the text before the fence as a short chunk of its own.
+        if end < len(text):
+            opener = _opener_offset(text[position:end], is_open)
+            if opener > 0:
+                fence = position + opener
+                opener_end = text.find('\n', fence)
+                code_end = text.find('\n', opener_end + 1) if opener_end >= 0 else -1
+                if code_end < 0:
+                    code_end = len(text)
+                if code_end >= end and code_end - fence < capacity:
+                    end = fence
         # Break between lines when the window has a newline in its second half:
         # a code line cut in two cannot be copied out of either message. The
         # newline is not emitted; the synthetic close/reopen pair stands in for
-        # it (consumed below). A newline right before a fence is passed over, so
-        # a boundary never produces an empty code block.
+        # it (consumed below). A newline right before a fence or right after an
+        # opener line is passed over, so a boundary never produces an empty
+        # code block.
         line_break = False
         if end < len(text):
             newline = text.rfind('\n', position, end)
-            while newline > position + capacity // 2 and text.startswith('```', newline + 1):
+            while newline > position + capacity // 2 and (
+                text.startswith('```', newline + 1) or _ends_opener_line(text, position, newline, is_open)
+            ):
                 newline = text.rfind('\n', position, newline)
             if newline > position + capacity // 2:
                 end = newline
