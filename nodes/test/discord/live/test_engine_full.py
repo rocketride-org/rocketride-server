@@ -28,7 +28,10 @@ the L3 gates, and ``botUserId`` in the engine id block. Optional:
 - ``DISCORD_E2E_PG_CONTAINER`` / ``_PG_HOST`` / ``_PG_USER`` / ``_PG_DATABASE``
   (plus the engine variable ``ROCKETRIDE_DISCORD_PG_PASSWORD``): a disposable
   PostgreSQL container for the capture cases (F32..F34). They drop and create
-  the capture table in that database, and F34 stops and starts the container.
+  the capture table in that database, and F34 stops and starts the container,
+  so they also need ``DISCORD_E2E_PG_DISPOSABLE`` set to exactly
+  ``<container>/<database>``, and they refuse a database that holds any other
+  table.
 """
 
 import json
@@ -77,9 +80,39 @@ def _full_gate() -> str:
 
 FULL_SKIP = _full_gate()
 pytestmark = [live_only, pytest.mark.skipif(bool(FULL_SKIP), reason=FULL_SKIP or 'full suite enabled')]
-needs_pg = pytest.mark.skipif(
-    not (PG_CONTAINER and PG_HOST and PG_USER and PG_DATABASE), reason='DISCORD_E2E_PG_* not set'
-)
+PG_DISPOSABLE = os.environ.get('DISCORD_E2E_PG_DISPOSABLE', '')
+
+
+def _pg_gate() -> str:
+    """Why the capture cases cannot run, or '' when they may.
+
+    F32 drops the capture table and F34 stops the container, so naming a
+    database is not enough: the operator must also confirm that exact
+    container and database are disposable.
+    """
+    if not (PG_CONTAINER and PG_HOST and PG_USER and PG_DATABASE):
+        return 'DISCORD_E2E_PG_* not set'
+    expected = f'{PG_CONTAINER}/{PG_DATABASE}'
+    if PG_DISPOSABLE != expected:
+        return (
+            f'DISCORD_E2E_PG_DISPOSABLE must be "{expected}" to confirm that container may be stopped '
+            'and that database may have its discord_events table dropped'
+        )
+    return ''
+
+
+PG_SKIP = _pg_gate()
+needs_pg = pytest.mark.skipif(bool(PG_SKIP), reason=PG_SKIP or 'capture cases enabled')
+
+
+def _require_disposable_database():
+    """Refuse to touch a database that holds anything but the capture table."""
+    others = _psql(
+        "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') "
+        "AND tablename <> 'discord_events'"
+    )
+    if others != '0':
+        pytest.skip(f'{PG_DATABASE} holds {others} other table(s); the capture cases need a disposable database')
 
 
 # -----------------------------------------------------------------------------
@@ -965,6 +998,7 @@ def test_f27_system_and_empty_messages(engine, engine_config, driver_bot):
 @needs_pg
 def test_f32_capture_into_postgres(engine, engine_config, driver_bot):
     tag = _tag('F32')
+    _require_disposable_database()
     _psql('DROP TABLE IF EXISTS discord_events')
     _start(engine, _with_capture(_echo(_params(engine_config))))
     posted = driver_bot.post(f'{tag} capture me')
@@ -1020,6 +1054,7 @@ def test_f34_database_down_mid_run(engine, engine_config, driver_bot):
     tag = _tag('F34')
     _start(engine, _with_capture(_echo(_params(engine_config))))
     mark = _log_size()
+    _require_disposable_database()
     subprocess.run(['docker', 'stop', PG_CONTAINER], capture_output=True, timeout=60)
     try:
         down = driver_bot.post(f'{tag} while the database is down')

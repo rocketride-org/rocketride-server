@@ -77,6 +77,7 @@ path, id or token is stored in the repo.
 | `DISCORD_E2E_PG_HOST` | L4, optional | `host:port` the engine's `db_postgres` node connects to |
 | `DISCORD_E2E_PG_USER` | L4, optional | database user, for the engine and for `psql` inside the container |
 | `DISCORD_E2E_PG_DATABASE` | L4, optional | database the capture cases drop and create `discord_events` in |
+| `DISCORD_E2E_PG_DISPOSABLE` | L4, required with the PG variables | Must be exactly `<container>/<database>` to confirm F32 may drop `discord_events` and F34 may stop the container; the cases also refuse a database holding any other table |
 | `DISCORD_LIVE_RESULTS_DIR` | L2, optional | where replay verdicts are written (default: system temp directory) |
 
 Id map (empty strings mean "not provided"; the harness discovers what it can and
