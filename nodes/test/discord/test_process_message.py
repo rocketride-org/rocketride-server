@@ -484,6 +484,40 @@ class TestAttachmentMerge:
         assert self._text_call(endpoint, 1)[0] == '[attachment flow.pipe]\nsource: discord'
         assert _sent_reply(endpoint) == 'first'  # first non-empty answer wins
 
+    def test_merge_off_a_blank_text_answer_loses_to_a_real_attachment_answer(self):
+        endpoint = self._endpoint(merge=False, text_answer='\n', binary_answer='image-answer')
+        message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert _sent_reply(endpoint) == 'image-answer'
+
+    def test_merge_off_only_blank_answers_post_nothing(self):
+        endpoint = self._endpoint(merge=False, text_answer=' \n ', binary_answer='\t')
+        message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert endpoint._send_response.await_count == 0
+
+    def test_merge_on_a_blank_text_pass_falls_back_to_the_attachment_answer(self):
+        endpoint = self._endpoint(text_answer='\n  ', binary_answer='image-answer')
+        message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert _sent_reply(endpoint) == 'image-answer'
+
+    def test_merge_on_a_blank_attachment_answer_is_not_folded_in(self):
+        endpoint = self._endpoint(binary_answer='  ')
+        message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        text, _meta = self._text_call(endpoint)
+        assert text == 'what is this?'
+        assert _sent_reply(endpoint) == 'text-answer'
+
     def test_merging_is_off_by_default(self):
         assert IEndpoint._merge_attachments is False
 
@@ -1988,6 +2022,15 @@ class TestDeliveryAndShutdownEdges:
 
         assert len(outbound['messageIds']) == 1
         assert outbound['complete'] is False
+
+    def test_a_blank_answer_is_nothing_to_send(self):
+        endpoint, message = self._sender()
+        message.channel.send = mock.AsyncMock()
+
+        outbound = asyncio.run(endpoint._send_response(message, ' \n\t '))
+
+        message.channel.send.assert_not_awaited()
+        assert outbound == {'messageIds': [], 'destination': 'channel', 'complete': True}
 
     def test_the_outbound_event_carries_completeness(self):
         endpoint = _make_endpoint()

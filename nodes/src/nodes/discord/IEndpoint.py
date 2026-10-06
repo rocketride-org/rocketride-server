@@ -742,6 +742,16 @@ class IEndpoint(IEndpointBase):
         content = message.content if isinstance(message.content, str) else str(message.content or '')
         return content if content.strip() else ''
 
+    @staticmethod
+    def _answer_text(answer: Any) -> str:
+        """A pipeline answer, or '' when it is only whitespace.
+
+        Answers are chosen by truthiness, so a blank one (``'\\n'``) would
+        otherwise win over a real answer from a later lane.
+        """
+        text = answer if isinstance(answer, str) else str(answer or '')
+        return text if text.strip() else ''
+
     def _message_metadata(self, message: discord.Message) -> Dict[str, Any]:
         """Build the stable downstream metadata contract for one message."""
         channel = message.channel
@@ -948,6 +958,7 @@ class IEndpoint(IEndpointBase):
                                 text_meta,
                             ),
                         )
+                        text_reply = self._answer_text(text_reply)
                         if text_reply:
                             reply = text_reply
                         if text_meta.get('_pipelineError'):
@@ -961,8 +972,8 @@ class IEndpoint(IEndpointBase):
                         attachment_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
                         if attachment in eligible_attachments:
                             group_index += 1
-                        att_reply = await self._process_attachment(
-                            message, attachment, attachment_meta, attachment_index
+                        att_reply = self._answer_text(
+                            await self._process_attachment(message, attachment, attachment_meta, attachment_index)
                         )
                         if attachment_meta.get('_pipelineError'):
                             processing_errors.append(attachment_meta.pop('_pipelineError'))
@@ -1050,7 +1061,9 @@ class IEndpoint(IEndpointBase):
             attachment_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
             if attachment in eligible_attachments:
                 group_index += 1
-            att_reply = await self._process_attachment(message, attachment, attachment_meta, attachment_index)
+            att_reply = self._answer_text(
+                await self._process_attachment(message, attachment, attachment_meta, attachment_index)
+            )
             if attachment_meta.get('_pipelineError'):
                 processing_errors.append(attachment_meta.pop('_pipelineError'))
             if not att_reply:
@@ -1078,7 +1091,7 @@ class IEndpoint(IEndpointBase):
         )
         if text_meta.get('_pipelineError'):
             processing_errors.append(text_meta.pop('_pipelineError'))
-        return text_reply or first_answer
+        return self._answer_text(text_reply) or first_answer
 
     def _is_text_attachment(self, attachment: discord.Attachment) -> bool:
         """Whether this attachment is decoded as text instead of routed as binary.
@@ -1489,7 +1502,14 @@ class IEndpoint(IEndpointBase):
         # Earlier chunks may already be on Discord when a later one fails, so
         # "some ids came back" is not "the whole answer was posted".
         complete = True
-        for chunk in chunk_message(response, number=bool(getattr(self, '_number_chunks', False))):
+        # A blank chunk is not a message Discord accepts; zero chunks left is
+        # nothing to send, not a failed send.
+        chunks = [
+            chunk
+            for chunk in chunk_message(response, number=bool(getattr(self, '_number_chunks', False)))
+            if chunk.strip()
+        ]
+        for chunk in chunks:
             try:
                 thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations)
             except discord.RateLimited as e:
