@@ -1026,8 +1026,9 @@ Wiring is identical to `qdrant` (Starter 2 / Pattern 3) — only the config bloc
 you already operate Postgres.
 
 > **Pitfall 15 — vector store wired like a SQL node (or vice versa).** `db_postgres` without
-> an `llm` control connection fails validation; `postgres` without an embedding node in front
-> stores nothing searchable (and search must use the SAME embedding model as ingestion).
+> an `llm` control connection cannot answer natural-language questions (raw SQL through
+> `execute` still works); `postgres` without an embedding node in front stores nothing
+> searchable (and search must use the SAME embedding model as ingestion).
 
 ### Pattern 29: Choosing a store — relational vs vector vs graph
 

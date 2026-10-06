@@ -1198,3 +1198,29 @@ def test_question_with_llm_reaches_the_llm():
         inst._buildSQLQueryOnce('all users')
 
     assert inst.instance.asked is True
+
+
+class _LaneInstanceWithoutLlm(_FakeInstance):
+    """Lane-recording instance with no llm controller connected."""
+
+    def getControllerNodeIds(self, class_type):
+        return []
+
+
+def test_write_questions_without_llm_reports_the_cause_on_the_lanes():
+    """A question on the lane with no llm connected tells the lane readers why.
+
+    The clear message must reach text/answers, not only the log, or a chat
+    pipeline gets no reply at all.
+    """
+    inst = _sql_instance(_FakeGlobal(max_attempts=1))
+    fake_instance = _LaneInstanceWithoutLlm(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('all users')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written.startswith('No LLM is connected to this TestDB node')
+    assert fake_instance.answer_written.getJson()['error'] == fake_instance.text_written

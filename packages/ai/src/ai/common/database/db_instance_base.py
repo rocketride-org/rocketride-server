@@ -176,6 +176,10 @@ def _format_table(table_info: dict) -> dict:
     return result
 
 
+class MissingLlmError(ValueError):
+    """A natural-language question reached a node with no llm connected."""
+
+
 class DatabaseInstanceBase(IInstanceBase, ABC):
     """Abstract base for the IInstance layer of any relational database node.
 
@@ -825,12 +829,12 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         ``query``.
 
         Raises:
-            ValueError: no LLM is connected to the node.
+            MissingLlmError: no LLM is connected to the node.
         """
         # The llm connection is optional: only natural-language questions use
         # it, while raw SQL through the execute tool never does.
         if not self.instance.getControllerNodeIds('llm'):
-            raise ValueError(
+            raise MissingLlmError(
                 f'No LLM is connected to this {self._db_display_name()} node. '
                 'Natural-language questions need an llm connection; raw SQL through '
                 'the execute tool (client.database.query) works without one.'
@@ -1047,6 +1051,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             self._emit(result, lanes, executed=executed)
 
+        except MissingLlmError as e:
+            # The reader of the text/answers lanes needs this cause, not only the log.
+            error(f'Error handling question: {e}')
+            self._emitError(str(e), lanes)
         except Exception as e:
             error(f'Error handling question: {e}')
 

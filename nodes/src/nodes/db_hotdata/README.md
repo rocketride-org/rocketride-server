@@ -47,7 +47,7 @@ An agent flow: `load_data` the rows, `build_index` on the text column, then `get
 
 Set an API key and workspace ID on the node, or export `HOTDATA_API_KEY` and `HOTDATA_WORKSPACE`. The default endpoint is `https://api.hotdata.dev`.
 
-Wire an LLM to the node's `llm` control connection — without one, natural-language querying cannot work. See `examples/db_hotdata.pipe`.
+For natural-language querying, wire an LLM to the node's `llm` control connection (see `examples/db_hotdata.pipe`). Raw SQL through the `execute` tool works without one.
 
 ## Limitations
 
