@@ -27,7 +27,6 @@ import json
 import os
 import re
 import threading
-from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import (
@@ -49,7 +48,6 @@ depends(requirements)
 import discord
 from discord.ext import commands
 
-from .capture import CaptureWriter, _engine_warning, capture_row, is_valid_source_label
 from .text_utils import (
     attachment_kind,
     chunk_message,
@@ -70,14 +68,23 @@ _THREAD_FALLBACK = object()
 # value is dropped and the channel's own default applies instead.
 THREAD_ARCHIVE_DURATIONS = (60, 1440, 4320, 10080)
 
-# A ``no_reply`` reason becomes the capture log's dedupe key, and some reasons
-# are built from an exception message. Clipped here, at the one place every
-# reason passes through, so a runaway string cannot reach the key.
+# Some ``no_reply`` reasons are built from an exception message. Clipped here,
+# at the one place every reason passes through, so a runaway string cannot
+# reach the emitted event.
 MAX_NO_REPLY_REASON_CHARS = 200
 
 
 # A ``${NAME}`` the engine could not resolve reaches the node as literal text.
 _UNRESOLVED_VARIABLE = re.compile(r'^\$\{([A-Za-z0-9_]+)\}$')
+
+
+def _engine_warning(message: str) -> None:
+    """Log through the engine's logger when there is one."""
+    try:
+        from rocketlib import warning  # type: ignore  # engine-only module
+    except ImportError:
+        return
+    warning(message)
 
 
 def _config_warning(message: str) -> None:
@@ -148,15 +155,6 @@ class IEndpoint(IEndpointBase):
     _emit_reactions: bool = False
     _emit_no_reply: bool = False
     _emit_outbound: bool = False
-    # Durable capture of the same bodies `_send_sse` broadcasts; all off by
-    # default, and `_capture` stays None unless `captureEvents` is on, so a
-    # node that does not want it never starts a thread or looks for a database.
-    _capture_events: bool = False
-    _capture_node_id: str = ''
-    _capture_table: str = 'discord_events'
-    _capture: Optional[CaptureWriter] = None
-    _capture_source_label: str = ''
-    _capture_source_setting: str = ''
     _include_member_metadata: bool = False
     _config_error: Optional[str] = None
     _inflight: set
@@ -380,12 +378,6 @@ class IEndpoint(IEndpointBase):
         self._emit_reactions = config.get('emitReactions', False)
         self._emit_no_reply = config.get('emitNoReply', False)
         self._emit_outbound = config.get('emitOutbound', False)
-        self._capture_events = config.get('captureEvents', False)
-        # Engine-provided strings may be proxies; both of these are substituted
-        # into SQL identifiers / compared to component ids, so coerce to str.
-        self._capture_node_id = str(config.get('captureNodeId', '') or '')
-        self._capture_table = str(config.get('captureTable', '') or 'discord_events')
-        self._capture_source_setting = str(config.get('captureSource', '') or '')
         self._include_member_metadata = config.get('includeMemberMetadata', False)
         debug(f'Discord _run: token_present={bool(self._bot_token)} reply_mode={self._reply_mode!r}')
 
@@ -408,10 +400,6 @@ class IEndpoint(IEndpointBase):
         # failure that fires before the event existed would otherwise hang).
         self._shutdown_event = threading.Event()
 
-        # Started alongside the Gateway client and torn down with it, so the
-        # writer thread's lifetime is exactly the bot's.
-        self._start_capture()
-
         try:
             startup_future = asyncio.run_coroutine_threadsafe(self._startup(), server_loop)
             startup_future.result(timeout=30)
@@ -419,7 +407,6 @@ class IEndpoint(IEndpointBase):
             # Startup validation failed (e.g. missing token): fail the source
             # promptly rather than blocking forever with no bot.
             debug(f'Discord _startup raised: {e}')
-            self._stop_capture()
             raise
 
         # Block scanObjects() until shutdown or a terminal Gateway failure. In
@@ -433,10 +420,6 @@ class IEndpoint(IEndpointBase):
             shutdown_future.result(timeout=10)
         except Exception as e:
             debug(f'Discord _shutdown raised: {e}')
-
-        # After the handlers have stopped producing events, so the drain is
-        # bounded by what is already queued.
-        self._stop_capture()
 
         # A terminal Gateway failure (invalid token, missing intent, unexpected
         # disconnect) surfaces as a failed source instead of a silent no-op.
@@ -805,8 +788,8 @@ class IEndpoint(IEndpointBase):
             metadata,
             'reaction',
             # occurredAt is stamped once, here, so every consumer of this event — the
-            # broadcast, live capture and a later import from the task log — keys
-            # the same reaction identically.
+            # broadcast and a later import from the task log — keys the same
+            # reaction identically.
             {
                 'emoji': str(payload.emoji),
                 'added': added,
@@ -1181,87 +1164,6 @@ class IEndpoint(IEndpointBase):
         except Exception as e:
             debug(f'Discord: monitorSSE failed: {e}')
 
-    # -------------------------------------------------------------------------
-    # Durable event capture (opt-in)
-    # -------------------------------------------------------------------------
-
-    def _capture_source(self) -> str:
-        """The label recorded in every captured row's ``source`` column.
-
-        ``captureSource`` when it is set and valid, so a pipeline can say what
-        kind of pipeline wrote a row, and so two Discord sources sharing one
-        capture table can be told apart.
-
-        Otherwise ``'discord:<node type>'``: ``endpoint.key`` is the node's
-        logical type in the engine, not its per-pipeline component id, so the
-        default label is ``'discord:discord'`` for every Discord source — which
-        is why ``captureSource`` is the setting that distinguishes them. Read
-        defensively: this runs in a unit-test process too, where the endpoint
-        is a stand-in.
-        """
-        configured = getattr(self, '_capture_source_setting', '')
-        if configured:
-            if is_valid_source_label(configured):
-                return configured
-            debug('Discord: captureSource is not a valid label; using the default')
-        endpoint = getattr(self, 'endpoint', None)
-        component = str(getattr(endpoint, 'key', '') or getattr(endpoint, 'logicalType', '') or 'discord')
-        return f'discord:{component}'
-
-    def _start_capture(self):
-        """Build and start the capture writer, when ``captureEvents`` is on.
-
-        A no-op otherwise, and that is the contract: with capture off this
-        node starts no thread, borrows no pipe, and never asks the engine
-        which tool nodes are connected to it.
-        """
-        if not getattr(self, '_capture_events', False) or self._capture is not None:
-            return
-        self._capture_source_label = self._capture_source()
-        self._capture = CaptureWriter(
-            self.target,
-            source=self._capture_source_label,
-            table=self._capture_table,
-            node_id=self._capture_node_id,
-        )
-        self._capture.start()
-
-    def _stop_capture(self):
-        """Drain and stop the capture writer. Safe to call twice, or never."""
-        writer = self._capture
-        if writer is None:
-            return
-        self._capture = None
-        try:
-            writer.stop(timeout=2.0)
-        except Exception as e:
-            debug(f'Discord: capture stop failed: {e}')
-
-    def _capture_event(self, event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any]):
-        """Queue one event for the capture log.
-
-        Called next to every ``_send_sse``, with the same three arguments, so
-        the durable row and the live broadcast can never describe different
-        things. Best-effort in the strongest sense: building the row is pure
-        and queueing it cannot block, and anything that still goes wrong is a
-        debug line, never an exception on the answering path.
-        """
-        writer = self._capture
-        if writer is None:
-            return
-        try:
-            writer.submit(
-                capture_row(
-                    event_type,
-                    metadata,
-                    payload,
-                    source=self._capture_source_label,
-                    now=datetime.now(timezone.utc),
-                )
-            )
-        except Exception as e:
-            debug(f'Discord: capture row failed: {e}')
-
     def _new_entry(self, obj: Dict[str, Any]):
         """Create an engine entry for a Discord object."""
         return getObject(obj=obj)
@@ -1305,7 +1207,6 @@ class IEndpoint(IEndpointBase):
             broadcast_text = text if sse_text is None else sse_text
             payload: Dict[str, Any] = {'lane': 'text', 'text': broadcast_text[:2000]}
             self._send_sse(pipe, 'message', obj_meta, payload)
-            self._capture_event('message', obj_meta, payload)
             pipe.writeText(text)
             pipe.close()
             results = entry.response.toDict()
@@ -1358,7 +1259,6 @@ class IEndpoint(IEndpointBase):
             self._send_metadata(pipe, obj_meta)
             binary_payload = {'lane': 'binary', 'mimeType': mime_type, 'size': len(file_data)}
             self._send_sse(pipe, 'message', obj_meta, binary_payload)
-            self._capture_event('message', obj_meta, binary_payload)
             if mime_type.startswith('image/'):
                 pipe.writeImage(AVI_ACTION.BEGIN, mime_type)
                 pipe.writeImage(AVI_ACTION.WRITE, mime_type, file_data)
@@ -1407,7 +1307,6 @@ class IEndpoint(IEndpointBase):
             pipe.open(entry)
             self._send_metadata(pipe, event_meta)
             self._send_sse(pipe, event_type, event_meta, payload)
-            self._capture_event(event_type, event_meta, payload)
             pipe.writeTagBeginObject()
             pipe.writeTagBeginStream()
             pipe.writeTagData(data)
@@ -1426,7 +1325,7 @@ class IEndpoint(IEndpointBase):
 
         The reason is clipped to :data:`MAX_NO_REPLY_REASON_CHARS` here, at the
         one place every reason passes through: a reason built from an exception
-        message is unbounded, and it becomes the capture log's dedupe key.
+        message is unbounded.
 
         Args:
             metadata (Dict[str, Any]): The message's metadata contract.

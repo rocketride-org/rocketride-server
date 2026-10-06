@@ -323,9 +323,6 @@ class TestServicesJsonSchema:
             'discord.emitReactions',
             'discord.emitNoReply',
             'discord.emitOutbound',
-            'discord.captureEvents',
-            'discord.captureNodeId',
-            'discord.captureTable',
             'discord.includeMemberMetadata',
             'discord.numberChunks',
         ]

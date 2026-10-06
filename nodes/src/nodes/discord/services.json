@@ -195,34 +195,6 @@
 			"default": false,
 			"optional": true
 		},
-		"discord.captureEvents": {
-			"type": "boolean",
-			"title": "Capture Events To Database",
-			"description": "Write every event this node handles — question, follow-up, reply, no-reply, reaction — into a database node connected to this source with a tool control edge. Question rows are always written; outbound, no_reply and reaction rows exist only when the matching Emit Outbound Events (emitOutbound), Emit No Reply Events (emitNoReply) or Emit Reactions (emitReactions) option is also on, because those events are not produced at all when it is off. Writes happen off the answering path; if the database is unreachable the bot keeps answering and each failed write is logged as a warning.",
-			"default": false,
-			"optional": true
-		},
-		"discord.captureNodeId": {
-			"type": "string",
-			"title": "Capture Database Node",
-			"description": "Component id of the database node to write to. Empty: the only database tool node connected to this source.",
-			"default": "",
-			"optional": true
-		},
-		"discord.captureTable": {
-			"type": "string",
-			"title": "Capture Table",
-			"description": "Table the captured events are written to. Created if it does not exist. Letters, digits and underscore only, not starting with a digit, at most 54 characters (Postgres truncates identifiers at 63 bytes, and this table's index and constraint names are derived from its name).",
-			"default": "discord_events",
-			"optional": true
-		},
-		"discord.captureSource": {
-			"type": "string",
-			"title": "Capture Source Label",
-			"description": "Text written to each captured row's source column, e.g. to tell which pipeline wrote it, and the only way to tell two Discord sources sharing one capture table apart. Letters, digits and _ . : + @ - only, up to 128 characters. Empty: discord:<node type>, which is discord:discord for every Discord source.",
-			"default": "",
-			"optional": true
-		},
 		"discord.includeMemberMetadata": {
 			"type": "boolean",
 			"title": "Include Member Metadata",
@@ -257,10 +229,6 @@
 				"discord.emitReactions",
 				"discord.emitNoReply",
 				"discord.emitOutbound",
-				"discord.captureEvents",
-				"discord.captureNodeId",
-				"discord.captureTable",
-				"discord.captureSource",
 				"discord.includeMemberMetadata"
 			]
 		}
