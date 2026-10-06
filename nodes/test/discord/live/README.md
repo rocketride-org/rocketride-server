@@ -22,7 +22,16 @@ is off unless `DISCORD_LIVE=1` is set; a normal run collects and skips them.
 - **L3** has a real engine spawn the node from `engine_min.pipe`; a second bot
   (the driver) posts questions and reads back what the node posted.
 - **L4** walks every base feature, success and failure, through real pipelines
-  on the engine, driven by the same driver bot.
+  on the engine, driven by the same driver bot. F32..F34 cover event capture
+  into a disposable PostgreSQL database and run only when the `DISCORD_E2E_PG_*`
+  variables are set:
+  - F32: with no capture table yet, the first insert creates `discord_events`,
+    and the question and answer land with the configured `captureSource`.
+  - F33: text plus a `.md` attachment keeps two `message` rows (`text`,
+    `text:1`), and inserting the same rows again adds nothing.
+  - F34: the database container is stopped mid-run; the bot still answers,
+    that question's rows are dropped and logged, and capture resumes once the
+    database is back.
 
 ## How to run
 
@@ -64,6 +73,10 @@ path, id or token is stored in the repo.
 | `DISCORD_E2E_FULL` | L4 | `1` to run the full suite |
 | `DISCORD_E2E_ENGINE_LOG` | L4, optional | engine log file, grepped for evidence |
 | `DISCORD_E2E_RESULTS_DIR` | L4, optional | where result rows are written (default: system temp directory) |
+| `DISCORD_E2E_PG_CONTAINER` | L4, optional | Docker container running a disposable PostgreSQL for F32..F34; F34 stops and starts it |
+| `DISCORD_E2E_PG_HOST` | L4, optional | `host:port` the engine's `db_postgres` node connects to |
+| `DISCORD_E2E_PG_USER` | L4, optional | database user, for the engine and for `psql` inside the container |
+| `DISCORD_E2E_PG_DATABASE` | L4, optional | database the capture cases drop and create `discord_events` in |
 | `DISCORD_LIVE_RESULTS_DIR` | L2, optional | where replay verdicts are written (default: system temp directory) |
 
 Id map (empty strings mean "not provided"; the harness discovers what it can and
@@ -93,7 +106,9 @@ skips the rest with a reason):
 ```
 
 In L3 and L4 the harness never holds the token of the bot under test: the engine
-resolves `${ROCKETRIDE_DISCORD_*}` in the pipes from its own environment.
+resolves `${ROCKETRIDE_DISCORD_*}` in the pipes from its own environment. The
+same goes for the capture database password, `${ROCKETRIDE_DISCORD_PG_PASSWORD}`.
+Point the `DISCORD_E2E_PG_*` variables only at a database you can throw away.
 
 ## Residue policy
 
@@ -115,5 +130,4 @@ resolves `${ROCKETRIDE_DISCORD_*}` in the pipes from its own environment.
   expectations of a real model.
 - E06 (an event branch landing in a vector store) is a placeholder that skips.
 - The behaviours that ship in follow-up changes (thread history, escalation
-  pause, reply sanitizing, retries, timeouts, backfill, event capture) are not
-  exercised here.
+  pause, reply sanitizing, retries, timeouts, backfill) are not exercised here.
