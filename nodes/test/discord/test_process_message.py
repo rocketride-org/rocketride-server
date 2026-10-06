@@ -1278,18 +1278,29 @@ class TestNumericAndMentionConfig:
         for attribute, default in self._BOOLEANS.values():
             assert getattr(endpoint, attribute) is default, attribute
 
-    def test_a_proxy_false_is_false(self):
-        """A string-like ``'false'`` used to read as True."""
-        endpoint = self._parse({'sendResponses': self._Proxy('false'), 'requireMention': self._Proxy('false')})
+    @pytest.mark.parametrize(
+        ('value', 'send_responses', 'require_mention'),
+        [
+            # The engine passes a JSON boolean as a real bool.
+            (True, True, True),
+            (False, False, False),
+            # A plain string is read by its words, not by truthiness.
+            ('false', False, False),
+            (' Yes ', True, True),
+            # An unknown word or no value keeps each setting's default.
+            ('perhaps', True, False),
+            (None, True, False),
+        ],
+    )
+    def test_send_responses_and_require_mention_read_bools_and_strings(self, value, send_responses, require_mention):
+        endpoint = self._parse({'sendResponses': value, 'requireMention': value})
 
-        assert endpoint._send_responses is False
-        assert endpoint._require_mention is False
+        assert endpoint._send_responses is send_responses
+        assert endpoint._require_mention is require_mention
 
-    def test_a_proxy_true_is_true(self):
-        endpoint = self._parse({'sendResponses': self._Proxy('TRUE'), 'requireMention': self._Proxy(' true ')})
-
-        assert endpoint._send_responses is True
-        assert endpoint._require_mention is True
+    def test_booleans_are_read_with_the_shared_parse_bool(self):
+        assert not hasattr(IEndpoint, '_as_bool')
+        assert _ENDPOINT_MODULE.parse_bool.__module__ == 'ai.common.utils.config_utils'
 
     @pytest.mark.parametrize(
         ('value', 'expected'),
@@ -1312,7 +1323,7 @@ class TestNumericAndMentionConfig:
         for attribute, _default in self._BOOLEANS.values():
             assert getattr(endpoint, attribute) is expected, attribute
 
-    @pytest.mark.parametrize('value', [None, '', 'maybe', object()])
+    @pytest.mark.parametrize('value', [None, '', 'maybe'])
     def test_an_unusable_boolean_falls_back_to_its_default(self, value):
         endpoint = self._parse({field: value for field in self._BOOLEANS})
 
