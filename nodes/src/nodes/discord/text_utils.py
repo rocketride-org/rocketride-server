@@ -853,13 +853,15 @@ def is_aimed_at_someone_else(
     role_mention_count: int,
     is_reply: bool,
     reply_target_is_bot: Optional[bool] = None,
+    reply_target_is_author: Optional[bool] = None,
 ) -> bool:
     """Decide whether a message is addressed to somebody other than the bot.
 
     Pure mirror of the support bot's ``isAimedAtSomeoneElse``: a direct mention
     of the bot always wins; otherwise a mention of another user or any role, or
     a reply to a message the bot did not author, means the message belongs to
-    someone else's conversation.
+    someone else's conversation. A reply to the author's own earlier message
+    (a common way to add details) is not.
 
     Args:
         is_bot_mentioned: Whether the bot is directly @mentioned.
@@ -869,6 +871,8 @@ def is_aimed_at_someone_else(
         is_reply: Whether the message replies to another message.
         reply_target_is_bot: Whether the replied-to message is the bot's, or
             None when it could not be fetched.
+        reply_target_is_author: Whether the replied-to message was written by
+            the author of this message, or None when it could not be fetched.
 
     Returns:
         bool: True when the message should be acknowledged rather than answered.
@@ -882,6 +886,9 @@ def is_aimed_at_someone_else(
         return False
     if is_reply and reply_target_is_bot:
         return False
+    if is_reply and reply_target_is_author:
+        # Adding details to your own message; a mention still aims it elsewhere.
+        return mentions_others
     return True
 
 

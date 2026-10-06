@@ -128,7 +128,7 @@ A message skipped as `paused` (or as `aimed_elsewhere`, below) is never ingested
 
 ### Ignore Messages Aimed At Others / Acknowledgement Emoji
 
-With `ignoreAimedAtOthers` enabled, a message that mentions another user or any role, or replies to a message the bot did not write, is treated as somebody else's conversation: the node reacts with `ackEmoji` (when set), posts no answer, emits `no_reply` with reason `aimed_elsewhere` (with the message `text`, as for `paused`), and — when `escalationPause` is also on — pauses the thread it arrived in. A direct @mention of the bot always wins over this gate.
+With `ignoreAimedAtOthers` enabled, a message that mentions another user or any role, or replies to a message the bot did not write, is treated as somebody else's conversation: the node reacts with `ackEmoji` (when set), posts no answer, emits `no_reply` with reason `aimed_elsewhere` (with the message `text`, as for `paused`), and — when `escalationPause` is also on — pauses the thread it arrived in. A direct @mention of the bot always wins over this gate. A reply to the author's own earlier message (a common way to add details) is not aimed elsewhere unless it also mentions somebody else.
 
 ### Feedback Reactions / Feedback Emojis
 

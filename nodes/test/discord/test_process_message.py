@@ -1400,6 +1400,25 @@ class TestAimedAtSomeoneElse:
         endpoint._run_with_optional_typing.assert_not_awaited()
         message.add_reaction.assert_awaited_once()
 
+    def test_a_reply_to_your_own_message_is_answered(self):
+        """Review of #2547: "also, I'm on v2.3" as a reply to your own question.
+
+        Discord's reply ping puts the replied-to author, here the author
+        themselves, in ``mentions``; that is not somebody else either.
+        """
+        endpoint = self._endpoint(_escalation_pause=True, _escalation_markers=['<@&77>'])
+        endpoint._resolved_threads = {'321'}
+        message = self._reply(resolved=self._author(3))  # the message author is 3
+        message.channel = _FakeThread(321)
+        message.channel.fetch_message = mock.AsyncMock()
+        message.mentions = [types.SimpleNamespace(id=3)]
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_with_optional_typing.assert_awaited_once()
+        message.add_reaction.assert_not_awaited()
+        assert endpoint._paused_threads == set()
+
     def test_aimed_elsewhere_in_a_thread_pauses_it(self):
         endpoint = self._endpoint(_escalation_pause=True, _escalation_markers=['<@&77>'])
         endpoint._resolved_threads = {'321'}

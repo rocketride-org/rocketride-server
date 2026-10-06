@@ -1617,24 +1617,30 @@ class IEndpoint(IEndpointBase):
         mentions = mentions if isinstance(mentions, (list, tuple)) else []
         role_mentions = getattr(message, 'role_mentions', []) or []
         role_mentions = role_mentions if isinstance(role_mentions, (list, tuple)) else []
+        author_id = getattr(getattr(message, 'author', None), 'id', None)
 
         reply_target_is_bot = None
+        reply_target_is_author = None
         if is_reply and not is_mentioned:
             try:
                 referenced = await self._replied_to_message(message)
                 author = getattr(referenced, 'author', None)
                 if author is not None:
                     reply_target_is_bot = getattr(author, 'id', None) == bot_user_id
+                    reply_target_is_author = author_id is not None and getattr(author, 'id', None) == author_id
             except Exception as e:
                 debug(f'Discord: could not look up the message replied to: {e}')
 
         return is_aimed_at_someone_else(
             is_bot_mentioned=is_mentioned,
-            mentioned_user_ids=[str(user.id) for user in mentions],
+            # The author is never somebody else: a reply to their own message
+            # pings them, which puts them in ``mentions``.
+            mentioned_user_ids=[str(user.id) for user in mentions if user.id != author_id],
             bot_user_id=str(bot_user_id) if bot_user_id is not None else None,
             role_mention_count=len(role_mentions),
             is_reply=is_reply,
             reply_target_is_bot=reply_target_is_bot,
+            reply_target_is_author=reply_target_is_author,
         )
 
     async def _react(self, message: discord.Message, emoji: str) -> bool:

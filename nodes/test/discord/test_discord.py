@@ -739,6 +739,16 @@ class TestIsAimedAtSomeoneElse:
     def test_reply_to_somebody_else_is_aimed_elsewhere(self):
         assert self._aimed(is_reply=True, reply_target_is_bot=False) is True
 
+    def test_a_reply_to_your_own_message_is_for_the_bot(self):
+        # Review of #2547: replying to your own question to add details is common.
+        assert self._aimed(is_reply=True, reply_target_is_bot=False, reply_target_is_author=True) is False
+
+    def test_a_reply_to_yourself_that_mentions_someone_else_is_still_aimed_elsewhere(self):
+        assert (
+            self._aimed(is_reply=True, reply_target_is_bot=False, reply_target_is_author=True, mentioned_user_ids=['5'])
+            is True
+        )
+
     def test_unfetchable_reference_stays_aimed_elsewhere(self):
         # The referenced message could not be fetched: the bot's behavior is to
         # treat it as somebody else's conversation.
