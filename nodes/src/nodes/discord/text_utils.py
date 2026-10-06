@@ -27,47 +27,13 @@ These functions have no discord.py dependency so they can be unit-tested
 directly without a Gateway connection or the discord.py package installed.
 """
 
-import json
 import re
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence
 
 DISCORD_MESSAGE_CHAR_LIMIT: int = 2000  # Discord's per-message cap
 
-# Default cap on the thread transcript handed to the pipeline as context.
-THREAD_HISTORY_MAX_CHARS: int = 6000
-
-# A reply that still opens with one of these labels is leaked agent scratchpad
-# ("Thought: ...", "Action Input: ...") rather than a user-facing answer.
-_OPENS_WITH_REASONING = re.compile(r'^\s*(Thought|Action(?:\s+Input)?|Observation|Reasoning)\s*:', re.IGNORECASE)
-_FINAL_ANSWER = re.compile(r'Final Answer\s*:\s*', re.IGNORECASE)
-
-# Some agent runtimes wrap the finished answer in a small JSON envelope instead
-# of writing it out: ``{"type": "final", "content": "<escaped string>"}``.
-_FINAL_JSON = re.compile(r'\{\s*"type"\s*:\s*"final"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}')
-
-# Engine and model failures can surface as the "answer" text — a provider API
-# error, a Python traceback, an engine stack frame, a bare exception line, or an
-# HTTP status from the provider. None of those may ever reach Discord.
-_ERROR_SIGNATURES = (
-    re.compile(r'an error occurred with the \w+ api\b', re.IGNORECASE),
-    re.compile(r'\b(chat|agent)\.py:\d+', re.IGNORECASE),
-    re.compile(r'_run failed\b', re.IGNORECASE),
-    re.compile(r'Traceback \(most recent call last\)', re.IGNORECASE),
-    re.compile(r'^\s*(Exception|Error)\s*:', re.IGNORECASE),
-    re.compile(r'Error code:\s*\d{3}\b', re.IGNORECASE),
-    # The engine's LLM layer reports a provider failure as the answer itself:
-    # ``**LLM error** — ValueError: An error occurred with the API.``
-    re.compile(r'^\s*\*\*LLM error\*\*'),
-    # ...and the sentence its mapped exception carries, when that sentence is the
-    # whole answer (prose that merely mentions API errors is not matched).
-    re.compile(r'^\s*(?:\w+Error:\s*)?an error occurred with the api\.?\s*$', re.IGNORECASE),
-)
-
 # Chunk numbering: each chunk ends with '\n\n*(3/7)*' when it is turned on.
 _CHUNK_LABEL_OVERHEAD = len('\n\n*(/)*')
-
-# Prefix added to a capped transcript so the reader knows the head was dropped.
-_TRANSCRIPT_TRUNCATION_PREFIX = '…\n'
 
 # Suffix marking a folded attachment whose tail was dropped at the char cap.
 _ATTACHMENT_TRUNCATION_SUFFIX = '\n… (truncated)'
@@ -363,56 +329,6 @@ def should_process_message(
     return True
 
 
-def format_thread_transcript(
-    entries: Iterable[Tuple[str, str]],
-    max_chars: int = THREAD_HISTORY_MAX_CHARS,
-) -> str:
-    """Render prior thread messages as a plain ``<name>: <content>`` transcript.
-
-    Mirrors the support bot's ``threadTranscript``: one line per message,
-    oldest first, and a tail-capped result prefixed with an ellipsis line when
-    the transcript is longer than ``max_chars`` (keeping the most recent
-    context, which is what the agent needs).
-
-    Args:
-        entries: ``(author_name, content)`` pairs, already ordered oldest first
-            and already filtered (no system messages, no empty content).
-        max_chars: Maximum transcript length before the head is dropped.
-
-    Returns:
-        str: The transcript, or '' when there is nothing to show.
-    """
-    lines: List[str] = []
-    for name, content in entries:
-        text = (content or '').strip()
-        if not text:
-            continue
-        lines.append(f'{name}: {text}')
-    out = '\n'.join(lines)
-    if max_chars > 0 and len(out) > max_chars:
-        out = _TRANSCRIPT_TRUNCATION_PREFIX + out[-max_chars:]
-    return out
-
-
-def with_thread_context(content: str, transcript: str) -> str:
-    """Frame the latest message plus its thread transcript for the pipeline.
-
-    Mirrors the support bot's context framing. Returns ``content`` unchanged
-    when there is no transcript, so a brand-new thread is a no-op.
-
-    Args:
-        content (str): The user's latest message text.
-        transcript (str): The formatted transcript (see
-            :func:`format_thread_transcript`).
-
-    Returns:
-        str: The text to hand to the pipeline.
-    """
-    if not transcript:
-        return content
-    return f"User's latest message: {content}\n\nEarlier in this thread (oldest first, for context):\n{transcript}"
-
-
 def attachment_kind(mime_type: str) -> str:
     """Name the modality of an attachment as the merged question refers to it.
 
@@ -468,7 +384,7 @@ def compose_merged_question(user_text: str, blocks: Sequence[str]) -> str:
     """Join the user's words and the folded attachment blocks into one question.
 
     Args:
-        user_text (str): The user's message (already carrying thread context).
+        user_text (str): The user's message.
         blocks (Sequence[str]): Folded blocks, in the order they should appear.
 
     Returns:
@@ -483,160 +399,6 @@ def compose_merged_question(user_text: str, blocks: Sequence[str]) -> str:
     if user_text:
         return '\n\n'.join([user_text, *parts])
     return '\n\n'.join([NO_MESSAGE_FRAMING, *parts])
-
-
-def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
-    """Return the first configured escalation marker present in ``text``.
-
-    The support bot tests a single team role mention; the node generalizes that
-    to a configured list (plus the outbound-allowlisted role mentions).
-
-    Args:
-        text (str): The text to inspect (typically a pipeline answer).
-        markers (Sequence[str]): The effective escalation markers.
-
-    Returns:
-        Optional[str]: The first marker found, in configured order, else None.
-    """
-    if not text:
-        return None
-    for marker in markers or ():
-        if marker and marker in text:
-            return marker
-    return None
-
-
-def looks_like_error(text: str) -> bool:
-    """Whether this "answer" is really an engine or model failure.
-
-    Mirrors the support bot's ``looksLikeError``, plus the two shapes that
-    reached a user anyway: a reply that opens with ``Exception:`` / ``Error:``,
-    and a provider status such as ``Error code: 429``. The caller suppresses
-    these instead of relaying them to Discord.
-
-    Args:
-        text (str): The candidate reply.
-
-    Returns:
-        bool: True when the text is a failure rather than an answer.
-    """
-    if not text:
-        return False
-    return any(pattern.search(text) for pattern in _ERROR_SIGNATURES)
-
-
-def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
-    """Turn the literal team name the model wrote into a real role mention.
-
-    Mirrors the support bot's ``injectRoleMention``: the agent is prompted to
-    hand off to "@RocketRide team", which Discord renders as plain text and
-    pings nobody. Matching is case-insensitive, and whitespace inside the alias
-    matches any run of whitespace so a line break between the words still hits.
-
-    Args:
-        text (str): The pipeline answer.
-        alias (str): The configured literal alias (empty disables this).
-        role_mention (str): The ``<@&id>`` mention to substitute.
-
-    Returns:
-        str: The answer with every occurrence of the alias replaced.
-    """
-    if not text or not alias or not role_mention:
-        return text
-    tokens = [re.escape(token) for token in alias.split()]
-    if not tokens:
-        return text
-    # A lambda, not the string itself: a replacement is a template, and a
-    # backslash in it would otherwise be read as a group reference.
-    return re.sub(r'\s+'.join(tokens), lambda _match: role_mention, text, flags=re.IGNORECASE)
-
-
-def sanitize_reply(text: str, markers: Sequence[str]) -> str:
-    """Strip leaked agent scratchpad from a reply before it is posted.
-
-    Mirrors the support bot's ``sanitizeReply`` (plus its ``extractFinalText``):
-
-    - unwrap a ``{"type": "final", "content": "..."}`` envelope;
-    - keep only what follows the LAST ``Final Answer:`` (when non-empty);
-    - if the result still opens with a reasoning label it is scratchpad, not an
-      answer: with an escalation marker present it becomes a short hand-off line
-      that keeps the marker, otherwise it becomes '' so nothing is posted.
-
-    Args:
-        text (str): The raw pipeline answer.
-        markers (Sequence[str]): The effective escalation markers.
-
-    Returns:
-        str: The reply to post, or '' when there is no real answer.
-    """
-    result = (text or '').strip()
-    if not result:
-        return result
-
-    envelope = _FINAL_JSON.search(result)
-    if envelope:
-        captured = envelope.group(1)
-        try:
-            result = json.loads(f'"{captured}"')
-        except ValueError:
-            # An envelope we cannot decode still told us where the answer is.
-            result = captured
-        result = result.strip()
-        if not result:
-            return result
-
-    marks = list(_FINAL_ANSWER.finditer(result))
-    if marks:
-        after = result[marks[-1].end() :].strip()
-        if after:
-            result = after
-
-    if _OPENS_WITH_REASONING.match(result):
-        marker = find_marker(result, markers)
-        if marker:
-            return f"Thanks for flagging this — I've looped in the team to take a look. {marker}"
-        return ''
-    return result
-
-
-def is_aimed_at_someone_else(
-    *,
-    is_bot_mentioned: bool,
-    mentioned_user_ids: Sequence[str],
-    bot_user_id: Optional[str],
-    role_mention_count: int,
-    is_reply: bool,
-    reply_target_is_bot: Optional[bool] = None,
-) -> bool:
-    """Decide whether a message is addressed to somebody other than the bot.
-
-    Pure mirror of the support bot's ``isAimedAtSomeoneElse``: a direct mention
-    of the bot always wins; otherwise a mention of another user or any role, or
-    a reply to a message the bot did not author, means the message belongs to
-    someone else's conversation.
-
-    Args:
-        is_bot_mentioned: Whether the bot is directly @mentioned.
-        mentioned_user_ids: The mentioned user ids, as strings.
-        bot_user_id: The bot's own user id as a string, or None if unknown.
-        role_mention_count: How many roles the message mentions.
-        is_reply: Whether the message replies to another message.
-        reply_target_is_bot: Whether the replied-to message is the bot's, or
-            None when it could not be fetched.
-
-    Returns:
-        bool: True when the message should be acknowledged rather than answered.
-    """
-    if is_bot_mentioned:
-        return False
-    mentions_others = any(str(user_id) != str(bot_user_id) for user_id in mentioned_user_ids or ()) or (
-        role_mention_count > 0
-    )
-    if not mentions_others and not is_reply:
-        return False
-    if is_reply and reply_target_is_bot:
-        return False
-    return True
 
 
 def guess_media_type(filename: str, content_type: str = '') -> str:
