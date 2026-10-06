@@ -138,6 +138,8 @@ With `feedbackReactions` enabled, the node adds each emoji in `feedbackEmojis` (
 
 ### Sanitize Replies
 
+`sanitizeReplies` does two things: it strips leaked agent reasoning from an answer (below), and it retries an answer that was only reasoning or empty (see **Retries on a non-answer**), so with it on one message can run the text pass up to `1 + nonAnswerRetries` times, even for a pipeline that is silent on purpose. Error answers are suppressed whether or not it is on (see **Error answers are never posted**).
+
 With `sanitizeReplies` enabled, an answer wrapped in a `{"type": "final", "content": "..."}` envelope is unwrapped to its decoded content first (an envelope whose JSON escapes do not decode falls back to the raw captured string). Only an envelope that is the whole reply, or that ends a reply opening with a scratchpad label, is unwrapped; an answer that shows one as an example is left alone. The result is then trimmed to what follows the last `Final Answer:` that starts a line outside a code fence, so prose or a code sample that mentions the label is not cut; if it still opens with `Thought:`, `Action:`, `Action Input:`, `Observation:`, or `Reasoning:` it is leaked agent scratchpad rather than an answer, and it is replaced by a short hand-off line that keeps the escalation marker when its final line (the last non-empty line, when that line is not itself a `Thought:` or other reasoning line) carries one, or suppressed entirely (with a `no_reply` event, reason `non_answer`) when there is none. Sanitizing happens before chunking, so nothing partial is ever posted.
 
 ### Error answers are never posted

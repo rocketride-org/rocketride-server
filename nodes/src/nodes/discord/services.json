@@ -374,14 +374,14 @@
 		"discord.sanitizeReplies": {
 			"type": "boolean",
 			"title": "Sanitize Replies",
-			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it. Error answers (an engine or provider error, a traceback) are never posted, whether or not this is on.",
+			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it, and retry an answer that was only reasoning or empty: the text pass then runs up to 1 + Retries on a non-answer times per message, even for a pipeline that is silent on purpose. Error answers (an engine or provider error, a traceback) are never posted, whether or not this is on.",
 			"default": false,
 			"optional": true
 		},
 		"discord.nonAnswerRetries": {
 			"type": "number",
 			"title": "Retries on a non-answer",
-			"description": "When Sanitize Replies strips the whole reply (the pipeline returned only agent scratchpad such as Thought: lines), re-run the text pass up to this many times before giving up. Zero never retries.",
+			"description": "While Sanitize Replies is on, re-run the text pass up to this many times when the reply was only agent scratchpad (such as Thought: lines) or empty, so one message runs the pipeline at most 1 + this many times. An error answer is never retried. Zero never retries.",
 			"default": 1,
 			"minimum": 0,
 			"maximum": 3,
