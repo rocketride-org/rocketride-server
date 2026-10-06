@@ -1751,6 +1751,75 @@ class TestTeamMentionAlias:
 
         assert _sent_reply(endpoint) == 'ping @RocketRide team'
 
+    @staticmethod
+    def _message_in(channel_id, message_id=2):
+        message = _make_message(content='question')
+        message.channel.id = channel_id
+        message.id = message_id
+        return message
+
+    def _ask_twice(self, endpoint, first, second, *, now=(1000.0, 1000.0)):
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', side_effect=list(now)):
+            asyncio.run(endpoint._process_message(first))
+            first_reply = _sent_reply(endpoint)
+            asyncio.run(endpoint._process_message(second))
+        return first_reply, _sent_reply(endpoint)
+
+    def test_a_second_ping_in_the_same_conversation_within_the_hour_is_plain_text(self):
+        """Review of #2547: any user could make the bot ping the staff role, repeatedly."""
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+
+        first, second = self._ask_twice(
+            endpoint, self._message_in(1), self._message_in(1, 3), now=(1000.0, 1000.0 + 3599)
+        )
+
+        assert first == 'Looping in <@&77> now.'
+        assert second == 'Looping in @RocketRide team now.', 'on cooldown the alias stays plain text'
+
+    def test_the_cooldown_is_per_conversation(self):
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+
+        first, second = self._ask_twice(endpoint, self._message_in(1), self._message_in(2, 3))
+
+        assert first == second == 'Looping in <@&77> now.'
+
+    def test_the_role_is_pinged_again_after_the_cooldown(self):
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+
+        _first, second = self._ask_twice(
+            endpoint, self._message_in(1), self._message_in(1, 3), now=(1000.0, 1000.0 + 3600)
+        )
+
+        assert second == 'Looping in <@&77> now.'
+
+    def test_an_answer_without_the_alias_does_not_start_the_cooldown(self):
+        endpoint = self._endpoint('A plain answer.')
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
+            asyncio.run(endpoint._process_message(self._message_in(1)))
+            endpoint._run_with_optional_typing = mock.AsyncMock(return_value='Looping in @RocketRide team.')
+            asyncio.run(endpoint._process_message(self._message_in(1, 3)))
+
+        assert _sent_reply(endpoint) == 'Looping in <@&77>.'
+
+    def test_a_hand_off_on_cooldown_still_pauses_the_thread(self):
+        endpoint = self._endpoint('Handing this to @RocketRide team', _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+        endpoint._send_response = mock.AsyncMock(
+            return_value={'messageIds': ['900'], 'destination': 'thread', 'threadId': '321', 'messages': []}
+        )
+        thread = _FakeThread(321)
+        first = _thread_message(endpoint, thread)
+
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
+            asyncio.run(endpoint._process_message(first))
+            endpoint._paused_threads = set()  # somebody @mentioned the bot back in
+            second = _thread_message(endpoint, thread)
+            second.id = 556
+            asyncio.run(endpoint._process_message(second))
+
+        assert _sent_reply(endpoint) == 'Handing this to @RocketRide team'
+        assert endpoint._paused_threads == {'321'}
+
     def test_services_json_declares_the_field(self):
         schema = _load_services_json()
 

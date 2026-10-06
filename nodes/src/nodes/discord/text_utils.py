@@ -752,6 +752,22 @@ def _alias_pattern(alias: str) -> Optional['re.Pattern']:
     return re.compile(r'(?<![\w/])' + r'\s+'.join(tokens) + r'(?!\w)', re.IGNORECASE)
 
 
+def contains_alias(text: str, alias: str) -> bool:
+    """Whether ``text`` names the team alias where it would be injected.
+
+    Args:
+        text (str): The answer.
+        alias (str): The configured alias (empty never matches).
+
+    Returns:
+        bool: True when :func:`inject_role_mention` would replace something.
+    """
+    pattern = _alias_pattern(alias)
+    if not text or pattern is None:
+        return False
+    return bool(_outside_code_fences(text, pattern.finditer(text)))
+
+
 def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
     """Turn the literal team name the model wrote into a real role mention.
 

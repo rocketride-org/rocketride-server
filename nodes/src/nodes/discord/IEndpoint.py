@@ -57,6 +57,7 @@ from ai.common.utils import parse_bool
 
 from .text_utils import (
     attachment_kind,
+    contains_alias,
     chunk_message,
     clip_attachment_text,
     compose_merged_question,
@@ -102,6 +103,18 @@ MAX_ATTACHMENT_BYTES = 104857600
 # backfill, so a message seen by both (or redelivered) is processed once;
 # bounded so a long-running bot does not grow it forever.
 HANDLED_MESSAGE_IDS_LIMIT = 1000
+
+# At most one injected team-role ping per conversation (a thread, or a
+# channel outside threads) in this many seconds. Any user who gets the model to
+# write the alias makes the bot ping the role, so repeats within the window
+# are posted with the alias as plain text. In memory only: a restart forgets it.
+TEAM_PING_COOLDOWN_SECONDS = 3600
+
+
+def _monotonic() -> float:
+    """``time.monotonic``, behind a name tests can patch without touching asyncio's clock."""
+    return time.monotonic()
+
 
 # Pipeline runs get their own bounded pool (and a semaphore of the same size),
 # so runs that hang cannot take the loop's default pool, which event emits use.
@@ -1393,7 +1406,7 @@ class IEndpoint(IEndpointBase):
         role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
         return alias if alias and role_ids else ''
 
-    def _with_team_mention(self, text: str) -> str:
+    def _with_team_mention(self, text: str, conversation_id: Optional[str] = None) -> str:
         """Turn the configured team alias in an answer into a real role mention.
 
         Mirrors the support bot's ``injectRoleMention``. The agent is prompted
@@ -1401,18 +1414,45 @@ class IEndpoint(IEndpointBase):
         and pings nobody; the first id in ``allowedMentionRoleIds`` is the role
         the node may actually mention, so that is the one substituted.
 
+        Any user who gets the model to write the alias makes the bot ping the
+        role, so a conversation gets at most one injected ping per
+        :data:`TEAM_PING_COOLDOWN_SECONDS`; within that window the alias is
+        posted as plain text.
+
         Args:
-            text (str): The pipeline answer.
+            text (str): The answer about to be posted.
+            conversation_id (Optional[str]): The thread or channel the answer
+                belongs to, which the cooldown is kept per.
 
         Returns:
-            str: The answer, unchanged unless both the alias and an allowed
-                role id are configured.
+            str: The answer, unchanged unless the alias and an allowed role id
+                are configured, the answer names the alias, and the
+                conversation is not on cooldown.
         """
-        alias = getattr(self, '_team_mention_alias', '')
-        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
-        if not text or not alias or not role_ids:
+        alias = self._handoff_alias()
+        if not text or not alias or not contains_alias(text, alias):
             return text
+        pings = getattr(self, '_team_pings', None)
+        if pings is None:
+            pings = self._team_pings = {}
+        now = _monotonic()
+        for key in [key for key, pinged in pings.items() if now - pinged >= TEAM_PING_COOLDOWN_SECONDS]:
+            del pings[key]
+        if conversation_id is not None:
+            if conversation_id in pings:
+                debug(f'Discord: team ping on cooldown in {conversation_id}; the alias is posted as plain text')
+                return text
+            pings[conversation_id] = now
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
         return inject_role_mention(text, alias, f'<@&{role_ids[0]}>')
+
+    def _is_escalation(self, text: str) -> bool:
+        """Whether a posted answer hands the conversation over.
+
+        It carries an escalation marker, or the team alias left as plain text
+        because the ping was on cooldown: the hand-off is just as real.
+        """
+        return bool(find_marker(text, self._effective_markers())) or contains_alias(text, self._handoff_alias())
 
     def _is_bot_mentioned(self, message: discord.Message) -> bool:
         """True when this bot is directly @mentioned (never @everyone/@here)."""
@@ -1460,8 +1500,7 @@ class IEndpoint(IEndpointBase):
                 must try again on the next message rather than fixing the
                 thread as open for the rest of the process.
         """
-        markers = self._effective_markers()
-        if not markers:
+        if not self._effective_markers() and not self._handoff_alias():
             return False
         bot_user = getattr(getattr(self, '_bot', None), 'user', None)
         bot_user_id = getattr(bot_user, 'id', None)
@@ -1475,7 +1514,7 @@ class IEndpoint(IEndpointBase):
         for item in reversed(history):  # Discord returns newest first
             author = getattr(item, 'author', None)
             if getattr(author, 'id', None) == bot_user_id:
-                if find_marker(getattr(item, 'content', '') or '', markers):
+                if self._is_escalation(getattr(item, 'content', '') or ''):
                     paused = True
             elif self._is_bot_named_in_text(item):
                 paused = False
@@ -1729,7 +1768,7 @@ class IEndpoint(IEndpointBase):
         if not outbound.get('messageIds'):
             return
 
-        if getattr(self, '_escalation_pause', False) and find_marker(reply, self._effective_markers()):
+        if getattr(self, '_escalation_pause', False) and self._is_escalation(reply):
             thread_id = outbound.get('threadId')
             if thread_id is None and isinstance(message.channel, discord.Thread):
                 thread_id = str(message.channel.id)
@@ -1900,7 +1939,7 @@ class IEndpoint(IEndpointBase):
                 # text that is posted, after sanitizing: reasoning that merely
                 # names the team must never ping it. Escalation detection after
                 # the send sees the injected mention.
-                reply = self._with_team_mention(reply)
+                reply = self._with_team_mention(reply, str(message.channel.id))
 
                 if reply and self._send_responses:
                     outbound = await self._send_response(message, reply)
