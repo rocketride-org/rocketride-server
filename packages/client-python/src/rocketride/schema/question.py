@@ -348,7 +348,6 @@ class Question(BaseModel):
         type: The type of question/query (semantic, keyword, etc.)
         filter: Controls which documents to search and how
         expectJson: Whether to return structured JSON data
-        cachePrefix: Whether the unchanging start of the prompt may be cached
         role: AI role/persona for the conversation
         instructions: List of custom instructions for the AI
         history: Previous conversation messages
@@ -367,14 +366,6 @@ class Question(BaseModel):
     )
     expectJson: Optional[bool] = Field(
         False, description='Set to True to get structured JSON responses instead of text.'
-    )
-    cachePrefix: Optional[bool] = Field(
-        False,
-        description=(
-            'Set to True when this prompt will be sent again with only its context, documents, goals or '
-            'questions changed (an agent loop). Providers that support prompt caching may then cache the '
-            'unchanging start of the prompt. Providers without it ignore this.'
-        ),
     )
     role: Optional[str] = Field(
         '', description='AI role or persona for the conversation (e.g., "You are a financial analyst").'

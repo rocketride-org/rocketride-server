@@ -22,12 +22,11 @@ from ai.common.util import EmptyResponseError, ThinkTruncatedError, parseJson
 from ai.common.validation import (
     validate_model_name,
     validate_max_tokens,
-    sanitize_prompt,
     validate_prompt,
     check_output_token_config,
     hand_supplied_token_fields,
 )
-from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, STOP_SEQUENCES_VAR, dispatch_native_chat_stream
+from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
 
 
@@ -84,10 +83,6 @@ class ChatBase:
     # OpenAI Responses API for reasoning-summary streaming.
     SUPPORTS_REASONING_STREAMING: bool = False
     _raw_client = None
-
-    # Opt-in: a driver sets True when its request builder reads PROMPT_CACHE_PREFIX_VAR
-    # and marks that prefix for the provider's prompt cache (Anthropic).
-    SUPPORTS_PROMPT_CACHE_PREFIX: bool = False
 
     # Native stream handler key, set by non-OpenAI drivers (e.g. Anthropic);
     # left empty for OpenAI-compatible drivers, which ChatBase auto-wires.
@@ -588,20 +583,6 @@ class ChatBase:
         # Return the model's response
         return result
 
-    def _prompt_cache_prefix(self, question: Question) -> Optional[str]:
-        """Return the start of *question*'s prompt that stays the same between calls.
-
-        That is the prompt rendered without its context, documents, goals and
-        questions: role, instructions, examples and history come first in getPrompt,
-        so this rendering is always a prefix of the full prompt. Only for drivers that
-        support it and questions that ask for it (Question.cachePrefix).
-        """
-        if not (self.SUPPORTS_PROMPT_CACHE_PREFIX and getattr(question, 'cachePrefix', False)):
-            return None
-        stable = question.model_copy(update={'context': [], 'documents': [], 'goals': [], 'questions': []})
-        # chat_string sanitizes the full prompt; sanitize this the same way so it stays a prefix.
-        return sanitize_prompt(stable.getPrompt()) or None
-
     def chat(
         self,
         question: Question,
@@ -615,12 +596,8 @@ class ChatBase:
         # No streaming for expectJson: repair retries would paint a bad first attempt.
         stream_cbs = (None, None, None) if question.expectJson else (on_chunk, on_finish, on_reasoning_chunk)
 
-        # Use chat_string which already handles network retries and token management.
-        # Only this first call may mark a cacheable prefix: a JSON repair prompt below
-        # inserts an instruction near the top, so its start differs and a cache write
-        # there would never be read back.
+        # Use chat_string which already handles network retries and token management
         json_token = _EXPECT_JSON_VAR.set(bool(question.expectJson))
-        token = PROMPT_CACHE_PREFIX_VAR.set(self._prompt_cache_prefix(question))
         try:
             response = self.chat_string(
                 question.getPrompt(),
@@ -629,7 +606,6 @@ class ChatBase:
                 on_reasoning_chunk=stream_cbs[2],
             )
         finally:
-            PROMPT_CACHE_PREFIX_VAR.reset(token)
             _EXPECT_JSON_VAR.reset(json_token)
 
         # If JSON output is expected, validate the response and retry if needed.

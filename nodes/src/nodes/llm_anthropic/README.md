@@ -146,10 +146,6 @@ Anthropic Messages API handler (`ai.common.llm_native_stream`, provider
 forwarded on the `thinking` SSE lane. Non-reasoning models stay on the default
 LangChain streaming path.
 
-### Prompt caching
-
-Anthropic reuses a prompt only up to an explicit `cache_control` marker. When a question sets `cachePrefix` (the RocketRide Wave agent does on every planning call), the node splits the prompt into two text blocks: the start that stays the same between calls (role, instructions, examples, history), marked for caching, and the rest (context, documents, goals, questions). The model reads the same text either way. Questions without the flag are sent as one block, as before. Cache writes and reads are metered separately from fresh input tokens.
-
 ### Save-time validation
 
 When the node configuration is saved, a lightweight validation pass runs before

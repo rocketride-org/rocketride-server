@@ -88,27 +88,6 @@ provider prefix produce a save-time warning. See the
 [Bedrock model IDs reference](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html)
 for available identifiers.
 
-### Prompt caching
-
-Claude models on Bedrock can reuse the start of a prompt they have already read, at
-a tenth of the input price. Bedrock does this on its own, but only as best effort;
-a `cache_control` marker makes that start eligible on every call. When a question sets
-`cachePrefix` (the RocketRide Wave agent does on every planning call), the node splits
-the prompt into two text blocks: the start that stays the same between calls (role,
-instructions, examples, history), marked for caching, and the rest (context,
-documents, goals, questions). The model reads the same text either way. Questions
-without the flag are sent as one block, as before.
-
-The marker goes only to Claude models that support it: every Claude from 4 on, Claude
-3.7 Sonnet and Claude 3.5 Haiku. Bedrock rejects it for the older Claude models, so
-they, and models from other providers, get the plain prompt. A prefix shorter than
-the model's minimum (from 512 to 4,096 tokens depending on the model; see
-[the Bedrock prompt caching guide](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html))
-is simply not cached, at no extra cost. Nova caches repeated prompt starts on its own
-(best effort) and gets no marker.
-
-Cache reads and writes are metered separately from fresh input tokens.
-
 ## Authentication
 
 Provide an AWS access key ID and secret access key with permission to invoke the chosen

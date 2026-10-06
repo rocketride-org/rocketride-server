@@ -31,51 +31,6 @@ STOP_SEQUENCES_VAR: contextvars.ContextVar[Optional[List[str]]] = contextvars.Co
     'rocketride_llm_stop_sequences', default=None
 )
 
-# Per-call carrier for the start of the prompt that may be cached (see
-# Question.cachePrefix). Set by ChatBase.chat around its first model call and read
-# where a driver builds the provider request, the same way as STOP_SEQUENCES_VAR, so
-# chat_string keeps taking one prompt string.
-PROMPT_CACHE_PREFIX_VAR: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    'rocketride_llm_prompt_cache_prefix', default=None
-)
-
-
-def apply_prompt_cache_breakpoint(payload: Dict[str, Any], prefix: Optional[str]) -> Dict[str, Any]:
-    """Split the last user message into a cached start and the rest (Anthropic format).
-
-    Anthropic caches a prompt only up to a ``cache_control`` marker placed at the end
-    of a content block. A single text block holding the whole prompt would put the
-    marker after the parts that change each call, so nothing would ever be reused.
-    Two blocks, the unchanging prefix marked and the rest unmarked, are Anthropic's
-    documented "shared prefix, varying suffix" pattern; the model reads the same text.
-
-    Args:
-        payload: A Messages API request body. Modified in place.
-        prefix: The start of the user message that may be cached, or None.
-
-    Returns:
-        *payload*, unchanged unless the last message is a user message whose text
-        starts with *prefix* and continues past it.
-    """
-    if not prefix or not prefix.strip():
-        return payload
-    messages = payload.get('messages') or []
-    turn = messages[-1] if messages else None
-    if not isinstance(turn, dict) or turn.get('role') != 'user':
-        return payload
-    content = turn.get('content')
-    if not isinstance(content, str) or not content.startswith(prefix):
-        return payload
-    rest = content[len(prefix) :]
-    if not rest.strip():
-        return payload  # Anthropic rejects a blank text block
-    turn['content'] = [
-        {'type': 'text', 'text': prefix, 'cache_control': {'type': 'ephemeral'}},
-        {'type': 'text', 'text': rest},
-    ]
-    return payload
-
-
 # --- Anthropic: model id gates (vendor prefixes) ---
 
 _VENDOR_MODEL_PREFIXES = (

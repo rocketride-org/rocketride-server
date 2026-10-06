@@ -18,5 +18,4 @@ smbprotocol                 # text_output: test_validate_config.py
 pygit2                      # tool_git: test_tools.py
 google-api-python-client    # tool_google_workspace: test_google_client.py, gmail/test_gmail.py
 google-auth                 # tool_google_workspace
-langchain-aws               # llm_bedrock: test_token_count.py, test_prompt_cache.py
-langchain-anthropic         # llm_anthropic: test_prompt_cache.py
+langchain-aws               # llm_bedrock: test_token_count.py

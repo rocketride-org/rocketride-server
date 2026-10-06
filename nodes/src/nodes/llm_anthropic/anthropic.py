@@ -32,12 +32,7 @@ from typing import Any, Dict
 
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.llm_native_stream import (
-    PROMPT_CACHE_PREFIX_VAR,
-    apply_prompt_cache_breakpoint,
-    build_anthropic_thinking_kwargs,
-    gate_model_name,
-)
+from ai.common.llm_native_stream import build_anthropic_thinking_kwargs, gate_model_name
 from ai.common.utils import parse_bool
 from langchain_anthropic import ChatAnthropic
 
@@ -47,28 +42,12 @@ def _estimate_token_ids(text: str) -> list:
     return [0] * max(1, (len(text) + 3) // 4)
 
 
-class _ChatAnthropic(ChatAnthropic):
-    """ChatAnthropic that marks the cacheable start of the prompt, when there is one.
-
-    Every request is built here, whether invoked, streamed through LangChain, or
-    streamed by the native extended-thinking adapter, so one override covers all three.
-    """
-
-    def _get_request_payload(self, input_, *, stop=None, **kwargs):
-        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        return apply_prompt_cache_breakpoint(payload, PROMPT_CACHE_PREFIX_VAR.get())
-
-
 class Chat(ChatBase):
     """
     Create an Anthropic chat bot.
     """
 
     _llm: ChatAnthropic
-
-    # Anthropic caches only up to an explicit marker, so the driver places one at the
-    # end of the prompt's unchanging start (see apply_prompt_cache_breakpoint).
-    SUPPORTS_PROMPT_CACHE_PREFIX = True
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -103,7 +82,7 @@ class Chat(ChatBase):
         if self._extended_thinking:
             self._native_stream_provider = 'anthropic'
 
-        self._llm = _ChatAnthropic(
+        self._llm = ChatAnthropic(
             model=model,
             api_key=apikey,
             max_tokens=self._modelOutputTokens,

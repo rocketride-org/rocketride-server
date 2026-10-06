@@ -127,9 +127,6 @@ def _build_wave_question(
     q.role = SYSTEM_ROLE
     # Instructs the schema layer to expect and parse a JSON response from the LLM
     q.expectJson = True
-    # Everything up to the context (role, tools, memory, format, rules) is the same
-    # every round, so a provider with prompt caching may cache it.
-    q.cachePrefix = True
 
     # Reframe the user's original questions as goals so the LLM treats them as
     # the objective to satisfy rather than questions it should answer literally

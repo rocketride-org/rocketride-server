@@ -180,12 +180,6 @@ export class Question {
 	type: QuestionType = QuestionType.QUESTION;
 	filter: DocFilter;
 	expectJson = false;
-	/**
-	 * Set to true when this prompt will be sent again with only its context, documents,
-	 * goals or questions changed (an agent loop). Providers that support prompt caching
-	 * may then cache the unchanging start of the prompt. Providers without it ignore this.
-	 */
-	cachePrefix = false;
 	role = '';
 	instructions: QuestionInstruction[] = [];
 	history: QuestionHistory[] = [];
@@ -199,7 +193,6 @@ export class Question {
 		type?: QuestionType;
 		filter?: DocFilter;
 		expectJson?: boolean;
-		cachePrefix?: boolean;
 		role?: string;
 	} = {}) {
 		this.type = options.type || QuestionType.QUESTION;
@@ -214,7 +207,6 @@ export class Question {
 			context: false
 		};
 		this.expectJson = options.expectJson || false;
-		this.cachePrefix = options.cachePrefix || false;
 		this.role = options.role || '';
 	}
 
@@ -463,7 +455,6 @@ export class Question {
 			type: this.type,
 			filter: this.filter,
 			expectJson: this.expectJson,
-			cachePrefix: this.cachePrefix,
 			role: this.role,
 			instructions: this.instructions,
 			history: this.history,
@@ -483,7 +474,6 @@ export class Question {
 			type: data.type as QuestionType,
 			filter: data.filter as DocFilter,
 			expectJson: data.expectJson as boolean,
-			cachePrefix: data.cachePrefix as boolean,
 			role: data.role as string
 		});
 
