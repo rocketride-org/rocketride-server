@@ -94,7 +94,7 @@ With `emitNoReply` on, a message that ends without a posted answer produces a `n
 - `paused`: the message arrived in a thread paused by **Pause After Escalation**;
 - `aimed_elsewhere`: **Ignore Messages Aimed At Others** skipped the message;
 - `non_answer`: **Sanitize Replies** left nothing postable in the answer, on every retry;
-- `model_error`: the answer (or a retry's) was recognised as an engine or model error (see **Error answers are never posted**);
+- `model_error`: the answer (or a retry's) was recognised as an engine or model error (see **Error answers**);
 - `timeout`: a pipeline run passed **Pipeline Timeout (seconds)**;
 - any other value: the error message of the first pipeline or download error, or of an unexpected failure, clipped to 200 characters (a reason built from an exception message would otherwise be unbounded).
 
@@ -138,24 +138,28 @@ With `feedbackReactions` enabled, the node adds each emoji in `feedbackEmojis` (
 
 ### Sanitize Replies
 
-`sanitizeReplies` does two things: it strips leaked agent reasoning from an answer (below), and it retries an answer that was only reasoning or empty (see **Retries on a non-answer**), so with it on one message can run the text pass up to `1 + nonAnswerRetries` times, even for a pipeline that is silent on purpose. Error answers are suppressed whether or not it is on (see **Error answers are never posted**).
+`sanitizeReplies` does two things: it strips leaked agent reasoning from an answer (below), and it retries an answer that was only reasoning or empty (see **Retries on a non-answer**), so with it on one message can run the text pass up to `1 + nonAnswerRetries` times, even for a pipeline that is silent on purpose. It also widens the error check to generic error-shaped openings such as `Error:`; engine and provider errors are suppressed whether or not it is on (see **Error answers**).
 
 With `sanitizeReplies` enabled, an answer wrapped in a `{"type": "final", "content": "..."}` envelope is unwrapped to its decoded content first (an envelope whose JSON escapes do not decode falls back to the raw captured string). Only an envelope that is the whole reply, or that ends a reply opening with a scratchpad label, is unwrapped; an answer that shows one as an example is left alone. The result is then trimmed to what follows the last `Final Answer:` that starts a line outside a code fence, so prose or a code sample that mentions the label is not cut; if it still opens with `Thought:`, `Action:`, `Action Input:`, `Observation:`, or `Reasoning:` it is leaked agent scratchpad rather than an answer, and it is replaced by a short hand-off line that keeps the escalation marker when its final line (the last non-empty line, when that line is not itself a `Thought:` or other reasoning line) carries one, or suppressed entirely (with a `no_reply` event, reason `non_answer`) when there is none. Sanitizing happens before chunking, so nothing partial is ever posted.
 
-### Error answers are never posted
+### Error answers
 
-Whatever `sanitizeReplies` says, the node never relays an engine or model failure as an answer: a raw provider exception can carry account details, key fragments, or internal URLs. A reply is treated as an error when it:
+Whatever `sanitizeReplies` says, the node never relays an engine or provider failure as an answer: a raw provider exception can carry account details, key fragments, or internal URLs. A reply is always treated as an error when it:
 
 - opens with the engine's `**LLM error**` prefix or the agent's `LLM error:` (bold or not, followed by `:`, `—`, `–`, or `-`);
 - is only the sentence `An error occurred with the API.` (optionally after an exception name such as `ValueError:`);
 - opens with `an error occurred with the <x> api`, a `chat.py:NN` / `agent.py:NN` engine frame, or `Traceback (most recent call last)`;
 - opens with `_run failed` (or the engine's `agent base _run failed` log line);
-- opens with `Exception:` or `Error:`;
-- opens with a provider status such as `Error code: 429` (optionally after an exception name such as `RateLimitError:`, never after another word such as `Note:`).
+- opens with a provider status followed by its payload, such as `Error code: 429 - {...}` (optionally after an exception name such as `RateLimitError:`, never after another word such as `Note:`).
 
-Each code block is replaced by a placeholder line before these checks, so the text after a leading code block is not taken as the reply's opening, and every shape counts only where the reply opens with it, so an answer that quotes the user's error or traceback is still posted.
+With `sanitizeReplies` on, generic error-shaped openings count too, because a real answer can start with one (`Error: ENOENT means the file does not exist` is posted with it off):
 
-Such a reply is not posted and not retried: it is logged and reported as `no_reply` with reason `model_error`. A retry's answer is checked the same way, and an error there ends the retries. With `sanitizeReplies` off only this check runs: scratchpad is posted as the pipeline returned it, and nothing is retried.
+- `Exception:`, `Error:`, or a label named after an exception (`ValueError:`, `RuntimeException:`);
+- a provider status without the payload, such as `Error code: 404`.
+
+The reply is checked as it arrived and, when the agent wrapped its answer, as the text after the last `Final Answer:` or inside a `{"type": "final"}` envelope, so a wrapped error is caught whether or not the wrapper would be stripped. Each code block is replaced by a placeholder line before these checks, so the text after a leading code block is not taken as the reply's opening, and every shape counts only where the reply opens with it, so an answer that quotes the user's error or traceback is still posted.
+
+Such a reply is not posted and not retried: it is reported as `no_reply` with reason `model_error`, and a task warning names the message (never the answer text). A retry's answer is checked the same way, raw and after sanitizing, and an error there ends the retries. With `sanitizeReplies` off scratchpad is posted as the pipeline returned it, and nothing is retried.
 
 ### Retries on a non-answer
 

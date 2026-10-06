@@ -1642,7 +1642,9 @@ class TestErrorReplies:
         assert endpoint._send_response.await_count == 0
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
 
-    @pytest.mark.parametrize('answer', [ERROR, '**LLM error** — X: y', 'LLM error: y'])
+    @pytest.mark.parametrize(
+        'answer', [ERROR, "Error code: 401 - {'error': 'invalid key'}", '**LLM error** — X: y', 'LLM error: y']
+    )
     def test_an_error_is_never_posted_even_with_sanitizing_off(self, answer):
         """Review of #2547: a raw provider error can carry account details.
 
@@ -1655,6 +1657,41 @@ class TestErrorReplies:
 
         assert endpoint._send_response.await_count == 0
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
+
+    # Real answers that only open like an error.
+    GENERIC = ('Error: ENOENT means the file does not exist', 'Error code: 404 means not found.')
+
+    @pytest.mark.parametrize('answer', GENERIC)
+    def test_a_generic_error_opening_is_posted_with_sanitizing_off(self, answer):
+        endpoint = self._endpoint([answer], sanitize=False, retries=0)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == answer
+
+    @pytest.mark.parametrize('answer', GENERIC)
+    def test_a_generic_error_opening_is_suppressed_with_sanitizing_on(self, answer):
+        endpoint = self._endpoint([answer], sanitize=True, retries=0)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
+
+    @pytest.mark.parametrize(
+        ('answers', 'sanitize'),
+        [([ERROR], False), (['Thought: still thinking', ERROR], True)],
+    )
+    def test_a_suppressed_answer_is_logged_once_without_its_text(self, answers, sanitize):
+        endpoint = self._endpoint(answers, sanitize=sanitize, retries=1)
+
+        with mock.patch.object(_ENDPOINT_MODULE, '_engine_warning') as warning:
+            asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        warning.assert_called_once()
+        logged = warning.call_args.args[0]
+        assert 'model_error' in logged
+        assert 'credits' not in logged and 'Error code' not in logged
 
     # A provider error the agent wrapped as its final answer.
     WRAPPED = (

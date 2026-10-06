@@ -1949,17 +1949,21 @@ class IEndpoint(IEndpointBase):
                         if att_reply and not reply:
                             reply = att_reply
 
-                if reply and looks_like_error(reply):
+                sanitize = bool(getattr(self, '_sanitize_replies', False))
+                if reply and looks_like_error(reply, generic=sanitize):
                     # An engine or model failure arrived as the "answer" (a
                     # provider error, a traceback). Whatever sanitizeReplies
                     # says: a raw provider exception can carry account details
-                    # or internal URLs. It is not a transient non-answer, so it
+                    # or internal URLs. Only the generic error-shaped openings,
+                    # which a real answer may start with, wait for
+                    # sanitizeReplies. It is not a transient non-answer, so it
                     # is neither relayed nor retried.
                     debug(f'Discord: suppressed an error-looking answer for {message.id}: {reply[:160]}')
+                    self._warn_suppressed(message)
                     await self._emit_no_reply_event(metadata, 'model_error')
                     return
 
-                if getattr(self, '_sanitize_replies', False):
+                if sanitize:
                     # Leaked agent scratchpad is not an answer: post the hand-off
                     # line when it escalated, otherwise ask once more (a ReAct agent
                     # that stopped at "Thought:" usually answers on a second run)
@@ -1971,6 +1975,7 @@ class IEndpoint(IEndpointBase):
                         retry_errors: List[str] = []
                         sanitized = await self._retry_non_answer(message, text_pass, retry_errors)
                         if retry_errors:
+                            self._warn_suppressed(message)
                             await self._emit_no_reply_event(metadata, 'model_error')
                             return
                     if reply and not sanitized:
@@ -2014,6 +2019,23 @@ class IEndpoint(IEndpointBase):
                 debug(f'Discord _process_message: EXCEPTION {e}')
                 if getattr(self, '_emit_no_reply', False):
                     await self._emit_no_reply_event(metadata, str(e))
+
+    @staticmethod
+    def _warn_suppressed(message: discord.Message) -> None:
+        """Report a suppressed error answer in the task's warnings.
+
+        Never names the answer itself: a provider error can carry account
+        details or key fragments.
+
+        Args:
+            message (discord.Message): The message whose answer was suppressed.
+
+        Returns:
+            None
+        """
+        _engine_warning(
+            f'Discord: the answer to message {message.id} looked like an error and was not posted (model_error)'
+        )
 
     async def _process_merged(
         self,

@@ -66,21 +66,21 @@ _CODE_FENCE = re.compile(r'```.*?(?:```|\Z)', re.DOTALL)
 _CODE_PLACEHOLDER = '\n[code]\n'
 
 # Engine and model failures can surface as the "answer" text — a provider API
-# error, a Python traceback, an engine stack frame, a bare exception line, or an
-# HTTP status from the provider. None of those may ever reach Discord. Each
-# shape is matched only where the reply opens with it (each code fence is
-# replaced by a placeholder line first), so a support answer that quotes the
-# user's error is still posted.
+# error, a Python traceback, an engine stack frame, or an HTTP status with the
+# provider's payload. None of those may ever reach Discord, whatever the
+# settings. Each shape is matched only where the reply opens with it (each code
+# fence is replaced by a placeholder line first), so a support answer that
+# quotes the user's error is still posted.
 _ERROR_SIGNATURES = (
     re.compile(r'^\s*an error occurred with the \w+ api\b', re.IGNORECASE),
     re.compile(r'^\s*[\w./\\-]*\b(chat|agent)\.py:\d+', re.IGNORECASE),
     # The engine's own log line is ``agent base _run failed run_id=...``.
     re.compile(r'^\s*(?:agent\s+base\s+)?_run failed\b', re.IGNORECASE),
     re.compile(r'^\s*Traceback \(most recent call last\)', re.IGNORECASE),
-    re.compile(r'^\s*(Exception|Error)\s*:', re.IGNORECASE),
-    # Optionally labelled by an exception name (``RateLimitError:``), never by
+    # A provider status followed by its payload (``Error code: 429 - {...}``),
+    # optionally labelled by an exception name (``RateLimitError:``), never by
     # an arbitrary word (``Note:``).
-    re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\b', re.IGNORECASE),
+    re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\s*-\s', re.IGNORECASE),
     # The engine's LLM layer reports a provider failure as the answer itself:
     # ``**LLM error** — ValueError: An error occurred with the API.``, and the
     # RocketRide agent as ``LLM error: <exception>`` (no bold).
@@ -88,6 +88,15 @@ _ERROR_SIGNATURES = (
     # ...and the sentence its mapped exception carries, when that sentence is the
     # whole answer (prose that merely mentions API errors is not matched).
     re.compile(r'^\s*(?:\w+Error:\s*)?an error occurred with the api\.?\s*$', re.IGNORECASE),
+)
+
+# Openings that are usually a failure but may open a real answer
+# (``Error: ENOENT means...``): an ``Error:`` / ``Exception:`` label, one named
+# after an exception (``ValueError:``), or a bare provider status. Counted only
+# when the caller asks for them (with ``sanitizeReplies`` on).
+_GENERIC_ERROR_SIGNATURES = (
+    re.compile(r'^\s*\w*(?:Exception|Error)\s*:', re.IGNORECASE),
+    re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\b', re.IGNORECASE),
 )
 
 # Chunk numbering: each chunk ends with '\n\n*(3/7)*' when it is turned on.
@@ -725,13 +734,14 @@ def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
     return None
 
 
-def looks_like_error(text: str) -> bool:
+def looks_like_error(text: str, generic: bool = True) -> bool:
     """Whether this "answer" is really an engine or model failure.
 
-    Mirrors the support bot's ``looksLikeError``, plus the two shapes that
-    reached a user anyway: a reply that opens with ``Exception:`` / ``Error:``,
-    and a provider status such as ``Error code: 429``. The caller suppresses
-    these instead of relaying them to Discord.
+    Mirrors the support bot's ``looksLikeError``, plus the shapes that reached
+    a user anyway: a provider status such as ``Error code: 429 - {...}`` and,
+    when ``generic`` is on, a reply that opens with ``Exception:`` /
+    ``Error:`` / ``<Name>Error:`` or a bare ``Error code: 429``. The caller
+    suppresses these instead of relaying them to Discord.
 
     Both the reply and the final text an agent wrapped in it (the last
     ``Final Answer:``, or a ``{"type": "final"}`` envelope) are checked, so a
@@ -739,19 +749,23 @@ def looks_like_error(text: str) -> bool:
 
     Args:
         text (str): The candidate reply.
+        generic (bool): Also count the generic error-shaped openings, which a
+            real answer may start with; off, only engine and provider
+            failures count.
 
     Returns:
         bool: True when the text is a failure rather than an answer.
     """
     if not text:
         return False
+    patterns = _ERROR_SIGNATURES + (_GENERIC_ERROR_SIGNATURES if generic else ())
     candidates = [text]
     final, _found = _extract_final(text)
     if final and final != text:
         candidates.append(final)
     for candidate in candidates:
         candidate = _CODE_FENCE.sub(_CODE_PLACEHOLDER, candidate)
-        if any(pattern.search(candidate) for pattern in _ERROR_SIGNATURES):
+        if any(pattern.search(candidate) for pattern in patterns):
             return True
     return False
 

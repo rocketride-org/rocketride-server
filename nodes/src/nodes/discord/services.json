@@ -374,7 +374,7 @@
 		"discord.sanitizeReplies": {
 			"type": "boolean",
 			"title": "Sanitize Replies",
-			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it, and retry an answer that was only reasoning or empty: the text pass then runs up to 1 + Retries on a non-answer times per message, even for a pipeline that is silent on purpose. Error answers (an engine or provider error, a traceback) are never posted, whether or not this is on.",
+			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it, and retry an answer that was only reasoning or empty: the text pass then runs up to 1 + Retries on a non-answer times per message, even for a pipeline that is silent on purpose. It also suppresses answers that open like an error (Error:, ValueError:, a bare Error code: 404); engine and provider errors (an LLM error, a traceback, Error code: 429 - {...}) are never posted, whether or not this is on.",
 			"default": false,
 			"optional": true
 		},

@@ -704,6 +704,32 @@ class TestLooksLikeError:
         # Three digits is the API shape; a version or a count is not.
         assert looks_like_error('error code: 42 in the docs') is False
 
+    def test_engine_and_provider_errors_count_without_the_generic_openings(self):
+        for text in (
+            "Error code: 401 - {'error': {'message': 'bad key'}}",
+            "Exception: Error code: 429 - {'error': 'quota'}",
+            '**LLM error** — X: y',
+            'LLM error: y',
+            'Traceback (most recent call last):\n  File "x"',
+            'chat.py:412 raised while answering',
+            'agent base _run failed run_id=42',
+            'An error occurred with the OpenAI API: timeout',
+            'ValueError: An error occurred with the API.',
+        ):
+            assert looks_like_error(text, generic=False) is True, text
+
+    def test_generic_error_openings_count_only_when_asked_for(self):
+        for text in (
+            'Error: ENOENT means the file does not exist',
+            'Exception: something went wrong',
+            'ValueError: the input is not a number',
+            'RuntimeException: the job stopped',
+            'Error code: 404 means not found.',
+            'RateLimitError: Error code: 429',
+        ):
+            assert looks_like_error(text, generic=False) is False, text
+            assert looks_like_error(text) is True, text
+
     def test_an_error_wrapped_as_the_final_answer_is_an_error(self):
         for text in (
             'Thought: done\nFinal Answer: Error code: 401 - key sk-1',
