@@ -36,6 +36,13 @@ _NODE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src/n
 _SERVICES_JSON = os.path.join(_NODE_DIR, 'services.json')
 
 
+def _load_services_json():
+    """Parse services.json, which is JSONC: its whole-line ``//`` comments are dropped first."""
+    with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
+        lines = handle.read().split('\n')
+    return json.loads('\n'.join(line for line in lines if not line.lstrip().startswith('//')))
+
+
 def _make_discord_stub():
     """Build a minimal ``discord`` stand-in covering what IEndpoint touches."""
     discord = types.ModuleType('discord')
@@ -1524,8 +1531,7 @@ class TestNumberedChunks:
         assert self._sent_texts(message) == ['short answer']
 
     def test_services_json_declares_the_field(self):
-        with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
-            schema = json.load(handle)
+        schema = _load_services_json()
 
         assert schema['fields']['discord.numberChunks']['default'] is False
         assert 'discord.numberChunks' in schema['fields']['Pipe.source.parameters']['properties']

@@ -1,12 +1,52 @@
 {
+	//
+	// Required:
+	//		The displayable name of this node
+	//
 	"title": "Discord Bot",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "discord://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
 	"classType": ["source"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
 	"capabilities": ["noinclude"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
 	"register": "endpoint",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
 	"path": "nodes.discord",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
 	"prefix": "Discord",
+	//
+	// Optional:
+	//		Description of this driver
+	//
 	"description": [
 		"A Discord Bot source node that receives messages from channels and DMs via the Discord Gateway. ",
 		"Supports text messages and media attachments (images, audio, video, documents). ",
@@ -14,18 +54,45 @@
 		"Pipeline responses are automatically sent back as replies to the originating channel or thread. ",
 		"Supports message content intent, attachment downloading, reply threading, and long-message chunking."
 	],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
 	"icon": "discord.svg",
+	//
+	// Optional:
+	//		Link to the documentation page for this node
+	//
 	"documentation": "https://docs.rocketride.org/nodes/discord",
+	//
+	// Optional:
+	//		The tile text shown on the node in the canvas; it reports whether a
+	//		bot token is configured, not whether the bot is connected
+	//
 	"tile": ["Token: ${parameters.discord.botToken ? 'configured' : 'missing'}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
 	"lanes": {
 		"_source": ["text", "image", "audio", "video", "tags"]
 	},
+	//
+	// Optional:
+	//		Profile section are configuration options used by the driver itself
+	//
 	"preconfig": {
 		"default": "default",
 		"profiles": {
 			"default": {}
 		}
 	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service.
+	//
 	"fields": {
 		"discord.botToken": {
 			"type": "string",
@@ -242,6 +309,10 @@
 			]
 		}
 	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service.
+	//
 	"shape": [
 		{
 			"section": "Pipe",

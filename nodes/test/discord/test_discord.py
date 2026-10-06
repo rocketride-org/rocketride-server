@@ -25,6 +25,13 @@ _NODE_DIR = os.path.join(os.path.dirname(__file__), '../../src/nodes/discord')
 _SERVICES_JSON = os.path.join(_NODE_DIR, 'services.json')
 
 
+def _load_services_json():
+    """Parse services.json, which is JSONC: its whole-line ``//`` comments are dropped first."""
+    with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
+        lines = handle.read().split('\n')
+    return json.loads('\n'.join(line for line in lines if not line.lstrip().startswith('//')))
+
+
 def _load_text_utils():
     """Load the node's text_utils module directly from its file path."""
     path = os.path.join(_NODE_DIR, 'text_utils.py')
@@ -290,8 +297,14 @@ class TestServicesJsonSchema:
 
     @pytest.fixture(scope='class')
     def schema(self):
-        with open(_SERVICES_JSON, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        return _load_services_json()
+
+    def test_every_top_level_key_has_a_comment_block(self, schema):
+        with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
+            lines = handle.read().split('\n')
+        for key in schema:
+            index = next(i for i, line in enumerate(lines) if line.startswith(f'\t"{key}":'))
+            assert lines[index - 1] == '\t//', f'{key} has no // comment block above it'
 
     def test_top_level_keys(self, schema):
         for key in ('title', 'protocol', 'classType', 'fields', 'lanes'):

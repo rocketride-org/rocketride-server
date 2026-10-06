@@ -345,8 +345,10 @@ class StubTarget:
 
 def services_defaults() -> Dict[str, Any]:
     """Every ``discord.*`` config default straight out of ``services.json``."""
+    # services.json is JSONC: drop its whole-line // comments before parsing.
     with open(_SERVICES_JSON, encoding='utf-8') as handle:
-        services = json.load(handle)
+        lines = handle.read().split('\n')
+    services = json.loads('\n'.join(line for line in lines if not line.lstrip().startswith('//')))
     defaults: Dict[str, Any] = {}
     for key, field in services['fields'].items():
         if not key.startswith('discord.'):
