@@ -2646,11 +2646,34 @@ class TestBackfill:
 
         assert [call.args[0] for call in endpoint._on_message.await_args_list] == ['a1', 'b1']
 
+    def test_a_non_numeric_channel_id_skips_only_that_channel(self):
+        # Review of #2547: int() on one bad entry ended the whole backfill.
+        channels = {1: self._Channel(1, ['a1']), 3: self._Channel(3, ['c1'])}
+        endpoint = self._endpoint(channels)
+        endpoint._channel_ids = ['1', 'general', '3']
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert [call.args[0] for call in endpoint._on_message.await_args_list] == ['a1', 'c1']
+
+    def test_nothing_is_replayed_while_send_responses_is_off(self):
+        """With nothing posted, every restart would replay every message again.
+
+        A shadow deployment would then emit the same outbound events once per
+        restart, so backfill is skipped while sendResponses is off.
+        """
+        endpoint = self._endpoint({1: self._Channel(1, ['a1'])})
+        endpoint._send_responses = False
+
+        asyncio.run(endpoint._run_backfill())
+
+        endpoint._on_message.assert_not_awaited()
+
 
 class _HistoryItem:
     """A fetched history message: the fields backfill reads to spot an answered one."""
 
-    def __init__(self, message_id, *, author_id=1, replies_to=None, thread=None):
+    def __init__(self, message_id, *, author_id=1, replies_to=None, thread=None, reactions=()):
         self.id = message_id
         self.author = mock.Mock()
         self.author.id = author_id
@@ -2659,6 +2682,7 @@ class _HistoryItem:
             self.reference = mock.Mock()
             self.reference.message_id = replies_to
         self.thread = thread
+        self.reactions = list(reactions)
 
     def __repr__(self):
         return f'<msg {self.id}>'
@@ -2726,6 +2750,30 @@ class TestBackfillSkipsAnsweredMessages:
 
         assert self._replayed(endpoint) == [4, 5]
 
+    def test_a_message_the_bot_reacted_to_is_skipped(self):
+        # Review of #2547: an aimed_elsewhere ack is the bot's own reaction and
+        # no reply, so every restart replayed the message.
+        history = [
+            _HistoryItem(3, reactions=[types.SimpleNamespace(me=False)]),
+            _HistoryItem(2, reactions=[types.SimpleNamespace(me=True)]),
+            _HistoryItem(1),
+        ]
+        endpoint = self._endpoint(history)
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert self._replayed(endpoint) == [1, 3]
+
+    @pytest.mark.parametrize('reply_mode', ['reply', 'channel', 'thread'])
+    def test_a_message_with_a_thread_is_skipped_in_every_reply_mode(self, reply_mode):
+        # Review of #2547: changing replyMode between runs answered old threads again.
+        history = [_HistoryItem(2, thread=mock.Mock()), _HistoryItem(1)]
+        endpoint = self._endpoint(history, reply_mode=reply_mode)
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert self._replayed(endpoint) == [1]
+
     def test_channel_mode_with_no_bot_post_replays_the_window(self):
         history = [_HistoryItem(2), _HistoryItem(1)]
         endpoint = self._endpoint(history, reply_mode='channel')
@@ -2767,6 +2815,39 @@ class TestHandledMessageIds:
         asyncio.run(scenario())
 
         endpoint._process_message.assert_awaited_once()
+
+    def test_a_restart_does_not_answer_what_was_already_answered(self):
+        """A fresh process (no remembered ids) backfills through the real gate.
+
+        Only the message nothing in the window shows as handled is processed:
+        not the one the bot replied to, not the one it acknowledged with a
+        reaction, and not the bot's own reply.
+        """
+        endpoint = self._endpoint()
+        endpoint._backfill_limit = 50
+        endpoint._reply_mode = 'reply'
+        endpoint._channel_ids = ['20']
+
+        def history_message(message_id, *, author_id=1, replies_to=None, reactions=()):
+            message = self._message(message_id)
+            message.author.id = author_id
+            message.author.bot = author_id == 999
+            message.thread = None
+            message.reactions = list(reactions)
+            message.reference = types.SimpleNamespace(message_id=replies_to) if replies_to else None
+            return message
+
+        history = [  # newest first, as Discord returns it
+            history_message(43, author_id=999, replies_to=41),  # the bot's answer to 41
+            history_message(42),  # never answered
+            history_message(41),
+            history_message(40, reactions=[types.SimpleNamespace(me=True)]),  # acknowledged
+        ]
+        endpoint._bot.get_channel = mock.Mock(return_value=TestBackfill._Channel(20, history))
+
+        asyncio.run(endpoint._run_backfill())
+
+        assert [call.args[0].id for call in endpoint._process_message.await_args_list] == [42]
 
     def test_a_redelivered_message_is_processed_once(self):
         endpoint = self._endpoint()

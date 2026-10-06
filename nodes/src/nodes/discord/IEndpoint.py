@@ -1096,12 +1096,26 @@ class IEndpoint(IEndpointBase):
             self._release_thread_lock(thread_id)
 
     async def _run_backfill(self):
-        """Process the most recent configured messages, oldest first."""
+        """Process the most recent configured messages, oldest first.
+
+        Skipped while ``sendResponses`` is off: with nothing posted, no answer
+        can be seen in the history, so every restart would replay (and emit
+        events for) every message in the window again.
+        """
+        if not getattr(self, '_send_responses', True):
+            debug('Discord backfill: skipped while sendResponses is off')
+            return
         try:
             channels = []
             if self._channel_ids:
                 for channel_id in self._channel_ids:
-                    channel = self._bot.get_channel(int(channel_id))
+                    # Per entry: one id that is not a number must not end the
+                    # backfill for every channel after it.
+                    try:
+                        channel = self._bot.get_channel(int(channel_id))
+                    except (TypeError, ValueError):
+                        debug(f'Discord backfill: skipping channel id {_shown_entry(str(channel_id))}: not a number')
+                        continue
                     if channel is not None:
                         channels.append(channel)
             else:
@@ -1136,9 +1150,12 @@ class IEndpoint(IEndpointBase):
         """Ids in a fetched backfill window that the bot already answered.
 
         Uses only the window backfill fetched (newest first), so no extra API
-        call is made per message. A message counts as answered when it has a
-        thread (thread mode), when a bot message in the window replies to it,
-        or, in channel mode, when the bot posted in the channel after it.
+        call is made per message. A message counts as handled when it has a
+        thread, when a bot message in the window replies to it, when it carries
+        a reaction the bot added (an ``aimed_elsewhere`` acknowledgement), or,
+        in channel mode, when the bot posted in the channel after it. The
+        thread and reply checks apply in every reply mode, so changing
+        ``replyMode`` between runs does not answer old messages again.
 
         Args:
             messages (List[Any]): The channel history, newest first.
@@ -1161,7 +1178,12 @@ class IEndpoint(IEndpointBase):
                     answered.add(str(replied_to))
             if reply_mode == 'channel' and seen_bot_post:
                 answered.add(str(getattr(message, 'id', None)))
-            if reply_mode == 'thread' and getattr(message, 'thread', None) is not None:
+            if getattr(message, 'thread', None) is not None:
+                answered.add(str(getattr(message, 'id', None)))
+            reactions = getattr(message, 'reactions', None)
+            if isinstance(reactions, (list, tuple)) and any(
+                getattr(reaction, 'me', False) is True for reaction in reactions
+            ):
                 answered.add(str(getattr(message, 'id', None)))
             seen_bot_post = seen_bot_post or is_bot
         return answered

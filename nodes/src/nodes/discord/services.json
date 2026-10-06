@@ -296,7 +296,7 @@
 		"discord.backfillLimit": {
 			"type": "number",
 			"title": "Backfill Limit",
-			"description": "Most-recent messages to process per readable channel at startup, at most 100. Zero disables backfill.",
+			"description": "Most-recent messages to process per readable channel at startup, at most 100; messages the bot already replied to, made a thread for, or reacted to are skipped. Zero disables backfill, and it never runs while Send Responses is off.",
 			"default": 0,
 			"minimum": 0,
 			"maximum": 100,
