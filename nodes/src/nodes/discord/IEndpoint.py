@@ -80,6 +80,32 @@ MAX_NO_REPLY_REASON_CHARS = 200
 # A ``${NAME}`` the engine could not resolve reaches the node as literal text.
 _UNRESOLVED_VARIABLE = re.compile(r'^\$\{([A-Za-z0-9_]+)\}$')
 
+# The engine resolves only ``ROCKETRIDE_*`` variables; any other ``${NAME}``
+# is replaced with this literal (see ``resolve_pipeline_env``).
+_REDACTED_VARIABLE = '<REDACTED>'
+
+
+def _unresolved_variable(value: Any) -> Optional[str]:
+    """Describe the variable a setting value failed to resolve, else None.
+
+    Args:
+        value (Any): One setting value (the token, or one list entry).
+
+    Returns:
+        Optional[str]: A clause naming the problem, for example
+            ``the variable NAME, which is not set on this server (...)``, or
+            None when the value is not an unresolved variable.
+    """
+    text = str(value).strip()
+    if text == _REDACTED_VARIABLE:
+        problem = 'a variable without the ROCKETRIDE_ prefix, which the engine does not resolve'
+    else:
+        unresolved = _UNRESOLVED_VARIABLE.match(text)
+        if not unresolved:
+            return None
+        problem = f'the variable {unresolved.group(1)}, which is not set on this server'
+    return f'{problem} (only ROCKETRIDE_* server variables are resolved)'
+
 
 def _engine_warning(message: str) -> None:
     """Log through the engine's logger when there is one."""
@@ -262,30 +288,33 @@ class IEndpoint(IEndpointBase):
                         f'it is read as plain text. Fix the setting.'
                     )
                 if isinstance(parsed, list):
-                    out.extend(str(v) for v in parsed if str(v).strip())
+                    # Each item gets the same strip + split as a bare string,
+                    # so '[" 123 "]' and '["123,456"]' read as ids too.
+                    for parsed_item in parsed:
+                        out.extend(part for part in re.split(r'[,\s]+', str(parsed_item).strip()) if part)
                     continue
             out.extend(part for part in re.split(r'[,\s]+', text) if part)
         return out
 
     @classmethod
     def _list_config_error(cls, config: Dict[str, Any]) -> Optional[str]:
-        """A fatal problem in the guild or channel allowlist, else None.
+        """A fatal problem in the guild, channel or mention-channel list, else None.
 
-        Broken JSON in either, or a ``${NAME}`` the engine could not resolve
-        (it arrives as literal text and becomes an id that matches nothing),
-        leaves the bot connected but answering nothing, so the start fails
-        with the reason. Other lists only warn.
+        Broken JSON in any of the three lists, or a ``${NAME}`` the engine
+        could not resolve in any of the three (it arrives as literal text, or
+        as ``<REDACTED>``, and becomes an id that matches nothing), leaves the
+        bot connected but answering nothing, or for the mention-channel list
+        answering without the mention it was meant to require, so the start
+        fails with the reason. Other lists only warn.
         """
-        for field in ('guildIds', 'channelIds'):
+        for field in ('guildIds', 'channelIds', 'requireMentionChannelIds'):
             text = _broken_json_text(config.get(field))
             if text is not None:
                 return f'Discord Bot: {field} is not valid JSON ({text[:80]!r}); fix the setting'
             for item in cls._as_str_list(config.get(field), field=field):
-                unresolved = _UNRESOLVED_VARIABLE.match(item)
-                if unresolved:
-                    return (
-                        f'Discord Bot: {field} uses the variable {unresolved.group(1)}, which is not set on this server'
-                    )
+                problem = _unresolved_variable(item)
+                if problem:
+                    return f'Discord Bot: {field} uses {problem}'
         return None
 
     @staticmethod
@@ -331,14 +360,11 @@ class IEndpoint(IEndpointBase):
             if item.isdigit():
                 ids.append(item)
                 continue
-            unresolved = _UNRESOLVED_VARIABLE.match(item)
-            if unresolved:
+            problem = _unresolved_variable(item)
+            if problem:
                 # Dropped like any non-numeric entry, but an operator has to
                 # hear about it: the mention it was meant to allow never pings.
-                _config_warning(
-                    f'Discord: {field} uses the variable {unresolved.group(1)}, which is not set on this server; '
-                    f'the entry is ignored'
-                )
+                _config_warning(f'Discord: {field} uses {problem}; the entry is ignored')
             else:
                 debug(f'Discord: ignoring {field} entry {item!r} - not a numeric Discord id')
         return ids
@@ -368,6 +394,12 @@ class IEndpoint(IEndpointBase):
             config.get('requireMentionChannelIds'), field='requireMentionChannelIds'
         )
         self._allowed_bot_ids = self._as_str_list(config.get('allowedBotIds'), field='allowedBotIds')
+        for item in self._allowed_bot_ids:
+            problem = _unresolved_variable(item)
+            if problem:
+                # Not fatal (an unmatched entry only keeps a bot out), but the
+                # bot it was meant to let through is ignored: say so.
+                _config_warning(f'Discord: allowedBotIds uses {problem}; the entry matches no bot')
         self._config_error = self._list_config_error(config)
         # Mention allowlists are the one config the outbound path cannot
         # tolerate garbage in, so a non-numeric entry is dropped here.
@@ -468,11 +500,12 @@ class IEndpoint(IEndpointBase):
             monitorStatus('Discord Bot: missing bot token')
             raise RuntimeError('Discord Bot: missing bot token')
 
-        unresolved = _UNRESOLVED_VARIABLE.match(str(self._bot_token).strip())
-        if unresolved:
-            # The engine passes an unknown ${NAME} through as text; Discord would
-            # only say "invalid token", which points at the wrong fix.
-            message = f'Discord Bot: the bot token variable {unresolved.group(1)} is not set on this server'
+        problem = _unresolved_variable(self._bot_token)
+        if problem:
+            # The engine passes an unset ${ROCKETRIDE_*} through as text and
+            # any other ${NAME} as <REDACTED>; Discord would only say "invalid
+            # token", which points at the wrong fix.
+            message = f'Discord Bot: the bot token uses {problem}'
             monitorStatus(message)
             raise RuntimeError(message)
 

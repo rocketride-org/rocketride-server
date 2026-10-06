@@ -1139,8 +1139,21 @@ class TestLifecycle:
         endpoint = IEndpoint.__new__(IEndpoint)
         endpoint._bot_token = '${ROCKETRIDE_DISCORD_NO_SUCH_TOKEN}'
 
-        with pytest.raises(RuntimeError, match='ROCKETRIDE_DISCORD_NO_SUCH_TOKEN is not set'):
+        with pytest.raises(RuntimeError, match='variable ROCKETRIDE_DISCORD_NO_SUCH_TOKEN, which is not set'):
             asyncio.run(endpoint._startup())
+
+    def test_a_token_variable_without_the_prefix_is_named(self):
+        # The engine resolves only ROCKETRIDE_* variables; any other ${NAME}
+        # arrives as the literal <REDACTED>, which Discord calls an invalid token.
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._bot_token = '<REDACTED>'
+
+        with pytest.raises(RuntimeError) as raised:
+            asyncio.run(endpoint._startup())
+
+        assert 'bot token' in str(raised.value)
+        assert 'only ROCKETRIDE_* server variables are resolved' in str(raised.value)
+        assert 'invalid token' not in str(raised.value)
 
     def test_a_broken_channel_list_fails_the_start(self):
         endpoint = IEndpoint.__new__(IEndpoint)
@@ -1598,6 +1611,10 @@ class TestConfigCoercion:
     def test_only_a_broken_guild_or_channel_list_is_fatal(self):
         assert 'channelIds is not valid JSON' in IEndpoint._list_config_error({'channelIds': '["1"'})
         assert 'guildIds is not valid JSON' in IEndpoint._list_config_error({'guildIds': ['["1",']})
+        # Broken JSON here would make the mention gate silently never apply.
+        assert 'requireMentionChannelIds is not valid JSON' in IEndpoint._list_config_error(
+            {'requireMentionChannelIds': '["1"'}
+        )
         assert IEndpoint._list_config_error({'channelIds': '["1"]', 'guildIds': '2'}) is None
         # Other lists keep the warning only: a broken allowlist must not stop the bot.
         assert IEndpoint._list_config_error({'allowedBotIds': '["1"'}) is None
@@ -1608,7 +1625,10 @@ class TestUnsetListVariables:
 
     @staticmethod
     def _message(field, name):
-        return f'Discord Bot: {field} uses the variable {name}, which is not set on this server'
+        return (
+            f'Discord Bot: {field} uses the variable {name}, which is not set on this server '
+            f'(only ROCKETRIDE_* server variables are resolved)'
+        )
 
     def test_an_unset_variable_in_guild_or_channel_ids_is_fatal(self):
         assert IEndpoint._list_config_error({'guildIds': '${GUILD_IDS}'}) == self._message('guildIds', 'GUILD_IDS')
@@ -1654,6 +1674,53 @@ class TestUnsetListVariables:
 
         assert endpoint._allowed_mention_role_ids == ['77']
         warn.assert_not_called()
+
+    @pytest.mark.parametrize('field', ['guildIds', 'channelIds', 'requireMentionChannelIds'])
+    @pytest.mark.parametrize('value', ['<REDACTED>', ['<REDACTED>'], '["123", "<REDACTED>"]', '123, <REDACTED>'])
+    def test_a_variable_without_the_prefix_is_fatal(self, field, value):
+        # A ${NAME} without the ROCKETRIDE_ prefix arrives as the literal <REDACTED>.
+        error = IEndpoint._list_config_error({field: value})
+
+        assert error is not None
+        assert error.startswith(f'Discord Bot: {field} uses a variable')
+        assert 'only ROCKETRIDE_* server variables are resolved' in error
+
+    def test_an_unset_variable_in_require_mention_channels_is_fatal(self):
+        # Matched as an id, it never matches: the mention gate fails open.
+        assert IEndpoint._list_config_error({'requireMentionChannelIds': ['${ROCKETRIDE_MENTION}']}) == (
+            self._message('requireMentionChannelIds', 'ROCKETRIDE_MENTION')
+        )
+
+    @pytest.mark.parametrize('value', [['${ROCKETRIDE_BOTS}', '42'], ['<REDACTED>', '42']])
+    def test_an_unset_variable_in_allowed_bot_ids_warns(self, value):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            endpoint = TestNumericAndMentionConfig._parse({'allowedBotIds': value})
+
+        assert '42' in endpoint._allowed_bot_ids
+        assert IEndpoint._list_config_error({'allowedBotIds': value}) is None
+        warn.assert_called_once()
+        assert 'allowedBotIds' in warn.call_args.args[0]
+        assert 'only ROCKETRIDE_* server variables are resolved' in warn.call_args.args[0]
+
+    @pytest.mark.parametrize('field', ['allowedMentionRoleIds', 'allowedMentionUserIds'])
+    def test_a_redacted_mention_entry_warns(self, field):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            TestNumericAndMentionConfig._parse({field: ['<REDACTED>', '77']})
+
+        warn.assert_called_once()
+        assert field in warn.call_args.args[0]
+        assert 'only ROCKETRIDE_* server variables are resolved' in warn.call_args.args[0]
+
+    def test_json_items_are_stripped_and_split_like_a_bare_string(self):
+        assert IEndpoint._as_str_list('[" 123 "]') == ['123']
+        assert IEndpoint._as_str_list('["123,456"]') == ['123', '456']
+        assert IEndpoint._as_str_list(['["123 456", " "]']) == ['123', '456']
+        assert IEndpoint._as_str_list('${ROCKETRIDE_G} ') == ['${ROCKETRIDE_G}']
+
+    def test_a_padded_variable_inside_json_is_still_caught(self):
+        assert IEndpoint._list_config_error({'guildIds': '["${ROCKETRIDE_G} "]'}) == self._message(
+            'guildIds', 'ROCKETRIDE_G'
+        )
 
 
 class TestOptionalTyping:
