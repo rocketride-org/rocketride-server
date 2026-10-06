@@ -26,12 +26,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from rocketride import TASK_STATE
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
 from ai.modules.task.task_engine import (
@@ -70,6 +72,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t = Task.__new__(Task)
     t.id = 'task-test'
     t.token = 'tk_test'
+    t._data_token = 'dt_test'
     t.client_id = 'user-1'
     t.team_id = 'team-1'
     t.org_id = 'org-1'
@@ -206,6 +209,8 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
     assert config['identity'] == {'userId': 'user-1', 'teamId': 'team-1', 'orgId': 'org-1'}
     # Dev runs anchor node storage at the owner's whole tree.
     assert config['storage'] == {'root': 'users/user-1/files'}
+    # The channel token stays with the engine; nothing of it is in the task file.
+    assert 'dt_test' not in json.dumps(config)
 
 
 def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
@@ -1712,3 +1717,114 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+
+# ---------------------------------------------------------------------------
+# The data-channel token
+# ---------------------------------------------------------------------------
+
+
+class _LaunchStop(Exception):
+    """Raised by a stubbed launch step to end start_task early."""
+
+
+def _startable_task(monkeypatch):
+    """Build a Task that start_task can drive up to the subprocess launch.
+
+    The launch itself is stubbed: ``create_subprocess_exec`` records its
+    arguments and raises ``_LaunchStop``, so no process starts.
+
+    Args:
+        monkeypatch: pytest fixture.
+
+    Returns:
+        tuple: ``(task, launches)`` — ``launches`` collects ``(argv, env)``.
+    """
+    from ai.modules.task import task_engine
+
+    t = _task()
+    t._status = SimpleNamespace(state=TASK_STATE.NONE.value, completed=False, startTime=None)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._resolve_pipeline = MagicMock(return_value={'components': []})
+    t._check_pipeline = MagicMock()
+    t._write_task_file = AsyncMock(return_value='/tmp/task-1.json')
+    t._is_debugging = MagicMock(return_value=False)
+    t._send_status_update = AsyncMock()
+    t._build_subprocess_env = AsyncMock(return_value={'PATH': '/usr/bin'})
+    t._terminated = AsyncMock()
+    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), _config={})
+
+    launches = []
+
+    async def fake_exec(*argv, env=None, **kwargs):
+        launches.append((argv, env))
+        raise _LaunchStop()
+
+    monkeypatch.setattr(task_engine.asyncio, 'create_subprocess_exec', fake_exec)
+    return t, launches
+
+
+async def test_start_task_mints_a_fresh_token_for_every_start(monkeypatch):
+    """Every start gets its own token, separate from the control token."""
+    t, _ = _startable_task(monkeypatch)
+    tokens = []
+
+    for _ in range(2):
+        t._status.state = TASK_STATE.NONE.value
+        with pytest.raises(_LaunchStop):
+            await Task.start_task(t)
+        tokens.append(t._data_token)
+
+    assert all(len(token) >= 32 for token in tokens)
+    assert tokens[0] != tokens[1]
+    assert t.token not in tokens
+
+
+async def test_start_task_passes_only_the_token_hash_ahead_of_pipeline_args(monkeypatch):
+    """The token's SHA-256 goes on argv before any pipeline arg; the token is in neither argv nor env."""
+    t, launches = _startable_task(monkeypatch)
+    t._launch_args = {'args': [f'--data_token_sha256={"b" * 64}']}
+
+    with pytest.raises(_LaunchStop):
+        await Task.start_task(t)
+
+    ((argv, env),) = launches
+    expected = f'--data_token_sha256={hashlib.sha256(t._data_token.encode("utf-8")).hexdigest()}'
+    assert [arg for arg in argv if arg.startswith('--data_token_sha256')][0] == expected
+    assert not any(t._data_token in arg for arg in argv)
+    assert not any(t._data_token in value for value in env.values())
+
+
+async def test_data_connection_presents_the_token(monkeypatch):
+    """The parent dials /task/data with its run's token on the handshake."""
+    from ai.modules.task import task_engine
+
+    transports = []
+
+    def fake_transport(uri, **kwargs):
+        transports.append((uri, kwargs))
+        return MagicMock(name='transport')
+
+    client = MagicMock(name='data-client')
+    client.connect = AsyncMock()
+    client.dap_request = AsyncMock(return_value={'success': True})
+    client.did_fail = MagicMock(return_value=False)
+
+    monkeypatch.setattr(task_engine, 'TransportWebSocket', fake_transport)
+    monkeypatch.setattr(Task, 'TaskData', MagicMock(return_value=client))
+
+    t = _task()
+    t._is_terminating = False
+    t._data_lock = asyncio.Lock()
+    t._data_client = None
+    t._data_port = 20001
+    t._data_token = 'run-token'
+    t._engine_process = None
+    t._provider = None
+
+    await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+
+    ((uri, kwargs),) = transports
+    assert uri == 'ws://127.0.0.1:20001/task/data'
+    assert kwargs['headers'] == {'Authorization': 'Bearer run-token'}
