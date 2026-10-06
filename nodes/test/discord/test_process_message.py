@@ -1057,6 +1057,26 @@ class TestThreadHistoryContext:
         transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
         assert transcript == 'Support Bot: Run the installer.'
 
+    def test_other_bots_are_left_out_unless_allowed(self):
+        """Review of #2547: bots that ignoreBots drops still reached the transcript."""
+        history = [
+            _FakeHistoryMessage(3, 'buy cheap tokens', 55, author_name='spambot'),
+            _FakeHistoryMessage(2, 'the earlier answer', 999),
+            _FakeHistoryMessage(1, 'the first question', 7, author_name='ada'),
+        ]
+        history[0].author.bot = True
+        history[1].author.bot = True
+
+        endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=[])
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321, history))))
+        transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
+        assert transcript == 'ada: the first question\nSupport Bot: the earlier answer'
+
+        endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=['55'])
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321, history))))
+        transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
+        assert transcript.endswith('spambot: buy cheap tokens')
+
     def test_sse_payload_keeps_the_original_text_and_reports_context_size(self):
         module = sys.modules['_discord_node.IEndpoint']
         endpoint = IEndpoint.__new__(IEndpoint)

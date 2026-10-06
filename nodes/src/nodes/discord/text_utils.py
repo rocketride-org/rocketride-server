@@ -38,6 +38,14 @@ DISCORD_MESSAGE_CHAR_LIMIT: int = 2000  # Discord's per-message cap
 # Default cap on the thread transcript handed to the pipeline as context.
 THREAD_HISTORY_MAX_CHARS: int = 6000
 
+# Cap on each message in the transcript, so one long message cannot fill the
+# whole transcript budget on its own.
+THREAD_HISTORY_MESSAGE_MAX_CHARS: int = 1000
+
+# Continuation lines of a message are indented by this much in the transcript,
+# so a newline inside one message cannot start another speaker's line.
+_TRANSCRIPT_CONTINUATION = '\n  '
+
 # A reply that still opens with one of these labels is leaked agent scratchpad
 # ("Thought: ...", "Action Input: ...") rather than a user-facing answer.
 _OPENS_WITH_REASONING = re.compile(r'^\s*(Thought|Action(?:\s+Input)?|Observation|Reasoning)\s*:', re.IGNORECASE)
@@ -529,10 +537,13 @@ def format_thread_transcript(
 ) -> str:
     """Render prior thread messages as a plain ``<name>: <content>`` transcript.
 
-    Mirrors the support bot's ``threadTranscript``: one line per message,
+    Mirrors the support bot's ``threadTranscript``: one entry per message,
     oldest first, and a tail-capped result prefixed with an ellipsis line when
     the transcript is longer than ``max_chars`` (keeping the most recent
-    context, which is what the agent needs).
+    context, which is what the agent needs). Each message is clipped to
+    :data:`THREAD_HISTORY_MESSAGE_MAX_CHARS`, and its continuation lines are
+    indented, so only the first line of a message starts with a speaker name:
+    one user cannot forge lines from another speaker, the bot included.
 
     Args:
         entries: ``(author_name, content)`` pairs, already ordered oldest first
@@ -547,7 +558,9 @@ def format_thread_transcript(
         text = (content or '').strip()
         if not text:
             continue
-        lines.append(f'{name}: {text}')
+        if len(text) > THREAD_HISTORY_MESSAGE_MAX_CHARS:
+            text = text[:THREAD_HISTORY_MESSAGE_MAX_CHARS] + '…'
+        lines.append(f'{name}: ' + _TRANSCRIPT_CONTINUATION.join(text.split('\n')))
     out = '\n'.join(lines)
     if max_chars > 0 and len(out) > max_chars:
         out = _TRANSCRIPT_TRUNCATION_PREFIX + out[-max_chars:]

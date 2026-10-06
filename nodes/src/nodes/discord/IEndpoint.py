@@ -1571,7 +1571,16 @@ class IEndpoint(IEndpointBase):
             if not content.strip():
                 continue
             author = getattr(item, 'author', None)
-            if getattr(author, 'id', None) == bot_user_id:
+            author_id = getattr(author, 'id', None)
+            if (
+                author_id != bot_user_id
+                and getattr(author, 'bot', False) is True
+                and str(author_id) not in (getattr(self, '_allowed_bot_ids', []) or [])
+            ):
+                # Another bot: one ``ignoreBots`` would drop must not speak in
+                # the context either.
+                continue
+            if author_id == bot_user_id:
                 name = bot_name
             else:
                 name = getattr(author, 'name', None) or 'user'
