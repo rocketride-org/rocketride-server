@@ -111,6 +111,8 @@ def _require_disposable_database():
         "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') "
         "AND tablename <> 'discord_events'"
     )
+    # The cases are switched on, so an unreachable database is a setup error.
+    assert others.isdigit(), f'cannot query {PG_DATABASE} in {PG_CONTAINER}: {others!r}'
     if others != '0':
         pytest.skip(f'{PG_DATABASE} holds {others} other table(s); the capture cases need a disposable database')
 
@@ -1052,9 +1054,11 @@ def test_f33_every_part_kept_and_duplicates_ignored(engine, engine_config, drive
 @needs_pg
 def test_f34_database_down_mid_run(engine, engine_config, driver_bot):
     tag = _tag('F34')
+    # Checked before anything starts capturing into that database.
+    engine.terminate()
+    _require_disposable_database()
     _start(engine, _with_capture(_echo(_params(engine_config))))
     mark = _log_size()
-    _require_disposable_database()
     subprocess.run(['docker', 'stop', PG_CONTAINER], capture_output=True, timeout=60)
     try:
         down = driver_bot.post(f'{tag} while the database is down')
