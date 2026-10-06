@@ -12,11 +12,19 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     ``state.target`` in their ``_run()`` method, which may execute after this
     module has already been loaded (e.g. when ``node.py`` eager-loads ``data``
     in the shared subprocess web server).
+
+    ``config['token_sha256']`` is the hex SHA-256 of the run's channel token,
+    which every connection must present; without it the endpoint refuses
+    every connection.
+
+    Args:
+        server: The WebServer to register ``/task/data`` on.
+        config: Module configuration; ``token_sha256`` is the hash of the run's channel token.
     """
     # Create the DataServer instance with a reference to the server so it can
     # read state.target lazily. Do NOT capture state.target here — it may not
     # be set yet for sourceless pipelines (agentic, etc.).
-    data_server = DataServer(server=server, config=config)
+    data_server = DataServer(server=server, token_sha256=config.get('token_sha256'), config=config)
 
     # Register our routes
     server.add_socket('/task/data', data_server.listen)
