@@ -183,6 +183,12 @@ def _raw_item_count(value: Any) -> int:
 
     A JSON-text item (the engine's encoding of an array) counts the items it
     holds, so ``'[]'`` and ``['[]']`` count none while ``'[""]'`` counts one.
+
+    Args:
+        value (Any): The raw config value of a list setting.
+
+    Returns:
+        int: The number of items given, blank ones included.
     """
     if not value:
         return 0
@@ -805,6 +811,8 @@ class IEndpoint(IEndpointBase):
 
         Args:
             message (discord.Message): The incoming Gateway message.
+            wait (bool): Await the processing task before returning instead
+                of leaving it to run in the background (used by tests).
 
         Returns:
             None
@@ -869,6 +877,12 @@ class IEndpoint(IEndpointBase):
         The intake gate strips the text to decide whether a message has
         anything to ask; processing must see the same answer, or blank text
         next to a file runs a text pass of its own.
+
+        Args:
+            message (discord.Message): The incoming message.
+
+        Returns:
+            str: The message text, or '' when it is empty or only whitespace.
         """
         content = message.content if isinstance(message.content, str) else str(message.content or '')
         return content if content.strip() else ''
@@ -879,6 +893,12 @@ class IEndpoint(IEndpointBase):
 
         Answers are chosen by truthiness, so a blank one (``'\\n'``) would
         otherwise win over a real answer from a later lane.
+
+        Args:
+            answer (Any): One pipeline answer.
+
+        Returns:
+            str: The answer text, or '' when it is empty or only whitespace.
         """
         text = answer if isinstance(answer, str) else str(answer or '')
         return text if text.strip() else ''
@@ -1054,8 +1074,8 @@ class IEndpoint(IEndpointBase):
         """Route a message to the pipeline and send back its answer.
 
         With ``mergeAttachments`` on a message that carries text
-        plus attachments produces ONE answer that has seen everything, the way
-        the support bot did: text-like files are folded into the question,
+        plus attachments produces ONE answer that has seen everything:
+        text-like files are folded into the question,
         image/audio/video/other attachments still run as their own lane objects
         first, and their answers are folded in as context before the single
         text pass whose answer is posted. With it off, text and attachments are
@@ -1167,8 +1187,7 @@ class IEndpoint(IEndpointBase):
     ) -> str:
         """Answer a message with attachments in a single text pass.
 
-        Mirrors the support bot's ``collectParts`` / ``combineIfNeeded``:
-        text-like files are folded into the question, every other attachment
+        Text-like files are folded into the question, every other attachment
         still becomes its own lane object (same lane, same metadata, same SSE
         event as when merging is off) and its answer is folded in as context.
         The one text pass that follows is the reply; if it produces nothing the
@@ -1359,6 +1378,12 @@ class IEndpoint(IEndpointBase):
         Args:
             message (discord.Message): The parent message (for entry URL).
             attachment (discord.Attachment): The attachment to download.
+            meta (Optional[Dict[str, Any]]): The object's metadata contract
+                (group index and size already set); built from the message
+                when None. A pipeline or download error is recorded on it
+                as ``_pipelineError``.
+            attachment_index (int): The attachment's position in the
+                message (object name ``<message_id>:<index>``).
             file_data (Optional[bytes]): The bytes, when the caller already
                 downloaded them; not fetched again.
 
@@ -1427,6 +1452,13 @@ class IEndpoint(IEndpointBase):
         metadata dict to the object flowing through the pipe (see
         ``IServiceFilterPipe``); it does not touch the entry's url/name. Called
         best-effort so a pipe implementation without it never breaks ingestion.
+
+        Args:
+            pipe (Any): The engine pipe the object is being written to.
+            metadata (Dict[str, Any]): The per-object metadata contract.
+
+        Returns:
+            None
         """
         try:
             pipe.sendTagMetadata(metadata)
@@ -1443,6 +1475,15 @@ class IEndpoint(IEndpointBase):
         exposes the node's metadata contract to a subscriber. Best-effort: a
         missing ``rocketlib.engine`` (unit tests) or pipe id never breaks
         ingestion.
+
+        Args:
+            pipe (Any): The engine pipe, for its ``pipeId``.
+            event_type (str): ``message``, ``reaction``, ``no_reply`` or ``outbound``.
+            metadata (Dict[str, Any]): The per-object metadata contract.
+            payload (Dict[str, Any]): The event-specific fields.
+
+        Returns:
+            None
         """
         try:
             from rocketlib.engine import monitorSSE  # type: ignore  # engine-only module
@@ -1480,6 +1521,12 @@ class IEndpoint(IEndpointBase):
             text (str): The message text.
             channel_id (int): The originating channel id (entry URL).
             message_id (int): The originating message id (entry URL).
+            meta (Dict[str, Any]): The object's metadata contract; a
+                pipeline error is recorded on it as ``_pipelineError``.
+            object_name (Optional[str]): The entry name; the message id
+                when None (a text attachment passes ``<message_id>:<index>``).
+            attachment_id (Optional[int]): Appended to the entry URL for a
+                text attachment; None for the message's own text.
             sse_text (Optional[str]): Text to broadcast instead of ``text`` —
                 the user's own message when attachments were folded in.
 
@@ -1532,8 +1579,13 @@ class IEndpoint(IEndpointBase):
         Args:
             file_data (bytes): The raw attachment bytes.
             mime_type (str): The attachment MIME type (selects the lane).
-            attachment_id (int): The attachment id (entry URL / name).
+            attachment_id (int): The attachment id (entry URL).
             channel_id (int): The originating channel id (entry URL).
+            message_id (int): The originating message id (entry URL and name).
+            attachment_index (int): The attachment's position in the message
+                (entry name ``<message_id>:<index>``).
+            meta (Dict[str, Any]): The object's metadata contract; a
+                pipeline error is recorded on it as ``_pipelineError``.
 
         Returns:
             str: The first pipeline answer, or '' on error / no answers.
@@ -1747,8 +1799,7 @@ class IEndpoint(IEndpointBase):
 
         ``{content}`` is the triggering message's text; a message that carries
         only files has none, so the first attachment's filename stands in for
-        it (the support bot's ``text || firstAttachment.name || 'Support'``).
-        The resolved name is capped by ``threadNameMaxLength``, and the node's
+        it. The resolved name is capped by ``threadNameMaxLength``, and the node's
         own default is used when nothing is left.
 
         Args:

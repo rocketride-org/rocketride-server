@@ -41,8 +41,7 @@ _CHUNK_LABEL_OVERHEAD = len('\n\n*(/)*')
 _ATTACHMENT_TRUNCATION_SUFFIX = '\n… (truncated)'
 
 # Framing for a message that carries only files. Without it the pipeline gets a
-# bare document and no task, and answers generically (the support bot's
-# ``collectParts`` adds the same line).
+# bare document and no task, and answers generically.
 NO_MESSAGE_FRAMING = (
     'The user shared the following file(s) with no message. '
     'Explain what each file is and what it does, and help them with it.'
@@ -98,9 +97,16 @@ def _label_width(total: int) -> int:
 def _numbered_chunks(text: str, max_length: int) -> List[str]:
     """Split ``text`` and end each chunk with ``*(i/n)*``, label included in the cap.
 
-    Mirrors the support bot's ``chunk``: a reply that needs more than one
+    A reply that needs more than one
     Discord message says which message this is, and the label is paid for by
     the split rather than added on top of a chunk that already fills the limit.
+
+    Args:
+        text (str): The reply text.
+        max_length (int): The per-message limit, label included.
+
+    Returns:
+        List[str]: The chunks; labelled only when there is more than one.
     """
     chunks = chunk_message(text, max_length)
     if len(chunks) < 2:
@@ -357,6 +363,9 @@ def should_process_message(
         allowed_channel_ids: Channel allowlist (empty means all channels).
         require_mention: Whether the bot must be @mentioned to respond.
         is_mentioned: Whether the bot is mentioned in this message.
+        parent_channel_id: A thread's parent channel id, which also matches
+            the channel allowlist; None outside a thread.
+        allowed_bot_ids: Bot user ids let through while ``ignore_bots`` is on.
 
     Returns:
         bool: True if the message passes every gate and should be processed.
@@ -435,7 +444,7 @@ def clip_attachment_text(text: str, max_chars: int) -> str:
 def fold_text_attachment(name: str, content: str, max_chars: int = 12000) -> str:
     """Render a text-like attachment as a fenced block for the merged question.
 
-    Mirrors the support bot's ``collectParts``: a text file travels with the
+    A text file travels with the
     user's own words instead of becoming a separate question, so one answer has
     seen both.
 
