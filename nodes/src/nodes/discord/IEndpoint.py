@@ -23,6 +23,9 @@
 
 import asyncio
 import collections
+import concurrent.futures
+import contextvars
+import functools
 import time
 import json
 import os
@@ -88,6 +91,10 @@ MAX_NO_REPLY_REASON_CHARS = 200
 # backfill, so a message seen by both (or redelivered) is processed once;
 # bounded so a long-running bot does not grow it forever.
 HANDLED_MESSAGE_IDS_LIMIT = 1000
+
+# Pipeline runs get their own bounded pool (and a semaphore of the same size),
+# so runs that hang cannot take the loop's default pool, which event emits use.
+PIPELINE_WORKERS = 8
 
 
 class PipelineTimeout(Exception):
@@ -538,6 +545,10 @@ class IEndpoint(IEndpointBase):
         self._closing = False
         self._backfill_done = False
         self._handled_message_ids = collections.OrderedDict()
+        self._pipeline_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=PIPELINE_WORKERS, thread_name_prefix='discord-pipeline'
+        )
+        self._pipeline_slots = asyncio.Semaphore(PIPELINE_WORKERS)
         self._pause_state()
 
         if not self._bot_token:
@@ -682,6 +693,12 @@ class IEndpoint(IEndpointBase):
             except asyncio.CancelledError:
                 pass
             self._bot_task = None
+
+        # Without waiting: a hung run would otherwise hold up the shutdown.
+        executor = getattr(self, '_pipeline_executor', None)
+        if executor is not None:
+            executor.shutdown(wait=False)
+            self._pipeline_executor = None
 
         monitorOther('usr')
 
@@ -1458,7 +1475,7 @@ class IEndpoint(IEndpointBase):
                     pipeline_text = with_thread_context(message.content, transcript)
                     text_reply = await self._run_with_optional_typing(
                         message,
-                        lambda: asyncio.to_thread(
+                        lambda: self._run_pipeline(
                             self._run_text_pipeline,
                             pipeline_text,
                             message.channel.id,
@@ -1633,7 +1650,7 @@ class IEndpoint(IEndpointBase):
         pipeline_text = compose_merged_question(with_thread_context(message.content, transcript), blocks)
         text_reply = await self._run_with_optional_typing(
             message,
-            lambda: asyncio.to_thread(
+            lambda: self._run_pipeline(
                 self._run_text_pipeline,
                 pipeline_text,
                 message.channel.id,
@@ -1691,7 +1708,7 @@ class IEndpoint(IEndpointBase):
             meta = dict(text_pass['meta'])
             answer = await self._run_with_optional_typing(
                 message,
-                lambda: asyncio.to_thread(
+                lambda: self._run_pipeline(
                     self._run_text_pipeline,
                     text_pass['text'],
                     message.channel.id,
@@ -1761,12 +1778,50 @@ class IEndpoint(IEndpointBase):
             return ''
         return fold_text_attachment(attachment.filename, decoded, getattr(self, '_text_attachment_max_chars', 12000))
 
+    async def _run_pipeline(self, func: Callable, *args, **kwargs):
+        """Run one blocking pipeline call on the node's own bounded pool.
+
+        Waits for a free slot first. The slot is given back when the call
+        returns, not when the caller stops waiting, so a run that timed out
+        keeps its worker until it finishes and the pool never holds more runs
+        than it has workers.
+
+        Args:
+            func (Callable): The blocking pipeline call.
+            *args: Its positional arguments.
+            **kwargs: Its keyword arguments.
+
+        Returns:
+            Any: What the call returned.
+        """
+        executor = getattr(self, '_pipeline_executor', None)
+        if executor is None:
+            executor = self._pipeline_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=PIPELINE_WORKERS, thread_name_prefix='discord-pipeline'
+            )
+        slots = getattr(self, '_pipeline_slots', None)
+        if slots is None:
+            slots = self._pipeline_slots = asyncio.Semaphore(PIPELINE_WORKERS)
+
+        await slots.acquire()
+        loop = asyncio.get_running_loop()
+        try:
+            # Like asyncio.to_thread: the call sees this task's context variables.
+            call = functools.partial(contextvars.copy_context().run, func, *args, **kwargs)
+            future = executor.submit(call)
+        except BaseException:
+            slots.release()
+            raise
+        future.add_done_callback(lambda _future: loop.call_soon_threadsafe(slots.release))
+        return await asyncio.wrap_future(future)
+
     async def _await_pipeline(self, coro_factory):
         """Await one pipeline run, giving up after ``pipelineTimeoutSeconds`` when set.
 
+        The limit covers waiting for a free pipeline slot as well as the run.
         The run itself cannot be cancelled (it is a worker thread): on timeout
-        it finishes in the background, returns its pipe, and its answer is
-        dropped because nothing awaits it any more.
+        it keeps its worker until it finishes in the background, returns its
+        pipe, and its answer is dropped because nothing awaits it any more.
 
         Raises:
             PipelineTimeout: The run did not answer within the limit.
@@ -1848,7 +1903,7 @@ class IEndpoint(IEndpointBase):
                 framed = f'[attachment {attachment.filename}]\n{decoded}'
                 return await self._run_with_optional_typing(
                     message,
-                    lambda: asyncio.to_thread(
+                    lambda: self._run_pipeline(
                         self._run_text_pipeline,
                         framed,
                         message.channel.id,
@@ -1860,7 +1915,7 @@ class IEndpoint(IEndpointBase):
                 )
             return await self._run_with_optional_typing(
                 message,
-                lambda: asyncio.to_thread(
+                lambda: self._run_pipeline(
                     self._run_binary_pipeline,
                     file_data,
                     mime_type,
@@ -1940,7 +1995,7 @@ class IEndpoint(IEndpointBase):
     ) -> str:
         """Push a text message through the pipeline on the text lane.
 
-        Blocking; must be called via asyncio.to_thread.
+        Blocking; must be called via :meth:`_run_pipeline`.
 
         Args:
             text (str): The message text.
@@ -2003,7 +2058,7 @@ class IEndpoint(IEndpointBase):
     ) -> str:
         """Push binary attachment data through the matching pipeline lane.
 
-        Blocking; must be called via asyncio.to_thread.
+        Blocking; must be called via :meth:`_run_pipeline`.
 
         Args:
             file_data (bytes): The raw attachment bytes.

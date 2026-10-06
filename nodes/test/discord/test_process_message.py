@@ -3225,6 +3225,90 @@ class TestPipelineTimeout:
         with pytest.raises(_ENDPOINT_MODULE.PipelineTimeout):
             asyncio.run(endpoint._process_attachment(_make_message(), attachment, {}, 0))
 
+    def test_hung_runs_do_not_block_events_or_new_messages(self):
+        """A full pipeline pool must not starve event emits, and a new message times out."""
+        import concurrent.futures
+
+        release = threading.Event()
+        endpoint = _make_endpoint()
+        endpoint._pipeline_timeout_seconds = 0.2
+        endpoint._emit_no_reply = True
+        endpoint._emit_event_pipeline = mock.Mock()
+        endpoint._run_with_optional_typing = IEndpoint._run_with_optional_typing.__get__(endpoint)
+        endpoint._run_text_pipeline = mock.Mock(side_effect=lambda *args, **kwargs: release.wait(10) and '')
+
+        async def scenario():
+            # Emits run on the loop's default pool; keep it as small as the pipeline pool.
+            asyncio.get_running_loop().set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=2))
+            try:
+                # Two runs hang and keep their workers: the pipeline pool is full.
+                for _ in range(2):
+                    await asyncio.wait_for(endpoint._process_message(_make_message(content='q')), 5)
+                endpoint._emit_event_pipeline.reset_mock()
+
+                # A new message cannot get a slot; it still reports timeout instead of hanging.
+                await asyncio.wait_for(endpoint._process_message(_make_message(content='q')), 5)
+                reasons = [call.args[2]['reason'] for call in endpoint._emit_event_pipeline.call_args_list]
+                assert reasons == ['timeout']
+                assert endpoint._run_text_pipeline.call_count == 2, 'the third run never started'
+
+                # Any other event emit still completes.
+                await asyncio.wait_for(endpoint._emit_no_reply_event({'messageId': '2'}, 'other'), 5)
+            finally:
+                release.set()
+
+        with mock.patch.object(_ENDPOINT_MODULE, 'PIPELINE_WORKERS', 2):
+            asyncio.run(scenario())
+
+        assert endpoint._send_response.await_count == 0
+
+    def test_a_timed_out_run_keeps_its_slot_until_it_returns(self):
+        release = threading.Event()
+        endpoint = _make_endpoint()
+
+        async def scenario():
+            with mock.patch.object(_ENDPOINT_MODULE, 'PIPELINE_WORKERS', 1):
+                hung = asyncio.ensure_future(endpoint._run_pipeline(release.wait, 10))
+                await asyncio.sleep(0.05)
+                hung.cancel()  # what a timeout does to the awaiting side
+                second = asyncio.ensure_future(endpoint._run_pipeline(lambda: 'next'))
+                await asyncio.sleep(0.1)
+                assert not second.done(), 'the slot is still held by the hung run'
+                release.set()
+                assert await asyncio.wait_for(second, 5) == 'next'
+
+        asyncio.run(scenario())
+
+    def test_startup_creates_a_bounded_pipeline_pool(self):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token'})
+        endpoint._bot_runner = mock.AsyncMock()
+
+        async def scenario():
+            await endpoint._startup()
+            await asyncio.sleep(0)
+
+        with mock.patch.object(_ENDPOINT_MODULE.commands, 'Bot', mock.Mock()):
+            asyncio.run(scenario())
+
+        try:
+            assert endpoint._pipeline_executor._max_workers == _ENDPOINT_MODULE.PIPELINE_WORKERS
+        finally:
+            endpoint._pipeline_executor.shutdown(wait=False)
+
+    def test_shutdown_does_not_wait_for_the_pipeline_pool(self):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._closing = False
+        endpoint._inflight = set()
+        endpoint._bot = None
+        endpoint._bot_task = None
+        executor = mock.Mock()
+        endpoint._pipeline_executor = executor
+
+        asyncio.run(endpoint._shutdown())
+
+        executor.shutdown.assert_called_once_with(wait=False)
+        assert endpoint._pipeline_executor is None
+
     def test_services_json_declares_the_field_off(self):
         schema = _load_services_json()
 

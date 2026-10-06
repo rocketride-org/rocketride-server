@@ -369,7 +369,7 @@
 		"discord.pipelineTimeoutSeconds": {
 			"type": "number",
 			"title": "Pipeline Timeout (seconds)",
-			"description": "Give up on a message whose pipeline has not answered after this many seconds and report a no_reply with reason timeout instead of posting. Each pipeline run (the question, each attachment, each retry) gets this long. The run itself is not stopped: it finishes in the background and its late answer is dropped. Zero (default) waits as long as it takes.",
+			"description": "Give up on a message whose pipeline has not answered after this many seconds and report a no_reply with reason timeout instead of posting. Each pipeline run (the question, each attachment, each retry) gets this long. The limit includes waiting for a free pipeline worker. The run itself is not stopped: it keeps its worker until it finishes in the background, and its late answer is dropped. Zero (default) waits as long as it takes.",
 			"default": 0,
 			"minimum": 0,
 			"optional": true
