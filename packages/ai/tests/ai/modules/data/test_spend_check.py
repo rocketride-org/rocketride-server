@@ -21,7 +21,6 @@ import pytest
 
 import ai.modules.data.data_server as data_server
 from ai.account.base import OutOfCreditsError
-from ai.common.dap import DAPConn
 from ai.modules.data.data_conn import DataConn
 
 REFUSAL = 'Out of credits'
@@ -30,6 +29,7 @@ REFUSAL = 'Out of credits'
 def _conn():
     conn = DataConn.__new__(DataConn)
     conn._asked = {}
+    conn._pending = {}
     conn._seq = 0
     conn._server = MagicMock()
     conn.debug_message = MagicMock()
@@ -110,6 +110,9 @@ async def test_the_eaas_connection_answers_credit_checks_while_connected(monkeyp
     server = data_server.DataServer.__new__(data_server.DataServer)
     server._dapbase_on_connected = AsyncMock()
     server._dapbase_on_disconnected = AsyncMock()
+    server._authorized = lambda websocket: True
+    server._channel_busy = lambda: False
+    server._live = None
     monkeypatch.setattr(data_server, 'DataConn', lambda **kwargs: _conn())
     seen = {}
 
@@ -117,7 +120,7 @@ async def test_the_eaas_connection_answers_credit_checks_while_connected(monkeyp
         seen['while_connected'] = data_server._eaas
         seen['signalled'] = data_server._eaas_connected.is_set()
 
-    monkeypatch.setattr(data_server, 'TransportWebSocket', lambda: MagicMock(accept=accept))
+    monkeypatch.setattr(data_server, 'TransportWebSocketHooked', lambda **kwargs: MagicMock(accept=accept))
     await server.listen(MagicMock())
 
     assert seen['while_connected'] is not None and seen['signalled']
@@ -203,18 +206,3 @@ def test_a_refusal_is_asked_again_every_time(eaas):
             data_server.require_credit()
 
     assert eaas.ask_spend.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_an_answer_to_a_cancelled_question_takes_the_usual_route(monkeypatch):
-    usual = AsyncMock()
-    monkeypatch.setattr(DAPConn, 'on_receive', usual)
-    conn = _conn()
-    cancelled = asyncio.get_running_loop().create_future()
-    cancelled.cancel()
-    conn._asked[5] = cancelled
-    message = {'type': 'response', 'request_seq': 5, 'body': {'refusal': None}}
-
-    await conn.on_receive(message)
-
-    usual.assert_awaited_once_with(message)

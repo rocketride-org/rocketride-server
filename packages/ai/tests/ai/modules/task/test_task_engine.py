@@ -99,6 +99,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
+    # Channel state __init__ would have set
+    Task._reset_channel_state(t)
     return t
 
 
@@ -2053,8 +2055,8 @@ class _SilentTransport:
 )
 async def test_data_channel_disconnect_fails_pending_requests(reason, expected):
     """A request waiting on the data channel fails when the channel closes, instead of waiting forever."""
-    parent = SimpleNamespace(_data_client=None)
-    client = Task.TaskData(parent_task=parent, module='DATA-test', transport=_SilentTransport())
+    parent = _task()
+    client = Task.TaskData(parent_task=parent, channel_id='c1', module='DATA-test', transport=_SilentTransport())
     parent._data_client = client
 
     pending = asyncio.ensure_future(client.dap_request(command='rrext_process', arguments={'subcommand': 'open'}))
@@ -2178,7 +2180,8 @@ async def test_data_connection_presents_the_token(monkeypatch):
 
     ((uri, kwargs),) = transports
     assert uri == 'ws://127.0.0.1:20001/task/data'
-    assert kwargs['headers'] == {'Authorization': 'Bearer run-token'}
+    assert kwargs['headers']['Authorization'] == 'Bearer run-token'
+    assert kwargs['headers']['X-Channel-Id']
 
 
 async def test_data_request_without_a_token_fails_at_once(monkeypatch):
