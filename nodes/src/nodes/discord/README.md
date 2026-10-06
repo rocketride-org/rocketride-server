@@ -126,47 +126,30 @@ Paste the token into the `discord.botToken` field. A missing token, an invalid t
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `Pipe.source.parameters` |  | **Discord Bot Configuration** |  |
-| `discord.ackEmoji` | `string` | **Acknowledgement Emoji**<br/>Emoji added to a message that is skipped as aimed at somebody else. Empty adds no reaction. | `""` |
 | `discord.allowedBotIds` | `array` | **Allowed Bot IDs**<br/>Bot user IDs allowed through when Ignore Bot Messages is enabled. | `[]` |
 | `discord.allowedMentionRoleIds` | `array` | **Allowed Mention Role IDs**<br/>Role IDs that outbound pipeline responses may mention. | `[]` |
 | `discord.allowedMentionUserIds` | `array` | **Allowed Mention User IDs**<br/>User IDs that outbound pipeline responses may mention. | `[]` |
-| `discord.backfillLimit` | `number` | **Backfill Limit**<br/>Most-recent messages to process per readable channel at startup. Zero disables backfill. | `0` |
 | `discord.botToken` | `string` | **Bot Token**<br/>Discord bot token from the Developer Portal (keep this secret - do not share) |  |
-| `discord.captureEvents` | `boolean` | **Capture Events To Database**<br/>Write every event this node handles — question, follow-up, reply, no-reply, reaction — into a database node connected to this source with a tool control edge. Question rows are always written; outbound, no_reply and reaction rows exist only when the matching Emit Outbound Events (emitOutbound), Emit No Reply Events (emitNoReply) or Emit Reactions (emitReactions) option is also on, because those events are not produced at all when it is off. Writes happen off the answering path; if the database is unreachable the bot keeps answering and each failed write is logged as a warning. | `false` |
-| `discord.captureNodeId` | `string` | **Capture Database Node**<br/>Component id of the database node to write to. Empty: the only database tool node connected to this source. | `""` |
-| `discord.captureSource` | `string` | **Capture Source Label**<br/>Text written to each captured row's source column, e.g. to tell which pipeline wrote it, and the only way to tell two Discord sources sharing one capture table apart. Letters, digits and _ . : + @ - only, up to 128 characters. Empty: discord:<node type>, which is discord:discord for every Discord source. | `""` |
-| `discord.captureTable` | `string` | **Capture Table**<br/>Table the captured events are written to. Created if it does not exist. Letters, digits and underscore only, not starting with a digit, at most 54 characters (Postgres truncates identifiers at 63 bytes, and this table's index and constraint names are derived from its name). | `"discord_events"` |
 | `discord.channelIds` | `array` | **Channel IDs**<br/>List of channel IDs to listen to. Leave empty to listen to all channels. |  |
 | `discord.emitNoReply` | `boolean` | **Emit No Reply Events**<br/>Emit an event when processing produces no answer or raises an error. | `false` |
 | `discord.emitOutbound` | `boolean` | **Emit Outbound Events**<br/>Emit an event after posting a pipeline response to Discord. | `false` |
 | `discord.emitReactions` | `boolean` | **Emit Reactions**<br/>Emit raw reaction add and remove events into the pipeline. | `false` |
-| `discord.escalationMarkers` | `array` | **Escalation Markers**<br/>Text markers that mark an answer as escalated (for example a team role mention). Allowed Mention Role IDs are added automatically. | `[]` |
-| `discord.escalationPause` | `boolean` | **Pause After Escalation**<br/>After an answer containing an escalation marker is posted into a thread, stay quiet in that thread until the bot is mentioned again. | `false` |
-| `discord.feedbackEmojis` | `array` | **Feedback Emojis**<br/>Emojis added, in order, to the last posted answer chunk when Feedback Reactions is enabled. | `["✅","❌"]` |
-| `discord.feedbackReactions` | `boolean` | **Feedback Reactions**<br/>Add feedback emojis to the last posted answer chunk so readers can grade it in one click. | `false` |
 | `discord.guildIds` | `array` | **Server IDs (Guild IDs)**<br/>List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in. |  |
-| `discord.ignoreAimedAtOthers` | `boolean` | **Ignore Messages Aimed At Others**<br/>Skip messages that mention another user or role, or reply to a message the bot did not write, unless the bot is mentioned. | `false` |
 | `discord.ignoreBots` | `boolean` | **Ignore Bot Messages**<br/>If true (default), messages from other bots are ignored to prevent loops. | `true` |
 | `discord.includeMemberMetadata` | `boolean` | **Include Member Metadata**<br/>Include display names and role IDs; requires the Discord members intent. | `false` |
 | `discord.maxAttachmentBytes` | `number` | **Max Attachment Size (bytes)**<br/>Maximum size of attachments to download. Larger files are skipped. Default 25 MB. | `26214400` |
 | `discord.mergeAttachments` | `boolean` | **Merge attachments into the question**<br/>When enabled, text-like files are folded into the message text and the answers the pipeline gives for image, audio, and video attachments are folded in as context before the text pass, so one reply covers everything. When disabled (the default), text and every attachment are asked separately and the first non-empty answer wins. | `false` |
-| `discord.nonAnswerRetries` | `number` | **Retries on a non-answer**<br/>When Sanitize Replies strips the whole reply (the pipeline returned only agent scratchpad such as Thought: lines), re-run the text pass up to this many times before giving up. Zero never retries. | `1` |
 | `discord.numberChunks` | `boolean` | **Number Reply Chunks**<br/>When an answer is too long for one Discord message, end each message with its position, for example (2/3). A reply that fits in one message is never labelled. | `false` |
-| `discord.pipelineTimeoutSeconds` | `number` | **Pipeline Timeout (seconds)**<br/>Give up on a message whose pipeline has not answered after this many seconds and report a no_reply with reason timeout instead of posting. Each pipeline run (the question, each attachment, each retry) gets this long. The run itself is not stopped: it finishes in the background and its late answer is dropped. Zero (default) waits as long as it takes. | `0` |
 | `discord.replyMode` | `string` | **Reply Mode**<br/>How the bot sends answers: 'channel' (post as normal message), 'reply' (reply to the message), or 'thread' (post in a thread). | `"reply"` |
 | `discord.requireMention` | `boolean` | **Require @Mention**<br/>If true, the bot only responds when explicitly @mentioned. If false, responds to all messages. | `false` |
 | `discord.requireMentionChannelIds` | `array` | **Require Mention Channel IDs**<br/>Channels (or thread parent channels) where a direct bot mention is always required. | `[]` |
-| `discord.sanitizeReplies` | `boolean` | **Sanitize Replies**<br/>Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it. | `false` |
 | `discord.sendResponses` | `boolean` | **Send Responses**<br/>If true, the bot sends pipeline answers back to Discord. If false, only processes messages. | `true` |
 | `discord.showTyping` | `boolean` | **Show Typing Indicator**<br/>If true, show a typing indicator while processing the pipeline. | `true` |
-| `discord.teamMentionAlias` | `string` | **Team Mention Alias**<br/>Literal team name the pipeline writes when it hands a question over, for example "@RocketRide team". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Empty leaves answers untouched. | `""` |
 | `discord.textAttachmentExtensions` | `array` | **Text Attachment Extensions**<br/>Filename extensions decoded as UTF-8 and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object. | `[]` |
 | `discord.textAttachmentMaxChars` | `number` | **Text Attachment Max Characters**<br/>Maximum decoded characters folded into the text lane per attachment. | `12000` |
-| `discord.threadAutoArchiveMinutes` | `number` | **Thread Auto Archive Minutes**<br/>Discord auto-archive duration, in minutes, for response threads the node creates: 60, 1440, 4320 or 10080. 0 (the default) uses the channel's own default. | `0` |
-| `discord.threadHistoryLimit` | `number` | **Thread History Limit**<br/>Prior thread messages fetched as conversation context for a message in a thread. Zero disables it. | `0` |
-| `discord.threadHistoryMaxChars` | `number` | **Thread History Max Characters**<br/>Maximum characters of thread transcript passed as context; the oldest lines are dropped first. | `6000` |
+| `discord.threadAutoArchiveMinutes` | `number` | **Thread Auto Archive Minutes**<br/>Discord auto-archive duration, in minutes, for response threads the node creates. Discord accepts only 60, 1440, 4320 or 10080; 0 (the default) uses the channel's own default. | `0` |
 | `discord.threadName` | `string` | **Thread Name**<br/>Name template for response threads. {content} is replaced with the triggering message text. | `"Pipeline Response"` |
-| `discord.threadNameMaxLength` | `number` | **Thread Name Max Length**<br/>Maximum number of characters in a resolved response thread name. | `90` |
+| `discord.threadNameMaxLength` | `number` | **Thread Name Max Length**<br/>Maximum number of characters in a resolved response thread name. Discord accepts 1 to 100. | `90` |
 
 ## Dependencies
 
