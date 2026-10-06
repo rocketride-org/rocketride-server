@@ -264,17 +264,25 @@ class IEndpoint(IEndpointBase):
             out.extend(part for part in re.split(r'[,\s]+', text) if part)
         return out
 
-    @staticmethod
-    def _list_config_error(config: Dict[str, Any]) -> Optional[str]:
+    @classmethod
+    def _list_config_error(cls, config: Dict[str, Any]) -> Optional[str]:
         """A fatal problem in the guild or channel allowlist, else None.
 
-        Broken JSON in either leaves the bot connected but answering nothing,
-        so the start fails with the reason. Other lists only warn.
+        Broken JSON in either, or a ``${NAME}`` the engine could not resolve
+        (it arrives as literal text and becomes an id that matches nothing),
+        leaves the bot connected but answering nothing, so the start fails
+        with the reason. Other lists only warn.
         """
         for field in ('guildIds', 'channelIds'):
             text = _broken_json_text(config.get(field))
             if text is not None:
                 return f'Discord Bot: {field} is not valid JSON ({text[:80]!r}); fix the setting'
+            for item in cls._as_str_list(config.get(field), field=field):
+                unresolved = _UNRESOLVED_VARIABLE.match(item)
+                if unresolved:
+                    return (
+                        f'Discord Bot: {field} uses the variable {unresolved.group(1)}, which is not set on this server'
+                    )
         return None
 
     @staticmethod
@@ -319,6 +327,15 @@ class IEndpoint(IEndpointBase):
         for item in cls._as_str_list(value, field=field):
             if item.isdigit():
                 ids.append(item)
+                continue
+            unresolved = _UNRESOLVED_VARIABLE.match(item)
+            if unresolved:
+                # Dropped like any non-numeric entry, but an operator has to
+                # hear about it: the mention it was meant to allow never pings.
+                _config_warning(
+                    f'Discord: {field} uses the variable {unresolved.group(1)}, which is not set on this server; '
+                    f'the entry is ignored'
+                )
             else:
                 debug(f'Discord: ignoring {field} entry {item!r} - not a numeric Discord id')
         return ids

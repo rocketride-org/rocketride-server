@@ -1575,6 +1575,59 @@ class TestConfigCoercion:
         assert IEndpoint._list_config_error({'allowedBotIds': '["1"'}) is None
 
 
+class TestUnsetListVariables:
+    """An unresolved ``${NAME}`` in a list setting is named, not matched as an id."""
+
+    @staticmethod
+    def _message(field, name):
+        return f'Discord Bot: {field} uses the variable {name}, which is not set on this server'
+
+    def test_an_unset_variable_in_guild_or_channel_ids_is_fatal(self):
+        assert IEndpoint._list_config_error({'guildIds': '${GUILD_IDS}'}) == self._message('guildIds', 'GUILD_IDS')
+        assert IEndpoint._list_config_error({'channelIds': ['${CHANNEL_IDS}']}) == self._message(
+            'channelIds', 'CHANNEL_IDS'
+        )
+
+    def test_the_variable_is_found_inside_json_text_and_delimited_lists(self):
+        assert IEndpoint._list_config_error({'channelIds': '["${CHANNEL_IDS}"]'}) == self._message(
+            'channelIds', 'CHANNEL_IDS'
+        )
+        assert IEndpoint._list_config_error({'guildIds': ['123', '${SECOND_GUILD}']}) == self._message(
+            'guildIds', 'SECOND_GUILD'
+        )
+        assert IEndpoint._list_config_error({'guildIds': '123, ${SECOND_GUILD}'}) == self._message(
+            'guildIds', 'SECOND_GUILD'
+        )
+
+    def test_resolved_ids_and_other_lists_are_not_fatal(self):
+        assert IEndpoint._list_config_error({'guildIds': ['123'], 'channelIds': '["456"]'}) is None
+        assert IEndpoint._list_config_error({'allowedBotIds': ['${BOT_IDS}']}) is None
+
+    def test_the_start_fails_naming_the_variable(self):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', 'channelIds': ['${CHANNEL_IDS}']})
+
+        with pytest.raises(RuntimeError, match='channelIds uses the variable CHANNEL_IDS, which is not set'):
+            asyncio.run(endpoint._startup())
+
+    @pytest.mark.parametrize('field', ['allowedMentionRoleIds', 'allowedMentionUserIds'])
+    def test_an_unset_variable_in_a_mention_list_warns(self, field):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            endpoint = TestNumericAndMentionConfig._parse({field: ['${MENTION_IDS}', '77']})
+
+        attribute = '_allowed_mention_role_ids' if field == 'allowedMentionRoleIds' else '_allowed_mention_user_ids'
+        assert getattr(endpoint, attribute) == ['77']
+        warn.assert_called_once()
+        assert field in warn.call_args.args[0]
+        assert 'MENTION_IDS' in warn.call_args.args[0]
+
+    def test_an_ordinary_non_numeric_mention_entry_does_not_warn(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            endpoint = TestNumericAndMentionConfig._parse({'allowedMentionRoleIds': ['the-team', '77']})
+
+        assert endpoint._allowed_mention_role_ids == ['77']
+        warn.assert_not_called()
+
+
 class TestOptionalTyping:
     """The pipeline awaitable runs exactly once regardless of typing errors."""
 
