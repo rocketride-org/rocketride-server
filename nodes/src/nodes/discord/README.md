@@ -139,7 +139,8 @@ Paste the token into the `discord.botToken` field. In production, also set `guil
 | `discord.guildIds` | `array` | **Server IDs (Guild IDs)**<br/>List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in. |  |
 | `discord.ignoreBots` | `boolean` | **Ignore Bot Messages**<br/>If true (default), messages from other bots are ignored to prevent loops. | `true` |
 | `discord.includeMemberMetadata` | `boolean` | **Include Member Metadata**<br/>Include display names and role IDs; requires the Discord members intent. | `false` |
-| `discord.maxAttachmentBytes` | `number` | **Max Attachment Size (bytes)**<br/>Maximum size of attachments to download. Larger files are skipped. Default 25 MB. | `26214400` |
+| `discord.maxAttachmentBytes` | `number` | **Max Attachment Size (bytes)**<br/>Maximum size of attachments to download. Larger files are skipped. Default 25 MB, at most 100 MB. | `26214400` |
+| `discord.maxConcurrentMessages` | `number` | **Max Concurrent Messages**<br/>How many messages are processed at once. Further messages wait their turn; none are dropped. | `4` |
 | `discord.mergeAttachments` | `boolean` | **Merge attachments into the question**<br/>When enabled, text-like files are folded into the message text and the answers the pipeline gives for image, audio, and video attachments are folded in as context before the text pass, so one reply covers everything. When disabled (the default), text and every attachment are asked separately and the first non-empty answer wins. | `false` |
 | `discord.numberChunks` | `boolean` | **Number Reply Chunks**<br/>When an answer is too long for one Discord message, end each message with its position, for example (2/3). A reply that fits in one message is never labelled. | `false` |
 | `discord.replyMode` | `string` | **Reply Mode**<br/>How the bot sends answers: 'channel' (post as normal message), 'reply' (reply to the message), or 'thread' (post in a thread). | `"reply"` |
@@ -148,14 +149,14 @@ Paste the token into the `discord.botToken` field. In production, also set `guil
 | `discord.sendResponses` | `boolean` | **Send Responses**<br/>If true, the bot sends pipeline answers back to Discord. If false, only processes messages. | `true` |
 | `discord.showTyping` | `boolean` | **Show Typing Indicator**<br/>If true, show a typing indicator while processing the pipeline. | `true` |
 | `discord.textAttachmentExtensions` | `array` | **Text Attachment Extensions**<br/>Filename extensions decoded as UTF-8 and routed through the text lane, for example .pipe, .json, .log, .md, .txt, .csv, .yaml, .yml. Once any extension is listed, text/* files are decoded too. Empty (the default): every attachment is routed as a binary object. | `[]` |
-| `discord.textAttachmentMaxChars` | `number` | **Text Attachment Max Characters**<br/>Maximum decoded characters folded into the text lane per attachment. | `12000` |
+| `discord.textAttachmentMaxChars` | `number` | **Text Attachment Max Characters**<br/>Maximum decoded characters folded into the text lane per attachment. 0 means no limit. | `12000` |
 | `discord.threadAutoArchiveMinutes` | `number` | **Thread Auto Archive Minutes**<br/>Discord auto-archive duration, in minutes, for response threads the node creates. Discord accepts only 60, 1440, 4320 or 10080; 0 (the default) uses the channel's own default. | `0` |
 | `discord.threadName` | `string` | **Thread Name**<br/>Name template for response threads. {content} is replaced with the triggering message text. | `"Pipeline Response"` |
 | `discord.threadNameMaxLength` | `number` | **Thread Name Max Length**<br/>Maximum number of characters in a resolved response thread name. Discord accepts 1 to 100. | `90` |
 
 ## Dependencies
 
-- `discord.py` `>=2.4.0`
+- `discord.py`
 
 ## Source
 
