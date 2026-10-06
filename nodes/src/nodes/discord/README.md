@@ -48,9 +48,10 @@ Server and channel allowlists. When non-empty, only messages from the listed gui
 
 ### What message text is broadcast and stored
 
-The node puts Discord message text into the `apaevt_sse` bodies, and therefore into the task's run log, in exactly two places:
+The node puts Discord message text into the `apaevt_sse` bodies, and therefore into the task's run log, in exactly three places:
 
 - the question text, in the `text` field of each `message` event for the text lane (clipped at 2000 characters). With `mergeAttachments` on, a message that has no text of its own carries the merged question instead, which includes the folded text-file contents and what the pipeline found in the other attachments;
+- the decoded contents of each text-like attachment (one `textAttachmentExtensions` selects), framed with its filename, in the `text` field of its own `message` event when `mergeAttachments` is off (clipped at 2000 characters);
 - the answer text, in the `text` field of each `outbound` event (only when `emitOutbound` is on).
 
 Binary attachments are never broadcast, only their MIME type and size. Every event's `metadata` also carries Discord IDs and attachment filenames, plus display names and role IDs when `includeMemberMetadata` is on, and a `no_reply` reason can quote an exception message. Operators need this list for their privacy notice: anyone who can monitor the task, and anyone who can read its run log, can read these messages. With `captureEvents` on, the same broadcast bodies, text included, are also stored in the capture table (see below), so anyone who can read that table can read them too.
