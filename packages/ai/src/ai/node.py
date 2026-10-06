@@ -123,6 +123,47 @@ def _parse_data_token_sha256() -> Optional[str]:
     return (args.data_token_sha256 or [None])[0] or None
 
 
+def _channel_signal(state: str, channel_id: Optional[str] = None) -> None:
+    """Tell the engine about the data channel through the monitor's stdout.
+
+    ``>CHN*1`` — the listener is up, dial it; with ``channel_id``, that
+    connection has ended, dial again. ``>CHN*2`` — the task is about to load
+    its pipeline, startup-only commands are over. The monitor's own sink is
+    used, not ``print``: it serialises with the engine's C++ output.
+
+    Args:
+        state: ``'1'`` or ``'2'``.
+        channel_id: The engine's name for the connection that ended.
+    """
+    from rocketlib import monitorOther
+
+    monitorOther('CHN', state if channel_id is None else f'{state}*{channel_id}')
+
+
+def _channel_authenticator(token_sha256: Optional[str]):
+    """Build the authenticator that makes the task's HTTP accept only the channel token.
+
+    Without it a request falls through to the account authenticator, which
+    takes the engine's own key — or any bearer when none is set.
+
+    Args:
+        token_sha256: Hex SHA-256 of the run's channel token; ``None`` refuses all.
+
+    Returns:
+        callable: ``async (credential) -> AccountInfo``; raises ``PermissionError``
+        for anything but the token, which stops the chain before the fallback.
+    """
+    from ai.account.models import AccountInfo
+    from ai.modules.data.data_server import token_matches
+
+    async def authenticate(credential: str):
+        if not token_matches(credential, token_sha256):
+            raise PermissionError('the task accepts only its channel token')
+        return AccountInfo(auth=credential, userId='task')
+
+    return authenticate
+
+
 def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     """Bootstrap the shared subprocess WebServer, if this process asked for one.
 
@@ -135,7 +176,9 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     (which exposes ``/task/data``) with the hash of the run's channel
     token from ``--data_token_sha256``, and blocks until the server
     signals it is up. Without the hash ``/task/data`` refuses every
-    connection.
+    connection. HTTP on the server accepts only that token too. The
+    ``task_channel`` is bound to ``server_loop`` so the task can send the
+    engine requests once it connects.
 
     Source nodes (webhook, telegram) discover the server via
     ``from ai.node import shared_web_server`` from inside their
@@ -184,9 +227,16 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
         load_env=False,
         standardEndpoints=False,
     )
+    server.add_authenticator(_channel_authenticator(token_sha256))
+
     # Mount `/task/data` — the WebSocket EaaS uses to send DAP traffic
-    # (data ops, cprofile, future trace control).
-    server.use('data', {'token_sha256': token_sha256})
+    # (data ops, cprofile, future trace control). A closed connection asks
+    # the engine to dial again.
+    server.use('data', {'token_sha256': token_sha256, 'on_closed': lambda cid: _channel_signal('1', cid)})
+
+    from ai.modules.data.channel import task_channel
+
+    task_channel.bind(server_loop)
 
     future = asyncio.run_coroutine_threadsafe(server.serve(), server_loop)
 
@@ -240,6 +290,34 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
         debug(f'shared WebServer startup did not signal within {timeout}s; proceeding anyway')
 
     return server, future
+
+
+def _is_listening(server: Optional[Any]) -> bool:
+    """Tell whether the shared WebServer has a bound listener.
+
+    Args:
+        server: The WebServer from ``_setup_shared_web_server``, or ``None``.
+
+    Returns:
+        bool: True when uvicorn reports ``started``.
+    """
+    return bool(getattr(getattr(server, 'server', None), 'started', False))
+
+
+def _announce_channel(server: Optional[Any]) -> None:
+    """Tell the engine the listener is up, then that startup requests are over.
+
+    Startup-only requests to the engine belong between the two signals;
+    there are none yet, so the startup phase closes at once. A server that
+    never bound gets no signal: the engine would dial a port nobody holds.
+
+    Args:
+        server: The WebServer from ``_setup_shared_web_server``, or ``None``.
+    """
+    if not _is_listening(server):
+        return
+    _channel_signal('1')
+    _channel_signal('2')
 
 
 def require_shared_web_server(node_name: str) -> Any:
@@ -366,6 +444,9 @@ def run():
         _ai_node_mod.shared_web_server = shared_web_server
     except Exception as e:
         debug(f'failed to mirror shared_web_server into ai.node: {e}')
+
+    # Let the engine connect now, before the pipeline exists
+    _announce_channel(shared_web_server)
 
     # Block direct GPU library imports (torch, tensorflow, etc.) when running
     # in model server mode — all GPU inference goes through ModelClient RPC

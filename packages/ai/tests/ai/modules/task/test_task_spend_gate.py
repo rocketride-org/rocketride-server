@@ -16,14 +16,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import asyncio
-
 import pytest
 
 import ai.account
 from ai.account.base import OutOfCreditsError
 from ai.constants import CONST_BILLING_UNAVAILABLE
-import ai.modules.task.task_engine as task_engine
 from ai.modules.task.task_engine import Task
 
 REFUSAL = 'Out of credits: add capacity on the Billing page to keep running pipelines'
@@ -81,37 +78,13 @@ async def test_a_task_with_no_org_leaves_the_answer_to_the_account(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_refused_pipe_keeps_its_code_on_the_way_back():
     task = _task()
+    task._data_token = 'run-token'
     refused = {'type': 'response', 'success': False, 'message': REFUSAL, 'code': 'OUT_OF_CREDITS'}
     task._data_client = SimpleNamespace(dap_request=AsyncMock(return_value=refused), did_fail=lambda r: True)
 
     with pytest.raises(OutOfCreditsError, match='Out of credits') as exc_info:
         await task._send_data({'command': 'rrext_process', 'arguments': {'subcommand': 'open'}})
     assert exc_info.value.code == 'OUT_OF_CREDITS'
-
-
-@pytest.mark.asyncio
-async def test_a_hosted_task_opens_the_data_channel_after_reporting_it_is_up(monkeypatch):
-    monkeypatch.setattr(task_engine, '_is_saas_engine', lambda: True)
-    task = _task()
-    order = []
-    task._send_status_update = AsyncMock(side_effect=lambda: order.append('status'))
-    task._keep_data_client = MagicMock(side_effect=lambda: order.append('channel'))
-
-    await task.on_event({'event': 'apaevt_status_state', 'body': {'service': True}})
-
-    assert order == ['status', 'channel']
-
-
-@pytest.mark.asyncio
-async def test_an_oss_task_keeps_the_data_channel_lazy(monkeypatch):
-    monkeypatch.setattr(task_engine, '_is_saas_engine', lambda: False)
-    task = _task()
-    task._send_status_update = AsyncMock()
-    task._keep_data_client = MagicMock()
-
-    await task.on_event({'event': 'apaevt_status_state', 'body': {'service': True}})
-
-    task._keep_data_client.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -124,53 +97,3 @@ async def test_a_failed_ledger_read_is_answered_as_an_error(monkeypatch):
     response = client._send.await_args.args[0]
     assert response['request_seq'] == 9
     assert response['success'] is False and response['message'] == CONST_BILLING_UNAVAILABLE
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    'service_up, terminating, reopens',
-    [(True, False, True), (True, True, False), (False, False, False)],
-    ids=['running', 'terminating', 'service-down'],
-)
-async def test_a_hosted_task_reopens_a_dropped_data_channel_only_while_it_runs(
-    monkeypatch, service_up, terminating, reopens
-):
-    monkeypatch.setattr(task_engine, '_is_saas_engine', lambda: True)
-    task = _task()
-    task._status.serviceUp = service_up
-    task._is_terminating = terminating
-    task._keep_data_client = MagicMock()
-    client = Task.TaskData(parent_task=task, module='DATA-t-1', transport=MagicMock())
-
-    await client.on_disconnected('dropped', True)
-
-    assert task._keep_data_client.called is reopens
-
-
-@pytest.mark.asyncio
-async def test_an_open_in_progress_is_not_started_twice():
-    task = _task()
-    opening = asyncio.Event()
-    task._ensure_data_client = AsyncMock(side_effect=opening.wait)
-
-    task._keep_data_client()
-    first = task._data_keeper
-    task._keep_data_client()
-
-    assert task._data_keeper is first
-    opening.set()
-    await first
-    task._ensure_data_client.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_a_data_channel_that_does_not_open_is_logged_not_raised(monkeypatch):
-    logged = MagicMock()
-    monkeypatch.setattr(task_engine, 'warning', logged)
-    task = _task()
-    task._ensure_data_client = AsyncMock(side_effect=RuntimeError('Subprocess exited with code 1'))
-
-    task._keep_data_client()
-    await task._data_keeper
-
-    assert 'Subprocess exited' in logged.call_args.args[0]
