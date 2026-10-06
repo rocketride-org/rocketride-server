@@ -14,6 +14,7 @@ the name collision between the ``discord`` node package and the discord.py
 library during test collection.
 """
 
+import codecs
 import importlib.util
 import json
 import os
@@ -322,7 +323,19 @@ class TestTextAttachmentHelpers:
 
     def test_a_nul_byte_means_binary(self):
         assert text_utils.decode_text_attachment(b'ok\x00binary') is None
-        assert text_utils.decode_text_attachment('hello'.encode('utf-16')) is None
+
+    def test_utf16_with_a_bom_is_text(self):
+        # Windows Notepad "Unicode" and PowerShell 5.1 redirects write these.
+        decode = text_utils.decode_text_attachment
+        assert decode(codecs.BOM_UTF16_LE + 'héllo\r\nworld'.encode('utf-16-le')) == 'héllo\r\nworld'
+        assert decode(codecs.BOM_UTF16_BE + 'héllo\r\nworld'.encode('utf-16-be')) == 'héllo\r\nworld'
+
+    def test_a_utf8_bom_is_stripped(self):
+        assert text_utils.decode_text_attachment(codecs.BOM_UTF8 + 'café'.encode('utf-8')) == 'café'
+
+    def test_utf32_is_still_binary(self):
+        # Its BOM starts with the UTF-16 LE one; read as UTF-16 it is full of NULs.
+        assert text_utils.decode_text_attachment('hello'.encode('utf-32')) is None
 
     def test_the_cap(self):
         clip = text_utils.clip_attachment_text

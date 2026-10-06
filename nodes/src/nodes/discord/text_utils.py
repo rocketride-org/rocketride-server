@@ -27,6 +27,7 @@ These functions have no discord.py dependency so they can be unit-tested
 directly without a Gateway connection or the discord.py package installed.
 """
 
+import codecs
 import mimetypes
 import re
 from typing import List, Optional, Sequence
@@ -361,13 +362,19 @@ def decode_text_attachment(data: bytes) -> Optional[str]:
         data (bytes): The downloaded file.
 
     Returns:
-        Optional[str]: The UTF-8 text with invalid bytes ignored, or None when
-            the file has a NUL byte: binary content, or a UTF-16 file, which
-            decoded as UTF-8 would be a NUL between every character.
+        Optional[str]: The text with invalid bytes ignored: UTF-16 when the
+            file starts with a UTF-16 byte order mark (Windows Notepad
+            "Unicode", PowerShell 5.1 redirects), else UTF-8 with any UTF-8
+            byte order mark stripped. None when the decoded text still holds
+            a NUL: binary content.
     """
-    if b'\x00' in data:
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        text = data.decode('utf-16', errors='ignore')
+    else:
+        text = data.decode('utf-8-sig', errors='ignore')
+    if '\x00' in text:
         return None
-    return data.decode('utf-8', errors='ignore')
+    return text
 
 
 def clip_attachment_text(text: str, max_chars: int) -> str:

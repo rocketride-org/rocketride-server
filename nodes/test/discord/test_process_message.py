@@ -22,6 +22,7 @@ deterministically in a clean CI environment (it never skips wholesale).
 """
 
 import asyncio
+import codecs
 import importlib.util
 import json
 import os
@@ -362,8 +363,8 @@ class TestTextAttachmentDecoding:
 
         assert endpoint._run_text_pipeline.call_args.args[0] == '[attachment notes.txt]\nabcdefgh'
 
-    @pytest.mark.parametrize('data', [b'ok\x00binary', 'hello'.encode('utf-16')])
-    def test_merge_off_a_nul_byte_means_binary_not_text(self, data):
+    def test_merge_off_a_nul_byte_means_binary_not_text(self):
+        data = b'ok\x00binary'
         endpoint = self._unmerged(12000)
         attachment = _attachment('notes.txt', data, content_type='text/plain')
 
@@ -372,6 +373,34 @@ class TestTextAttachmentDecoding:
         endpoint._run_text_pipeline.assert_not_called()
         assert endpoint._run_binary_pipeline.call_args.args[0] == data
         assert result == 'binary-answer'
+
+    # Windows Notepad "Unicode" and PowerShell 5.1 redirects write UTF-16 with a BOM.
+    _UTF16 = [
+        codecs.BOM_UTF16_LE + 'héllo'.encode('utf-16-le'),
+        codecs.BOM_UTF16_BE + 'héllo'.encode('utf-16-be'),
+        codecs.BOM_UTF8 + 'héllo'.encode('utf-8'),
+    ]
+
+    @pytest.mark.parametrize('data', _UTF16)
+    def test_merge_off_utf16_and_bom_files_are_text(self, data):
+        endpoint = self._unmerged(12000)
+        attachment = _attachment('notes.txt', data, content_type='text/plain')
+
+        asyncio.run(endpoint._process_attachment(_make_message(), attachment, {}, 0))
+
+        endpoint._run_binary_pipeline.assert_not_called()
+        assert endpoint._run_text_pipeline.call_args.args[0] == '[attachment notes.txt]\nhéllo'
+
+    @pytest.mark.parametrize('data', _UTF16)
+    def test_merge_on_utf16_and_bom_files_are_folded(self, data):
+        endpoint = TestAttachmentMerge._endpoint()
+        message = TestAttachmentMerge._message('look', _attachment('notes.txt', data, content_type='text/plain'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_binary_pipeline.assert_not_called()
+        text, _meta = TestAttachmentMerge._text_call(endpoint)
+        assert text == 'look\n\nContents of attached file "notes.txt":\n```\nhéllo\n```'
 
     def test_merge_on_a_cap_of_zero_keeps_everything(self):
         endpoint = TestAttachmentMerge._endpoint()
@@ -383,17 +412,6 @@ class TestTextAttachmentDecoding:
         text, _meta = TestAttachmentMerge._text_call(endpoint)
         assert '```\nabcdefgh\n```' in text
         assert 'truncated' not in text
-
-    def test_merge_on_a_utf16_file_is_skipped_as_binary(self):
-        endpoint = TestAttachmentMerge._endpoint()
-        message = TestAttachmentMerge._message(
-            'look', _attachment('notes.txt', 'hello'.encode('utf-16'), content_type='text/plain')
-        )
-
-        asyncio.run(endpoint._process_message(message))
-
-        text, _meta = TestAttachmentMerge._text_call(endpoint)
-        assert text == 'look'
 
 
 class TestAttachmentMerge:
@@ -507,16 +525,28 @@ class TestAttachmentMerge:
         endpoint._run_text_pipeline.assert_not_called()  # nothing to ask about
         assert endpoint._send_response.await_count == 0
 
-    def test_binary_content_in_a_text_file_is_skipped(self):
+    def test_binary_content_in_a_text_file_goes_to_the_binary_path(self):
+        # Same as with merging off: its own lane object, not dropped.
         endpoint = self._endpoint()
-        message = self._message('have a look', _attachment('notes.txt', b'ok\x00binary', content_type='text/plain'))
+        data = b'ok\x00binary'
+        image = _attachment('shot.png', b'\x89PNG', content_type='image/png', attachment_id=78)
+        notes = _attachment('notes.txt', data, content_type='text/plain', attachment_id=79)
+        message = self._message('have a look', notes, image)
 
         asyncio.run(endpoint._process_message(message))
 
+        notes.read.assert_awaited_once()  # downloaded once, not again for the binary path
+        calls = endpoint._run_binary_pipeline.call_args_list
+        assert [(call.args[0], call.args[1], call.args[5]) for call in calls] == [
+            (data, 'text/plain', 0),
+            (b'\x89PNG', 'image/png', 1),
+        ]
+        assert [(call.args[6]['groupIndex'], call.args[6]['groupSize']) for call in calls] == [(1, 3), (2, 3)]
         assert endpoint._run_text_pipeline.call_count == 1
         text, meta = self._text_call(endpoint)
-        assert text == 'have a look'  # the file contributed nothing
-        assert meta['groupSize'] == 1
+        assert 'Contents of attached file' not in text
+        assert 'What the pipeline found in the attached file "notes.txt":\nimage-answer' in text
+        assert meta['groupSize'] == 3
 
     def test_oversized_attachment_is_skipped_and_not_counted(self):
         endpoint = self._endpoint()

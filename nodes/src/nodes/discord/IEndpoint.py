@@ -28,7 +28,7 @@ import json
 import os
 import re
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from rocketlib import (
     IEndpointBase,
@@ -1093,13 +1093,20 @@ class IEndpoint(IEndpointBase):
                 # Oversized files go here too: _process_attachment skips them
                 # with a debug log, as it does when merging is off.
                 binaries.append((attachment_index, attachment))
-        eligible_binaries = [item for item in binaries if item[1] in eligible_attachments]
 
         blocks: List[str] = []
-        for _attachment_index, attachment in text_like:
-            block = await self._folded_text_attachment(attachment, processing_errors)
+        downloaded: Dict[int, bytes] = {}
+        for attachment_index, attachment in text_like:
+            block, binary_data = await self._folded_text_attachment(attachment, processing_errors)
             if block:
                 blocks.append(block)
+            elif binary_data is not None:
+                # Binary content after all: its own lane object, as it is with
+                # merging off, instead of being dropped.
+                binaries.append((attachment_index, attachment))
+                downloaded[attachment_index] = binary_data
+        binaries.sort(key=lambda item: item[0])
+        eligible_binaries = [item for item in binaries if item[1] in eligible_attachments]
 
         # groupSize has to be on the objects pushed below, before the text pass
         # has happened: anything foldable means a text pass is coming. The one
@@ -1116,7 +1123,13 @@ class IEndpoint(IEndpointBase):
             if attachment in eligible_attachments:
                 group_index += 1
             att_reply = self._answer_text(
-                await self._process_attachment(message, attachment, attachment_meta, attachment_index)
+                await self._process_attachment(
+                    message,
+                    attachment,
+                    attachment_meta,
+                    attachment_index,
+                    file_data=downloaded.get(attachment_index),
+                )
             )
             if attachment_meta.get('_pipelineError'):
                 processing_errors.append(attachment_meta.pop('_pipelineError'))
@@ -1166,33 +1179,38 @@ class IEndpoint(IEndpointBase):
         extension = os.path.splitext(attachment.filename)[1].lower()
         return mime_type.startswith('text/') or extension in extensions
 
-    async def _folded_text_attachment(self, attachment: discord.Attachment, processing_errors: List[str]) -> str:
+    async def _folded_text_attachment(
+        self, attachment: discord.Attachment, processing_errors: List[str]
+    ) -> Tuple[str, Optional[bytes]]:
         """Download one text-like attachment and render it for the question.
 
         The caller has already applied the size cap; this applies the character
-        cap and drops files that turn out to hold binary content, as the
-        support bot does.
+        cap and hands back a file that turns out to hold binary content, so it
+        can be routed like any other binary attachment.
 
         Args:
             attachment (discord.Attachment): A text-like attachment.
             processing_errors (List[str]): Collects a failed download's error.
 
         Returns:
-            str: The block to fold in, or '' when the file is unusable.
+            Tuple[str, Optional[bytes]]: The block to fold in ('' when there
+                is none), and the downloaded bytes when the file is binary
+                content (else None).
         """
         try:
             file_data = await attachment.read()
         except Exception as e:
             debug(f'Discord: attachment {attachment.filename} error: {e}')
             processing_errors.append(str(e))
-            return ''
+            return '', None
         if not file_data:
-            return ''
+            return '', None
         decoded = decode_text_attachment(file_data)
         if decoded is None:
-            debug(f'Discord: skipping attachment {attachment.filename} (binary content)')
-            return ''
-        return fold_text_attachment(attachment.filename, decoded, getattr(self, '_text_attachment_max_chars', 12000))
+            debug(f'Discord: attachment {attachment.filename} holds binary content; routing it as binary')
+            return '', file_data
+        block = fold_text_attachment(attachment.filename, decoded, getattr(self, '_text_attachment_max_chars', 12000))
+        return block, None
 
     async def _run_with_optional_typing(self, message: discord.Message, coro_factory):
         """Run an awaitable, optionally showing the Discord typing indicator.
@@ -1235,12 +1253,15 @@ class IEndpoint(IEndpointBase):
         attachment: discord.Attachment,
         meta: Optional[Dict[str, Any]] = None,
         attachment_index: int = 0,
+        file_data: Optional[bytes] = None,
     ) -> str:
         """Download one attachment and route it to the matching lane.
 
         Args:
             message (discord.Message): The parent message (for entry URL).
             attachment (discord.Attachment): The attachment to download.
+            file_data (Optional[bytes]): The bytes, when the caller already
+                downloaded them; not fetched again.
 
         Returns:
             str: The first pipeline answer, or '' if skipped or none produced.
@@ -1252,7 +1273,8 @@ class IEndpoint(IEndpointBase):
                 )
                 return ''
             mime_type = guess_media_type(attachment.filename, attachment.content_type or '')
-            file_data = await attachment.read()
+            if file_data is None:
+                file_data = await attachment.read()
             if not file_data:
                 return ''
             if meta is None:
