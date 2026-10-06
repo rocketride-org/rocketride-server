@@ -9,7 +9,7 @@ is off unless `DISCORD_LIVE=1` is set; a normal run collects and skips them.
 
 | Layer | File | What is real | What is stubbed |
 |---|---|---|---|
-| L1 live I/O | `test_live_io.py` (D01..D19) | Discord, the node | engine and pipeline |
+| L1 live I/O | `test_live_io.py` (D01..D19; backfill is in F35) | Discord, the node | engine and pipeline |
 | L2 replay | `test_replay.py` (R01..R10) | Discord, the node | engine and pipeline |
 | L3 engine e2e | `test_engine_e2e.py` (E01..E06) | Discord, the node, the engine, a real model | nothing |
 | L4 full engine suite | `test_engine_full.py` | Discord, the node, the engine | the model (`fake_llm.py`) or none (`echo` pipe) |
