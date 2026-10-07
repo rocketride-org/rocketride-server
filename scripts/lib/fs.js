@@ -284,7 +284,21 @@ async function copyFile(src, dest, mode) {
  */
 async function copyFileEnsure(src, dest) {
 	await fsp.mkdir(path.dirname(dest), { recursive: true });
-	return retryTransientLock(() => fsp.copyFile(src, dest));
+
+	return retryTransientLock(async () => {
+		try {
+			return await fsp.copyFile(src, dest);
+		} catch (err) {
+			// RO dest (e.g. part of JDK/JRE files) - force-remove RO dest and copy src in its place
+			if (err.code === 'EACCES' || err.code === 'EPERM') {
+				await fsp.access(src, fs.constants.R_OK);
+				await fsp.rm(dest, { force: true });
+				return await fsp.copyFile(src, dest);
+			}
+
+			throw err;
+		}
+	});
 }
 
 /**
@@ -627,7 +641,7 @@ async function walkFiles(dirPath, exclude = []) {
 
 			if (item.isDirectory()) await walk(fullPath, relPath);
 			// Forward slashes, so a hash means the same on either platform
-			else files.push({ rel: relPath.replace(/\\/g, '/'), full: fullPath });
+			else if (item.isFile()) files.push({ rel: relPath.replace(/\\/g, '/'), full: fullPath });
 		}
 	}
 

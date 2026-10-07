@@ -80,6 +80,16 @@ function getSymName(name) {
 	return isWindows() ? `${name}.pdb` : null;
 }
 
+/**
+ * Name of the library a consumer links a shared library through, or null where
+ * the platform links the shared library itself
+ * @param {string} name - Target name, without prefix or extension
+ * @returns {string|null} e.g. engine.lib on Windows, null elsewhere
+ */
+function getImportName(name) {
+	return isWindows() ? `${name}.lib` : null;
+}
+
 module.exports = {
 	getPlatform,
 	isWindows,
@@ -88,4 +98,5 @@ module.exports = {
 	getExecName,
 	getSharedName,
 	getSymName,
+	getImportName,
 };

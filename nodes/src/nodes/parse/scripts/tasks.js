@@ -42,6 +42,7 @@ const {
 	fingerprint,
 } = require('../../../../../scripts/lib');
 const { execMaven, CORE_DIR } = require('../../../../../packages/java/scripts/tasks');
+const { makeNodeModule } = require('../../../../scripts/node-build');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'java');
@@ -155,11 +156,20 @@ async function parseFingerprint() {
 // Module Export
 // ============================================================================
 
-module.exports = {
+const node = makeNodeModule({
 	name: 'parse',
-	description: 'Parse Node Java Library',
+	srcDir: path.join(PACKAGE_DIR, '..'),
+	description: 'Parse Node (c++ and java)',
+	// Its jar, after the library: both are this node's artifacts
+	extraSteps: ['parse:submodule-build'],
+});
+
+module.exports = {
+	...node,
 
 	actions: [
+		...node.actions,
+
 		// Internal actions
 		{ name: 'parse:check-source', action: makeCheckSourceAction },
 		{ name: 'parse:build-jar', action: makeBuildJarAction },
