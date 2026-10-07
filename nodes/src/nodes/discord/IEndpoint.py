@@ -1760,6 +1760,7 @@ class IEndpoint(IEndpointBase):
             if (
                 author_id != bot_user_id
                 and getattr(author, 'bot', False) is True
+                and getattr(self, '_ignore_bots', True)
                 and str(author_id) not in (getattr(self, '_allowed_bot_ids', []) or [])
             ):
                 # Another bot: one ``ignoreBots`` would drop must not speak in

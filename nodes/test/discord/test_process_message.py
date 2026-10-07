@@ -1079,12 +1079,19 @@ class TestThreadHistoryContext:
         history[0].author.bot = True
         history[1].author.bot = True
 
-        endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=[])
+        endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=[], _ignore_bots=True)
         asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321, history))))
         transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
         assert transcript == 'ada: the first question\nSupport Bot: the earlier answer'
 
-        endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=['55'])
+        endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=['55'], _ignore_bots=True)
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321, history))))
+        transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
+        assert transcript.endswith('spambot: buy cheap tokens')
+
+        # Review of #2547: with ignoreBots off the node answers every bot, so
+        # their earlier messages are context too.
+        endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=[], _ignore_bots=False)
         asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321, history))))
         transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
         assert transcript.endswith('spambot: buy cheap tokens')
