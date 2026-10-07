@@ -1439,7 +1439,61 @@ class IEndpoint(IEndpointBase):
         role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
         return alias if alias and role_ids else ''
 
-    def _with_team_mention(self, text: str, conversation_id: Optional[str] = None) -> str:
+    def _team_mention(self) -> str:
+        """The team role's mention (``<@&id>``), when there is an alias for it.
+
+        Returns:
+            str: The mention of the first ``allowedMentionRoleIds`` entry, or ''
+                when no ``teamMentionAlias`` or no allowed role is configured.
+        """
+        if not self._handoff_alias():
+            return ''
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return f'<@&{role_ids[0]}>'
+
+    def _team_ping_on_cooldown(self, author_id: Optional[str]) -> bool:
+        """Whether this user already had the team pinged within the cooldown.
+
+        Expired entries are dropped on the way.
+
+        Args:
+            author_id (Optional[str]): The id of the user who asked; None is
+                never on cooldown.
+
+        Returns:
+            bool: True when the team role was pinged for this user less than
+                :data:`TEAM_PING_COOLDOWN_SECONDS` ago.
+        """
+        pings = getattr(self, '_team_pings', None)
+        if pings is None:
+            pings = self._team_pings = {}
+        now = _monotonic()
+        for key in [key for key, pinged in pings.items() if now - pinged >= TEAM_PING_COOLDOWN_SECONDS]:
+            del pings[key]
+        return author_id is not None and author_id in pings
+
+    def _note_team_ping(self, author_id: Optional[str], outbound: Dict[str, Any]) -> None:
+        """Start a user's team-ping cooldown once a mention actually went out.
+
+        Only a posted chunk that carries the team role's mention counts: a send
+        that failed, or stopped before that chunk, pinged nobody.
+
+        Args:
+            author_id (Optional[str]): The id of the user who asked.
+            outbound (Dict[str, Any]): The result of :meth:`_send_response`.
+
+        Returns:
+            None
+        """
+        mention = self._team_mention()
+        if author_id is None or not mention:
+            return
+        if any(mention in chunk for chunk in outbound.get('postedChunks') or []):
+            if getattr(self, '_team_pings', None) is None:
+                self._team_pings = {}
+            self._team_pings[author_id] = _monotonic()
+
+    def _with_team_mention(self, text: str, on_cooldown: bool = False) -> str:
         """Turn the configured team alias in an answer into a real role mention.
 
         Mirrors the support bot's ``injectRoleMention``. The agent is prompted
@@ -1448,36 +1502,26 @@ class IEndpoint(IEndpointBase):
         the node may actually mention, so that is the one substituted.
 
         Any user who gets the model to write the alias makes the bot ping the
-        role, so a conversation gets at most one injected ping per
+        role, so a user gets at most one team ping per
         :data:`TEAM_PING_COOLDOWN_SECONDS`; within that window the alias is
-        posted as plain text.
+        posted as plain text (see :meth:`_team_ping_on_cooldown`).
 
         Args:
             text (str): The answer about to be posted.
-            conversation_id (Optional[str]): The thread or channel the answer
-                belongs to, which the cooldown is kept per.
+            on_cooldown (bool): Whether the asking user is on cooldown.
 
         Returns:
             str: The answer, unchanged unless the alias and an allowed role id
-                are configured, the answer names the alias, and the
-                conversation is not on cooldown.
+                are configured, the answer names the alias, and the user is
+                not on cooldown.
         """
         alias = self._handoff_alias()
         if not text or not alias or not contains_alias(text, alias):
             return text
-        pings = getattr(self, '_team_pings', None)
-        if pings is None:
-            pings = self._team_pings = {}
-        now = _monotonic()
-        for key in [key for key, pinged in pings.items() if now - pinged >= TEAM_PING_COOLDOWN_SECONDS]:
-            del pings[key]
-        if conversation_id is not None:
-            if conversation_id in pings:
-                debug(f'Discord: team ping on cooldown in {conversation_id}; the alias is posted as plain text')
-                return text
-            pings[conversation_id] = now
-        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
-        return inject_role_mention(text, alias, f'<@&{role_ids[0]}>')
+        if on_cooldown:
+            debug('Discord: team ping on cooldown for this user; the alias is posted as plain text')
+            return text
+        return inject_role_mention(text, alias, self._team_mention())
 
     def _is_escalation(self, text: str) -> bool:
         """Whether a posted answer hands the conversation over.
@@ -1587,6 +1631,7 @@ class IEndpoint(IEndpointBase):
             return ''
 
         starter_type = getattr(getattr(discord, 'MessageType', None), 'thread_starter_message', None)
+        team_mention = self._team_mention()
         entries = []
         for item in reversed(history):  # Discord returns newest first
             # ``before`` already excludes it; kept as a harmless guard.
@@ -1619,6 +1664,10 @@ class IEndpoint(IEndpointBase):
                 name = bot_name
             else:
                 name = getattr(author, 'name', None) or 'user'
+            if team_mention:
+                # The model must not see the raw role mention: echoed back, it
+                # would ping the team whatever the cooldown says.
+                content = content.replace(team_mention, self._handoff_alias())
             entries.append((str(name), str(content)))
         return format_thread_transcript(entries, max_chars)
 
@@ -1988,10 +2037,17 @@ class IEndpoint(IEndpointBase):
                 # text that is posted, after sanitizing: reasoning that merely
                 # names the team must never ping it. Escalation detection after
                 # the send sees the injected mention.
-                reply = self._with_team_mention(reply, str(message.channel.id))
+                author_id = getattr(getattr(message, 'author', None), 'id', None)
+                author_id = str(author_id) if author_id is not None else None
+                on_cooldown = self._team_ping_on_cooldown(author_id)
+                reply = self._with_team_mention(reply, on_cooldown)
 
                 if reply and self._send_responses:
-                    outbound = await self._send_response(message, reply)
+                    # On cooldown the send withholds the team role too, so a
+                    # literal mention in the answer cannot ping it either.
+                    outbound = await self._send_response(message, reply, ping_team=not on_cooldown)
+                    if not on_cooldown:
+                        self._note_team_ping(author_id, outbound)
                     if getattr(self, '_escalation_pause', False) or getattr(self, '_feedback_reactions', False):
                         await self._after_send(message, reply, outbound)
                     if outbound.get('messageIds'):
@@ -2752,7 +2808,7 @@ class IEndpoint(IEndpointBase):
     # Replies
     # -------------------------------------------------------------------------
 
-    async def _send_response(self, message: discord.Message, response: str):
+    async def _send_response(self, message: discord.Message, response: str, *, ping_team: bool = True):
         """Send the pipeline answer back to Discord per the configured mode.
 
         Long answers are chunked at Discord's 2000-character limit. discord.py
@@ -2764,6 +2820,9 @@ class IEndpoint(IEndpointBase):
         Args:
             message (discord.Message): The originating message.
             response (str): The pipeline answer text.
+            ping_team (bool): False leaves the team role (see
+                :meth:`_team_mention`) out of the allowed mentions, for a user
+                on the team-ping cooldown.
 
         Returns:
             Dict[str, Any]: What was posted, with these keys:
@@ -2774,8 +2833,12 @@ class IEndpoint(IEndpointBase):
                 nothing was posted.
                 ``complete`` (bool): False when a chunk failed and the rest
                 were abandoned, so Discord shows only part of the answer.
+                ``threadId``, ``messages`` and ``postedChunks`` (the text of
+                every posted chunk) are internal.
         """
         thread = None
+        allowed_mentions = self._allowed_mentions(ping_team=ping_team)
+        posted_chunks: List[str] = []
         sent_ids: List[str] = []
         destinations: List[str] = []
         sent_messages: List[Any] = []
@@ -2791,7 +2854,10 @@ class IEndpoint(IEndpointBase):
         ]
         for chunk in chunks:
             try:
-                thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations, sent_messages)
+                thread = await self._send_chunk(
+                    message, chunk, thread, sent_ids, destinations, sent_messages, allowed_mentions=allowed_mentions
+                )
+                posted_chunks.append(chunk)
             except discord.RateLimited as e:
                 # discord.py handles 429s internally (honoring Retry-After) and
                 # only surfaces RateLimited when the client sets
@@ -2800,7 +2866,10 @@ class IEndpoint(IEndpointBase):
                 debug(f'Discord: rate limited; retrying after {e.retry_after}s')
                 await asyncio.sleep(float(e.retry_after))
                 try:
-                    thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations, sent_messages)
+                    thread = await self._send_chunk(
+                        message, chunk, thread, sent_ids, destinations, sent_messages, allowed_mentions=allowed_mentions
+                    )
+                    posted_chunks.append(chunk)
                 except Exception as e2:
                     debug(f'Discord: send retry failed, abandoning remaining chunks: {e2}')
                     complete = False
@@ -2818,12 +2887,24 @@ class IEndpoint(IEndpointBase):
             'complete': complete,
             'threadId': str(thread.id) if thread is not None and getattr(thread, 'id', None) is not None else None,
             'messages': sent_messages,
+            'postedChunks': posted_chunks,
         }
 
-    def _allowed_mentions(self):
-        """Build the outbound mention allowlist; never permit everyone/here."""
-        role_ids = getattr(self, '_allowed_mention_role_ids', [])
+    def _allowed_mentions(self, *, ping_team: bool = True):
+        """Build the outbound mention allowlist; never permit everyone/here.
+
+        Args:
+            ping_team (bool): False leaves the team role (see
+                :meth:`_team_mention`) out; other allowed roles and users stay.
+
+        Returns:
+            discord.AllowedMentions: The allowlist for one send.
+        """
+        role_ids = list(getattr(self, '_allowed_mention_role_ids', []) or [])
         user_ids = getattr(self, '_allowed_mention_user_ids', [])
+        team_mention = self._team_mention()
+        if not ping_team and team_mention:
+            role_ids = [role_id for role_id in role_ids if f'<@&{role_id}>' != team_mention]
         if not role_ids and not user_ids:
             return discord.AllowedMentions.none()
         return discord.AllowedMentions(
@@ -2893,6 +2974,8 @@ class IEndpoint(IEndpointBase):
         sent_ids: Optional[List[str]] = None,
         destinations: Optional[List[str]] = None,
         sent_messages: Optional[List[Any]] = None,
+        *,
+        allowed_mentions: Any = None,
     ):
         """Send a single chunk using the configured reply mode.
 
@@ -2904,6 +2987,8 @@ class IEndpoint(IEndpointBase):
             destinations: Collects the destination used per chunk.
             sent_messages: Collects the posted message objects (the feedback
                 reactions go on the last one).
+            allowed_mentions: The mention allowlist for this send; None builds
+                the default one (:meth:`_allowed_mentions`).
 
         Returns:
             The thread used (for 'thread' mode) so later chunks reuse it, else None.
@@ -2911,7 +2996,8 @@ class IEndpoint(IEndpointBase):
         # Outbound content is model-generated: by default all mentions are
         # suppressed. Only the explicitly configured allowedMentionRoleIds /
         # allowedMentionUserIds may ping; @everyone/@here are never allowed.
-        allowed_mentions = self._allowed_mentions()
+        if allowed_mentions is None:
+            allowed_mentions = self._allowed_mentions()
 
         if self._reply_mode == 'reply':
             sent = await message.reply(chunk, mention_author=False, allowed_mentions=allowed_mentions)

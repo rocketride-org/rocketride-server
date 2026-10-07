@@ -1764,6 +1764,17 @@ class TestTeamMentionAlias:
         endpoint._team_mention_alias = '@RocketRide team'
         endpoint._allowed_mention_role_ids = ['77']
         endpoint._run_with_optional_typing = mock.AsyncMock(return_value=answer)
+        # A send that posts every chunk, as _send_response reports it: the
+        # cooldown starts only once the chunk with the mention is on Discord.
+        endpoint._send_response = mock.AsyncMock(
+            side_effect=lambda message, text, **_kwargs: {
+                'messageIds': ['900'],
+                'destination': 'reply',
+                'threadId': None,
+                'messages': [],
+                'postedChunks': [text],
+            }
+        )
         for name, value in attrs.items():
             setattr(endpoint, name, value)
         return endpoint
@@ -1847,20 +1858,22 @@ class TestTeamMentionAlias:
         assert _sent_reply(endpoint) == 'ping @RocketRide team'
 
     @staticmethod
-    def _message_in(channel_id, message_id=2):
+    def _message_in(channel_id, message_id=2, author_id=3):
         message = _make_message(content='question')
         message.channel.id = channel_id
         message.id = message_id
+        message.author.id = author_id
         return message
 
     def _ask_twice(self, endpoint, first, second, *, now=(1000.0, 1000.0)):
-        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', side_effect=list(now)):
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=now[0]) as clock:
             asyncio.run(endpoint._process_message(first))
             first_reply = _sent_reply(endpoint)
+            clock.return_value = now[1]
             asyncio.run(endpoint._process_message(second))
         return first_reply, _sent_reply(endpoint)
 
-    def test_a_second_ping_in_the_same_conversation_within_the_hour_is_plain_text(self):
+    def test_a_second_ping_for_the_same_user_within_the_hour_is_plain_text(self):
         """Review of #2547: any user could make the bot ping the staff role, repeatedly."""
         endpoint = self._endpoint('Looping in @RocketRide team now.')
 
@@ -1871,12 +1884,129 @@ class TestTeamMentionAlias:
         assert first == 'Looping in <@&77> now.'
         assert second == 'Looping in @RocketRide team now.', 'on cooldown the alias stays plain text'
 
-    def test_the_cooldown_is_per_conversation(self):
+    def test_the_cooldown_follows_the_user_across_channels(self):
+        # A new channel or thread is not a way round the hourly limit.
         endpoint = self._endpoint('Looping in @RocketRide team now.')
 
         first, second = self._ask_twice(endpoint, self._message_in(1), self._message_in(2, 3))
 
+        assert first == 'Looping in <@&77> now.'
+        assert second == 'Looping in @RocketRide team now.'
+
+    def test_the_cooldown_is_per_user(self):
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+
+        first, second = self._ask_twice(endpoint, self._message_in(1), self._message_in(1, 3, author_id=4))
+
         assert first == second == 'Looping in <@&77> now.'
+
+    def test_a_literal_team_mention_on_cooldown_does_not_ping(self):
+        # The model may echo <@&77> from the transcript, or be asked to: on
+        # cooldown the send itself must not let the role ping.
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
+            asyncio.run(endpoint._process_message(self._message_in(1)))
+            assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+            endpoint._run_with_optional_typing = mock.AsyncMock(return_value='Paging <@&77> again.')
+            asyncio.run(endpoint._process_message(self._message_in(1, 3)))
+
+        assert _sent_reply(endpoint) == 'Paging <@&77> again.'
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is False
+
+    def test_off_cooldown_the_send_may_ping_the_team(self):
+        endpoint = self._endpoint('A plain answer.')
+
+        asyncio.run(endpoint._process_message(self._message_in(1)))
+
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+
+    def test_a_send_on_cooldown_leaves_the_team_role_out_of_allowed_mentions(self):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._reply_mode = 'channel'
+        endpoint._team_mention_alias = '@RocketRide team'
+        endpoint._allowed_mention_role_ids = ['77', '88']
+        endpoint._allowed_mention_user_ids = ['555']
+        endpoint._number_chunks = False
+        message = mock.Mock()
+        message.channel.send = mock.AsyncMock(return_value=types.SimpleNamespace(id=900))
+
+        asyncio.run(endpoint._send_response(message, 'Paging <@&77> again.', ping_team=False))
+
+        allowed = message.channel.send.await_args.kwargs['allowed_mentions']
+        assert [role.id for role in allowed.roles] == [88], 'only the team role is withheld'
+        assert [user.id for user in allowed.users] == [555]
+        assert allowed.everyone is False
+
+    def test_the_team_role_is_the_only_allowed_mention_on_cooldown_pings_nobody(self):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._team_mention_alias = '@RocketRide team'
+        endpoint._allowed_mention_role_ids = ['77']
+        endpoint._allowed_mention_user_ids = []
+
+        allowed = endpoint._allowed_mentions(ping_team=False)
+
+        assert allowed.roles is False or list(allowed.roles) == []
+        assert allowed.everyone is False
+
+    def test_a_failed_send_does_not_start_the_cooldown(self):
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+        endpoint._send_response = mock.AsyncMock(
+            return_value={
+                'messageIds': [],
+                'destination': 'reply',
+                'threadId': None,
+                'messages': [],
+                'postedChunks': [],
+            }
+        )
+
+        first, second = self._ask_twice(endpoint, self._message_in(1), self._message_in(1, 3))
+
+        assert first == second == 'Looping in <@&77> now.', 'nothing reached Discord, so the next hand-off still pings'
+
+    def test_a_chunk_without_the_mention_does_not_start_the_cooldown(self):
+        # Only the chunk that carries the mention counts: an earlier chunk
+        # that went out before the send failed pinged nobody.
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+        endpoint._send_response = mock.AsyncMock(
+            return_value={
+                'messageIds': ['900'],
+                'destination': 'reply',
+                'threadId': None,
+                'messages': [],
+                'postedChunks': ['Looping in'],
+            }
+        )
+
+        first, second = self._ask_twice(endpoint, self._message_in(1), self._message_in(1, 3))
+
+        assert first == second == 'Looping in <@&77> now.'
+
+    def test_send_responses_off_does_not_start_the_cooldown(self):
+        endpoint = self._endpoint('Looping in @RocketRide team now.', _send_responses=False)
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
+            asyncio.run(endpoint._process_message(self._message_in(1)))
+            endpoint._send_responses = True
+            asyncio.run(endpoint._process_message(self._message_in(1, 3)))
+
+        assert _sent_reply(endpoint) == 'Looping in <@&77> now.'
+
+    def test_the_team_role_mention_in_the_transcript_is_shown_as_the_alias(self):
+        # The model must not see a raw <@&id> it could echo back as a ping.
+        endpoint = TestThreadHistoryContext._endpoint(
+            _thread_history_limit=25, _team_mention_alias='@RocketRide team', _allowed_mention_role_ids=['77', '88']
+        )
+        history = [
+            _FakeHistoryMessage(2, 'Handing over to <@&77>; <@&88> is cc', 999),
+            _FakeHistoryMessage(1, 'help', 7, author_name='ada'),
+        ]
+        thread = _FakeThread(321, history)
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='any news?')))
+
+        text = endpoint._run_text_pipeline.call_args.args[0]
+        assert 'Handing over to @RocketRide team; <@&88> is cc' in text
+        assert '<@&77>' not in text
 
     def test_the_role_is_pinged_again_after_the_cooldown(self):
         endpoint = self._endpoint('Looping in @RocketRide team now.')
@@ -1900,7 +2030,13 @@ class TestTeamMentionAlias:
         endpoint = self._endpoint('Handing this to @RocketRide team', _escalation_pause=True)
         endpoint._resolved_threads = {'321'}
         endpoint._send_response = mock.AsyncMock(
-            return_value={'messageIds': ['900'], 'destination': 'thread', 'threadId': '321', 'messages': []}
+            return_value={
+                'messageIds': ['900'],
+                'destination': 'thread',
+                'threadId': '321',
+                'messages': [],
+                'postedChunks': ['Handing this to <@&77>'],
+            }
         )
         thread = _FakeThread(321)
         first = _thread_message(endpoint, thread)
@@ -4473,6 +4609,7 @@ class TestDeliveryAndShutdownEdges:
             'complete': True,
             'threadId': None,
             'messages': [],
+            'postedChunks': [],
         }
 
     def test_the_outbound_event_carries_completeness(self):

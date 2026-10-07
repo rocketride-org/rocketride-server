@@ -338,7 +338,7 @@
 		"discord.teamMentionAlias": {
 			"type": "string",
 			"title": "Team Mention Alias",
-			"description": "Literal team name the pipeline writes when it hands a question over, for example \"@RocketRide team\". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Any user who gets the model to write it triggers that ping, so a thread or channel gets at most one ping per hour (reset on restart); later answers keep the alias as plain text. Empty leaves answers untouched.",
+			"description": "Literal team name the pipeline writes when it hands a question over, for example \"@RocketRide team\". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Any user who gets the model to write it triggers that ping, so each user gets at most one ping per hour (reset on restart); later answers to that user keep the alias as plain text and cannot ping the role. Empty leaves answers untouched.",
 			"default": "",
 			"optional": true
 		},
