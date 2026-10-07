@@ -1538,6 +1538,14 @@ class TestServicesJson:
         assert 'CREATE' in description
         assert 'no grant on a sequence' in description
 
+    @pytest.mark.parametrize('field', ['discord.captureEvents', 'discord.captureNodeId'])
+    def test_the_capture_descriptions_warn_about_allow_execute(self, schema, field):
+        """The editor description is all a pipeline builder sees; it must say not to reuse an agent's node."""
+        description = schema['fields'][field]['description']
+        assert 'Allow direct query execution' in description
+        assert 'raw SQL to every caller of that node' in description
+        assert 'never one an agent can reach' in description
+
     def test_the_capture_source_description_gives_the_real_default(self, schema):
         """``endpoint.key`` is the node's logical type, so the default is discord:discord."""
         description = schema['fields']['discord.captureSource']['description']
