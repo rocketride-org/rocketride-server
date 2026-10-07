@@ -82,9 +82,10 @@ THREAD_ARCHIVE_DURATIONS = (60, 1440, 4320, 10080)
 # Discord rejects a thread name outside 1..100 characters.
 THREAD_NAME_MAX_CHARS = 100
 
-# A ``no_reply`` reason becomes the capture log's dedupe key, and some reasons
-# are built from an exception message. Clipped here, at the one place every
-# reason passes through, so a runaway string cannot reach the key.
+# Some ``no_reply`` reasons are built from an exception message, which is
+# unbounded. Clipped here, at the one place every reason passes through, so the
+# event (and the capture row that stores it) stays bounded. Capture keys such a
+# reason as ``error``, never by its text.
 MAX_NO_REPLY_REASON_CHARS = 200
 
 # Upper bounds for maxConcurrentMessages and maxAttachmentBytes (the schema
@@ -1809,7 +1810,8 @@ class IEndpoint(IEndpointBase):
 
         The reason is clipped to :data:`MAX_NO_REPLY_REASON_CHARS` here, at the
         one place every reason passes through: a reason built from an exception
-        message is unbounded, and it becomes the capture log's dedupe key.
+        message is unbounded, and the clip keeps the event bounded. (Capture
+        keys such a reason as ``error``, not by its text.)
 
         Args:
             metadata (Dict[str, Any]): The message's metadata contract.

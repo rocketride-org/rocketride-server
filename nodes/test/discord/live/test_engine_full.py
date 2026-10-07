@@ -1016,7 +1016,8 @@ def test_f32_capture_into_postgres(engine, engine_config, driver_bot):
         'F32',
         'captureEvents / captureSource / default table',
         'question and answer with capture on, no captureTable set, and no table yet',
-        'first INSERT finds no table, discord_events is created; message and outbound rows with source e2e:full',
+        'the check before the first INSERT finds no table, discord_events is created; '
+        'message and outbound rows with source e2e:full',
         ok,
         f'discord_events exists={table}; rows={rows}',
         f'database {PG_DATABASE}',
@@ -1055,6 +1056,9 @@ def test_f33_every_part_kept_and_duplicates_ignored(engine, engine_config, drive
 @needs_pg
 def test_f34_database_down_mid_run(engine, engine_config, driver_bot):
     tag = _tag('F34')
+    # The pass condition includes the failed / recovered log lines.
+    if not ENGINE_LOG:
+        pytest.skip('F34 checks the capture log lines; set DISCORD_E2E_ENGINE_LOG')
     # Checked before anything starts capturing into that database.
     engine.terminate()
     _require_disposable_database()
@@ -1076,14 +1080,22 @@ def test_f34_database_down_mid_run(engine, engine_config, driver_bot):
     time.sleep(10)
     up_rows = _psql(f"SELECT count(*) FROM discord_events WHERE message_id = '{up.id}'")
     down_rows = _psql(f"SELECT count(*) FROM discord_events WHERE message_id = '{down.id}'")
-    failed = _log_tail(mark, r'Discord capture: .*failed')
-    recovered = _log_tail(mark, r'recovered')
-    ok = down_answer is not None and up_answer is not None and up_rows not in ('', '0') and down_rows == '0'
+    failed = _log_tail(mark, r'Discord capture: writing .* failed')
+    recovered = _log_tail(mark, r'Discord capture: writes to .* recovered after')
+    ok = (
+        down_answer is not None
+        and up_answer is not None
+        and up_rows not in ('', '0')
+        and down_rows == '0'
+        and bool(failed)
+        and bool(recovered)
+    )
     _check(
         'F34',
         'capture: database down mid-run',
         'container stopped, question, container started, question',
-        'answered while down (capture write logged and dropped); next question captured again',
+        'answered while down; the failed capture write is logged and dropped; '
+        'next question captured again and the recovery logged',
         ok,
         f'answered while down={down_answer is not None}; rows for outage question={down_rows}; '
         f'answered after={up_answer is not None}; rows after={up_rows}',

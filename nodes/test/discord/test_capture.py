@@ -1846,6 +1846,27 @@ class TestProcessedMessagesAreCaptured:
 
 
 # ===========================================================================
+# README
+# ===========================================================================
+
+
+def _normalized_sql(sql):
+    """Collapse whitespace so the README's laid-out DDL compares to the one-line string."""
+    sql = re.sub(r'\s+', ' ', sql).strip()
+    sql = re.sub(r'\( ', '(', sql)
+    sql = re.sub(r' \)', ')', sql)
+    return sql.rstrip(';')
+
+
+def test_the_readme_ddl_is_exactly_what_capture_runs():
+    """Operators create the table in advance from this block, so it must not drift."""
+    with open(os.path.join(_NODE_DIR, 'README.md'), encoding='utf-8') as handle:
+        readme = handle.read()
+    (block,) = re.findall(r'```sql\n(CREATE TABLE IF NOT EXISTS "discord_events".*?)```', readme, re.S)
+    assert _normalized_sql(block) == _normalized_sql(CREATE_TABLE_SQL('discord_events'))
+
+
+# ===========================================================================
 # services.json
 # ===========================================================================
 

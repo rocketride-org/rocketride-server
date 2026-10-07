@@ -114,9 +114,9 @@ MAX_TABLE_NAME_CHARS = POSTGRES_IDENTIFIER_BYTES - max(len(suffix) for suffix in
 # lower-cased and double-quoted, so a reserved word such as ``user`` works.
 _TABLE_NAME_RE = re.compile(rf'[A-Za-z_][A-Za-z0-9_]{{0,{MAX_TABLE_NAME_CHARS - 1}}}')
 
-# ``event_key`` is part of the dedupe key, and a ``no_reply`` reason can be
-# built from an exception message. The node clips the reason at its emit site;
-# this is the backstop for whatever else ever reaches the key builder.
+# ``event_key`` is part of the dedupe key. A ``no_reply`` reason built from an
+# exception message is keyed ``error``, never by its text; this clip is the
+# backstop for whatever else ever reaches the key builder.
 MAX_EVENT_KEY_CHARS = 200
 
 # A configured ``captureSource`` label: short, printable, no spaces. It is a

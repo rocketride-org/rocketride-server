@@ -25,13 +25,16 @@ is off unless `DISCORD_LIVE=1` is set; a normal run collects and skips them.
   on the engine, driven by the same driver bot. F32..F34 cover event capture
   into a disposable PostgreSQL database and run only when the `DISCORD_E2E_PG_*`
   variables are set:
-  - F32: with no capture table yet, the first insert creates `discord_events`,
-    and the question and answer land with the configured `captureSource`.
+  - F32: with no capture table yet, the check before the first insert creates
+    `discord_events`, and the question and answer land with the configured
+    `captureSource`.
   - F33: text plus a `.md` attachment keeps two `message` rows (`text`,
     `text:1`), and inserting the same rows again adds nothing.
   - F34: the database container is stopped mid-run; the bot still answers,
-    that question's rows are dropped and logged, and capture resumes once the
-    database is back.
+    that question's rows are dropped and the failure is logged, and capture
+    resumes once the database is back, with a `recovered` log line. It passes
+    only when both log lines are found, so it needs `DISCORD_E2E_ENGINE_LOG`
+    and is skipped without it.
 
 ## How to run
 
@@ -71,7 +74,7 @@ path, id or token is stored in the repo.
 | `ROCKETRIDE_URI` | L3, L4 | engine to run the pipes on |
 | `DISCORD_E2E_<KEY>` | L3, L4 | overrides one key of the id map's `engine` block, e.g. `DISCORD_E2E_SUPPORTCHANNELID` |
 | `DISCORD_E2E_FULL` | L4 | `1` to run the full suite |
-| `DISCORD_E2E_ENGINE_LOG` | L4, optional | engine log file, grepped for evidence |
+| `DISCORD_E2E_ENGINE_LOG` | L4, optional; required for F34 | engine log file, grepped for evidence |
 | `DISCORD_E2E_RESULTS_DIR` | L4, optional | where result rows are written (default: system temp directory) |
 | `DISCORD_E2E_PG_CONTAINER` | L4, optional | Docker container running a disposable PostgreSQL for F32..F34; F34 stops and starts it |
 | `DISCORD_E2E_PG_HOST` | L4, optional | `host:port` the engine's `db_postgres` node connects to |

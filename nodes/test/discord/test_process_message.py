@@ -1143,7 +1143,7 @@ class TestSendFailure:
 
 
 class TestNoReplyReasonLength:
-    """A ``no_reply`` reason is part of the capture key, so it is bounded."""
+    """A ``no_reply`` reason can be exception text, so it is clipped to keep the event bounded."""
 
     @staticmethod
     def _endpoint():
