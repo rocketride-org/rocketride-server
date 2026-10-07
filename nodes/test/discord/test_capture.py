@@ -1479,6 +1479,11 @@ class TestServicesJson:
         ):
             assert field in properties, field
 
+    def test_the_capture_edge_can_be_drawn_in_the_editor(self, schema):
+        """The canvas draws a tool handle only for the keys of ``invoke``; ``min: 0`` keeps it optional."""
+        assert 'invoke' in schema['capabilities']
+        assert schema['invoke']['tool']['min'] == 0
+
     def test_the_default_table_matches_the_contract(self, schema):
         assert schema['fields']['discord.captureTable']['default'] == capture.DEFAULT_TABLE == 'discord_events'
 

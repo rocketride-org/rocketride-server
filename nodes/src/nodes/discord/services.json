@@ -17,9 +17,10 @@
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
-	//		engine
+	//		engine. "invoke" lets a database node attach via a control-plane
+	//		connection (classType "tool") for captureEvents.
 	//
-	"capabilities": ["noinclude"],
+	"capabilities": ["invoke", "noinclude"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -70,6 +71,18 @@
 	//		bot token is configured, not whether the bot is connected
 	//
 	"tile": ["Token: ${parameters.discord.botToken ? 'configured' : 'missing'}"],
+	//
+	//	Optional:
+	//		Invoke channels this component consumes - the database node that
+	//		captureEvents writes to connects here. Optional: without capture
+	//		nothing needs to be connected.
+	//
+	"invoke": {
+		"tool": {
+			"description": "Database node that captured events are written to (via control-plane invoke)",
+			"min": 0
+		}
+	},
 	//
 	// Optional:
 	//		As a pipe component, define what this pipe component takes
