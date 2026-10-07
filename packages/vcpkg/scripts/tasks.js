@@ -26,7 +26,9 @@
  *
  * Handles downloading and bootstrapping vcpkg.
  */
+const os = require('os');
 const path = require('path');
+const { glob } = require('glob');
 const {
 	withLock,
 	getState,
@@ -38,11 +40,17 @@ const {
 	exists,
 	readJson,
 	mkdir,
+	getExecName,
+	isWindows,
+	isMac,
+	isLinux,
 } = require('../../../scripts/lib');
 
 // Paths
 const VCPKG_DIR = path.join(BUILD_ROOT, 'vcpkg');
-const VCPKG_INSTALLED_DIR = path.join(BUILD_ROOT, 'vcpkg_installed');
+const VCPKG_BOOTSTRAP_SCRIPT = path.join(VCPKG_DIR, isWindows() ? 'bootstrap-vcpkg' : 'bootstrap-vcpkg.sh');
+const VCPKG_EXECUTABLE = path.join(VCPKG_DIR, getExecName('vcpkg'));
+const VCPKG_INSTALLED_ROOT = path.join(BUILD_ROOT, 'vcpkg_installed');
 
 // Read vcpkg version from package.json (loaded async in tasks)
 let VCPKG_VERSION = null;
@@ -61,10 +69,82 @@ const VCPKG_REPO = 'https://github.com/microsoft/vcpkg.git';
 // Helpers
 // =============================================================================
 
-function getBootstrapScript() {
-	return process.platform === 'win32'
-		? path.join(VCPKG_DIR, 'bootstrap-vcpkg')
-		: path.join(VCPKG_DIR, 'bootstrap-vcpkg.sh');
+function getVcpkgTriplet(options = {}) {
+	const arch = options.arch || os.arch();
+	if (isWindows()) return 'x64-windows-msvc-rocketride';
+	if (isLinux()) return 'x64-linux-clang-rocketride';
+	if (isMac()) return arch === 'arm64' ? 'arm64-osx-appleclang-rocketride' : 'x64-osx-appleclang-rocketride';
+	throw new Error('Unsupported platform');
+}
+
+async function getVcpkgInstalledDir(options = {}) {
+	return path.join(VCPKG_INSTALLED_ROOT, getVcpkgTriplet(options));
+}
+
+async function getPythonVersion() {
+	let pythonVersion = await getState('vcpkg.pythonVersion');
+	if (pythonVersion !== undefined) return pythonVersion;
+
+	const vcpkgJsonPath = path.join(VCPKG_DIR, 'ports', 'python3', 'vcpkg.json');
+	if (!(await exists(vcpkgJsonPath))) throw new Error('Python port not found');
+
+	const vcpkgJson = await readJson(vcpkgJsonPath);
+	if (!vcpkgJson || !vcpkgJson.version) throw new Error(`Python version not found in ${vcpkgJsonPath}`);
+
+	// Get major.minor from manifest version (e.g., "3.12.9" -> "3.12")
+	const match = /^(\d+\.\d+)/.exec(vcpkgJson.version);
+	if (!match) throw new Error(`Unexpected Python version format: ${vcpkgJson.version}`);
+
+	pythonVersion = match[1];
+	await setState('vcpkg.pythonVersion', pythonVersion);
+	return pythonVersion;
+}
+
+async function getPatchelf() {
+	const [vcpkgPatchelf] = await glob('downloads/tools/patchelf/*/bin/patchelf', { cwd: VCPKG_DIR, absolute: true });
+	return vcpkgPatchelf ?? 'patchelf';
+}
+
+function getVcpkgEnv(baseEnv = process.env) {
+	return { ...baseEnv, VCPKG_ROOT: VCPKG_DIR };
+}
+
+/**
+ * The -D flags a CMake project needs to build against our vcpkg.
+ *
+ * @param {object} options
+ *   overlayPorts    - the consumer's overlay ports directory
+ *   overlayTriplets - the consumer's overlay triplets directory
+ *   arch            - target architecture, for the triplet
+ *   manifest        - true installs from the project's vcpkg.json (the server);
+ *                     false consumes the already installed tree (a node)
+ */
+function getVcpkgCmakeArgs(options = {}) {
+	const triplet = getVcpkgTriplet(options);
+	const args = [
+		`-DCMAKE_TOOLCHAIN_FILE=${path.join(VCPKG_DIR, 'scripts', 'buildsystems', 'vcpkg.cmake')}`,
+		`-DVCPKG_TARGET_TRIPLET=${triplet}`,
+		`-DVCPKG_HOST_TRIPLET=${triplet}`,
+	];
+
+	if (options.overlayPorts) args.push(`-DVCPKG_OVERLAY_PORTS=${options.overlayPorts}`);
+	if (options.overlayTriplets) args.push(`-DVCPKG_OVERLAY_TRIPLETS=${options.overlayTriplets}`);
+
+	if (options.manifest === false) {
+		args.push(`-DVCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_ROOT}`, '-DVCPKG_MANIFEST_MODE=OFF');
+		return args;
+	}
+
+	// Opt-in (CI / small-disk hosts): drop each port's buildtree + package
+	// staging right after it builds so peak disk stays low across the whole
+	// from-source build. Without it, the final link accumulates every port's
+	// scratch and can run out of disk on a small runner ("final link failed:
+	// No space left"). Off by default so local rebuilds keep their buildtrees.
+	if (process.env.VCPKG_CLEAN_AFTER_BUILD === '1') {
+		args.push('-DVCPKG_INSTALL_OPTIONS=--clean-buildtrees-after-build;--clean-packages-after-build');
+	}
+
+	return args;
 }
 
 // =============================================================================
@@ -88,7 +168,7 @@ function makeCloneVcpkgAction(options = {}) {
 			task.output = `Cloning v${version}...`;
 
 			await withLock('vcpkg-clone', async () => {
-				await removeDirs([VCPKG_DIR, VCPKG_INSTALLED_DIR]);
+				await removeDirs([VCPKG_DIR, VCPKG_INSTALLED_ROOT]);
 				await mkdir(BUILD_ROOT);
 
 				try {
@@ -115,10 +195,9 @@ function makeBootstrapVcpkgAction(options = {}) {
 		locks: ['vcpkg'],
 		run: async (ctx, task) => {
 			const vcpkgState = await getState('vcpkg.state');
-			const vcpkgPath = path.join(VCPKG_DIR, process.platform === 'win32' ? 'vcpkg.exe' : 'vcpkg');
 
 			// Skip if already bootstrapped
-			if (!options.force && vcpkgState === 'bootstrapped' && (await exists(vcpkgPath))) {
+			if (!options.force && vcpkgState === 'bootstrapped' && (await exists(VCPKG_EXECUTABLE))) {
 				task.output = 'Already bootstrapped';
 				return;
 			}
@@ -126,9 +205,8 @@ function makeBootstrapVcpkgAction(options = {}) {
 			task.output = 'Bootstrapping...';
 
 			await withLock('vcpkg-bootstrap', async () => {
-				const bootstrapScript = getBootstrapScript();
-				await execCommand(bootstrapScript, ['-disableMetrics'], { cwd: VCPKG_DIR, task });
-				await execCommand(path.join(VCPKG_DIR, 'vcpkg'), ['--version'], { cwd: VCPKG_DIR, task });
+				await execCommand(VCPKG_BOOTSTRAP_SCRIPT, ['-disableMetrics'], { cwd: VCPKG_DIR, task });
+				await execCommand(VCPKG_EXECUTABLE, ['--version'], { cwd: VCPKG_DIR, task });
 				await setState('vcpkg.state', 'bootstrapped');
 			});
 
@@ -162,7 +240,7 @@ module.exports = {
 			action: () => ({
 				run: async (ctx, task) => {
 					await withLock('vcpkg-setup', async () => {
-						await removeDirs([VCPKG_DIR, VCPKG_INSTALLED_DIR]);
+						await removeDirs([VCPKG_DIR, VCPKG_INSTALLED_ROOT]);
 						await setState('vcpkg.state', null);
 						await setState('vcpkg.version', null);
 					});
@@ -176,3 +254,9 @@ module.exports = {
 // Export for direct use
 module.exports.VCPKG_DIR = VCPKG_DIR;
 module.exports.getVcpkgVersion = getVcpkgVersion;
+module.exports.getVcpkgTriplet = getVcpkgTriplet;
+module.exports.getVcpkgInstalledDir = getVcpkgInstalledDir;
+module.exports.getVcpkgEnv = getVcpkgEnv;
+module.exports.getVcpkgCmakeArgs = getVcpkgCmakeArgs;
+module.exports.getPythonVersion = getPythonVersion;
+module.exports.getPatchelf = getPatchelf;

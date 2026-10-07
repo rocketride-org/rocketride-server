@@ -34,6 +34,10 @@ const os = require('os');
 const fs = require('fs');
 const {
 	exists,
+	readFile,
+	fingerprint,
+	getState,
+	setState,
 	syncDir,
 	syncFile,
 	readDirSafe,
@@ -60,7 +64,10 @@ const {
 	parseServerAddress,
 	isLinux,
 	loadPackageJson,
+	getBuildBaseEnv,
 } = require('../../scripts/lib');
+const cmake = require('../../scripts/lib/cmake');
+const vcpkg = require('../../packages/vcpkg/scripts/tasks');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 
@@ -81,6 +88,9 @@ const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', 
 
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
+
+// The cmake a c++ node is built by (rocketride-node.cmake and what it includes)
+const SERVER_CMAKE_DIR = path.join(PROJECT_ROOT, 'packages', 'server', 'cmake');
 
 // Where cmake leaves the c++ node binaries
 const BUILD_NODES_DIR = path.join(BUILD_ROOT, 'nodes');
@@ -108,35 +118,70 @@ function makeSyncNodesAction() {
 	};
 }
 
-async function syncNode(name, srcDir, stats) {
-	const distDir = path.join(DIST_DIR, name);
-	const libs = new Set();
+function makeCompileAction(options = {}) {
+	return {
+		locks: ['cmake'],
+		run: async (ctx, task) => {
+			// The ports and triplets are the server's; everything else about
+			// building against its vcpkg comes from the vcpkg module
+			const { VCPKG_OVERLAY_DIRS } = require('../../packages/server/scripts/tasks');
 
-	await syncDir(srcDir, distDir, { mirror: false, package: true, ignore: IGNORE }, stats);
+			const cmakeConfig = options.cmakeConfig || 'Release';
+			const env = vcpkg.getVcpkgEnv(await getBuildBaseEnv(task));
 
-	for (const file of await readDirSafe(srcDir)) {
-		if (!/^services.*\.json$/.test(file)) continue;
+			// A node consumes the packages the server build installed rather
+			// than installing a manifest of its own
+			const vcpkgArgs = vcpkg.getVcpkgCmakeArgs({ ...options, ...VCPKG_OVERLAY_DIRS, manifest: false });
 
-		const services = await readJson(path.join(srcDir, file));
-		if (services.node !== 'cpp') continue;
+			const built = [];
+			const upToDate = [];
 
-		if (typeof services.path !== 'string' || !services.path)
-			throw new Error(`${path.join(srcDir, file)}: ` + 'a cpp service needs a library name in "path"');
+			for (const [name, srcDir] of SRC_NODE_DIRS) {
+				const nodeDir = path.join(srcDir, name);
+				if (!(await exists(path.join(nodeDir, 'CMakeLists.txt')))) continue;
 
-		libs.add(services.path);
-	}
+				const nodeBuildDir = path.join(BUILD_NODES_DIR, name);
+				const srcHash = await nodeSourceHash(nodeDir, cmakeConfig);
+				const configured = await isNodeConfigured(nodeBuildDir, cmakeConfig);
 
-	if (libs.size > 1) throw new Error(`The node ${name} names more than one library: ` + [...libs].join(', '));
+				// The hash alone would skip into a build tree a clean removed
+				if (!options.force && configured && srcHash === (await getState(`nodes.${name}.buildHash`))) {
+					upToDate.push(name);
+					continue;
+				}
 
-	const [lib] = libs;
-	if (!lib) return;
+				if (options.force || !configured) {
+					task.output = `Configuring Node ${name}...`;
+					const configureArgs = [
+						...(await cmake.getConfigureArgs(nodeDir, nodeBuildDir, cmakeConfig)),
+						...vcpkgArgs,
+						`-DROCKETRIDE_PACKAGES_DIR=${path.join(PROJECT_ROOT, 'packages')}`,
+						`-DROCKETRIDE_SERVER_BUILD_DIR=${BUILD_ROOT}`,
+					];
+					if (OVERLAY_ROOT) {
+						configureArgs.push(`-DROCKETRIDE_OVERLAY_ROOT=${OVERLAY_ROOT}`);
+					}
+					await execCommand('cmake', configureArgs, { task, env, verbose: options.verbose });
+				}
 
-	for (const file of [getSharedName(lib), getSymName(lib)].filter(Boolean)) {
-		const built = path.join(BUILD_NODES_DIR, name, file);
-		if (!(await exists(built))) continue;
+				task.output = `Building Node ${name}...`;
+				await execCommand('cmake', cmake.getBuildArgs(nodeBuildDir, cmakeConfig), {
+					task,
+					env,
+					verbose: options.verbose,
+				});
 
-		await syncFile(built, path.join(distDir, file), { package: true }, stats);
-	}
+				// Only after the library is there; a failed build throws, so
+				// the hash is never written for one
+				await setState(`nodes.${name}.buildHash`, srcHash);
+				built.push(name);
+			}
+
+			if (!built.length && !upToDate.length) task.output = 'No C++ nodes to build';
+			else if (!built.length) task.output = `Up to date (${upToDate.length})`;
+			else task.output = `Built ${built.join(', ')}`;
+		},
+	};
 }
 
 function makeStartTestServerAction(options = {}) {
@@ -405,29 +450,6 @@ function makeTestAction(options = {}) {
 	return { description: 'Testing nodes', steps };
 }
 
-// Why the container tasks cannot run here, or null. Linux only: elsewhere
-// dist/server holds a Windows or macOS engine, which cannot go into a Linux image.
-async function containerUnavailable() {
-	if (!isLinux()) return 'Linux only; dist/server here is not a Linux engine. Pull a published engine-base instead';
-	try {
-		await execCommand('docker', ['info'], { stdio: 'ignore', silent: true });
-	} catch {
-		return 'no Docker daemon reachable';
-	}
-	return null;
-}
-
-function skipLoudly(taskName, task, reason) {
-	task.output = `Skipped: ${reason}`;
-	console.warn(`WARNING: ${taskName} skipped — ${reason}`);
-}
-
-// Both images carry the engine version: the task protocol is not versioned.
-async function imageNames() {
-	const { version } = await loadPackageJson();
-	return { base: `rocketride/engine-base:${version}`, node: `rocketride/node:${version}` };
-}
-
 // Builds engine-base from dist/server, then the node image FROM it.
 function makeBuildImageAction(options = {}) {
 	return {
@@ -490,6 +512,83 @@ function makeTestImageAction(options = {}) {
 }
 
 // ============================================================================
+// Utilities
+// ============================================================================
+
+async function syncNode(name, srcDir, stats) {
+	const distDir = path.join(DIST_DIR, name);
+	const libs = new Set();
+
+	await syncDir(srcDir, distDir, { mirror: false, package: true, ignore: IGNORE }, stats);
+
+	for (const file of await readDirSafe(srcDir)) {
+		if (!/^services.*\.json$/.test(file)) continue;
+
+		const services = await readJson(path.join(srcDir, file));
+		if (services.node !== 'cpp') continue;
+
+		if (typeof services.path !== 'string' || !services.path)
+			throw new Error(`${path.join(srcDir, file)}: ` + 'a cpp service needs a library name in "path"');
+
+		libs.add(services.path);
+	}
+
+	if (libs.size > 1) throw new Error(`The node ${name} names more than one library: ` + [...libs].join(', '));
+
+	const [lib] = libs;
+	if (!lib) return;
+
+	for (const file of [getSharedName(lib), getSymName(lib)].filter(Boolean)) {
+		const built = path.join(BUILD_NODES_DIR, name, file);
+		if (!(await exists(built))) continue;
+
+		await syncFile(built, path.join(distDir, file), { package: true }, stats);
+	}
+}
+
+async function isNodeConfigured(nodeBuildDir, cmakeConfig) {
+	const cachePath = path.join(nodeBuildDir, 'CMakeCache.txt');
+	if (!(await exists(cachePath))) return false;
+
+	const cache = await readFile(cachePath, 'utf8');
+	return new RegExp(`^CMAKE_BUILD_TYPE:\\w+=${cmakeConfig}$`, 'm').test(cache);
+}
+
+async function nodeSourceHash(nodeDir, cmakeConfig) {
+	const [nodeFp, cmakeFp, engineHash] = await Promise.all([
+		fingerprint(nodeDir),
+		fingerprint(SERVER_CMAKE_DIR),
+		getState('server.buildHash'),
+	]);
+
+	return require('crypto')
+		.createHash('md5')
+		.update(`${nodeFp}:${cmakeFp}:${engineHash}:${cmakeConfig}`)
+		.digest('hex');
+}
+
+async function containerUnavailable() {
+	if (!isLinux()) return 'Linux only; dist/server here is not a Linux engine. Pull a published engine-base instead';
+	try {
+		await execCommand('docker', ['info'], { stdio: 'ignore', silent: true });
+	} catch {
+		return 'no Docker daemon reachable';
+	}
+	return null;
+}
+
+function skipLoudly(taskName, task, reason) {
+	task.output = `Skipped: ${reason}`;
+	console.warn(`WARNING: ${taskName} skipped — ${reason}`);
+}
+
+// Both images carry the engine version: the task protocol is not versioned.
+async function imageNames() {
+	const { version } = await loadPackageJson();
+	return { base: `rocketride/engine-base:${version}`, node: `rocketride/node:${version}` };
+}
+
+// ============================================================================
 // Module Export
 // ============================================================================
 
@@ -500,19 +599,32 @@ module.exports = {
 	actions: [
 		// Internal actions
 		{ name: 'nodes:sync', action: makeSyncNodesAction },
+		{ name: 'nodes:compile', action: makeCompileAction },
 		{ name: 'nodes:start-server', action: makeStartTestServerAction },
 		{ name: 'nodes:stop-server', action: makeStopTestServerAction },
 		{ name: 'nodes:run-contracts', action: makeRunContractTestsAction },
 		{ name: 'nodes:docs-generate', action: makeDocsGenerateAction },
 		{ name: 'nodes:credentials-generate', action: makeCredentialsGenerateAction },
 		{ name: 'nodes:credentials-check', action: makeCredentialsCheckAction },
+		{
+			name: 'nodes:submodule-build',
+			action: () => ({
+				// TODO: drop explicit 'parse:submodule-build' and ensure nodes:compile calls it
+				steps: ['nodes:compile', 'parse:submodule-build', 'nodes:sync'],
+			}),
+		},
 
 		// Public actions (have descriptions)
 		{
 			name: 'nodes:build',
 			action: () => ({
 				description: 'Build nodes',
-				steps: ['server:build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate'],
+				steps: [
+					'server:build-core',
+					'nodes:submodule-build',
+					'nodes:docs-generate',
+					'nodes:credentials-generate',
+				],
 			}),
 		},
 		{

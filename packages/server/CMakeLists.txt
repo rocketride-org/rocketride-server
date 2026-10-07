@@ -136,7 +136,6 @@ include(cmake/setup_vcpkg.cmake)
 # -----------------------------------------------------------------------------
 include(cmake/setup.cmake)
 include(cmake/rocketride.cmake)
-include(cmake/rocketride-node.cmake)
 
 # -----------------------------------------------------------------------------
 # Compiler information
@@ -175,29 +174,6 @@ add_subdirectory(engine-mod)
 
 # Main engine executable
 add_subdirectory(engine)
-
-# C++ nodes
-set(nodeNamesSeen "")
-
-foreach(nodesRoot ${ROCKETRIDE_OVERLAY_ROOT} ${ROCKETRIDE_PROJECT_ROOT})
-    file(GLOB nodeDirs LIST_DIRECTORIES true "${nodesRoot}/nodes/src/nodes/*")
-
-    foreach(nodeDir ${nodeDirs})
-        if(NOT IS_DIRECTORY ${nodeDir})
-            continue()
-        endif()
-
-        get_filename_component(nodeName ${nodeDir} NAME)
-
-        if(NOT nodeName IN_LIST nodeNamesSeen)
-            list(APPEND nodeNamesSeen ${nodeName})
-
-            if(EXISTS ${nodeDir}/CMakeLists.txt)
-                add_subdirectory(${nodeDir} ${CMAKE_BINARY_DIR}/nodes/${nodeName})
-            endif()
-        endif()
-    endforeach()
-endforeach()
 
 # -----------------------------------------------------------------------------
 # Testing configuration
