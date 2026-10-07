@@ -188,8 +188,8 @@ Binary attachments are never broadcast, only their MIME type and size. Every eve
 | `discord.captureNodeId` | `string` | **Capture Database Node**<br/>Component id of the database node to write to. Empty: the only database tool node connected to this source. | `""` |
 | `discord.captureSource` | `string` | **Capture Source Label**<br/>Text written to each captured row's source column, e.g. to tell which pipeline wrote it, and the only way to tell two Discord sources sharing one capture table apart. Letters, digits and _ . : + @ - only, up to 128 characters. Empty: discord:<node type>, which is discord:discord for every Discord source. | `""` |
 | `discord.captureTable` | `string` | **Capture Table**<br/>Table the captured events are written to. Created on the first write that finds it missing. Letters, digits and underscore only, not starting with a digit, at most 54 characters (Postgres truncates identifiers at 63 bytes, and this table's index and constraint names are derived from its name). | `"discord_events"` |
-| `discord.channelIds` | `array` | **Channel IDs**<br/>List of channel IDs to listen to. Leave empty to listen to all channels. |  |
-| `discord.emitNoReply` | `boolean` | **Emit No Reply Events**<br/>Emit an event when processing produces no answer or raises an error. | `false` |
+| `discord.channelIds` | `array` | **Channel IDs**<br/>List of channel IDs to listen to. Leave empty to listen to all channels. | `[]` |
+| `discord.emitNoReply` | `boolean` | **Emit No Reply Events**<br/>Emit an event when processing produces no answer or raises an error. The reason is no_answer, send_failed or shutdown; any other value is an error message clipped to 200 characters. | `false` |
 | `discord.emitOutbound` | `boolean` | **Emit Outbound Events**<br/>Emit an event after posting a pipeline response to Discord. | `false` |
 | `discord.emitReactions` | `boolean` | **Emit Reactions**<br/>Emit raw reaction add and remove events into the pipeline. | `false` |
 | `discord.guildIds` | `array` | **Server IDs (Guild IDs)**<br/>List of Discord server IDs to listen to. Leave empty to listen to all servers the bot is in. | `[]` |
