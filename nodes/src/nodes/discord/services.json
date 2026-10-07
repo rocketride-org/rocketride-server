@@ -17,10 +17,11 @@
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
-	//		engine. "invoke" lets a database node attach via a control-plane
-	//		connection (classType "tool") for captureEvents.
+	//		engine. No "invoke" here: that flag marks a node other nodes invoke.
+	//		The capture edge to a database node comes from the "invoke" block
+	//		below.
 	//
-	"capabilities": ["invoke", "noinclude"],
+	"capabilities": ["noinclude"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the

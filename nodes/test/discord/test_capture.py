@@ -1683,8 +1683,11 @@ class TestServicesJson:
 
     def test_the_capture_edge_can_be_drawn_in_the_editor(self, schema):
         """The canvas draws a tool handle only for the keys of ``invoke``; ``min: 0`` keeps it optional."""
-        assert 'invoke' in schema['capabilities']
         assert schema['invoke']['tool']['min'] == 0
+
+    def test_the_source_is_not_an_invoke_target(self, schema):
+        """The ``invoke`` capability draws a top handle for being invoked, which nothing can connect to."""
+        assert 'invoke' not in schema['capabilities']
 
     def test_the_default_table_matches_the_contract(self, schema):
         assert schema['fields']['discord.captureTable']['default'] == capture.DEFAULT_TABLE == 'discord_events'
