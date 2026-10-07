@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: add context_optimizer node — fits questions into the model context window by token budget (#1489)
 - **nodes**: add currency_convert_explicit node (#1497)
 - **nodes**: add discord — Discord Bot source node over the Gateway; routes messages and image/audio/video/document attachments to the text/image/audio/video/tags lanes and posts the pipeline's first answer back as a reply, channel message, or thread (with thread naming); guild/channel/mention/bot gates, chunked replies (optionally numbered), mention allowlists, text-attachment decoding and attachment merge, and reaction/no_reply/outbound events (#1503)
+- **nodes**: discord event capture, opt-in — writes every event the node handles (question, reply, no_reply, reaction) to a PostgreSQL table through a database node connected to the source, deduplicated per event and off the answering path, so a slow or unreachable database never delays a reply (#2548)
 - **nodes**: add extract_facts node — document-context + cell-by-cell reader + validator (#1426) (#1545)
 - **nodes**: add n8n workflow-automation node (#1231)
 - **nodes**: add tool_oura Oura Ring connector (#1625)
