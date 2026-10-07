@@ -1959,7 +1959,8 @@ class IEndpoint(IEndpointBase):
         """Apply the post-reply side effects: the escalation pause and feedback.
 
         Pauses the thread when the posted answer escalated (it carries an
-        escalation marker), and adds the configured feedback affordances to the
+        escalation marker; after a partial delivery, in a chunk that was
+        posted), and adds the configured feedback affordances to the
         last posted chunk when the whole answer went out. Both are best-effort
         and never fail the reply.
 
@@ -1975,7 +1976,13 @@ class IEndpoint(IEndpointBase):
         if not outbound.get('messageIds'):
             return
 
-        if getattr(self, '_escalation_pause', False) and self._is_escalation(reply):
+        escalated = getattr(self, '_escalation_pause', False) and self._is_escalation(reply)
+        if escalated and outbound.get('complete') is False:
+            # Only what reached Discord hands over: a hand-off in a chunk that
+            # failed was never seen (and pinged nobody), and the pause rebuilt
+            # after a restart reads the posted messages one by one too.
+            escalated = any(self._is_escalation(chunk) for chunk in outbound.get('postedChunks') or [])
+        if escalated:
             thread_id = outbound.get('threadId')
             if thread_id is None and isinstance(message.channel, discord.Thread):
                 thread_id = str(message.channel.id)

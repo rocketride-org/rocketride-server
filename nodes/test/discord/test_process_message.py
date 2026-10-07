@@ -23,6 +23,7 @@ deterministically in a clean CI environment (it never skips wholesale).
 
 import asyncio
 import codecs
+import functools
 import importlib.util
 import json
 import os
@@ -2340,6 +2341,52 @@ class TestTeamMentionAlias:
 
         assert _sent_reply(endpoint) == 'Handing this to @RocketRide team'
         assert endpoint._paused_threads == {'321'}
+
+    @staticmethod
+    def _real_send(endpoint, fail_at=None):
+        """Use the real _send_response over a fake per-chunk send; returns the calls."""
+        calls = []
+
+        async def send_chunk(message, chunk, thread, sent_ids, destinations, sent_messages, *, allowed_mentions):
+            calls.append((chunk, sorted(role.id for role in (allowed_mentions.roles or []))))
+            if fail_at is not None and len(calls) == fail_at:
+                raise RuntimeError('missing permission')
+            sent_ids.append(str(900 + len(calls)))
+            destinations.append('thread')
+            sent_messages.append(mock.Mock())
+            return message.channel
+
+        endpoint._reply_mode = 'thread'
+        endpoint._allowed_mention_user_ids = []
+        endpoint._send_chunk = send_chunk
+        endpoint._send_response = mock.AsyncMock(side_effect=functools.partial(IEndpoint._send_response, endpoint))
+        return calls
+
+    def test_a_hand_off_whose_last_chunk_fails_neither_pauses_nor_pings(self):
+        """Pre-review of #2547: a partial delivery paused the thread on a hand-off nobody saw."""
+        answer = 'Step done. ' * 270 + 'Looping in @RocketRide team.'
+        endpoint = self._endpoint(answer, _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+        calls = self._real_send(endpoint, fail_at=2)
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert len(calls) == 2
+        assert '<@&77>' not in calls[0][0] and '<@&77>' in calls[1][0], 'the mention was in the failed chunk'
+        assert endpoint._paused_threads == set()
+        assert not endpoint._team_pings, 'nobody was pinged, so the cooldown is released'
+
+    def test_a_hand_off_posted_before_a_later_chunk_fails_still_pauses(self):
+        answer = 'Looping in @RocketRide team. ' + 'Step done. ' * 270
+        endpoint = self._endpoint(answer, _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+        calls = self._real_send(endpoint, fail_at=2)
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert '<@&77>' in calls[0][0]
+        assert endpoint._paused_threads == {'321'}
+        assert endpoint._team_pings, 'the team was pinged'
 
     def test_services_json_declares_the_field(self):
         schema = _load_services_json()
