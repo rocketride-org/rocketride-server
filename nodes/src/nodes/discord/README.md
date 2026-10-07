@@ -8,6 +8,12 @@ A `source` node (`discord://`) that authenticates with a bot you create in the D
 
 The node uses **discord.py** to maintain a resilient Gateway connection with automatic heartbeating, resume, and reconnect. Attachments are downloaded through discord.py's `Attachment.read()` (which uses `aiohttp` transitively; it is not a direct dependency).
 
+## Connections
+
+| Connection | Required | Description |
+| --- | --- | --- |
+| `tool` | no | The database node that **Capture Events To Database** writes to, connected through the control-plane invoke channel. Connect a database node that exists only for this source (see **Capture Events To Database**). |
+
 ## Lanes
 
 The node is a pipeline source: its `_source` lane emits one object per message and per attachment, routed by type.
