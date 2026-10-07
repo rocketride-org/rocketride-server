@@ -56,6 +56,7 @@ from discord.ext import commands
 from ai.common.utils import parse_bool
 
 from .text_utils import (
+    _outside_code_fences,
     attachment_kind,
     contains_alias,
     chunk_message,
@@ -117,6 +118,9 @@ HANDLED_MESSAGE_IDS_LIMIT = 1000
 # the role, so repeats within the window are posted with the alias as plain
 # text and the send withholds the role. In memory only: a restart forgets it.
 TEAM_PING_COOLDOWN_SECONDS = 3600
+
+# A role mention as Discord writes it in message text.
+_ROLE_MENTION = re.compile(r'<@&(\d+)>')
 
 
 def _monotonic() -> float:
@@ -1487,24 +1491,79 @@ class IEndpoint(IEndpointBase):
         role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
         return f'<@&{role_ids[0]}>'
 
-    def _final_role_ids(self, text: str) -> List[str]:
-        """The allowed roles mentioned where a reply may hand off.
+    def _final_role_mentions(self, text: str) -> Dict[int, str]:
+        """The allowed role mentions that may ping, by their offset in ``text``.
 
         Every role in ``allowedMentionRoleIds`` counts as the team (see
-        :meth:`_effective_markers`), and only a mention in the final part of a
-        raw scratchpad (see ``handoff_part``) may ping it: one in the reasoning
-        neither pings nor pauses the thread.
+        :meth:`_effective_markers`), and only a mention outside code in the
+        final part of a raw scratchpad (see ``handoff_part``) may ping it: one
+        in the reasoning or in code neither pings nor pauses the thread.
 
         Args:
             text (str): The reply about to be posted.
 
         Returns:
-            List[str]: The allowed role ids whose mention is in that part, in
+            Dict[int, str]: The role id of each such mention, keyed by where
+                the mention starts.
+        """
+        head, part, _tail = handoff_part(text)
+        start, end = len(head), len(head) + len(part)
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return {
+            match.start(): match.group(1)
+            for match in _outside_code_fences(text, _ROLE_MENTION.finditer(text))
+            if start <= match.start() < end and match.group(1) in role_ids
+        }
+
+    def _final_role_ids(self, text: str) -> List[str]:
+        """The allowed roles mentioned where a reply may hand off.
+
+        Args:
+            text (str): The reply about to be posted.
+
+        Returns:
+            List[str]: The allowed role ids with a mention that may ping (see
+                :meth:`_final_role_mentions`), in configured order.
+        """
+        found = set(self._final_role_mentions(text).values())
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return [role_id for role_id in role_ids if role_id in found]
+
+    def _chunk_role_ids(self, text: str, chunks: List[str]) -> List[List[str]]:
+        """The allowed roles each chunk of a reply may ping.
+
+        A chunk may ping a role only when it carries one of that role's
+        mentions that may ping (see :meth:`_final_role_mentions`): a mention of
+        the same role in reasoning or code in another chunk must not ride on
+        it. Each mention in a chunk is matched to the next occurrence of the
+        same mention in ``text``; the chunker adds fences and labels but never
+        a role mention.
+
+        Args:
+            text (str): The reply.
+            chunks (List[str]): The chunks it is posted as, in order.
+
+        Returns:
+            List[List[str]]: For each chunk, the role ids it may ping, in
                 configured order.
         """
-        part = handoff_part(text)[1]
+        pinging = self._final_role_mentions(text)
+        mentions = list(_ROLE_MENTION.finditer(text))
         role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
-        return [role_id for role_id in role_ids if f'<@&{role_id}>' in part]
+        position = 0
+        plan: List[List[str]] = []
+        for chunk in chunks:
+            found = set()
+            for mention in _ROLE_MENTION.finditer(chunk):
+                while position < len(mentions) and mentions[position].group(0) != mention.group(0):
+                    position += 1
+                if position == len(mentions):
+                    break
+                if mentions[position].start() in pinging:
+                    found.add(mention.group(1))
+                position += 1
+            plan.append([role_id for role_id in role_ids if role_id in found])
+        return plan
 
     def _team_ping_on_cooldown(self, author_id: Optional[str]) -> bool:
         """Whether this user already had the team pinged within the cooldown.
@@ -2963,8 +3022,9 @@ class IEndpoint(IEndpointBase):
             response (str): The pipeline answer text.
             ping_team (bool): False leaves every allowed role out of the
                 allowed mentions, for a user on the team-ping cooldown; True
-                still allows only the roles mentioned where the reply may hand
-                off (see :meth:`_final_role_ids`).
+                allows every allowed role or, with ``teamMentionAlias`` set,
+                on each chunk only the roles whose mention in that chunk may
+                hand off (see :meth:`_chunk_role_ids`).
 
         Returns:
             Dict[str, Any]: What was posted, with these keys:
@@ -2979,7 +3039,6 @@ class IEndpoint(IEndpointBase):
                 every posted chunk) are internal.
         """
         thread = None
-        allowed_mentions = self._allowed_mentions(ping_team=ping_team, text=response)
         posted_chunks: List[str] = []
         sent_ids: List[str] = []
         destinations: List[str] = []
@@ -2994,7 +3053,11 @@ class IEndpoint(IEndpointBase):
             for chunk in chunk_message(response, number=bool(getattr(self, '_number_chunks', False)))
             if chunk.strip()
         ]
-        for chunk in chunks:
+        # With the alias set, each chunk may ping only the roles whose
+        # mention in that chunk may hand off; without it, every allowed role.
+        role_plan = self._chunk_role_ids(response, chunks) if self._handoff_alias() else [None] * len(chunks)
+        for chunk, role_ids in zip(chunks, role_plan):
+            allowed_mentions = self._allowed_mentions(ping_team=ping_team, role_ids=role_ids)
             try:
                 thread = await self._send_chunk(
                     message, chunk, thread, sent_ids, destinations, sent_messages, allowed_mentions=allowed_mentions
@@ -3032,25 +3095,24 @@ class IEndpoint(IEndpointBase):
             'postedChunks': posted_chunks,
         }
 
-    def _allowed_mentions(self, *, ping_team: bool = True, text: Optional[str] = None):
+    def _allowed_mentions(self, *, ping_team: bool = True, role_ids: Optional[List[str]] = None):
         """Build the outbound mention allowlist; never permit everyone/here.
 
         Args:
             ping_team (bool): False leaves every allowed role out; allowed
                 users stay.
-            text (Optional[str]): The reply being sent: when given and
-                ``teamMentionAlias`` is set, only the allowed roles mentioned
-                where it may hand off stay (see :meth:`_final_role_ids`).
+            role_ids (Optional[List[str]]): The allowed roles this send may
+                ping (see :meth:`_chunk_role_ids`); None allows every role in
+                ``allowedMentionRoleIds``.
 
         Returns:
             discord.AllowedMentions: The allowlist for one send.
         """
-        role_ids = list(getattr(self, '_allowed_mention_role_ids', []) or [])
+        if role_ids is None:
+            role_ids = list(getattr(self, '_allowed_mention_role_ids', []) or [])
         user_ids = getattr(self, '_allowed_mention_user_ids', [])
         if not ping_team:
             role_ids = []
-        elif text is not None and self._handoff_alias():
-            role_ids = self._final_role_ids(text)
         if not role_ids and not user_ids:
             return discord.AllowedMentions.none()
         return discord.AllowedMentions(

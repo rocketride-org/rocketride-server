@@ -2388,6 +2388,43 @@ class TestTeamMentionAlias:
         assert endpoint._paused_threads == {'321'}
         assert endpoint._team_pings, 'the team was pinged'
 
+    def test_a_reasoning_mention_in_an_earlier_chunk_does_not_ping(self):
+        """Pre-review of #2547: the final part's role was allowed on every chunk."""
+        answer = 'Thought: maybe <@&77> should see this. ' + 'Still thinking. ' * 122 + '\nFinal Answer: Ask <@&77>.'
+        assert len(answer) > 2000
+        endpoint = self._endpoint(answer)
+        calls = self._real_send(endpoint)
+
+        asyncio.run(endpoint._process_message(self._message_in(1)))
+
+        assert len(calls) == 2
+        assert '<@&77>' in calls[0][0] and calls[0][1] == [], 'the reasoning chunk allows no role'
+        assert 'Final Answer: Ask <@&77>.' in calls[1][0] and calls[1][1] == [77]
+        assert endpoint._team_pings
+
+    @pytest.mark.parametrize(
+        'answer', ['Run this:\n```\nnotify <@&77>\n```\nThen restart.', 'Write `<@&77>` to mention the role.']
+    )
+    def test_a_role_mention_in_code_neither_pings_nor_starts_the_cooldown(self, answer):
+        endpoint = self._endpoint(answer)
+        calls = self._real_send(endpoint)
+
+        asyncio.run(endpoint._process_message(self._message_in(1)))
+
+        assert calls == [(answer, [])]
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is False
+        assert not getattr(endpoint, '_team_pings', None)
+
+    def test_a_coded_mention_does_not_ride_on_the_final_parts_ping(self):
+        answer = 'Run:\n```\nnotify <@&77>\n```\n' + 'Step done. ' * 200 + '\nThen ask <@&77>.'
+        endpoint = self._endpoint(answer)
+        calls = self._real_send(endpoint)
+
+        asyncio.run(endpoint._process_message(self._message_in(1)))
+
+        assert len(calls) == 2
+        assert calls[0][1] == [] and calls[1][1] == [77]
+
     def test_services_json_declares_the_field(self):
         schema = _load_services_json()
 
