@@ -2348,6 +2348,23 @@ class TestNonAnswerRetry:
         assert retry.kwargs['retry'] == 1
         assert 'retry' not in first.kwargs  # the original run is unmarked
 
+    def test_no_retry_starts_once_shutdown_has_begun(self):
+        """Review of #2547: a retry could start a pipeline run during the shutdown grace."""
+        endpoint = self._endpoint([], retries=3)
+        answers = iter(['Thought: one', 'Thought: two', 'never asked', 'never asked'])
+
+        def run(*_args, **_kwargs):
+            if endpoint._run_text_pipeline.call_count == 2:
+                endpoint._closing = True  # shutdown begins during the first retry
+            return next(answers)
+
+        endpoint._run_text_pipeline = mock.Mock(side_effect=run)
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert endpoint._run_text_pipeline.call_count == 2, 'no retry after shutdown began'
+        assert endpoint._send_response.await_count == 0
+
     def test_scratchpad_twice_gives_up_with_non_answer(self):
         endpoint = self._endpoint(['Thought: one', 'Thought: two'])
 

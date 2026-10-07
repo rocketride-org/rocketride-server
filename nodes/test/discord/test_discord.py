@@ -676,6 +676,11 @@ class TestMarkersAndSanitize:
         raw = 'Look for the Final Answer: line in the trace; everything above it is reasoning.'
         assert sanitize_reply(raw, self.MARKERS) == raw
 
+    def test_an_envelope_with_a_raw_newline_is_still_decoded(self):
+        # Review of #2547: models often put a real newline inside the content.
+        raw = '{"type": "final", "content": "line one\nline two \\"quoted\\" \\u00e9"}'
+        assert sanitize_reply(raw, self.MARKERS) == 'line one\nline two "quoted" é'
+
     def test_an_undecodable_envelope_falls_back_to_the_captured_text(self):
         raw = '{"type": "final", "content": "bad \\q escape"}'
         assert sanitize_reply(raw, self.MARKERS) == 'bad \\q escape'

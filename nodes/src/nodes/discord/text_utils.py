@@ -945,7 +945,8 @@ def _extract_final(text: str) -> Tuple[str, bool]:
     if envelope:
         captured = envelope.group(1)
         try:
-            result = json.loads(f'"{captured}"')
+            # Not strict: a model often writes a raw newline inside the content.
+            result = json.loads(f'"{captured}"', strict=False)
         except ValueError:
             # An envelope we cannot decode still told us where the answer is.
             result = captured

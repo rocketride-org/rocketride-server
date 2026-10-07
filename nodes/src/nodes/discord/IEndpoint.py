@@ -2358,6 +2358,9 @@ class IEndpoint(IEndpointBase):
         retries = getattr(self, '_non_answer_retries', 0) or 0
         markers = self._effective_markers()
         for attempt in range(1, int(retries) + 1):
+            # No new pipeline run once shutdown has begun: the pipe is torn down.
+            if getattr(self, '_closing', False):
+                break
             debug(f'Discord: non-answer reply for {message.id}, retry {attempt}/{retries}')
             # A copy: a retry's pipeline error must not overwrite the original's.
             meta = dict(text_pass['meta'])
