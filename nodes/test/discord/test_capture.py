@@ -1613,6 +1613,26 @@ class TestProcessedMessagesAreCaptured:
         assert sorted(row[2] for row in kept if row[0] == 'message') == ['binary:1', 'binary:2', 'text']
         assert len(kept) == 3
 
+    @pytest.mark.parametrize('merge', [False, True])
+    def test_text_plus_an_attachment_gives_two_rows_and_a_redelivery_adds_none(self, merge):
+        """Merge off: text pass then the file. Merge on: the binary file is its own lane object, then the question."""
+        pipe = _PipelinePipe()
+        endpoint = self._endpoint(pipe, merge=merge)
+        report = self._attachment('report.pdf', b'%PDF-1.4', 'application/pdf', 6007)
+        message = self._message('have a look', report)
+        try:
+            asyncio.run(endpoint._process_message(message))
+            # The Gateway can deliver the same message again after a resume.
+            asyncio.run(endpoint._process_message(message))
+        finally:
+            endpoint._stop_capture()
+
+        inserted = sorted(call[2]['params'][2] for call in pipe.calls if 'INSERT INTO' in call[2]['sql'])
+        assert inserted == ['binary:1', 'binary:1', 'text', 'text']
+        kept = _kept_rows(pipe)
+        assert sorted(row[2] for row in kept if row[0] == 'message') == ['binary:1', 'text']
+        assert all(row[1] == '1001' for row in kept)
+
     def test_a_message_skipped_at_shutdown_leaves_only_its_no_reply(self):
         pipe = _PipelinePipe()
         endpoint = self._endpoint(pipe)
