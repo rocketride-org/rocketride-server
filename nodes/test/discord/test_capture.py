@@ -1146,6 +1146,7 @@ def _load_endpoint_class():
     for name in ('monitorOther', 'monitorStatus', 'monitorCompleted', 'monitorFailed', 'debug'):
         setattr(rocketlib, name, mock.Mock(name=name))
     rocketlib.getObject = mock.Mock(name='getObject')
+    rocketlib.isCancelled = mock.Mock(name='isCancelled', return_value=False)
     rocketlib.AVI_ACTION = type('AVI_ACTION', (), {'BEGIN': 'BEGIN', 'WRITE': 'WRITE', 'END': 'END'})
 
     depends = types.ModuleType('depends')
@@ -1323,6 +1324,94 @@ class TestEndpointCaptureWiring:
         endpoint._stop_capture()
         endpoint._stop_capture()
         assert endpoint._capture is None
+
+
+class TestRunStopsAndDrains:
+    """``_run`` reaches its teardown, and so the capture drain, on a normal stop too."""
+
+    @staticmethod
+    def _run_in_thread(endpoint, is_cancelled):
+        """Run ``_run`` against a stub shared server and a real loop; return (thread, error box)."""
+        loop = asyncio.new_event_loop()
+        loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+        loop_thread.start()
+
+        node = types.ModuleType('ai.node')
+        node.require_shared_web_server = mock.Mock(
+            return_value=types.SimpleNamespace(app=types.SimpleNamespace(state=types.SimpleNamespace()))
+        )
+        node.server_loop = loop
+        ai = types.ModuleType('ai')
+        ai.__path__ = []
+        ai.node = node
+
+        errors = []
+
+        def target():
+            try:
+                endpoint._run()
+            except BaseException as e:  # noqa: BLE001 - surfaced to the test
+                errors.append(e)
+
+        module = sys.modules['_discord_capture_node.IEndpoint']
+        with (
+            mock.patch.dict(sys.modules, {'ai': ai, 'ai.node': node}),
+            mock.patch.object(module, 'isCancelled', is_cancelled),
+        ):
+            thread = threading.Thread(target=target, daemon=True)
+            thread.start()
+            thread.join(5)
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(5)
+        return thread, errors
+
+    @staticmethod
+    def _endpoint(writer):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint.endpoint = types.SimpleNamespace(
+            serviceConfig={'parameters': {}}, key='discord_1', logicalType='discord'
+        )
+        endpoint.target = None
+        endpoint._capture = None
+        endpoint._fatal_error = None
+
+        def start_capture():
+            endpoint._capture = writer
+
+        async def noop():
+            return None
+
+        endpoint._start_capture = start_capture
+        endpoint._startup = noop
+        endpoint._shutdown = noop
+        return endpoint
+
+    def test_a_cancelled_task_tears_down_and_drains_capture(self):
+        """Stop sends SIGTERM, which sets the engine's cancel flag; the drain must run before the kill."""
+        writer = mock.Mock()
+        endpoint = self._endpoint(writer)
+
+        thread, errors = self._run_in_thread(endpoint, mock.Mock(side_effect=[False, False, True]))
+
+        assert not thread.is_alive()
+        assert errors == []
+        writer.stop.assert_called_once_with(timeout=2.0)
+
+    def test_a_terminal_failure_still_drains_and_fails_the_source(self):
+        writer = mock.Mock()
+        endpoint = self._endpoint(writer)
+
+        async def startup():
+            endpoint._fail('Discord: gateway closed')
+
+        endpoint._startup = startup
+
+        with mock.patch.object(sys.modules['_discord_capture_node.IEndpoint'], 'monitorStatus'):
+            thread, errors = self._run_in_thread(endpoint, mock.Mock(return_value=False))
+
+        assert not thread.is_alive()
+        assert [str(e) for e in errors] == ['Discord: gateway closed']
+        writer.stop.assert_called_once_with(timeout=2.0)
 
 
 def _kept_rows(pipe):

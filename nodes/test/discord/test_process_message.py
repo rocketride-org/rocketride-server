@@ -122,6 +122,7 @@ def _load_endpoint_class():
     for _name in ('monitorOther', 'monitorStatus', 'monitorCompleted', 'monitorFailed', 'debug'):
         setattr(rocketlib, _name, mock.Mock(name=_name))
     rocketlib.getObject = mock.Mock(name='getObject')
+    rocketlib.isCancelled = mock.Mock(name='isCancelled', return_value=False)
 
     class _AVI_ACTION:
         BEGIN = 'BEGIN'

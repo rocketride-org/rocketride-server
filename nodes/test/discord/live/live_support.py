@@ -169,6 +169,7 @@ def _load_node(real_discord: bool = True):
         return Entry(obj)
 
     rocketlib.getObject = _get_object
+    rocketlib.isCancelled = mock.Mock(name='isCancelled', return_value=False)
 
     class _AVI_ACTION:
         BEGIN = 'BEGIN'

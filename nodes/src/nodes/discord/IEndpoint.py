@@ -39,6 +39,7 @@ from rocketlib import (
     monitorFailed,
     debug,
     getObject,
+    isCancelled,
     AVI_ACTION,
 )
 
@@ -645,11 +646,16 @@ class IEndpoint(IEndpointBase):
             self._stop_capture()
             raise
 
-        # Block scanObjects() until shutdown or a terminal Gateway failure. In
-        # production the subprocess is terminated by EaaS, interrupting this
-        # wait — mirroring how uvicorn's server.run() blocked until the same
-        # external signal. _bot_runner sets this event on a terminal failure.
-        self._shutdown_event.wait()
+        # Block scanObjects() until a stop or a terminal Gateway failure.
+        # Stopping the task sends SIGTERM, which sets the engine's cancellation
+        # flag; the supervisor force-kills only CONST_CANCEL_WAIT_TIMEOUT_SECONDS
+        # later. This source emits no scan callbacks, so it polls the flag
+        # itself (as the webhook source does), and the teardown below -- the
+        # capture drain included -- runs on a normal stop too. _bot_runner
+        # sets the event on a terminal failure.
+        while not isCancelled():
+            if self._shutdown_event.wait(timeout=0.1):
+                break
 
         try:
             shutdown_future = asyncio.run_coroutine_threadsafe(self._shutdown(), server_loop)
