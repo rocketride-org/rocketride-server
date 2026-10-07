@@ -78,24 +78,34 @@ _CODE_PLACEHOLDER = '\n[code]\n'
 # fence is replaced by a placeholder line first), so a support answer that
 # quotes the user's error is still posted.
 _ERROR_SIGNATURES = (
-    re.compile(r'^\s*an error occurred with the \w+ api\b', re.IGNORECASE),
     re.compile(r'^\s*[\w./\\-]*\b(chat|agent)\.py:\d+', re.IGNORECASE),
     # The engine's own log line is ``agent base _run failed run_id=...``.
     re.compile(r'^\s*(?:agent\s+base\s+)?_run failed\b', re.IGNORECASE),
-    re.compile(r'^\s*Traceback \(most recent call last\)', re.IGNORECASE),
+    # The header and the first frame under it; prose that names it is not one.
+    re.compile(r'^\s*Traceback \(most recent call last\):[ \t]*\r?\n[ \t]+File "', re.IGNORECASE),
+    # A provider error the agent wrapped in its own text: ``Deep agent <stage>
+    # failed: <Name>: ...`` (agent_deepagent), ``LangChain agent <stage>
+    # failed: <Name>: ...`` (agent_langchain), ``Unable to produce final
+    # answer: <exception>`` (agent_rocketride), and botocore's ``An error
+    # occurred (<Code>) when calling the <Operation> operation: ...``.
+    re.compile(r'^\s*(?:Deep agent|LangChain agent) \w+ failed: \w+:'),
+    re.compile(r'^\s*Unable to produce final answer:\s*\S'),
+    re.compile(r'^\s*An error occurred \(\w+\) when calling the \w+ operation:'),
     # A provider status followed by its payload (``Error code: 429 - {...}``,
     # a JSON list, or a proxy's HTML page; prose after the dash is an answer),
     # optionally labelled by an exception name (``RateLimitError:``), never by
     # an arbitrary word (``Note:``).
     re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\s*-\s*[{\[<]', re.IGNORECASE),
     # The engine's LLM layer reports a provider failure as the answer itself:
-    # ``**LLM error** — ValueError: An error occurred with the API.``, and the
-    # RocketRide agent as ``LLM error: <exception>`` (no bold). A dash needs a
-    # space after it, so ``LLM error-handling`` is not matched.
-    re.compile(r'^\s*(?:\*\*)?LLM error(?:\*\*)?\s*(?::|[—–-]\s)'),
-    # ...and the sentence its mapped exception carries, when that sentence is the
-    # whole answer (prose that merely mentions API errors is not matched).
-    re.compile(r'^\s*(?:\w+Error:\s*)?an error occurred with the api\.?\s*$', re.IGNORECASE),
+    # ``**LLM error** — ValueError: An error occurred with the API.``
+    # (llm_base.py), and the RocketRide agent as ``LLM error: <exception>``.
+    # Prose that opens ``LLM error — this means...`` has no exception name.
+    re.compile(r'^\s*\*\*LLM error\*\*\s*[—–-]\s*\w+:'),
+    re.compile(r'^\s*(?:\*\*)?LLM error(?:\*\*)?:'),
+    # ...and the sentence a provider's mapped exception carries (``the API``,
+    # ``the OpenAI API``, ``the Baidu Qianfan API``), only as the whole answer:
+    # an answer that opens with it and goes on to explain it is posted.
+    re.compile(r'^\s*(?:\w+Error:\s*)?an error occurred with the[\w ]{0,41}? api\.?\s*$', re.IGNORECASE),
 )
 
 # Openings that are usually a failure but may open a real answer

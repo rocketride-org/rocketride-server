@@ -694,8 +694,41 @@ class TestLooksLikeError:
     """Engine/model failures that arrive as the answer text."""
 
     def test_the_api_error_sentence_is_an_error(self):
-        assert looks_like_error('An error occurred with the OpenAI API: timeout') is True
+        assert looks_like_error('An error occurred with the OpenAI API.') is True
         assert looks_like_error('an error occurred with the anthropic api') is True
+
+    def test_the_api_error_sentence_names_a_multi_word_provider(self):
+        assert looks_like_error('An error occurred with the Baidu Qianfan API.', generic=False) is True
+
+    def test_an_answer_that_opens_with_the_api_error_sentence_is_posted(self):
+        # Pre-review of #2547: the sentence counts only as the whole reply.
+        text = 'An error occurred with the OpenAI API. This usually means the key is invalid; check it in Settings.'
+        assert looks_like_error(text) is False
+        assert looks_like_error(text, generic=False) is False
+
+    @pytest.mark.parametrize(
+        'text',
+        [
+            "Deep agent invoke failed: RateLimitError: Error code: 429 - {'error': {'message': 'org-xyz quota'}}",
+            'Deep agent create_deep_agent failed: ValueError: bad tools',
+            "LangChain agent invoke failed: APIStatusError: Error code: 401 - {'error': 'bad key'}",
+            "Unable to produce final answer: Error code: 429 - {'error': 'quota'}",
+            'An error occurred (ThrottlingException) when calling the InvokeModel operation: Rate exceeded',
+        ],
+    )
+    def test_an_agent_wrapped_provider_error_is_suppressed_by_default(self, text):
+        # Pre-review of #2547: the agents wrap the provider error in their own
+        # text (deepagent.py, langchain.py, rocketride_agent.py, botocore).
+        assert looks_like_error(text, generic=False) is True
+        assert looks_like_error(text) is True
+
+    def test_prose_about_the_agent_failure_shapes_is_posted(self):
+        for text in (
+            'The Deep agent invoke failed because the key expired; regenerate it.',
+            'Unable to produce final answer is what the agent says when every tool failed.',
+            'An error occurred while saving; retry.',
+        ):
+            assert looks_like_error(text, generic=False) is False, text
 
     def test_the_engine_llm_error_answer_is_an_error(self):
         # Live F40: the engine's LLM layer turned a provider failure into this
@@ -706,8 +739,21 @@ class TestLooksLikeError:
     def test_the_agent_llm_error_without_bold_is_an_error(self):
         # Review of #2547: the RocketRide agent reports ``LLM error: {exc}``.
         assert looks_like_error('LLM error: y') is True
-        assert looks_like_error('LLM error - quota exceeded') is True
         assert looks_like_error('**LLM error** — X: y') is True
+
+    def test_prose_that_opens_with_llm_error_and_a_dash_is_posted(self):
+        # Pre-review of #2547: only the engine's ``**LLM error** — Name:`` form
+        # takes a dash.
+        assert looks_like_error('LLM error — this means the model call failed. Check your key.') is False
+        assert looks_like_error('LLM error - quota exceeded') is False
+        assert looks_like_error("**LLM error** — APIStatusError: Error code: 429 - {'error': 'x'}") is True
+
+    def test_prose_that_names_a_traceback_is_posted(self):
+        # Pre-review of #2547: only the real shape (a ``File "`` frame next) counts.
+        text = 'Traceback (most recent call last) is what Python prints; paste the last line.'
+        assert looks_like_error(text) is False
+        assert looks_like_error('Traceback (most recent call last):\nnothing useful', generic=False) is False
+        assert looks_like_error('Traceback (most recent call last):\n  File "x.py", line 1\nKeyError: a') is True
 
     def test_the_bare_api_error_sentence_is_an_error(self):
         assert looks_like_error('An error occurred with the API.') is True
@@ -789,7 +835,7 @@ class TestLooksLikeError:
             'Traceback (most recent call last):\n  File "x"',
             'chat.py:412 raised while answering',
             'agent base _run failed run_id=42',
-            'An error occurred with the OpenAI API: timeout',
+            'An error occurred with the OpenAI API.',
             'ValueError: An error occurred with the API.',
         ):
             assert looks_like_error(text, generic=False) is True, text
@@ -823,7 +869,6 @@ class TestLooksLikeError:
         assert looks_like_error('LLM error-handling in RocketRide works by retrying.', generic=False) is False
         assert looks_like_error('**LLM error** — X: y', generic=False) is True
         assert looks_like_error('LLM error: y', generic=False) is True
-        assert looks_like_error('LLM error - quota exceeded', generic=False) is True
 
     def test_an_error_wrapped_as_the_final_answer_is_an_error(self):
         for text in (

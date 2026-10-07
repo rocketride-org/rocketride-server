@@ -1652,7 +1652,19 @@ class TestErrorReplies:
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'model_error'
 
     @pytest.mark.parametrize(
-        'answer', [ERROR, "Error code: 401 - {'error': 'invalid key'}", '**LLM error** — X: y', 'LLM error: y']
+        'answer',
+        [
+            ERROR,
+            "Error code: 401 - {'error': 'invalid key'}",
+            '**LLM error** — X: y',
+            'LLM error: y',
+            # Pre-review of #2547: provider errors wrapped by an agent.
+            "Deep agent invoke failed: RateLimitError: Error code: 429 - {'error': {'message': 'org-xyz quota'}}",
+            "LangChain agent invoke failed: APIStatusError: Error code: 401 - {'error': 'bad key'}",
+            "Unable to produce final answer: Error code: 429 - {'error': 'quota'}",
+            'An error occurred (ThrottlingException) when calling the InvokeModel operation: Rate exceeded',
+            'An error occurred with the Baidu Qianfan API.',
+        ],
     )
     def test_an_error_is_never_posted_even_with_sanitizing_off(self, answer):
         """Review of #2547: a raw provider error can carry account details.

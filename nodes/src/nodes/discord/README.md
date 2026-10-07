@@ -148,9 +148,10 @@ With `sanitizeReplies` enabled, an answer wrapped in a `{"type": "final", "conte
 
 Whatever `sanitizeReplies` says, the node never relays an engine or provider failure as an answer: a raw provider exception can carry account details, key fragments, or internal URLs. A reply is always treated as an error when it:
 
-- opens with the engine's `**LLM error**` prefix or the agent's `LLM error:` (bold or not, followed by `:`, or by `—`, `–`, or `-` and a space, so `LLM error-handling` is not one);
-- is only the sentence `An error occurred with the API.` (optionally after an exception name such as `ValueError:`);
-- opens with `an error occurred with the <x> api`, a `chat.py:NN` / `agent.py:NN` engine frame, or `Traceback (most recent call last)`;
+- opens with the engine's `**LLM error** — <ExceptionName>:` or the agent's `LLM error:` (so `LLM error — this means...` and `LLM error-handling` are posted);
+- is only the sentence `An error occurred with the <provider> API.` (`the API`, `the OpenAI API`, `the Baidu Qianfan API`; optionally after an exception name such as `ValueError:`), so an answer that opens with it and goes on to explain it is posted;
+- opens with a provider error an agent wrapped in its own text: `Deep agent <stage> failed: <ExceptionName>:`, `LangChain agent <stage> failed: <ExceptionName>:`, `Unable to produce final answer: ...`, or AWS's `An error occurred (<Code>) when calling the <Operation> operation:`;
+- opens with a `chat.py:NN` / `agent.py:NN` engine frame, or a Python traceback (`Traceback (most recent call last):` with a `File "...` line under it);
 - opens with `_run failed` (or the engine's `agent base _run failed` log line);
 - opens with a provider status followed by its payload, such as `Error code: 429 - {...}` (the payload starts with `{`, `[`, or `<`, so `Error code: 401 - Unauthorized means...` is posted; optionally after an exception name such as `RateLimitError:`, never after another word such as `Note:`).
 
