@@ -46,7 +46,7 @@ jobs:
     name: Semantic .pipe diff
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # The action can deepen a shallow checkout itself, but the history is
           # needed either way to resolve the merge base — fetching it up front
