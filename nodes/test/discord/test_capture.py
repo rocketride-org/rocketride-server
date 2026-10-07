@@ -163,21 +163,8 @@ class TestCaptureRowColumns:
         """``message_id`` is NOT NULL, and every event carries a correlation id."""
         meta = _metadata()
         meta.pop('messageId')
-        row = capture_row('no_reply', meta, {'reason': 'paused'}, source='s', now=NOW)
+        row = capture_row('no_reply', meta, {'reason': 'no_answer'}, source='s', now=NOW)
         assert row['message_id'] == '1001'
-
-    def test_a_skipped_message_records_its_own_text(self):
-        """A paused thread emits no `message` event, so the no_reply row IS the record."""
-        row = capture_row(
-            'no_reply',
-            _metadata(messageId='1002', threadId='1001'),
-            {'reason': 'paused', 'text': 'I will take this one'},
-            source='s',
-            now=NOW,
-        )
-        assert row['text'] == 'I will take this one'
-        assert row['event_key'] == 'paused'
-        assert row['thread_id'] == '1001'
 
     def test_ids_arriving_as_numbers_are_stored_as_text(self):
         """Discord snowflakes are TEXT in the contract; an int would not match."""
@@ -195,10 +182,7 @@ class TestCaptureRowColumns:
 class TestCaptureRowEventKeys:
     """The ``event_key`` rules, which are what the unique key dedupes on."""
 
-    @pytest.mark.parametrize(
-        'reason',
-        ['no_answer', 'non_answer', 'model_error', 'send_failed', 'shutdown', 'paused', 'aimed_elsewhere', 'timeout'],
-    )
+    @pytest.mark.parametrize('reason', ['no_answer', 'send_failed', 'shutdown'])
     def test_a_known_no_reply_reason_is_its_own_key(self, reason):
         row = capture_row('no_reply', _metadata(), {'reason': reason}, source='s', now=NOW)
 
@@ -216,11 +200,6 @@ class TestCaptureRowEventKeys:
     def test_the_text_pass_is_keyed_text(self):
         row = capture_row('message', _metadata(), {'lane': 'text', 'text': 'x'}, source='s', now=NOW)
         assert row['event_key'] == 'text'
-
-    def test_a_retried_text_pass_is_keyed_by_its_attempt(self):
-        """Each retry is a separate pipeline run and must not collapse into one row."""
-        row = capture_row('message', _metadata(), {'lane': 'text', 'text': 'x', 'retry': 2}, source='s', now=NOW)
-        assert row['event_key'] == 'text:retry:2'
 
     def test_an_attachment_is_keyed_by_its_lane_and_group_index(self):
         row = capture_row(
@@ -257,8 +236,8 @@ class TestCaptureRowEventKeys:
 
     def test_a_no_reply_event_is_keyed_by_its_reason(self):
         """One message can be skipped for different reasons across runs."""
-        row = capture_row('no_reply', _metadata(), {'reason': 'aimed_elsewhere'}, source='s', now=NOW)
-        assert row['event_key'] == 'aimed_elsewhere'
+        row = capture_row('no_reply', _metadata(), {'reason': 'send_failed'}, source='s', now=NOW)
+        assert row['event_key'] == 'send_failed'
         assert row['text'] is None
 
     def test_a_reaction_is_keyed_by_user_emoji_direction_and_time(self):
@@ -292,7 +271,7 @@ class TestCaptureRowEventKeys:
         """outbound/no_reply carry the QUESTION's metadata, so they belong to the thread it roots."""
         for event_type, payload in (
             ('outbound', {'text': 'hi', 'messageIds': [], 'destination': 'thread'}),
-            ('no_reply', {'reason': 'paused'}),
+            ('no_reply', {'reason': 'no_answer'}),
         ):
             row = capture_row(event_type, _metadata(), payload, source='s', now=NOW)
             assert row['thread_id'] == row['message_id'], event_type
@@ -1657,17 +1636,6 @@ class TestEveryMessagePartIsKept:
             endpoint._stop_capture()
 
         assert len(_kept_rows(pipe)) == 2
-
-    def test_a_retried_text_pass_gets_its_own_row(self):
-        pipe = _PipelinePipe()
-        endpoint = _endpoint(pipe, capture_events=True)
-        try:
-            endpoint._capture_event('message', _metadata(), {'lane': 'text', 'text': 'hello'})
-            endpoint._capture_event('message', _metadata(), {'lane': 'text', 'text': 'hello', 'retry': 1})
-        finally:
-            endpoint._stop_capture()
-
-        assert [row[2] for row in _kept_rows(pipe)] == ['text', 'text:retry:1']
 
 
 class TestProcessedMessagesAreCaptured:

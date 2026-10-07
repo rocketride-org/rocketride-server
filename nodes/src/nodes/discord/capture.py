@@ -337,9 +337,7 @@ def _message_part(metadata: Dict[str, Any], payload: Dict[str, Any]) -> str:
 
 
 # The no_reply reasons the node emits as fixed codes (see IEndpoint).
-NO_REPLY_REASON_CODES = frozenset(
-    {'no_answer', 'non_answer', 'model_error', 'send_failed', 'shutdown', 'paused', 'aimed_elsewhere', 'timeout'}
-)
+NO_REPLY_REASON_CODES = frozenset({'no_answer', 'send_failed', 'shutdown'})
 
 
 def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any], now: datetime) -> str:
@@ -350,14 +348,12 @@ def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any
 
     * ``message``   -- one per part of the message: ``text`` for the text
       pass, ``<lane>:<groupIndex>`` for each attachment (``binary:1``,
-      ``text:2`` for a text file asked about on its own), with ``:retry:<n>``
-      appended for a retried pass, which is a genuinely separate pipeline run
-      with its own answer.
+      ``text:2`` for a text file asked about on its own).
     * ``outbound``  -- one reply per message. The chunk ids are in the payload.
-    * ``no_reply``  -- the reason code, because one message can be skipped for
-      different reasons across runs (paused, then aimed_elsewhere); a reason
-      that is exception text becomes ``error``, since that text can differ
-      between deliveries of the same message.
+    * ``no_reply``  -- the reason code, because one message can end without a
+      reply for different reasons across runs (no_answer, then send_failed); a
+      reason that is exception text becomes ``error``, since that text can
+      differ between deliveries of the same message.
     * ``reaction``  -- user, emoji, direction and time: the same person can
       add, remove and re-add the same emoji, and all three are real events.
 
@@ -383,9 +379,6 @@ def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any
         key = f'{user_id}:{emoji}:{direction}:{when}'
     elif event_type == 'message':
         key = _message_part(metadata, payload)
-        retry = payload.get('retry')
-        if retry:
-            key = f'{key}:retry:{int(retry)}'
     return key[:MAX_EVENT_KEY_CHARS]
 
 
