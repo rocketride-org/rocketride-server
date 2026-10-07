@@ -1616,10 +1616,12 @@ class IEndpoint(IEndpointBase):
         return reserved
 
     def _release_team_ping(self, author_id: Optional[str], reserved: Optional[float], outbound: Dict[str, Any]) -> None:
-        """Drop a reservation when no posted chunk carried an allowed role mention.
+        """Drop a reservation when no posted chunk pinged a role.
 
         A send that failed, or stopped before the chunk with the mention,
-        pinged nobody, so the user may still have the team pinged later.
+        pinged nobody, so the user may still have the team pinged later. A
+        posted chunk whose mention was not allowed to ping (one in the
+        reasoning) does not count either.
 
         Args:
             author_id (Optional[str]): The id of the user who asked.
@@ -1632,8 +1634,7 @@ class IEndpoint(IEndpointBase):
         """
         if reserved is None:
             return
-        mentions = [f'<@&{role_id}>' for role_id in getattr(self, '_allowed_mention_role_ids', []) or []]
-        if any(mention in chunk for chunk in outbound.get('postedChunks') or [] for mention in mentions):
+        if outbound.get('pingedRoleIds'):
             return
         pings = getattr(self, '_team_pings', None) or {}
         if pings.get(author_id) == reserved:
@@ -1836,6 +1837,10 @@ class IEndpoint(IEndpointBase):
                 name = f'{bot_name} (this bot)'
             else:
                 name = getattr(author, 'name', None) or 'user'
+                if getattr(author, 'bot', False) is True:
+                    # Bot and webhook names are free text, so they could copy
+                    # the "(this bot)" label: other bots are marked as such.
+                    name = f'{name} (bot)'
             if team_mention:
                 # Shown as the alias the prompt tells the model to write, not
                 # as a raw mention for it to copy. Either way a ping in its
@@ -2382,6 +2387,8 @@ class IEndpoint(IEndpointBase):
         transcript = await self._thread_transcript(message) if isinstance(message.channel, discord.Thread) else ''
 
         pipeline_text = compose_merged_question(with_thread_context(question, transcript), blocks)
+        # The SSE event shows the user's own message (or only the files), never the transcript.
+        sse_text = question or compose_merged_question('', blocks)
         text_reply = await self._run_with_optional_typing(
             message,
             lambda: self._run_pipeline(
@@ -2390,7 +2397,7 @@ class IEndpoint(IEndpointBase):
                 message.channel.id,
                 message.id,
                 text_meta,
-                sse_text=question or pipeline_text,
+                sse_text=sse_text,
                 context_chars=len(pipeline_text) - len(question),
             ),
         )
@@ -2403,7 +2410,7 @@ class IEndpoint(IEndpointBase):
         metadata['_textPass'] = {
             'text': pipeline_text,
             'meta': text_meta,
-            'sseText': question or pipeline_text,
+            'sseText': sse_text,
             'contextChars': len(pipeline_text) - len(question),
         }
         return self._answer_text(text_reply) or first_answer
@@ -2794,7 +2801,8 @@ class IEndpoint(IEndpointBase):
             attachment_id (Optional[int]): Appended to the entry URL for a
                 text attachment; None for the message's own text.
             sse_text (Optional[str]): Text to broadcast instead of ``text`` —
-                the user's own message when thread context was prepended.
+                the user's own message (or, for a file-only message, only the
+                files) when thread context was prepended; never the transcript.
             context_chars (int): Size of the prepended thread transcript.
             retry (int): Which non-answer retry this run is (1-based). Reported
                 on the ``message`` SSE event so a UI can tell a re-run from the
@@ -3051,11 +3059,13 @@ class IEndpoint(IEndpointBase):
                 nothing was posted.
                 ``complete`` (bool): False when a chunk failed and the rest
                 were abandoned, so Discord shows only part of the answer.
-                ``threadId``, ``messages`` and ``postedChunks`` (the text of
-                every posted chunk) are internal.
+                ``threadId``, ``messages``, ``postedChunks`` (the text of
+                every posted chunk) and ``pingedRoleIds`` (the roles a posted
+                chunk was allowed to ping and mentioned) are internal.
         """
         thread = None
         posted_chunks: List[str] = []
+        pinged_role_ids: List[str] = []
         sent_ids: List[str] = []
         destinations: List[str] = []
         sent_messages: List[Any] = []
@@ -3074,11 +3084,25 @@ class IEndpoint(IEndpointBase):
         role_plan = self._chunk_role_ids(response, chunks) if self._handoff_alias() else [None] * len(chunks)
         for chunk, role_ids in zip(chunks, role_plan):
             allowed_mentions = self._allowed_mentions(ping_team=ping_team, role_ids=role_ids)
+            # The roles this chunk pings if it is posted: allowed on it and
+            # mentioned in it.
+            may_ping = (
+                [
+                    str(role_id)
+                    for role_id in (
+                        role_ids if role_ids is not None else getattr(self, '_allowed_mention_role_ids', []) or []
+                    )
+                ]
+                if ping_team
+                else []
+            )
+            chunk_pings = [role_id for role_id in may_ping if f'<@&{role_id}>' in chunk]
             try:
                 thread = await self._send_chunk(
                     message, chunk, thread, sent_ids, destinations, sent_messages, allowed_mentions=allowed_mentions
                 )
                 posted_chunks.append(chunk)
+                pinged_role_ids.extend(chunk_pings)
             except discord.RateLimited as e:
                 # discord.py handles 429s internally (honoring Retry-After) and
                 # only surfaces RateLimited when the client sets
@@ -3091,6 +3115,7 @@ class IEndpoint(IEndpointBase):
                         message, chunk, thread, sent_ids, destinations, sent_messages, allowed_mentions=allowed_mentions
                     )
                     posted_chunks.append(chunk)
+                    pinged_role_ids.extend(chunk_pings)
                 except Exception as e2:
                     debug(f'Discord: send retry failed, abandoning remaining chunks: {e2}')
                     complete = False
@@ -3109,6 +3134,7 @@ class IEndpoint(IEndpointBase):
             'threadId': str(thread.id) if thread is not None and getattr(thread, 'id', None) is not None else None,
             'messages': sent_messages,
             'postedChunks': posted_chunks,
+            'pingedRoleIds': pinged_role_ids,
         }
 
     def _allowed_mentions(self, *, ping_team: bool = True, role_ids: Optional[List[str]] = None):
