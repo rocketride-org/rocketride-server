@@ -240,6 +240,24 @@ def _clip(value: Any) -> Optional[str]:
     return str(value)[:MAX_TEXT_CHARS]
 
 
+def _scrub_nul(value: Any) -> Any:
+    """Return ``value`` with every NUL character removed from every string in it.
+
+    PostgreSQL ``text`` rejects NUL outright and ``jsonb`` rejects the
+    ``\\u0000`` that ``json.dumps`` writes for it, so a single NUL fails the row
+    for good. A UTF-16 ``.txt`` decoded with ``errors='ignore'`` is full of
+    them. Containers are copied, never changed in place: the caller's dicts
+    are the ones the SSE broadcast uses.
+    """
+    if isinstance(value, str):
+        return value.replace('\x00', '')
+    if isinstance(value, dict):
+        return {_scrub_nul(key): _scrub_nul(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub_nul(item) for item in value]
+    return value
+
+
 def _message_part(metadata: Dict[str, Any], payload: Dict[str, Any]) -> str:
     """Name which part of one Discord message a ``message`` event is.
 
@@ -335,8 +353,8 @@ def capture_row(
     Returns:
         dict: One row, keyed by :data:`COLUMNS`.
     """
-    metadata = metadata or {}
-    payload = payload or {}
+    metadata = _scrub_nul(metadata or {})
+    payload = _scrub_nul(payload or {})
 
     # Exactly the body `_send_sse` broadcasts, so a reader of this table and a
     # live SSE subscriber are looking at the same object.
@@ -367,8 +385,9 @@ def capture_row(
         'occurred_at': now.isoformat(),
         'text': _clip(payload.get('text')),
         # `default=str` rather than a raising dump: a payload this node cannot
-        # serialise must degrade to a readable repr, never drop the row.
-        'payload': json.dumps(body, default=str, ensure_ascii=False),
+        # serialise must degrade to a readable repr, never drop the row; that
+        # repr is scrubbed of NUL like everything else.
+        'payload': json.dumps(body, default=lambda item: _scrub_nul(str(item)), ensure_ascii=False),
         'source': source,
     }
 

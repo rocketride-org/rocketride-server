@@ -358,6 +358,29 @@ class TestCaptureRowPayload:
         assert row['text'] is None
         assert json.loads(row['payload'])['mimeType'] == 'image/png'
 
+    def test_nul_characters_are_stripped_from_text_and_payload(self):
+        """PostgreSQL text and jsonb reject NUL; a UTF-16 .txt decoded with errors='ignore' is full of them."""
+        metadata = _metadata(displayName='A\x00da')
+        payload = {
+            'lane': 'text',
+            'text': 'h\x00e\x00l\x00l\x00o\x00',
+            'files': [{'name': 'notes\x00.txt', 'extra': {'note': 'x\x00y'}}],
+        }
+        row = capture_row('message', metadata, payload, source='discord:discord_1', now=NOW)
+
+        assert row['text'] == 'hello'
+        assert '\x00' not in row['payload']
+        assert '\\u0000' not in row['payload']
+        body = json.loads(row['payload'])
+        assert body['text'] == 'hello'
+        assert body['files'] == [{'name': 'notes.txt', 'extra': {'note': 'xy'}}]
+        assert body['metadata']['displayName'] == 'Ada'
+
+    def test_scrubbing_leaves_the_callers_dicts_alone(self):
+        payload = {'text': 'a\x00b', 'nested': {'v': 'c\x00'}}
+        capture_row('message', _metadata(), payload, source='discord:discord_1', now=NOW)
+        assert payload == {'text': 'a\x00b', 'nested': {'v': 'c\x00'}}
+
     def test_an_unserialisable_payload_value_does_not_raise(self):
         """A capture write must never be the thing that fails a message."""
         row = capture_row('message', _metadata(), {'text': 'x', 'odd': object()}, source='s', now=NOW)
