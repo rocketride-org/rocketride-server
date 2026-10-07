@@ -2120,7 +2120,7 @@ class IEndpoint(IEndpointBase):
                     # which a real answer may start with, wait for
                     # sanitizeReplies. It is not a transient non-answer, so it
                     # is neither relayed nor retried.
-                    debug(f'Discord: suppressed an error-looking answer for {message.id}: {reply[:160]}')
+                    debug(f'Discord: suppressed an error-looking answer for {message.id} ({len(reply)} chars)')
                     self._warn_suppressed(message)
                     await self._emit_no_reply_event(metadata, 'model_error')
                     return

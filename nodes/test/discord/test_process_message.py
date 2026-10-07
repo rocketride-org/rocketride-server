@@ -1695,6 +1695,22 @@ class TestErrorReplies:
         assert 'model_error' in logged
         assert 'credits' not in logged and 'Error code' not in logged
 
+    @pytest.mark.parametrize(
+        ('answers', 'sanitize'),
+        [([ERROR], False), (['Thought: still thinking', ERROR], True)],
+    )
+    def test_a_suppressed_answer_is_not_in_the_debug_log(self, answers, sanitize):
+        """Review of #2547: the debug line logged the first 160 characters of the error."""
+        endpoint = self._endpoint(answers, sanitize=sanitize, retries=1)
+
+        with mock.patch.object(_ENDPOINT_MODULE, 'debug') as log:
+            asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        logged = ' '.join(str(call.args[0]) for call in log.call_args_list)
+        assert 'credits' not in logged and 'Error code' not in logged
+        if not sanitize:
+            assert f'({len(self.ERROR)} chars)' in logged
+
     # A provider error the agent wrapped as its final answer.
     WRAPPED = (
         "Thought: done\nFinal Answer: Error code: 401 - {'error': 'key sk-1'}",
