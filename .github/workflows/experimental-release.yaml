@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: 'server'
+      test:
+        description: 'Run the test suite before releasing (off by default: the artifacts are what this build is for)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   init:
@@ -60,6 +65,7 @@ jobs:
       build_stamp: ${{ needs.init.outputs.build_stamp }}
       nodownload: true
       package: true
+      test: ${{ inputs.test }}
     secrets: inherit
 
   # Build a flat matrix from the comma-separated `products` input.
