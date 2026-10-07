@@ -100,7 +100,7 @@ MAX_NO_REPLY_REASON_CHARS = 200
 MAX_CONCURRENT_MESSAGES = 32
 MAX_ATTACHMENT_BYTES = 104857600
 
-# Upper bounds for the support-bot numbers (the schema declares the same).
+# Upper bounds for the support-behavior numbers (the schema declares the same).
 # Each history fetch pages 100 messages at a time, and every backfilled
 # message runs a pipeline at startup, per channel.
 MAX_BACKFILL_LIMIT = 100
@@ -353,7 +353,7 @@ class IEndpoint(IEndpointBase):
     _emit_outbound: bool = False
     _include_member_metadata: bool = False
     _backfill_limit: int = 0
-    # Support-bot parity behaviors; all off by default so the node stays generic.
+    # Support behaviors; all off by default so the node stays generic.
     _thread_history_limit: int = 0
     _thread_history_max_chars: int = 6000
     _escalation_pause: bool = False
@@ -1417,7 +1417,7 @@ class IEndpoint(IEndpointBase):
         await emit
 
     # -------------------------------------------------------------------------
-    # Support-bot parity behaviors (all opt-in)
+    # Support behaviors (all opt-in)
     # -------------------------------------------------------------------------
 
     def _pause_state(self):
@@ -1440,8 +1440,7 @@ class IEndpoint(IEndpointBase):
 
         The configured ``escalationMarkers`` plus a role mention for every id in
         ``allowedMentionRoleIds`` — a role the node is allowed to ping is by
-        construction the team it escalates to (the support bot hardcodes exactly
-        one such mention).
+        construction the team it escalates to.
 
         Returns:
             List[str]: Markers in configured order, role mentions appended.
@@ -1548,8 +1547,7 @@ class IEndpoint(IEndpointBase):
     def _with_team_mention(self, text: str, on_cooldown: bool = False) -> str:
         """Turn the configured team alias in an answer into a real role mention.
 
-        Mirrors the support bot's ``injectRoleMention``. The agent is prompted
-        to hand off to a literal team name, which Discord renders as plain text
+        The agent is prompted to hand off to a literal team name, which Discord renders as plain text
         and pings nobody; the first id in ``allowedMentionRoleIds`` is the role
         the node may actually mention, so that is the one substituted.
 
@@ -1639,8 +1637,7 @@ class IEndpoint(IEndpointBase):
     async def _paused_from_history(self, thread) -> Optional[bool]:
         """Reconstruct a thread's escalation pause from its recent history.
 
-        Mirrors the support bot's ``isPausedFromHistory``: walk the last 50
-        messages oldest first; a bot message carrying an escalation marker
+        Walk the last 50 messages oldest first; a bot message carrying an escalation marker
         pauses, a later non-bot message whose text @mentions the bot resumes
         (a reply ping alone does not). Used the first time this process sees a
         thread, so a restart does not resume a conversation a human took over.
@@ -1678,8 +1675,7 @@ class IEndpoint(IEndpointBase):
     async def _thread_transcript(self, message: discord.Message) -> str:
         """Build the thread transcript handed to the pipeline as context.
 
-        Mirrors the support bot's ``threadTranscript``: up to
-        ``threadHistoryLimit`` prior messages, oldest first, excluding the
+        Up to ``threadHistoryLimit`` prior messages, oldest first, excluding the
         current message, system messages, and empty content; capped at
         ``threadHistoryMaxChars``. Best-effort — a failed fetch means no context.
 
@@ -1871,9 +1867,9 @@ class IEndpoint(IEndpointBase):
             return False
 
     async def _skip_reason(self, message: discord.Message) -> Optional[str]:
-        """Decide whether to stay quiet on this message, mirroring the bot.
+        """Decide whether to stay quiet on this message.
 
-        Two opt-in gates, in the support bot's order: a thread that escalated
+        Two opt-in gates, in this order: a thread that escalated
         stays quiet until the bot is @mentioned again, and a message aimed at
         somebody else gets an acknowledging reaction instead of an answer (and
         pauses its thread, as the bot does).
@@ -1928,7 +1924,7 @@ class IEndpoint(IEndpointBase):
         return None
 
     async def _after_send(self, message: discord.Message, reply: str, outbound: Dict[str, Any]):
-        """Apply the post-reply side effects the support bot applies.
+        """Apply the post-reply side effects: the escalation pause and feedback.
 
         Pauses the thread when the posted answer escalated (it carries an
         escalation marker), and adds the configured feedback affordances to the
@@ -2012,7 +2008,7 @@ class IEndpoint(IEndpointBase):
             processing_errors: List[str] = []
             try:
                 # Paused thread / message aimed at somebody else: stay quiet without
-                # ingesting anything, exactly as the support bot does.
+                # ingesting anything.
                 skip_reason = await self._skip_reason(message)
                 if skip_reason is not None:
                     # The message itself still travels with the event: a team

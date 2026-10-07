@@ -549,8 +549,8 @@ def format_thread_transcript(
 ) -> str:
     """Render prior thread messages as a plain ``<name>: <content>`` transcript.
 
-    Mirrors the support bot's ``threadTranscript``: one entry per message,
-    oldest first, and a tail-capped result prefixed with an ellipsis line when
+    One entry per message, oldest first, and a tail-capped result prefixed
+    with an ellipsis line when
     the transcript is longer than ``max_chars`` (keeping the most recent
     context, which is what the agent needs); the cut never leaves part of a
     message at the top, unless that part is all there is. Each message is clipped to
@@ -590,8 +590,8 @@ def format_thread_transcript(
 def with_thread_context(content: str, transcript: str) -> str:
     """Frame the latest message plus its thread transcript for the pipeline.
 
-    Mirrors the support bot's context framing. Returns ``content`` unchanged
-    when there is no transcript, so a brand-new thread is a no-op.
+    Returns ``content`` unchanged when there is no transcript, so a brand-new
+    thread is a no-op.
 
     Args:
         content (str): The user's latest message text.
@@ -719,9 +719,8 @@ def compose_merged_question(user_text: str, blocks: Sequence[str]) -> str:
 def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
     """Return the first configured escalation marker present in ``text``.
 
-    The support bot tests a single team role mention; the node generalizes that
-    to a configured list (plus the outbound-allowlisted role mentions). A marker
-    counts only as a whole word (``ESCALATED`` is not found in ``NOTESCALATED``;
+    The markers are a configured list (plus the outbound-allowlisted role
+    mentions). A marker counts only as a whole word (``ESCALATED`` is not found in ``NOTESCALATED``;
     an edge that is punctuation, as in ``<@&id>``, needs no boundary) and only
     outside fenced code blocks.
 
@@ -748,8 +747,9 @@ def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
 def looks_like_error(text: str, generic: bool = True) -> bool:
     """Whether this "answer" is really an engine or model failure.
 
-    Mirrors the support bot's ``looksLikeError``, plus the shapes that reached
-    a user anyway: a provider status such as ``Error code: 429 - {...}`` and,
+    Counts the engine and provider failure shapes: an API error sentence, a
+    traceback, an engine stack frame, a provider status such as
+    ``Error code: 429 - {...}`` and,
     when ``generic`` is on, a reply that opens with ``Exception:`` /
     ``Error:`` / ``<Name>Error:`` or a bare ``Error code: 429``. The caller
     suppresses these instead of relaying them to Discord.
@@ -835,8 +835,8 @@ def contains_alias(text: str, alias: str) -> bool:
 def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
     """Turn the literal team name the model wrote into a real role mention.
 
-    Mirrors the support bot's ``injectRoleMention``: the agent is prompted to
-    hand off to "@RocketRide team", which Discord renders as plain text and
+    The agent is prompted to hand off to "@RocketRide team", which Discord
+    renders as plain text and
     pings nobody. Matching is case-insensitive, and whitespace inside the alias
     matches any run of whitespace so a line break between the words still hits.
     Only whole-word occurrences outside fenced code blocks are replaced, since
@@ -973,7 +973,7 @@ def handoff_part(text: str) -> Tuple[str, str, str]:
 def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
     """Strip leaked agent scratchpad from a reply before it is posted.
 
-    Mirrors the support bot's ``sanitizeReply`` (plus its ``extractFinalText``):
+    In order:
 
     - unwrap a ``{"type": "final", "content": "..."}`` envelope;
     - keep only what follows the LAST ``Final Answer:`` (when non-empty);
@@ -1022,8 +1022,7 @@ def is_aimed_at_someone_else(
 ) -> bool:
     """Decide whether a message is addressed to somebody other than the bot.
 
-    Pure mirror of the support bot's ``isAimedAtSomeoneElse``: a direct mention
-    of the bot always wins; otherwise a mention of another user or any role, or
+    A direct mention of the bot always wins; otherwise a mention of another user or any role, or
     a reply to a message the bot did not author, means the message belongs to
     someone else's conversation. A reply to the author's own earlier message
     (a common way to add details) is not.

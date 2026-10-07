@@ -197,7 +197,7 @@ def _make_endpoint(*, send_responses=True, merge_attachments=True):
     endpoint._include_member_metadata = False
     endpoint._bot = mock.Mock()
     endpoint._bot.user.id = 999
-    # Parity behaviors (all opt-in); tests turn on what they exercise.
+    # Support behaviors (all opt-in); tests turn on what they exercise.
     endpoint._thread_history_limit = 0
     endpoint._thread_history_max_chars = 6000
     endpoint._escalation_pause = False
@@ -850,7 +850,7 @@ class TestMetadataAndEvents:
 
 
 # ---------------------------------------------------------------------------
-# Support-bot parity behaviors (thread context, pause, ack, feedback, hygiene)
+# Support behaviors (thread context, pause, ack, feedback, hygiene)
 # ---------------------------------------------------------------------------
 
 

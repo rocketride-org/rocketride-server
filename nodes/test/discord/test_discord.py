@@ -460,7 +460,7 @@ class TestTextAttachmentHelpers:
 
 
 class TestThreadTranscript:
-    """The thread-context transcript mirrors the support bot's threadTranscript."""
+    """The thread-context transcript: one line per message, oldest first."""
 
     def test_lines_are_name_colon_content_oldest_first(self):
         transcript = format_thread_transcript(
@@ -530,7 +530,7 @@ class TestThreadTranscript:
 
 
 class TestMarkersAndSanitize:
-    """Escalation-marker detection and the reply sanitizer (sanitizeReply)."""
+    """Escalation-marker detection and the reply sanitizer."""
 
     MARKERS = ['<@&900000000000000202>', 'ESCALATED']
 
@@ -648,7 +648,7 @@ class TestMarkersAndSanitize:
 
 
 class TestLooksLikeError:
-    """Engine/model failures that arrive as the answer text (looksLikeError)."""
+    """Engine/model failures that arrive as the answer text."""
 
     def test_the_api_error_sentence_is_an_error(self):
         assert looks_like_error('An error occurred with the OpenAI API: timeout') is True
@@ -782,7 +782,7 @@ class TestLooksLikeError:
 
 
 class TestInjectRoleMention:
-    """The literal team alias becomes a real role mention (injectRoleMention)."""
+    """The literal team alias becomes a real role mention."""
 
     def test_the_alias_becomes_the_role_mention(self):
         assert inject_role_mention('I am looping in @RocketRide team.', '@RocketRide team', '<@&77>') == (
@@ -863,7 +863,7 @@ class TestAliasAndMarkerBoundaries:
 
 
 class TestIsAimedAtSomeoneElse:
-    """The aimed-elsewhere decision table (isAimedAtSomeoneElse)."""
+    """The aimed-elsewhere decision table."""
 
     @staticmethod
     def _aimed(**overrides):
