@@ -113,7 +113,7 @@ node).
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `database.query({ token, sql, nodeId?, sessionId?, params?, rowMode? }): Promise<{ rows, affected_rows }>` | Execute raw SQL through the pipeline's `execute` tool function. `rowMode: 'array'` returns positional rows (TypeScript only; the Python SDK has no `row_mode`). |
+| `database.query` | `database.query({ token, sql, nodeId?, sessionId?, params?, rowMode? }): Promise<{ rows, affected_rows }>` | Execute raw SQL or Cypher through the pipeline's `execute` tool function. `params` is a positional array for SQL nodes, or an object keyed by placeholder name for graph (Cypher) nodes. `rowMode: 'array'` returns positional rows (TypeScript only; the Python SDK has no `row_mode`). |
 | `database.beginTransaction` | `database.beginTransaction({ token, nodeId? }): Promise<{ session_id }>` | Open a transaction (`begin` tool function). |
 | `database.commit` | `database.commit({ token, sessionId, nodeId? }): Promise<{ ok }>` | Commit the open transaction. |
 | `database.rollback` | `database.rollback({ token, sessionId, nodeId? }): Promise<{ ok }>` | Roll back the open transaction. |
@@ -129,12 +129,13 @@ See [Deployments](/clients/typescript/deploy) for the model.
 | --- | --- |
 | `deploy.add({kind?, pipeline?, data?, metadata?, comment?, deployTo?})` | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
 | `deploy.addApp(appRoot, { workspaceRoot?, comment?, metadata?, onProgress? }): Promise<PublishResult>` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `onProgress` receives one line per step. Deploying activates nothing — bind an audience with `publishApp` afterwards. |
+| `deploy.createApp(slug, { template?, displayName?, developerId?, sidebar?, statusFooter?, docTabs?, install?, workspaceRoot?, serverBaseUrl?, onProgress? }): Promise<CreatedApp>` | Scaffold a new app in the workspace — the programmatic twin of the App Builder's New App wizard, rendering the identical templates (Node.js only). Writes `./apps/<slug>`, vendors the connected server's shell + client packages, and runs the workspace install. The id becomes `<developerId>.<slug>`. Scaffolding only — nothing is deployed. |
 | `deploy.verifyApp(appRoot, { workspaceRoot? }): Promise<AppVerifyReport>` | The no-side-effect precheck for `addApp` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
 | `deploy.deploy(projectId, version, teamId)` | Point a team at a version — promotion and rollback alike. |
-| `deploy.list(params?)` | Deployments visible to you, standard `{ rows, total, page, pageSize }` envelope. |
+| `deploy.list({ teamId?, page?, pageSize?, search?, filters?, sort? }?)` | Deployments visible to you, standard `{ rows, total, page, pageSize }` envelope. `teamId` restricts to one team; omitted = your member teams plus your personal space (the whole org for an org admin). |
 | `deploy.get(projectId, teamId)` | One team's deployment, registry-joined. |
 | `deploy.versions(projectId, params?)` | Registry versions (the version strip), newest first. |
-| `deploy.history(projectId, params?)` | The immutable audit trail, newest first, server-paged. |
+| `deploy.history(projectId, { teamId?, page?, pageSize?, search?, filters?, sort? }?)` | The immutable audit trail, newest first, server-paged. `teamId` restricts to one team's pointer changes (org-wide publish rows always ride along). |
 | `deploy.disable(projectId, teamId)` | The kill switch: nothing runs until enabled again. |
 | `deploy.enable(projectId, teamId)` | Enable a disabled deployment. |
 | `deploy.remove(projectId, teamId)` | Soft remove — history and artifacts survive forever. |
@@ -146,7 +147,8 @@ See [Deployments](/clients/typescript/deploy) for the model.
 | `deploy.artifact(projectId, version)` | One immutable version's pipeline JSON, sha256-verified server-side. |
 | `deploy.preview(schedule, count?)` | THE single cron evaluator: validity + next occurrences. |
 
-Returns mirror the Python table: `add` → `PublishResult`; `deploy`, `get`,
+Returns mirror the Python table: `add`/`addApp` → `PublishResult`; `createApp` →
+`CreatedApp`; `verifyApp` → `AppVerifyReport`; `deploy`, `get`,
 `disable`, `enable`, `remove`, `setSchedule`, `pauseSchedule`, `resumeSchedule`,
 `setSourceConfig` → `Deployment`; `list`/`versions`/`history` →
 `DeployListEnvelope<T>`; `run` → `{ token, version }`; `artifact` →
@@ -155,21 +157,25 @@ Returns mirror the Python table: `add` → `PublishResult`; `deploy`, `get`,
 ### App publish ladder
 
 See [Deployments](/clients/typescript/deploy#app-publish-ladder) for the model.
-Only `deploy.add` and `deploy.addApp` live on `client.deploy`; the unprefixed
-verbs below are methods on the client itself (`client.publishApp(...)`).
+The `deploy.`-prefixed verbs below (`add`, `addApp`, `createApp`, `verifyApp`)
+live on `client.deploy`; the unprefixed verbs are methods on the client itself
+(`client.publishApp(...)`).
 
 | Method | Signature | Description |
 | ------ | --------- | ----------- |
 | `deploy.add` | `deploy.add({kind?, pipeline?, data?, metadata?, comment?, deployTo?}): Promise<PublishResult>` | The ONE rail door: deploy any kind of object as the next immutable registry version. `kind:'pipe'` (default) takes a `pipeline` dict; `kind:'app'` takes ONE `data` zip of the app's SOURCE — the server performs the build (client-produced binaries are never trusted); the zip is retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
 | `deploy.addApp` | `deploy.addApp(appRoot, { workspaceRoot?, comment?, metadata?, onProgress? }): Promise<PublishResult>` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `onProgress` receives one line per step. Deploying activates nothing — bind an audience with `publishApp` afterwards. |
+| `deploy.createApp` | `deploy.createApp(slug, { template?, displayName?, developerId?, sidebar?, statusFooter?, docTabs?, install?, workspaceRoot?, serverBaseUrl?, onProgress? }): Promise<CreatedApp>` | Scaffold a new app in the workspace — the programmatic twin of the App Builder's New App wizard, rendering the identical templates (Node.js only). Writes `./apps/<slug>`, vendors the connected server's shell + client packages, and runs the workspace install. The id becomes `<developerId>.<slug>`. Scaffolding only — the lifecycle (`verifyApp` → `addApp` → `publishApp`) follows. |
 | `deploy.verifyApp` | `deploy.verifyApp(appRoot, { workspaceRoot? }): Promise<AppVerifyReport>` | The no-side-effect precheck for `addApp` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
-| `listDeployments` | `listDeployments(appId): Promise<RailEntry[]>` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
+| `listDeployments` | `listDeployments(appId): Promise<Array<{registryVersion, appVersion, sha256, publishedAt, author, message, state, buildStatus, buildPhase, buildEndedAt?, rungs}>>` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its build lifecycle (`buildStatus` — 'ok' = servable — plus the `buildPhase` it reached and `buildEndedAt`: epoch seconds, or `null` until the build ends), and the `rungs` naming the audiences bound to it. No error text rides the rail: read it with `buildLog`. |
 | `submitApp` | `submitApp(appId, registryVersion): Promise<{artifact}>` | Submit a deployed version for store review — flips the deployment `private` → `submit` (it enters the admin queue). Developer-org + namespace gated. |
 | `withdrawApp` | `withdrawApp(appId, registryVersion): Promise<{artifact}>` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private` (leaves the admin queue, back to draft; history records `withdrawn`). Only a version in `submit` withdraws. Developer-org + namespace gated. |
 | `replyApp` | `replyApp(appId, message, registryVersion?): Promise<{replied, appId}>` | Append a developer message to the app's review thread — the developer half of the reviewer conversation. Rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated. |
 | `buildLog` | `buildLog(appId, registryVersion): Promise<{appId, version, log}>` | One version's durable server build log — the full phase-by-phase output the build worker stores beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; `''` = no log. Developer-org gated. |
 | `publishApp` | `publishApp(appId, registryVersion, target): Promise<{publish}>` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. `@public` requires the deployment be `ready` (approved); `@me`/`@team` accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector and is allowed; publishing your own app requires the id to be in your namespace. |
-| `whereApp` | `whereApp(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound DEPLOYMENT's review state. |
+| `removeAppPublish` | `removeAppPublish(appId, target): Promise<{publish}>` | Remove an audience binding — the app stops serving to that audience and the row leaves the where-live listing. SOFT: registry versions and audit history survive; publishing to the audience again revives it. Returns the final binding row (state `removed`). |
+| `disableAppPublish` | `disableAppPublish(appId, target): Promise<{publish}>` | Disable an audience binding — serving stops, but the row STAYS in the where-live listing marked `disabled` (a visible off switch), unlike `removeAppPublish`. Publishing any version to that audience re-enables it. Returns the binding row (state `disabled`). |
+| `whereApp` | `whereApp(appId): Promise<Array<{rung, handle, version, appVersion, state, deployedAt?}>>` | The reverse index: one row per audience serving the app — `state` is the bound DEPLOYMENT's review state. |
 
 Serving needs no verb: a version's bundle loads from the stable
 `/apps/<appId>/v<N>/remoteEntry.js` URL constructed from its registry
@@ -256,6 +262,7 @@ constructor(options?: {
   type?: QuestionType;
   filter?: DocFilter;
   expectJson?: boolean;
+  cachePrefix?: boolean;
   role?: string;
 })
 ```
@@ -272,6 +279,7 @@ constructor(options?: {
 | `addDocuments` | `addDocuments(documents: Doc \| Doc[]): void` | Adds documents for the AI to reference. |
 | `addGoal` | `addGoal(goal: string): void` | Adds a goal statement for the AI. |
 | `getPrompt` | `getPrompt(hasPreviousJsonFailed?: boolean): string` | Returns the full prompt (internal use). |
+| `cachePrefix` | field, default `false` | Set to `true` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
 
 ## Answer
 
@@ -299,7 +307,8 @@ constructor(expectJson?: boolean)  // default false
 - **UPLOAD_RESULT**: Per-file result with e.g. `action` (`'complete'` \| `'error'`), `filepath`, `error?`, `result?`, `upload_time?`.
 - **ConnectResult**: Identity payload returned by `connect()`/`login()` — user, organizations, apps, teams.
 - **QuestionHistory**: `{ role: string, content: string }` · **QuestionExample**: `{ given: string, result: string }` · **QuestionType**/**QuestionText**.
-- **Deploy types**: `DeployArtifact`, `Deployment`, `DeploymentSchedule`, `DeployActor`, `DeployHistoryEntry`, `PublishResult`, `DeployListEnvelope<T>` (the generic list/versions/history envelope), `DeployListParams`, `SchedulePreview` (from `rocketride`).
+- **Deploy types**: `DeployArtifact`, `Deployment`, `DeploymentSchedule`, `DeployActor`, `DeployHistoryEntry`, `PublishResult`, `DeployListEnvelope<T>` (the generic list/versions/history envelope), `DeployListParams`, `SchedulePreview`, `AppVerifyReport`, `AppVerifyCheck` (from `rocketride`).
+- **CreatedApp**: `deploy.createApp`'s result — `{ appId, folder, files, vendored, installed }` (from `rocketride`; Python's `create_app` returns the same keys as a plain dict). <!-- language-specific -->
 - **Drizzle types** (from `rocketride/drizzle`): `DrizzleOverPipesOptions`, `RocketRideDrizzle<TSchema>`; transport interface `DrizzleDatabaseLike` from `rocketride` (see [Drizzle over Pipelines](/clients/typescript/database-drizzle)). <!-- language-specific -->
 - **Sequelize types** (deprecated): `CreateSequelizeOptions`, `SequelizeConstructor` (see [Sequelize over Pipelines](/clients/typescript/database-sequelize)). <!-- language-specific -->
 

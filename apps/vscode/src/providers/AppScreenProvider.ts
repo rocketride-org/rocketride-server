@@ -435,12 +435,12 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 									if (listing.icon) {
 										checks.push((await fileExists(listing.icon)) ? { id: 'icon', state: 'pass', label: 'Icon', note: listing.icon, tier: 'package' } : { id: 'icon', state: 'fail', label: 'Icon', note: `${listing.icon} does not exist in the app folder.`, tier: 'package' });
 									} else {
-										checks.push({ id: 'icon', state: 'warn', label: 'Icon', note: 'No icon declared — tiles show a generic glyph.', tier: 'package' });
+										checks.push({ id: 'icon', state: 'warn', label: 'Icon', note: 'No icon declared, so tiles show a generic glyph.', tier: 'package' });
 									}
 									if (listing.readme) {
 										checks.push((await fileExists(listing.readme)) ? { id: 'readme', state: 'pass', label: 'README', note: listing.readme, tier: 'package' } : { id: 'readme', state: 'fail', label: 'README', note: `${listing.readme} does not exist in the app folder.`, tier: 'package' });
 									} else {
-										checks.push({ id: 'readme', state: 'warn', label: 'README', note: 'No README declared — recommended so users know what the app does.', tier: 'package' });
+										checks.push({ id: 'readme', state: 'warn', label: 'README', note: 'No README declared. Recommended so users know what the app does.', tier: 'package' });
 									}
 									// Include paths are WORKSPACE-relative; a missing one fails
 									// the deploy pack, so it fails here first, by name.
@@ -461,7 +461,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 									// The typecheck waiver is always VISIBLE, never silent —
 									// a deploy that skips verification should read as a choice.
 									if (listing.typecheck === false) {
-										checks.push({ id: 'typecheck', state: 'warn', label: 'Strict type checking', note: 'Off — the server builds without verifying types.', tier: 'package' });
+										checks.push({ id: 'typecheck', state: 'warn', label: 'Strict type checking', note: 'Off, so the server builds without verifying types.', tier: 'package' });
 									}
 									// ── store tier — the additional public-submission bar ─
 									checks.push(scanned.description ? { id: 'desc', state: 'pass', label: 'Description', tier: 'store' } : { id: 'desc', state: 'fail', label: 'Description', note: 'A store listing needs a description.', tier: 'store' });
@@ -501,7 +501,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 									}
 									const rel = path.relative(scanned.folder, picked[0].fsPath);
 									if (rel.startsWith('..') || path.isAbsolute(rel)) {
-										throw new Error('The file must live inside the app folder — the deploy only packs (and the server only serves) app-relative assets.');
+										throw new Error('The file must live inside the app folder. The deploy only packs (and the server only serves) app-relative assets.');
 									}
 									value = `./${rel.split(path.sep).join('/')}`;
 									break;
@@ -544,7 +544,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 									}
 									const rel = path.relative(wsRoot.fsPath, picked[0].fsPath);
 									if (rel.startsWith('..') || path.isAbsolute(rel)) {
-										throw new Error('The path must live inside the workspace — include paths are workspace-relative and packed from the workspace root.');
+										throw new Error('The path must live inside the workspace. Include paths are workspace-relative and packed from the workspace root.');
 									}
 									// The workspace root itself would pack the entire workspace
 									// into every deploy — an include entry names something in it.

@@ -19,7 +19,8 @@ result = await client.use(filepath='pipeline.pipe')
 token = result['token']
 ```
 
-Beyond `filepath`/`pipeline`, `use()` accepts `source`, `threads`, `use_existing`,
+Beyond `filepath`/`pipeline`, `use()` accepts `token` (a custom task token; the
+server generates one when omitted), `source`, `threads`, `use_existing`,
 `args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
 [run log](/clients/python/logs)), `name` (a display name for the task), and `env`
 (per-run variable overrides). Pass the pipeline config **as-is** — the client sends it

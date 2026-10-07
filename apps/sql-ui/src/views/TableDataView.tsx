@@ -227,7 +227,7 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 				<ContentHeader title={table} subtitle="data" />
 				<div style={styles.body}>
 					<Banner variant="warning">
-						Table {table} is not in the current schema snapshot — refresh the schema from the connection overview.
+						Table {table} is not in the current schema snapshot. Refresh the schema from the connection overview.
 					</Banner>
 				</div>
 			</div>
@@ -255,7 +255,7 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 					</div>
 				)}
 				{unordered && (
-					<div style={styles.note}>No primary key — page order is not guaranteed by the database</div>
+					<div style={styles.note}>No primary key: page order is not guaranteed by the database</div>
 				)}
 				<Card noBodyPadding fill>
 					<DataGrid<Record<string, unknown>>

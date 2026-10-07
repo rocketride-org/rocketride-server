@@ -432,6 +432,24 @@ def test_execute_tool_is_disabled_unless_allowed():
         inst.execute({'query': 'CREATE (n:Person)'})
 
 
+@pytest.mark.parametrize(
+    'args',
+    [
+        {'query': 'CREATE (n:Person)', 'session_id': 'tx-1'},
+        {'sql': 'CREATE (n:Person)', 'row_mode': 'array'},
+        {'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}},
+        {'query': 'CREATE (n:Person)', 'params': ['Ada']},
+        {'query': ''},
+    ],
+)
+def test_execute_tool_reports_disabled_before_argument_errors(args):
+    # A disabled node answers "disabled", not which argument is wrong.
+    graph = _FakeGraph()
+    with pytest.raises(ValueError, match='allow_execute'):
+        _instance(_FakeGlobal(graph)).execute(args)
+    assert graph.calls == []
+
+
 def test_execute_tool_runs_writes_when_allowed():
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
@@ -439,6 +457,81 @@ def test_execute_tool_runs_writes_when_allowed():
     out = _instance(glb).execute({'query': 'CREATE (n:Person)'})
     assert graph.calls[0][0] == 'query'
     assert out['affected_rows'] == 1
+
+
+def test_execute_tool_accepts_sql_key_from_database_query():
+    # client.database.query sends the statement as 'sql', not 'query'.
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    out = _instance(glb).execute({'sql': 'CREATE (n:Person)'})
+    assert graph.calls[0][0] == 'query'
+    assert out['affected_rows'] == 1
+
+
+@pytest.mark.parametrize('params', [None, {}, []])
+def test_execute_tool_treats_empty_params_as_none(params):
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    out = _instance(glb).execute({'query': 'CREATE (n:Person)', 'params': params})
+    assert out['affected_rows'] == 1
+
+
+def test_execute_tool_refuses_params_the_driver_cannot_bind():
+    # FalkorDB's _run_query_raw takes no params: refuse rather than drop them.
+    glb = _FakeGlobal(_FakeGraph())
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match='not supported'):
+        _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
+
+
+@pytest.mark.parametrize('params', [0, False, '', 'rows', 42])
+def test_execute_tool_refuses_non_object_params(params):
+    glb = _FakeGlobal(_FakeGraph())
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match='keyed by placeholder name'):
+        _instance(glb).execute({'query': 'CREATE (n:Person)', 'params': params})
+
+
+@pytest.mark.parametrize(
+    ('extra', 'message'),
+    [
+        ({'session_id': 'tx-1'}, 'no transactions'),
+        ({'row_mode': 'array'}, "must be 'object'"),
+    ],
+)
+def test_execute_tool_refuses_sql_only_options(extra, message):
+    # client.database.query forwards these SQL-node options; graph nodes have
+    # no transactions and always return row objects.
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match=message):
+        _instance(glb).execute({'sql': 'CREATE (n:Person)', **extra})
+    assert graph.calls == []
+
+
+def test_execute_tool_accepts_object_row_mode():
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    out = _instance(glb).execute({'sql': 'CREATE (n:Person)', 'row_mode': 'object', 'session_id': ''})
+    assert out['affected_rows'] == 1
+
+
+def test_execute_schema_lists_params_only_when_supported():
+    glb = _FakeGlobal(_FakeGraph())
+    assert 'params' not in _instance(glb)._execute_input_schema()['properties']
+    glb.supports_execute_params = True
+    assert 'params' in _instance(glb)._execute_input_schema()['properties']
+
+
+def test_execute_tool_refuses_positional_params():
+    glb = _FakeGlobal(_FakeGraph())
+    glb.allow_execute = True
+    with pytest.raises(ValueError, match='keyed by placeholder name'):
+        _instance(glb).execute({'query': 'CREATE (n:Person {name: $1})', 'params': ['Ada']})
 
 
 def test_validate_query_uses_explain():

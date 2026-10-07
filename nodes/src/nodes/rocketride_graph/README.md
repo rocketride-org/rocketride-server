@@ -36,7 +36,7 @@ node defines no configurable server-name prefix. Inputs are JSON objects.
 | get_data | Converts required natural-language question to a safe read-only Cypher query and returns rows; limit is optional. |
 | get_schema | Returns the discovered labels, sampled node properties, and relationships. |
 | get_query | Converts required natural-language question to read-only Cypher without executing it; limit is optional. |
-| execute | Runs required raw Cypher query when direct execution is enabled. |
+| execute | Runs required raw Cypher query when direct execution is enabled; optional params binds `$name` values (for example `{"rows": [...]}` for `UNWIND $rows`), which need no escaping and do not count toward the 10,000-character query limit (params JSON is capped at 8 MiB). The statement may also be sent as sql, the key client.database.query uses; session_id and row_mode 'array' are refused, because graph nodes have no transactions and return row objects. If the result has more rows than the execute row limit, the call fails and nothing is saved. On AGE 1.5.0, `UNWIND $rows ... MERGE` creates duplicates when rows repeat a key, so remove repeated keys first. |
 | dialect | Returns {"dialect": "age"}. |
 
 get_data defaults to the shared read limit, then clamps the requested limit to
@@ -49,6 +49,17 @@ get_query returns {query, valid: true} only after its safe-query checks.
 execute bypasses the read-only gate but still passes Cypher through the AGE
 translation and resource limits; it raises if direct execution is disabled or
 the input is invalid, and otherwise returns {rows, affected_rows}.
+
+The translator also guards two AGE 1.5.0 gaps that would otherwise return wrong
+data without an error. An empty-list test such as `x IN []` is rewritten to
+`false`, its standard Cypher value. AGE applies SET, REMOVE and DELETE only to
+the first node or edge a MERGE creates in a statement, so after a MERGE these
+are rejected unless they change a variable bound before that MERGE, or the node
+of a single-node MERGE that starts the query. For a bulk upsert, run the MERGE,
+then the SET as a separate execute call, for example
+`UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name`.
+Properties written inside the MERGE pattern are stored, but MERGE matches on
+them: with different values it creates a second node or edge.
 
 ## Configuration
 

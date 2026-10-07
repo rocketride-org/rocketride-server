@@ -809,7 +809,7 @@ const OutputDataBox: React.FC<{
 						</div>
 						{!expanded && resultText && (
 							<span style={{ fontSize: 11, color: 'var(--rr-text-secondary)', fontStyle: 'italic' }}>
-								{'\u2014'} {resultText}
+								{resultText}
 							</span>
 						)}
 						{expanded && <DataViewToggle mode={viewMode} modes={availableModes} onChange={setViewMode} />}
@@ -830,7 +830,7 @@ const OutputDataBox: React.FC<{
 				</>
 			) : resultText ? (
 				<div style={{ fontSize: 11, color: 'var(--rr-text-secondary)' }}>
-					Output {'\u2014'} {resultText}
+					Output: {resultText}
 				</div>
 			) : null}
 		</div>

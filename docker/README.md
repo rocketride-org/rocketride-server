@@ -109,3 +109,28 @@ Named volumes persist data between restarts:
 | miniodata  | minio    | Object storage       |
 | milvusdata | milvus   | Vector index data    |
 | chromadata | chroma   | ChromaDB persistence |
+
+## Images
+
+| File | Built locally as | Published as | Purpose |
+| ---- | ---------------- | ------------ | ------- |
+| `Dockerfile.engine-base` | `rocketride/engine-base:<version>` (`nodes:build-container`), `rocketride/engine-base:local` (compose) | `ghcr.io/rocketride-org/rocketride-engine-base:<version>` | The engine from `dist/server`, its Python baseline installed, the libc++ load check. No entrypoint. |
+| `Dockerfile.engine` | the compose `engine` service | `ghcr.io/rocketride-org/rocketride-engine:<version>` and `latest` | The server: engine-base plus `static/`, runs `ai/eaas.py`. |
+| `Dockerfile.node` | `rocketride/node:<version>` (`nodes:build-container`) | `ghcr.io/rocketride-org/rocketride-node:<version>`, never `latest` | One pipeline task: engine-base plus a warmed uv wheel cache; tini, no command. |
+
+The engine and node images are built FROM the engine-base of the same version
+(`--build-arg ENGINE_BASE=...`). On Linux, `./builder nodes:build-container`
+builds engine-base and the node image from the local `dist/server`; elsewhere
+`dist/server` is not a Linux engine and the task skips. `./builder
+nodes:test-container` builds them and checks the node image as a run gets it:
+with capabilities dropped the engine is non-dumpable, the shipped constraints
+are accepted as they are, and every requirement file the cache was warmed from
+installs from it with no network (`docker/test-node-image.sh`). Files whose
+resolution needs torch are not warmed: the warm step lists them, and fails the
+build unless the file is installed only without a model server (`torch_allowed`
+in `docker/warm-wheel-cache.sh`) — otherwise every run would download a CUDA
+torch.
+CI runs it on Linux when the image's inputs change, and the release workflow
+runs the same script on the published node image before signing it. All three
+published images are cosign-signed. The node image has no `latest` tag on
+purpose: a server starts tasks only from the node image of its own version.

@@ -208,28 +208,45 @@ export function setLocalAppsListener(fn: (() => void) | null): void {
 }
 
 /**
- * Whether an app is an EMBEDDED DEV PREVIEW still waiting for its dev
- * registration. The injection can only arrive after the dev server has
- * booted and announced its address — during that window the deep-linked app
+ * How long an embedded dev preview holds its locked app for the embedder's
+ * dev-remote registration, measured from page load. App Builder mounts the
+ * preview only once its dev server is serving and injects on shell:devReady,
+ * so a healthy registration lands within a second or two — one that has not
+ * arrived by this deadline is not coming (an app id the embedder does not
+ * register, a dead dev server). Ending the hold lets the real outcome show
+ * ("App not found", the load error, or the published fallback) instead of a
+ * splash that never resolves. A registration that does arrive late still
+ * self-corrects: the injection invalidates and reloads the app.
+ */
+export const DEV_REMOTE_TIMEOUT_MS = 30_000;
+
+/**
+ * Milliseconds left in this page's dev-preview hold: 0 once the deadline has
+ * passed, and always 0 on a page that is not an embedded dev preview.
+ */
+export function devPreviewHoldRemainingMs(): number {
+	if (!isDevPreviewPage()) return 0;
+	return Math.max(0, DEV_REMOTE_TIMEOUT_MS - performance.now());
+}
+
+/**
+ * Whether an app is an EMBEDDED DEV PREVIEW's locked app still waiting for
+ * its dev registration. The injection can only arrive after the shell has
+ * booted and announced itself — during that window the deep-linked app
  * either isn't in the manifest (new apps) or fails to load (dead published
  * entry), and showing an error would be a flash that the injection's
  * invalidate-and-retry immediately self-corrects. The layout holds the
- * loading state instead while this is true.
+ * loading state instead while this is true — but only for the app the page
+ * is locked to, and only until DEV_REMOTE_TIMEOUT_MS: an unbounded hold
+ * hides every failure behind the splash.
  *
- * @param appId - The session-locked app id.
+ * @param appId - The app whose load state is being rendered.
  */
 export function isDevPreviewPending(appId: string): boolean {
 	// Once locally registered, real load states (success or error) apply.
 	if (localOverrides.has(appId)) return false;
-	try {
-		// Only embedded dev previews qualify: iframe + the rrdev flag (URL or
-		// the per-tab persistence the flavor picker writes).
-		if (window.self === window.top) return false;
-		const urlFlag = new URLSearchParams(window.location.search).get('rrdev') === '1';
-		return urlFlag || sessionStorage.getItem('rr:dev') === '1';
-	} catch {
-		return false;
-	}
+	const lockedAppId = previewLockedAppId();
+	return !!lockedAppId && appId === lockedAppId && devPreviewHoldRemainingMs() > 0;
 }
 
 /**
@@ -313,6 +330,15 @@ export function unregisterLocalApp(id: string): void {
  * @param entry - The dev server's remoteEntry.js URL.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string): void {
+	// The wrong-id signal: an embedded preview receives ONE registration, for
+	// the app its URL is locked to. A registration for any other id means the
+	// two disagree, and the locked app will never register — say so instead
+	// of letting the preview run out its hold in silence.
+	const lockedAppId = isDevPreviewPage() ? previewLockedAppId() : '';
+	if (lockedAppId && appId !== lockedAppId) {
+		console.warn(`[appLoader] App Builder delivered a dev build for "${appId}", but this preview is for "${lockedAppId}" — check appManifest.id in the app's package.json`);
+	}
+
 	// Injection for a container the manifest registered AND that is LOADED or
 	// mid-load this document: such a container is committed to its entry
 	// (repointing corrupts its consume-shared getters; a forced registration

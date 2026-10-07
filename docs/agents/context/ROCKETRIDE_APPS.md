@@ -186,7 +186,8 @@ Two rules before anything else:
   files.** The scaffold carries load-bearing details that are easy to get
   subtly wrong by hand: the pinned Module Federation plugin version, the
   `src/index.ts` async boundary, the jsx-dev-runtime HMR anchor, the
-  `*.pipe` module declaration, and the vendored platform-package pins.
+  `emitOnErrors: false` build setting, the `*.pipe` module declaration,
+  and the vendored platform-package pins.
   Hand-rolled app folders fail in ways whose symptoms (blank preview,
   frozen HMR, share-negotiation errors) appear far from the cause.
   Two front doors render the identical templates: the App Builder's New
@@ -251,7 +252,7 @@ sharing one `node_modules`.
 | `README.md` | Ships with the app and appears on its store listing; readme readiness starts green. |
 | `src/index.ts` | The Module Federation **async boundary** — its entire body is `import('./AppDescriptor');`. Required so shared modules are negotiated before any app code runs. |
 | `src/global.d.ts` | Ambient module declaration for `*.pipe` imports (see [Embedding Pipelines](#embedding-pipelines)). |
-| `src/AppDescriptor.ts` | The single exposed module. Starts with `import 'react/jsx-dev-runtime';` — the **HMR anchor**: it keeps the shared JSX runtime referenced even when your root component fails to compile. Without it, an error build orphans the runtime, hot reload tombstones its module factory, and every later fix silently fails to apply (the frozen-preview bug). Do not remove it. |
+| `src/AppDescriptor.ts` | The single exposed module. Starts with `import 'react/jsx-dev-runtime';` — the **HMR anchor**: it keeps the shared JSX runtime referenced even when a save leaves your root component with no JSX. Without it, that update disposes the runtime, no later hot update can bring it back, and every later save silently fails to apply (the frozen-preview bug). Failed builds are covered separately by `emitOnErrors: false` (see [Build Configuration](#build-configuration)). Do not remove it. |
 | `src/App.tsx` | Your root component: `<AppLayout>` composed from the frame options you picked, wrapping a starter `Content`. Recompose its props (`sidebar`, `showStatus`) any time. |
 
 ---
@@ -1455,6 +1456,8 @@ export default defineConfig(() => ({
 	// .pipe files are JSON — importable and passable to client.use().
 	tools: {
 		rspack: {
+			// A failed build emits nothing — the preview keeps the last good one.
+			optimization: { emitOnErrors: false },
 			module: { rules: [{ test: /\.pipe$/, type: 'json' } as const] },
 		},
 	},
@@ -1478,6 +1481,12 @@ Key rules:
   Bundling your own copy of any of them breaks the app at load time.
 - **Keep the exact MF plugin pin** (`2.5.1`) — see
   [the scaffold table](#the-scaffolded-files).
+- **Keep `emitOnErrors: false`.** A failed build then emits nothing, and the
+  preview keeps running the last good build until the fix lands. Without
+  it, the failed build's hot update disposes every module only the broken
+  file imported, and every later save silently fails to apply. Apps
+  scaffolded before this setting existed should add it under
+  `tools.rspack`.
 - **`npm run build` = `tsc --noEmit && rsbuild build`.** Type errors fail
   the local build exactly as the server build will (unless waived with
   `typecheck: false`).
@@ -1589,8 +1598,8 @@ version you want off the air while you investigate — and the still-visible
 row is the reminder. **Remove** is the statement that you no longer serve
 this audience at all, and it tidies the table. The Deploy tab's **Remove**
 action on a where-live row is the remove verb; from scripts,
-`client.removeAppPublish(appId, target)` performs remove, and disable rides
-the same deploy command as its `disable` subcommand. For the `@public` row,
+`client.removeAppPublish(appId, target)` performs remove and
+`client.disableAppPublish(appId, target)` performs disable. For the `@public` row,
 only the developer organization may do either.
 
 ### Testing a specific published version: the version override
@@ -1641,6 +1650,7 @@ same verbs (TypeScript camelCase / Python snake_case):
 | Deploy a source zip | `client.deploy.add({ kind: 'app', data, metadata })` |
 | Publish to a rung | `client.publishApp(appId, version, target)` |
 | Remove a binding | `client.removeAppPublish(appId, target)` |
+| Disable a binding | `client.disableAppPublish(appId, target)` |
 | Where live | `client.whereApp(appId)` |
 | Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` |
 | Review thread reply | `client.replyApp(appId, message)` |

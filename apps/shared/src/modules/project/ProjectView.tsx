@@ -283,8 +283,8 @@ type DocSubView = 'development' | 'deploy';
  * Per-page header subtitles — "{Page} — {short descriptor}".
  */
 const DOC_SUBVIEW_SUBTITLES: Record<DocSubView, string> = {
-	development: 'Development — live monitoring and replay of your dev runs.',
-	deploy: 'Deploy — the deployed pipeline: scheduled runs, monitoring, and replay.',
+	development: 'Development: live monitoring and replay of your dev runs.',
+	deploy: 'Deploy: the deployed pipeline (scheduled runs, monitoring, and replay).',
 };
 
 /**

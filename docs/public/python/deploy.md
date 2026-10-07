@@ -33,7 +33,8 @@ for dep in live['rows']:
 
 `add(..., deploy_to=<team>)` collapses add + deploy into one step. Listings
 (`deploy.list`, `deploy.versions`, `deploy.history`) return the standard
-`{rows, total, page, pageSize}` envelope, server-paged.
+`{rows, total, page, pageSize}` envelope, server-paged. `deploy.list` and
+`deploy.history` take an optional `team_id` to scope the listing to one team.
 `deploy.artifact(project_id, version)` fetches one immutable version's pipeline
 JSON, sha256-verified server-side.
 
@@ -84,22 +85,19 @@ App ids are partitioned by the caller org's **developer id**: every app is
 ids inside its own namespace (the platform holds `rocketride`). Deploying or
 publishing an app requires the org to have claimed a developer id.
 
-`deploy.add` and `deploy.add_app` live on `client.deploy`; every other verb
-below is a method on the client itself (`client.list_deployments(...)`,
-`client.publish_app(...)`), not on `client.deploy`.
+The lifecycle, verb by verb: scaffold with `deploy.create_app`, pre-check with
+`deploy.verify_app`, then pack and deploy with `deploy.add_app` (or the raw
+`deploy.add(kind='app', data=...)` door for a zip you packed yourself). Watch
+the build on the version rail (`list_deployments`, `build_log`), take a version
+through store review (`submit_app`, `withdraw_app`, `reply_app`), and bind it to
+an audience with `publish_app`. `where_app` shows which audiences serve which
+version. `disable_app_publish` pauses a binding (its row stays visible, marked
+disabled) and `remove_app_publish` drops it; both are soft, and publishing to the
+audience again restores it.
 
-| Method | Description |
-| --- | --- |
-| `deploy.add` | The ONE rail door (on the `client.deploy` namespace): deploy any kind of object as the next immutable registry version. `kind='pipe'` (default) takes a `pipeline` dict; `kind='app'` takes ONE `data` zip of the app's SOURCE (the server performs the build; client-produced binaries are never trusted), retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
-| `deploy.add_app` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `on_progress` narrates one line per step. Deploying activates nothing — bind an audience with `publish_app` afterwards. |
-| `deploy.verify_app` | The no-side-effect precheck for `add_app` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
-| `list_deployments` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry carries its deployment `state`, its `buildStatus` ('ok' = servable), and the `rungs` naming the audiences bound to it. |
-| `submit_app` | Submit a deployed version for review — flips the deployment `private` → `submit`. |
-| `withdraw_app` | Withdraw a pending review — the developer's own cancel: flips the deployment `submit` → `private`, the version leaves the admin queue and history records `withdrawn`. Only a version in `submit` withdraws. Developer-org + namespace gated, like submit. |
-| `reply_app` | Append a developer message to the app's review thread — rides `deployment_history` as a `reply` row (side `'developer'`), the same stream `deploy.history()` reads. Developer-org + namespace gated, like submit. |
-| `build_log` | One version's durable server build log — the full phase-by-phase output stored beside the version's artifacts (no error text rides the rail rows). Long logs serve their tail; empty `log` = none. Developer-org gated. |
-| `publish_app` | Bind a deployment to '@me', '@team/<name>', or '@public' ('@user' = legacy input alias). The binding is a pure pointer born 'enabled'. '@public' requires the deployment be `ready`; '@me'/'@team' accept any non-`failed` deployment. Pinning ANOTHER org's public app to '@me'/'@team' is the version selector; publishing your own app requires the id to be in your namespace. |
-| `where_app` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound deployment's review state. |
+The four `deploy.`-prefixed verbs live on `client.deploy`; every other verb is a
+method on the client itself (`client.list_deployments(...)`,
+`client.publish_app(...)`), not on `client.deploy`.
 
 Serving needs no verb: a version's bundle loads from the stable
 `/apps/<app_id>/v<N>/remoteEntry.js` URL constructed from its registry

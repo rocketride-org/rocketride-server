@@ -312,8 +312,8 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 					title="No run at this position"
 					description={
 						onJumpToRun
-							? 'Land the needle inside a run — live or recorded — and its report card appears here.'
-							: 'This source has not run yet — start a run and its report card appears here.'
+							? 'Land the needle inside a run (live or recorded) and its report card appears here.'
+							: 'This source has not run yet. Start a run and its report card appears here.'
 					}
 					action={
 						onJumpToRun && (
@@ -327,7 +327,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 					<div style={styles.columns}>
 						<div>
 							<div style={styles.sectionTitle}>
-								Where the time went <span style={styles.sectionHint}>&mdash; this run</span>
+								Where the time went <span style={styles.sectionHint}>(this run)</span>
 							</div>
 							<div style={styles.emptyHint}>Per-component timing lands here as the run executes.</div>
 						</div>
@@ -422,10 +422,10 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 			<div style={traceOff ? { ...styles.columns, ...styles.tracelessDim } : styles.columns}>
 				<div>
 					<div style={styles.sectionTitle}>
-						Where the time went <span style={styles.sectionHint}>&mdash; this run</span>
+						Where the time went <span style={styles.sectionHint}>(this run)</span>
 					</div>
 					{componentRows.length === 0 ? (
-						<div style={styles.emptyHint}>{traceOff ? 'Pipeline tracing is not enabled for this run — set the Trace level to record component stats.' : 'No component timing recorded — component stats require pipeline tracing.'}</div>
+						<div style={styles.emptyHint}>{traceOff ? 'Pipeline tracing is not enabled for this run. Set the Trace level to record component stats.' : 'No component timing recorded. Component stats require pipeline tracing.'}</div>
 					) : (
 						componentRows.map((row) => (
 							<div
@@ -447,7 +447,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 						Slowest completions
 					</div>
 					{slowest.length === 0 ? (
-						<div style={styles.emptyHint}>{traceOff ? 'Pipeline tracing is not enabled for this run.' : `No completions recorded yet${componentRows.length === 0 ? ' — requires pipeline tracing' : ''}.`}</div>
+						<div style={styles.emptyHint}>{traceOff ? 'Pipeline tracing is not enabled for this run.' : `No completions recorded yet${componentRows.length === 0 ? ' (requires pipeline tracing)' : ''}.`}</div>
 					) : (
 						slowest.map((doc) => {
 							const clickable = onOpenTrace && doc.beginSeq != null;

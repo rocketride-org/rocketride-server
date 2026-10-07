@@ -312,7 +312,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 			<div style={S.appsList}>
 				{appBuilder.apps.length === 0 && (
 					<div style={{ padding: '4px 10px', fontSize: 12, color: 'var(--rr-text-secondary)' }}>
-						No apps yet — create one with New app.
+						No apps yet. Create one with New app.
 					</div>
 				)}
 				{appBuilder.apps.map((app) => {

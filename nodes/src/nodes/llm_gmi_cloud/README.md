@@ -84,8 +84,8 @@ other hosts are rejected. The shared endpoint defaults to
 
 ### Custom models
 
-Select `custom` to provide a GMI Cloud model identifier, its context limit, and an
-endpoint URL directly. Open-weight identifiers use `org/model-name`, such as
+Select `custom` to provide a GMI Cloud model identifier, its context limit, its
+output limit (4,096 by default), and an endpoint URL directly. Open-weight identifiers use `org/model-name`, such as
 `deepseek-ai/DeepSeek-R1`; proxied identifiers use `provider/model-name`, such as
 `openai/gpt-4o`.
 
@@ -161,6 +161,7 @@ nothing changes — see [Why some providers need their own key](https://github.c
 | `gmi_cloud.profile` | `string` | **Model**<br/>GMI Cloud LLM model | `"deepseek-v3"` |
 | `gmi_cloud.serverbase` | `string` | **Endpoint URL**<br/>Your GMI Cloud deployment endpoint URL. Deploy the model at console.gmicloud.ai, then paste the provided endpoint URL here. |  |
 | `model` | `string` | **Model**<br/>GMI Cloud model identifier. Use org/model-name for open-weight models (e.g. deepseek-ai/DeepSeek-R1, Qwen/Qwen3-32B-FP8) or provider/model-name for proxied models (e.g. openai/gpt-4o, anthropic/claude-sonnet-4.5, google/gemini-3-flash-preview). Full list: https://www.gmicloud.ai/models |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
 ## Dependencies

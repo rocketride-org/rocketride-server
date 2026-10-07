@@ -46,6 +46,11 @@ on:
         required: false
         type: boolean
         default: true
+      container_test:
+        description: Build the node image and run nodes:test-container (Linux)
+        required: false
+        type: boolean
+        default: false
       retention_days:
         # 1 day is enough to chain build → release → docker within the same
         # workflow run; downloads inside a run work even after "expiry".
@@ -161,6 +166,24 @@ jobs:
           # cloud target is the rocketride.*.cloudUrl setting. (The Stripe
           # publishable key arrives from the server probe at runtime.)
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }} --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
+
+      # The node image, built from the dist/server just built and checked as a
+      # run gets it. Before the tests, which install into dist/server (the image
+      # filters that out, but there is no reason to build from a dirtier tree).
+      # Docker's data goes to /mnt, the runner's large disk: the image is ~6 GB
+      # unpacked, and the root filesystem is needed by the tests that follow.
+      - name: Test the node container image / Linux
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test && inputs.container_test
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /mnt/docker
+          conf=/etc/docker/daemon.json
+          { sudo cat "$conf" 2>/dev/null || echo '{}'; } | jq '. + {"data-root": "/mnt/docker"}' | sudo tee "$conf.new" >/dev/null
+          sudo mv "$conf.new" "$conf"
+          sudo systemctl restart docker
+          docker info --format 'docker {{.ServerVersion}}, data in {{.DockerRootDir}}'
+          ${{ matrix.builder_cmd }} nodes:test-container --verbose
+          docker system prune -af >/dev/null
 
       # S3-compatible server for S3Store integration tests (Linux only): moto,
       # not MinIO. MinIO stopped public distribution (2026-09-24: quay.io

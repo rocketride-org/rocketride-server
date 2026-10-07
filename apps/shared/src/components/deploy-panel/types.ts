@@ -174,7 +174,7 @@ export const createDeployHistoryColumns = (): GridColumnDefinition[] => [
 		formatter: (cell: CellComponent) => formatTime(cell.getValue() as number),
 		width: 170,
 	},
-	{ title: 'Actor', field: 'actor', rrType: 'string', rrDefault: true, rrDescription: 'Who performed the action (denormalized — survives account deletion).', width: 160 },
+	{ title: 'Actor', field: 'actor', rrType: 'string', rrDefault: true, rrDescription: 'Who performed the action (denormalized, so it survives account deletion).', width: 160 },
 	{
 		title: 'Action',
 		field: 'seq',

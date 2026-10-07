@@ -102,7 +102,7 @@ export function setWorkspaceInstallDelegate(run: (() => Promise<boolean>) | null
 export function ensureShell(context: vscode.ExtensionContext): Promise<ShellVendorResult> {
 	if (ensureShellPromise) return ensureShellPromise;
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-	if (!workspaceRoot) return Promise.resolve({ ok: false, reason: 'No workspace folder is open — the platform package lives under the workspace root.' });
+	if (!workspaceRoot) return Promise.resolve({ ok: false, reason: 'No workspace folder is open. The platform package lives under the workspace root.' });
 	ensureShellPromise = vendorShellPackage(workspaceRoot, path.join(context.extensionPath, 'shell.tgz'), path.join(context.extensionPath, 'rocketride-client.tgz')).then((result) => {
 		// vendorShellPackage never throws (non-fatal by design); a failure
 		// clears the memo so a later open retries with a (possibly)
@@ -163,7 +163,7 @@ export function refreshVendoredPlatform(context: vscode.ExtensionContext): Promi
 export async function vendorAppTypes(context: vscode.ExtensionContext, appFolder: string): Promise<ShellVendorResult> {
 	const logger = getLogger();
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-	if (!workspaceRoot) return { ok: false, reason: 'No workspace folder is open — the platform package lives under the workspace root.' };
+	if (!workspaceRoot) return { ok: false, reason: 'No workspace folder is open. The platform package lives under the workspace root.' };
 	// Wiring failures FAIL the pass: an app whose workspace file or
 	// dependency wiring could not be written will not link the platform
 	// package, so pretending success would only defer the error to a
@@ -240,7 +240,7 @@ function ensureWorkspaceFile(workspaceRoot: string): void {
 				// appended block entry — refuse loudly instead of corrupting
 				// the user-owned file (a trailing comment does not count).
 				if ((packagesLine[1] ?? '').replace(/#.*$/, '').trim().length > 0) {
-					throw new Error(`${yamlPath} declares packages as an inline value — add 'apps/*' manually`);
+					throw new Error(`${yamlPath} declares packages as an inline value; add 'apps/*' manually`);
 				}
 				// Block form: match the first existing entry's indentation so
 				// the added line follows the user's formatting; two spaces
@@ -442,7 +442,7 @@ function ensureWorkspaceOverrides(workspaceRoot: string, deps: ReadonlyArray<(ty
 	// step: an inline overrides value cannot be amended line-wise — refuse
 	// (\r counts as \s, so a CRLF bare block head never false-positives)
 	if (/^overrides:[ \t]*[^\s#]/m.test(text)) {
-		throw new Error(`${yamlPath} declares overrides as an inline value — add ${entries.join(', ')} manually`);
+		throw new Error(`${yamlPath} declares overrides as an inline value; add ${entries.join(', ')} manually`);
 	}
 	if (/^overrides:[ \t]*(?:#[^\n]*)?\r?$/m.test(text)) {
 		// step: insert under the existing block, matching its entry indentation
@@ -631,7 +631,7 @@ export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: st
 		let source = '';
 		let failure = '';
 		if (!baseUrl) {
-			failure = `Not connected to a RocketRide server — the ${label} is served by the connected server.`;
+			failure = `Not connected to a RocketRide server. The ${label} is served by the connected server.`;
 		} else {
 			const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
 			try {
@@ -642,13 +642,13 @@ export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: st
 						tgz = body;
 						source = `${baseUrl}/${route}`;
 					} else {
-						failure = `The ${label} served by ${baseUrl} is larger than the ${MAX_VENDORED_TGZ_BYTES / (1024 * 1024)} MB limit — refusing the download.`;
+						failure = `The ${label} served by ${baseUrl} is larger than the ${MAX_VENDORED_TGZ_BYTES / (1024 * 1024)} MB limit. Refusing the download.`;
 					}
 				} else {
 					failure = `${baseUrl} does not serve the ${label} (HTTP ${res.status}).`;
 				}
 			} catch (err) {
-				failure = `Cannot reach ${baseUrl} — is the server running? (${err instanceof Error ? err.message : String(err)})`;
+				failure = `Cannot reach ${baseUrl}. Is the server running? (${err instanceof Error ? err.message : String(err)})`;
 			}
 		}
 		if (!tgz && fallback && fs.existsSync(fallback)) {
@@ -682,7 +682,7 @@ export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: st
 			fetchTgz('client/typescript', 'client SDK package (rocketride.tgz)', clientFallbackTgz),
 		]);
 		if (!shell.tgz) {
-			return { ok: false, reason: `${shell.failure} No packaged fallback copy is available — connect to a server and reopen this app.` };
+			return { ok: false, reason: `${shell.failure} No packaged fallback copy is available. Connect to a server and reopen this app.` };
 		}
 
 		const tgzPath = path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz');
@@ -722,7 +722,7 @@ export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: st
 		// only as the fallback for delegate-less contexts.
 		if (workspaceInstallDelegate) {
 			if (!(await workspaceInstallDelegate())) {
-				return { ok: false, reason: 'Workspace pnpm install failed — the app Console carries the pnpm output.' };
+				return { ok: false, reason: 'Workspace pnpm install failed. The app Console carries the pnpm output.' };
 			}
 		} else {
 			await runRootInstall(workspaceRoot);

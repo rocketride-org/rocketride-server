@@ -578,7 +578,7 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 					<div style={styles.paneFill}>
 						{hiddenTraces > 0 && (
 							<div style={styles.traceWindowNote}>
-								Showing in-flight traces and the last {TRACE_CLOSED_WINDOW} completed — {hiddenTraces} earlier {hiddenTraces === 1 ? 'trace is' : 'traces are'} reachable by scrubbing back.
+								Showing in-flight traces and the last {TRACE_CLOSED_WINDOW} completed; {hiddenTraces} earlier {hiddenTraces === 1 ? 'trace is' : 'traces are'} reachable by scrubbing back.
 							</div>
 						)}
 						<div style={styles.paneScrollHost}>
@@ -609,10 +609,10 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 								<span>
 									Slice <b>{formatTime(selection.from)}</b> → <b>{formatTime(selection.to)}</b>
 									{' · '}
-									{Math.max(1, Math.round(selection.to - selection.from))} s{' — report card stays run-scoped'}
+									{Math.max(1, Math.round(selection.to - selection.from))} s{' (report card stays run-scoped)'}
 								</span>
 								<Button variant="secondary" small onClick={() => setSelection(null)}>
-									Clear — back to track
+									Clear: back to track
 								</Button>
 							</div>
 						)}
@@ -676,7 +676,7 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 					title={openTrace.name}
 					width={640}
 					persistKey="panelTraceDetailWidth"
-					subtitle={openTraceIndex >= 0 ? `Request ${openTraceIndex + 1} of ${traceDocOrder.length} — ${source.name}` : source.name}
+					subtitle={openTraceIndex >= 0 ? `Request ${openTraceIndex + 1} of ${traceDocOrder.length}: ${source.name}` : source.name}
 					footer={
 						<div style={{ display: 'flex', gap: 8 }}>
 							<Button

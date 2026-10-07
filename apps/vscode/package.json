@@ -289,22 +289,22 @@
 				"rocketride.development.teamId": {
 					"type": "string",
 					"default": "",
-					"deprecationMessage": "Retired — the development team is assigned by your server profile"
+					"deprecationMessage": "Retired: the development team is assigned by your server profile"
 				},
 				"rocketride.deployment.teamId": {
 					"type": "string",
 					"default": "",
-					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+					"deprecationMessage": "Retired: deployments are team-scoped on the server; no client-side team setting"
 				},
 				"rocketride.developmentTeamId": {
 					"type": "string",
 					"default": "",
-					"deprecationMessage": "Retired — the development team is assigned by your server profile"
+					"deprecationMessage": "Retired: the development team is assigned by your server profile"
 				},
 				"rocketride.deployTargetTeamId": {
 					"type": "string",
 					"default": "",
-					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+					"deprecationMessage": "Retired: deployments are team-scoped on the server; no client-side team setting"
 				},
 				"rocketride.appdev.shellUrl": {
 					"type": "string",

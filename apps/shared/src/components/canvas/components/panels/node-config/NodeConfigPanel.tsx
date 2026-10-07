@@ -282,7 +282,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		// updateNode silently no-ops on a locked graph — surface it and keep
 		// the tokens pending; unlocking re-runs this effect and applies them.
 		if (isLocked) {
-			setValidationError('The canvas is locked — unlock it to apply the Google sign-in tokens.');
+			setValidationError('The canvas is locked. Unlock it to apply the Google sign-in tokens.');
 			return;
 		}
 		setValidationError(null);

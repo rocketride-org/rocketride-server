@@ -36,9 +36,9 @@ export const themeStylesEntry: IGalleryEntry = {
 	blurb: 'The styling vocabulary: ~80 --rr-* theme tokens (ThemeTokens) and the commonStyles map of shared CSSProperties every stock component builds on.',
 	doc: `Styling has exactly two layers, both on the surface:
 
-**Tokens** — every colour, font, radius, and shadow is a \`--rr-*\` CSS variable declared on \`:root\` and re-declared per theme (\`ThemeTokens\` is the typed map). Components never hardcode colours; they reference \`var(--rr-...)\` so every theme — light, dark, custom — applies without component changes. Each component entry in this gallery lists the exact tokens it consumes (click a chip to copy).
+**Tokens**: every colour, font, radius, and shadow is a \`--rr-*\` CSS variable declared on \`:root\` and re-declared per theme (\`ThemeTokens\` is the typed map). Components never hardcode colours; they reference \`var(--rr-...)\` so every theme (light, dark, custom) applies without component changes. Each component entry in this gallery lists the exact tokens it consumes (click a chip to copy).
 
-**commonStyles** — the shared \`CSSProperties\` map from the shell theme layer. Reach for a member BEFORE writing a one-off style; single-use styles stay in the component. The members by family:
+**commonStyles**: the shared \`CSSProperties\` map from the shell theme layer. Reach for a member BEFORE writing a one-off style; single-use styles stay in the component. The members by family:
 
 - **Cards & sections**: \`card\`, \`cardHeader\`, \`cardBody\`, \`cardFlat\`, \`section\`, \`sectionHeader\`, \`sectionHeaderLabel\`
 - **Buttons**: \`buttonPrimary\`, \`buttonSecondary\`, \`buttonDanger\`, \`buttonDangerOutline\`, the \`*Small\` variants, \`buttonDisabled\`, \`cardHeaderButton\`, \`cardBodyButton\`, \`toggleButton(active)\`, \`toggleGroup\`

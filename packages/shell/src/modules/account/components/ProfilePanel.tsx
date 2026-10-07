@@ -467,7 +467,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Login Name</div>
 							<input value={fields.preferredUsername} readOnly style={styles.inputReadOnly} />
-							<div style={commonStyles.textMuted}>Used to sign in -- contact support to change</div>
+							<div style={commonStyles.textMuted}>Used to sign in. Contact support to change</div>
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>First Name</div>

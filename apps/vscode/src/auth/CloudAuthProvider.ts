@@ -310,7 +310,7 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 				this.waitlistedName = displayName;
 				this._onDidChange.emit('changed');
 				vscode.window.showInformationMessage(
-					`Thanks for signing up${displayName ? `, ${displayName}` : ''}! Your RocketRide Cloud account is in the access queue — access is rolling out in waves, and we'll email you as soon as your account is activated.`
+					`Thanks for signing up${displayName ? `, ${displayName}` : ''}! Your RocketRide Cloud account is in the access queue. Access is rolling out in waves, and we'll email you as soon as your account is activated.`
 				);
 				return;
 			}
