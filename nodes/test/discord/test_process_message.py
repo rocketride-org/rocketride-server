@@ -1697,8 +1697,8 @@ class TestErrorReplies:
 
     # A provider error the agent wrapped as its final answer.
     WRAPPED = (
-        'Thought: done\nFinal Answer: Error code: 401 - key sk-1',
-        '{"type":"final","content":"Error code: 401 - key sk-1"}',
+        "Thought: done\nFinal Answer: Error code: 401 - {'error': 'key sk-1'}",
+        '{"type":"final","content":"Error code: 401 - {\'error\': \'key sk-1\'}"}',
     )
 
     @pytest.mark.parametrize('sanitize', [True, False])
@@ -1743,6 +1743,21 @@ class TestErrorReplies:
             'That means your provider account is out of credits; add some and retry.'
         )
         endpoint = self._endpoint([answer])
+
+        asyncio.run(endpoint._process_message(_make_message(content='question')))
+
+        assert _sent_reply(endpoint) == answer
+
+    @pytest.mark.parametrize(
+        'answer',
+        [
+            'Error code: 401 - Unauthorized means your API key is wrong. Create a new one.',
+            'LLM error-handling in RocketRide works by retrying the call once.',
+        ],
+    )
+    def test_an_answer_that_opens_by_quoting_an_error_is_posted_by_default(self, answer):
+        """Review of #2547: the always-on error check dropped these real answers."""
+        endpoint = self._endpoint([answer], sanitize=False)
 
         asyncio.run(endpoint._process_message(_make_message(content='question')))
 

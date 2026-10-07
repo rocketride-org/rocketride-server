@@ -80,14 +80,16 @@ _ERROR_SIGNATURES = (
     # The engine's own log line is ``agent base _run failed run_id=...``.
     re.compile(r'^\s*(?:agent\s+base\s+)?_run failed\b', re.IGNORECASE),
     re.compile(r'^\s*Traceback \(most recent call last\)', re.IGNORECASE),
-    # A provider status followed by its payload (``Error code: 429 - {...}``),
+    # A provider status followed by its payload (``Error code: 429 - {...}``,
+    # a JSON list, or a proxy's HTML page; prose after the dash is an answer),
     # optionally labelled by an exception name (``RateLimitError:``), never by
     # an arbitrary word (``Note:``).
-    re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\s*-\s', re.IGNORECASE),
+    re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\s*-\s*[{\[<]', re.IGNORECASE),
     # The engine's LLM layer reports a provider failure as the answer itself:
     # ``**LLM error** — ValueError: An error occurred with the API.``, and the
-    # RocketRide agent as ``LLM error: <exception>`` (no bold).
-    re.compile(r'^\s*(?:\*\*)?LLM error(?:\*\*)?\s*[:—–-]'),
+    # RocketRide agent as ``LLM error: <exception>`` (no bold). A dash needs a
+    # space after it, so ``LLM error-handling`` is not matched.
+    re.compile(r'^\s*(?:\*\*)?LLM error(?:\*\*)?\s*(?::|[—–-]\s)'),
     # ...and the sentence its mapped exception carries, when that sentence is the
     # whole answer (prose that merely mentions API errors is not matched).
     re.compile(r'^\s*(?:\w+Error:\s*)?an error occurred with the api\.?\s*$', re.IGNORECASE),

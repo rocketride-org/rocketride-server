@@ -146,11 +146,11 @@ With `sanitizeReplies` enabled, an answer wrapped in a `{"type": "final", "conte
 
 Whatever `sanitizeReplies` says, the node never relays an engine or provider failure as an answer: a raw provider exception can carry account details, key fragments, or internal URLs. A reply is always treated as an error when it:
 
-- opens with the engine's `**LLM error**` prefix or the agent's `LLM error:` (bold or not, followed by `:`, `—`, `–`, or `-`);
+- opens with the engine's `**LLM error**` prefix or the agent's `LLM error:` (bold or not, followed by `:`, or by `—`, `–`, or `-` and a space, so `LLM error-handling` is not one);
 - is only the sentence `An error occurred with the API.` (optionally after an exception name such as `ValueError:`);
 - opens with `an error occurred with the <x> api`, a `chat.py:NN` / `agent.py:NN` engine frame, or `Traceback (most recent call last)`;
 - opens with `_run failed` (or the engine's `agent base _run failed` log line);
-- opens with a provider status followed by its payload, such as `Error code: 429 - {...}` (optionally after an exception name such as `RateLimitError:`, never after another word such as `Note:`).
+- opens with a provider status followed by its payload, such as `Error code: 429 - {...}` (the payload starts with `{`, `[`, or `<`, so `Error code: 401 - Unauthorized means...` is posted; optionally after an exception name such as `RateLimitError:`, never after another word such as `Note:`).
 
 With `sanitizeReplies` on, generic error-shaped openings count too, because a real answer can start with one (`Error: ENOENT means the file does not exist` is posted with it off):
 

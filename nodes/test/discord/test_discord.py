@@ -763,10 +763,29 @@ class TestLooksLikeError:
             assert looks_like_error(text, generic=False) is False, text
             assert looks_like_error(text) is True, text
 
+    def test_prose_after_an_error_code_is_not_a_provider_error(self):
+        # Review of #2547: only a payload (JSON, or a proxy's HTML page) follows
+        # the provider's ``Error code: NNN - ``; prose there is an answer.
+        answer = 'Error code: 401 - Unauthorized means your API key is wrong. Create a new one.'
+        assert looks_like_error(answer, generic=False) is False
+        for text in (
+            "Error code: 401 - {'error': 'key sk-1'}",
+            'Error code: 400 - [{"message": "bad"}]',
+            'Error code: 502 - <html><body>Bad Gateway</body></html>',
+        ):
+            assert looks_like_error(text, generic=False) is True, text
+
+    def test_a_hyphenated_llm_error_word_is_not_an_error(self):
+        # Review of #2547: ``LLM error-handling ...`` is an answer about errors.
+        assert looks_like_error('LLM error-handling in RocketRide works by retrying.', generic=False) is False
+        assert looks_like_error('**LLM error** — X: y', generic=False) is True
+        assert looks_like_error('LLM error: y', generic=False) is True
+        assert looks_like_error('LLM error - quota exceeded', generic=False) is True
+
     def test_an_error_wrapped_as_the_final_answer_is_an_error(self):
         for text in (
-            'Thought: done\nFinal Answer: Error code: 401 - key sk-1',
-            '{"type":"final","content":"Error code: 401 - key sk-1"}',
+            "Thought: done\nFinal Answer: Error code: 401 - {'error': 'key sk-1'}",
+            '{"type":"final","content":"Error code: 401 - {\'error\': \'key sk-1\'}"}',
             'Thought: done\n{"type": "final", "content": "**LLM error** — X: y"}',
         ):
             assert looks_like_error(text) is True, text
