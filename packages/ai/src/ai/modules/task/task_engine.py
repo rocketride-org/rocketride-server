@@ -41,7 +41,7 @@ import shutil
 from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from rocketlib import debug, args as startup_args
+from rocketlib import debug, warning, args as startup_args
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
@@ -705,6 +705,10 @@ class Task(DAPBase):
         '(db_postgres for SQL, PostgreSQL (pgvector) with provider postgres for vectors, '
         'graph_neo4j for graphs)'
     )
+    _CLOUD_DB_CONFIG_ERROR_REASON = (
+        'this RocketRide Cloud server is missing required database broker configuration. '
+        'Contact the server operator to restore the database broker configuration and retry the pipeline'
+    )
 
     def _pipeline_uses_rocketride_db(self) -> bool:
         """True when any pipeline component is a RocketRide cloud DB node."""
@@ -768,13 +772,14 @@ class Task(DAPBase):
                 dsn = await account.resolve_db_dsn(self.org_id or self.client_id)
                 subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
             except NotImplementedError:
-                # Broker env not configured (open-source default). Pass a
-                # reason down so the node reports the missing cloud database
-                # instead of the identity env var it would otherwise check
-                # (#2463). Debug-level only: normal on a local engine, but a
-                # Cloud pod missing its broker env should leave a trace here.
-                self.debug_message('RocketRide DB DSN not resolved: no database broker configured on this engine')
-                subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = self._NO_CLOUD_DB_REASON
+                # Missing broker config is normal on a local engine, but on
+                # Cloud it is an operator problem, not a reason to swap nodes.
+                if _is_saas_engine():
+                    warning(f'RocketRide DB DSN not resolved: {self._CLOUD_DB_CONFIG_ERROR_REASON}')
+                    subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = self._CLOUD_DB_CONFIG_ERROR_REASON
+                else:
+                    self.debug_message('RocketRide DB DSN not resolved: no database broker configured on this engine')
+                    subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = self._NO_CLOUD_DB_REASON
             except Exception as e:
                 self.debug_message(f'RocketRide DB DSN resolution failed: {e}')
                 reason = (str(e).strip().splitlines() or [repr(e)])[0]

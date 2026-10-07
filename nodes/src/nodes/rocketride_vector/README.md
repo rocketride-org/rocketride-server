@@ -31,7 +31,9 @@ identity instead of a host, user, password, or database name you enter. On a
 server without a RocketRide cloud database (for example, a local or self-hosted
 engine with no database broker) the task fails at start with a message that
 says so; use PostgreSQL (pgvector), provider `postgres`, with your own connection
-settings there. Bind an
+settings there. On RocketRide Cloud, missing broker configuration is a server
+configuration error: contact the server operator to restore it and retry.
+Bind an
 embedding module for semantic search; the embedding dimension is taken from the
 first stored document rather than from a configuration field.
 

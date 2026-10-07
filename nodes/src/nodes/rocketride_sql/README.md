@@ -163,7 +163,9 @@ available; DSN resolution is deliberately not replaced by host or credential
 fields. On a server without a RocketRide cloud database (for example, a local
 or self-hosted engine with no database broker) the task fails at start with a
 message that says so; use a connection-configured node such as db_postgres
-there. LLM-generated queries are limited to the safe SQL path, while raw SQL
+there. On RocketRide Cloud, missing broker configuration is a server
+configuration error: contact the server operator to restore it and retry.
+LLM-generated queries are limited to the safe SQL path, while raw SQL
 is unavailable until direct execution is explicitly enabled.
 
 ## Notes

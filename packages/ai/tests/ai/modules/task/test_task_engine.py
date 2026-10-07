@@ -904,15 +904,48 @@ async def test_subprocess_env_unconfigured_account_reports_missing_cloud_db(monk
         raise NotImplementedError('no RocketRide cloud database is configured on this server')
 
     _patch_resolve(monkeypatch, fake_resolve)
+    monkeypatch.setattr('ai.modules.task.task_engine._is_saas_engine', lambda: False)
+    warn = MagicMock()
+    monkeypatch.setattr('ai.modules.task.task_engine.warning', warn)
     t = _env_task(pipeline=_DB_PIPELINE)
     env = await Task._build_subprocess_env(t)
     assert 'ROCKETRIDE_DB_DSN' not in env
     assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == Task._NO_CLOUD_DB_REASON
     assert 'this server has no RocketRide cloud database' in env['ROCKETRIDE_DB_RESOLVE_ERROR']
     assert 'ROCKETRIDE_CLIENT_ID' not in env['ROCKETRIDE_DB_RESOLVE_ERROR']
-    # One debug line, so a Cloud pod missing its broker env leaves a trace.
+    # Missing broker config is normal on a local engine: debug only.
     t.debug_message.assert_called_once()
     assert 'no database broker' in t.debug_message.call_args.args[0]
+    warn.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('hosted_signal', ['flag', 'capability'])
+async def test_subprocess_env_hosted_missing_broker_warns_and_directs_to_operator(monkeypatch, hosted_signal):
+    import ai.account
+    import ai.modules.task.task_engine as engine
+
+    async def fake_resolve(client_id):
+        raise NotImplementedError('broker not configured')
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    monkeypatch.setattr(engine, 'startup_args', lambda: ['--saas'] if hosted_signal == 'flag' else [])
+    monkeypatch.setattr(ai.account.account, 'capabilities', ['saas'] if hosted_signal == 'capability' else [])
+    warn = MagicMock()
+    monkeypatch.setattr(engine, 'warning', warn)
+    monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/other-tenant')
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'https://broker.example/provision')
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'secret-test-token')
+    t = _env_task(pipeline=_DB_PIPELINE)
+    env = await Task._build_subprocess_env(t)
+    reason = env['ROCKETRIDE_DB_RESOLVE_ERROR']
+    assert reason == Task._CLOUD_DB_CONFIG_ERROR_REASON
+    assert 'Contact the server operator' in reason
+    assert 'db_postgres' not in reason
+    for name in ('ROCKETRIDE_DB_DSN', 'ROCKETRIDE_DB_BROKER_URL', 'ROCKETRIDE_DB_BROKER_TOKEN'):
+        assert name not in env
+    warn.assert_called_once_with(f'RocketRide DB DSN not resolved: {reason}')
+    t.debug_message.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
