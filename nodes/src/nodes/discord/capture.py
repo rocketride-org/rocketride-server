@@ -117,8 +117,11 @@ _SOURCE_LABEL_RE = re.compile(r'^[A-Za-z0-9_.:+@-]{1,128}$')
 # PostgreSQL's. What a database node's ``dialect`` tool answers for it.
 POSTGRES_DIALECTS = ('postgres', 'postgresql')
 
-# How PostgreSQL words an INSERT into a table that does not exist.
-_MISSING_TABLE_RE = re.compile(r'relation "[^"]*" does not exist')
+# How PostgreSQL words an INSERT into a table that does not exist. Anchored to
+# the start of the driver's message (or of the part after a ``prefix: ``),
+# because a missing column (42703) reads ``column "x" of relation "<table>"
+# does not exist`` and must not be taken for a missing table.
+_MISSING_TABLE_RE = re.compile(r'(?:^|: )relation "[^"]*" does not exist')
 
 # Sentinel the worker loop reads as "the queue is drained, you may stop".
 _STOP = object()

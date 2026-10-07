@@ -653,6 +653,34 @@ class TestWriterWrites:
         assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')]
         assert writer.failures == 1
 
+    def test_a_missing_column_is_not_taken_for_a_missing_table(self):
+        """42703 quotes ``relation "..." does not exist`` too; a table of another shape must not get DDL."""
+        error = RuntimeError('column "event_key" of relation "discord_events" does not exist')
+        pipe = _FakePipe(fail=error)
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+
+        assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')]
+        assert writer.failures == 1
+        assert 'column "event_key"' in warnings[0]
+
+    @pytest.mark.parametrize(
+        'message, missing',
+        [
+            ('relation "discord_events" does not exist', True),
+            ('SQL execution failed: relation "discord_events" does not exist', True),
+            ('psycopg2.errors.UndefinedTable: relation "discord_events" does not exist', True),
+            ('ERROR 42P01: undefined table', True),
+            ('column "event_key" of relation "discord_events" does not exist', False),
+            ('SQL execution failed: column "source" of relation "discord_events" does not exist', False),
+            ('42703: column "event_key" of relation "discord_events" does not exist', False),
+        ],
+    )
+    def test_only_a_missing_relation_counts_as_a_missing_table(self, message, missing):
+        assert capture._is_missing_table(RuntimeError(message)) is missing
+
     def test_the_pipe_is_returned_even_when_the_write_raises(self):
         """A leaked pipe starves the answering path, which is the whole point."""
         target = _FakeTarget(_FakePipe(fail=RuntimeError('boom')))
