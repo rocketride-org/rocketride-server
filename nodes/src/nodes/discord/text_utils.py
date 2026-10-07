@@ -46,6 +46,9 @@ THREAD_HISTORY_MESSAGE_MAX_CHARS: int = 1000
 # so a newline inside one message cannot start another speaker's line.
 _TRANSCRIPT_CONTINUATION = '\n  '
 
+# A newline that starts a speaker line (not an indented continuation line).
+_SPEAKER_LINE_START = re.compile(r'\n(?!  )')
+
 # A reply that still opens with one of these labels is leaked agent scratchpad
 # ("Thought: ...", "Action Input: ...") rather than a user-facing answer.
 _OPENS_WITH_REASONING = re.compile(r'^\s*(Thought|Action(?:\s+Input)?|Observation|Reasoning)\s*:', re.IGNORECASE)
@@ -549,7 +552,8 @@ def format_thread_transcript(
     Mirrors the support bot's ``threadTranscript``: one entry per message,
     oldest first, and a tail-capped result prefixed with an ellipsis line when
     the transcript is longer than ``max_chars`` (keeping the most recent
-    context, which is what the agent needs). Each message is clipped to
+    context, which is what the agent needs); the cut never leaves part of a
+    message at the top, unless that part is all there is. Each message is clipped to
     :data:`THREAD_HISTORY_MESSAGE_MAX_CHARS`, and its continuation lines are
     indented, so only the first line of a message starts with a speaker name:
     one user cannot forge lines from another speaker, the bot included.
@@ -572,7 +576,14 @@ def format_thread_transcript(
         lines.append(f'{name}: ' + _TRANSCRIPT_CONTINUATION.join(text.split('\n')))
     out = '\n'.join(lines)
     if max_chars > 0 and len(out) > max_chars:
-        out = _TRANSCRIPT_TRUNCATION_PREFIX + out[-max_chars:]
+        tail = out[-max_chars:]
+        on_line_start = out[-max_chars - 1] == '\n' and not tail.startswith(_TRANSCRIPT_CONTINUATION[1:])
+        if not on_line_start:
+            # The cut landed inside a message: start at the next speaker line.
+            start = _SPEAKER_LINE_START.search(tail)
+            if start is not None and tail[start.end() :]:
+                tail = tail[start.end() :]
+        out = _TRANSCRIPT_TRUNCATION_PREFIX + tail
     return out
 
 

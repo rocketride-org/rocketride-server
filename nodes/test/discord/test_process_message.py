@@ -1001,7 +1001,8 @@ class TestThreadHistoryContext:
         text = endpoint._run_text_pipeline.call_args.args[0]
         assert 'the current message' not in text
         transcript = text.split('for context):\n', 1)[1]
-        assert transcript.startswith('…\n') and len(transcript) == 42
+        # Capped at 40 characters, starting on a whole speaker line.
+        assert transcript == '…\nSupport Bot: the earlier answer'
 
     def test_history_failure_is_best_effort(self):
         endpoint = self._endpoint(_thread_history_limit=25)
@@ -3315,6 +3316,12 @@ class TestNumericAndMentionConfig:
         assert declared['minimum'] == 0
         assert declared['maximum'] == maximum
         assert declared['minimum'] <= declared['default'] <= declared['maximum']
+
+    def test_emojis_are_stripped(self):
+        endpoint = self._parse({'ackEmoji': self._Proxy(' \u2705 '), 'feedbackEmojis': [' \u2705', '\u274c  ']})
+
+        assert endpoint._ack_emoji == '\u2705'
+        assert endpoint._feedback_emojis == ['\u2705', '\u274c']
 
     def test_phrase_lists_keep_spaces_and_commas_inside_an_entry(self):
         marker = 'Escalated to the team, please wait'

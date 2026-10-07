@@ -685,7 +685,7 @@ class IEndpoint(IEndpointBase):
         self._team_mention_alias = str(config.get('teamMentionAlias', '') or '')
         self._ignore_aimed_at_others = parse_bool(config.get('ignoreAimedAtOthers'), False)
         # Engine-provided strings may be proxies; discord.py needs a real str.
-        self._ack_emoji = str(config.get('ackEmoji', '') or '')
+        self._ack_emoji = str(config.get('ackEmoji', '') or '').strip()
         self._feedback_reactions = parse_bool(config.get('feedbackReactions'), False)
         self._feedback_emojis = self._as_str_list(
             config.get('feedbackEmojis', ['✅', '❌']), field='feedbackEmojis', split=False

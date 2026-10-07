@@ -478,8 +478,30 @@ class TestThreadTranscript:
         entries = [('ada', 'x' * 100) for _ in range(10)]
         transcript = format_thread_transcript(entries, max_chars=200)
         assert transcript.startswith('…\n')
-        assert len(transcript) == 202  # the ellipsis prefix plus exactly max_chars
+        assert len(transcript) <= 202  # the ellipsis prefix plus at most max_chars
         assert transcript.endswith('x' * 100)  # the newest line survives
+
+    def test_the_tail_cut_starts_on_a_whole_speaker_line(self):
+        entries = [('ada', 'first question'), ('bob', 'a long middle answer'), ('cid', 'last')]
+        # The cut lands inside bob's line: the rest of it is dropped too.
+        transcript = format_thread_transcript(entries, max_chars=len('answer\ncid: last'))
+        assert transcript == '…\ncid: last'
+
+    def test_the_tail_cut_skips_a_continuation_line(self):
+        entries = [('ada', 'one\ntwo\nthree'), ('bob', 'ok')]
+        transcript = format_thread_transcript(entries, max_chars=len('o\n  three\nbob: ok'))
+        assert transcript == '…\nbob: ok'
+
+    def test_a_cut_on_a_line_start_keeps_that_line(self):
+        entries = [('ada', 'first'), ('bob', 'second'), ('cid', 'third')]
+        transcript = format_thread_transcript(entries, max_chars=len('bob: second\ncid: third'))
+        assert transcript == '…\nbob: second\ncid: third'
+
+    def test_a_cut_inside_the_only_line_left_keeps_the_partial_line(self):
+        # Dropping it would leave nothing at all.
+        entries = [('ada', 'first'), ('bob', 'x' * 50)]
+        transcript = format_thread_transcript(entries, max_chars=20)
+        assert transcript == '…\n' + 'x' * 20
 
     def test_transcript_at_the_cap_is_untouched(self):
         transcript = format_thread_transcript([('a', 'x' * 8)], max_chars=11)
