@@ -45,7 +45,8 @@ being able to hurt the bot:
 
 The module is pure Python with no engine imports at module scope (the
 ``IInvokeTool`` import is deferred into ``_invoke_param``), so it loads in a
-plain unit-test process the way ``text_utils`` does.
+plain unit-test process as part of the node package (it imports
+``text_utils``).
 """
 
 from __future__ import annotations
@@ -58,6 +59,8 @@ import time
 
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
+
+from .text_utils import _engine_warning, _shown_entry
 
 # The discord_events columns an INSERT binds, in positional order. ``seq`` and
 # ``captured_at`` are the database's to fill in.
@@ -134,30 +137,6 @@ _MISSING_TABLE_RE = re.compile(r'(?:^|: )relation "[^"]*" does not exist')
 
 # Sentinel the worker loop reads as "the queue is drained, you may stop".
 _STOP = object()
-
-# Messages about a configured value (the table, the database node id) show at
-# most this many of its characters, as the node's own ``_shown_entry`` does:
-# the value may be a secret ``${ROCKETRIDE_*}`` pasted into the wrong field.
-_SHOWN_ENTRY_CHARS = 12
-
-
-def _shown_entry(value: Any) -> str:
-    """Quote a configured value for a message without ever echoing a secret in full.
-
-    Mirrors ``IEndpoint._shown_entry``; this module is loaded on its own, so it
-    cannot import that one.
-
-    Args:
-        value (Any): The configured value.
-
-    Returns:
-        str: The quoted value, whole when at most ``_SHOWN_ENTRY_CHARS`` long,
-            else its first ``_SHOWN_ENTRY_CHARS`` characters followed by ``…``.
-    """
-    text = str(value)
-    if len(text) <= _SHOWN_ENTRY_CHARS:
-        return repr(text)
-    return repr(text[:_SHOWN_ENTRY_CHARS] + '…')
 
 
 def is_valid_table_name(table: Any) -> bool:
@@ -476,15 +455,6 @@ def _control_envelope(param: Any):
     from rocketlib.types import IInvoke  # type: ignore  # engine-only module
 
     return IInvoke(param=param, result=None)
-
-
-def _engine_warning(message: str) -> None:
-    """Log through the engine's logger when there is one."""
-    try:
-        from rocketlib import warning  # type: ignore  # engine-only module
-    except ImportError:
-        return
-    warning(message)
 
 
 def _is_missing_table(exc: BaseException) -> bool:

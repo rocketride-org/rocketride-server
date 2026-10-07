@@ -53,8 +53,11 @@ from discord.ext import commands
 
 from ai.common.utils import parse_bool
 
-from .capture import CaptureWriter, _engine_warning, capture_row, is_valid_source_label
+from .capture import CaptureWriter, capture_row, is_valid_source_label
 from .text_utils import (
+    _MENTION_WRAPPER,
+    _engine_warning,
+    _shown_entry,
     attachment_kind,
     chunk_message,
     clip_attachment_text,
@@ -126,13 +129,7 @@ def _unresolved_variable(value: Any) -> Optional[str]:
 # 20 digits: two ids pasted together are not one.
 _NUMERIC_ID = re.compile(r'[0-9]{1,20}')
 
-# Messages about a list entry show at most this many of its characters. The
-# entry may be a bot token or a secret ${ROCKETRIDE_*} value pasted by mistake,
-# and the message reaches the task status, the start error and the logs.
-_SHOWN_ENTRY_CHARS = 12
-
-# A channel, role or user mention pasted where its id belongs.
-_MENTION_WRAPPER = re.compile(r'<(#|@&|@!?)([0-9]{1,20})>')
+# The mention kinds ``_MENTION_WRAPPER`` (text_utils) matches.
 _MENTION_KIND = {'#': 'channel', '@&': 'role', '@': 'user', '@!': 'user'}
 
 # What each list holds, as a mention kind; a server has no mention form.
@@ -147,22 +144,6 @@ _LIST_ID_KIND = {
 def _is_numeric_id(item: str) -> bool:
     """Whether a list entry is an id Discord could have issued (ASCII digits, 64-bit)."""
     return _NUMERIC_ID.fullmatch(item) is not None and int(item) < 2**64
-
-
-def _shown_entry(item: str) -> str:
-    """Quote a list entry for a message without ever echoing a secret in full.
-
-    Args:
-        item (str): The entry.
-
-    Returns:
-        str: The quoted entry, whole when it is a mention (``<#123>``) or at
-            most ``_SHOWN_ENTRY_CHARS`` long, else its first
-            ``_SHOWN_ENTRY_CHARS`` characters followed by ``…``.
-    """
-    if len(item) <= _SHOWN_ENTRY_CHARS or _MENTION_WRAPPER.fullmatch(item):
-        return repr(item)
-    return repr(item[:_SHOWN_ENTRY_CHARS] + '…')
 
 
 def _non_numeric_id(field: str, item: str) -> str:

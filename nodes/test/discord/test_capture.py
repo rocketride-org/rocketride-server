@@ -46,10 +46,18 @@ _SERVICES_JSON = os.path.join(_NODE_DIR, 'services.json')
 
 
 def _load_capture():
-    """Load the node's capture module directly from its file path."""
+    """Load the node's capture module from its file path, inside a synthetic package.
+
+    The package is what lets ``capture`` import ``text_utils`` relatively, as
+    it does in the engine; neither module touches the engine or discord.py.
+    """
+    pkg = types.ModuleType('_discord_capture_pure')
+    pkg.__path__ = [_NODE_DIR]
+    sys.modules['_discord_capture_pure'] = pkg
     path = os.path.join(_NODE_DIR, 'capture.py')
-    spec = importlib.util.spec_from_file_location('discord_capture', path)
+    spec = importlib.util.spec_from_file_location('_discord_capture_pure.capture', path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules['_discord_capture_pure.capture'] = module
     spec.loader.exec_module(module)
     return module
 

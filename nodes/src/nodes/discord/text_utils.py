@@ -30,9 +30,18 @@ directly without a Gateway connection or the discord.py package installed.
 import codecs
 import mimetypes
 import re
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 DISCORD_MESSAGE_CHAR_LIMIT: int = 2000  # Discord's per-message cap
+
+# Messages about a configured value (a list entry, the capture table, the
+# capture database node id) show at most this many of its characters. The value
+# may be a bot token or a secret ${ROCKETRIDE_*} value pasted by mistake, and
+# the message reaches the task status, the start error and the logs.
+_SHOWN_ENTRY_CHARS = 12
+
+# A channel, role or user mention pasted where its id belongs.
+_MENTION_WRAPPER = re.compile(r'<(#|@&|@!?)([0-9]{1,20})>')
 
 # Chunk numbering: each chunk ends with '\n\n*(3/7)*' when it is turned on.
 _CHUNK_LABEL_OVERHEAD = len('\n\n*(/)*')
@@ -77,6 +86,35 @@ _EXT_TO_MIME = {
 # video/vnd.dlna.mpeg-tts). A fresh ``MimeTypes()`` is filled from the built-in
 # defaults alone; the system files go into the module's own global table.
 _BUILTIN_MIME_TYPES = mimetypes.MimeTypes()
+
+
+def _shown_entry(value: Any) -> str:
+    """Quote a configured value for a message without ever echoing a secret in full.
+
+    Args:
+        value (Any): The value (a list entry, the capture table, a node id).
+
+    Returns:
+        str: The quoted value, whole when it is a mention (``<#123>``) or at
+            most ``_SHOWN_ENTRY_CHARS`` long, else its first
+            ``_SHOWN_ENTRY_CHARS`` characters followed by ``…``.
+    """
+    text = str(value)
+    if len(text) <= _SHOWN_ENTRY_CHARS or _MENTION_WRAPPER.fullmatch(text):
+        return repr(text)
+    return repr(text[:_SHOWN_ENTRY_CHARS] + '…')
+
+
+def _engine_warning(message: str) -> None:
+    """Log through the engine's logger when there is one.
+
+    The import is deferred so this module still loads without the engine.
+    """
+    try:
+        from rocketlib import warning  # type: ignore  # engine-only module
+    except ImportError:
+        return
+    warning(message)
 
 
 def _hard_split(text: str, max_length: int) -> List[str]:
