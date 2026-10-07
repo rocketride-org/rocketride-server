@@ -23,5 +23,29 @@
 """System One decision models: shared, vendor-neutral building blocks."""
 
 from .limits import DecisionLimits
+from .questions import (
+    PICK_ONE,
+    RUBRIC,
+    YES_NO,
+    ProtocolError,
+    QuestionConfigError,
+    QuestionSpec,
+    build_wire_questions,
+    error_decision,
+    map_answer,
+    parse_questions,
+)
 
-__all__ = ['DecisionLimits']
+__all__ = [
+    'DecisionLimits',
+    'PICK_ONE',
+    'ProtocolError',
+    'RUBRIC',
+    'YES_NO',
+    'QuestionConfigError',
+    'QuestionSpec',
+    'build_wire_questions',
+    'error_decision',
+    'map_answer',
+    'parse_questions',
+]
