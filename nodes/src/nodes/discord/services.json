@@ -193,7 +193,7 @@
 			"type": "array",
 			"items": {"type": "string"},
 			"title": "Allowed Mention Role IDs",
-			"description": "Role IDs that outbound pipeline responses may mention. A role is pinged only when its mention is in the answer itself (not in leaked agent reasoning), and each user gets at most one role ping per hour (reset on restart); within that hour no allowed role can be pinged in answers to that user.",
+			"description": "Role IDs that outbound pipeline responses may mention. With Team Mention Alias set, a role is pinged only when its mention is in the answer itself (not in leaked agent reasoning or code), and each user gets at most one role ping per hour (reset on restart); within that hour no allowed role can be pinged in answers to that user. Without it, every listed role may be pinged in any answer.",
 			"optional": true,
 			"default": []
 		},
@@ -338,7 +338,7 @@
 		"discord.teamMentionAlias": {
 			"type": "string",
 			"title": "Team Mention Alias",
-			"description": "Literal team name the pipeline writes when it hands a question over, for example \"@RocketRide team\". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Any user who gets the model to write it triggers that ping, so each user gets at most one ping per hour (reset on restart); later answers to that user keep the alias as plain text and cannot ping any allowed role. Empty leaves answers untouched.",
+			"description": "Literal team name the pipeline writes when it hands a question over, for example \"@RocketRide team\". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Any user who gets the model to write it triggers that ping, so each user gets at most one ping per hour (reset on restart); later answers to that user keep the alias as plain text and cannot ping any allowed role. While it is set, every allowed role pings only from the answer itself and shares that hourly limit. Empty leaves answers and role pings as they are.",
 			"default": "",
 			"optional": true
 		},

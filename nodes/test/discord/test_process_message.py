@@ -2149,9 +2149,8 @@ class TestTeamMentionAlias:
 
         assert endpoint._send_response.await_args.kwargs['ping_team'] is False, 'the second one is on cooldown'
 
-    @pytest.mark.parametrize('alias', ['@RocketRide team', ''])
-    def test_every_allowed_role_is_limited_by_the_cooldown(self, alias):
-        endpoint = self._endpoint('Paging <@&88>.', _allowed_mention_role_ids=['77', '88'], _team_mention_alias=alias)
+    def test_every_allowed_role_is_limited_by_the_cooldown(self):
+        endpoint = self._endpoint('Paging <@&88>.', _allowed_mention_role_ids=['77', '88'])
 
         with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
             asyncio.run(endpoint._process_message(self._message_in(1)))
@@ -2160,6 +2159,29 @@ class TestTeamMentionAlias:
 
         assert _sent_reply(endpoint) == 'Paging <@&88>.'
         assert endpoint._send_response.await_args.kwargs['ping_team'] is False
+
+    def test_without_the_alias_every_allowed_role_may_ping_every_answer(self):
+        """Pre-review of #2547: the cooldown and the final-part rule are part of the alias feature."""
+        endpoint = self._endpoint('Paging <@&88>.', _allowed_mention_role_ids=['77', '88'], _team_mention_alias='')
+
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
+            asyncio.run(endpoint._process_message(self._message_in(1)))
+            assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+            endpoint._run_with_optional_typing = mock.AsyncMock(return_value='A plain answer.')
+            asyncio.run(endpoint._process_message(self._message_in(1, 3)))
+
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+        assert not getattr(endpoint, '_team_pings', None), 'no cooldown without the alias'
+
+    def test_without_the_alias_the_send_allows_every_role_as_on_develop(self):
+        endpoint, message = self._sender()
+        endpoint._team_mention_alias = ''
+
+        asyncio.run(endpoint._send_response(message, 'Thought: maybe <@&88>?\nFinal Answer: Ask <@&77>.'))
+
+        allowed = message.channel.send.await_args.kwargs['allowed_mentions']
+        assert [role.id for role in allowed.roles] == [77, 88]
+        assert [user.id for user in allowed.users] == [555]
 
     def test_the_team_role_is_the_only_allowed_mention_on_cooldown_pings_nobody(self):
         endpoint = IEndpoint.__new__(IEndpoint)

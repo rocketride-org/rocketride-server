@@ -2153,16 +2153,19 @@ class IEndpoint(IEndpointBase):
                 # the send sees the injected mention.
                 author_id = getattr(getattr(message, 'author', None), 'id', None)
                 author_id = str(author_id) if author_id is not None else None
-                on_cooldown = self._team_ping_on_cooldown(author_id)
+                # The cooldown and the final-part rule come with the alias;
+                # without it every allowed role may ping, as it always could.
+                team_alias = bool(self._handoff_alias())
+                on_cooldown = team_alias and self._team_ping_on_cooldown(author_id)
                 reply = self._with_team_mention(reply, on_cooldown)
-                # On cooldown, or when no allowed role is mentioned in the
-                # part of the reply that may hand off (a mention in raw
-                # reasoning does not count), the send withholds every allowed
-                # role, so a literal mention in the answer cannot ping either.
-                ping_team = not on_cooldown and bool(self._final_role_ids(reply))
+                # With the alias set, on cooldown or when no allowed role is
+                # mentioned in the part of the reply that may hand off (a
+                # mention in raw reasoning does not count), the send withholds
+                # every allowed role, so a literal mention cannot ping either.
+                ping_team = not team_alias or (not on_cooldown and bool(self._final_role_ids(reply)))
 
                 if reply and self._send_responses:
-                    reserved = self._reserve_team_ping(author_id, reply) if ping_team else None
+                    reserved = self._reserve_team_ping(author_id, reply) if team_alias and ping_team else None
                     outbound: Dict[str, Any] = {}
                     try:
                         outbound = await self._send_response(message, reply, ping_team=ping_team)
@@ -3028,9 +3031,9 @@ class IEndpoint(IEndpointBase):
         Args:
             ping_team (bool): False leaves every allowed role out; allowed
                 users stay.
-            text (Optional[str]): The reply being sent: when given, only the
-                allowed roles mentioned where it may hand off stay (see
-                :meth:`_final_role_ids`).
+            text (Optional[str]): The reply being sent: when given and
+                ``teamMentionAlias`` is set, only the allowed roles mentioned
+                where it may hand off stay (see :meth:`_final_role_ids`).
 
         Returns:
             discord.AllowedMentions: The allowlist for one send.
@@ -3039,7 +3042,7 @@ class IEndpoint(IEndpointBase):
         user_ids = getattr(self, '_allowed_mention_user_ids', [])
         if not ping_team:
             role_ids = []
-        elif text is not None:
+        elif text is not None and self._handoff_alias():
             role_ids = self._final_role_ids(text)
         if not role_ids and not user_ids:
             return discord.AllowedMentions.none()
