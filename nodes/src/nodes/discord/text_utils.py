@@ -70,6 +70,8 @@ _FINAL_JSON = re.compile(r'\{\s*"type"\s*:\s*"final"\s*,\s*"content"\s*:\s*"((?:
 
 # A fenced code block, or an unclosed fence running to the end of the text.
 _CODE_FENCE = re.compile(r'```.*?(?:```|\Z)', re.DOTALL)
+# Any code: a fenced block, or an inline span on one line (``x`` or ````x````).
+_CODE = re.compile(r'```.*?(?:```|\Z)|`[^`\n]+`', re.DOTALL)
 
 # What a code block becomes before the error checks: a line of its own, so the
 # text after a leading block is not mistaken for the opening of the reply.
@@ -573,8 +575,8 @@ def format_thread_transcript(
     the transcript is longer than ``max_chars`` (keeping the most recent
     context, which is what the agent needs); the cut never leaves part of a
     message at the top, unless that part is all there is. Each message is clipped to
-    :data:`THREAD_HISTORY_MESSAGE_MAX_CHARS` (a code block the clip leaves open
-    is closed), and its continuation lines, after any line break, are
+    :data:`THREAD_HISTORY_MESSAGE_MAX_CHARS`, a code block left open (by the
+    clip or by the message itself) is closed, and its continuation lines, after any line break, are
     indented, so only the first line of a message starts with a speaker name:
     one user cannot forge lines from another speaker, the bot included.
 
@@ -593,9 +595,10 @@ def format_thread_transcript(
             continue
         if len(text) > THREAD_HISTORY_MESSAGE_MAX_CHARS:
             text = text[:THREAD_HISTORY_MESSAGE_MAX_CHARS] + '…'
-            # A cut inside a code block would leave every later line in it.
-            if text.count('```') % 2:
-                text += '\n```'
+        # A block left open (by the clip, or by the message itself) would put
+        # every later line in it.
+        if text.count('```') % 2:
+            text += '\n```'
         # Every line break (``\r``, U+2028 and the rest too), so none of them
         # can start a line that reads as another speaker's.
         lines.append(f'{name}: ' + _TRANSCRIPT_CONTINUATION.join(text.splitlines()))
@@ -747,7 +750,7 @@ def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
     The markers are a configured list (plus the outbound-allowlisted role
     mentions). A marker counts only as a whole word (``ESCALATED`` is not found in ``NOTESCALATED``;
     an edge that is punctuation, as in ``<@&id>``, needs no boundary) and only
-    outside fenced code blocks.
+    outside code (a fenced block or an inline backtick span).
 
     Args:
         text (str): The text to inspect (typically a pipeline answer).
@@ -807,16 +810,18 @@ def looks_like_error(text: str, generic: bool = True) -> bool:
 
 
 def _outside_code_fences(text: str, matches) -> list:
-    """Keep only the regex matches that do not start inside a fenced code block.
+    """Keep only the regex matches that do not start inside code.
+
+    Code is a fenced block or an inline backtick span.
 
     Args:
         text (str): The text the matches were found in.
         matches: The ``re.Match`` objects, in any order.
 
     Returns:
-        list: The matches outside code fences, in their original order.
+        list: The matches outside code, in their original order.
     """
-    fences = [fence.span() for fence in _CODE_FENCE.finditer(text)]
+    fences = [fence.span() for fence in _CODE.finditer(text)]
     return [match for match in matches if not any(start <= match.start() < end for start, end in fences)]
 
 
@@ -882,7 +887,7 @@ def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
     renders as plain text and
     pings nobody. Matching is case-insensitive, and whitespace inside the alias
     matches any run of whitespace so a line break between the words still hits.
-    Only whole-word occurrences outside fenced code blocks are replaced, since
+    Only whole-word occurrences outside code (fenced or inline) are replaced, since
     each replacement garbles the text it hits and sends a real ping.
 
     Args:

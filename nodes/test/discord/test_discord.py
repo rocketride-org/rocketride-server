@@ -539,6 +539,11 @@ class TestThreadTranscript:
         assert transcript.count('```') == 2
         assert transcript.endswith('x…')
 
+    def test_an_unclosed_code_block_in_a_short_message_is_closed(self):
+        # Pre-review of #2547: not only a clip leaves a block open.
+        transcript = format_thread_transcript([('u', '```py\nprint(1)'), ('bob', 'ok')], max_chars=0)
+        assert transcript == 'u: ```py\n  print(1)\n  ```\nbob: ok'
+
     def test_context_framing_and_no_op_without_transcript(self):
         framed = with_thread_context('how do I stop it?', 'ada: how do I start?')
         assert framed == (
@@ -1026,6 +1031,19 @@ class TestAliasAndMarkerBoundaries:
     def test_a_marker_inside_a_code_block_does_not_count(self):
         assert find_marker('The log says:\n```\nESCALATED\n```\nso it was handled.', ['ESCALATED']) is None
         assert find_marker('```\nping <@&77>\n```', ['<@&77>']) is None
+
+    def test_inline_code_is_code_too(self):
+        # Pre-review of #2547: only fenced blocks were skipped.
+        text = 'write `@RocketRide team` in your prompt'
+        assert text_utils.contains_alias(text, '@RocketRide team') is False
+        assert inject_role_mention(text, '@RocketRide team', '<@&77>') == text
+        assert find_marker('the agent prints ``ESCALATED`` when it gives up', ['ESCALATED']) is None
+        assert find_marker('the agent prints `ESCALATED` when it gives up', ['ESCALATED']) is None
+        assert find_marker('copy `<@&77>` to mention the role', ['<@&77>']) is None
+        assert find_marker('`code` then ESCALATED', ['ESCALATED']) == 'ESCALATED'
+        assert inject_role_mention('`x` then ask @RocketRide team', '@RocketRide team', '<@&77>') == (
+            '`x` then ask <@&77>'
+        )
 
     def test_a_marker_inside_a_longer_word_does_not_count(self):
         assert find_marker('NOTESCALATED yet', ['ESCALATED']) is None
