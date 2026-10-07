@@ -2024,6 +2024,50 @@ class TestTeamMentionAlias:
 
         assert first == second == 'Looping in <@&77> now.', 'nothing reached Discord, so the next hand-off still pings'
 
+    @staticmethod
+    def _posted(text):
+        return {'messageIds': ['900'], 'destination': 'reply', 'threadId': None, 'messages': [], 'postedChunks': [text]}
+
+    def test_two_concurrent_hand_offs_from_one_user_ping_once(self):
+        """Both messages are past the cooldown check before either send finishes."""
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+        sent = []
+
+        async def send(message, text, **kwargs):
+            sent.append((text, kwargs['ping_team']))
+            await asyncio.sleep(0.01)
+            return self._posted(text)
+
+        endpoint._send_response = mock.AsyncMock(side_effect=send)
+
+        async def both():
+            await asyncio.gather(
+                endpoint._process_message(self._message_in(1)),
+                endpoint._process_message(self._message_in(2, 3)),
+            )
+
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
+            asyncio.run(both())
+
+        assert sorted(sent) == [('Looping in <@&77> now.', True), ('Looping in @RocketRide team now.', False)]
+
+    def test_a_send_that_raises_releases_the_reservation(self):
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+        endpoint._send_response = mock.AsyncMock(side_effect=[RuntimeError('gateway down'), self._posted('x')])
+
+        first, second = self._ask_twice(endpoint, self._message_in(1), self._message_in(1, 3))
+
+        assert first == second == 'Looping in <@&77> now.', 'the failed send pinged nobody'
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+
+    def test_a_failed_send_leaves_no_reservation_behind(self):
+        endpoint = self._endpoint('Looping in @RocketRide team now.')
+        endpoint._send_response = mock.AsyncMock(return_value={'messageIds': [], 'postedChunks': []})
+
+        asyncio.run(endpoint._process_message(self._message_in(1)))
+
+        assert not endpoint._team_pings
+
     def test_a_chunk_without_the_mention_does_not_start_the_cooldown(self):
         # Only the chunk that carries the mention counts: an earlier chunk
         # that went out before the send failed pinged nobody.

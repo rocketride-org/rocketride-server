@@ -1497,26 +1497,53 @@ class IEndpoint(IEndpointBase):
             del pings[key]
         return author_id is not None and author_id in pings
 
-    def _note_team_ping(self, author_id: Optional[str], outbound: Dict[str, Any]) -> None:
-        """Start a user's team-ping cooldown once a mention actually went out.
+    def _reserve_team_ping(self, author_id: Optional[str], reply: str) -> Optional[float]:
+        """Start a user's team-ping cooldown before the reply that pings goes out.
 
-        Only a posted chunk that carries the team role's mention counts: a send
-        that failed, or stopped before that chunk, pinged nobody.
+        Called with no await since :meth:`_team_ping_on_cooldown`, so a second
+        message from the same user handled meanwhile sees the cooldown and does
+        not ping too. :meth:`_release_team_ping` undoes it when the send pinged
+        nobody.
 
         Args:
             author_id (Optional[str]): The id of the user who asked.
-            outbound (Dict[str, Any]): The result of :meth:`_send_response`.
+            reply (str): The reply about to be sent.
+
+        Returns:
+            Optional[float]: The reservation's timestamp, or None when the
+                reply carries no team mention (or the user is unknown).
+        """
+        mention = self._team_mention()
+        if author_id is None or not mention or mention not in reply:
+            return None
+        if getattr(self, '_team_pings', None) is None:
+            self._team_pings = {}
+        reserved = self._team_pings[author_id] = _monotonic()
+        return reserved
+
+    def _release_team_ping(self, author_id: Optional[str], reserved: Optional[float], outbound: Dict[str, Any]) -> None:
+        """Drop a reservation when no posted chunk carried the team mention.
+
+        A send that failed, or stopped before the chunk with the mention,
+        pinged nobody, so the user may still have the team pinged later.
+
+        Args:
+            author_id (Optional[str]): The id of the user who asked.
+            reserved (Optional[float]): What :meth:`_reserve_team_ping` returned.
+            outbound (Dict[str, Any]): The result of :meth:`_send_response`
+                (empty when it raised).
 
         Returns:
             None
         """
-        mention = self._team_mention()
-        if author_id is None or not mention:
+        if reserved is None:
             return
+        mention = self._team_mention()
         if any(mention in chunk for chunk in outbound.get('postedChunks') or []):
-            if getattr(self, '_team_pings', None) is None:
-                self._team_pings = {}
-            self._team_pings[author_id] = _monotonic()
+            return
+        pings = getattr(self, '_team_pings', None) or {}
+        if pings.get(author_id) == reserved:
+            del pings[author_id]
 
     def _with_team_mention(self, text: str, on_cooldown: bool = False) -> str:
         """Turn the configured team alias in an answer into a real role mention.
@@ -2106,9 +2133,12 @@ class IEndpoint(IEndpointBase):
                 ping_team = not on_cooldown and bool(handoff_part(reply)[1])
 
                 if reply and self._send_responses:
-                    outbound = await self._send_response(message, reply, ping_team=ping_team)
-                    if ping_team:
-                        self._note_team_ping(author_id, outbound)
+                    reserved = self._reserve_team_ping(author_id, reply) if ping_team else None
+                    outbound: Dict[str, Any] = {}
+                    try:
+                        outbound = await self._send_response(message, reply, ping_team=ping_team)
+                    finally:
+                        self._release_team_ping(author_id, reserved, outbound)
                     if getattr(self, '_escalation_pause', False) or getattr(self, '_feedback_reactions', False):
                         await self._after_send(message, reply, outbound)
                     if outbound.get('messageIds'):
