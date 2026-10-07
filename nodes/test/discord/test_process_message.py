@@ -4645,6 +4645,29 @@ class TestPipelineTimeout:
         executor.shutdown.assert_called_once_with(wait=False)
         assert endpoint._pipeline_executor is None
 
+    def test_shutdown_does_not_wait_forever_for_a_hung_handler(self):
+        # A run that never returns (pipelineTimeoutSeconds is off by default)
+        # must not keep shutdown from closing the bot: the wait is bounded and
+        # the handler still running is cancelled.
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._closing = False
+        endpoint._bot = mock.Mock()
+        endpoint._bot.close = mock.AsyncMock()
+        endpoint._bot_task = None
+        endpoint._pipeline_executor = None
+
+        async def scenario():
+            hung = asyncio.ensure_future(asyncio.Event().wait())
+            endpoint._inflight = {hung}
+            with mock.patch.object(_ENDPOINT_MODULE, 'SHUTDOWN_GRACE_SECONDS', 0.05):
+                await asyncio.wait_for(endpoint._shutdown(), timeout=2)
+            return hung
+
+        hung = asyncio.run(scenario())
+
+        assert hung.cancelled()
+        endpoint._bot.close.assert_awaited_once()
+
     def test_services_json_declares_the_field_off(self):
         schema = _load_services_json()
 

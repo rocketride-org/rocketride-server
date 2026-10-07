@@ -132,6 +132,11 @@ def _monotonic() -> float:
 # so runs that hang cannot take the loop's default pool, which event emits use.
 PIPELINE_WORKERS = 8
 
+# How long shutdown waits for message handlers still running. ``_run`` gives
+# the whole shutdown 10 seconds; a handler stuck in a hung run is cancelled
+# after this so the bot is still closed (its worker thread runs on regardless).
+SHUTDOWN_GRACE_SECONDS = 5
+
 
 class PipelineTimeout(Exception):
     """A pipeline run took longer than ``pipelineTimeoutSeconds``."""
@@ -907,8 +912,10 @@ class IEndpoint(IEndpointBase):
     async def _shutdown(self):
         """Gracefully tear down the Gateway client.
 
-        Awaits in-flight message handlers, closes the bot connection, and
-        cancels the background task. Clears the monitor user-info panel.
+        Awaits in-flight message handlers (for at most
+        :data:`SHUTDOWN_GRACE_SECONDS`, then cancels those still running),
+        closes the bot connection, and cancels the background task. Clears the
+        monitor user-info panel.
 
         Returns:
             None
@@ -918,7 +925,12 @@ class IEndpoint(IEndpointBase):
         self._closing = True
 
         if self._inflight:
-            await asyncio.gather(*self._inflight, return_exceptions=True)
+            _, pending = await asyncio.wait(set(self._inflight), timeout=SHUTDOWN_GRACE_SECONDS)
+            for task in pending:
+                task.cancel()
+            if pending:
+                debug(f'Discord _shutdown: cancelled {len(pending)} message handler(s) still running')
+                await asyncio.gather(*pending, return_exceptions=True)
 
         if self._bot is not None:
             try:

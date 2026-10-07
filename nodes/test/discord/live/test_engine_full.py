@@ -543,7 +543,8 @@ def test_f07_require_mention_per_channel(engine, engine_config, driver_bot, bot_
 
 def test_f08_guild_and_channel_filters(engine, engine_config, driver_bot):
     tag = _tag('F08')
-    other_guild = live_ids().get('guildId') or '900000000000000303'
+    # A guild id that does not exist, so the support channel's own guild is never allowlisted.
+    other_guild = '900000000000000303'
     rows = []
     for label, overrides in (
         ('other guild', {'guildIds': [other_guild]}),
