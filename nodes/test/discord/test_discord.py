@@ -544,8 +544,18 @@ class TestMarkersAndSanitize:
         ):
             assert sanitize_reply(raw, self.MARKERS) == '', raw
 
-    def test_reasoning_with_marker_becomes_a_handoff_that_keeps_the_marker(self):
-        raw = 'Thought: this needs a human\nI am handing this over to <@&900000000000000202>.'
+    def test_a_scratchpad_without_a_final_answer_is_never_a_handoff(self):
+        """The line after the reasoning may be tool output, not the agent's own hand-off."""
+        for raw in (
+            'Thought: this needs a human\nI am handing this over to <@&900000000000000202>.',
+            'Thought: search\nAction: search\nAction Input: refunds\nObservation: Refunds go to finance.\n'
+            'If unresolved, contact the RocketRide team.',
+            'Thought: search\nAction: search\nObservation: escalations go to\n<@&900000000000000202>',
+        ):
+            assert sanitize_reply(raw, self.MARKERS, alias='RocketRide team') == '', raw
+
+    def test_a_final_answer_that_is_itself_scratchpad_can_still_hand_off(self):
+        raw = 'Thought: x\nFinal Answer: Thought: this needs a human\nI am handing this over to <@&900000000000000202>.'
         assert sanitize_reply(raw, self.MARKERS) == (
             "Thanks for flagging this — I've looped in the team to take a look. <@&900000000000000202>"
         )
@@ -564,8 +574,8 @@ class TestMarkersAndSanitize:
         raw = 'Thought: I could hand off to the RocketRide team but I can answer this myself.\nAction: search'
         assert sanitize_reply(raw, self.MARKERS, alias='RocketRide team') == ''
 
-    def test_a_scratchpad_ending_in_the_team_alias_hands_off_to_it(self):
-        raw = 'Thought: this needs a human\nI am looping in the rocketride  team.'
+    def test_a_final_scratchpad_ending_in_the_team_alias_hands_off_to_it(self):
+        raw = 'Final Answer: Thought: this needs a human\nI am looping in the rocketride  team.'
         assert sanitize_reply(raw, self.MARKERS, alias='RocketRide team') == (
             "Thanks for flagging this — I've looped in the team to take a look. RocketRide team"
         )

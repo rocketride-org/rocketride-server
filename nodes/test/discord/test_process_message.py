@@ -1576,12 +1576,13 @@ class TestReplyHygiene:
         assert endpoint._send_response.await_count == 0
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
 
-    def test_reasoning_with_a_marker_becomes_a_handoff(self):
+    def test_reasoning_with_a_marker_but_no_final_answer_is_a_non_answer(self):
         endpoint = self._endpoint('Thought: this needs a human\nBringing in <@&77> for this one.')
 
         asyncio.run(endpoint._process_message(_make_message(content='question')))
 
-        assert _sent_reply(endpoint) == ("Thanks for flagging this — I've looped in the team to take a look. <@&77>")
+        assert endpoint._send_response.await_count == 0
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
 
     def test_a_plain_answer_is_posted_unchanged_when_disabled(self):
         endpoint = self._endpoint('  Thought: leaked  ')
@@ -1793,14 +1794,33 @@ class TestTeamMentionAlias:
 
         assert _sent_reply(endpoint) == 'ping <@&77>'
 
-    def test_a_scratchpad_ending_in_the_alias_hands_off_with_a_ping(self):
+    def test_a_scratchpad_final_answer_ending_in_the_alias_hands_off_with_a_ping(self):
         endpoint = self._endpoint(
-            'Thought: this needs a human\nI am bringing in @RocketRide team.', _sanitize_replies=True
+            'Final Answer: Thought: this needs a human\nI am bringing in @RocketRide team.', _sanitize_replies=True
         )
 
         asyncio.run(endpoint._process_message(_make_message(content='question')))
 
         assert _sent_reply(endpoint) == ("Thanks for flagging this — I've looped in the team to take a look. <@&77>")
+
+    def test_tool_output_naming_the_team_is_not_a_handoff(self):
+        """A last line after an Observation is tool output, not the agent handing off."""
+        endpoint = self._endpoint(
+            'Thought: search\nAction: search\nAction Input: refunds\nObservation: Refunds go to finance.\n'
+            'If unresolved, contact the RocketRide team.',
+            _team_mention_alias='RocketRide team',
+            _sanitize_replies=True,
+            _escalation_pause=True,
+            _emit_no_reply=True,
+            _emit_no_reply_event=mock.AsyncMock(),
+        )
+        endpoint._resolved_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert endpoint._send_response.await_count == 0, 'no hand-off line, so nobody is pinged'
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
+        assert endpoint._paused_threads == set()
 
     def test_a_scratchpad_that_only_mentions_the_team_is_not_a_handoff(self):
         """Review of #2547: leaked reasoning naming the team pinged it and paused the thread."""

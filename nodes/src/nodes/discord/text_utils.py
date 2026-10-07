@@ -917,9 +917,12 @@ def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
     - unwrap a ``{"type": "final", "content": "..."}`` envelope;
     - keep only what follows the LAST ``Final Answer:`` (when non-empty);
     - if the result still opens with a reasoning label it is scratchpad, not an
-      answer: when its final line (the last non-empty one, not itself a
-      reasoning line) carries an escalation marker it becomes a short hand-off
-      line that keeps the marker, otherwise it becomes '' so nothing is posted.
+      answer: when it came from a ``Final Answer:`` or envelope and its final
+      line (the last non-empty one, not itself a reasoning line) carries an
+      escalation marker it becomes a short hand-off line that keeps the
+      marker, otherwise it becomes '' so nothing is posted. A scratchpad with
+      no final answer is never a hand-off: its last line may be tool output
+      (an ``Observation:`` that names the team), not the agent handing off.
 
     The team alias is not turned into a role mention here: the caller does that
     on the text it finally posts, so reasoning that names the team never pings.
@@ -932,11 +935,13 @@ def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
     Returns:
         str: The reply to post, or '' when there is no real answer.
     """
-    result, _found = _extract_final(text)
+    result, found = _extract_final(text)
     if not result:
         return result
 
     if _OPENS_WITH_REASONING.match(result):
+        if not found:
+            return ''
         marker = _handoff_marker(result, markers, alias)
         if marker:
             return f"Thanks for flagging this — I've looped in the team to take a look. {marker}"
