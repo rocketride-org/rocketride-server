@@ -1,0 +1,314 @@
+{
+	"title": "Ollama (System One)",
+	"protocol": "decision_ollama://",
+	"classType": [
+		"decision"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.decision_systemone",
+	"prefix": "decision",
+	"description": [
+		"Asks typed questions (yes/no, pick-one, rubric) about each document using a local System One ",
+		"decision model served by Ollama, in one call per document. Answers are attached to the ",
+		"document as metadata.decisions for a Router to branch on; the document passes through unchanged."
+	],
+	"icon": "ollama.svg",
+	"documentation": "https://docs.rocketride.org/nodes/decision_systemone",
+	"tile": [
+		"Model: ${parameters.decision_ollama.profile}"
+	],
+	"lanes": {
+		"documents": [
+			"documents",
+			"answers"
+		]
+	},
+	"preconfig": {
+		"default": "nimble",
+		"profiles": {
+			"nimble": {
+				"title": "Nimble",
+				"model": "nimble",
+				"serverbase": "http://localhost:11434",
+				"timeout": 120,
+				"limits": {
+					"max_options": 26,
+					"max_levels": 26,
+					"max_questions": 64,
+					"max_state_tokens": 32000,
+					"chars_per_token": 4,
+					"max_body_bytes": 65536,
+					"object_criteria": false
+				}
+			},
+			"tev1": {
+				"title": "Tev1",
+				"model": "tev1",
+				"serverbase": "http://localhost:11434",
+				"timeout": 120,
+				"limits": {
+					"max_options": 24,
+					"max_levels": 26,
+					"max_questions": 64,
+					"max_state_tokens": 32000,
+					"chars_per_token": 4,
+					"max_body_bytes": 65536,
+					"object_criteria": false
+				}
+			},
+			"custom": {
+				"title": "Custom",
+				"model": "",
+				"serverbase": "http://localhost:11434",
+				"timeout": 120,
+				"limits": {
+					"max_options": 26,
+					"max_levels": 26,
+					"max_questions": 64,
+					"max_state_tokens": 8000,
+					"chars_per_token": 4,
+					"max_body_bytes": 65536,
+					"object_criteria": false
+				}
+			}
+		}
+	},
+	"fields": {
+		"decision.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Model name as served by the backend"
+		},
+		"decision.serverbase": {
+			"type": "string",
+			"title": "Server URL",
+			"description": "Base URL; /v1/systemone is appended"
+		},
+		"decision.name": {
+			"type": "string",
+			"title": "Name",
+			"description": "Key under metadata.decisions (lowercase, digits, _)"
+		},
+		"decision.question": {
+			"type": "string",
+			"title": "Question",
+			"description": "Phrase it so a high value means yes"
+		},
+		"decision.yes_means": {
+			"type": "string",
+			"title": "Yes means",
+			"optional": true
+		},
+		"decision.no_means": {
+			"type": "string",
+			"title": "No means",
+			"optional": true
+		},
+		"decision.threshold": {
+			"type": "number",
+			"title": "Yes threshold",
+			"default": 0.5,
+			"minimum": 0.01,
+			"maximum": 0.99
+		},
+		"decision.min_confidence": {
+			"type": "number",
+			"title": "Minimum confidence",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 1,
+			"description": "Below this the answer is 'uncertain'. Confidence is not comparable across backends."
+		},
+		"decision.options": {
+			"type": "string",
+			"title": "Options",
+			"ui": {
+				"ui:widget": "textarea"
+			},
+			"description": "One per line: value | optional description"
+		},
+		"decision.levels": {
+			"type": "string",
+			"title": "Levels",
+			"ui": {
+				"ui:widget": "textarea"
+			},
+			"description": "One per line, level 0 first; describe the situation, not a degree"
+		},
+		"decision.yes_no": {
+			"type": "array",
+			"title": "Yes/No questions",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [
+					"decision.name",
+					"decision.question",
+					"decision.yes_means",
+					"decision.no_means",
+					"decision.threshold",
+					"decision.min_confidence"
+				]
+			}
+		},
+		"decision.pick_one": {
+			"type": "array",
+			"title": "Pick-one questions",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [
+					"decision.name",
+					"decision.question",
+					"decision.options",
+					"decision.min_confidence"
+				]
+			}
+		},
+		"decision.rubric": {
+			"type": "array",
+			"title": "Rubric questions",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [
+					"decision.name",
+					"decision.question",
+					"decision.levels",
+					"decision.min_confidence"
+				]
+			}
+		},
+		"decision.state_metadata": {
+			"type": "string",
+			"title": "Metadata to include",
+			"optional": true,
+			"ui": {
+				"ui:widget": "textarea"
+			},
+			"description": "Metadata keys (one per line) sent alongside the content, e.g. parent"
+		},
+		"decision.on_error": {
+			"type": "string",
+			"title": "On error",
+			"default": "fail",
+			"enum": [
+				[
+					"fail",
+					"Fail the object"
+				],
+				[
+					"pass_through",
+					"Pass through with answer 'error'"
+				]
+			]
+		},
+		"decision_ollama.custom": {
+			"object": "custom",
+			"properties": [
+				"decision.model",
+				"decision.serverbase"
+			]
+		},
+		"decision_ollama.nimble": {
+			"object": "nimble",
+			"properties": [
+				"decision.serverbase"
+			]
+		},
+		"decision_ollama.tev1": {
+			"object": "tev1",
+			"properties": [
+				"decision.serverbase"
+			]
+		},
+		"decision_ollama.profile": {
+			"title": "Model",
+			"type": "string",
+			"default": "nimble",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"decision_ollama.custom"
+					]
+				},
+				{
+					"value": "nimble",
+					"properties": [
+						"decision_ollama.nimble"
+					]
+				},
+				{
+					"value": "tev1",
+					"properties": [
+						"decision_ollama.tev1"
+					]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "System One (Ollama)",
+			"properties": [
+				"decision_ollama.profile",
+				"decision.yes_no",
+				"decision.pick_one",
+				"decision.rubric",
+				"decision.state_metadata",
+				"decision.on_error"
+			]
+		}
+	],
+	"test": [
+		{
+			"requires": [
+				"ROCKETRIDE_SYSTEMONE_OLLAMA"
+			],
+			"avoidMocks": true,
+			"chain": [
+				"preprocessor_langchain",
+				"*"
+			],
+			"profiles": [
+				"nimble"
+			],
+			"config": {
+				"yes_no": [
+					{
+						"name": "urgent",
+						"question": "Does this need attention right away?"
+					}
+				],
+				"pick_one": [
+					{
+						"name": "team",
+						"question": "Which team should handle this?",
+						"options": "billing | Payments\nbug | Software errors\naccount"
+					}
+				]
+			},
+			"outputs": [
+				"answers"
+			],
+			"cases": [
+				{
+					"name": "Nimble classifies a ticket",
+					"text": "Our checkout has returned 500 errors since 9am.",
+					"expect": {
+						"answers": {
+							"contains": "decisions"
+						}
+					}
+				}
+			]
+		}
+	]
+}
