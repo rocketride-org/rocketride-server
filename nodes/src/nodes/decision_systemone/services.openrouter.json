@@ -1,0 +1,272 @@
+{
+	"title": "OpenRouter (System One)",
+	"protocol": "decision_openrouter://",
+	"classType": [
+		"decision"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.decision_systemone",
+	"prefix": "decision",
+	"description": [
+		"Asks typed questions (yes/no, pick-one, rubric) about each document using a System One model ",
+		"such as Jev served through OpenRouter, in one call per document. Answers are attached to the ",
+		"document as metadata.decisions for a Router to branch on; the document passes through unchanged."
+	],
+	"icon": "openrouter.svg",
+	"documentation": "https://docs.rocketride.org/nodes/decision_systemone",
+	"tile": [
+		"Model: ${parameters.decision_openrouter.profile}"
+	],
+	"lanes": {
+		"documents": [
+			"documents",
+			"answers"
+		]
+	},
+	"preconfig": {
+		"default": "jev-latest",
+		"profiles": {
+			"jev-latest": {
+				"title": "Jev (latest)",
+				"model": "~typesafe/jev-latest",
+				"serverbase": "https://openrouter.ai/api",
+				"apikey": "",
+				"limits": {
+					"max_options": 255,
+					"max_levels": 10,
+					"max_questions": 64,
+					"max_state_tokens": 32000,
+					"chars_per_token": 6,
+					"object_criteria": true
+				}
+			},
+			"jev-1-13": {
+				"title": "Jev 1.13",
+				"model": "typesafe/jev-1.13",
+				"serverbase": "https://openrouter.ai/api",
+				"apikey": "",
+				"limits": {
+					"max_options": 255,
+					"max_levels": 10,
+					"max_questions": 64,
+					"max_state_tokens": 32000,
+					"chars_per_token": 6,
+					"object_criteria": true
+				}
+			},
+			"custom": {
+				"title": "Custom",
+				"model": "",
+				"serverbase": "https://openrouter.ai/api",
+				"apikey": "",
+				"limits": {
+					"max_options": 255,
+					"max_levels": 10,
+					"max_questions": 64,
+					"max_state_tokens": 32000,
+					"chars_per_token": 6,
+					"object_criteria": true
+				}
+			}
+		}
+	},
+	"fields": {
+		"decision.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Model name as served by the backend"
+		},
+		"decision.serverbase": {
+			"type": "string",
+			"title": "Server URL",
+			"description": "Base URL; /v1/systemone is appended"
+		},
+		"decision.name": {
+			"type": "string",
+			"title": "Name",
+			"description": "Key under metadata.decisions (lowercase, digits, _)"
+		},
+		"decision.question": {
+			"type": "string",
+			"title": "Question",
+			"description": "Phrase it so a high value means yes"
+		},
+		"decision.yes_means": {
+			"type": "string",
+			"title": "Yes means",
+			"optional": true
+		},
+		"decision.no_means": {
+			"type": "string",
+			"title": "No means",
+			"optional": true
+		},
+		"decision.threshold": {
+			"type": "number",
+			"title": "Yes threshold",
+			"default": 0.5,
+			"minimum": 0.01,
+			"maximum": 0.99
+		},
+		"decision.min_confidence": {
+			"type": "number",
+			"title": "Minimum confidence",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 1,
+			"description": "Below this the answer is 'uncertain'. Confidence is not comparable across backends."
+		},
+		"decision.options": {
+			"type": "string",
+			"title": "Options",
+			"ui": {
+				"ui:widget": "textarea"
+			},
+			"description": "One per line: value | optional description"
+		},
+		"decision.levels": {
+			"type": "string",
+			"title": "Levels",
+			"ui": {
+				"ui:widget": "textarea"
+			},
+			"description": "One per line, level 0 first; describe the situation, not a degree"
+		},
+		"decision.yes_no": {
+			"type": "array",
+			"title": "Yes/No questions",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [
+					"decision.name",
+					"decision.question",
+					"decision.yes_means",
+					"decision.no_means",
+					"decision.threshold",
+					"decision.min_confidence"
+				]
+			}
+		},
+		"decision.pick_one": {
+			"type": "array",
+			"title": "Pick-one questions",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [
+					"decision.name",
+					"decision.question",
+					"decision.options",
+					"decision.min_confidence"
+				]
+			}
+		},
+		"decision.rubric": {
+			"type": "array",
+			"title": "Rubric questions",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [
+					"decision.name",
+					"decision.question",
+					"decision.levels",
+					"decision.min_confidence"
+				]
+			}
+		},
+		"decision.state_metadata": {
+			"type": "string",
+			"title": "Metadata to include",
+			"optional": true,
+			"ui": {
+				"ui:widget": "textarea"
+			},
+			"description": "Metadata keys (one per line) sent alongside the content, e.g. parent"
+		},
+		"decision.on_error": {
+			"type": "string",
+			"title": "On error",
+			"default": "fail",
+			"enum": [
+				[
+					"fail",
+					"Fail the object"
+				],
+				[
+					"pass_through",
+					"Pass through with answer 'error'"
+				]
+			]
+		},
+		"decision.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"decision_openrouter.jev-latest": {
+			"object": "jev-latest",
+			"properties": []
+		},
+		"decision_openrouter.jev-1-13": {
+			"object": "jev-1-13",
+			"properties": []
+		},
+		"decision_openrouter.custom": {
+			"object": "custom",
+			"properties": [
+				"decision.model"
+			]
+		},
+		"decision_openrouter.profile": {
+			"title": "Model",
+			"type": "string",
+			"default": "jev-latest",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "jev-latest",
+					"properties": [
+						"decision_openrouter.jev-latest"
+					]
+				},
+				{
+					"value": "jev-1-13",
+					"properties": [
+						"decision_openrouter.jev-1-13"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"decision_openrouter.custom"
+					]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "System One (OpenRouter)",
+			"properties": [
+				"decision.apikey",
+				"decision_openrouter.profile",
+				"decision.yes_no",
+				"decision.pick_one",
+				"decision.rubric",
+				"decision.state_metadata",
+				"decision.on_error"
+			]
+		}
+	]
+}
