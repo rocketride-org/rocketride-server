@@ -566,9 +566,16 @@ class CaptureWriter:
         self._disabled = False
         self._failures = 0
         self._dropped = 0
+        self._unwritten = 0
         self._dropped_lock = threading.Lock()
+        # Held across submit()'s running check and its put, and while stop()
+        # closes the writer: no row can then land in the queue behind the stop
+        # marker, where the worker would never read it.
+        self._submit_lock = threading.Lock()
+        self._closed = False
         self._last_failure_warn = 0.0
         self._last_drop_warn = 0.0
+        self._last_late_warn = 0.0
 
         # Refused here rather than at the first write: a name that cannot be
         # substituted into the DDL can never work, so there is nothing to
@@ -596,6 +603,11 @@ class CaptureWriter:
         return self._dropped
 
     @property
+    def unwritten(self) -> int:
+        """Rows submitted after stop(), or still queued when a busy writer was stopped."""
+        return self._unwritten
+
+    @property
     def failures(self) -> int:
         """Consecutive failed writes; reset by the next success."""
         return self._failures
@@ -610,8 +622,11 @@ class CaptureWriter:
             return
         # Daemon: a capture write stuck on an unresponsive database must never
         # be what keeps the node subprocess alive after the engine stops it.
-        self._thread = threading.Thread(target=self._run, name='discord-capture', daemon=True)
-        self._thread.start()
+        thread = threading.Thread(target=self._run, name='discord-capture', daemon=True)
+        with self._submit_lock:
+            self._closed = False
+            self._thread = thread
+        thread.start()
 
     def stop(self, timeout: float = 2.0) -> None:
         """Drain what is queued, then stop the worker. Safe to call twice.
@@ -622,12 +637,15 @@ class CaptureWriter:
         reports exactly how many. The thread is a daemon, so a call that never
         returns cannot keep the process alive either.
         """
-        thread = self._thread
-        if thread is None:
-            return
-        # Cleared first so anything still handling a Discord event stops
-        # queueing rows the worker is no longer going to read.
-        self._thread = None
+        with self._submit_lock:
+            thread = self._thread
+            if thread is None:
+                return
+            # Closed before the stop marker is queued, under the lock submit()
+            # holds while it queues: every row is then either ahead of the
+            # marker, so drained, or refused and counted by submit().
+            self._thread = None
+            self._closed = True
         try:
             self._queue.put(_STOP, timeout=max(0.0, timeout))
         except queue.Full:
@@ -644,12 +662,34 @@ class CaptureWriter:
             )
 
     def submit(self, row: Dict[str, Any]) -> None:
-        """Queue one row. Never blocks, never raises."""
-        if self._disabled or self._thread is None:
+        """Queue one row. Never blocks, never raises.
+
+        A row submitted after :meth:`stop` -- by a handler that took the
+        writer just before Stop -- is not written; it is counted in
+        :attr:`unwritten` and reported, never lost silently.
+        """
+        if self._disabled:
             return
-        try:
-            self._queue.put_nowait(row)
-        except queue.Full:
+        with self._submit_lock:
+            if self._thread is None:
+                if not self._closed:
+                    return  # never started
+                late = True
+            else:
+                try:
+                    self._queue.put_nowait(row)
+                    return
+                except queue.Full:
+                    late = False
+        if late:
+            with self._dropped_lock:
+                self._unwritten += 1
+                unwritten = self._unwritten
+            self._warn_throttled(
+                '_last_late_warn',
+                f'Discord capture: {unwritten} event(s) arrived after capture stopped and were not written.',
+            )
+        else:
             # The NEW row is what goes, not the oldest: the queue is ordered,
             # and dropping from the front would keep a reply whose question
             # was discarded.
@@ -693,6 +733,8 @@ class CaptureWriter:
                 break
             if row is not _STOP:
                 unwritten += 1
+        with self._dropped_lock:
+            self._unwritten += unwritten
         self._warn(f'Discord capture: stopped with {unwritten} row(s) unwritten (the writer was still busy)')
 
     def _write_one(self, row: Dict[str, Any]) -> None:

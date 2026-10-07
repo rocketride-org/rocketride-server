@@ -1223,6 +1223,51 @@ class TestWriterThread:
         assert writer.failures >= 1
         assert warnings
 
+    def test_a_row_submitted_after_stop_is_counted_not_lost(self):
+        """A handler that took the writer just before Stop can still submit to it."""
+        pipe = _FakePipe()
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+        writer.start()
+        writer.stop(timeout=5.0)
+
+        writer.submit(_row())
+        writer.submit(_row())
+
+        assert pipe.calls == []
+        assert writer.unwritten == 2
+        assert warnings == ['Discord capture: 1 event(s) arrived after capture stopped and were not written.']
+
+    def test_submit_before_start_is_not_counted(self):
+        writer = _writer(_FakeTarget(_FakePipe()), [])
+        writer.submit(_row())
+        assert writer.unwritten == 0
+
+    def test_every_row_submitted_around_stop_is_written_or_counted(self):
+        """Rows racing the stop marker are never left silently behind it in the queue."""
+        pipe = _FakePipe()
+        writer = _writer(_FakeTarget(pipe), [])
+        writer.start()
+        threads_count, per_thread = 8, 100
+        barrier = threading.Barrier(threads_count + 1)
+
+        def submit_many():
+            barrier.wait()
+            for _ in range(per_thread):
+                writer.submit(_row())
+
+        threads = [threading.Thread(target=submit_many) for _ in range(threads_count)]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        writer.stop(timeout=5.0)
+        for thread in threads:
+            thread.join(5)
+
+        inserted = sum(1 for call in pipe.calls if 'INSERT INTO' in call[2]['sql'])
+        assert inserted + writer.dropped + writer.unwritten == threads_count * per_thread
+        assert writer._queue.empty()
+
     def test_an_invalid_table_name_disables_capture_before_anything_starts(self):
         target = _FakeTarget(_FakePipe())
         warnings = []
