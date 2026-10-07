@@ -111,15 +111,19 @@ MAX_THREAD_HISTORY_MAX_CHARS = 20000
 # bounded so a long-running bot does not grow it forever.
 HANDLED_MESSAGE_IDS_LIMIT = 1000
 
-# At most one injected team-role ping per conversation (a thread, or a
-# channel outside threads) in this many seconds. Any user who gets the model to
-# write the alias makes the bot ping the role, so repeats within the window
-# are posted with the alias as plain text. In memory only: a restart forgets it.
+# At most one team-role ping per user (the message author) in this many
+# seconds. Any user who gets the model to write the alias makes the bot ping
+# the role, so repeats within the window are posted with the alias as plain
+# text and the send withholds the role. In memory only: a restart forgets it.
 TEAM_PING_COOLDOWN_SECONDS = 3600
 
 
 def _monotonic() -> float:
-    """``time.monotonic``, behind a name tests can patch without touching asyncio's clock."""
+    """``time.monotonic``, behind a name tests can patch without touching asyncio's clock.
+
+    Returns:
+        float: The monotonic clock, in seconds.
+    """
     return time.monotonic()
 
 
@@ -812,6 +816,11 @@ class IEndpoint(IEndpointBase):
 
         @self._bot.event
         async def on_ready():
+            """Report the connected bot in the task's monitor once Discord is ready.
+
+            Returns:
+                None
+            """
             info = {
                 'url-text': 'Discord Bot',
                 'url-link': 'https://discord.com/',
@@ -1053,7 +1062,14 @@ class IEndpoint(IEndpointBase):
         return entry[0]
 
     def _release_thread_lock(self, thread_id: str):
-        """Give back a borrowed lock, forgetting the thread once it is idle."""
+        """Give back a borrowed lock, forgetting the thread once it is idle.
+
+        Args:
+            thread_id (str): The thread whose lock was borrowed.
+
+        Returns:
+            None
+        """
         locks = getattr(self, '_thread_locks', None) or {}
         entry = locks.get(thread_id)
         if entry is None:
@@ -1101,6 +1117,9 @@ class IEndpoint(IEndpointBase):
         Skipped while ``sendResponses`` is off: with nothing posted, no answer
         can be seen in the history, so every restart would replay (and emit
         events for) every message in the window again.
+
+        Returns:
+            None
         """
         if not getattr(self, '_send_responses', True):
             debug('Discord backfill: skipped while sendResponses is off')
@@ -1434,7 +1453,12 @@ class IEndpoint(IEndpointBase):
         return markers
 
     def _handoff_alias(self) -> str:
-        """The team alias, when there is a role to turn it into (else '')."""
+        """The team alias, when there is a role to turn it into.
+
+        Returns:
+            str: ``teamMentionAlias`` when it and an allowed role id are both
+                configured, else ''.
+        """
         alias = getattr(self, '_team_mention_alias', '')
         role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
         return alias if alias and role_ids else ''
@@ -1528,11 +1552,26 @@ class IEndpoint(IEndpointBase):
 
         It carries an escalation marker, or the team alias left as plain text
         because the ping was on cooldown: the hand-off is just as real.
+
+        Args:
+            text (str): The posted answer (or a bot message from the thread's
+                history, when the pause is rebuilt).
+
+        Returns:
+            bool: True when the text hands the conversation over.
         """
         return bool(find_marker(text, self._effective_markers())) or contains_alias(text, self._handoff_alias())
 
     def _is_bot_mentioned(self, message: discord.Message) -> bool:
-        """True when this bot is directly @mentioned (never @everyone/@here)."""
+        """Whether this bot is directly @mentioned (never @everyone/@here).
+
+        Args:
+            message (discord.Message): The incoming message.
+
+        Returns:
+            bool: True when the bot is in ``message.mentions``, which includes
+                the replied-to author of a Reply with its ping on.
+        """
         bot_user = getattr(getattr(self, '_bot', None), 'user', None)
         if bot_user is None:
             return False
@@ -1549,6 +1588,12 @@ class IEndpoint(IEndpointBase):
         to one of the bot's messages would count as a mention. Resuming a paused
         thread needs somebody to actually ask the bot back in, so it reads
         ``raw_mentions`` (the ids discord.py parses from the content) instead.
+
+        Args:
+            message (discord.Message): The incoming message.
+
+        Returns:
+            bool: True when the bot's id is in ``message.raw_mentions``.
         """
         bot_user_id = getattr(getattr(getattr(self, '_bot', None), 'user', None), 'id', None)
         if bot_user_id is None:
@@ -1776,7 +1821,15 @@ class IEndpoint(IEndpointBase):
         )
 
     async def _react(self, message: discord.Message, emoji: str) -> bool:
-        """Add one reaction, best-effort (needs the Add Reactions permission)."""
+        """Add one reaction, best-effort (needs the Add Reactions permission).
+
+        Args:
+            message (discord.Message): The message to react to.
+            emoji (str): The emoji to add.
+
+        Returns:
+            bool: True when the reaction was added; a failure is logged.
+        """
         try:
             await message.add_reaction(emoji)
             return True
@@ -2364,6 +2417,14 @@ class IEndpoint(IEndpointBase):
         The run itself cannot be cancelled (it is a worker thread): on timeout
         it keeps its worker until it finishes in the background, returns its
         pipe, and its answer is dropped because nothing awaits it any more.
+
+        Args:
+            coro_factory (Callable[[], Awaitable[Any]]): Zero-arg callable
+                returning the awaitable that runs the pipeline; it is called
+                exactly once.
+
+        Returns:
+            Any: What the awaitable returned.
 
         Raises:
             PipelineTimeout: The run did not answer within the limit.
@@ -2955,6 +3016,8 @@ class IEndpoint(IEndpointBase):
                 to skip.
             destinations (Optional[List[str]]): Collects the destination of
                 every chunk; None to skip.
+            sent_messages (Optional[List[Any]]): Collects the posted message
+                objects; None to skip.
 
         Returns:
             None

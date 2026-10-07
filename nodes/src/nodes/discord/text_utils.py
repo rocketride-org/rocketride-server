@@ -782,7 +782,15 @@ def looks_like_error(text: str, generic: bool = True) -> bool:
 
 
 def _outside_code_fences(text: str, matches) -> list:
-    """Keep only the regex matches that do not start inside a fenced code block."""
+    """Keep only the regex matches that do not start inside a fenced code block.
+
+    Args:
+        text (str): The text the matches were found in.
+        matches: The ``re.Match`` objects, in any order.
+
+    Returns:
+        list: The matches outside code fences, in their original order.
+    """
     fences = [fence.span() for fence in _CODE_FENCE.finditer(text)]
     return [match for match in matches if not any(start <= match.start() < end for start, end in fences)]
 
@@ -794,6 +802,13 @@ def _alias_pattern(alias: str) -> Optional['re.Pattern']:
     whitespace, so a line break between the words still hits. Only a whole
     word counts: not inside a longer word (``Support`` in ``supportive``) or a
     URL path (``/support/``).
+
+    Args:
+        alias (str): The configured team alias.
+
+    Returns:
+        Optional[re.Pattern]: The compiled pattern, or None when the alias is
+            empty or only whitespace.
     """
     tokens = [re.escape(token) for token in (alias or '').split()]
     if not tokens:
