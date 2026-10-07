@@ -28,9 +28,10 @@ The single cloud profile provides a table, cosine similarity, a score threshold,
 and HNSW index defaults. RocketRide provisions a per-tenant database for its
 managed database nodes, and this node resolves it from the signed-in RocketRide
 identity instead of a host, user, password, or database name you enter. On a
-server without a RocketRide cloud database (a local engine, or a self-hosted
+server without a RocketRide cloud database (for example, a local or self-hosted
 engine with no database broker) the task fails at start with a message that
-says so; use a connection-configured node such as store_postgres there. Bind an
+says so; use PostgreSQL (pgvector), provider `postgres`, with your own connection
+settings there. Bind an
 embedding module for semantic search; the embedding dimension is taken from the
 first stored document rather than from a configuration field.
 

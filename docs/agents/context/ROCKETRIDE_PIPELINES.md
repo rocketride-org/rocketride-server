@@ -665,9 +665,10 @@ All three share the shape: `questions` in; `table`, `text`, `answers` out; an `l
 connection is REQUIRED (it crafts Cypher from the question). Config is profile-based —
 `graph_falkordb` profile `default` takes `host`, `port`, `graph`, and a `db_description`
 (describe the schema so the LLM writes good Cypher); `graph_neo4j` defaults
-`database: "neo4j"`; `rocketride_graph` (built-in, RocketRide Cloud only) needs no external
-server. Their classType also includes `tool`, so an agent can control a graph store as a tool
-instead.
+`database: "neo4j"`; `rocketride_graph` requires a configured RocketRide database broker,
+available on RocketRide Cloud or a self-hosted engine configured with that broker. It takes
+no database connection settings in the pipeline. Their classType also includes `tool`, so
+an agent can control a graph store as a tool instead.
 
 ### Pattern 15: Memory options
 
@@ -1021,8 +1022,12 @@ inventories, transactions → relational (give the LLM a good `db_description`).
 relationships → graph — noting the graph nodes only QUERY a graph; to build one from text,
 use `tool_cognee` (Pattern 22). The families compose: an agent can control any of these as
 tools, so RAG plus a `db_postgres` tool on one agent is a common shape. The built-in
-`rocketride_*` variants need no external server — the fastest prototypes before pointing the
-same wiring at production infrastructure.
+`rocketride_sql`, `rocketride_vector` and `rocketride_graph` variants require a configured
+RocketRide database broker, on RocketRide Cloud or a self-hosted engine configured with
+that broker. They take no database connection settings in the pipeline; being built in
+does not make a database available on an unconfigured local engine. For your own database,
+use `db_postgres` for SQL, PostgreSQL (pgvector), provider `postgres`, for vectors, or
+`graph_neo4j` / `graph_falkordb` for graphs.
 
 ---
 

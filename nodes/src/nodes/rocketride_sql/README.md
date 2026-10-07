@@ -160,8 +160,8 @@ LLM-generated, safety-checked SELECT statements.
 This node is marked noremote and depends on a signed-in RocketRide identity to
 resolve the per-tenant DSN. It cannot start where that cloud identity is not
 available; DSN resolution is deliberately not replaced by host or credential
-fields. On a server without a RocketRide cloud database (a local engine, or a
-self-hosted engine with no database broker) the task fails at start with a
+fields. On a server without a RocketRide cloud database (for example, a local
+or self-hosted engine with no database broker) the task fails at start with a
 message that says so; use a connection-configured node such as db_postgres
 there. LLM-generated queries are limited to the safe SQL path, while raw SQL
 is unavailable until direct execution is explicitly enabled.

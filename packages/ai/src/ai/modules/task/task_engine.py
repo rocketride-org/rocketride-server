@@ -702,7 +702,8 @@ class Task(DAPBase):
         'The rocketride_sql, rocketride_vector and rocketride_graph nodes need a server with a '
         'RocketRide cloud database (RocketRide Cloud, or a self-hosted engine with a database '
         'broker); on this server use a node with its own connection settings instead '
-        '(db_postgres, store_postgres, graph_neo4j)'
+        '(db_postgres for SQL, PostgreSQL (pgvector) with provider postgres for vectors, '
+        'graph_neo4j for graphs)'
     )
 
     def _pipeline_uses_rocketride_db(self) -> bool:
