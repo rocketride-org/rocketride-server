@@ -552,6 +552,15 @@ class TestThreadTranscript:
         )
         assert with_thread_context('plain question', '') == 'plain question'
 
+    def test_context_framing_for_a_message_with_no_text(self):
+        # A follow-up that is only an attachment still gets the thread's history.
+        framed = with_thread_context('', 'ada: please send the log')
+        assert framed == (
+            "User's latest message: (no text; see the attached files below)\n\n"
+            'Earlier in this thread (oldest first, for context):\nada: please send the log'
+        )
+        assert with_thread_context('', '') == ''
+
 
 class TestMarkersAndSanitize:
     """Escalation-marker detection and the reply sanitizer."""

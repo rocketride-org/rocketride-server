@@ -619,10 +619,12 @@ def with_thread_context(content: str, transcript: str) -> str:
     """Frame the latest message plus its thread transcript for the pipeline.
 
     Returns ``content`` unchanged when there is no transcript, so a brand-new
-    thread is a no-op.
+    thread is a no-op. A message with no text of its own (only attachments,
+    folded in after this framing) is named as such, so the model still reads
+    the history it follows on from.
 
     Args:
-        content (str): The user's latest message text.
+        content (str): The user's latest message text (may be empty).
         transcript (str): The formatted transcript (see
             :func:`format_thread_transcript`).
 
@@ -631,7 +633,8 @@ def with_thread_context(content: str, transcript: str) -> str:
     """
     if not transcript:
         return content
-    return f"User's latest message: {content}\n\nEarlier in this thread (oldest first, for context):\n{transcript}"
+    latest = content or '(no text; see the attached files below)'
+    return f"User's latest message: {latest}\n\nEarlier in this thread (oldest first, for context):\n{transcript}"
 
 
 def attachment_kind(mime_type: str) -> str:

@@ -2377,11 +2377,10 @@ class IEndpoint(IEndpointBase):
             return first_answer
 
         text_meta = dict(metadata, groupIndex=0, groupSize=group_size)
-        # Thread context is carried exactly as it is without attachments: only
-        # a message the user actually typed gets the transcript framing.
-        transcript = (
-            await self._thread_transcript(message) if question and isinstance(message.channel, discord.Thread) else ''
-        )
+        # In a thread the merged question carries the earlier conversation too,
+        # also when the message is only attachments (the log the bot asked for).
+        transcript = await self._thread_transcript(message) if isinstance(message.channel, discord.Thread) else ''
+
         pipeline_text = compose_merged_question(with_thread_context(question, transcript), blocks)
         text_reply = await self._run_with_optional_typing(
             message,

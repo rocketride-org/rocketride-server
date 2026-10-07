@@ -604,6 +604,24 @@ class TestAttachmentMerge:
         assert kwargs['sse_text'] == 'and this file?'  # SSE keeps the user's own words
         assert kwargs['context_chars'] == len(text) - len('and this file?')
 
+    def test_thread_context_reaches_an_attachment_only_follow_up(self):
+        # CodeRabbit on #2547: a thread follow-up that is only a file (the log
+        # the bot asked for) was answered without the thread's history.
+        endpoint = self._endpoint()
+        endpoint._thread_history_limit = 25
+        endpoint._bot.user.display_name = 'Support Bot'
+        thread = _FakeThread(321, [_FakeHistoryMessage(1, 'please send the log', 7, author_name='ada')])
+        message = self._message('', _attachment('run.log', b'boom'))
+        message.channel = thread
+        message.id = 556
+
+        asyncio.run(endpoint._process_message(message))
+
+        text, _meta = self._text_call(endpoint)
+        assert text.startswith("User's latest message: (no text; see the attached files below)\n\n")
+        assert 'Earlier in this thread (oldest first, for context):\nada: please send the log' in text
+        assert 'attached file "run.log"' in text
+
     def test_merge_off_keeps_one_object_per_attachment(self):
         endpoint = self._endpoint(merge=False)
         endpoint._run_text_pipeline = mock.Mock(side_effect=['first', 'second'])
