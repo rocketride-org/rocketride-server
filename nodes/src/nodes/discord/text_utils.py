@@ -27,6 +27,8 @@ These functions have no discord.py dependency so they can be unit-tested
 directly without a Gateway connection or the discord.py package installed.
 """
 
+import codecs
+import mimetypes
 import re
 from typing import List, Optional, Sequence
 
@@ -39,8 +41,7 @@ _CHUNK_LABEL_OVERHEAD = len('\n\n*(/)*')
 _ATTACHMENT_TRUNCATION_SUFFIX = '\n… (truncated)'
 
 # Framing for a message that carries only files. Without it the pipeline gets a
-# bare document and no task, and answers generically (the support bot's
-# ``collectParts`` adds the same line).
+# bare document and no task, and answers generically.
 NO_MESSAGE_FRAMING = (
     'The user shared the following file(s) with no message. '
     'Explain what each file is and what it does, and help them with it.'
@@ -55,19 +56,57 @@ _EXT_TO_MIME = {
     '.mp3': 'audio/mpeg',
     '.wav': 'audio/wav',
     '.ogg': 'audio/ogg',
+    # Common on Discord, but only some hosts' MIME tables know them.
+    '.m4a': 'audio/mp4',
+    '.flac': 'audio/flac',
+    '.opus': 'audio/opus',
+    '.aac': 'audio/aac',
     '.mp4': 'video/mp4',
     '.webm': 'video/webm',
     '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska',
     '.pdf': 'application/pdf',
     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.zip': 'application/zip',
 }
 
+# Python's built-in MIME table only. The module-level ``mimetypes.guess_type``
+# also reads the Windows registry and /etc/mime.types, so the same file routed
+# differently per host (on Windows .csv is application/vnd.ms-excel and .ts
+# video/vnd.dlna.mpeg-tts). A fresh ``MimeTypes()`` is filled from the built-in
+# defaults alone; the system files go into the module's own global table.
+_BUILTIN_MIME_TYPES = mimetypes.MimeTypes()
+
 
 def _hard_split(text: str, max_length: int) -> List[str]:
     """Split text into fixed-size pieces, each at most ``max_length`` chars."""
     return [text[i : i + max_length] for i in range(0, len(text), max_length)]
+
+
+def _split_long_line(text: str, max_length: int) -> List[str]:
+    """Split one line with no fence into pieces of at most ``max_length`` chars.
+
+    Each cut falls after the last sentence end, else the last whitespace, in
+    the second half of the window (see :func:`_prose_boundary`), and at the
+    exact character count only when there is neither.
+
+    Args:
+        text (str): The line, longer than ``max_length``.
+        max_length (int): The maximum piece length; must be positive.
+
+    Returns:
+        List[str]: The pieces in order; joined they give ``text`` back.
+    """
+    pieces: List[str] = []
+    position = 0
+    while len(text) - position > max_length:
+        end = position + max_length
+        cut = _prose_boundary(text, position + max_length // 2, end, False, '', position)
+        pieces.append(text[position:cut])
+        position = cut
+    pieces.append(text[position:])
+    return pieces
 
 
 def _chunk_label(index: int, total: int) -> str:
@@ -83,9 +122,16 @@ def _label_width(total: int) -> int:
 def _numbered_chunks(text: str, max_length: int) -> List[str]:
     """Split ``text`` and end each chunk with ``*(i/n)*``, label included in the cap.
 
-    Mirrors the support bot's ``chunk``: a reply that needs more than one
+    A reply that needs more than one
     Discord message says which message this is, and the label is paid for by
     the split rather than added on top of a chunk that already fills the limit.
+
+    Args:
+        text (str): The reply text.
+        max_length (int): The per-message limit, label included.
+
+    Returns:
+        List[str]: The chunks; labelled only when there is more than one.
     """
     chunks = chunk_message(text, max_length)
     if len(chunks) < 2:
@@ -118,9 +164,10 @@ def chunk_message(text: str, max_length: int = DISCORD_MESSAGE_CHAR_LIMIT, numbe
     """Split text into chunks that each fit within Discord's per-message limit.
 
     Splits on newline boundaries first, then on sentence boundaries for any
-    line that still exceeds the limit, and finally hard-splits any single
-    token/sentence that is itself longer than ``max_length`` (e.g. a long URL
-    with no whitespace). Every returned chunk is guaranteed to be at most
+    line that still exceeds the limit. A single sentence that is itself longer
+    than ``max_length`` is cut at a sentence end or whitespace in the second
+    half of each window, and by character count only when there is neither
+    (e.g. a long URL). Every returned chunk is guaranteed to be at most
     ``max_length`` characters.
 
     Args:
@@ -130,8 +177,11 @@ def chunk_message(text: str, max_length: int = DISCORD_MESSAGE_CHAR_LIMIT, numbe
             more than one message. A single chunk is never labeled.
 
     Returns:
-        List[str]: Non-empty chunks, each at most ``max_length`` characters.
+        List[str]: Non-empty chunks, each at most ``max_length`` characters;
+            empty when ``max_length`` is zero or less.
     """
+    if max_length <= 0:
+        return []
     if number:
         return _numbered_chunks(text, max_length)
 
@@ -164,11 +214,12 @@ def chunk_message(text: str, max_length: int = DISCORD_MESSAGE_CHAR_LIMIT, numbe
         sentence = ''
         for part in re.split(r'(?<=[.!?])\s+', line):
             if len(part) > max_length:
-                # A single sentence/token exceeds the limit — flush and hard-split.
+                # A single sentence/token exceeds the limit — flush and split
+                # at whitespace, or by character count when there is none.
                 if sentence:
                     chunks.append(sentence.rstrip())
                     sentence = ''
-                chunks.extend(_hard_split(part, max_length))
+                chunks.extend(piece.rstrip() for piece in _split_long_line(part, max_length))
             elif len(sentence) + len(part) + 1 <= max_length:
                 sentence += part + ' '
             else:
@@ -199,6 +250,42 @@ def _fence_state(fragment: str, is_open: bool, language: str) -> tuple:
     return is_open, language
 
 
+def _opener_offset(fragment: str, is_open: bool) -> int:
+    """Where in ``fragment`` the code block still open at its end was opened.
+
+    Args:
+        fragment (str): The text to scan, from the start of a chunk.
+        is_open (bool): Whether a fence is open at the start of ``fragment``.
+
+    Returns:
+        int: The offset of that block's opening backticks; -1 when no block is
+            open at the end, or the open one began before ``fragment``.
+    """
+    opener = -1
+    for match in re.finditer(r'```', fragment):
+        opener = -1 if is_open else match.start()
+        is_open = not is_open
+    return opener if is_open else -1
+
+
+def _ends_opener_line(text: str, position: int, newline: int, is_open: bool) -> bool:
+    """Whether the newline at ``newline`` ends a line that opens a code block.
+
+    Args:
+        text (str): The whole reply.
+        position (int): Where the chunk starts.
+        newline (int): The offset of a newline in ``text`` after ``position``.
+        is_open (bool): Whether a fence is open at ``position``.
+
+    Returns:
+        bool: True when a block opened between ``position`` and ``newline``
+            is still open at ``newline`` and its opening backticks sit on the
+            line that newline ends; cutting there would leave an empty block.
+    """
+    opener = _opener_offset(text[position:newline], is_open)
+    return opener >= 0 and '\n' not in text[position + opener : newline]
+
+
 def _safe_fence_boundary(text: str, start: int, end: int) -> int:
     """Move ``end`` so it never cuts through one of the three backticks."""
     fence = text.rfind('```', start, min(len(text), end + 2))
@@ -207,6 +294,35 @@ def _safe_fence_boundary(text: str, start: int, end: int) -> int:
             return fence
         return min(len(text), fence + 3)
     return end
+
+
+def _prose_boundary(text: str, start: int, end: int, is_open: bool, language: str, position: int) -> int:
+    """Pick a word boundary in ``text[start:end]`` to cut a chunk at.
+
+    Args:
+        text (str): The whole reply.
+        start (int): The earliest acceptable cut (the window's midpoint).
+        end (int): The cut by character count.
+        is_open (bool): Whether a fence is open at ``position``.
+        language (str): The open fence's language marker.
+        position (int): Where the chunk starts.
+
+    Returns:
+        int: Just past the last sentence end (``.``, ``!`` or ``?`` followed
+            by whitespace), else just past the last whitespace, in the range;
+            ``end`` when there is neither or that cut would fall inside a
+            code block.
+    """
+    window = text[start:end]
+    candidates = [match.end() for match in re.finditer(r'[.!?]\s', window)]
+    if not candidates:
+        candidates = [match.end() for match in re.finditer(r'\s', window)]
+    if not candidates:
+        return end
+    cut = start + candidates[-1]
+    if cut >= end or _fence_state(text[position:cut], is_open, language)[0]:
+        return end
+    return cut
 
 
 def _chunk_fenced_message(text: str, max_length: int) -> List[str]:
@@ -236,19 +352,43 @@ def _chunk_fenced_message(text: str, max_length: int) -> List[str]:
         reserved_close = 4
         capacity = max(1, max_length - len(prefix) - reserved_close)
         end = min(len(text), position + capacity)
+        # A block opened in this window whose opener line and first code line
+        # do not both fit starts the next chunk instead: cutting inside it
+        # would split the language name or leave an empty code block behind.
+        # Only when they fit there, though; otherwise moving the cut would just
+        # send the text before the fence as a short chunk of its own.
+        if end < len(text):
+            opener = _opener_offset(text[position:end], is_open)
+            if opener > 0:
+                fence = position + opener
+                opener_end = text.find('\n', fence)
+                code_end = text.find('\n', opener_end + 1) if opener_end >= 0 else -1
+                if code_end < 0:
+                    code_end = len(text)
+                if code_end >= end and code_end - fence < capacity:
+                    end = fence
         # Break between lines when the window has a newline in its second half:
         # a code line cut in two cannot be copied out of either message. The
         # newline is not emitted; the synthetic close/reopen pair stands in for
-        # it (consumed below). A newline right before a fence is passed over, so
-        # a boundary never produces an empty code block.
+        # it (consumed below). A newline right before a fence or right after an
+        # opener line is passed over, so a boundary never produces an empty
+        # code block.
         line_break = False
         if end < len(text):
             newline = text.rfind('\n', position, end)
-            while newline > position + capacity // 2 and text.startswith('```', newline + 1):
+            while newline > position + capacity // 2 and (
+                text.startswith('```', newline + 1) or _ends_opener_line(text, position, newline, is_open)
+            ):
                 newline = text.rfind('\n', position, newline)
             if newline > position + capacity // 2:
                 end = newline
                 line_break = True
+            elif not _fence_state(text[position:end], is_open, language)[0]:
+                # Prose outside a code block (a reply only takes this path
+                # because it holds a fence somewhere): break after the last
+                # sentence end, else the last whitespace, in the second half
+                # rather than in the middle of a word.
+                end = _prose_boundary(text, position + capacity // 2, end, is_open, language, position)
         end = _safe_fence_boundary(text, position, end)
         if end <= position:
             end = min(len(text), position + 1)
@@ -307,6 +447,9 @@ def should_process_message(
         allowed_channel_ids: Channel allowlist (empty means all channels).
         require_mention: Whether the bot must be @mentioned to respond.
         is_mentioned: Whether the bot is mentioned in this message.
+        parent_channel_id: A thread's parent channel id, which also matches
+            the channel allowlist; None outside a thread.
+        allowed_bot_ids: Bot user ids let through while ``ignore_bots`` is on.
 
     Returns:
         bool: True if the message passes every gate and should be processed.
@@ -344,10 +487,48 @@ def attachment_kind(mime_type: str) -> str:
     return 'file'
 
 
+def decode_text_attachment(data: bytes) -> Optional[str]:
+    """Decode a text-like attachment, or say it holds binary content.
+
+    The one decode both attachment paths use (merged or not), so a file is
+    text on one path exactly when it is text on the other.
+
+    Args:
+        data (bytes): The downloaded file.
+
+    Returns:
+        Optional[str]: The text with invalid bytes ignored: UTF-16 when the
+            file starts with a UTF-16 byte order mark (Windows Notepad
+            "Unicode", PowerShell 5.1 redirects), else UTF-8 with any UTF-8
+            byte order mark stripped. None when the decoded text still holds
+            a NUL: binary content.
+    """
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        text = data.decode('utf-16', errors='ignore')
+    else:
+        text = data.decode('utf-8-sig', errors='ignore')
+    if '\x00' in text:
+        return None
+    return text
+
+
+def clip_attachment_text(text: str, max_chars: int) -> str:
+    """Apply the ``textAttachmentMaxChars`` cap to decoded attachment text.
+
+    Args:
+        text (str): The decoded text.
+        max_chars (int): Maximum characters kept. Zero or less keeps everything.
+
+    Returns:
+        str: The text, cut to ``max_chars`` when the cap applies.
+    """
+    return text[:max_chars] if max_chars > 0 else text
+
+
 def fold_text_attachment(name: str, content: str, max_chars: int = 12000) -> str:
     """Render a text-like attachment as a fenced block for the merged question.
 
-    Mirrors the support bot's ``collectParts``: a text file travels with the
+    A text file travels with the
     user's own words instead of becoming a separate question, so one answer has
     seen both.
 
@@ -360,9 +541,9 @@ def fold_text_attachment(name: str, content: str, max_chars: int = 12000) -> str
     Returns:
         str: The block to fold into the question.
     """
-    text = content
-    if max_chars > 0 and len(text) > max_chars:
-        text = text[:max_chars] + _ATTACHMENT_TRUNCATION_SUFFIX
+    text = clip_attachment_text(content, max_chars)
+    if len(text) < len(content):
+        text += _ATTACHMENT_TRUNCATION_SUFFIX
     return f'Contents of attached file "{name}":\n```\n{text}\n```'
 
 
@@ -409,7 +590,9 @@ def guess_media_type(filename: str, content_type: str = '') -> str:
         content_type (str): The reported content type, if any (takes priority).
 
     Returns:
-        str: A MIME type string, defaulting to 'application/octet-stream'.
+        str: A MIME type string: the reported type, else the node's own
+            extension table, else Python's built-in ``mimetypes`` table (never
+            the host's), else 'application/octet-stream'.
     """
     if content_type:
         # Normalize to lowercase without parameters (e.g. '; charset=utf-8').
@@ -424,4 +607,6 @@ def guess_media_type(filename: str, content_type: str = '') -> str:
     for ext, mime_type in _EXT_TO_MIME.items():
         if filename_lower.endswith(ext):
             return mime_type
-    return 'application/octet-stream'
+    # Anything the table does not list (.avi, .bmp, ...) would otherwise go
+    # to the tags lane whatever it is: ask Python's MIME table before giving up.
+    return _BUILTIN_MIME_TYPES.guess_type(filename_lower)[0] or 'application/octet-stream'

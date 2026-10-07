@@ -14,10 +14,13 @@ the name collision between the ``discord`` node package and the discord.py
 library during test collection.
 """
 
+import codecs
 import importlib.util
 import json
+import mimetypes
 import os
 import re
+from unittest import mock
 
 import pytest
 
@@ -191,7 +194,7 @@ class TestChunkMessage:
         text = 'word ' * 800
         numbered = chunk_message(text, number=True)
         stripped = [re.sub(r'\n\n\*\(\d+/\d+\)\*$', '', chunk) for chunk in numbered]
-        assert ''.join(stripped).split() == text.split()
+        assert ' '.join(stripped).split() == text.split()
 
     def test_code_fence_is_balanced_across_chunks(self):
         text = 'Intro\n```python\n' + ('print("long code line")\n' * 10) + '```\nOutro'
@@ -229,6 +232,92 @@ class TestChunkMessage:
         assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
         assert ''.join(chunks).replace('\n``````\n', '').count('y') == 5000
 
+    @staticmethod
+    def _paragraph(length, word='setup'):
+        """Prose of about ``length`` characters with no newline in it."""
+        sentence = f'This explains one step of the {word} in plain words. '
+        return (sentence * (length // len(sentence) + 1))[:length].rstrip()
+
+    def test_prose_before_a_code_block_is_not_cut_mid_word(self):
+        # Reviewer reproduction: two long paragraphs, then a short code block.
+        # Any fence sends the whole reply down the fenced path, which used to
+        # cut the second paragraph at the exact character count.
+        text = self._paragraph(868) + '\n\n' + self._paragraph(1550) + '\n\n```\nprint("hi")\n```'
+        chunks = chunk_message(text)
+
+        assert len(chunks) == 2
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert ' '.join(chunks).split() == text.split(), 'a word was cut in two'
+        assert chunks[0].rstrip().endswith('.'), 'prefer a sentence end'
+        assert ''.join(chunks) == text
+        assert all(chunk.count('```') % 2 == 0 for chunk in chunks)
+
+    def test_prose_with_no_sentence_end_breaks_at_whitespace(self):
+        text = ('word ' * 600).rstrip() + '\n```\ncode\n```'
+        chunks = chunk_message(text)
+
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert ' '.join(chunks).split() == text.split()
+        assert ''.join(chunks) == text
+
+    @staticmethod
+    def _assert_fenced_split(chunks, text, language):
+        """The guarantees every split of a fenced reply in ``language`` keeps."""
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert all(chunk.count('```') % 2 == 0 for chunk in chunks)
+        for chunk in chunks:
+            assert set(re.findall(r'```(\w*)', chunk)) <= {'', language}, f'split language name: {chunk[-40:]!r}'
+            assert not re.search(r'```\w*\n```$', chunk), f'empty code block: {chunk[-40:]!r}'
+        assert ''.join(chunks).replace(f'\n``````{language}\n', '\n') == text
+
+    def test_a_cut_never_splits_a_fence_language_name(self):
+        # Reviewer reproduction: the window ended inside '```javascript', so
+        # chunk 1 ended with '```javascri' and chunk 2's code began with 'pt'.
+        text = 'word ' * 397 + '```javascript\n' + 'let x = 1;\n' * 300 + '```'
+        chunks = chunk_message(text)
+
+        self._assert_fenced_split(chunks, text, 'javascript')
+        assert not any(line == 'pt' for chunk in chunks for line in chunk.splitlines())
+
+    @pytest.mark.parametrize('words', range(388, 401))
+    def test_an_opener_line_near_the_limit_moves_to_the_next_chunk(self, words):
+        # The opener line ends a few characters before (or right at) the cut:
+        # chunk 1 used to end with the opener and a synthetic close, an empty
+        # code block, or with the language name cut in two.
+        text = 'word ' * words + '```python\n' + 'x = 1\n' * 400 + '```'
+        chunks = chunk_message(text)
+
+        self._assert_fenced_split(chunks, text, 'python')
+
+    def test_a_long_line_without_a_fence_breaks_at_whitespace(self):
+        # No newline and no sentence end: the cut used to land at the exact
+        # character count, in the middle of a word.
+        text = 'abcdef ' * 600
+        chunks = chunk_message(text)
+
+        assert len(chunks) > 1
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert ' '.join(chunks).split() == text.split(), 'a word was cut in two'
+
+    @pytest.mark.parametrize('max_length', [0, -1])
+    @pytest.mark.parametrize('number', [False, True])
+    def test_a_non_positive_limit_yields_no_chunks(self, max_length, number):
+        # A cap of zero used to loop forever while splitting the long line.
+        assert chunk_message('ab cd', max_length, number=number) == []
+
+    @pytest.mark.parametrize('intro', ['Here is the code:\n', 'Intro '])
+    def test_a_first_code_line_too_long_to_fit_does_not_move_the_cut_to_the_fence(self, intro):
+        # Moving the block to the next chunk cannot help when its first code
+        # line overflows that chunk too: chunk 1 was just the intro.
+        text = intro + '```js\n' + 'x' * 5000 + '\n```'
+        chunks = chunk_message(text)
+
+        assert len(chunks[0]) > DISCORD_MESSAGE_CHAR_LIMIT // 2, f'short first chunk: {chunks[0]!r}'
+        assert chunks[0].startswith(intro + '```js\n')
+        assert all(len(chunk) <= DISCORD_MESSAGE_CHAR_LIMIT for chunk in chunks)
+        assert all(chunk.count('```') % 2 == 0 for chunk in chunks)
+        assert ''.join(chunks).replace('\n``````js\n', '') == text
+
     def test_a_numbered_last_chunk_has_no_trailing_blank_lines(self):
         # Live F12: the answer's trailing newlines sat between the closing fence
         # and the label as blank lines.
@@ -265,8 +354,42 @@ class TestGuessMediaType:
         assert guess_media_type('archive.zip') == 'application/zip'
 
     def test_unknown_defaults_to_octet_stream(self):
-        assert guess_media_type('file.xyz') == 'application/octet-stream'
+        # '.xyz' is a registered chemistry type in many system MIME tables, so
+        # an extension no table knows stands in for "unknown".
+        assert guess_media_type('file.qqzz') == 'application/octet-stream'
         assert guess_media_type('noext') == 'application/octet-stream'
+
+    def test_common_discord_audio_and_video_route_on_every_host(self):
+        # In the node's own table, so routing does not depend on the host's
+        # MIME files (a bare CI image has none for these).
+        assert guess_media_type('voice.m4a') == 'audio/mp4'
+        assert guess_media_type('track.flac') == 'audio/flac'
+        assert guess_media_type('call.opus') == 'audio/opus'
+        assert guess_media_type('clip.mkv') == 'video/x-matroska'
+
+    def test_types_python_knows_route_by_extension(self):
+        # Not in the node's own table, so only the built-in fallback routes them.
+        assert '.avi' not in text_utils._EXT_TO_MIME and '.bmp' not in text_utils._EXT_TO_MIME
+        assert guess_media_type('movie.avi').startswith('video/')
+        assert guess_media_type('scan.bmp').startswith('image/')
+
+    def test_the_table_still_wins_over_the_fallback(self):
+        # mimetypes says audio/x-wav; the node's own table answers first.
+        assert guess_media_type('clip.wav') == 'audio/wav'
+        assert guess_media_type('song.mp3') == 'audio/mpeg'
+
+    def test_the_fallback_uses_python_built_in_table_only(self):
+        # On Windows the registry says application/vnd.ms-excel for .csv and
+        # video/vnd.dlna.mpeg-tts for .ts (TypeScript, as often as not).
+        assert guess_media_type('data.csv') == 'text/csv'
+        assert not guess_media_type('app.ts').startswith('video/')
+
+    def test_the_host_mime_table_is_never_consulted(self):
+        host = mock.Mock(return_value=('application/vnd.ms-excel', None))
+        with mock.patch.object(mimetypes, 'guess_type', host), mock.patch.object(mimetypes, '_db', None):
+            assert guess_media_type('data.csv') == 'text/csv'
+            assert guess_media_type('app.ts') == 'application/octet-stream'
+        host.assert_not_called()
 
     def test_case_insensitive_extension(self):
         assert guess_media_type('Photo.JPG') == 'image/jpeg'
@@ -289,7 +412,43 @@ class TestGuessMediaType:
         # A present-but-empty-after-normalization content type must not win;
         # fall through to the filename extension.
         assert guess_media_type('photo.jpg', '   ; charset=utf-8') == 'image/jpeg'
-        assert guess_media_type('mystery.xyz', ' ; x=y') == 'application/octet-stream'
+        assert guess_media_type('mystery.qqzz', ' ; x=y') == 'application/octet-stream'
+        assert guess_media_type('voice.opus', ' ; x=y').startswith('audio/')
+
+
+class TestTextAttachmentHelpers:
+    """The one decode helper and cap rule both attachment paths share."""
+
+    def test_utf8_is_decoded_and_invalid_bytes_ignored(self):
+        assert text_utils.decode_text_attachment(b'caf\xc3\xa9 \xff ok') == 'café  ok'
+
+    def test_a_nul_byte_means_binary(self):
+        assert text_utils.decode_text_attachment(b'ok\x00binary') is None
+
+    def test_utf16_with_a_bom_is_text(self):
+        # Windows Notepad "Unicode" and PowerShell 5.1 redirects write these.
+        decode = text_utils.decode_text_attachment
+        assert decode(codecs.BOM_UTF16_LE + 'héllo\r\nworld'.encode('utf-16-le')) == 'héllo\r\nworld'
+        assert decode(codecs.BOM_UTF16_BE + 'héllo\r\nworld'.encode('utf-16-be')) == 'héllo\r\nworld'
+
+    def test_a_utf8_bom_is_stripped(self):
+        assert text_utils.decode_text_attachment(codecs.BOM_UTF8 + 'café'.encode('utf-8')) == 'café'
+
+    def test_utf32_is_still_binary(self):
+        # Its BOM starts with the UTF-16 LE one; read as UTF-16 it is full of NULs.
+        assert text_utils.decode_text_attachment('hello'.encode('utf-32')) is None
+
+    def test_the_cap(self):
+        clip = text_utils.clip_attachment_text
+        assert clip('abcdefgh', 3) == 'abc'
+        assert clip('abcdefgh', 0) == 'abcdefgh'
+        assert clip('abcdefgh', -1) == 'abcdefgh'
+        assert clip('abc', 10) == 'abc'
+
+    def test_the_folded_block_follows_the_same_cap(self):
+        fold = text_utils.fold_text_attachment
+        assert fold('a.txt', 'abcdefgh', 3) == 'Contents of attached file "a.txt":\n```\nabc\n… (truncated)\n```'
+        assert fold('a.txt', 'abcdefgh', 0) == 'Contents of attached file "a.txt":\n```\nabcdefgh\n```'
 
 
 class TestServicesJsonSchema:
@@ -386,6 +545,10 @@ class TestServicesJsonSchema:
         assert values == [0, 60, 1440, 4320, 10080]
         assert all(isinstance(option[1], str) and option[1] for option in field['enum'])
         assert field['default'] in values
+
+    def test_text_attachment_max_chars_cannot_be_negative(self, schema):
+        """0 means no limit; a negative cap has no meaning."""
+        assert schema['fields']['discord.textAttachmentMaxChars']['minimum'] == 0
 
     def test_bot_token_is_secure(self, schema):
         assert schema['fields']['discord.botToken'].get('secure') is True

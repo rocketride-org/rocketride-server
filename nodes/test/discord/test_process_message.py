@@ -22,6 +22,7 @@ deterministically in a clean CI environment (it never skips wholesale).
 """
 
 import asyncio
+import codecs
 import importlib.util
 import json
 import os
@@ -339,6 +340,80 @@ class TestProcessMessageAttachments:
         endpoint._run_binary_pipeline.assert_not_called()
 
 
+class TestTextAttachmentDecoding:
+    """Merge on or off, a text attachment is decoded and capped the same way."""
+
+    @staticmethod
+    def _unmerged(max_chars):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._max_attachment_bytes = 1024
+        endpoint._show_typing = False
+        endpoint._text_attachment_extensions = ['.txt']
+        endpoint._text_attachment_max_chars = max_chars
+        endpoint._run_text_pipeline = mock.Mock(return_value='text-answer')
+        endpoint._run_binary_pipeline = mock.Mock(return_value='binary-answer')
+        return endpoint
+
+    @pytest.mark.parametrize('max_chars', [0, -1])
+    def test_merge_off_a_cap_of_zero_or_less_keeps_everything(self, max_chars):
+        endpoint = self._unmerged(max_chars)
+        attachment = _attachment('notes.txt', b'abcdefgh', content_type='text/plain')
+
+        asyncio.run(endpoint._process_attachment(_make_message(), attachment, {}, 0))
+
+        assert endpoint._run_text_pipeline.call_args.args[0] == '[attachment notes.txt]\nabcdefgh'
+
+    def test_merge_off_a_nul_byte_means_binary_not_text(self):
+        data = b'ok\x00binary'
+        endpoint = self._unmerged(12000)
+        attachment = _attachment('notes.txt', data, content_type='text/plain')
+
+        result = asyncio.run(endpoint._process_attachment(_make_message(), attachment, {}, 0))
+
+        endpoint._run_text_pipeline.assert_not_called()
+        assert endpoint._run_binary_pipeline.call_args.args[0] == data
+        assert result == 'binary-answer'
+
+    # Windows Notepad "Unicode" and PowerShell 5.1 redirects write UTF-16 with a BOM.
+    _UTF16 = [
+        codecs.BOM_UTF16_LE + 'héllo'.encode('utf-16-le'),
+        codecs.BOM_UTF16_BE + 'héllo'.encode('utf-16-be'),
+        codecs.BOM_UTF8 + 'héllo'.encode('utf-8'),
+    ]
+
+    @pytest.mark.parametrize('data', _UTF16)
+    def test_merge_off_utf16_and_bom_files_are_text(self, data):
+        endpoint = self._unmerged(12000)
+        attachment = _attachment('notes.txt', data, content_type='text/plain')
+
+        asyncio.run(endpoint._process_attachment(_make_message(), attachment, {}, 0))
+
+        endpoint._run_binary_pipeline.assert_not_called()
+        assert endpoint._run_text_pipeline.call_args.args[0] == '[attachment notes.txt]\nhéllo'
+
+    @pytest.mark.parametrize('data', _UTF16)
+    def test_merge_on_utf16_and_bom_files_are_folded(self, data):
+        endpoint = TestAttachmentMerge._endpoint()
+        message = TestAttachmentMerge._message('look', _attachment('notes.txt', data, content_type='text/plain'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        endpoint._run_binary_pipeline.assert_not_called()
+        text, _meta = TestAttachmentMerge._text_call(endpoint)
+        assert text == 'look\n\nContents of attached file "notes.txt":\n```\nhéllo\n```'
+
+    def test_merge_on_a_cap_of_zero_keeps_everything(self):
+        endpoint = TestAttachmentMerge._endpoint()
+        endpoint._text_attachment_max_chars = 0
+        message = TestAttachmentMerge._message('look', _attachment('notes.txt', b'abcdefgh', content_type='text/plain'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        text, _meta = TestAttachmentMerge._text_call(endpoint)
+        assert '```\nabcdefgh\n```' in text
+        assert 'truncated' not in text
+
+
 class TestAttachmentMerge:
     """mergeAttachments folds files into one question so one answer sees everything."""
 
@@ -450,16 +525,28 @@ class TestAttachmentMerge:
         endpoint._run_text_pipeline.assert_not_called()  # nothing to ask about
         assert endpoint._send_response.await_count == 0
 
-    def test_binary_content_in_a_text_file_is_skipped(self):
+    def test_binary_content_in_a_text_file_goes_to_the_binary_path(self):
+        # Same as with merging off: its own lane object, not dropped.
         endpoint = self._endpoint()
-        message = self._message('have a look', _attachment('notes.txt', b'ok\x00binary', content_type='text/plain'))
+        data = b'ok\x00binary'
+        image = _attachment('shot.png', b'\x89PNG', content_type='image/png', attachment_id=78)
+        notes = _attachment('notes.txt', data, content_type='text/plain', attachment_id=79)
+        message = self._message('have a look', notes, image)
 
         asyncio.run(endpoint._process_message(message))
 
+        notes.read.assert_awaited_once()  # downloaded once, not again for the binary path
+        calls = endpoint._run_binary_pipeline.call_args_list
+        assert [(call.args[0], call.args[1], call.args[5]) for call in calls] == [
+            (data, 'text/plain', 0),
+            (b'\x89PNG', 'image/png', 1),
+        ]
+        assert [(call.args[6]['groupIndex'], call.args[6]['groupSize']) for call in calls] == [(1, 3), (2, 3)]
         assert endpoint._run_text_pipeline.call_count == 1
         text, meta = self._text_call(endpoint)
-        assert text == 'have a look'  # the file contributed nothing
-        assert meta['groupSize'] == 1
+        assert 'Contents of attached file' not in text
+        assert 'What the pipeline found in the attached file "notes.txt":\nimage-answer' in text
+        assert meta['groupSize'] == 3
 
     def test_oversized_attachment_is_skipped_and_not_counted(self):
         endpoint = self._endpoint()
@@ -483,6 +570,40 @@ class TestAttachmentMerge:
         assert self._text_call(endpoint, 0)[0] == 'what does this pipe do?'
         assert self._text_call(endpoint, 1)[0] == '[attachment flow.pipe]\nsource: discord'
         assert _sent_reply(endpoint) == 'first'  # first non-empty answer wins
+
+    def test_merge_off_a_blank_text_answer_loses_to_a_real_attachment_answer(self):
+        endpoint = self._endpoint(merge=False, text_answer='\n', binary_answer='image-answer')
+        message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert _sent_reply(endpoint) == 'image-answer'
+
+    def test_merge_off_only_blank_answers_post_nothing(self):
+        endpoint = self._endpoint(merge=False, text_answer=' \n ', binary_answer='\t')
+        message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert endpoint._send_response.await_count == 0
+
+    def test_merge_on_a_blank_text_pass_falls_back_to_the_attachment_answer(self):
+        endpoint = self._endpoint(text_answer='\n  ', binary_answer='image-answer')
+        message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        assert _sent_reply(endpoint) == 'image-answer'
+
+    def test_merge_on_a_blank_attachment_answer_is_not_folded_in(self):
+        endpoint = self._endpoint(binary_answer='  ')
+        message = self._message('what is this?', _attachment('shot.png', b'\x89PNG', content_type='image/png'))
+
+        asyncio.run(endpoint._process_message(message))
+
+        text, _meta = self._text_call(endpoint)
+        assert text == 'what is this?'
+        assert _sent_reply(endpoint) == 'text-answer'
 
     def test_merging_is_off_by_default(self):
         assert IEndpoint._merge_attachments is False
@@ -906,6 +1027,69 @@ class TestReactionScoping:
 
         endpoint._emit_event_pipeline.assert_called_once()
 
+    def test_an_allowlisted_bot_removal_reports_a_bot_author(self):
+        """``payload.member`` is None on a removal; the user cache says it is a bot."""
+        endpoint = self._endpoint(_allowed_bot_ids=['8'])
+        endpoint._bot.get_user = mock.Mock(return_value=types.SimpleNamespace(id=8, bot=True))
+
+        asyncio.run(endpoint._on_raw_reaction(self._payload(user_id=8), False))
+
+        metadata = endpoint._emit_event_pipeline.call_args.args[0]
+        assert metadata['authorIsBot'] is True
+
+    def test_a_human_reaction_reports_a_human_author(self):
+        endpoint = self._endpoint()
+
+        asyncio.run(endpoint._on_raw_reaction(self._payload(), False))
+
+        assert endpoint._emit_event_pipeline.call_args.args[0]['authorIsBot'] is False
+
+
+class TestReactionsDuringShutdown:
+    """Once shutdown has begun, a reaction must not reach the pipeline."""
+
+    @staticmethod
+    def _endpoint():
+        endpoint = TestReactionScoping._endpoint()
+        endpoint._closing = False
+        return endpoint
+
+    def test_a_reaction_after_shutdown_began_emits_nothing(self):
+        endpoint = self._endpoint()
+        endpoint._closing = True
+
+        asyncio.run(endpoint._on_raw_reaction(TestReactionScoping._payload(), True))
+        asyncio.run(endpoint._on_raw_reaction(TestReactionScoping._payload(), False))
+
+        endpoint._emit_event_pipeline.assert_not_called()
+
+    def test_shutdown_waits_for_a_reaction_emit_already_under_way(self):
+        endpoint = self._endpoint()
+        endpoint._inflight = set()
+        endpoint._bot.close = mock.AsyncMock()
+        endpoint._bot_task = None
+        entered, release = threading.Event(), threading.Event()
+
+        def blocking_emit(*_args, **_kwargs):
+            entered.set()
+            release.wait(5)
+
+        endpoint._emit_event_pipeline = mock.Mock(side_effect=blocking_emit)
+
+        async def scenario():
+            handler = asyncio.ensure_future(endpoint._on_raw_reaction(TestReactionScoping._payload(), True))
+            while not entered.is_set():
+                await asyncio.sleep(0.01)
+            shutdown = asyncio.ensure_future(endpoint._shutdown())
+            await asyncio.sleep(0.2)
+            waited = not shutdown.done()
+            release.set()
+            await asyncio.wait_for(shutdown, 5)
+            await handler
+            return waited
+
+        assert asyncio.run(scenario()) is True, 'shutdown must wait for the emit already under way'
+
 
 class TestSendFailure:
     """An answer that could not be posted is reported, not silently dropped."""
@@ -1068,6 +1252,90 @@ class TestNumericAndMentionConfig:
 
         assert self._numbers(endpoint) == (26214400, 90, 0, 12000)
 
+    @pytest.mark.parametrize('value', ['inf', '-inf', '1e400', _Proxy('1e400')])
+    def test_an_overflowing_number_falls_back_to_its_default(self, value):
+        endpoint = self._parse({'maxAttachmentBytes': value, 'textAttachmentMaxChars': value})
+
+        assert endpoint._max_attachment_bytes == 26214400
+        assert endpoint._text_attachment_max_chars == 12000
+
+    _BOOLEANS = {
+        'ignoreBots': ('_ignore_bots', True),
+        'requireMention': ('_require_mention', False),
+        'showTyping': ('_show_typing', True),
+        'sendResponses': ('_send_responses', True),
+        'numberChunks': ('_number_chunks', False),
+        'mergeAttachments': ('_merge_attachments', False),
+        'emitReactions': ('_emit_reactions', False),
+        'emitNoReply': ('_emit_no_reply', False),
+        'emitOutbound': ('_emit_outbound', False),
+        'captureEvents': ('_capture_events', False),
+        'includeMemberMetadata': ('_include_member_metadata', False),
+    }
+
+    def test_boolean_defaults_are_unchanged(self):
+        endpoint = self._parse({})
+
+        for attribute, default in self._BOOLEANS.values():
+            assert getattr(endpoint, attribute) is default, attribute
+
+    @pytest.mark.parametrize(
+        ('value', 'send_responses', 'require_mention'),
+        [
+            # The engine passes a JSON boolean as a real bool.
+            (True, True, True),
+            (False, False, False),
+            # A plain string is read by its words, not by truthiness.
+            ('false', False, False),
+            (' Yes ', True, True),
+            # An unknown word or no value keeps each setting's default.
+            ('perhaps', True, False),
+            (None, True, False),
+        ],
+    )
+    def test_send_responses_and_require_mention_read_bools_and_strings(self, value, send_responses, require_mention):
+        endpoint = self._parse({'sendResponses': value, 'requireMention': value})
+
+        assert endpoint._send_responses is send_responses
+        assert endpoint._require_mention is require_mention
+
+    @pytest.mark.parametrize(('value', 'expected'), [('false', False), ('0', False), ('true', True), (True, True)])
+    def test_capture_events_reads_bools_and_strings(self, value, expected):
+        # A string 'false' is truthy: read by truthiness it would turn capture on.
+        assert self._parse({'captureEvents': value})._capture_events is expected
+
+    def test_booleans_are_read_with_the_shared_parse_bool(self):
+        assert not hasattr(IEndpoint, '_as_bool')
+        assert _ENDPOINT_MODULE.parse_bool.__module__ == 'ai.common.utils.config_utils'
+
+    @pytest.mark.parametrize(
+        ('value', 'expected'),
+        [
+            (True, True),
+            (False, False),
+            ('true', True),
+            ('False', False),
+            ('1', True),
+            ('0', False),
+            ('yes', True),
+            ('NO', False),
+            ('on', True),
+            ('off', False),
+        ],
+    )
+    def test_every_boolean_setting_is_coerced(self, value, expected):
+        endpoint = self._parse({field: value for field in self._BOOLEANS})
+
+        for attribute, _default in self._BOOLEANS.values():
+            assert getattr(endpoint, attribute) is expected, attribute
+
+    @pytest.mark.parametrize('value', [None, '', 'maybe'])
+    def test_an_unusable_boolean_falls_back_to_its_default(self, value):
+        endpoint = self._parse({field: value for field in self._BOOLEANS})
+
+        for attribute, default in self._BOOLEANS.values():
+            assert getattr(endpoint, attribute) is default, attribute
+
     def test_a_float_is_truncated_not_rejected(self):
         endpoint = self._parse({'threadNameMaxLength': 12.0, 'textAttachmentMaxChars': '7.9'})
 
@@ -1139,8 +1407,21 @@ class TestLifecycle:
         endpoint = IEndpoint.__new__(IEndpoint)
         endpoint._bot_token = '${ROCKETRIDE_DISCORD_NO_SUCH_TOKEN}'
 
-        with pytest.raises(RuntimeError, match='ROCKETRIDE_DISCORD_NO_SUCH_TOKEN is not set'):
+        with pytest.raises(RuntimeError, match='variable ROCKETRIDE_DISCORD_NO_SUCH_TOKEN, which is not set'):
             asyncio.run(endpoint._startup())
+
+    def test_a_token_variable_without_the_prefix_is_named(self):
+        # The engine resolves only ROCKETRIDE_* variables; any other ${NAME}
+        # arrives as the literal <REDACTED>, which Discord calls an invalid token.
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._bot_token = '<REDACTED>'
+
+        with pytest.raises(RuntimeError) as raised:
+            asyncio.run(endpoint._startup())
+
+        assert 'bot token' in str(raised.value)
+        assert 'only ROCKETRIDE_* server variables are resolved' in str(raised.value)
+        assert 'invalid token' not in str(raised.value)
 
     def test_a_broken_channel_list_fails_the_start(self):
         endpoint = IEndpoint.__new__(IEndpoint)
@@ -1578,6 +1859,22 @@ class TestConfigCoercion:
     def test_bare_string_is_single_element_not_per_character(self):
         assert IEndpoint._as_str_list('123456') == ['123456']
 
+    _PHRASES = '["Escalated to the RocketRide team.", " x ", ""]'
+
+    def test_split_is_on_by_default(self):
+        words = ['Escalated', 'to', 'the', 'RocketRide', 'team.', 'x']
+        assert IEndpoint._as_str_list(self._PHRASES) == words
+        assert IEndpoint._as_str_list([self._PHRASES]) == words
+        assert IEndpoint._as_str_list('a b, c') == ['a', 'b', 'c']
+
+    def test_split_off_keeps_phrases_whole(self):
+        phrases = ['Escalated to the RocketRide team.', 'x']
+        assert IEndpoint._as_str_list(self._PHRASES, split=False) == phrases
+        assert IEndpoint._as_str_list([self._PHRASES], split=False) == phrases
+        assert IEndpoint._as_str_list('  a b, c  ', split=False) == ['a b, c']
+        assert IEndpoint._as_str_list(['one phrase', ' ', 2], split=False) == ['one phrase', '2']
+        assert IEndpoint._as_str_list('', split=False) == []
+
     def test_broken_json_is_reported_with_the_field_name(self):
         # Live F38: '["123"' became the literal id '["123"' and the allowlist
         # rejected everyone, with nothing in the task's warnings.
@@ -1598,6 +1895,10 @@ class TestConfigCoercion:
     def test_only_a_broken_guild_or_channel_list_is_fatal(self):
         assert 'channelIds is not valid JSON' in IEndpoint._list_config_error({'channelIds': '["1"'})
         assert 'guildIds is not valid JSON' in IEndpoint._list_config_error({'guildIds': ['["1",']})
+        # Broken JSON here would make the mention gate silently never apply.
+        assert 'requireMentionChannelIds is not valid JSON' in IEndpoint._list_config_error(
+            {'requireMentionChannelIds': '["1"'}
+        )
         assert IEndpoint._list_config_error({'channelIds': '["1"]', 'guildIds': '2'}) is None
         # Other lists keep the warning only: a broken allowlist must not stop the bot.
         assert IEndpoint._list_config_error({'allowedBotIds': '["1"'}) is None
@@ -1608,7 +1909,10 @@ class TestUnsetListVariables:
 
     @staticmethod
     def _message(field, name):
-        return f'Discord Bot: {field} uses the variable {name}, which is not set on this server'
+        return (
+            f'Discord Bot: {field} uses the variable {name}, which is not set on this server '
+            f'(only ROCKETRIDE_* server variables are resolved)'
+        )
 
     def test_an_unset_variable_in_guild_or_channel_ids_is_fatal(self):
         assert IEndpoint._list_config_error({'guildIds': '${GUILD_IDS}'}) == self._message('guildIds', 'GUILD_IDS')
@@ -1654,6 +1958,252 @@ class TestUnsetListVariables:
 
         assert endpoint._allowed_mention_role_ids == ['77']
         warn.assert_not_called()
+
+    @pytest.mark.parametrize('field', ['guildIds', 'channelIds', 'requireMentionChannelIds'])
+    @pytest.mark.parametrize('value', ['<REDACTED>', ['<REDACTED>'], '["123", "<REDACTED>"]', '123, <REDACTED>'])
+    def test_a_variable_without_the_prefix_is_fatal(self, field, value):
+        # A ${NAME} without the ROCKETRIDE_ prefix arrives as the literal <REDACTED>.
+        error = IEndpoint._list_config_error({field: value})
+
+        assert error is not None
+        assert error.startswith(f'Discord Bot: {field} uses a variable')
+        assert 'only ROCKETRIDE_* server variables are resolved' in error
+
+    def test_an_unset_variable_in_require_mention_channels_is_fatal(self):
+        # Matched as an id, it never matches: the mention gate fails open.
+        assert IEndpoint._list_config_error({'requireMentionChannelIds': ['${ROCKETRIDE_MENTION}']}) == (
+            self._message('requireMentionChannelIds', 'ROCKETRIDE_MENTION')
+        )
+
+    @pytest.mark.parametrize('value', [['${ROCKETRIDE_BOTS}', '42'], ['<REDACTED>', '42']])
+    def test_an_unset_variable_in_allowed_bot_ids_warns(self, value):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            endpoint = TestNumericAndMentionConfig._parse({'allowedBotIds': value})
+
+        assert '42' in endpoint._allowed_bot_ids
+        assert IEndpoint._list_config_error({'allowedBotIds': value}) is None
+        warn.assert_called_once()
+        assert 'allowedBotIds' in warn.call_args.args[0]
+        assert 'only ROCKETRIDE_* server variables are resolved' in warn.call_args.args[0]
+
+    @pytest.mark.parametrize('field', ['allowedMentionRoleIds', 'allowedMentionUserIds'])
+    def test_a_redacted_mention_entry_warns(self, field):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            TestNumericAndMentionConfig._parse({field: ['<REDACTED>', '77']})
+
+        warn.assert_called_once()
+        assert field in warn.call_args.args[0]
+        assert 'only ROCKETRIDE_* server variables are resolved' in warn.call_args.args[0]
+
+    def test_json_items_are_stripped_and_split_like_a_bare_string(self):
+        assert IEndpoint._as_str_list('[" 123 "]') == ['123']
+        assert IEndpoint._as_str_list('["123,456"]') == ['123', '456']
+        assert IEndpoint._as_str_list(['["123 456", " "]']) == ['123', '456']
+        assert IEndpoint._as_str_list('${ROCKETRIDE_G} ') == ['${ROCKETRIDE_G}']
+
+    def test_a_padded_variable_inside_json_is_still_caught(self):
+        assert IEndpoint._list_config_error({'guildIds': '["${ROCKETRIDE_G} "]'}) == self._message(
+            'guildIds', 'ROCKETRIDE_G'
+        )
+
+
+class TestEmptyResolvingLists:
+    """A list that was set but resolves to no ids must not mean "everywhere"."""
+
+    _FIELDS = ['guildIds', 'channelIds', 'requireMentionChannelIds']
+
+    @staticmethod
+    def _message(field):
+        return f'Discord Bot: {field} is set but resolves to no ids (an empty variable?); fix the setting or remove it'
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    @pytest.mark.parametrize('value', [[''], ['  '], '[""]', '["  "]', ['[""]'], ['', '  ']])
+    def test_a_set_but_blank_list_is_fatal(self, field, value):
+        # A set ${ROCKETRIDE_X} whose value is empty arrives as "".
+        assert IEndpoint._list_config_error({field: value}) == self._message(field)
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    def test_the_start_fails_with_the_reason(self, field):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', field: ['']})
+
+        with pytest.raises(RuntimeError, match=f'{field} is set but resolves to no ids'):
+            _start(endpoint)
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    @pytest.mark.parametrize('value', [None, [], '', '[]', ['[]']])
+    def test_a_genuinely_empty_list_still_means_all(self, field, value):
+        assert IEndpoint._list_config_error({field: value}) is None
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    @pytest.mark.parametrize('value', [None, [], '', '[]', ['[]']])
+    def test_a_genuinely_empty_list_still_starts(self, field, value):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', field: value})
+
+        _start(endpoint)
+
+    def test_a_missing_list_still_starts(self):
+        assert IEndpoint._list_config_error({}) is None
+        _start(TestNumericAndMentionConfig._parse({'botToken': 'token'}))
+
+    def test_a_blank_item_next_to_a_real_id_is_fine(self):
+        assert IEndpoint._list_config_error({'guildIds': ['123', '']}) is None
+
+
+class TestNumericIds:
+    """Every id list holds plain ASCII digits; anything else is named, not matched."""
+
+    _FIELDS = ['guildIds', 'channelIds', 'requireMentionChannelIds']
+
+    @pytest.mark.parametrize(
+        ('field', 'value'),
+        [('requireMentionChannelIds', ['<#123>']), ('channelIds', ['general']), ('guildIds', ['My Server'])],
+    )
+    def test_a_non_numeric_entry_fails_the_start_naming_its_field(self, field, value):
+        error = IEndpoint._list_config_error({field: value})
+
+        assert error is not None
+        assert error.startswith(f'Discord Bot: {field} ')
+        assert 'numeric' in error
+
+    @pytest.mark.parametrize('field', ['channelIds', 'requireMentionChannelIds'])
+    def test_a_pasted_channel_mention_in_a_channel_list_suggests_its_id(self, field):
+        error = IEndpoint._list_config_error({field: ['<#123>']})
+
+        assert "'<#123>'" in error
+        assert 'use 123' in error
+
+    @pytest.mark.parametrize(
+        ('field', 'value', 'kind'),
+        [
+            ('channelIds', '<@&456>', 'role'),
+            ('requireMentionChannelIds', '<@789>', 'user'),
+            ('guildIds', '<#123>', 'channel'),
+            ('guildIds', '<@!1>', 'user'),
+        ],
+    )
+    def test_a_mention_of_the_wrong_kind_never_suggests_its_digits(self, field, value, kind):
+        # Its digits are the id of something else; following that hint would
+        # leave a valid-looking list that matches nothing.
+        error = IEndpoint._list_config_error({field: [value]})
+        digits = ''.join(ch for ch in value if ch.isdigit())
+
+        assert f'use {digits}' not in error
+        assert f'{kind} mention' in error
+
+    @pytest.mark.parametrize('field', _FIELDS)
+    def test_a_unicode_digit_is_not_an_id(self, field):
+        # '²'.isdigit() is True, but int('²') raises.
+        error = IEndpoint._list_config_error({field: ['123²']})
+
+        assert error is not None and field in error
+
+    def test_the_start_fails_with_the_reason(self):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', 'channelIds': ['general']})
+
+        with pytest.raises(RuntimeError, match="channelIds has 'general', which is not a numeric"):
+            _start(endpoint)
+
+    def test_numeric_ids_still_pass(self):
+        config = {'guildIds': ['123'], 'channelIds': '["456", "789"]', 'requireMentionChannelIds': '1, 2'}
+
+        assert IEndpoint._list_config_error(config) is None
+
+    def test_a_unicode_digit_mention_id_is_dropped_and_sends_still_build(self):
+        endpoint = TestNumericAndMentionConfig._parse({'allowedMentionUserIds': ['123²', '555']})
+
+        assert endpoint._allowed_mention_user_ids == ['555']
+        assert [obj.id for obj in endpoint._allowed_mentions().users] == [555]
+
+    def test_a_non_numeric_allowed_bot_id_warns_but_does_not_fail(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            endpoint = TestNumericAndMentionConfig._parse({'allowedBotIds': ['<@42>', '123²', '77']})
+
+        assert IEndpoint._list_config_error({'allowedBotIds': ['<@42>']}) is None
+        assert '77' in endpoint._allowed_bot_ids
+        assert warn.call_count == 2
+        assert all('allowedBotIds' in call.args[0] for call in warn.call_args_list)
+        assert 'use 42' in warn.call_args_list[0].args[0]
+
+    def test_a_numeric_allowed_bot_id_does_not_warn(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            TestNumericAndMentionConfig._parse({'allowedBotIds': ['77', '88']})
+
+        warn.assert_not_called()
+
+    # A bot token (or a secret-valued ${ROCKETRIDE_*}) pasted into an id list.
+    _SECRET = 'secret-value-' + 'z' * 40
+    _CLIPPED = "'secret-value…'"
+
+    @pytest.mark.parametrize('field', ['guildIds', 'channelIds', 'requireMentionChannelIds'])
+    def test_a_secret_in_an_id_list_is_clipped_in_the_start_error(self, field):
+        endpoint = TestNumericAndMentionConfig._parse({'botToken': 'token', field: [self._SECRET]})
+
+        with pytest.raises(RuntimeError) as raised:
+            _start(endpoint)
+
+        assert self._CLIPPED in str(raised.value)
+        assert self._SECRET not in str(raised.value)
+        assert self._SECRET[:13] not in str(raised.value)
+
+    def test_a_secret_in_allowed_bot_ids_is_clipped_in_the_warning(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            TestNumericAndMentionConfig._parse({'allowedBotIds': [self._SECRET]})
+
+        warn.assert_called_once()
+        assert self._CLIPPED in warn.call_args.args[0]
+        assert self._SECRET[:13] not in warn.call_args.args[0]
+
+    @pytest.mark.parametrize('field', ['allowedMentionRoleIds', 'allowedMentionUserIds'])
+    def test_a_secret_in_a_mention_allowlist_is_clipped_in_the_debug_line(self, field):
+        with mock.patch.object(_ENDPOINT_MODULE, 'debug') as log:
+            TestNumericAndMentionConfig._parse({field: [self._SECRET]})
+
+        logged = ' '.join(str(call.args[0]) for call in log.call_args_list)
+        assert self._CLIPPED in logged
+        assert self._SECRET[:13] not in logged
+
+    @pytest.mark.parametrize('field', ['guildIds', 'channelIds'])
+    def test_a_secret_in_broken_json_is_clipped(self, field):
+        value = '["' + self._SECRET
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            error = IEndpoint._list_config_error({field: value})
+            IEndpoint._as_str_list(value, field=field)
+
+        for text in (error, warn.call_args.args[0]):
+            assert "'[\"secret-val…'" in text
+            assert self._SECRET[:11] not in text
+
+    def test_an_entry_of_twelve_characters_is_shown_whole(self):
+        assert "'general-chat'" in IEndpoint._list_config_error({'channelIds': ['general-chat']})
+
+    def test_a_long_mention_wrapper_is_still_shown_whole_with_its_hint(self):
+        mention = '<#123456789012345678>'
+        error = IEndpoint._list_config_error({'channelIds': [mention]})
+
+        assert repr(mention) in error
+        assert 'use 123456789012345678, the id inside the mention' in error
+
+    def test_a_mention_wrapping_too_many_digits_is_clipped_with_the_plain_hint(self):
+        mention = '<#' + '1' * 40 + '>'
+        error = IEndpoint._list_config_error({'channelIds': [mention]})
+
+        assert repr(mention[:12] + '…') in error
+        assert mention not in error
+        assert error.endswith('; use the numeric id')
+
+    @pytest.mark.parametrize('value', ['1' * 36, '123456789012345678' * 2, '18446744073709551616', '1' * 21])
+    def test_an_id_too_long_for_discord_is_rejected(self, value):
+        error = IEndpoint._list_config_error({'channelIds': [value]})
+
+        assert error is not None and 'not a numeric Discord id' in error
+        endpoint = TestNumericAndMentionConfig._parse({'allowedMentionUserIds': [value, '555']})
+        assert endpoint._allowed_mention_user_ids == ['555']
+
+    @pytest.mark.parametrize('value', ['18446744073709551615', '123456789012345678', '1234567890123456789'])
+    def test_an_id_discord_could_issue_passes(self, value):
+        assert IEndpoint._list_config_error({'channelIds': [value], 'guildIds': [value]}) is None
+        endpoint = TestNumericAndMentionConfig._parse({'allowedMentionUserIds': [value]})
+        assert endpoint._allowed_mention_user_ids == [value]
 
 
 class TestOptionalTyping:
@@ -1922,6 +2472,15 @@ class TestDeliveryAndShutdownEdges:
         assert len(outbound['messageIds']) == 1
         assert outbound['complete'] is False
 
+    def test_a_blank_answer_is_nothing_to_send(self):
+        endpoint, message = self._sender()
+        message.channel.send = mock.AsyncMock()
+
+        outbound = asyncio.run(endpoint._send_response(message, ' \n\t '))
+
+        message.channel.send.assert_not_awaited()
+        assert outbound == {'messageIds': [], 'destination': 'channel', 'complete': True}
+
     def test_the_outbound_event_carries_completeness(self):
         endpoint = _make_endpoint()
         endpoint._emit_outbound = True
@@ -1952,3 +2511,193 @@ class TestDeliveryAndShutdownEdges:
 
         endpoint._process_message.assert_not_awaited()
         assert endpoint._inflight == set()
+
+
+def _start(endpoint, after=None):
+    """Run the real ``_startup`` with the Gateway client faked out.
+
+    Args:
+        endpoint: An endpoint whose config fields are already set.
+        after: Optional coroutine function run on the same loop once started.
+    """
+
+    async def _go():
+        with (
+            mock.patch.object(_ENDPOINT_MODULE.commands, 'Bot', mock.Mock()),
+            mock.patch.object(endpoint, '_bot_runner', mock.AsyncMock()),
+        ):
+            await endpoint._startup()
+            if after is not None:
+                return await after()
+
+    return asyncio.run(_go())
+
+
+class TestOpenBotWarning:
+    """A bot with no server allowlist answers wherever it is added."""
+
+    @staticmethod
+    def _endpoint(guild_ids, channel_ids=None):
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._bot_token = 'token'
+        endpoint._guild_ids = guild_ids
+        endpoint._channel_ids = channel_ids or []
+        return endpoint
+
+    def test_a_channel_list_alone_raises_no_warning(self):
+        # Only the listed channels (and their threads) are answered, and DMs
+        # are refused: the bot does not answer in any server it joins.
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            _start(self._endpoint([], ['456']))
+
+        warn.assert_not_called()
+
+    def test_both_lists_empty_warns(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            _start(self._endpoint([], []))
+
+        warn.assert_called_once()
+
+    def test_an_empty_guild_list_warns_once_at_start(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            _start(self._endpoint([]))
+
+        warn.assert_called_once()
+        text = warn.call_args.args[0]
+        assert 'any server it is added to' in text
+        assert 'guildIds' in text
+        assert 'Public Bot' in text
+
+    def test_a_guild_list_raises_no_warning(self):
+        with mock.patch.object(_ENDPOINT_MODULE, '_config_warning') as warn:
+            _start(self._endpoint(['123']))
+
+        warn.assert_not_called()
+
+
+class TestConcurrentMessages:
+    """maxConcurrentMessages bounds how many messages are processed at once."""
+
+    def test_the_default_and_the_clamp(self):
+        parse = TestNumericAndMentionConfig._parse
+        assert parse({})._max_concurrent_messages == 4
+        assert parse({'maxConcurrentMessages': TestNumericAndMentionConfig._Proxy('8')})._max_concurrent_messages == 8
+        assert parse({'maxConcurrentMessages': 0})._max_concurrent_messages == 1
+        assert parse({'maxConcurrentMessages': -3})._max_concurrent_messages == 1
+        assert parse({'maxConcurrentMessages': 500})._max_concurrent_messages == 32
+        assert parse({'maxConcurrentMessages': 'lots'})._max_concurrent_messages == 4
+
+    def test_the_attachment_size_is_clamped_to_its_maximum(self):
+        parse = TestNumericAndMentionConfig._parse
+        assert parse({'maxAttachmentBytes': 10**12})._max_attachment_bytes == 104857600
+        assert parse({'maxAttachmentBytes': 104857600})._max_attachment_bytes == 104857600
+        assert parse({'maxAttachmentBytes': 1024})._max_attachment_bytes == 1024
+
+    @pytest.mark.parametrize('configured', [0, -5, TestNumericAndMentionConfig._Proxy('-1')])
+    def test_a_non_positive_attachment_size_means_the_default(self, configured):
+        # Zero or below skipped every attachment, and so did the 1-byte floor
+        # that replaced it: either way the value cannot be meant literally.
+        assert TestNumericAndMentionConfig._parse({'maxAttachmentBytes': configured})._max_attachment_bytes == 26214400
+
+    def test_a_one_byte_attachment_size_is_kept(self):
+        assert TestNumericAndMentionConfig._parse({'maxAttachmentBytes': 1})._max_attachment_bytes == 1
+
+    def test_the_schema_sets_the_attachment_size_minimum(self):
+        assert _load_services_json()['fields']['discord.maxAttachmentBytes']['minimum'] == 1
+
+    @pytest.mark.parametrize(
+        ('configured', 'expected'),
+        [
+            (['md'], ['.md']),
+            (['.MD', ' json '], ['.md', '.json']),
+            (['..log', '.'], ['.log']),
+            ('["txt", ".csv"]', ['.txt', '.csv']),
+        ],
+    )
+    def test_text_extensions_are_normalised(self, configured, expected):
+        endpoint = TestNumericAndMentionConfig._parse({'textAttachmentExtensions': configured})
+
+        assert endpoint._text_attachment_extensions == expected
+
+    def test_an_extension_without_a_dot_still_marks_a_file_as_text(self):
+        endpoint = TestNumericAndMentionConfig._parse({'textAttachmentExtensions': ['md']})
+
+        assert endpoint._is_text_attachment(_attachment('a.md', b'# hi')) is True
+        assert endpoint._is_text_attachment(_attachment('a.bin', b'x')) is False
+
+    def test_no_more_than_the_limit_run_at_once_and_none_are_dropped(self):
+        endpoint = _make_endpoint(merge_attachments=False)
+        endpoint._bot_token = 'token'
+        endpoint._guild_ids = ['1']
+        endpoint._max_concurrent_messages = 2
+        running = {'now': 0, 'peak': 0}
+
+        async def pipeline(_message, _factory):
+            running['now'] += 1
+            running['peak'] = max(running['peak'], running['now'])
+            await asyncio.sleep(0.01)
+            running['now'] -= 1
+            return 'answer'
+
+        endpoint._run_with_optional_typing = pipeline
+
+        async def flood():
+            messages = [_make_message(content=f'question {index}') for index in range(7)]
+            await asyncio.gather(*(endpoint._process_message(message) for message in messages))
+
+        _start(endpoint, flood)
+
+        assert running['peak'] == 2
+        assert endpoint._send_response.await_count == 7
+
+    @pytest.mark.parametrize('emit_no_reply', [False, True])
+    def test_a_message_queued_for_a_slot_is_skipped_once_shutdown_began(self, emit_no_reply):
+        endpoint = _make_endpoint(merge_attachments=False)
+        endpoint._bot_token = 'token'
+        endpoint._guild_ids = ['1']
+        endpoint._max_concurrent_messages = 1
+        endpoint._emit_no_reply = emit_no_reply
+        endpoint._emit_event_pipeline = mock.Mock()
+        asked = []
+
+        async def scenario():
+            release = asyncio.Event()
+
+            async def pipeline(message, _factory):
+                asked.append(message.content)
+                await release.wait()
+                return 'answer'
+
+            endpoint._run_with_optional_typing = pipeline
+            first = asyncio.create_task(endpoint._process_message(_make_message(content='first')))
+            await asyncio.sleep(0)
+            queued = asyncio.create_task(endpoint._process_message(_make_message(content='queued')))
+            await asyncio.sleep(0)
+            # What _shutdown does first, while the queued message still waits.
+            endpoint._closing = True
+            release.set()
+            await asyncio.gather(first, queued)
+
+        _start(endpoint, scenario)
+
+        assert asked == ['first']
+        assert endpoint._send_response.await_count == 1
+        events = [call.args[1:] for call in endpoint._emit_event_pipeline.call_args_list]
+        if emit_no_reply:
+            assert events == [('no_reply', {'reason': 'shutdown'})]
+        else:
+            assert events == []
+
+    def test_services_json_declares_the_settings(self):
+        schema = _load_services_json()
+        field = schema['fields']['discord.maxConcurrentMessages']
+        assert field['type'] == 'number'
+        assert (field['default'], field['minimum'], field['maximum']) == (4, 1, 32)
+        assert field['title'] and field['description']
+        assert 'discord.maxConcurrentMessages' in schema['fields']['Pipe.source.parameters']['properties']
+        assert schema['fields']['discord.maxAttachmentBytes']['maximum'] == 104857600
+
+        with open(_SERVICES_JSON, 'r', encoding='utf-8') as handle:
+            lines = handle.read().split('\n')
+        index = next(i for i, line in enumerate(lines) if line.strip().startswith('"discord.maxConcurrentMessages":'))
+        assert lines[index - 1].strip() == '//', 'the new field has no // comment block above it'

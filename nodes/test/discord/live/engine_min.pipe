@@ -46,15 +46,11 @@
     {
       "id": "prompt_1",
       "provider": "prompt",
-      "name": "Support Prompt",
+      "name": "Prompt",
       "config": {
         "instructions": [
-          "You are a support assistant in a Discord channel for RocketRide, a platform for building AI pipelines and apps.",
-          "Answer briefly — two or three sentences where you can, and never more than a short paragraph. Discord messages are read on phones.",
-          "Answer only what you actually know about RocketRide. Do not invent product names, config fields, SDK methods, URLs, prices, or dates.",
-          "If you are unsure, or the question needs a human (account, billing, access, an outage, or anything you cannot answer from what you know), answer what you can and end your reply with exactly this line: Escalated to the RocketRide team.",
-          "Never write that line in a reply you are confident about.",
-          "Each message is a separate question from a separate person unless it is explicitly a follow-up in the same thread. Do not carry facts from one question into another."
+          "You are a helpful assistant answering questions in a Discord channel.",
+          "Answer briefly, in two or three sentences where you can. Do not invent facts you are unsure of."
         ],
         "parameters": {}
       },
@@ -134,7 +130,7 @@
       }
     }
   ],
-  "project_id": "ea4a9516-2a9e-467c-8f0b-18bc983578f3",
+  "project_id": "8da4cdef-86de-40e5-9755-bfa8e13d9503",
   "viewport": {
     "x": 0,
     "y": 0,

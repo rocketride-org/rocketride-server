@@ -27,6 +27,7 @@ The IEndpoint tests reuse the synthetic-package bootstrap from
 ``test_process_message.py``.
 """
 
+import asyncio
 import importlib.util
 import json
 import os
@@ -195,7 +196,8 @@ class TestCaptureRowEventKeys:
     """The ``event_key`` rules, which are what the unique key dedupes on."""
 
     @pytest.mark.parametrize(
-        'reason', ['no_answer', 'non_answer', 'model_error', 'send_failed', 'paused', 'aimed_elsewhere', 'timeout']
+        'reason',
+        ['no_answer', 'non_answer', 'model_error', 'send_failed', 'shutdown', 'paused', 'aimed_elsewhere', 'timeout'],
     )
     def test_a_known_no_reply_reason_is_its_own_key(self, reason):
         row = capture_row('no_reply', _metadata(), {'reason': reason}, source='s', now=NOW)
@@ -761,11 +763,41 @@ class TestWriterFailures:
         writer._write_one(_row())
 
         assert len(warnings) == 1
-        assert 'db_1' in warnings[0]
-        assert 'discord_events' in warnings[0]
+        assert "'db_1'" in warnings[0]
+        # Configured values are quoted the way the node quotes any config entry.
+        assert "'discord_even\u2026'" in warnings[0]
         assert 'message' in warnings[0]
         assert '1001' in warnings[0]
         assert 'could not connect to server' in warnings[0]
+
+    def test_a_configured_secret_is_never_echoed_in_full(self):
+        # A ${ROCKETRIDE_*} secret pasted into captureNodeId or captureTable
+        # would otherwise reach the task's warnings whole.
+        secret = 'abcdefghijklmnopqrstuvwxyz0123456789'
+        pipe = _FakePipe(fail=RuntimeError('could not connect to server'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings, node_id=secret, table=secret)
+
+        writer._write_one(_row())
+        _writer(_FakeTarget(pipe), warnings, table=secret + '-not-an-identifier')
+        _writer(_FakeTarget(_FakePipe(dialect='mysql')), warnings, node_id=secret)._write_one(_row())
+
+        assert len(warnings) == 3
+        for warning in warnings:
+            assert secret not in warning
+            assert "'abcdefghijkl\u2026'" in warning
+
+    def test_row_text_quoted_by_the_driver_never_reaches_the_warning(self):
+        text = 'my account number is 12345678'
+        pipe = _FakePipe(fail=RuntimeError(f'invalid input syntax: "{text}"\nDETAIL: more'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row(text=text))
+
+        assert len(warnings) == 1
+        assert text not in warnings[0]
+        assert 'invalid input syntax: "<row text>"' in warnings[0]
 
     def test_the_next_row_is_still_attempted_after_a_failure(self):
         pipe = _FakePipe(fail=RuntimeError('boom'))
@@ -815,7 +847,7 @@ class TestWriterFailures:
         writer._write_one(_row())
 
         recovered = [message for message in warnings if 'recovered' in message]
-        assert recovered == ['Discord capture: writes to db_1 recovered after 2 failures']
+        assert recovered == ["Discord capture: writes to 'db_1' recovered after 2 failures"]
 
     def test_a_clean_run_never_warns(self):
         warnings = []
@@ -1334,6 +1366,81 @@ class TestEveryMessagePartIsKept:
             endpoint._stop_capture()
 
         assert [row[2] for row in _kept_rows(pipe)] == ['text', 'text:retry:1']
+
+
+class TestProcessedMessagesAreCaptured:
+    """Whole messages through ``_process_message``, as the base node now handles them."""
+
+    @staticmethod
+    def _endpoint(pipe, *, merge=True):
+        endpoint = _endpoint(pipe, capture_events=True)
+        endpoint._merge_attachments = merge
+        endpoint._max_attachment_bytes = 1024
+        endpoint._text_attachment_extensions = ['.txt']
+        endpoint._text_attachment_max_chars = 12000
+        endpoint._show_typing = False
+        endpoint._send_responses = False
+        endpoint._emit_outbound = False
+        endpoint._emit_no_reply = True
+        endpoint._include_member_metadata = False
+        endpoint._closing = False
+        endpoint._bot = mock.Mock()
+        endpoint._bot.user.id = 9009
+        return endpoint
+
+    @staticmethod
+    def _attachment(filename, data, content_type, attachment_id):
+        attachment = mock.Mock()
+        attachment.filename = filename
+        attachment.content_type = content_type
+        attachment.size = len(data)
+        attachment.id = attachment_id
+        attachment.read = mock.AsyncMock(return_value=data)
+        return attachment
+
+    @staticmethod
+    def _message(content, *attachments):
+        message = mock.Mock()
+        message.content = content
+        message.attachments = list(attachments)
+        message.channel = mock.Mock()
+        message.channel.id = 2002
+        message.id = 1001
+        message.author.id = 4004
+        message.author.bot = False
+        message.guild = None
+        message.mentions = []
+        message.role_mentions = []
+        message.reference = None
+        message.created_at = None
+        return message
+
+    def test_a_binary_file_in_merge_mode_keeps_its_own_row(self):
+        # A text-like file holding binary content is now its own binary lane
+        # object in merge mode too: every part still has a distinct key.
+        pipe = _PipelinePipe()
+        endpoint = self._endpoint(pipe)
+        notes = self._attachment('notes.txt', b'ok\x00binary', 'text/plain', 6006)
+        report = self._attachment('report.pdf', b'%PDF-1.4', 'application/pdf', 6007)
+        try:
+            asyncio.run(endpoint._process_message(self._message('have a look', notes, report)))
+        finally:
+            endpoint._stop_capture()
+
+        kept = _kept_rows(pipe)
+        assert sorted(row[2] for row in kept if row[0] == 'message') == ['binary:1', 'binary:2', 'text']
+        assert len(kept) == 3
+
+    def test_a_message_skipped_at_shutdown_leaves_only_its_no_reply(self):
+        pipe = _PipelinePipe()
+        endpoint = self._endpoint(pipe)
+        endpoint._closing = True
+        try:
+            asyncio.run(endpoint._process_message(self._message('hello')))
+        finally:
+            endpoint._stop_capture()
+
+        assert [(row[0], row[2]) for row in _kept_rows(pipe)] == [('no_reply', 'shutdown')]
 
 
 # ===========================================================================

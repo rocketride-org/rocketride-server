@@ -11,7 +11,7 @@ is off unless `DISCORD_LIVE=1` is set; a normal run collects and skips them.
 |---|---|---|---|
 | L1 live I/O | `test_live_io.py` (D01..D15) | Discord, the node | engine and pipeline |
 | L2 replay | `test_replay.py` (R01..R10) | Discord, the node | engine and pipeline |
-| L3 engine e2e | `test_engine_e2e.py` (E01..E06) | Discord, the node, the engine, a real model | nothing |
+| L3 engine e2e | `test_engine_e2e.py` (E01..E04) | Discord, the node, the engine, a real model | nothing |
 | L4 full engine suite | `test_engine_full.py` | Discord, the node, the engine | the model (`fake_llm.py`) or none (`echo` pipe) |
 
 - **L1** drives `_on_message` (gating) and `_process_message` directly on a real
@@ -54,7 +54,7 @@ DISCORD_LIVE=1 DISCORD_E2E_FULL=1 DISCORD_LIVE_IDS_FILE=<ids file> ROCKETRIDE_UR
 ```
 
 `--confcutdir` keeps pytest from loading `nodes/test/conftest.py`, which needs the
-engine's `ai` package. Requirements: Python 3.9+ with `discord.py` installed, and
+engine's `ai` package. Requirements: Python 3.10+ with `discord.py` installed, and
 the `rocketride` SDK for L3 and L4.
 
 ## Configuration
@@ -107,8 +107,25 @@ skips the rest with a reason):
 ```
 
 In L3 and L4 the harness never holds the token of the bot under test: the engine
-resolves `${ROCKETRIDE_DISCORD_*}` in the pipes from its own environment. The
-same goes for the capture database password, `${ROCKETRIDE_DISCORD_PG_PASSWORD}`.
+resolves `${ROCKETRIDE_*}` in the pipes from its own environment.
+
+### Engine variables
+
+L3 and L4 need these variables set on the engine (not in the harness's
+environment):
+
+| Variable | Used by | What it is |
+|---|---|---|
+| `ROCKETRIDE_DISCORD_DISCORD_BOT_TOKEN` | L3, L4 | token of the bot under test |
+| `ROCKETRIDE_DISCORD_GUILD_ID` | L3, L4 | the test server's id (the id map's `engine.guildId`) |
+| `ROCKETRIDE_DISCORD_SUPPORT_CHANNEL_ID` | L3, L4 | the channel the driver posts in (the id map's `engine.supportChannelId`) |
+| `ROCKETRIDE_DISCORD_TEAM_ROLE_ID` | L3 | a role the answers may mention (`allowedMentionRoleIds` in `engine_min.pipe`) |
+| `ROCKETRIDE_OPENAI_KEY` | L3 | OpenAI key for the model in `engine_min.pipe` |
+| `ROCKETRIDE_DISCORD_PG_PASSWORD` | L4, F32..F34 only | password of `DISCORD_E2E_PG_USER`, for the capture pipe's `db_postgres` node |
+
+`ROCKETRIDE_DISCORD_E2E_NO_SUCH_TOKEN` must stay unset: L4 uses it to check
+that an unset variable in the token fails the start with a message naming it.
+
 Point the `DISCORD_E2E_PG_*` variables only at a database you can throw away.
 
 ## Residue policy
@@ -129,6 +146,5 @@ Point the `DISCORD_E2E_PG_*` variables only at a database you can throw away.
   handles `MESSAGE_CREATE` only).
 - Grading answer content: L2 checks plumbing only, and L3 checks a few fixed
   expectations of a real model.
-- E06 (an event branch landing in a vector store) is a placeholder that skips.
 - The behaviours that ship in follow-up changes (thread history, escalation
   pause, reply sanitizing, retries, timeouts, backfill) are not exercised here.

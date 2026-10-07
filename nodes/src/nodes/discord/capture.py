@@ -123,6 +123,30 @@ _MISSING_TABLE_RE = re.compile(r'relation "[^"]*" does not exist')
 # Sentinel the worker loop reads as "the queue is drained, you may stop".
 _STOP = object()
 
+# Messages about a configured value (the table, the database node id) show at
+# most this many of its characters, as the node's own ``_shown_entry`` does:
+# the value may be a secret ``${ROCKETRIDE_*}`` pasted into the wrong field.
+_SHOWN_ENTRY_CHARS = 12
+
+
+def _shown_entry(value: Any) -> str:
+    """Quote a configured value for a message without ever echoing a secret in full.
+
+    Mirrors ``IEndpoint._shown_entry``; this module is loaded on its own, so it
+    cannot import that one.
+
+    Args:
+        value (Any): The configured value.
+
+    Returns:
+        str: The quoted value, whole when at most ``_SHOWN_ENTRY_CHARS`` long,
+            else its first ``_SHOWN_ENTRY_CHARS`` characters followed by ``…``.
+    """
+    text = str(value)
+    if len(text) <= _SHOWN_ENTRY_CHARS:
+        return repr(text)
+    return repr(text[:_SHOWN_ENTRY_CHARS] + '…')
+
 
 def is_valid_table_name(table: Any) -> bool:
     """Return True when ``table`` is safe to substitute into the fixed DDL.
@@ -228,7 +252,7 @@ def _message_part(metadata: Dict[str, Any], payload: Dict[str, Any]) -> str:
 
 # The no_reply reasons the node emits as fixed codes (see IEndpoint).
 NO_REPLY_REASON_CODES = frozenset(
-    {'no_answer', 'non_answer', 'model_error', 'send_failed', 'paused', 'aimed_elsewhere', 'timeout'}
+    {'no_answer', 'non_answer', 'model_error', 'send_failed', 'shutdown', 'paused', 'aimed_elsewhere', 'timeout'}
 )
 
 
@@ -389,10 +413,23 @@ def _is_missing_table(exc: BaseException) -> bool:
     return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or '42P01' in text
 
 
-def _short_error(exc: BaseException) -> str:
-    """Return the first line of an exception, bounded, for a log line."""
+def _short_error(exc: BaseException, hide: tuple = ()) -> str:
+    """Return the first line of an exception, bounded, for a log line.
+
+    Args:
+        exc (BaseException): The exception.
+        hide (tuple): Strings replaced by ``<row text>`` before the line is
+            cut, so a value the driver quoted never reaches the log.
+
+    Returns:
+        str: The first line, at most 300 characters.
+    """
     text = str(exc).strip().splitlines()
-    return (text[0] if text else exc.__class__.__name__)[:300]
+    line = text[0] if text else exc.__class__.__name__
+    for value in hide:
+        if isinstance(value, str) and value.strip():
+            line = line.replace(value, '<row text>')
+    return line[:300]
 
 
 class CaptureWriter:
@@ -452,7 +489,7 @@ class CaptureWriter:
         if not is_valid_table_name(table):
             self._disabled = True
             self._warn(
-                f'Discord capture: captureTable {table!r} is not a valid table name '
+                f'Discord capture: captureTable {_shown_entry(table)} is not a valid table name '
                 f'(letters, digits and underscore, not starting with a digit, '
                 f'at most {MAX_TABLE_NAME_CHARS} characters); capture is off for this run.'
             )
@@ -638,7 +675,7 @@ class CaptureWriter:
             return True
         self._disabled = True
         self._warn(
-            f'Discord capture: {node_id} is a {dialect or "unknown"!r} database, and capture writes to '
+            f'Discord capture: {_shown_entry(node_id)} is a {dialect or "unknown"!r} database, and capture writes to '
             f'PostgreSQL only; capture is off for this run.'
         )
         return False
@@ -690,10 +727,12 @@ class CaptureWriter:
         """Count a failed write and report it, throttled after the first."""
         self._failures += 1
         suffix = f' ({self._failures} failures so far)' if self._failures > 1 else ''
+        # The driver's message can quote a bound value: never the user's text.
+        error = _short_error(exc, hide=(row.get('payload'), row.get('text')))
         self._warn_throttled(
             '_last_failure_warn',
             f'Discord capture: writing {row.get("event_type")} for message {row.get("message_id")} '
-            f'to {self._node_label()}.{self._table} failed{suffix}: {_short_error(exc)}',
+            f'to {self._node_label()} table {_shown_entry(self._table)} failed{suffix}: {error}',
         )
 
     def _on_success(self) -> None:
@@ -706,4 +745,4 @@ class CaptureWriter:
 
     def _node_label(self) -> str:
         """Name the database node for a log line, resolved or not."""
-        return self._node_id or 'the connected database node'
+        return _shown_entry(self._node_id) if self._node_id else 'the connected database node'
