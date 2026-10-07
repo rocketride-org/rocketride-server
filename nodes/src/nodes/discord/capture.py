@@ -78,9 +78,11 @@ COLUMNS = (
 
 DEFAULT_TABLE = 'discord_events'
 
-# The contract clips `text` at 8000 characters. The whole, unclipped text is
-# still in `payload`, so nothing is actually lost -- this keeps one pathological
-# attachment transcript from dominating the column every query selects.
+# The contract clips the `text` column at 8000 characters; `payload` keeps the
+# text the node handed over, unclipped. A Discord message is at most 4000
+# characters, so this only ever bites on a text attachment asked about on its
+# own or a long answer: it keeps one of those from dominating the column every
+# query selects.
 MAX_TEXT_CHARS = 8000
 
 # Roughly a minute of a very busy channel. Past this the database is not
@@ -398,7 +400,8 @@ def capture_row(
     Args:
         event_type (str): ``message`` / ``outbound`` / ``no_reply`` / ``reaction``.
         metadata (dict): The node's downstream metadata contract for the event.
-        payload (dict): The event-specific body, as ``_send_sse`` broadcasts it.
+        payload (dict): The event-specific body, as ``_send_sse`` broadcasts it
+            (for a ``message``, with the unclipped text the row should store).
         source (str): The writer's label: ``captureSource``, or
             ``'discord:<node type>'`` when it is not set.
         now (datetime): Node-side event time; tz-aware.
@@ -409,8 +412,10 @@ def capture_row(
     metadata = _scrub_nul(metadata or {})
     payload = _scrub_nul(payload or {})
 
-    # Exactly the body `_send_sse` broadcasts, so a reader of this table and a
-    # live SSE subscriber are looking at the same object.
+    # The body `_send_sse` broadcasts, so a reader of this table and a live SSE
+    # subscriber are looking at the same object -- except that a `message`
+    # row's text is the user's whole message, where the broadcast clips it at
+    # 2000 characters (the node passes the text it wants stored).
     body = {'schemaVersion': 1, 'eventType': event_type, 'metadata': metadata, **payload}
 
     message_id = _opt_text(metadata.get('messageId')) or _opt_text(metadata.get('correlationId')) or ''

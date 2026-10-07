@@ -1321,6 +1321,7 @@ class IEndpoint(IEndpointBase):
                 message.id,
                 text_meta,
                 sse_text=question or pipeline_text,
+                capture_text=question,
             ),
         )
         if text_meta.get('_pipelineError'):
@@ -1607,9 +1608,10 @@ class IEndpoint(IEndpointBase):
     def _capture_event(self, event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any]):
         """Queue one event for the capture log.
 
-        Called next to every ``_send_sse``, with the same three arguments, so
-        the durable row and the live broadcast can never describe different
-        things. Best-effort in the strongest sense: building the row is pure
+        Called next to every ``_send_sse``, with the same three arguments
+        (a ``message`` passes its text unclipped, where the broadcast clips
+        it at 2000 characters), so the durable row and the live broadcast
+        describe the same event. Best-effort in the strongest sense: building the row is pure
         and queueing it cannot block, and anything that still goes wrong is a
         debug line, never an exception on the answering path.
         """
@@ -1642,6 +1644,7 @@ class IEndpoint(IEndpointBase):
         object_name: Optional[str] = None,
         attachment_id: Optional[int] = None,
         sse_text: Optional[str] = None,
+        capture_text: Optional[str] = None,
     ) -> str:
         """Push a text message through the pipeline on the text lane.
 
@@ -1659,6 +1662,9 @@ class IEndpoint(IEndpointBase):
                 text attachment; None for the message's own text.
             sse_text (Optional[str]): Text to broadcast instead of ``text`` —
                 the user's own message when attachments were folded in.
+            capture_text (Optional[str]): Text for the capture row instead
+                of the broadcast text — the user's own message (possibly
+                empty) when attachments were folded in.
 
         Returns:
             str: The first pipeline answer, or '' on error / no answers.
@@ -1678,7 +1684,11 @@ class IEndpoint(IEndpointBase):
             broadcast_text = text if sse_text is None else sse_text
             payload: Dict[str, Any] = {'lane': 'text', 'text': broadcast_text[:2000]}
             self._send_sse(pipe, 'message', obj_meta, payload)
-            self._capture_event('message', obj_meta, payload)
+            # The 2000-character clip keeps the broadcast small; the capture
+            # row is the durable record, so it gets the text whole (a Discord
+            # message can be up to 4000 characters).
+            stored_text = broadcast_text if capture_text is None else capture_text
+            self._capture_event('message', obj_meta, dict(payload, text=stored_text))
             pipe.writeText(text)
             pipe.close()
             results = entry.response.toDict()

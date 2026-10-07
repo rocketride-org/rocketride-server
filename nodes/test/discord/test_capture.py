@@ -1732,6 +1732,65 @@ class TestProcessedMessagesAreCaptured:
 
         assert [(row[0], row[2]) for row in _kept_rows(pipe)] == [('no_reply', 'shutdown')]
 
+    @staticmethod
+    def _record_sse(endpoint):
+        """Replace the SSE broadcast with a recorder of its ``message`` payloads."""
+        sent = []
+        endpoint._send_sse = lambda pipe, event_type, metadata, payload: sent.append((event_type, dict(payload)))
+        return sent
+
+    @pytest.mark.parametrize('merge', [False, True])
+    def test_a_long_message_is_stored_whole_and_broadcast_clipped(self, merge):
+        """Discord allows 4000 characters; the 2000 clip is the broadcast's, not the capture's."""
+        pipe = _PipelinePipe()
+        endpoint = self._endpoint(pipe, merge=merge)
+        sent = self._record_sse(endpoint)
+        question = 'q' * 3999 + 'Z'
+        try:
+            asyncio.run(endpoint._process_message(self._message(question)))
+        finally:
+            endpoint._stop_capture()
+
+        (row,) = [row for row in _kept_rows(pipe) if row[0] == 'message']
+        assert row[9] == question
+        assert json.loads(row[10])['text'] == question
+        (broadcast,) = [payload for event_type, payload in sent if event_type == 'message']
+        assert broadcast['text'] == question[:2000]
+
+    def test_merge_mode_stores_only_the_users_own_text(self):
+        """The folded file contents are pipeline input, not what the user wrote."""
+        pipe = _PipelinePipe()
+        endpoint = self._endpoint(pipe, merge=True)
+        sent = self._record_sse(endpoint)
+        notes = self._attachment('notes.txt', b'secret file body', 'text/plain', 6006)
+        try:
+            asyncio.run(endpoint._process_message(self._message('what is this?', notes)))
+        finally:
+            endpoint._stop_capture()
+
+        (row,) = [row for row in _kept_rows(pipe) if row[0] == 'message']
+        assert row[9] == 'what is this?'
+        assert 'secret file body' not in row[10]
+        (broadcast,) = [payload for event_type, payload in sent if event_type == 'message']
+        assert broadcast['text'] == 'what is this?'
+
+    def test_merge_mode_with_no_text_of_its_own_stores_no_text(self):
+        pipe = _PipelinePipe()
+        endpoint = self._endpoint(pipe, merge=True)
+        sent = self._record_sse(endpoint)
+        notes = self._attachment('notes.txt', b'secret file body', 'text/plain', 6006)
+        try:
+            asyncio.run(endpoint._process_message(self._message('', notes)))
+        finally:
+            endpoint._stop_capture()
+
+        (row,) = [row for row in _kept_rows(pipe) if row[0] == 'message']
+        assert not row[9]
+        assert 'secret file body' not in row[10]
+        # The broadcast still carries the merged question, as before.
+        (broadcast,) = [payload for event_type, payload in sent if event_type == 'message']
+        assert 'secret file body' in broadcast['text']
+
 
 # ===========================================================================
 # services.json
