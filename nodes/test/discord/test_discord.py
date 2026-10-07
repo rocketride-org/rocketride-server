@@ -603,6 +603,25 @@ class TestMarkersAndSanitize:
             "Thanks for flagging this — I've looped in the team to take a look. RocketRide team"
         )
 
+    def test_a_scratchpad_whose_thought_label_was_stripped_is_suppressed(self):
+        # Review of #2547: agent_llamaindex strips the leading ``Thought:``.
+        raw = (
+            'I could hand off to the RocketRide team but I can answer this myself.\nAction: search\nAction Input: {bad'
+        )
+        assert sanitize_reply(raw, self.MARKERS, alias='RocketRide team') == ''
+        assert sanitize_reply('Let me check.\nObservation: <@&900000000000000202>', self.MARKERS) == ''
+
+    def test_a_stripped_scratchpad_closed_by_an_envelope_is_unwrapped(self):
+        raw = 'Let me check.\nAction: search\n{"type": "final", "content": "Restart the app."}'
+        assert sanitize_reply(raw, self.MARKERS) == 'Restart the app.'
+
+    def test_an_answer_that_mentions_an_action_label_is_untouched(self):
+        for raw in (
+            'Open the Action: field in the editor and pick a trigger.',
+            'Your agent printed:\n```\nAction: search\nObservation: none\n```\nThat is the ReAct loop.',
+        ):
+            assert sanitize_reply(raw, self.MARKERS) == raw, raw
+
     def test_reasoning_after_final_answer_extraction_is_still_scratchpad(self):
         raw = 'Thought: step one\nFinal Answer: Observation: nothing to add'
         assert sanitize_reply(raw, self.MARKERS) == ''
@@ -848,6 +867,33 @@ class TestHandoffPart:
         head, part, tail = handoff_part(raw)
         assert part == 'Ask the team.'
         assert head + part + tail == raw
+
+    # Review of #2547: agent_llamaindex strips the leading ``Thought:``, so its
+    # raw scratchpad reaches the node without one.
+    STRIPPED = (
+        'I could hand off to the RocketRide team but I can answer this myself.\nAction: search\nAction Input: {bad'
+    )
+
+    def test_a_scratchpad_whose_thought_label_was_stripped_may_not_hand_off(self):
+        assert handoff_part(self.STRIPPED) == (self.STRIPPED, '', '')
+        for raw in (
+            'I should look this up.\nObservation: the team handles refunds',
+            'Let me check.\n  Action Input: {"q": "x"}',
+        ):
+            assert handoff_part(raw) == (raw, '', ''), raw
+
+    def test_a_stripped_scratchpad_with_a_final_answer_hands_off_only_there(self):
+        raw = 'Ask the team?\nAction: search\nObservation: x\nFinal Answer: Ask the team.'
+        head, part, tail = handoff_part(raw)
+        assert part == 'Ask the team.'
+        assert head + part + tail == raw
+
+    def test_an_answer_that_mentions_an_action_label_may_still_hand_off(self):
+        for raw in (
+            'Open the Action: field in the editor and ask the team.',
+            'Your agent printed:\n```\nAction: search\nObservation: none\n```\nAsk the team about it.',
+        ):
+            assert handoff_part(raw) == ('', raw, ''), raw
 
 
 class TestAliasAndMarkerBoundaries:

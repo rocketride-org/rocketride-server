@@ -52,6 +52,9 @@ _SPEAKER_LINE_START = re.compile(r'\n(?!  )')
 # A reply that still opens with one of these labels is leaked agent scratchpad
 # ("Thought: ...", "Action Input: ...") rather than a user-facing answer.
 _OPENS_WITH_REASONING = re.compile(r'^\s*(Thought|Action(?:\s+Input)?|Observation|Reasoning)\s*:', re.IGNORECASE)
+# A tool-call label that starts any line also marks a scratchpad: some agent
+# runtimes strip the leading ``Thought:`` before the reply reaches the node.
+_REASONING_LINE = re.compile(r'^[ \t]*(?:Action(?:[ \t]+Input)?|Observation)[ \t]*:', re.MULTILINE)
 # Only at the start of a line: prose that mentions the label is not trimmed.
 _FINAL_ANSWER = re.compile(r'^[ \t]*Final Answer\s*:\s*', re.IGNORECASE | re.MULTILINE)
 
@@ -797,6 +800,23 @@ def _outside_code_fences(text: str, matches) -> list:
     return [match for match in matches if not any(start <= match.start() < end for start, end in fences)]
 
 
+def _is_scratchpad(text: str) -> bool:
+    """Whether a reply is raw agent scratchpad rather than an answer.
+
+    It opens with a reasoning label, or an ``Action:``, ``Action Input:`` or
+    ``Observation:`` label starts one of its lines outside code.
+
+    Args:
+        text (str): The reply.
+
+    Returns:
+        bool: True when the reply is scratchpad.
+    """
+    if _OPENS_WITH_REASONING.match(text):
+        return True
+    return bool(_outside_code_fences(text, _REASONING_LINE.finditer(text)))
+
+
 def _alias_pattern(alias: str) -> Optional['re.Pattern']:
     """The regex that finds the team alias in an answer, or None for no alias.
 
@@ -913,7 +933,7 @@ def _extract_final(text: str) -> Tuple[str, bool]:
 
     envelope = _FINAL_JSON.search(result)
     if envelope and (
-        envelope.end() != len(result) or (envelope.start() != 0 and not _OPENS_WITH_REASONING.match(result))
+        envelope.end() != len(result) or (envelope.start() != 0 and not _is_scratchpad(result[: envelope.start()]))
     ):
         envelope = None
     if envelope:
@@ -940,7 +960,8 @@ def _extract_final(text: str) -> Tuple[str, bool]:
 def handoff_part(text: str) -> Tuple[str, str, str]:
     """Split a reply around the part of it that may hand the conversation over.
 
-    A reply that opens with a reasoning label is a raw scratchpad: only its
+    A reply that opens with a reasoning label, or has an ``Action:`` /
+    ``Action Input:`` / ``Observation:`` line outside code, is a raw scratchpad: only its
     final text (after the last ``Final Answer:``, or inside a final JSON
     envelope) may name the team or carry an escalation marker, since a
     ``Thought:`` that names the team is not a hand-off. Any other reply may
@@ -955,7 +976,7 @@ def handoff_part(text: str) -> Tuple[str, str, str]:
             has no final text.
     """
     text = text or ''
-    if not _OPENS_WITH_REASONING.match(text):
+    if not _is_scratchpad(text):
         return '', text, ''
     start, end, found = 0, len(text), False
     envelope = _FINAL_JSON.search(text)
@@ -979,8 +1000,9 @@ def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
 
     - unwrap a ``{"type": "final", "content": "..."}`` envelope;
     - keep only what follows the LAST ``Final Answer:`` (when non-empty);
-    - if the result still opens with a reasoning label it is scratchpad, not an
-      answer: when it came from a ``Final Answer:`` or envelope and its final
+    - if the result still opens with a reasoning label, or has an ``Action:`` /
+      ``Action Input:`` / ``Observation:`` line outside code, it is
+      scratchpad, not an answer: when it came from a ``Final Answer:`` or envelope and its final
       line (the last non-empty one, not itself a reasoning line) carries an
       escalation marker it becomes a short hand-off line that keeps the
       marker, otherwise it becomes '' so nothing is posted. A scratchpad with
@@ -1002,7 +1024,7 @@ def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
     if not result:
         return result
 
-    if _OPENS_WITH_REASONING.match(result):
+    if _is_scratchpad(result):
         if not found:
             return ''
         marker = _handoff_marker(result, markers, alias)

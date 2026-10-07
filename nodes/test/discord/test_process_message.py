@@ -1875,6 +1875,39 @@ class TestTeamMentionAlias:
         assert endpoint._paused_threads == set()
         assert not getattr(endpoint, '_team_pings', None), 'nobody was pinged, so no cooldown'
 
+    # Review of #2547: agent_llamaindex strips the leading ``Thought:`` label.
+    STRIPPED = (
+        'I could hand off to the RocketRide team but I can answer this myself.\nAction: search\nAction Input: {bad'
+    )
+
+    def test_a_raw_scratchpad_without_its_thought_label_neither_pings_nor_pauses(self):
+        endpoint = self._endpoint(self.STRIPPED, _team_mention_alias='RocketRide team', _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert _sent_reply(endpoint) == self.STRIPPED, 'the alias stays plain text'
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is False
+        assert endpoint._paused_threads == set()
+        assert not getattr(endpoint, '_team_pings', None), 'nobody was pinged, so no cooldown'
+
+    def test_a_sanitized_scratchpad_without_its_thought_label_is_not_posted(self):
+        endpoint = self._endpoint(
+            self.STRIPPED,
+            _team_mention_alias='RocketRide team',
+            _sanitize_replies=True,
+            _escalation_pause=True,
+            _emit_no_reply=True,
+            _emit_no_reply_event=mock.AsyncMock(),
+        )
+        endpoint._resolved_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert endpoint._send_response.await_count == 0, 'nothing is posted, so nobody is pinged'
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
+        assert endpoint._paused_threads == set()
+
     def test_a_raw_scratchpad_whose_final_answer_names_the_team_pings_once_and_pauses(self):
         raw = 'Thought: the RocketRide team should see this.\nFinal Answer: Looping in the RocketRide team.'
         endpoint = self._endpoint(raw, _team_mention_alias='RocketRide team', _escalation_pause=True)
