@@ -559,7 +559,8 @@ def format_thread_transcript(
     the transcript is longer than ``max_chars`` (keeping the most recent
     context, which is what the agent needs); the cut never leaves part of a
     message at the top, unless that part is all there is. Each message is clipped to
-    :data:`THREAD_HISTORY_MESSAGE_MAX_CHARS`, and its continuation lines are
+    :data:`THREAD_HISTORY_MESSAGE_MAX_CHARS` (a code block the clip leaves open
+    is closed), and its continuation lines, after any line break, are
     indented, so only the first line of a message starts with a speaker name:
     one user cannot forge lines from another speaker, the bot included.
 
@@ -578,7 +579,12 @@ def format_thread_transcript(
             continue
         if len(text) > THREAD_HISTORY_MESSAGE_MAX_CHARS:
             text = text[:THREAD_HISTORY_MESSAGE_MAX_CHARS] + '…'
-        lines.append(f'{name}: ' + _TRANSCRIPT_CONTINUATION.join(text.split('\n')))
+            # A cut inside a code block would leave every later line in it.
+            if text.count('```') % 2:
+                text += '\n```'
+        # Every line break (``\r``, U+2028 and the rest too), so none of them
+        # can start a line that reads as another speaker's.
+        lines.append(f'{name}: ' + _TRANSCRIPT_CONTINUATION.join(text.splitlines()))
     out = '\n'.join(lines)
     if max_chars > 0 and len(out) > max_chars:
         tail = out[-max_chars:]
