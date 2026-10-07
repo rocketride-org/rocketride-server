@@ -1026,6 +1026,7 @@ def test_f32_capture_into_postgres(engine, engine_config, driver_bot):
 @needs_pg
 def test_f33_every_part_kept_and_duplicates_ignored(engine, engine_config, driver_bot, tmp_media):
     tag = _tag('F33')
+    _require_disposable_database()
     _start(engine, _with_capture(_echo(_params(engine_config, textAttachmentExtensions=['.md']))))
     posted = driver_bot.post(f'{tag} text and a file', files=_files(tmp_media['md']))
     answer = _answer(driver_bot, driver_bot.channel, posted, tag)
