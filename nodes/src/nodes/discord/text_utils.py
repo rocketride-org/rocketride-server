@@ -935,6 +935,41 @@ def _extract_final(text: str) -> Tuple[str, bool]:
     return result, found
 
 
+def handoff_part(text: str) -> Tuple[str, str, str]:
+    """Split a reply around the part of it that may hand the conversation over.
+
+    A reply that opens with a reasoning label is a raw scratchpad: only its
+    final text (after the last ``Final Answer:``, or inside a final JSON
+    envelope) may name the team or carry an escalation marker, since a
+    ``Thought:`` that names the team is not a hand-off. Any other reply may
+    hand off anywhere.
+
+    Args:
+        text (str): The reply as it will be posted.
+
+    Returns:
+        Tuple[str, str, str]: ``(head, part, tail)`` with
+            ``head + part + tail == text``; ``part`` is '' when a scratchpad
+            has no final text.
+    """
+    text = text or ''
+    if not _OPENS_WITH_REASONING.match(text):
+        return '', text, ''
+    start, end, found = 0, len(text), False
+    envelope = _FINAL_JSON.search(text)
+    if envelope and not text[envelope.end() :].strip():
+        start, end = envelope.span(1)
+        found = True
+    final = text[start:end]
+    marks = _outside_code_fences(final, _FINAL_ANSWER.finditer(final))
+    if marks and final[marks[-1].end() :].strip():
+        start += marks[-1].end()
+        found = True
+    if not found or not text[start:end].strip():
+        return text, '', ''
+    return text[:start], text[start:end], text[end:]
+
+
 def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
     """Strip leaked agent scratchpad from a reply before it is posted.
 

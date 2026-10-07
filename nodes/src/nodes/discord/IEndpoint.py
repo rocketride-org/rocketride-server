@@ -67,6 +67,7 @@ from .text_utils import (
     fold_text_attachment,
     format_thread_transcript,
     guess_media_type,
+    handoff_part,
     inject_role_mention,
     is_aimed_at_someone_else,
     looks_like_error,
@@ -1540,18 +1541,22 @@ class IEndpoint(IEndpointBase):
                 not on cooldown.
         """
         alias = self._handoff_alias()
-        if not text or not alias or not contains_alias(text, alias):
+        # In a raw scratchpad only the final text may hand off: a Thought that
+        # names the team must not ping it.
+        head, part, tail = handoff_part(text)
+        if not part or not alias or not contains_alias(part, alias):
             return text
         if on_cooldown:
             debug('Discord: team ping on cooldown for this user; the alias is posted as plain text')
             return text
-        return inject_role_mention(text, alias, self._team_mention())
+        return head + inject_role_mention(part, alias, self._team_mention()) + tail
 
     def _is_escalation(self, text: str) -> bool:
         """Whether a posted answer hands the conversation over.
 
         It carries an escalation marker, or the team alias left as plain text
-        because the ping was on cooldown: the hand-off is just as real.
+        because the ping was on cooldown: the hand-off is just as real. In a
+        raw scratchpad only the final text counts (see ``handoff_part``).
 
         Args:
             text (str): The posted answer (or a bot message from the thread's
@@ -1560,7 +1565,8 @@ class IEndpoint(IEndpointBase):
         Returns:
             bool: True when the text hands the conversation over.
         """
-        return bool(find_marker(text, self._effective_markers())) or contains_alias(text, self._handoff_alias())
+        part = handoff_part(text)[1]
+        return bool(find_marker(part, self._effective_markers())) or contains_alias(part, self._handoff_alias())
 
     def _is_bot_mentioned(self, message: discord.Message) -> bool:
         """Whether this bot is directly @mentioned (never @everyone/@here).
@@ -2094,12 +2100,14 @@ class IEndpoint(IEndpointBase):
                 author_id = str(author_id) if author_id is not None else None
                 on_cooldown = self._team_ping_on_cooldown(author_id)
                 reply = self._with_team_mention(reply, on_cooldown)
+                # On cooldown, or when the reply is a raw scratchpad with no
+                # final text, the send withholds the team role too, so a
+                # literal mention in the answer cannot ping it either.
+                ping_team = not on_cooldown and bool(handoff_part(reply)[1])
 
                 if reply and self._send_responses:
-                    # On cooldown the send withholds the team role too, so a
-                    # literal mention in the answer cannot ping it either.
-                    outbound = await self._send_response(message, reply, ping_team=not on_cooldown)
-                    if not on_cooldown:
+                    outbound = await self._send_response(message, reply, ping_team=ping_team)
+                    if ping_team:
                         self._note_team_ping(author_id, outbound)
                     if getattr(self, '_escalation_pause', False) or getattr(self, '_feedback_reactions', False):
                         await self._after_send(message, reply, outbound)

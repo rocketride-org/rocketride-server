@@ -1841,6 +1841,45 @@ class TestTeamMentionAlias:
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
         assert endpoint._paused_threads == set()
 
+    def test_a_raw_scratchpad_naming_the_team_neither_pings_nor_pauses(self):
+        """Review of #2547: with sanitizeReplies off the raw scratchpad is posted as-is.
+
+        Only its final text may hand off, and this one has none: the alias stays
+        plain text, the team role is withheld and the thread is not paused.
+        """
+        raw = 'Thought: I could hand off to the RocketRide team but I can answer this myself.\nAction: search'
+        endpoint = self._endpoint(
+            raw, _team_mention_alias='RocketRide team', _escalation_markers=['<@&77>'], _escalation_pause=True
+        )
+        endpoint._resolved_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert _sent_reply(endpoint) == raw
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is False
+        assert endpoint._paused_threads == set()
+        assert not getattr(endpoint, '_team_pings', None), 'nobody was pinged, so no cooldown'
+
+    def test_a_raw_scratchpad_whose_final_answer_names_the_team_pings_once_and_pauses(self):
+        raw = 'Thought: the RocketRide team should see this.\nFinal Answer: Looping in the RocketRide team.'
+        endpoint = self._endpoint(raw, _team_mention_alias='RocketRide team', _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert _sent_reply(endpoint) == (
+            'Thought: the RocketRide team should see this.\nFinal Answer: Looping in the <@&77>.'
+        )
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+        assert endpoint._paused_threads == {'321'}
+
+    def test_a_raw_scratchpad_in_history_does_not_rebuild_a_pause(self):
+        endpoint = self._endpoint('', _team_mention_alias='RocketRide team', _escalation_markers=['<@&77>'])
+
+        assert not endpoint._is_escalation('Thought: hand off to the RocketRide team? <@&77>\nAction: search')
+        assert endpoint._is_escalation('Thought: hm\nFinal Answer: Handing over to <@&77>.')
+        assert endpoint._is_escalation('Handing over to the RocketRide team.')
+
     def test_the_alias_is_injected_only_into_the_posted_text(self):
         # The sanitizer sees the alias as the model wrote it; only the text that
         # is finally posted carries the role mention.

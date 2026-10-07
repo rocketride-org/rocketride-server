@@ -54,6 +54,7 @@ find_marker = text_utils.find_marker
 sanitize_reply = text_utils.sanitize_reply
 looks_like_error = text_utils.looks_like_error
 inject_role_mention = text_utils.inject_role_mention
+handoff_part = text_utils.handoff_part
 is_aimed_at_someone_else = text_utils.is_aimed_at_someone_else
 DISCORD_MESSAGE_CHAR_LIMIT = text_utils.DISCORD_MESSAGE_CHAR_LIMIT
 
@@ -801,6 +802,33 @@ class TestInjectRoleMention:
     def test_regex_metacharacters_in_the_alias_are_literal(self):
         assert inject_role_mention('ask the a.b team now', 'a.b team', '<@&77>') == 'ask the <@&77> now'
         assert inject_role_mention('ask the axb team now', 'a.b team', '<@&77>') == 'ask the axb team now'
+
+
+class TestHandoffPart:
+    """Only the final text of a raw scratchpad may hand the conversation over."""
+
+    def test_a_plain_reply_may_hand_off_anywhere(self):
+        assert handoff_part('Looping in the team.') == ('', 'Looping in the team.', '')
+
+    def test_a_scratchpad_without_final_text_may_not_hand_off(self):
+        raw = 'Thought: I could hand off to the team.\nAction: search'
+        assert handoff_part(raw) == (raw, '', '')
+
+    def test_only_the_text_after_the_last_final_answer_counts(self):
+        raw = 'Thought: team?\nFinal Answer: draft\nFinal Answer: Ask the team.'
+        head, part, tail = handoff_part(raw)
+        assert part == 'Ask the team.'
+        assert head + part + tail == raw
+
+    def test_an_empty_final_answer_is_no_final_text(self):
+        raw = 'Thought: ask the team\nFinal Answer:   '
+        assert handoff_part(raw)[1] == ''
+
+    def test_a_final_envelope_supplies_the_final_text(self):
+        raw = 'Thought: team?\n{"type": "final", "content": "Ask the team."}'
+        head, part, tail = handoff_part(raw)
+        assert part == 'Ask the team.'
+        assert head + part + tail == raw
 
 
 class TestAliasAndMarkerBoundaries:
