@@ -243,6 +243,43 @@ def INSERT_SQL(table: str) -> str:
     )
 
 
+# Asks whether the capture table exists. ``to_regclass`` takes a name as SQL
+# would write it (so the quoted, lower-cased one), returns NULL instead of
+# raising for a missing relation, and needs no privilege on the table.
+TABLE_EXISTS_SQL = 'SELECT to_regclass($1)'
+
+
+def _table_exists_answer(output: Any) -> Optional[bool]:
+    """Read the ``execute`` tool's answer to :data:`TABLE_EXISTS_SQL`.
+
+    The tool returns ``{'rows': [...], 'affected_rows': N}``, one row with one
+    value: the table's name when it exists, NULL when it does not. Rows are
+    lists with ``row_mode: 'array'`` and dicts otherwise; both are read.
+
+    Returns:
+        Optional[bool]: True / False for a readable answer, None for anything
+            else, which leaves the writer to its INSERT-first fallback.
+    """
+    rows = output.get('rows') if isinstance(output, dict) else getattr(output, 'rows', None)
+    if not isinstance(rows, (list, tuple)) or len(rows) != 1:
+        return None
+    row = rows[0]
+    if isinstance(row, dict):
+        values = list(row.values())
+    elif isinstance(row, (list, tuple)):
+        values = list(row)
+    else:
+        return None
+    if len(values) != 1:
+        return None
+    value = values[0]
+    if value is None:
+        return False
+    if isinstance(value, str) and value:
+        return True
+    return None
+
+
 def _opt_text(value: Any) -> Optional[str]:
     """Coerce an id-ish value to text, mapping absent/empty to NULL.
 
@@ -487,8 +524,9 @@ class CaptureWriter:
 
     One writer per node process. ``submit`` is called from whichever thread is
     handling a Discord event and never blocks; a single daemon thread borrows
-    a pipe, resolves the database node and checks it is PostgreSQL once, and
-    runs the INSERTs, creating the table only when an INSERT finds it missing.
+    a pipe, resolves the database node and checks it is PostgreSQL once, asks
+    once whether the table exists (creating it when it does not), and runs the
+    INSERTs, creating the table again should an INSERT still find it missing.
 
     Args:
         target: The endpoint target to borrow pipes from (``getPipe`` /
@@ -526,6 +564,7 @@ class CaptureWriter:
         # then borrows no more pipes, and drops and counts what is left.
         self._stopping = threading.Event()
         self._dialect_checked = False
+        self._table_checked = False
         self._disabled = False
         self._failures = 0
         self._dropped = 0
@@ -670,13 +709,16 @@ class CaptureWriter:
                 return
             if not self._dialect_checked and not self._check_dialect(pipe, node_id):
                 return
+            if not self._table_checked:
+                self._ensure_table(pipe, node_id)
             try:
                 self._invoke(pipe, node_id, INSERT_SQL(self._table), row_params(row))
             except Exception as e:
-                # INSERT first, DDL only for a table that is really missing: a
-                # database user allowed only to INSERT into an existing table
-                # must never need CREATE rights. A CREATE that fails is a
-                # failed write, so the next row tries it again.
+                # DDL only for a table that is really missing: a database user
+                # allowed only to INSERT into an existing table must never
+                # need CREATE rights. This covers a table dropped after the
+                # check, or a check whose answer could not be read. A CREATE
+                # that fails is a failed write, so the next row tries again.
                 if not _is_missing_table(e):
                     raise
                 self._invoke(pipe, node_id, CREATE_TABLE_SQL(self._table), None)
@@ -688,6 +730,26 @@ class CaptureWriter:
         finally:
             if pipe is not None:
                 self._target.putPipe(pipe)
+
+    def _ensure_table(self, pipe: Any, node_id: str) -> None:
+        """Before the first INSERT of a run, create the table if it does not exist.
+
+        Without this, the first row into a new table is an INSERT that fails,
+        and the database node logs every failed statement at error level with
+        its bound parameters -- the user's question among them. The check
+        never fails that way. It runs once per run: a check or CREATE that
+        raises is a failed write, and the next row asks again; an answer that
+        cannot be read leaves the INSERT-first fallback to do the work.
+        """
+        output = self._call_tool(
+            pipe,
+            node_id,
+            'execute',
+            {'sql': TABLE_EXISTS_SQL, 'params': [_quoted_table(self._table)], 'row_mode': 'array'},
+        )
+        if _table_exists_answer(output) is False:
+            self._invoke(pipe, node_id, CREATE_TABLE_SQL(self._table), None)
+        self._table_checked = True
 
     def _invoke(self, pipe: Any, node_id: str, sql: str, params: Optional[List[Any]]) -> Any:
         """Call the ``execute`` tool on ``node_id`` over ``pipe``."""

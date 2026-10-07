@@ -524,14 +524,30 @@ class _FakePipe:
     """A pipe that records invokes and reports one connected tool node.
 
     It stands in for a PostgreSQL database node: ``dialect`` answers
-    ``dialect`` (recorded in ``dialect_calls``, not ``calls``), and while the
-    table does not exist an INSERT fails the way PostgreSQL reports it.
+    ``dialect`` (recorded in ``dialect_calls``, not ``calls``), the
+    ``to_regclass`` existence check answers from ``table_exists`` (recorded in
+    ``check_calls``, not ``calls``; ``check_output`` replaces the answer), and
+    while the table does not exist an INSERT fails the way PostgreSQL reports it.
     """
 
-    def __init__(self, node_ids=('db_1',), fail=None, dialect='postgres', table_exists=True, create_fails=None):
+    _ANSWER = object()
+
+    def __init__(
+        self,
+        node_ids=('db_1',),
+        fail=None,
+        dialect='postgres',
+        table_exists=True,
+        create_fails=None,
+        check_output=_ANSWER,
+        check_fails=None,
+    ):
         self.node_ids = list(node_ids)
         self.calls = []
         self.dialect_calls = []
+        self.check_calls = []
+        self.check_output = check_output
+        self.check_fails = check_fails
         self.controller_queries = 0
         self.fail = fail
         self.dialect = dialect
@@ -548,6 +564,15 @@ class _FakePipe:
             self.dialect_calls.append(component_id)
             param.output = {'dialect': self.dialect}
             return
+        if param.input['sql'].startswith('SELECT to_regclass'):
+            self.check_calls.append((component_id, dict(param.input)))
+            if self.check_fails is not None:
+                raise self.check_fails
+            if self.check_output is not self._ANSWER:
+                param.output = self.check_output
+            else:
+                param.output = {'rows': [['discord_events' if self.table_exists else None]], 'affected_rows': 0}
+            return
         if self.fail is not None:
             raise self.fail
         sql = param.input['sql']
@@ -561,7 +586,7 @@ class _FakePipe:
             )
 
     def invoke(self, param, component_id=''):
-        if param.tool_name != 'dialect':
+        if param.tool_name != 'dialect' and not param.input['sql'].startswith('SELECT to_regclass'):
             self.calls.append((component_id, param.tool_name, dict(param.input)))
         self._answer(param, component_id)
         return param.output
@@ -678,8 +703,61 @@ class TestWriterWrites:
         assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')] * 3
         assert warnings == []
 
-    def test_a_missing_table_is_created_once_then_the_insert_is_retried(self):
+    def test_the_table_is_checked_once_before_the_first_insert(self):
+        """``to_regclass`` needs no privilege and never fails the way a doomed INSERT does."""
+        pipe = _FakePipe(table_exists=True)
+        writer = _writer(_FakeTarget(pipe), [], table='Bot_Events')
+
+        writer._write_one(_row())
+        writer._write_one(_row())
+
+        assert pipe.check_calls == [
+            ('db_1', {'sql': 'SELECT to_regclass($1)', 'params': ['"bot_events"'], 'row_mode': 'array'})
+        ]
+
+    def test_an_existing_table_gets_no_ddl_and_no_failed_insert(self):
+        """The database node logs a failed INSERT at error level with its parameters: never send one."""
+        pipe = _FakePipe(table_exists=True)
+        inserts = []
+        original = pipe._answer
+
+        def answer(param, component_id):
+            original(param, component_id)
+            if param.tool_name == 'execute' and param.input['sql'].startswith('INSERT'):
+                inserts.append(pipe.table_exists)
+
+        pipe._answer = answer
+        writer = _writer(_FakeTarget(pipe), [])
+
+        writer._write_one(_row())
+
+        assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')]
+        assert inserts == [True]
+        assert writer.failures == 0
+
+    def test_a_missing_table_is_created_before_the_first_insert(self):
         pipe = _FakePipe(table_exists=False)
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+        writer._write_one(_row())
+
+        assert [call[2]['sql'] for call in pipe.calls] == [
+            CREATE_TABLE_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+        ]
+        assert len(pipe.check_calls) == 1
+        assert warnings == []
+        assert writer.failures == 0
+
+    @pytest.mark.parametrize(
+        'output',
+        [None, {}, {'rows': []}, {'rows': [[1]]}, {'rows': [['a', 'b']]}, {'rows': 'discord_events'}, 'text'],
+    )
+    def test_an_unreadable_check_falls_back_to_insert_first(self, output):
+        pipe = _FakePipe(table_exists=False, check_output=output)
         warnings = []
         writer = _writer(_FakeTarget(pipe), warnings)
 
@@ -692,7 +770,49 @@ class TestWriterWrites:
             INSERT_SQL('discord_events'),
             INSERT_SQL('discord_events'),
         ]
+        assert len(pipe.check_calls) == 1
         assert warnings == []
+
+    def test_an_object_row_answer_is_read_too(self):
+        pipe = _FakePipe(table_exists=False, check_output={'rows': [{'to_regclass': None}]})
+        writer = _writer(_FakeTarget(pipe), [])
+
+        writer._write_one(_row())
+
+        assert [call[2]['sql'] for call in pipe.calls] == [
+            CREATE_TABLE_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+        ]
+
+    def test_a_failed_check_is_a_failed_write_and_is_asked_again(self):
+        pipe = _FakePipe(check_fails=RuntimeError('connection refused'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+        pipe.check_fails = None
+        writer._write_one(_row())
+
+        assert len(pipe.check_calls) == 2
+        assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')]
+        assert 'connection refused' in warnings[0]
+        assert writer.failures == 0
+
+    def test_a_table_dropped_after_the_check_is_created_again(self):
+        """The INSERT-error fallback stays for a table that disappears mid-run."""
+        pipe = _FakePipe(table_exists=True)
+        writer = _writer(_FakeTarget(pipe), [])
+
+        writer._write_one(_row())
+        pipe.table_exists = False
+        writer._write_one(_row())
+
+        assert [call[2]['sql'] for call in pipe.calls] == [
+            INSERT_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+            CREATE_TABLE_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+        ]
         assert writer.failures == 0
 
     def test_a_failed_create_is_a_failed_write_and_is_tried_again_next_row(self):
@@ -1774,7 +1894,7 @@ class _ControlOnlyPipe(_FakePipe):
 
     def control(self, lane, envelope, nodeId=''):
         param = envelope.param
-        if param.tool_name != 'dialect':
+        if param.tool_name != 'dialect' and not param.input['sql'].startswith('SELECT to_regclass'):
             self.calls.append((nodeId, param.tool_name, dict(param.input), lane))
         self._answer(param, nodeId)
 
@@ -1798,6 +1918,7 @@ def test_a_pipe_without_invoke_is_driven_through_control(monkeypatch):
     (insert,) = pipe.calls
     assert insert[0] == 'db_1' and insert[1] == 'execute' and insert[3] == 'tool'
     assert pipe.dialect_calls == ['db_1']
+    assert [call[0] for call in pipe.check_calls] == ['db_1']
     assert insert[2]['sql'] == INSERT_SQL('discord_events')
     assert len(insert[2]['params']) == 12
     assert warnings == []
