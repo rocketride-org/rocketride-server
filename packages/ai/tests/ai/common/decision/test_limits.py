@@ -86,12 +86,26 @@ def test_fit_content_reserved_exceeds_budget_returns_empty():
 
 
 def test_fit_content_respects_utf8_json_byte_budget():
-    # Each emoji is 4 UTF-8 bytes but json.dumps escapes it to 12 ASCII bytes (surrogate pair).
+    # Each emoji is 4 UTF-8 bytes in compact encoding.
     text = '\U0001f600' * 1000
     lim = _limits(max_state_tokens=10_000_000, max_body_bytes=2000)
     out, truncated = fit_content(text, lim, reserved_tokens=0, reserved_bytes=500)
     assert truncated is True
+    assert out  # non-empty
+    assert text.startswith(out)
     assert json_bytes(out) <= 1500
+
+
+def test_json_bytes_counts_utf8_non_ascii():
+    # Quoted é (2 quote bytes) + 2-byte UTF-8 é = 4 bytes total.
+    assert json_bytes('é') == 4
+
+
+def test_json_bytes_handles_lone_surrogate():
+    # Lone surrogates (e.g., from broken PDF text) are replaced with U+FFFD.
+    # Should not raise UnicodeEncodeError.
+    result = json_bytes('\ud800')
+    assert result > 0
 
 
 def test_shrink_keeps_three_quarters():
