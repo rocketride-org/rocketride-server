@@ -95,13 +95,19 @@ WARN_INTERVAL_SECONDS = 30.0
 # whole budget would have those derived names truncated -- and two capture
 # tables whose names differ only past the cut would then collide on them. The
 # accepted name is therefore shorter by the longest suffix the DDL appends.
+#
+# Each suffix starts with ``$``, which a table name may not contain: index,
+# constraint and table names share one namespace, so a ``_thread`` suffix
+# would make the index for table ``events`` collide with a table named
+# ``events_thread``.
 POSTGRES_IDENTIFIER_BYTES = 63
-TABLE_NAME_SUFFIXES = ('_dedupe', '_thread', '_occurred')
+TABLE_NAME_SUFFIXES = ('$dedupe', '$thread', '$occurred')
 MAX_TABLE_NAME_CHARS = POSTGRES_IDENTIFIER_BYTES - max(len(suffix) for suffix in TABLE_NAME_SUFFIXES)
 
-# The table name is substituted into DDL, so it is matched against this and
-# refused rather than quoted.
-_TABLE_NAME_RE = re.compile(rf'^[A-Za-z_][A-Za-z0-9_]{{0,{MAX_TABLE_NAME_CHARS - 1}}}$')
+# The table name is substituted into SQL, so it must match this in full
+# (``fullmatch``: ``$`` would also match before a trailing newline) and is then
+# lower-cased and double-quoted, so a reserved word such as ``user`` works.
+_TABLE_NAME_RE = re.compile(rf'[A-Za-z_][A-Za-z0-9_]{{0,{MAX_TABLE_NAME_CHARS - 1}}}')
 
 # ``event_key`` is part of the dedupe key, and a ``no_reply`` reason can be
 # built from an exception message. The node clips the reason at its emit site;
@@ -111,10 +117,11 @@ MAX_EVENT_KEY_CHARS = 200
 # A configured ``captureSource`` label: short, printable, no spaces. It is a
 # bind parameter, never SQL text, so this is hygiene for the readers of the
 # column rather than a guard against injection.
-_SOURCE_LABEL_RE = re.compile(r'^[A-Za-z0-9_.:+@-]{1,128}$')
+_SOURCE_LABEL_RE = re.compile(r'[A-Za-z0-9_.:+@-]{1,128}')
 
 # The capture SQL (identity column, JSONB, ON CONFLICT, CAST(... AS jsonb)) is
-# PostgreSQL's (10 or later, for the identity column). What a database node's ``dialect`` tool answers for it.
+# PostgreSQL's, 10 or later for the identity column. What a database node's
+# ``dialect`` tool answers for it.
 POSTGRES_DIALECTS = ('postgres', 'postgresql')
 
 # How PostgreSQL words an INSERT into a table that does not exist. Anchored to
@@ -155,16 +162,29 @@ def is_valid_table_name(table: Any) -> bool:
     """Return True when ``table`` is safe to substitute into the fixed DDL.
 
     The table name is the one part of these statements that comes from config,
-    and it lands in a position no bind parameter can occupy. So it is matched
-    against an identifier pattern and refused outright -- quoting it would
-    accept names that work but read as an injection attempt in the logs.
+    and it lands in a position no bind parameter can occupy. So it must match
+    an identifier pattern in full and is refused outright otherwise -- quoting
+    alone would accept names that work but read as an injection attempt in the
+    logs. A name that passes is still lower-cased and quoted by
+    :func:`_quoted_table`, so a reserved word is a usable table name too.
     """
-    return isinstance(table, str) and bool(_TABLE_NAME_RE.match(table))
+    return isinstance(table, str) and bool(_TABLE_NAME_RE.fullmatch(table))
 
 
 def is_valid_source_label(label: Any) -> bool:
     """Return True when ``label`` may be written as a row's ``source``."""
-    return isinstance(label, str) and bool(_SOURCE_LABEL_RE.match(label))
+    return isinstance(label, str) and bool(_SOURCE_LABEL_RE.fullmatch(label))
+
+
+def _quoted_table(table: str, suffix: str = '') -> str:
+    """Return ``table`` (plus ``suffix``) lower-cased and double-quoted for SQL.
+
+    Unquoted, PostgreSQL folds a name to lower case and refuses a reserved
+    word (``INSERT INTO user`` is a syntax error). Quoted, any name works but
+    case is significant, so the name is lower-cased first: ``Discord_Events``
+    still means the table ``discord_events`` an unquoted query finds.
+    """
+    return f'"{(table + suffix).lower()}"'
 
 
 def CREATE_TABLE_SQL(table: str) -> str:
@@ -172,8 +192,10 @@ def CREATE_TABLE_SQL(table: str) -> str:
 
     Three statements in one string: the table and its two indexes. Every one
     is ``IF NOT EXISTS``, so this is safe to run on each process start, and
-    the index and constraint names are derived from ``table`` so two capture
-    tables can live in one database without colliding.
+    the index and constraint names are ``table`` plus a ``$`` suffix. A table
+    name may not contain ``$``, so a derived name can never be another capture
+    table's name, and two capture tables can live in one database without
+    colliding.
 
     ``table`` MUST have passed :func:`is_valid_table_name` -- callers go
     through ``CaptureWriter``, which refuses to start otherwise.
@@ -183,8 +205,9 @@ def CREATE_TABLE_SQL(table: str) -> str:
     identity column needs only ``INSERT`` on the table. A user that may only
     insert into a table created beforehand then needs no other grant.
     """
+    name = _quoted_table(table)
     return (
-        f'CREATE TABLE IF NOT EXISTS {table} ('
+        f'CREATE TABLE IF NOT EXISTS {name} ('
         'seq BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, '
         'event_type TEXT NOT NULL, '
         'message_id TEXT NOT NULL, '
@@ -199,10 +222,10 @@ def CREATE_TABLE_SQL(table: str) -> str:
         'payload JSONB NOT NULL, '
         "source TEXT NOT NULL DEFAULT '', "
         'captured_at TIMESTAMPTZ NOT NULL DEFAULT now(), '
-        f'CONSTRAINT {table}_dedupe UNIQUE (message_id, event_type, event_key)'
+        f'CONSTRAINT {_quoted_table(table, "$dedupe")} UNIQUE (message_id, event_type, event_key)'
         '); '
-        f'CREATE INDEX IF NOT EXISTS {table}_thread ON {table} (thread_id); '
-        f'CREATE INDEX IF NOT EXISTS {table}_occurred ON {table} (occurred_at)'
+        f'CREATE INDEX IF NOT EXISTS {_quoted_table(table, "$thread")} ON {name} (thread_id); '
+        f'CREATE INDEX IF NOT EXISTS {_quoted_table(table, "$occurred")} ON {name} (occurred_at)'
     )
 
 
@@ -214,7 +237,7 @@ def INSERT_SQL(table: str) -> str:
     message after a resume, and the capture log is append-only.
     """
     return (
-        f'INSERT INTO {table} ({", ".join(COLUMNS)}) '
+        f'INSERT INTO {_quoted_table(table)} ({", ".join(COLUMNS)}) '
         'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CAST($11 AS jsonb),$12) '
         'ON CONFLICT (message_id, event_type, event_key) DO NOTHING'
     )

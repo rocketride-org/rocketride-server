@@ -398,7 +398,7 @@ class TestSql:
     def test_the_insert_names_the_twelve_columns_and_binds_twelve_params(self):
         sql = INSERT_SQL('discord_events')
         assert sql == (
-            'INSERT INTO discord_events (event_type, message_id, event_key, thread_id, channel_id, guild_id, '
+            'INSERT INTO "discord_events" (event_type, message_id, event_key, thread_id, channel_id, guild_id, '
             'author_id, author_is_bot, occurred_at, text, payload, source) '
             'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CAST($11 AS jsonb),$12) '
             'ON CONFLICT (message_id, event_type, event_key) DO NOTHING'
@@ -410,9 +410,9 @@ class TestSql:
 
     def test_the_create_table_is_idempotent_and_brings_both_indexes(self):
         sql = CREATE_TABLE_SQL('discord_events')
-        assert 'CREATE TABLE IF NOT EXISTS discord_events' in sql
-        assert 'CREATE INDEX IF NOT EXISTS discord_events_thread ON discord_events (thread_id)' in sql
-        assert 'CREATE INDEX IF NOT EXISTS discord_events_occurred ON discord_events (occurred_at)' in sql
+        assert 'CREATE TABLE IF NOT EXISTS "discord_events"' in sql
+        assert 'CREATE INDEX IF NOT EXISTS "discord_events$thread" ON "discord_events" (thread_id)' in sql
+        assert 'CREATE INDEX IF NOT EXISTS "discord_events$occurred" ON "discord_events" (occurred_at)' in sql
 
     def test_the_create_table_declares_every_contract_column(self):
         sql = CREATE_TABLE_SQL('discord_events')
@@ -429,14 +429,47 @@ class TestSql:
     def test_a_custom_table_renames_its_indexes_and_constraint_too(self):
         """Two capture tables in one database must not collide on index names."""
         sql = CREATE_TABLE_SQL('bot_events')
-        assert 'CREATE TABLE IF NOT EXISTS bot_events' in sql
-        assert 'bot_events_thread' in sql
-        assert 'bot_events_occurred' in sql
-        assert 'bot_events_dedupe' in sql
+        assert 'CREATE TABLE IF NOT EXISTS "bot_events"' in sql
+        assert '"bot_events$thread"' in sql
+        assert '"bot_events$occurred"' in sql
+        assert '"bot_events$dedupe"' in sql
         assert 'discord_events' not in sql
-        assert INSERT_SQL('bot_events').startswith('INSERT INTO bot_events (')
+        assert INSERT_SQL('bot_events').startswith('INSERT INTO "bot_events" (')
 
-    @pytest.mark.parametrize('name', ['discord_events', 'T', '_x', 'a1_2', 'A' * capture.MAX_TABLE_NAME_CHARS])
+    def test_no_derived_name_can_be_another_capture_table(self):
+        """Tables ``events`` and ``events_thread`` must not collide on an index named ``events_thread``."""
+        sql = CREATE_TABLE_SQL('events')
+        derived = re.findall(r'"(events[^"]+)"', sql)
+        assert sorted(derived) == ['events$dedupe', 'events$occurred', 'events$thread']
+        for name in derived:
+            assert capture.is_valid_table_name(name) is False, name
+
+    def test_a_reserved_word_is_quoted_in_all_sql(self):
+        """``user`` is reserved: ``INSERT INTO user (...)`` fails every row unless the name is quoted."""
+        assert capture.is_valid_table_name('user') is True
+        assert INSERT_SQL('user').startswith('INSERT INTO "user" (')
+        create = CREATE_TABLE_SQL('user')
+        assert 'CREATE TABLE IF NOT EXISTS "user" (' in create
+        assert 'ON "user" (thread_id)' in create
+        assert all(found.startswith('"') for found in re.findall(r'"?\buser\S*', create))
+
+    def test_a_mixed_case_name_means_the_lower_case_table(self):
+        """Quoting makes case significant, so the name is lower-cased first: Discord_Events is discord_events."""
+        assert capture.is_valid_table_name('Discord_Events') is True
+        assert INSERT_SQL('Discord_Events') == INSERT_SQL('discord_events')
+        assert CREATE_TABLE_SQL('Discord_Events') == CREATE_TABLE_SQL('discord_events')
+
+    def test_the_writer_writes_a_mixed_case_name_lower_cased(self):
+        pipe = _FakePipe()
+        writer = _writer(_FakeTarget(pipe), [], table='Discord_Events')
+
+        writer._write_one(_row())
+
+        assert pipe.calls[0][2]['sql'].startswith('INSERT INTO "discord_events" (')
+
+    @pytest.mark.parametrize(
+        'name', ['discord_events', 'T', '_x', 'a1_2', 'user', 'Discord_Events', 'A' * capture.MAX_TABLE_NAME_CHARS]
+    )
     def test_valid_table_names(self, name):
         assert capture.is_valid_table_name(name) is True
 
@@ -448,7 +481,10 @@ class TestSql:
             'dd events',
             'dd-events',
             'dd.events',
+            'dd"events',
             'discord_events;DROP TABLE x',
+            'discord_events\n',
+            '\ndiscord_events',
             'A' * (capture.MAX_TABLE_NAME_CHARS + 1),
             None,
             7,
@@ -459,13 +495,13 @@ class TestSql:
 
     def test_the_accepted_length_leaves_room_for_every_derived_name(self):
         """Postgres truncates at 63 bytes, which would collide the suffixes."""
-        assert capture.MAX_TABLE_NAME_CHARS == capture.POSTGRES_IDENTIFIER_BYTES - len('_occurred')
+        assert capture.MAX_TABLE_NAME_CHARS == capture.POSTGRES_IDENTIFIER_BYTES - len('$occurred')
 
     def test_no_identifier_from_a_max_length_table_exceeds_63_bytes(self):
         name = 'a' * capture.MAX_TABLE_NAME_CHARS
-        identifiers = re.findall(rf'\b{name}\w*', CREATE_TABLE_SQL(name))
+        identifiers = re.findall(r'"([^"]+)"', CREATE_TABLE_SQL(name))
 
-        assert sorted(set(identifiers)) == sorted({name, f'{name}_dedupe', f'{name}_thread', f'{name}_occurred'})
+        assert sorted(set(identifiers)) == sorted({name, f'{name}$dedupe', f'{name}$thread', f'{name}$occurred'})
         for identifier in identifiers:
             assert len(identifier.encode('utf-8')) <= capture.POSTGRES_IDENTIFIER_BYTES, identifier
 
@@ -1675,6 +1711,7 @@ class TestServicesJson:
         ('two words', False),
         ('x' * 128, True),
         ('x' * 129, False),
+        ('discord:discord_1\n', False),
         (None, False),
     ],
 )
