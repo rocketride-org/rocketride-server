@@ -49,12 +49,16 @@ _TRANSCRIPT_CONTINUATION = '\n  '
 # A newline that starts a speaker line (not an indented continuation line).
 _SPEAKER_LINE_START = re.compile(r'\n(?!  )')
 
-# A reply that still opens with one of these labels is leaked agent scratchpad
-# ("Thought: ...", "Action Input: ...") rather than a user-facing answer.
+# A line that opens with one of these labels is reasoning, not a hand-off line.
 _OPENS_WITH_REASONING = re.compile(r'^\s*(Thought|Action(?:\s+Input)?|Observation|Reasoning)\s*:', re.IGNORECASE)
-# A tool-call label that starts any line also marks a scratchpad: some agent
-# runtimes strip the leading ``Thought:`` before the reply reaches the node.
-_REASONING_LINE = re.compile(r'^[ \t]*(?:Action(?:[ \t]+Input)?|Observation)[ \t]*:', re.MULTILINE)
+# A reply that opens with one of these is leaked agent scratchpad. A lone
+# ``Action:``, ``Observation:`` or ``Reasoning:`` also opens real answers (a
+# step, a finding), and no agent ends its output on ``Observation:`` (the
+# ReAct agents stop generating there).
+_OPENS_AS_SCRATCHPAD = re.compile(r'^\s*(?:Thought|Action\s+Input)\s*:', re.IGNORECASE)
+# A tool call, ``Action:`` with ``Action Input:`` on the next non-blank line,
+# also marks one: some agent runtimes strip the leading ``Thought:``.
+_REACT_STEP = re.compile(r'^[ \t]*Action[ \t]*:[^\n]*\n(?:[ \t]*\n)*[ \t]*Action[ \t]+Input[ \t]*:', re.MULTILINE)
 # Only at the start of a line: prose that mentions the label is not trimmed.
 _FINAL_ANSWER = re.compile(r'^[ \t]*Final Answer\s*:\s*', re.IGNORECASE | re.MULTILINE)
 
@@ -819,8 +823,9 @@ def _outside_code_fences(text: str, matches) -> list:
 def _is_scratchpad(text: str) -> bool:
     """Whether a reply is raw agent scratchpad rather than an answer.
 
-    It opens with a reasoning label, or an ``Action:``, ``Action Input:`` or
-    ``Observation:`` label starts one of its lines outside code.
+    It opens with ``Thought:`` or ``Action Input:``, or holds a tool call (an
+    ``Action:`` line with ``Action Input:`` on the next non-blank line) outside
+    code.
 
     Args:
         text (str): The reply.
@@ -828,9 +833,9 @@ def _is_scratchpad(text: str) -> bool:
     Returns:
         bool: True when the reply is scratchpad.
     """
-    if _OPENS_WITH_REASONING.match(text):
+    if _OPENS_AS_SCRATCHPAD.match(text):
         return True
-    return bool(_outside_code_fences(text, _REASONING_LINE.finditer(text)))
+    return bool(_outside_code_fences(text, _REACT_STEP.finditer(text)))
 
 
 def _alias_pattern(alias: str) -> Optional['re.Pattern']:
@@ -907,7 +912,7 @@ def _handoff_marker(scratchpad: str, markers: Sequence[str], alias: str) -> Opti
     off to the team, but...") is not a hand-off.
 
     Args:
-        scratchpad (str): A reply that opens with a reasoning label.
+        scratchpad (str): A reply recognised as scratchpad.
         markers (Sequence[str]): The effective escalation markers.
         alias (str): The team alias, which also counts as a marker here.
 
@@ -977,8 +982,8 @@ def _extract_final(text: str) -> Tuple[str, bool]:
 def handoff_part(text: str) -> Tuple[str, str, str]:
     """Split a reply around the part of it that may hand the conversation over.
 
-    A reply that opens with a reasoning label, or has an ``Action:`` /
-    ``Action Input:`` / ``Observation:`` line outside code, is a raw scratchpad: only its
+    A reply that opens with ``Thought:`` or ``Action Input:``, or holds an
+    ``Action:`` / ``Action Input:`` tool call outside code, is a raw scratchpad: only its
     final text (after the last ``Final Answer:``, or inside a final JSON
     envelope) may name the team or carry an escalation marker, since a
     ``Thought:`` that names the team is not a hand-off. Any other reply may
@@ -1017,8 +1022,8 @@ def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
 
     - unwrap a ``{"type": "final", "content": "..."}`` envelope;
     - keep only what follows the LAST ``Final Answer:`` (when non-empty);
-    - if the result still opens with a reasoning label, or has an ``Action:`` /
-      ``Action Input:`` / ``Observation:`` line outside code, it is
+    - if the result still opens with ``Thought:`` or ``Action Input:``, or
+      holds an ``Action:`` / ``Action Input:`` tool call outside code, it is
       scratchpad, not an answer: when it came from a ``Final Answer:`` or envelope and its final
       line (the last non-empty one, not itself a reasoning line) carries an
       escalation marker it becomes a short hand-off line that keeps the

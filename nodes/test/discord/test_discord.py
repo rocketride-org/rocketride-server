@@ -579,10 +579,8 @@ class TestMarkersAndSanitize:
     def test_reasoning_only_without_marker_is_suppressed(self):
         for raw in (
             'Thought: I should look this up',
-            'action: search(docs)',
             'Action Input: {"q": "x"}',
-            'Observation: nothing found',
-            'Reasoning: unclear',
+            'Action: search(docs)\nAction Input: docs',
         ):
             assert sanitize_reply(raw, self.MARKERS) == '', raw
 
@@ -628,10 +626,11 @@ class TestMarkersAndSanitize:
             'I could hand off to the RocketRide team but I can answer this myself.\nAction: search\nAction Input: {bad'
         )
         assert sanitize_reply(raw, self.MARKERS, alias='RocketRide team') == ''
-        assert sanitize_reply('Let me check.\nObservation: <@&900000000000000202>', self.MARKERS) == ''
+        raw = 'Let me check.\nAction: search\nAction Input: x\nObservation: <@&900000000000000202>'
+        assert sanitize_reply(raw, self.MARKERS) == ''
 
     def test_a_stripped_scratchpad_closed_by_an_envelope_is_unwrapped(self):
-        raw = 'Let me check.\nAction: search\n{"type": "final", "content": "Restart the app."}'
+        raw = 'Let me check.\nAction: search\nAction Input: x\n{"type": "final", "content": "Restart the app."}'
         assert sanitize_reply(raw, self.MARKERS) == 'Restart the app.'
 
     def test_an_answer_that_mentions_an_action_label_is_untouched(self):
@@ -642,7 +641,7 @@ class TestMarkersAndSanitize:
             assert sanitize_reply(raw, self.MARKERS) == raw, raw
 
     def test_reasoning_after_final_answer_extraction_is_still_scratchpad(self):
-        raw = 'Thought: step one\nFinal Answer: Observation: nothing to add'
+        raw = 'Thought: step one\nFinal Answer: Thought: nothing to add'
         assert sanitize_reply(raw, self.MARKERS) == ''
 
     def test_a_final_json_envelope_is_decoded_to_its_content(self):
@@ -946,13 +945,13 @@ class TestHandoffPart:
     def test_a_scratchpad_whose_thought_label_was_stripped_may_not_hand_off(self):
         assert handoff_part(self.STRIPPED) == (self.STRIPPED, '', '')
         for raw in (
-            'I should look this up.\nObservation: the team handles refunds',
-            'Let me check.\n  Action Input: {"q": "x"}',
+            'I should look this up.\nAction: search\nAction Input: refunds\nObservation: the team handles refunds',
+            'Let me check.\n  Action: search\n  Action Input: {"q": "x"}',
         ):
             assert handoff_part(raw) == (raw, '', ''), raw
 
     def test_a_stripped_scratchpad_with_a_final_answer_hands_off_only_there(self):
-        raw = 'Ask the team?\nAction: search\nObservation: x\nFinal Answer: Ask the team.'
+        raw = 'Ask the team?\nAction: search\nAction Input: x\nObservation: x\nFinal Answer: Ask the team.'
         head, part, tail = handoff_part(raw)
         assert part == 'Ask the team.'
         assert head + part + tail == raw
@@ -963,6 +962,48 @@ class TestHandoffPart:
             'Your agent printed:\n```\nAction: search\nObservation: none\n```\nAsk the team about it.',
         ):
             assert handoff_part(raw) == ('', raw, ''), raw
+
+
+class TestScratchpadNeedsReActStructure:
+    """Pre-review of #2547: one ``Action:`` or ``Observation:`` line is not a scratchpad."""
+
+    MARKERS = ['ESCALATED']
+    STRIPPED = (
+        'I could hand off to the RocketRide team but I can answer this myself.\nAction: search\nAction Input: {bad'
+    )
+
+    @pytest.mark.parametrize('raw', [STRIPPED, STRIPPED.replace('\nAction Input', '\n\nAction Input')])
+    def test_a_tool_call_without_its_thought_label_is_still_scratchpad(self, raw):
+        assert sanitize_reply(raw, self.MARKERS, alias='RocketRide team') == ''
+        assert handoff_part(raw) == (raw, '', '')
+
+    ANSWERS = (
+        'Try this first:\nAction: restart the service.\nIf that does not help, @RocketRide team will take a look.',
+        'In the workflow editor, set the trigger like this:\nAction: Send email\n'
+        'Observation: the email arrives within a minute.',
+        'Here is what I found.\n\nObservation: your pipeline has no response node.',
+        'Action: Restart the engine, then re-run the pipeline.',
+        'Reasoning: the webhook fires early, so add a delay.',
+        '  Action: redeploy',
+        'Observation: the log shows a 429, so you are rate limited.',
+    )
+
+    @pytest.mark.parametrize('raw', ANSWERS)
+    def test_a_single_label_line_is_an_answer(self, raw):
+        assert sanitize_reply(raw, self.MARKERS) == raw.strip()
+        assert handoff_part(raw) == ('', raw, '')
+
+    def test_an_answer_with_an_action_step_still_hands_off(self):
+        raw = self.ANSWERS[0]
+        assert text_utils.contains_alias(handoff_part(raw)[1], '@RocketRide team')
+
+    def test_a_tool_call_inside_code_is_not_scratchpad(self):
+        raw = 'The agent printed:\n```\nAction: search\nAction Input: {"q": "x"}\n```\nAsk the team.'
+        assert handoff_part(raw) == ('', raw, '')
+
+    def test_a_thought_label_still_opens_a_scratchpad(self):
+        assert sanitize_reply('Thought: hm\nAction: restart', self.MARKERS) == ''
+        assert sanitize_reply('Thought experiment: if the token expired you would see a 401.', self.MARKERS) != ''
 
 
 class TestAliasAndMarkerBoundaries:

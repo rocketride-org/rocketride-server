@@ -1943,6 +1943,18 @@ class TestTeamMentionAlias:
         assert endpoint._emit_no_reply_event.await_args.args[1] == 'non_answer'
         assert endpoint._paused_threads == set()
 
+    def test_an_answer_with_one_action_step_still_hands_off_with_sanitizing_off(self):
+        """Pre-review of #2547: a single ``Action:`` line is a step list, not a scratchpad."""
+        raw = 'Try this first:\nAction: restart the service.\nIf that does not help, @RocketRide team will take a look.'
+        endpoint = self._endpoint(raw, _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert _sent_reply(endpoint) == raw.replace('@RocketRide team', '<@&77>')
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+        assert endpoint._paused_threads == {'321'}
+
     def test_a_raw_scratchpad_whose_final_answer_names_the_team_pings_once_and_pauses(self):
         raw = 'Thought: the RocketRide team should see this.\nFinal Answer: Looping in the RocketRide team.'
         endpoint = self._endpoint(raw, _team_mention_alias='RocketRide team', _escalation_pause=True)
