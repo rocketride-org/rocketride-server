@@ -2022,28 +2022,97 @@ class TestTeamMentionAlias:
         assert endpoint._send_response.await_args.kwargs['ping_team'] is False
 
     def test_off_cooldown_the_send_may_ping_the_team(self):
-        endpoint = self._endpoint('A plain answer.')
+        endpoint = self._endpoint('Ask <@&77> about it.')
 
         asyncio.run(endpoint._process_message(self._message_in(1)))
 
         assert endpoint._send_response.await_args.kwargs['ping_team'] is True
 
-    def test_a_send_on_cooldown_leaves_the_team_role_out_of_allowed_mentions(self):
+    def test_an_answer_without_a_role_mention_allows_no_role(self):
+        endpoint = self._endpoint('A plain answer.')
+
+        asyncio.run(endpoint._process_message(self._message_in(1)))
+
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is False
+        assert not getattr(endpoint, '_team_pings', None)
+
+    @staticmethod
+    def _sender(role_ids=('77', '88')):
         endpoint = IEndpoint.__new__(IEndpoint)
         endpoint._reply_mode = 'channel'
         endpoint._team_mention_alias = '@RocketRide team'
-        endpoint._allowed_mention_role_ids = ['77', '88']
+        endpoint._allowed_mention_role_ids = list(role_ids)
         endpoint._allowed_mention_user_ids = ['555']
         endpoint._number_chunks = False
         message = mock.Mock()
         message.channel.send = mock.AsyncMock(return_value=types.SimpleNamespace(id=900))
+        return endpoint, message
 
-        asyncio.run(endpoint._send_response(message, 'Paging <@&77> again.', ping_team=False))
+    def test_a_send_on_cooldown_leaves_every_allowed_role_out_of_allowed_mentions(self):
+        endpoint, message = self._sender()
+
+        asyncio.run(endpoint._send_response(message, 'Paging <@&77> and <@&88> again.', ping_team=False))
 
         allowed = message.channel.send.await_args.kwargs['allowed_mentions']
-        assert [role.id for role in allowed.roles] == [88], 'only the team role is withheld'
+        assert list(allowed.roles) == [], 'every allowed role is withheld on cooldown'
         assert [user.id for user in allowed.users] == [555]
         assert allowed.everyone is False
+
+    def test_a_send_allows_only_the_roles_mentioned_in_the_final_part(self):
+        """Review of #2547: a role mention in the reasoning pinged, but did not pause the thread."""
+        endpoint, message = self._sender()
+
+        asyncio.run(endpoint._send_response(message, 'Thought: maybe <@&88>?\nFinal Answer: Ask <@&77>.'))
+
+        allowed = message.channel.send.await_args.kwargs['allowed_mentions']
+        assert [role.id for role in allowed.roles] == [77]
+
+    # Review of #2547: the model wrote a raw role mention in its reasoning.
+    IN_REASONING = 'Thought: this may need <@&77>\nFinal Answer: Restart the app.'
+
+    def test_a_role_mention_in_the_reasoning_does_not_ping_or_start_the_cooldown(self):
+        endpoint = self._endpoint(self.IN_REASONING, _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        assert _sent_reply(endpoint) == self.IN_REASONING
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is False
+        assert not getattr(endpoint, '_team_pings', None), 'nobody was pinged, so no cooldown'
+        assert endpoint._paused_threads == set()
+
+    def test_the_real_send_of_a_reasoning_mention_allows_no_role(self):
+        endpoint, message = self._sender(['77'])
+
+        asyncio.run(endpoint._send_response(message, self.IN_REASONING))
+
+        allowed = message.channel.send.await_args.kwargs['allowed_mentions']
+        assert allowed.roles is False or list(allowed.roles) == []
+
+    def test_a_role_mention_in_the_final_answer_pings_once_and_pauses(self):
+        raw = 'Thought: hm\nFinal Answer: Handing over to <@&77>.'
+        endpoint = self._endpoint(raw, _escalation_pause=True)
+        endpoint._resolved_threads = {'321'}
+
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
+            asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+            assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+            assert endpoint._paused_threads == {'321'}
+            asyncio.run(endpoint._process_message(self._message_in(1, 3)))  # the same user
+
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is False, 'the second one is on cooldown'
+
+    @pytest.mark.parametrize('alias', ['@RocketRide team', ''])
+    def test_every_allowed_role_is_limited_by_the_cooldown(self, alias):
+        endpoint = self._endpoint('Paging <@&88>.', _allowed_mention_role_ids=['77', '88'], _team_mention_alias=alias)
+
+        with mock.patch.object(_ENDPOINT_MODULE, '_monotonic', return_value=1000.0):
+            asyncio.run(endpoint._process_message(self._message_in(1)))
+            assert endpoint._send_response.await_args.kwargs['ping_team'] is True
+            asyncio.run(endpoint._process_message(self._message_in(1, 3)))
+
+        assert _sent_reply(endpoint) == 'Paging <@&88>.'
+        assert endpoint._send_response.await_args.kwargs['ping_team'] is False
 
     def test_the_team_role_is_the_only_allowed_mention_on_cooldown_pings_nobody(self):
         endpoint = IEndpoint.__new__(IEndpoint)

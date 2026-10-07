@@ -1487,6 +1487,25 @@ class IEndpoint(IEndpointBase):
         role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
         return f'<@&{role_ids[0]}>'
 
+    def _final_role_ids(self, text: str) -> List[str]:
+        """The allowed roles mentioned where a reply may hand off.
+
+        Every role in ``allowedMentionRoleIds`` counts as the team (see
+        :meth:`_effective_markers`), and only a mention in the final part of a
+        raw scratchpad (see ``handoff_part``) may ping it: one in the reasoning
+        neither pings nor pauses the thread.
+
+        Args:
+            text (str): The reply about to be posted.
+
+        Returns:
+            List[str]: The allowed role ids whose mention is in that part, in
+                configured order.
+        """
+        part = handoff_part(text)[1]
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return [role_id for role_id in role_ids if f'<@&{role_id}>' in part]
+
     def _team_ping_on_cooldown(self, author_id: Optional[str]) -> bool:
         """Whether this user already had the team pinged within the cooldown.
 
@@ -1497,7 +1516,7 @@ class IEndpoint(IEndpointBase):
                 never on cooldown.
 
         Returns:
-            bool: True when the team role was pinged for this user less than
+            bool: True when an allowed role was pinged for this user less than
                 :data:`TEAM_PING_COOLDOWN_SECONDS` ago.
         """
         pings = getattr(self, '_team_pings', None)
@@ -1522,10 +1541,10 @@ class IEndpoint(IEndpointBase):
 
         Returns:
             Optional[float]: The reservation's timestamp, or None when the
-                reply carries no team mention (or the user is unknown).
+                reply mentions no allowed role where it may hand off (or the
+                user is unknown).
         """
-        mention = self._team_mention()
-        if author_id is None or not mention or mention not in reply:
+        if author_id is None or not self._final_role_ids(reply):
             return None
         if getattr(self, '_team_pings', None) is None:
             self._team_pings = {}
@@ -1533,7 +1552,7 @@ class IEndpoint(IEndpointBase):
         return reserved
 
     def _release_team_ping(self, author_id: Optional[str], reserved: Optional[float], outbound: Dict[str, Any]) -> None:
-        """Drop a reservation when no posted chunk carried the team mention.
+        """Drop a reservation when no posted chunk carried an allowed role mention.
 
         A send that failed, or stopped before the chunk with the mention,
         pinged nobody, so the user may still have the team pinged later.
@@ -1549,8 +1568,8 @@ class IEndpoint(IEndpointBase):
         """
         if reserved is None:
             return
-        mention = self._team_mention()
-        if any(mention in chunk for chunk in outbound.get('postedChunks') or []):
+        mentions = [f'<@&{role_id}>' for role_id in getattr(self, '_allowed_mention_role_ids', []) or []]
+        if any(mention in chunk for chunk in outbound.get('postedChunks') or [] for mention in mentions):
             return
         pings = getattr(self, '_team_pings', None) or {}
         if pings.get(author_id) == reserved:
@@ -2135,10 +2154,11 @@ class IEndpoint(IEndpointBase):
                 author_id = str(author_id) if author_id is not None else None
                 on_cooldown = self._team_ping_on_cooldown(author_id)
                 reply = self._with_team_mention(reply, on_cooldown)
-                # On cooldown, or when the reply is a raw scratchpad with no
-                # final text, the send withholds the team role too, so a
-                # literal mention in the answer cannot ping it either.
-                ping_team = not on_cooldown and bool(handoff_part(reply)[1])
+                # On cooldown, or when no allowed role is mentioned in the
+                # part of the reply that may hand off (a mention in raw
+                # reasoning does not count), the send withholds every allowed
+                # role, so a literal mention in the answer cannot ping either.
+                ping_team = not on_cooldown and bool(self._final_role_ids(reply))
 
                 if reply and self._send_responses:
                     reserved = self._reserve_team_ping(author_id, reply) if ping_team else None
@@ -2927,9 +2947,10 @@ class IEndpoint(IEndpointBase):
         Args:
             message (discord.Message): The originating message.
             response (str): The pipeline answer text.
-            ping_team (bool): False leaves the team role (see
-                :meth:`_team_mention`) out of the allowed mentions, for a user
-                on the team-ping cooldown.
+            ping_team (bool): False leaves every allowed role out of the
+                allowed mentions, for a user on the team-ping cooldown; True
+                still allows only the roles mentioned where the reply may hand
+                off (see :meth:`_final_role_ids`).
 
         Returns:
             Dict[str, Any]: What was posted, with these keys:
@@ -2944,7 +2965,7 @@ class IEndpoint(IEndpointBase):
                 every posted chunk) are internal.
         """
         thread = None
-        allowed_mentions = self._allowed_mentions(ping_team=ping_team)
+        allowed_mentions = self._allowed_mentions(ping_team=ping_team, text=response)
         posted_chunks: List[str] = []
         sent_ids: List[str] = []
         destinations: List[str] = []
@@ -2997,21 +3018,25 @@ class IEndpoint(IEndpointBase):
             'postedChunks': posted_chunks,
         }
 
-    def _allowed_mentions(self, *, ping_team: bool = True):
+    def _allowed_mentions(self, *, ping_team: bool = True, text: Optional[str] = None):
         """Build the outbound mention allowlist; never permit everyone/here.
 
         Args:
-            ping_team (bool): False leaves the team role (see
-                :meth:`_team_mention`) out; other allowed roles and users stay.
+            ping_team (bool): False leaves every allowed role out; allowed
+                users stay.
+            text (Optional[str]): The reply being sent: when given, only the
+                allowed roles mentioned where it may hand off stay (see
+                :meth:`_final_role_ids`).
 
         Returns:
             discord.AllowedMentions: The allowlist for one send.
         """
         role_ids = list(getattr(self, '_allowed_mention_role_ids', []) or [])
         user_ids = getattr(self, '_allowed_mention_user_ids', [])
-        team_mention = self._team_mention()
-        if not ping_team and team_mention:
-            role_ids = [role_id for role_id in role_ids if f'<@&{role_id}>' != team_mention]
+        if not ping_team:
+            role_ids = []
+        elif text is not None:
+            role_ids = self._final_role_ids(text)
         if not role_ids and not user_ids:
             return discord.AllowedMentions.none()
         return discord.AllowedMentions(
