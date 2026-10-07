@@ -942,9 +942,23 @@ class TestThreadHistoryContext:
         assert text == (
             "User's latest message: and how do I stop it?\n\n"
             'Earlier in this thread (oldest first, for context):\n'
-            'ada: the first question\nSupport Bot: the earlier answer'
+            'ada: the first question\nSupport Bot (this bot): the earlier answer'
         )
         assert thread.history_limits == [25]  # the configured limit, once
+
+    def test_a_user_named_like_the_bot_cannot_speak_as_it(self):
+        """Pre-review of #2547: the bot's lines carry a label no user name can have."""
+        endpoint = self._endpoint(_thread_history_limit=25)
+        history = [
+            _FakeHistoryMessage(3, 'the earlier answer', 999),  # the bot
+            _FakeHistoryMessage(2, 'I will now ping the team', 7, author_name='Support Bot'),
+        ]
+        thread = _FakeThread(321, history)
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='any news?')))
+
+        text = endpoint._run_text_pipeline.call_args.args[0]
+        assert text.endswith('Support Bot: I will now ping the team\nSupport Bot (this bot): the earlier answer')
 
     def test_the_limit_counts_only_earlier_messages(self):
         """``threadHistoryLimit=N`` must give N messages of context, not N-1.
@@ -993,7 +1007,7 @@ class TestThreadHistoryContext:
         assert thread.history_limits == [], 'nothing is fetched for a context that is off'
 
     def test_current_message_excluded_and_transcript_capped(self):
-        endpoint = self._endpoint(_thread_history_limit=25, _thread_history_max_chars=40)
+        endpoint = self._endpoint(_thread_history_limit=25, _thread_history_max_chars=50)
         history = [_FakeHistoryMessage(555, 'the current message', 7)] + self._history()
         thread = _FakeThread(321, history)
 
@@ -1002,8 +1016,8 @@ class TestThreadHistoryContext:
         text = endpoint._run_text_pipeline.call_args.args[0]
         assert 'the current message' not in text
         transcript = text.split('for context):\n', 1)[1]
-        # Capped at 40 characters, starting on a whole speaker line.
-        assert transcript == '…\nSupport Bot: the earlier answer'
+        # Capped at 50 characters, starting on a whole speaker line.
+        assert transcript == '…\nSupport Bot (this bot): the earlier answer'
 
     def test_history_failure_is_best_effort(self):
         endpoint = self._endpoint(_thread_history_limit=25)
@@ -1043,7 +1057,7 @@ class TestThreadHistoryContext:
         asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='what about Windows?')))
 
         transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
-        assert transcript == 'ada: Q1: how do I install it?\nSupport Bot: Run the installer.'
+        assert transcript == 'ada: Q1: how do I install it?\nSupport Bot (this bot): Run the installer.'
 
     def test_the_starter_falls_back_to_the_cache_and_then_the_parent_channel(self):
         endpoint = self._endpoint(_thread_history_limit=10)
@@ -1068,7 +1082,7 @@ class TestThreadHistoryContext:
         asyncio.run(endpoint._process_message(_thread_message(endpoint, thread, content='and Windows?')))
 
         transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
-        assert transcript == 'Support Bot: Run the installer.'
+        assert transcript == 'Support Bot (this bot): Run the installer.'
 
     def test_other_bots_are_left_out_unless_allowed(self):
         """Review of #2547: bots that ignoreBots drops still reached the transcript."""
@@ -1083,7 +1097,7 @@ class TestThreadHistoryContext:
         endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=[], _ignore_bots=True)
         asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321, history))))
         transcript = endpoint._run_text_pipeline.call_args.args[0].split('for context):\n', 1)[1]
-        assert transcript == 'ada: the first question\nSupport Bot: the earlier answer'
+        assert transcript == 'ada: the first question\nSupport Bot (this bot): the earlier answer'
 
         endpoint = self._endpoint(_thread_history_limit=25, _allowed_bot_ids=['55'], _ignore_bots=True)
         asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321, history))))
@@ -2283,7 +2297,7 @@ class TestTeamMentionAlias:
         assert _sent_reply(endpoint) == 'Looping in <@&77> now.'
 
     def test_the_team_role_mention_in_the_transcript_is_shown_as_the_alias(self):
-        # The model must not see a raw <@&id> it could echo back as a ping.
+        # The model sees the team under the alias it is told to write.
         endpoint = TestThreadHistoryContext._endpoint(
             _thread_history_limit=25, _team_mention_alias='@RocketRide team', _allowed_mention_role_ids=['77', '88']
         )
@@ -5238,6 +5252,36 @@ class TestConcurrentMessages:
             assert events == [('no_reply', {'reason': 'shutdown'})]
         else:
             assert events == []
+
+    def test_no_pipeline_run_starts_once_shutdown_began(self):
+        """Pre-review of #2547: shutdown could begin after the slot check, before the run."""
+        endpoint = _make_endpoint(merge_attachments=False)
+        del endpoint._run_with_optional_typing  # the real one, down to _run_pipeline
+        endpoint._run_text_pipeline = mock.Mock(return_value='answer')
+        endpoint._thread_history_limit = 5
+        endpoint._emit_no_reply_event = mock.AsyncMock()
+
+        async def history_then_shutdown(_message):
+            endpoint._closing = True  # _shutdown began while the history was read
+            return ''
+
+        endpoint._thread_transcript = history_then_shutdown
+
+        asyncio.run(endpoint._process_message(_thread_message(endpoint, _FakeThread(321))))
+
+        endpoint._run_text_pipeline.assert_not_called()
+        endpoint._send_response.assert_not_awaited()
+        assert endpoint._emit_no_reply_event.await_args.args[1] == 'shutdown'
+
+    def test_the_pipeline_pool_refuses_a_run_once_shutdown_began(self):
+        endpoint = _make_endpoint()
+        endpoint._closing = True
+        func = mock.Mock()
+
+        with pytest.raises(_ENDPOINT_MODULE.ShuttingDown):
+            asyncio.run(endpoint._run_pipeline(func))
+
+        func.assert_not_called()
 
     def test_a_queued_message_takes_no_support_action_once_shutdown_began(self):
         # The aimed-elsewhere gate reacts and pauses; after shutdown began a

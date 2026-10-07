@@ -113,10 +113,11 @@ MAX_THREAD_HISTORY_MAX_CHARS = 20000
 # bounded so a long-running bot does not grow it forever.
 HANDLED_MESSAGE_IDS_LIMIT = 1000
 
-# At most one team-role ping per user (the message author) in this many
-# seconds. Any user who gets the model to write the alias makes the bot ping
-# the role, so repeats within the window are posted with the alias as plain
-# text and the send withholds the role. In memory only: a restart forgets it.
+# With teamMentionAlias set, at most one role ping per user (the message
+# author) in this many seconds, across every role in allowedMentionRoleIds.
+# Any user who gets the model to write the alias makes the bot ping the role,
+# so repeats within the window are posted with the alias as plain text and
+# the send withholds every allowed role. In memory only: a restart forgets it.
 TEAM_PING_COOLDOWN_SECONDS = 3600
 
 # A role mention as Discord writes it in message text.
@@ -144,6 +145,10 @@ SHUTDOWN_GRACE_SECONDS = 5
 
 class PipelineTimeout(Exception):
     """A pipeline run took longer than ``pipelineTimeoutSeconds``."""
+
+
+class ShuttingDown(Exception):
+    """A pipeline run was asked for after shutdown began."""
 
 
 # A ``${NAME}`` the engine could not resolve reaches the node as literal text.
@@ -1826,12 +1831,16 @@ class IEndpoint(IEndpointBase):
                 # the context either.
                 continue
             if author_id == bot_user_id:
-                name = bot_name
+                # A fixed suffix no Discord username can carry, so a user
+                # named like the bot cannot speak as it in the transcript.
+                name = f'{bot_name} (this bot)'
             else:
                 name = getattr(author, 'name', None) or 'user'
             if team_mention:
-                # The model must not see the raw role mention: echoed back, it
-                # would ping the team whatever the cooldown says.
+                # Shown as the alias the prompt tells the model to write, not
+                # as a raw mention for it to copy. Either way a ping in its
+                # answer goes through the same rules: final part only, outside
+                # code, and the per-user cooldown.
                 content = content.replace(team_mention, self._handoff_alias())
             entries.append((str(name), str(content)))
         return format_thread_transcript(entries, max_chars)
@@ -2260,6 +2269,8 @@ class IEndpoint(IEndpointBase):
             except PipelineTimeout as e:
                 debug(f'Discord: {e} for {message.id}; its late answer will be dropped')
                 await self._emit_no_reply_event(metadata, 'timeout')
+            except ShuttingDown:
+                await self._emit_no_reply_event(metadata, 'shutdown')
             except Exception as e:
                 debug(f'Discord _process_message: EXCEPTION {e}')
                 if getattr(self, '_emit_no_reply', False):
@@ -2527,7 +2538,13 @@ class IEndpoint(IEndpointBase):
 
         Returns:
             Any: What the call returned.
+
+        Raises:
+            ShuttingDown: Shutdown has begun; every run goes through here, so
+                none starts after that point (the pipe is being torn down).
         """
+        if getattr(self, '_closing', False):
+            raise ShuttingDown('shutdown began before the pipeline run')
         executor = getattr(self, '_pipeline_executor', None)
         if executor is None:
             executor = self._pipeline_executor = concurrent.futures.ThreadPoolExecutor(
@@ -2680,7 +2697,7 @@ class IEndpoint(IEndpointBase):
                     meta,
                 ),
             )
-        except PipelineTimeout:
+        except (PipelineTimeout, ShuttingDown):
             raise  # the whole message is given up, not just this attachment
         except Exception as e:
             debug(f'Discord: attachment {attachment.filename} error: {e}')
