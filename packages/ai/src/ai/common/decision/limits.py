@@ -66,9 +66,18 @@ def estimate_tokens(text: str, chars_per_token: float) -> int:
     return math.ceil(len(text) / chars_per_token) if text else 0
 
 
+def encode_json(value) -> bytes:
+    """Return ``value`` as the UTF-8 bytes that will be sent in a request body.
+
+    Uses compact encoding (no spaces, UTF-8 non-ASCII characters).
+    Lone surrogates are replaced with U+FFFD (the replacement character).
+    """
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8', errors='replace')
+
+
 def json_bytes(value) -> int:
     """Return the number of bytes ``value`` occupies once JSON-encoded."""
-    return len(json.dumps(value).encode('utf-8'))
+    return len(encode_json(value))
 
 
 def fit_content(content: str, limits: DecisionLimits, reserved_tokens: int, reserved_bytes: int) -> tuple[str, bool]:

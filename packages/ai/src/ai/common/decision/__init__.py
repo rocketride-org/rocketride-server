@@ -22,6 +22,7 @@
 # =============================================================================
 """System One decision models: shared, vendor-neutral building blocks."""
 
+from .client import SystemOneClient, SystemOneError
 from .limits import DecisionLimits
 from .questions import (
     PICK_ONE,
@@ -41,6 +42,8 @@ __all__ = [
     'PICK_ONE',
     'ProtocolError',
     'RUBRIC',
+    'SystemOneClient',
+    'SystemOneError',
     'YES_NO',
     'QuestionConfigError',
     'QuestionSpec',
