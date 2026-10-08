@@ -32,6 +32,7 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { spawn: spawnProcess } = require('child_process');
 const {
 	exists,
 	syncDir,
@@ -59,6 +60,7 @@ const {
 	bracket,
 	parseServerAddress,
 	isLinux,
+	isWindows,
 	loadPackageJson,
 } = require('../../scripts/lib');
 
@@ -428,9 +430,16 @@ function skipLoudly(taskName, task, reason) {
 }
 
 // Both images carry the engine version: the task protocol is not versioned.
+// <version> is what the docker runtime starts; <version>-clean is the full build
+// that container:sync always starts from.
 async function imageNames() {
 	const { version } = await loadPackageJson();
-	return { base: `rocketride/engine-base:${version}`, node: `rocketride/node:${version}` };
+	return {
+		version,
+		base: `rocketride/engine-base:${version}`,
+		node: `rocketride/node:${version}`,
+		clean: `rocketride/node:${version}-clean`,
+	};
 }
 
 // No provenance attestation on these local images: it records the build time, so a fully
@@ -444,7 +453,7 @@ function makeBuildImageAction(options = {}) {
 			const reason = await containerUnavailable();
 			if (reason) return skipLoudly('container:build', task, reason);
 
-			const { base, node } = await imageNames();
+			const { base, node, clean } = await imageNames();
 			const dockerDir = path.join(PROJECT_ROOT, 'docker');
 			// The per-Dockerfile .dockerignore files need BuildKit
 			const env = { ...process.env, DOCKER_BUILDKIT: '1' };
@@ -464,6 +473,8 @@ function makeBuildImageAction(options = {}) {
 				{ task, env, verbose: options.verbose }
 			);
 
+			// Tagged twice: container:sync overlays <version> from <version>-clean,
+			// and compares this engine with the one the label records
 			task.output = `Building ${node}...`;
 			await execCommand(
 				'docker',
@@ -474,8 +485,12 @@ function makeBuildImageAction(options = {}) {
 					path.join(dockerDir, 'Dockerfile.node'),
 					'--build-arg',
 					`ENGINE_BASE=${base}`,
+					'--label',
+					`rocketride.engine-sha256=${await engineSha256()}`,
 					'-t',
 					node,
+					'-t',
+					clean,
 					PROJECT_ROOT,
 				],
 				{ task, env, verbose: options.verbose }
@@ -502,6 +517,302 @@ function makeTestImageAction(options = {}) {
 				verbose: options.verbose,
 			});
 			task.output = `${node}: engine probe and offline installs passed`;
+		},
+	};
+}
+
+// One command to completion with stdout and stderr apart: for parsing, not for logs
+function capture(command, args, options = {}) {
+	return new Promise((resolve) => {
+		let proc;
+		try {
+			proc = spawnProcess(command, args, { shell: false, windowsHide: true, ...options });
+		} catch (err) {
+			resolve({ code: -1, stdout: '', stderr: String(err) });
+			return;
+		}
+		let stdout = '';
+		let stderr = '';
+		proc.stdout.on('data', (d) => {
+			stdout += d;
+		});
+		proc.stderr.on('data', (d) => {
+			stderr += d;
+		});
+		proc.on('error', (err) => resolve({ code: -1, stdout, stderr: String(err) }));
+		proc.on('close', (code) => resolve({ code, stdout, stderr }));
+	});
+}
+
+// The labels of a local image, or null when the daemon has no such image
+async function imageLabels(image) {
+	const { code, stdout } = await capture('docker', [
+		'image',
+		'inspect',
+		'--format',
+		'{{json .Config.Labels}}',
+		image,
+	]);
+	if (code !== 0) return null;
+	try {
+		return JSON.parse(stdout.trim()) || {};
+	} catch {
+		return {};
+	}
+}
+
+// SHA-256 of dist/server/libengine.so: container:build records it, container:sync compares it
+function engineSha256() {
+	const crypto = require('crypto');
+	return new Promise((resolve, reject) => {
+		const hash = crypto.createHash('sha256');
+		fs.createReadStream(path.join(DIST_ROOT, 'server', 'libengine.so'))
+			.on('error', reject)
+			.on('data', (d) => hash.update(d))
+			.on('end', () => resolve(hash.digest('hex')));
+	});
+}
+
+// KEY=value lines of /etc/os-release
+function parseOsRelease(text) {
+	const values = {};
+	for (const line of text.split(/\r?\n/)) {
+		const m = line.match(/^([A-Z_]+)=(.*)$/);
+		if (m) values[m[1]] = m[2].replace(/^"(.*)"$/, '$1');
+	}
+	return values;
+}
+
+// The WSL distribution named by --distro / RR_WSL_DISTRO, Ubuntu-22.04 by default
+function wslDistro(options) {
+	return options.distro || process.env.RR_WSL_DISTRO || 'Ubuntu-22.04';
+}
+
+// The distribution must match the image base (jammy, 22.04) and reach a daemon:
+// an engine built on a newer glibc does not start in the image.
+async function checkWslDistro(distro) {
+	const release = await capture('wsl.exe', ['-d', distro, '--', 'cat', '/etc/os-release']);
+	if (release.code !== 0) {
+		throw new Error(
+			`WSL distribution ${distro} is not available (--distro=, RR_WSL_DISTRO): ` +
+				(release.stderr || release.stdout).trim()
+		);
+	}
+	const version = parseOsRelease(release.stdout).VERSION_ID;
+	if (version !== '22.04') {
+		throw new Error(
+			`${distro} is Ubuntu ${version}; the image base is 22.04 (jammy), and an engine built on a newer ` +
+				'glibc does not start in it. Pick a 22.04 distribution with --distro='
+		);
+	}
+	const info = await capture('wsl.exe', ['-d', distro, '--', 'docker', 'info', '--format', '{{.ID}}']);
+	if (info.code !== 0) {
+		throw new Error(
+			`docker does not work inside ${distro}: ` +
+				"turn on Docker Desktop's WSL integration for it, or start its daemon"
+		);
+	}
+}
+
+// container:sync — this tree's Python over the clean image of the same version.
+// Seconds instead of a full build, from Windows, Linux or macOS; binaries untouched.
+function makeSyncImageAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			const daemon = await capture('docker', ['info', '--format', '{{.ID}}']);
+			if (daemon.code !== 0) return skipLoudly('container:sync', task, 'no Docker daemon reachable');
+
+			const { node, clean } = await imageNames();
+			let cleanLabels = await imageLabels(clean);
+			if (cleanLabels === null) {
+				const current = await imageLabels(node);
+				if (current === null) {
+					throw new Error(
+						`Neither ${clean} nor ${node} is on this daemon: build it with ./builder container:build` +
+							(isWindows() ? ' (from Windows: container:build-on-wsl)' : '') +
+							`, or pull the published image and tag it ${node}`
+					);
+				}
+				if (current['rocketride.overlay']) {
+					throw new Error(
+						`${node} is an earlier overlay and ${clean} is gone: rebuild with ./builder container:build`
+					);
+				}
+				// A pulled image, or one built before -clean existed: it is the clean one
+				await execCommand('docker', ['tag', node, clean], { task });
+				cleanLabels = current;
+			}
+
+			// Binaries come only from a full build; say so when this tree's differ
+			const expected = cleanLabels['rocketride.engine-sha256'];
+			const actual = isLinux() ? await engineSha256().catch(() => null) : null;
+			if (expected && actual && expected !== actual) {
+				console.warn(
+					`WARNING: container:sync — the engine binaries changed since ${clean} was built; ` +
+						'run container:build'
+				);
+			} else if (!isLinux()) {
+				console.warn(
+					`NOTE: container:sync copies Python only; the engine in ${clean} stays the one it was built with`
+				);
+			}
+
+			const describe = await capture('git', ['describe', '--always', '--dirty'], { cwd: PROJECT_ROOT });
+			const overlay = describe.code === 0 ? describe.stdout.trim() : 'unknown';
+			// The per-Dockerfile .dockerignore needs BuildKit
+			const env = { ...process.env, DOCKER_BUILDKIT: '1' };
+			task.output = `Refreshing ${node} from ${clean}...`;
+			await execCommand(
+				'docker',
+				[
+					'build',
+					...LOCAL_BUILD_FLAGS,
+					'-f',
+					path.join(PROJECT_ROOT, 'docker', 'Dockerfile.node-overlay'),
+					'--build-arg',
+					`NODE_CLEAN=${clean}`,
+					'--label',
+					`rocketride.overlay=${overlay}`,
+					'-t',
+					node,
+					path.dirname(DIST_ROOT),
+				],
+				{ task, env, verbose: options.verbose }
+			);
+			task.output = `${node}: ${overlay} over ${clean}`;
+		},
+	};
+}
+
+// container:build-on-wsl — the full build in a WSL checkout, from Windows, where
+// dist/server is a Windows engine (D5). Touches neither tree: no pull, no checkout.
+function makeBuildOnWslAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			if (!isWindows())
+				return skipLoudly(
+					'container:build-on-wsl',
+					task,
+					isLinux() ? 'already on Linux: run container:build' : 'Windows only: WSL builds the Linux engine'
+				);
+			const checkout = options.checkout || process.env.RR_WSL_CHECKOUT;
+			if (!checkout) {
+				throw new Error(
+					'container:build-on-wsl needs the WSL checkout to build in: ' +
+						'--checkout=/home/<you>/rocketride-server or RR_WSL_CHECKOUT'
+				);
+			}
+			const distro = wslDistro(options);
+			await checkWslDistro(distro);
+
+			const there = await capture('wsl.exe', ['-d', distro, '--cd', checkout, '--', 'git', 'rev-parse', 'HEAD']);
+			if (there.code !== 0)
+				throw new Error(
+					`${checkout} in ${distro} is not a git checkout: ${(there.stderr || there.stdout).trim()}`
+				);
+			const here = await capture('git', ['rev-parse', 'HEAD'], { cwd: PROJECT_ROOT });
+			console.log(
+				`container:build-on-wsl: ${distro}:${checkout} at ${there.stdout.trim()}; ` +
+					`this checkout at ${here.stdout.trim()}`
+			);
+			if (here.stdout.trim() !== there.stdout.trim()) {
+				console.warn(
+					'WARNING: container:build-on-wsl — the two checkouts are at different commits; ' +
+						'the image is built from the WSL one'
+				);
+			}
+			// A login shell: node from nvm is on PATH only there
+			await execCommand(
+				'wsl.exe',
+				['-d', distro, '--cd', checkout, '--', 'bash', '-lc', './builder container:build'],
+				{ task, verbose: options.verbose }
+			);
+		},
+	};
+}
+
+// wsl docker save | docker load, without a shell in between
+function pipeSaveLoad(distro, images, task) {
+	return new Promise((resolve, reject) => {
+		const save = spawnProcess('wsl.exe', ['-d', distro, '--', 'docker', 'save', ...images], { windowsHide: true });
+		const load = spawnProcess('docker', ['load'], { windowsHide: true });
+		save.stdout.pipe(load.stdin);
+		let saveErr = '';
+		let loadOut = '';
+		save.stderr.on('data', (d) => {
+			saveErr += d;
+		});
+		load.stdout.on('data', (d) => {
+			loadOut += d;
+			task.output = String(d).trim();
+		});
+		load.stderr.on('data', (d) => {
+			loadOut += d;
+		});
+		let pending = 2;
+		let failure = null;
+		const done = (who, code) => {
+			if (code !== 0 && !failure)
+				failure = new Error(
+					`docker ${who} failed (exit ${code}): ${(who === 'save' ? saveErr : loadOut).trim()}`
+				);
+			pending -= 1;
+			if (pending === 0) {
+				if (failure) reject(failure);
+				else resolve();
+			}
+		};
+		save.on('error', reject);
+		load.on('error', reject);
+		save.on('close', (code) => done('save', code));
+		load.on('close', (code) => done('load', code));
+	});
+}
+
+// container:sync-from-wsl — moves the image when WSL runs a daemon of its own.
+// With Docker Desktop's WSL integration both sides see one daemon: nothing to do.
+function makeSyncFromWslAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			if (!isWindows())
+				return skipLoudly('container:sync-from-wsl', task, 'not Windows: the image is already on this daemon');
+			const distro = wslDistro(options);
+			const here = await capture('docker', ['info', '--format', '{{.ID}}']);
+			if (here.code !== 0) throw new Error('no Docker daemon reachable from Windows');
+			const there = await capture('wsl.exe', ['-d', distro, '--', 'docker', 'info', '--format', '{{.ID}}']);
+			if (there.code !== 0) throw new Error(`docker does not work inside ${distro} (--distro=, RR_WSL_DISTRO)`);
+			if (here.stdout.trim() === there.stdout.trim()) {
+				task.output = `${distro} and Windows see one daemon: nothing to copy`;
+				return;
+			}
+
+			const { version, node, clean } = await imageNames();
+			const images = [];
+			for (const image of [node, clean]) {
+				const found = await capture('wsl.exe', [
+					'-d',
+					distro,
+					'--',
+					'docker',
+					'image',
+					'inspect',
+					'--format',
+					'{{.Id}}',
+					image,
+				]);
+				if (found.code === 0) images.push(image);
+			}
+			if (!images.includes(node)) {
+				throw new Error(
+					`${node} (this checkout's version ${version}) is not on ${distro}'s daemon: ` +
+						`build it there from a checkout at ${version}`
+				);
+			}
+			console.warn(
+				`container:sync-from-wsl: copying ${images.join(' and ')} from ${distro} — about 6 GB, minutes`
+			);
+			await pipeSaveLoad(distro, images, task);
+			task.output = `Copied ${images.join(', ')} from ${distro}`;
 		},
 	};
 }
@@ -594,6 +905,34 @@ const containerModule = {
 						action: (opts) => makeContainerRuntimeTestAction({ ...options, ...opts }),
 					},
 				],
+			}),
+		},
+		// The edit loop: Python only, over <version>-clean
+		{
+			name: 'container:sync',
+			action: (options) => ({
+				description: "Refresh the local node image with this tree's Python (binaries untouched)",
+				steps: [
+					'ai:sync',
+					'nodes:sync',
+					'client-python:sync-source',
+					{ name: 'container:sync-image', action: makeSyncImageAction(options) },
+				],
+			}),
+		},
+		// Optional, Windows only, not in the Windows pipeline
+		{
+			name: 'container:build-on-wsl',
+			action: (options) => ({
+				description: 'Run container:build in a WSL checkout (Windows)',
+				steps: [{ name: 'container:build-in-wsl', action: makeBuildOnWslAction(options) }],
+			}),
+		},
+		{
+			name: 'container:sync-from-wsl',
+			action: (options) => ({
+				description: "Copy the node image from WSL's daemon when it is not Windows' (Windows)",
+				steps: [{ name: 'container:copy-image', action: makeSyncFromWslAction(options) }],
 			}),
 		},
 	],
