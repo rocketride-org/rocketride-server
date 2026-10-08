@@ -47,6 +47,9 @@ is off unless `DISCORD_LIVE=1` is set; a normal run collects and skips them.
   - F32: with no capture table yet, the check before the first insert creates
     `discord_events`, and the question and answer land with the configured
     `captureSource`.
+  - F32b: a database user granted only `INSERT` on the existing table still
+    gets the question and answer rows (it needs `ROCKETRIDE_DISCORD_PG_PASSWORD`
+    in the test environment as well, for the role it creates).
   - F33: text plus a `.md` attachment keeps two `message` rows (`text`,
     `text:1`), and inserting the same rows again adds nothing.
   - F34: the database container is stopped mid-run; the bot still answers,

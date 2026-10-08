@@ -213,14 +213,22 @@ def CREATE_TABLE_SQL(table: str) -> str:
 def INSERT_SQL(table: str) -> str:
     """Return the fixed, positional INSERT for ``table``.
 
-    ``ON CONFLICT DO NOTHING`` on the contract's dedupe key is what makes a
-    redelivered Gateway event harmless: the Discord Gateway can repeat a
-    message after a resume, and the capture log is append-only.
+    ``ON CONFLICT DO NOTHING`` is what makes a redelivered Gateway event
+    harmless: the Discord Gateway can repeat a message after a resume, and the
+    capture log is append-only. The table's UNIQUE constraint on the dedupe
+    key is what turns the repeat into a conflict.
+
+    The clause names no conflict target on purpose. PostgreSQL requires
+    ``SELECT`` on the columns of a conflict target, even for ``DO NOTHING``,
+    so ``ON CONFLICT (message_id, ...)`` fails every row for a database user
+    that may only ``INSERT``. Without a target any unique violation counts,
+    and the only unique keys on the table are the dedupe key and ``seq``,
+    which the database fills in itself.
     """
     return (
         f'INSERT INTO {_quoted_table(table)} ({", ".join(COLUMNS)}) '
         'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CAST($11 AS jsonb),$12) '
-        'ON CONFLICT (message_id, event_type, event_key) DO NOTHING'
+        'ON CONFLICT DO NOTHING'
     )
 
 

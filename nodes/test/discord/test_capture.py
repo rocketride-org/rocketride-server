@@ -409,12 +409,22 @@ class TestSql:
             'INSERT INTO "discord_events" (event_type, message_id, event_key, thread_id, channel_id, guild_id, '
             'author_id, author_is_bot, occurred_at, text, payload, source) '
             'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CAST($11 AS jsonb),$12) '
-            'ON CONFLICT (message_id, event_type, event_key) DO NOTHING'
+            'ON CONFLICT DO NOTHING'
         )
 
     def test_the_insert_is_idempotent_on_the_contract_key(self):
-        """A redelivered Gateway event must not double-count."""
-        assert 'ON CONFLICT (message_id, event_type, event_key) DO NOTHING' in INSERT_SQL('discord_events')
+        """A redelivered Gateway event must not double-count: the UNIQUE constraint makes it a conflict."""
+        assert INSERT_SQL('discord_events').endswith(' ON CONFLICT DO NOTHING')
+
+    def test_the_insert_names_no_conflict_target_so_insert_alone_is_enough(self):
+        """PostgreSQL wants SELECT on the columns of a conflict target, even for DO NOTHING.
+
+        Measured on PostgreSQL 16: a role with only INSERT gets "permission
+        denied" for every row of ``ON CONFLICT (message_id, ...) DO NOTHING``,
+        and inserts fine with a target-less ``ON CONFLICT DO NOTHING``.
+        """
+        conflict = INSERT_SQL('discord_events').split(' ON CONFLICT', 1)[1]
+        assert '(' not in conflict
 
     def test_the_create_table_is_idempotent_and_brings_both_indexes(self):
         sql = CREATE_TABLE_SQL('discord_events')

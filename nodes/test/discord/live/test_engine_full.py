@@ -244,11 +244,12 @@ def _fake(params: Dict[str, Any], fake: FakeLLM) -> Dict[str, Any]:
     }
 
 
-def _with_capture(pipeline: Dict[str, Any], source: Optional[str] = 'e2e:full') -> Dict[str, Any]:
+def _with_capture(pipeline: Dict[str, Any], source: Optional[str] = 'e2e:full', user: str = '') -> Dict[str, Any]:
     """Add a db_postgres capture component, in the disposable test database.
 
     The database node is connected to the Discord source only, as the node
-    README requires of a capture database.
+    README requires of a capture database. ``user`` replaces
+    ``DISCORD_E2E_PG_USER`` as the database user (same password).
     """
     params = pipeline['components'][0]['config']['parameters']
     params.update({'captureEvents': True, 'captureNodeId': 'capture_db'})
@@ -262,7 +263,7 @@ def _with_capture(pipeline: Dict[str, Any], source: Optional[str] = 'e2e:full') 
                 'profile': 'default',
                 'default': {
                     'host': PG_HOST,
-                    'user': PG_USER,
+                    'user': user or PG_USER,
                     'password': '${ROCKETRIDE_DISCORD_PG_PASSWORD}',
                     'database': PG_DATABASE,
                     'table': 'discord_events',
@@ -1346,6 +1347,54 @@ def test_f32_capture_into_postgres(engine, engine_config, driver_bot):
     )
 
 
+INSERT_ONLY_ROLE = 'discord_capture_insert_only'
+
+
+@needs_pg
+def test_f32b_capture_with_an_insert_only_role(engine, engine_config, driver_bot):
+    """A database user granted only INSERT on an existing table captures every row.
+
+    PostgreSQL wants SELECT on the columns of a named ``ON CONFLICT`` target,
+    even for ``DO NOTHING``, so this is the case that broke when the insert
+    named one. The role gets the same password as ``DISCORD_E2E_PG_USER``,
+    which the engine already holds as ``ROCKETRIDE_DISCORD_PG_PASSWORD``; the
+    test process must have that variable too.
+    """
+    tag = _tag('F32b')
+    password = os.environ.get('ROCKETRIDE_DISCORD_PG_PASSWORD', '')
+    if not password:
+        pytest.skip('F32b needs ROCKETRIDE_DISCORD_PG_PASSWORD in the test environment too')
+    _require_disposable_database()
+    if _psql("SELECT to_regclass('public.discord_events') IS NOT NULL") != 't':
+        pytest.skip('F32b writes into the table F32 creates; run F32 first')
+    quoted = password.replace("'", "''")
+    _psql(f'DO $$ BEGIN CREATE ROLE {INSERT_ONLY_ROLE} LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$')
+    _psql(f"ALTER ROLE {INSERT_ONLY_ROLE} PASSWORD '{quoted}'")
+    _psql(f'REVOKE ALL ON discord_events FROM {INSERT_ONLY_ROLE}')
+    _psql(f'GRANT INSERT ON discord_events TO {INSERT_ONLY_ROLE}')
+    _start(engine, _with_capture(_echo(_params(engine_config)), user=INSERT_ONLY_ROLE))
+    posted = driver_bot.post(f'{tag} capture me with INSERT only')
+    answer = _answer(driver_bot, driver_bot.channel, posted, tag)
+    time.sleep(10)
+    rows = _psql(
+        f"SELECT event_type || '|' || event_key FROM discord_events WHERE message_id = '{posted.id}' ORDER BY seq"
+    ).splitlines()
+    grants = _psql(
+        "SELECT string_agg(privilege_type, ',' ORDER BY privilege_type) FROM information_schema.role_table_grants "
+        f"WHERE grantee = '{INSERT_ONLY_ROLE}' AND table_name = 'discord_events'"
+    )
+    ok = answer is not None and grants == 'INSERT' and 'message|text' in rows and 'outbound|' in rows
+    _check(
+        'F32b',
+        'captureEvents with an INSERT-only database user',
+        'existing discord_events, database user granted only INSERT on it',
+        'message and outbound rows written; no SELECT grant needed',
+        ok,
+        f'grants={grants}; rows={rows}',
+        f'database {PG_DATABASE}, role {INSERT_ONLY_ROLE}',
+    )
+
+
 @needs_pg
 def test_f33_every_part_kept_and_duplicates_ignored(engine, engine_config, driver_bot, tmp_media):
     tag = _tag('F33')
@@ -1360,7 +1409,7 @@ def test_f33_every_part_kept_and_duplicates_ignored(engine, engine_config, drive
     _psql(
         'INSERT INTO discord_events (event_type, message_id, event_key, occurred_at, payload) '
         f'SELECT event_type, message_id, event_key, now(), payload FROM discord_events {where} '
-        'ON CONFLICT (message_id, event_type, event_key) DO NOTHING'
+        'ON CONFLICT DO NOTHING'
     )
     after = _psql(f'SELECT count(*) FROM discord_events {where}')
     ok = answer is not None and keys == ['text', 'text:1'] and after == '2'
