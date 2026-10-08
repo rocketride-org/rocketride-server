@@ -126,10 +126,14 @@ nodes:test-container` builds them and checks the node image as a run gets it:
 with capabilities dropped the engine is non-dumpable, the shipped constraints
 are accepted as they are, and every requirement file the cache was warmed from
 installs from it with no network (`docker/test-node-image.sh`). Files whose
-resolution needs torch are not warmed: the warm step lists them, and fails the
-build unless the file is installed only without a model server (`torch_allowed`
-in `docker/warm-wheel-cache.sh`) — otherwise every run would download a CUDA
-torch.
+resolution needs a local inference runtime — torch, or onnxruntime, which
+depends() installs as the 430 MB onnxruntime-gpu on Linux — are not warmed: the
+warm step lists them, and fails the build unless the file is installed only
+without a model server (`inference_allowed` in `docker/warm-wheel-cache.sh`) —
+otherwise every run would download it. A rebuild with no changes takes seconds:
+the builder builds both images without a provenance attestation, which records
+the build time and would give a cached engine-base a new digest every time, so
+the node image built FROM it would miss its cache.
 CI runs it on Linux when the image's inputs change, and the release workflow
 runs the same script on the published node image before signing it. All three
 published images are cosign-signed. The node image has no `latest` tag on
