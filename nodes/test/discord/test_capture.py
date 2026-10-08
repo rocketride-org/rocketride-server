@@ -959,7 +959,8 @@ class TestWriterWrites:
             ('relation "discord_events" does not exist', True),
             ('SQL execution failed: relation "discord_events" does not exist', True),
             ('psycopg2.errors.UndefinedTable: relation "discord_events" does not exist', True),
-            ('ERROR 42P01: undefined table', True),
+            ('SQL execution failed: Error 42P01: undefined table', True),
+            ('SQL execution failed: Error 58P01: could not open file "base/16384/42P01"', False),
             ('column "event_key" of relation "discord_events" does not exist', False),
             ('SQL execution failed: column "source" of relation "discord_events" does not exist', False),
             ('42703: column "event_key" of relation "discord_events" does not exist', False),
@@ -1273,6 +1274,67 @@ class TestWriterFailures:
         attempts = len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']])
         assert attempts == capture.MAX_ROWS_REJECTED_IN_A_ROW
         assert writer.failures == 1
+
+    def test_the_rejection_streak_starts_again_after_the_wait(self):
+        """After the wait, five more refused rows are needed before the next one; every refused row is counted."""
+        clock = [1000.0]
+        pipe = _FakePipe(fail=RuntimeError('SQL execution failed: Error 22P02: invalid input syntax for type bigint'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings, clock=lambda: clock[0])
+
+        for _ in range(capture.MAX_ROWS_REJECTED_IN_A_ROW):
+            writer._write_one(_row())
+        assert writer.rows_rejected == capture.MAX_ROWS_REJECTED_IN_A_ROW
+        assert any(f'{capture.MAX_ROWS_REJECTED_IN_A_ROW} rows in a row' in warning for warning in warnings)
+
+        clock[0] += capture.BACKOFF_SECONDS
+        for _ in range(capture.MAX_ROWS_REJECTED_IN_A_ROW - 1):
+            writer._write_one(_row())
+
+        attempts = len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']])
+        assert attempts == 2 * capture.MAX_ROWS_REJECTED_IN_A_ROW - 1, 'rows after the wait are tried again'
+        assert writer.rows_rejected == 2 * capture.MAX_ROWS_REJECTED_IN_A_ROW - 1
+
+    def test_a_write_resets_the_rejection_streak(self):
+        clock = [1000.0]
+        pipe = _FakePipe(fail=RuntimeError('SQL execution failed: Error 22P02: invalid input syntax for type json'))
+        writer = _writer(_FakeTarget(pipe), [], clock=lambda: clock[0])
+
+        for _ in range(capture.MAX_ROWS_REJECTED_IN_A_ROW - 1):
+            writer._write_one(_row())
+        pipe.fail = None
+        writer._write_one(_row())
+        pipe.fail = RuntimeError('SQL execution failed: Error 22P02: invalid input syntax for type json')
+        writer._write_one(_row())
+
+        assert writer.failures == 0, 'one refused row after a write is not a streak'
+
+    @pytest.mark.parametrize(
+        'message',
+        [
+            'SQL execution failed: Error 53100: could not extend file "base/16384/42501": No space left on device',
+            'SQL execution failed: Error 58P01: could not open file "base/16384/42703"',
+            'SQL execution failed: Error 58P01: could not open file "base/16384/42P10"',
+        ],
+    )
+    def test_a_code_inside_server_text_is_not_a_lasting_failure(self, message):
+        """A SQLSTATE-like name in a path must not switch capture off for the run."""
+        pipe = _FakePipe(fail=RuntimeError(message))
+        writer = _writer(_FakeTarget(pipe), [])
+
+        writer._write_one(_row())
+
+        assert writer.disabled is False
+        assert writer.failures == 1
+
+    def test_a_code_inside_server_text_is_not_a_missing_table(self):
+        pipe = _FakePipe(fail=RuntimeError('SQL execution failed: Error 58P01: could not open file "base/16384/42P01"'))
+        writer = _writer(_FakeTarget(pipe), [])
+        writer._table_checked = True
+
+        writer._write_one(_row())
+
+        assert not [call for call in pipe.calls if 'CREATE TABLE' in call[2]['sql']]
 
     def test_a_row_failure_does_not_hide_the_warning_for_an_outage(self):
         clock = [1000.0]

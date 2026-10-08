@@ -159,10 +159,13 @@ POSTGRES_DIALECTS = ('postgres', 'postgresql')
 # because a missing column (42703) reads ``column "x" of relation "<table>"
 # does not exist`` and must not be taken for a missing table.
 _MISSING_TABLE_RE = re.compile(r'(?:^|: )relation "[^"]*" does not exist')
+_MISSING_TABLE_CODE_RE = re.compile(r'(?:^|: )Error 42P01: ')
 
 # Failures no retry can fix, as the database node passes them on (the driver's
 # primary message, sometimes with the exception class or SQLSTATE), each with
-# the cause a warning names. Checked in order; the first match wins.
+# the cause a warning names. Checked in order; the first match wins. A SQLSTATE
+# counts only where the database node writes it (``Error <sqlstate>: ``), never
+# as free text, so a file path or pid in a server message cannot match.
 _LASTING_FAILURES = (
     (
         re.compile(r'\bnot owned\b'),
@@ -173,15 +176,15 @@ _LASTING_FAILURES = (
         'its execute tool is disabled; turn on Allow direct query execution (allow_execute) on that node',
     ),
     (
-        re.compile(r'permission denied|InsufficientPrivilege|\b42501\b'),
+        re.compile(r'permission denied for |InsufficientPrivilege|(?:^|: )Error 42501: '),
         'the database user was refused (permission denied); grant it INSERT on the table',
     ),
     (
-        re.compile(r'no unique or exclusion constraint matching|InvalidColumnReference|\b42P10\b'),
+        re.compile(r'no unique or exclusion constraint matching|InvalidColumnReference|(?:^|: )Error 42P10: '),
         'the table has no unique constraint capture can use; create it as the node README shows',
     ),
     (
-        re.compile(r'column "[^"]*"(?: of relation "[^"]*")? does not exist|UndefinedColumn|\b42703\b'),
+        re.compile(r'column "[^"]*"(?: of relation "[^"]*")? does not exist|UndefinedColumn|(?:^|: )Error 42703: '),
         'a column capture writes does not exist in the table; create it as the node README shows',
     ),
     (
@@ -613,7 +616,7 @@ def _is_missing_table(exc: BaseException, hide: tuple = ()) -> bool:
     for value in hide:
         if _is_hideable(value):
             text = text.replace(value, '')
-    return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or '42P01' in text
+    return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or bool(_MISSING_TABLE_CODE_RE.search(text))
 
 
 def _is_hideable(value: Any) -> bool:
@@ -987,10 +990,7 @@ class CaptureWriter:
             cause = _lasting_cause(e, hide=(row.get('payload'), row.get('text')))
             if cause is not None:
                 self._give_up(cause)
-            elif (
-                _is_row_failure(e, hide=(row.get('payload'), row.get('text')))
-                and self._rejected_in_a_row < MAX_ROWS_REJECTED_IN_A_ROW - 1
-            ):
+            elif _is_row_failure(e, hide=(row.get('payload'), row.get('text'))):
                 self._on_row_failure(row, e)
             else:
                 self._on_failure(row, e)
@@ -1166,6 +1166,12 @@ class CaptureWriter:
         """
         self._rows_rejected += 1
         self._rejected_in_a_row += 1
+        if self._rejected_in_a_row >= MAX_ROWS_REJECTED_IN_A_ROW:
+            # Every row refused: a column that cannot hold what capture writes,
+            # not bad rows. Wait like after any other failure, then count anew.
+            self._rejected_in_a_row = 0
+            self._on_failure(row, exc, streak=MAX_ROWS_REJECTED_IN_A_ROW)
+            return
         count = f' ({self._rows_rejected} rows rejected so far)' if self._rows_rejected > 1 else ''
         error = _short_error(exc, hide=(row.get('payload'), row.get('text'), (self._node_id, '<captureNodeId>')))
         # Its own throttle slot: a rejected row must not hide the warning for
@@ -1176,8 +1182,18 @@ class CaptureWriter:
             f'row for message {row.get("message_id")}{count}: {error}; this row is dropped.',
         )
 
-    def _on_failure(self, row: Dict[str, Any], exc: BaseException) -> None:
-        """Count a failed write, start the backoff and report it, throttled after the first."""
+    def _on_failure(self, row: Dict[str, Any], exc: BaseException, streak: int = 0) -> None:
+        """Count a failed write, start the backoff and report it, throttled after the first.
+
+        Args:
+            row (Dict[str, Any]): The row that failed.
+            exc (BaseException): What the write raised.
+            streak (int): When set, this many rows in a row were refused for
+                their values, which the warning names as the cause.
+
+        Returns:
+            None
+        """
         self._failures += 1
         self._retry_at = self._clock() + BACKOFF_SECONDS
         counts = []
@@ -1185,6 +1201,8 @@ class CaptureWriter:
             counts.append(f'{self._failures} failures so far')
         if self._skipped:
             counts.append(f'{self._skipped} row(s) dropped while waiting to retry')
+        if streak:
+            counts.insert(0, f'{streak} rows in a row refused, so the table likely has a column of another type')
         suffix = f' ({", ".join(counts)})' if counts else ''
         # The driver's message can quote a bound value: never the user's text.
         # Nor the node id, which may be a secret pasted into captureNodeId.
