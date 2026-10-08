@@ -1198,6 +1198,31 @@ class TestWriterFailures:
         assert text not in warnings[0]
         assert 'invalid input syntax: "<row text>"' in warnings[0]
 
+    @pytest.mark.parametrize(
+        'message',
+        [
+            'invalid input syntax for type json',
+            'value too long for type character varying(64)',
+            'invalid byte sequence for encoding "UTF8": 0xc3',
+            'DataError: integer out of range',
+        ],
+    )
+    def test_a_row_the_database_rejects_drops_only_that_row(self, message):
+        """One bad row must not stop the rows after it for a whole backoff window."""
+        clock = [1000.0]
+        pipe = _FakePipe(fail=RuntimeError(message))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings, clock=lambda: clock[0])
+
+        writer._write_one(_row())
+        pipe.fail = None
+        writer._write_one(_row())  # no time has passed: no backoff in force
+
+        assert len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]) == 2
+        assert writer.disabled is False
+        assert len(warnings) == 1 and 'this row is dropped' in warnings[0]
+        assert 'recovered' not in ' '.join(warnings)
+
     def test_the_next_row_after_the_backoff_is_attempted_again(self):
         clock = [1000.0]
         pipe = _FakePipe(fail=RuntimeError('boom'))
@@ -1351,7 +1376,8 @@ class TestWriterCircuitBreaker:
         writer._write_one(_row(text=text))
 
         assert writer.disabled is False
-        assert writer.failures == 1
+        # A data error: only this row is lost, with no backoff for the next.
+        assert writer.failures == 0 and writer._rows_rejected == 1
 
     def test_any_other_failure_backs_off_then_retries(self):
         clock = [1000.0]
@@ -1944,6 +1970,29 @@ class TestEndpointCaptureWiring:
         assert answer == ''
         inserts = [call[2]['params'] for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]
         assert [(params[0], params[2]) for params in inserts] == [('message', 'text' if lane == 'text' else 'binary:1')]
+
+    @pytest.mark.parametrize('event_type', ['outbound', 'no_reply', 'reaction'])
+    def test_an_event_is_captured_even_when_the_pipeline_cannot_open(self, event_type):
+        """Event rows, like question rows, do not depend on the pipeline object opening."""
+
+        class _BrokenPipe(_PipelinePipe):
+            def open(self, entry):
+                raise RuntimeError('open failed')
+
+        pipe = _BrokenPipe()
+        endpoint = _endpoint(pipe, capture_events=True)
+        payload = {
+            'outbound': {'text': 'the answer', 'messageIds': ['9'], 'destination': 'reply', 'complete': True},
+            'no_reply': {'reason': 'no_answer'},
+            'reaction': {'emoji': '✅', 'added': True, 'userId': '7', 'occurredAt': '2026-10-08T00:00:00+00:00'},
+        }[event_type]
+        try:
+            endpoint._emit_event_pipeline(_metadata(), event_type, payload)
+        finally:
+            endpoint._stop_capture()
+
+        inserts = [call[2]['params'] for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]
+        assert [params[0] for params in inserts] == [event_type]
 
     def test_stopping_capture_twice_is_safe(self):
         endpoint = _endpoint(_PipelinePipe(), capture_events=True)

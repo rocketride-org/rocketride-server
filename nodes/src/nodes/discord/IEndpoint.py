@@ -3076,13 +3076,15 @@ class IEndpoint(IEndpointBase):
                 'name': f'{message_id}:{event_type}',
             }
         )
+        # Captured before the pipe is touched, like a question: the event is on
+        # record even when the pipeline object cannot be opened.
+        self._capture_event(event_type, event_meta, payload)
         pipe = self.target.getPipe()
         data = json.dumps({'eventType': event_type, 'metadata': event_meta, **payload}).encode('utf-8')
         try:
             pipe.open(entry)
             self._send_metadata(pipe, event_meta)
             self._send_sse(pipe, event_type, event_meta, payload)
-            self._capture_event(event_type, event_meta, payload)
             pipe.writeTagBeginObject()
             pipe.writeTagBeginStream()
             pipe.writeTagData(data)

@@ -186,6 +186,15 @@ _LASTING_FAILURES = (
     ),
 )
 
+# Failures caused by one row's values (PostgreSQL data exceptions, SQLSTATE
+# class 22, and the row-level integrity checks): that row is dropped, but the
+# database is fine, so the rows after it are written without a backoff.
+_ROW_FAILURE_RE = re.compile(
+    r'invalid input syntax|invalid byte sequence|value too long|out of range|'
+    r'violates not-null constraint|violates check constraint|DataError|NotNullViolation|CheckViolation|'
+    r'\b22[0-9A-Z]{3}\b|\b2350[2-4]\b|\b23514\b'
+)
+
 # The shortest row value or node id an error message is searched for (to hide
 # it, or to keep it from reading as a lasting failure).
 MIN_HIDDEN_CHARS = 8
@@ -624,6 +633,24 @@ def _lasting_cause(exc: BaseException, hide: tuple = ()) -> Optional[str]:
     return None
 
 
+def _is_row_failure(exc: BaseException, hide: tuple = ()) -> bool:
+    """Whether a failed write was refused for that row's own values.
+
+    Args:
+        exc (BaseException): What the write raised.
+        hide (tuple): Row values taken out of the message first, so text the
+            user wrote cannot make the failure read as a row failure.
+
+    Returns:
+        bool: True for a data exception or a row-level integrity check.
+    """
+    text = str(exc)
+    for value in hide:
+        if _is_hideable(value):
+            text = text.replace(value, '')
+    return _ROW_FAILURE_RE.search(text) is not None
+
+
 def _short_error(exc: BaseException, hide: tuple = ()) -> str:
     """Return the first line of an exception, bounded, for a log line.
 
@@ -704,6 +731,8 @@ class CaptureWriter:
         # before which rows are dropped, and how many were.
         self._retry_at = 0.0
         self._skipped = 0
+        # Rows the database refused for their own values (no backoff).
+        self._rows_rejected = 0
         self._dropped = 0
         self._unwritten = 0
         self._dropped_lock = threading.Lock()
@@ -924,6 +953,8 @@ class CaptureWriter:
             cause = _lasting_cause(e, hide=(row.get('payload'), row.get('text')))
             if cause is not None:
                 self._give_up(cause)
+            elif _is_row_failure(e, hide=(row.get('payload'), row.get('text'))):
+                self._on_row_failure(row, e)
             else:
                 self._on_failure(row, e)
         else:
@@ -1080,6 +1111,28 @@ class CaptureWriter:
         self._warn(
             f'Discord capture: writing to {self._node_label()} table {self._table_label()} cannot work: '
             f'{cause}; capture is off for this run.'
+        )
+
+    def _on_row_failure(self, row: Dict[str, Any], exc: BaseException) -> None:
+        """Count a row the database rejected for its own values, without a backoff.
+
+        The database answered, so the next row is written as usual; only this
+        one is lost. Reported like any failure, throttled after the first.
+
+        Args:
+            row (Dict[str, Any]): The row that was refused.
+            exc (BaseException): What the write raised.
+
+        Returns:
+            None
+        """
+        self._rows_rejected += 1
+        count = f' ({self._rows_rejected} rows rejected so far)' if self._rows_rejected > 1 else ''
+        error = _short_error(exc, hide=(row.get('payload'), row.get('text'), (self._node_id, '<captureNodeId>')))
+        self._warn_throttled(
+            '_last_failure_warn',
+            f'Discord capture: {self._node_label()} table {self._table_label()} refused the {row.get("event_type")} '
+            f'row for message {row.get("message_id")}{count}: {error}; this row is dropped.',
         )
 
     def _on_failure(self, row: Dict[str, Any], exc: BaseException) -> None:
