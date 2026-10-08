@@ -695,24 +695,30 @@ def _real_user():
     return os.getuid(), os.getgid()
 
 
+# Windows has no uid: test_store_without_a_uid_keeps_the_image_user covers that case
+needs_uid = pytest.mark.skipif(not hasattr(os, 'getuid'), reason='no uid on Windows')
+
+
 async def test_store_subtree_is_mounted_and_the_task_store_points_at_it(tmp_path):
     cli = FakeCli(run=_probe_writes)
     launcher = _launcher(cli, environ=_store_environ(tmp_path))
     await launcher.start(_spec(uses_store=True, storage_root='users/u1/files'))
     create = cli.call('create')
     mounts = [create.args[i + 1] for i, a in enumerate(create.args) if a == '-v']
-    assert mounts == [f'{tmp_path}/store/users/u1/files:/opt/store/users/u1/files']
+    assert mounts == [f'{os.path.join(tmp_path, "store", "users/u1/files")}:/opt/store/users/u1/files']
     assert create.env['RR_STORE_URL'] == 'filesystem:///opt/store'
     assert (tmp_path / 'store' / 'users' / 'u1' / 'files').is_dir()
     # The daemon was asked, once, as a task runs, and the probe left nothing behind
     probe = cli.call('run').args
     assert probe[:4] == ['run', '--rm', '--pull', 'never']
-    assert probe[probe.index('--user') + 1] == '%d:%d' % _real_user()
+    if hasattr(os, 'getuid'):
+        assert probe[probe.index('--user') + 1] == '%d:%d' % _real_user()
     assert probe[probe.index('--cap-drop') + 1] == 'ALL'
-    assert probe[probe.index('-v') + 1].startswith(f'{tmp_path}/store/.rocketride-probe-')
+    assert probe[probe.index('-v') + 1].startswith(os.path.join(tmp_path, 'store', '.rocketride-probe-'))
     assert not any(name.startswith('.rocketride-probe') for name in os.listdir(tmp_path / 'store'))
 
 
+@needs_uid
 async def test_store_works_whatever_uid_the_engine_runs_as(tmp_path):
     """No uid 1000 rule: the task runs as the engine's own user, so the mount keeps one owner."""
     cli = FakeCli(run=_probe_writes)
@@ -749,6 +755,7 @@ async def test_store_refused_when_a_task_cannot_write_it(tmp_path):
     assert 'create' not in cli.commands()
 
 
+@needs_uid
 async def test_store_refused_when_a_tasks_file_is_not_the_engines(tmp_path, monkeypatch):
     """A daemon that remaps users: the file the probe wrote is someone else's on this host."""
     real_uid = os.getuid()
