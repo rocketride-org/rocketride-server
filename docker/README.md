@@ -120,11 +120,13 @@ Named volumes persist data between restarts:
 
 The engine and node images are built FROM the engine-base of the same version
 (`--build-arg ENGINE_BASE=...`). On Linux, `./builder container:build`
-builds engine-base and the node image from the local `dist/server`; elsewhere
-`dist/server` is not a Linux engine and the task skips. `./builder
-container:test` builds them and checks the node image as a run gets it:
-with capabilities dropped the engine is non-dumpable, the shipped constraints
-are accepted as they are, every requirement file the cache was warmed from
+builds engine-base and the node image from the local `dist/server`. Elsewhere
+`dist/server` is not a Linux engine, and the builder refuses the task before
+it stages anything; on Windows, `container:build-on-wsl` (below) builds it in a
+WSL checkout. `./builder container:test` builds them and checks the node
+image as a run gets it: with capabilities dropped the engine is non-dumpable,
+the shipped constraints are accepted as they are, every requirement file the
+cache was warmed from
 installs from it with no network, and a uid other than 1000 in the image's
 group can write what a run writes and install (`docker/test-node-image.sh`).
 That last one matters because a task runs as the engine's own uid and gid with
@@ -136,10 +138,12 @@ warm step lists them, and fails the build unless the file is installed only
 without a model server (`inference_allowed` in `docker/warm-wheel-cache.sh`) —
 otherwise every run would download it. Then it runs `nodes:test` with every task
 in a container (`--runtime=docker`, see the self-hosting docs) and compares
-nothing by itself: the same tests pass under both runtimes. Without a daemon each
-step skips loudly. A rebuild with no changes takes seconds: the builder builds
-the images without a provenance attestation, which records the build time and
-would give a cached engine-base a new digest every time, so the node image built
+nothing by itself: the same tests pass under both runtimes. Without a daemon the
+image and test steps skip loudly; the staging steps before them (`nodes:build`,
+`ai:sync`, `client-python:sync-source`) still run. A rebuild with no changes
+takes seconds: the builder builds the images without a provenance
+attestation, which records the build time and would give a cached engine-base
+a new digest every time, so the node image built
 FROM it would miss its cache.
 CI runs it on Linux when the image's inputs change, and the release workflow
 runs the same script on the published node image before signing it. All three
@@ -163,8 +167,10 @@ next task under `--runtime=docker` without a full build. It always starts from
 `<version>-clean`, so layers do not pile up. A file deleted from the source
 stays, also after `container:build`: `ai:sync` and `nodes:sync` add and update
 files in `dist/server` but do not remove them, and the image is built from
-`dist/server`. Delete it there too, or clear both trees with
-`./builder ai:clean nodes:clean` and then run `./builder container:build`. When `<version>-clean` is missing but `<version>` is a
+`dist/server`. Delete it there too, then run `./builder container:build`:
+`container:sync` copies over `<version>-clean`, which still holds the file. Or
+clear both trees with `./builder ai:clean nodes:clean` and then run
+`./builder container:build`. When `<version>-clean` is missing but `<version>` is a
 full build (pulled, or built before the task existed), it is tagged `-clean`
 first.
 
