@@ -141,6 +141,7 @@ def _server(logs):
     ts._reserved_ports = set()
     ts._store_instance = None
     ts._config = {}
+    ts._launcher = None
     ts._server = MagicMock()
     ts._server.account.generate_token = MagicMock(side_effect=lambda content, prefix: f'{prefix}abcdefgh12345678')
     ts.debug_message = lambda msg: logs.append(str(msg))

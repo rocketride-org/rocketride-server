@@ -135,6 +135,7 @@ def _server(logs, monkeypatch, key=None):
     ts._reserved_ports = set()
     ts._store_instance = None
     ts._config = {}
+    ts._launcher = None
     ts._server = SimpleNamespace(
         account=SimpleNamespace(
             generate_token=lambda content, prefix='': AccountBase.generate_token(None, content, prefix),
