@@ -1295,6 +1295,27 @@ class TestWriterFailures:
         assert attempts == 2 * capture.MAX_ROWS_REJECTED_IN_A_ROW - 1, 'rows after the wait are tried again'
         assert writer.rows_rejected == 2 * capture.MAX_ROWS_REJECTED_IN_A_ROW - 1
 
+    def test_an_outage_ends_a_rejection_streak(self):
+        """Refused rows before an outage and its wait do not count toward a streak after it."""
+        clock = [1000.0]
+        bad_row = RuntimeError('SQL execution failed: Error 22P02: invalid input syntax for type json')
+        pipe = _FakePipe(fail=bad_row)
+        writer = _writer(_FakeTarget(pipe), [], clock=lambda: clock[0])
+
+        for _ in range(capture.MAX_ROWS_REJECTED_IN_A_ROW - 1):
+            writer._write_one(_row())
+        pipe.fail = RuntimeError('SQL execution failed: Error 08006: server closed the connection unexpectedly')
+        writer._write_one(_row())
+        clock[0] += capture.BACKOFF_SECONDS
+        pipe.fail = bad_row
+        writer._write_one(_row())
+        writer._write_one(_row())  # still inside no wait: one refused row is not a streak
+
+        assert (
+            len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']])
+            == capture.MAX_ROWS_REJECTED_IN_A_ROW + 2
+        )
+
     def test_a_write_resets_the_rejection_streak(self):
         clock = [1000.0]
         pipe = _FakePipe(fail=RuntimeError('SQL execution failed: Error 22P02: invalid input syntax for type json'))
@@ -1505,7 +1526,7 @@ class TestWriterCircuitBreaker:
 
     def test_row_text_that_reads_like_a_missing_table_does_not_create_one(self):
         """CodeRabbit on #2548: the user's words must not make a data error read as a missing table."""
-        text = 'why does it say relation "x" does not exist 42P01'
+        text = 'it said: relation "x" does not exist, then x: Error 42P01: y'
         pipe = _FakePipe(fail=RuntimeError(f'SQL execution failed: Error 22P02: invalid input syntax: "{text}"'))
         writer = _writer(_FakeTarget(pipe), [])
         writer._table_checked = True  # the table is known to exist
@@ -1518,7 +1539,7 @@ class TestWriterCircuitBreaker:
 
     def test_row_text_that_reads_like_a_lasting_failure_is_not_one(self):
         """A driver error quoting the user's own words must not switch capture off."""
-        text = 'permission denied when I log in'
+        text = 'permission denied for my account when I log in'
         pipe = _FakePipe(fail=RuntimeError(f'SQL execution failed: Error 22P02: invalid input syntax: "{text}"'))
         writer = _writer(_FakeTarget(pipe), [])
 

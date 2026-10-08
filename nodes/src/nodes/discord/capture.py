@@ -1196,6 +1196,9 @@ class CaptureWriter:
         """
         self._failures += 1
         self._retry_at = self._clock() + BACKOFF_SECONDS
+        if not streak:
+            # A failure of the database itself ends any run of refused rows.
+            self._rejected_in_a_row = 0
         counts = []
         if self._failures > 1:
             counts.append(f'{self._failures} failures so far')
