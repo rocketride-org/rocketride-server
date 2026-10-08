@@ -139,6 +139,12 @@ function parseArgs(args) {
 			options.cmakeConfig = value;
 		} else if (arg.startsWith('--taskserver=')) {
 			options.taskserver = arg.substring('--taskserver='.length);
+		} else if (arg.startsWith('--checkout=')) {
+			// container:build-on-wsl: the WSL checkout to build in
+			options.checkout = arg.substring('--checkout='.length);
+		} else if (arg.startsWith('--distro=')) {
+			// container:build-on-wsl / container:sync-from-wsl: the WSL distribution
+			options.distro = arg.substring('--distro='.length);
 		} else if (arg.startsWith('--runtime=')) {
 			// How the engine runs tasks (spawn | docker): node tests, server:dev
 			const runtime = arg.substring('--runtime='.length);
@@ -296,6 +302,9 @@ Options:
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
   --cmake-config=TYPE C++ build type (default: Release); repeat it on every call
                       (TYPE: Release|RelWithDebInfo|Sanitize; Sanitize = ASan + UBSan, Linux only)
+  --checkout=DIR      container:build-on-wsl: the WSL checkout to build in (or RR_WSL_CHECKOUT)
+  --distro=NAME       container:build-on-wsl, container:sync-from-wsl: the WSL distribution
+                      (default Ubuntu-22.04, or RR_WSL_DISTRO)
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message
