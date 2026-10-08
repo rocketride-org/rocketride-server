@@ -565,3 +565,97 @@ def test_stop_monitoring_on_idle_is_a_noop(fake_psutil, no_gpu):
         await tm.stop_monitoring()
 
     asyncio.run(run())  # absence of exception is the assertion
+
+
+# ---------------------------------------------------------------------------
+# A runtime's sampler (a container has no local PID)
+# ---------------------------------------------------------------------------
+
+
+class _Sampler:
+    """A MetricsSampler stand-in returning canned readings."""
+
+    def __init__(self, readings, min_interval=0.0):
+        self.min_interval = min_interval
+        self._readings = list(readings)
+        self.calls = 0
+
+    async def sample(self):
+        self.calls += 1
+        return self._readings.pop(0) if self._readings else None
+
+
+def _make_sampled(fake_psutil, sampler, sample_interval=1.0):
+    """Build a TaskMetrics fed by a sampler instead of a pid."""
+    status = make_status()
+    tm = task_metrics.TaskMetrics(task_status=status, sample_interval=sample_interval, sampler=sampler)
+    return tm, status
+
+
+@pytest.mark.parametrize('kwargs', [{}, {'pid': 1, 'sampler': _Sampler([])}])
+def test_init_needs_exactly_one_of_pid_and_sampler(fake_psutil, no_gpu, kwargs):
+    """Neither or both is a programming error, not a silent zero."""
+    with pytest.raises(ValueError, match='exactly one'):
+        task_metrics.TaskMetrics(task_status=make_status(), **kwargs)
+
+
+def test_sampler_never_touches_psutil_process(fake_psutil, no_gpu):
+    """With a sampler there is no local process to open."""
+    tm, _ = _make_sampled(fake_psutil, _Sampler([]))
+    fake_psutil.Process.assert_not_called()
+    assert tm._process is None and tm.pid is None
+
+
+def test_sampler_sets_its_own_minimum_interval(fake_psutil, no_gpu):
+    """A docker stats call takes about a second, so the interval is not shorter."""
+    tm, _ = _make_sampled(fake_psutil, _Sampler([], min_interval=1.0), sample_interval=0.25)
+    assert tm.sample_interval == 1.0
+
+
+def test_sampler_reading_is_recorded_like_psutil(fake_psutil, no_gpu):
+    """CPU is normalized by core count (4 in the fixture), memory becomes MB, raw CPU is kept for billing."""
+    tm, status = _make_sampled(fake_psutil, _Sampler([]))
+    tm._apply_sampler_reading((150.0, 512 * 1024 * 1024))
+    assert status.metrics.cpu_percent == pytest.approx(37.5)
+    assert status.metrics.cpu_memory_mb == pytest.approx(512.0)
+    assert tm._cpu_percent_raw == pytest.approx(150.0)
+
+
+def test_sampler_reading_none_keeps_the_last_values(fake_psutil, no_gpu):
+    """A failed reading does not zero the gauges."""
+    tm, status = _make_sampled(fake_psutil, _Sampler([]))
+    tm._apply_sampler_reading((40.0, 1024 * 1024))
+    tm._apply_sampler_reading(None)
+    assert status.metrics.cpu_percent == pytest.approx(10.0)
+    assert status.metrics.cpu_memory_mb == pytest.approx(1.0)
+
+
+def test_sampler_gpu_half_reads_zero(monkeypatch, fake_psutil):
+    """No local PID: nothing to match against NVML's processes, even with a GPU present."""
+    fake_nvml = MagicMock()
+    fake_nvml.nvmlDeviceGetCount.return_value = 1
+    monkeypatch.setitem(sys.modules, 'pynvml', fake_nvml)
+    tm, status = _make_sampled(fake_psutil, _Sampler([]))
+    status.metrics.gpu_memory_mb = 99.0
+    tm._sample_gpu()
+    assert status.metrics.gpu_memory_mb == 0.0
+    fake_nvml.nvmlDeviceGetComputeRunningProcesses.assert_not_called()
+
+
+async def test_monitoring_loop_reads_the_sampler(fake_psutil, no_gpu):
+    """The background loop takes its CPU and memory from the sampler."""
+    sampler = _Sampler([(80.0, 256 * 1024 * 1024)] * 50)
+    tm, status = _make_sampled(fake_psutil, sampler, sample_interval=0.01)
+    tm._report_to_billing_system = MagicMock(side_effect=lambda: asyncio.sleep(0))
+    tm._audit_task_usage = MagicMock(side_effect=lambda: asyncio.sleep(0))
+
+    tm.start_monitoring()
+    for _ in range(100):
+        if sampler.calls:
+            break
+        await asyncio.sleep(0.01)
+    await tm.stop_monitoring()
+
+    assert sampler.calls >= 1
+    assert status.metrics.cpu_percent == pytest.approx(20.0)
+    assert status.metrics.cpu_memory_mb == pytest.approx(256.0)
