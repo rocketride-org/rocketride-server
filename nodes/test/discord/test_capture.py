@@ -1201,10 +1201,10 @@ class TestWriterFailures:
     @pytest.mark.parametrize(
         'message',
         [
-            'invalid input syntax for type json',
-            'value too long for type character varying(64)',
-            'invalid byte sequence for encoding "UTF8": 0xc3',
-            'DataError: integer out of range',
+            'SQL execution failed: Error 22P02: invalid input syntax for type json',
+            'SQL execution failed: Error 22001: value too long for type character varying(64)',
+            'SQL execution failed: Error 22021: invalid byte sequence for encoding "UTF8": 0xc3',
+            'SQL execution failed: Error 22003: integer out of range',
         ],
     )
     def test_a_row_the_database_rejects_drops_only_that_row(self, message):
@@ -1220,8 +1220,82 @@ class TestWriterFailures:
 
         assert len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]) == 2
         assert writer.disabled is False
+        assert writer.rows_rejected == 1
         assert len(warnings) == 1 and 'this row is dropped' in warnings[0]
         assert 'recovered' not in ' '.join(warnings)
+
+    @pytest.mark.parametrize(
+        'message',
+        [
+            # Server text that merely contains digits or words a loose match would take for a row error.
+            'SQL execution failed: Error 53100: could not extend file "base/16384/22013": No space left on device',
+            'SQL execution failed: Error 58P01: could not write to file "pg_wal/xlogtemp.22871"',
+            'connection to server at "db" (10.0.0.5), port 22001 failed: Connection refused',
+            'IndexError: list index out of range',
+            'SQL execution failed: Error 40P01: deadlock detected',
+            'SQL execution failed: Error 57014: canceling statement due to statement timeout',
+            'SQL execution failed: Error 08006: server closed the connection unexpectedly',
+        ],
+    )
+    def test_a_database_failure_is_never_taken_for_a_row_failure(self, message):
+        clock = [1000.0]
+        pipe = _FakePipe(fail=RuntimeError(message))
+        writer = _writer(_FakeTarget(pipe), [], clock=lambda: clock[0])
+
+        writer._write_one(_row())
+        writer._write_one(_row())  # inside the backoff: not attempted
+
+        assert writer.rows_rejected == 0
+        assert writer.failures == 1
+        assert len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]) == 1
+
+    @pytest.mark.parametrize('code', ['23502', '23503', '23514'])
+    def test_a_table_whose_constraints_refuse_capture_rows_turns_capture_off(self, code):
+        """A NOT NULL, foreign key or CHECK capture rows cannot meet fails every row: a table problem."""
+        pipe = _FakePipe(fail=RuntimeError(f'SQL execution failed: Error {code}: new row violates a constraint'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+
+        assert writer.disabled is True
+        assert len(warnings) == 1 and 'capture is off' in warnings[0]
+
+    def test_rejected_rows_in_a_row_are_a_table_problem_not_row_problems(self):
+        """Every row refused (a column of the wrong type) backs off like any lasting trouble."""
+        clock = [1000.0]
+        pipe = _FakePipe(fail=RuntimeError('SQL execution failed: Error 22P02: invalid input syntax for type bigint'))
+        writer = _writer(_FakeTarget(pipe), [], clock=lambda: clock[0])
+
+        for _ in range(capture.MAX_ROWS_REJECTED_IN_A_ROW + 2):
+            writer._write_one(_row())
+
+        attempts = len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']])
+        assert attempts == capture.MAX_ROWS_REJECTED_IN_A_ROW
+        assert writer.failures == 1
+
+    def test_a_row_failure_does_not_hide_the_warning_for_an_outage(self):
+        clock = [1000.0]
+        pipe = _FakePipe(fail=RuntimeError('SQL execution failed: Error 22P02: invalid input syntax for type json'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings, clock=lambda: clock[0])
+
+        writer._write_one(_row())
+        clock[0] += 10
+        pipe.fail = RuntimeError('SQL execution failed: Error 08006: server closed the connection unexpectedly')
+        writer._write_one(_row())
+
+        assert len(warnings) == 2 and 'server closed the connection' in warnings[1]
+
+    def test_rows_rejected_this_run_are_reported_at_stop(self):
+        pipe = _FakePipe(fail=RuntimeError('SQL execution failed: Error 22P02: invalid input syntax for type json'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+        writer.start()
+        writer.submit(_row())
+        writer.stop(timeout=2.0)
+
+        assert any('refused 1 row' in warning for warning in warnings)
 
     def test_the_next_row_after_the_backoff_is_attempted_again(self):
         clock = [1000.0]
@@ -1370,7 +1444,7 @@ class TestWriterCircuitBreaker:
     def test_row_text_that_reads_like_a_missing_table_does_not_create_one(self):
         """CodeRabbit on #2548: the user's words must not make a data error read as a missing table."""
         text = 'why does it say relation "x" does not exist 42P01'
-        pipe = _FakePipe(fail=RuntimeError(f'invalid input syntax: "{text}"'))
+        pipe = _FakePipe(fail=RuntimeError(f'SQL execution failed: Error 22P02: invalid input syntax: "{text}"'))
         writer = _writer(_FakeTarget(pipe), [])
         writer._table_checked = True  # the table is known to exist
 
@@ -1378,19 +1452,19 @@ class TestWriterCircuitBreaker:
 
         assert not [call for call in pipe.calls if 'CREATE TABLE' in call[2]['sql']]
         assert writer.disabled is False
-        assert writer._rows_rejected == 1
+        assert writer.rows_rejected == 1
 
     def test_row_text_that_reads_like_a_lasting_failure_is_not_one(self):
         """A driver error quoting the user's own words must not switch capture off."""
         text = 'permission denied when I log in'
-        pipe = _FakePipe(fail=RuntimeError(f'invalid input syntax: "{text}"'))
+        pipe = _FakePipe(fail=RuntimeError(f'SQL execution failed: Error 22P02: invalid input syntax: "{text}"'))
         writer = _writer(_FakeTarget(pipe), [])
 
         writer._write_one(_row(text=text))
 
         assert writer.disabled is False
         # A data error: only this row is lost, with no backoff for the next.
-        assert writer.failures == 0 and writer._rows_rejected == 1
+        assert writer.failures == 0 and writer.rows_rejected == 1
 
     def test_any_other_failure_backs_off_then_retries(self):
         clock = [1000.0]

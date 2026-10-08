@@ -2864,10 +2864,11 @@ class IEndpoint(IEndpointBase):
     def _capture_event(self, event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any]):
         """Queue one event for the capture log.
 
-        Called next to every ``_send_sse``, with the same three arguments
-        (a ``message`` passes its text unclipped, where the broadcast clips
-        it at 2000 characters), so the durable row and the live broadcast
-        describe the same event. Best-effort in the strongest sense: building the row is pure
+        Called for every event that is broadcast with ``_send_sse``, with the
+        same three arguments (a ``message`` passes its text unclipped, where
+        the broadcast clips it at 2000 characters), so the durable row and the
+        live broadcast describe the same event. It runs before the pipeline
+        object is opened, so the row is queued even when opening fails. Best-effort in the strongest sense: building the row is pure
         and queueing it cannot block, and anything that still goes wrong is a
         debug line, never an exception on the answering path.
         """

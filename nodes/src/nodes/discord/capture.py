@@ -184,16 +184,27 @@ _LASTING_FAILURES = (
         re.compile(r'column "[^"]*"(?: of relation "[^"]*")? does not exist|UndefinedColumn|\b42703\b'),
         'a column capture writes does not exist in the table; create it as the node README shows',
     ),
+    (
+        # Integrity checks capture rows cannot meet (an extra NOT NULL column,
+        # a foreign key or a CHECK constraint): every row would fail.
+        re.compile(r'(?:^|: )Error 2350[23]: |(?:^|: )Error 23514: '),
+        'the table has a constraint capture rows do not meet (NOT NULL, foreign key or CHECK); '
+        'create it as the node README shows',
+    ),
 )
 
-# Failures caused by one row's values (PostgreSQL data exceptions, SQLSTATE
-# class 22, and the row-level integrity checks): that row is dropped, but the
-# database is fine, so the rows after it are written without a backoff.
-_ROW_FAILURE_RE = re.compile(
-    r'invalid input syntax|invalid byte sequence|value too long|out of range|'
-    r'violates not-null constraint|violates check constraint|DataError|NotNullViolation|CheckViolation|'
-    r'\b22[0-9A-Z]{3}\b|\b2350[2-4]\b|\b23514\b'
-)
+# A failure caused by one row's values: a PostgreSQL data exception (SQLSTATE
+# class 22), matched only where the database node writes the code
+# (``SQL execution failed: Error <sqlstate>: <message>``), never as free text,
+# so a path, pid or port in a server message cannot read as one. That row is
+# dropped, but the database is fine, so the rows after it are written without
+# a backoff.
+_ROW_FAILURE_RE = re.compile(r'(?:^|: )Error 22[0-9A-Z]{3}: ')
+
+# This many rows refused in a row, with no write in between, is a table whose
+# column cannot hold what capture writes (a column of another type), not bad
+# rows: the next one is handled like any other failure, with the backoff.
+MAX_ROWS_REJECTED_IN_A_ROW = 5
 
 # The shortest row value or node id an error message is searched for (to hide
 # it, or to keep it from reading as a lasting failure).
@@ -744,6 +755,7 @@ class CaptureWriter:
         self._skipped = 0
         # Rows the database refused for their own values (no backoff).
         self._rows_rejected = 0
+        self._rejected_in_a_row = 0
         self._dropped = 0
         self._unwritten = 0
         self._dropped_lock = threading.Lock()
@@ -755,6 +767,7 @@ class CaptureWriter:
         self._last_failure_warn = 0.0
         self._last_drop_warn = 0.0
         self._last_late_warn = 0.0
+        self._last_row_warn = 0.0
 
         # Refused here rather than at the first write: a name that cannot be
         # substituted into the DDL can never work, so there is nothing to
@@ -785,6 +798,11 @@ class CaptureWriter:
     def unwritten(self) -> int:
         """Rows submitted after stop(), or still queued when a busy writer was stopped."""
         return self._unwritten
+
+    @property
+    def rows_rejected(self) -> int:
+        """Rows the database refused for their own values this run (not retried)."""
+        return self._rows_rejected
 
     @property
     def failures(self) -> int:
@@ -841,6 +859,11 @@ class CaptureWriter:
             # stop now rather than wait for room the worker may never make.
             self._stopping.set()
         thread.join(max(0.0, deadline - time.monotonic()))
+        if self._rows_rejected:
+            self._warn(
+                f'Discord capture: the database refused {self._rows_rejected} row(s) this run for their own values; '
+                f'they were not written'
+            )
         if thread.is_alive():
             # Set before _stopping, which is what the worker checks first.
             self._abandoned.set()
@@ -964,11 +987,15 @@ class CaptureWriter:
             cause = _lasting_cause(e, hide=(row.get('payload'), row.get('text')))
             if cause is not None:
                 self._give_up(cause)
-            elif _is_row_failure(e, hide=(row.get('payload'), row.get('text'))):
+            elif (
+                _is_row_failure(e, hide=(row.get('payload'), row.get('text')))
+                and self._rejected_in_a_row < MAX_ROWS_REJECTED_IN_A_ROW - 1
+            ):
                 self._on_row_failure(row, e)
             else:
                 self._on_failure(row, e)
         else:
+            self._rejected_in_a_row = 0
             self._on_success()
         finally:
             if pipe is not None and not self._abandoned.is_set():
@@ -1138,10 +1165,13 @@ class CaptureWriter:
             None
         """
         self._rows_rejected += 1
+        self._rejected_in_a_row += 1
         count = f' ({self._rows_rejected} rows rejected so far)' if self._rows_rejected > 1 else ''
         error = _short_error(exc, hide=(row.get('payload'), row.get('text'), (self._node_id, '<captureNodeId>')))
+        # Its own throttle slot: a rejected row must not hide the warning for
+        # an outage that starts right after it.
         self._warn_throttled(
-            '_last_failure_warn',
+            '_last_row_warn',
             f'Discord capture: {self._node_label()} table {self._table_label()} refused the {row.get("event_type")} '
             f'row for message {row.get("message_id")}{count}: {error}; this row is dropped.',
         )
