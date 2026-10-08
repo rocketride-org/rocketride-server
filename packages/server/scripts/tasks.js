@@ -117,7 +117,7 @@ async function getPackageInfo(options = {}) {
 	const { version } = await loadPackageJson();
 	const platform = getPlatformInfo(options);
 	const releaseTag = `server-v${version}`;
-	const prereleaseTag = `${releaseTag}-prerelease`;
+	const prereleaseTag = `${releaseTag}-${options.suffix || 'prerelease'}`;
 	const baseName = `rocketride-${releaseTag}-${platform.name}`;
 	const manifestFilename = `${baseName}.manifest.json`;
 	const distFilename = `${baseName}.${platform.ext}`;
@@ -468,8 +468,11 @@ function makeDownloadAction(options = {}) {
 			const { releaseTag, prereleaseTag, manifestFilename, distFilename, symDistFilename } =
 				await getPackageInfo(options);
 
-			// Try stable release first, then prerelease
-			const tagsToTry = [releaseTag, prereleaseTag];
+			const tagsToTry = options.suffix
+							// A named release is the only one tried
+						    ? [prereleaseTag] 
+							// Try stable release first, then prerelease
+							: [releaseTag, prereleaseTag];
 			let releaseAvailable = false;
 			let releaseHash = null;
 			let matchedTag = null;
