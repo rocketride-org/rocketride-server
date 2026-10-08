@@ -40,4 +40,4 @@
 // =============================================================================
 
 /** The current shell-api contract version (the newest frozen `versions/vN`). */
-export const SHELL_API_VERSION = 4 as const;
+export const SHELL_API_VERSION = 5 as const;
