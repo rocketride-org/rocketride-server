@@ -1041,15 +1041,16 @@ class CaptureWriter:
     def _create_table(self, pipe: Any, node_id: str) -> None:
         """Create the missing capture table.
 
-        A CREATE refused for good (no CREATE right on the schema) raises
-        :class:`_LastingFailure`, which ends capture for the run. Any other
-        failure is passed on unchanged and takes the usual backoff, with
-        ``_table_checked`` still False, so a later row checks again: a dropped
-        connection must not end capture. Two sources sharing one table can
-        race to create it, and PostgreSQL may then refuse the loser's CREATE
-        (23505 on ``pg_type``): when the table exists after a failed CREATE,
-        it is used. The statement binds no values, so its error carries no row
-        text.
+        After a failed CREATE the table is looked for once more first: two
+        sources sharing one table can race to create it, and the loser's
+        CREATE fails (23505 on a catalog index, or ``permission denied`` for a
+        source that may only INSERT) although the table now exists, so it is
+        used. Only when it is still missing does a CREATE refused for good (no
+        CREATE right on the schema) raise :class:`_LastingFailure`, which ends
+        capture for the run. Any other failure is passed on unchanged and takes
+        the usual backoff, with ``_table_checked`` still False, so a later row
+        checks again: a dropped connection must not end capture. The statement
+        binds no values, so its error carries no row text.
 
         Args:
             pipe (Any): The borrowed pipe.
@@ -1061,10 +1062,14 @@ class CaptureWriter:
         try:
             self._invoke(pipe, node_id, CREATE_TABLE_SQL(self._table), None)
         except Exception as e:
+            try:
+                exists = self._table_exists(pipe, node_id)
+            except Exception:
+                exists = None  # the second look failed too: judge the CREATE error alone
+            if exists is True:
+                return
             if _lasting_cause(e) is not None:
                 raise _LastingFailure(f'the table does not exist and could not be created ({_short_error(e)})') from e
-            if self._table_exists(pipe, node_id) is True:
-                return
             raise
 
     def _invoke(self, pipe: Any, node_id: str, sql: str, params: Optional[List[Any]]) -> Any:

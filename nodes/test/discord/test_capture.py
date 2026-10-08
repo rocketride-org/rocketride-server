@@ -986,6 +986,29 @@ class TestWriterWrites:
             INSERT_SQL('discord_events'),
         ]
 
+    def test_an_insert_only_writer_uses_a_table_another_source_just_created(self):
+        """CodeRabbit on #2548: a refused CREATE is not lasting when the table exists by then."""
+
+        class _RacePipe(_FakePipe):
+            def _answer(self, param, component_id):
+                if param.tool_name == 'execute' and 'CREATE TABLE' in param.input.get('sql', ''):
+                    self.table_exists = True  # the other source, which may CREATE, made it
+                    raise RuntimeError('SQL execution failed: Error 42501: permission denied for schema public')
+                super()._answer(param, component_id)
+
+        pipe = _RacePipe(table_exists=False)
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+
+        assert writer.disabled is False
+        assert warnings == []
+        assert [call[2]['sql'] for call in pipe.calls] == [
+            CREATE_TABLE_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+        ]
+
     def test_an_insert_failing_for_another_reason_runs_no_ddl(self):
         pipe = _FakePipe(fail=RuntimeError('connection refused'))
         writer = _writer(_FakeTarget(pipe), [])
