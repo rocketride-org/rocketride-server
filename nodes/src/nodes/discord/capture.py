@@ -187,26 +187,22 @@ _LASTING_FAILURES = (
         re.compile(r'column "[^"]*"(?: of relation "[^"]*")? does not exist|UndefinedColumn|(?:^|: )Error 42703: '),
         'a column capture writes does not exist in the table; create it as the node README shows',
     ),
-    (
-        # Integrity checks capture rows cannot meet (an extra NOT NULL column,
-        # a foreign key or a CHECK constraint): every row would fail.
-        re.compile(r'(?:^|: )Error 2350[23]: |(?:^|: )Error 23514: '),
-        'the table has a constraint capture rows do not meet (NOT NULL, foreign key or CHECK); '
-        'create it as the node README shows',
-    ),
 )
 
 # A failure caused by one row's values: a PostgreSQL data exception (SQLSTATE
-# class 22), matched only where the database node writes the code
+# class 22), or a NOT NULL, foreign key or CHECK constraint of the operator's
+# table (23502, 23503, 23514), which can refuse some rows (reactions) and
+# accept others; matched only where the database node writes the code
 # (``SQL execution failed: Error <sqlstate>: <message>``), never as free text,
 # so a path, pid or port in a server message cannot read as one. That row is
 # dropped, but the database is fine, so the rows after it are written without
 # a backoff.
-_ROW_FAILURE_RE = re.compile(r'(?:^|: )Error 22[0-9A-Z]{3}: ')
+_ROW_FAILURE_RE = re.compile(r'(?:^|: )Error (?:22[0-9A-Z]{3}|2350[23]|23514): ')
 
-# This many rows refused in a row, with no write in between, is a table whose
-# column cannot hold what capture writes (a column of another type), not bad
-# rows: the next one is handled like any other failure, with the backoff.
+# This many rows refused in a row, with no write in between, is a table that
+# cannot hold what capture writes (a column of another type, a constraint
+# every row breaks), not bad rows: the next one is handled like any other
+# failure, with the backoff.
 MAX_ROWS_REJECTED_IN_A_ROW = 5
 
 # The shortest row value or node id an error message is searched for (to hide
@@ -1205,7 +1201,10 @@ class CaptureWriter:
         if self._skipped:
             counts.append(f'{self._skipped} row(s) dropped while waiting to retry')
         if streak:
-            counts.insert(0, f'{streak} rows in a row refused, so the table likely has a column of another type')
+            counts.insert(
+                0,
+                f'{streak} rows in a row refused, so the table likely has a column of another type or a constraint every row breaks',
+            )
         suffix = f' ({", ".join(counts)})' if counts else ''
         # The driver's message can quote a bound value: never the user's text.
         # Nor the node id, which may be a secret pasted into captureNodeId.

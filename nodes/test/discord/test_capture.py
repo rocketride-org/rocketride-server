@@ -1251,16 +1251,32 @@ class TestWriterFailures:
         assert len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]) == 1
 
     @pytest.mark.parametrize('code', ['23502', '23503', '23514'])
-    def test_a_table_whose_constraints_refuse_capture_rows_turns_capture_off(self, code):
-        """A NOT NULL, foreign key or CHECK capture rows cannot meet fails every row: a table problem."""
+    def test_a_constraint_that_refuses_one_row_drops_only_that_row(self, code):
+        """CodeRabbit on #2548: a CHECK or foreign key can refuse some rows (reactions) and accept others."""
         pipe = _FakePipe(fail=RuntimeError(f'SQL execution failed: Error {code}: new row violates a constraint'))
-        warnings = []
-        writer = _writer(_FakeTarget(pipe), warnings)
+        writer = _writer(_FakeTarget(pipe), [])
 
+        writer._write_one(_row(event_type='reaction'))
+        pipe.fail = None
         writer._write_one(_row())
 
-        assert writer.disabled is True
-        assert len(warnings) == 1 and 'capture is off' in warnings[0]
+        assert writer.disabled is False
+        assert writer.rows_rejected == 1
+        assert len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]) == 2
+
+    def test_a_constraint_that_refuses_every_row_backs_off(self):
+        clock = [1000.0]
+        pipe = _FakePipe(fail=RuntimeError('SQL execution failed: Error 23502: null value in column "tenant" violates'))
+        writer = _writer(_FakeTarget(pipe), [], clock=lambda: clock[0])
+
+        for _ in range(capture.MAX_ROWS_REJECTED_IN_A_ROW + 2):
+            writer._write_one(_row())
+
+        assert writer.disabled is False
+        assert writer.failures == 1
+        assert (
+            len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]) == capture.MAX_ROWS_REJECTED_IN_A_ROW
+        )
 
     def test_rejected_rows_in_a_row_are_a_table_problem_not_row_problems(self):
         """Every row refused (a column of the wrong type) backs off like any lasting trouble."""
