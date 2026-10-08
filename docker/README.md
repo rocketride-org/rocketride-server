@@ -145,3 +145,33 @@ CI runs it on Linux when the image's inputs change, and the release workflow
 runs the same script on the published node image before signing it. All three
 published images are cosign-signed. The node image has no `latest` tag on
 purpose: a server starts tasks only from the node image of its own version.
+
+## Image tasks
+
+The node image has five builder tasks of its own:
+
+| Task | Where | What it does |
+| ---- | ----- | ------------ |
+| `container:build` | Linux, WSL included | Builds engine-base and the node image from `dist/server`; tags `rocketride/node:<version>` and `rocketride/node:<version>-clean` and labels them with the SHA-256 of `libengine.so`. |
+| `container:test` | Linux | The image probe (`test-node-image.sh`), then `nodes:test --runtime=docker`. |
+| `container:sync` | Windows and Linux; macOS on a pulled image, untested | Copies the Python trees of `dist/server` (`ai/`, `nodes/`, `rocketride/`, `rocketride_common/`) over `<version>-clean` and recompiles `constraints.txt` once (`Dockerfile.node-overlay`). Seconds; the binaries are never touched. |
+| `container:build-on-wsl` | Windows | Runs `container:build` in a WSL checkout: `--checkout=` or `RR_WSL_CHECKOUT`, and `--distro=` or `RR_WSL_DISTRO` (default `Ubuntu-22.04`, which must be 22.04 like the image base). |
+| `container:sync-from-wsl` | Windows | When WSL runs a daemon of its own, copies `<version>` and `<version>-clean` from it with `docker save \| docker load`. With Docker Desktop's WSL integration both sides see one daemon and there is nothing to copy. |
+
+`container:sync` is the edit loop: after it, an edited `node.py` runs in the
+next task under `--runtime=docker` without a full build. It always starts from
+`<version>-clean`, so layers do not pile up; a file deleted from the source
+stays in the image until the next `container:build`, because a copy adds files
+and never removes them. When `<version>-clean` is missing but `<version>` is a
+full build (pulled, or built before the task existed), it is tagged `-clean`
+first.
+
+The binaries — the engine, `libengine.so`, libc++, `lib/` and the C++ nodes —
+come only from `container:build`. On Linux `container:sync` warns when
+`dist/server/libengine.so` no longer matches the image's label; elsewhere it
+reminds you that the image keeps the engine it was built with.
+
+An updated image is a local artifact, labelled `rocketride.overlay` with `git
+describe --dirty`: it is never pushed, and release images are built from
+scratch in CI. `container:build-on-wsl` and `container:sync-from-wsl` are
+optional and not part of the Windows pipeline.
