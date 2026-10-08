@@ -1112,15 +1112,33 @@ class TestWriterFailures:
 
         assert len(warnings) == 1
         assert "'db_1'" in warnings[0]
-        # Configured values are quoted the way the node quotes any config entry.
-        assert "'discord_even\u2026'" in warnings[0]
+        # A table name that passed validation is an identifier, not a secret: shown whole.
+        assert "table 'discord_events'" in warnings[0]
         assert 'message' in warnings[0]
         assert '1001' in warnings[0]
         assert 'could not connect to server' in warnings[0]
 
+    def test_validated_names_are_shown_whole(self):
+        """The table name after its check, and a node id found on the tool edge, need no clipping."""
+        table = 'support_bot_capture_events'
+        configured = 'capture_database_primary'
+        warnings = []
+        for node_ids, node_id in (((configured,), configured), (('auto_detected_database_1',), '')):
+            pipe = _FakePipe(node_ids=node_ids, fail=RuntimeError('could not connect to server'))
+            _writer(_FakeTarget(pipe), warnings, node_id=node_id, table=table)._write_one(_row())
+        _writer(_FakeTarget(_FakePipe(node_ids=(configured,), dialect='mysql')), warnings)._write_one(_row())
+
+        assert f"'{configured}'" in warnings[0]
+        assert f"table '{table}'" in warnings[0]
+        assert "'auto_detected_database_1'" in warnings[1]
+        assert f"'{configured}'" in warnings[2]
+        assert not any('\u2026' in warning for warning in warnings)
+
     def test_a_configured_secret_is_never_echoed_in_full(self):
         # A ${ROCKETRIDE_*} secret pasted into captureNodeId or captureTable
-        # would otherwise reach the task's warnings whole.
+        # would otherwise reach the task's warnings whole. A value that fails
+        # its check (no such node on the tool edge, not a table name) is
+        # clipped.
         secret = 'abcdefghijklmnopqrstuvwxyz0123456789'
         pipe = _FakePipe(fail=RuntimeError('could not connect to server'))
         warnings = []

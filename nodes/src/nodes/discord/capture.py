@@ -1007,7 +1007,7 @@ class CaptureWriter:
             return False
         self._disabled = True
         self._warn(
-            f'Discord capture: {_shown_entry(node_id)} is a {dialect or "unknown"!r} database, and capture writes to '
+            f'Discord capture: {self._node_label()} is a {dialect!r} database, and capture writes to '
             f'PostgreSQL only; capture is off for this run.'
         )
         return False
@@ -1078,7 +1078,7 @@ class CaptureWriter:
         """
         self._disabled = True
         self._warn(
-            f'Discord capture: writing to {self._node_label()} table {_shown_entry(self._table)} cannot work: '
+            f'Discord capture: writing to {self._node_label()} table {self._table_label()} cannot work: '
             f'{cause}; capture is off for this run.'
         )
 
@@ -1098,7 +1098,7 @@ class CaptureWriter:
         self._warn_throttled(
             '_last_failure_warn',
             f'Discord capture: writing {row.get("event_type")} for message {row.get("message_id")} '
-            f'to {self._node_label()} table {_shown_entry(self._table)} failed{suffix}: {error}. '
+            f'to {self._node_label()} table {self._table_label()} failed{suffix}: {error}. '
             f'Rows are dropped until writing is tried again in {int(BACKOFF_SECONDS)} seconds.',
         )
 
@@ -1116,5 +1116,16 @@ class CaptureWriter:
         self._last_failure_warn = 0.0
 
     def _node_label(self) -> str:
-        """Name the database node for a log line, resolved or not."""
-        return _shown_entry(self._node_id) if self._node_id else 'the connected database node'
+        """Name the database node for a log line, resolved or not.
+
+        An id found on this source's tool edge is a component id, shown
+        whole; one not checked yet is still a raw configured value, and is
+        clipped like any other.
+        """
+        if not self._node_id:
+            return 'the connected database node'
+        return repr(self._node_id) if self._node_checked else _shown_entry(self._node_id)
+
+    def _table_label(self) -> str:
+        """Name the table for a log line. The writer only runs with a name that passed its check."""
+        return repr(self._table)
