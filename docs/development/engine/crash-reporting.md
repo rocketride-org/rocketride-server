@@ -98,6 +98,13 @@ before the monitor is up, such as a log file that cannot be opened, differs by
 platform: on Windows it exits with code 1 and reads `Stopped`; on Linux and
 macOS it ends in `abort()` and reads `Unexpected termination: SIGABRT (code 6)`.
 
+A task in a container (`--runtime=docker`) is judged by the container's exit
+code, which is 128 plus the signal number: a task killed there without an
+`>EXIT` reads `Stopped` with, for example, exit code 137, not
+`Stopped unexpectedly`. A crash the engine reports itself reads the same in
+every runtime. With `--dumps` the task writes its dump inside the container,
+which is removed when the task ends.
+
 A stop by the server reads `Stopped` with exit code 0 and an empty exit message
 on every platform, also after a restart, whatever the engine reports while it
 stops.

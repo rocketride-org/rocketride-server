@@ -154,7 +154,7 @@ Examples:
         '--runtime',
         choices=RUNTIMES,
         default=RUNTIMES[0],
-        help='How tasks run: spawn, a child process of this engine (default: spawn)',
+        help='How tasks run: spawn (a child process of this engine, the default) or docker (a container per task)',
     )
 
     # Logging
