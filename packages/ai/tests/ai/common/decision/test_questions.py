@@ -140,6 +140,15 @@ def test_map_pick_one_computes_confidence_when_absent():
     assert d['confidence'] == pytest.approx(0.5)
 
 
+def test_spread_confidence_uses_option_count_not_returned_probabilities():
+    """Spec 6.2: n is the number of options, even if the backend returns fewer probabilities."""
+    spec = QuestionSpec('team', PICK_ONE, 'q', options=(('a', None), ('b', None), ('c', None)))
+    d = map_answer(
+        spec, {'type': 'choice', 'choice': 'a', 'probabilities': {'a': 0.8, 'b': 0.2}}, model=None, source='n'
+    )
+    assert d['confidence'] == pytest.approx((0.8 - 1 / 3) / (1 - 1 / 3))
+
+
 def test_map_rubric_argmax_and_level_text():
     spec = QuestionSpec('sev', RUBRIC, 'q', levels=('Calm', 'Frustrated', 'Very angry'))
     wire = {

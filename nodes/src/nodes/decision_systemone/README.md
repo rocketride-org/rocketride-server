@@ -14,7 +14,7 @@ served by several other backends, including Ollama.
 For every document on the `documents` lane, the node sends all of its configured
 questions to a System One backend in **one call** (`POST /v1/systemone`) and writes
 the answers to `metadata.decisions.<name>`. The document itself passes through
-unchanged, so a Router node downstream can branch on the answers. The same answers
+unchanged, so a downstream node, such as the Router (shipping separately), can branch on the answers. The same answers
 are also emitted as JSON on the `answers` lane when something is connected to it.
 Use it for cheap classification and gating ahead of costly steps; it does not
 generate text and is not an agent tool. The shape of `metadata.decisions` is defined in
@@ -97,7 +97,7 @@ There are three arrays, one per question kind. Every question needs a `name` and
 
 Write questions about what the document says, and phrase each one so that the answer
 you want is the one the model scores. Breaking a judgment into several small questions
-and combining the answers in a Router works better than one broad question.
+and combining the answers downstream works better than one broad question.
 
 ### Yes/No questions
 
@@ -109,7 +109,7 @@ reported probability of yes is at least the threshold. Raise it to make `yes` ra
 ### Options
 
 For a pick-one question, enter one option per line as `value | optional description`.
-The value is what ends up in `answer` and what a Router matches on, so it must be 1 to 64
+The value is what ends up in `answer` and what a downstream node matches on, so it must be 1 to 64
 characters of letters, digits, `_` or `-`. `uncertain` and `error` are reserved and cannot be
 used as values. Values must be unique within a question, and the count must be between 2
 and the backend's option limit.
@@ -142,7 +142,7 @@ Something is broken and there is no workaround
 
 The model returns a confidence with every answer. When it is below the question's
 **Minimum confidence** (default 0, so never), the answer is replaced with the string
-`uncertain` and `uncertain` is set to `true`, so a Router can send the document to a review
+`uncertain` and `uncertain` is set to `true`, so a downstream node, such as the Router (shipping separately), can send the document to a review
 branch. Confidence is computed as follows:
 
 - Yes/No: the margin from the threshold, scaled to 0 to 1. For `yes`, `(p - t) / (1 - t)`;
@@ -169,7 +169,7 @@ failure, an answer that does not match the question):
 - **Fail the object** (default): the object fails.
 - **Pass through with answer `error`**: the document is forwarded, and every question
   gets `answer: 'error'`, `uncertain: true`, `confidence: 0` and an `error` message, so
-  a Router can send it to its own branch.
+  a downstream node, such as the Router (shipping separately), can send it to its own branch.
 
 Configuration errors are not affected by this setting. A 401, 403 or 404 response always
 fails the object, even under pass-through, because every later document would fail the
@@ -267,6 +267,10 @@ The OpenRouter node is shipped, with base URL `https://openrouter.ai/api` and th
 documentation and a route probe that returned 401 without a key. No live call has been made
 yet; it is pending an API key. Treat this node as unverified against the live service until
 that is done.
+
+### Clef is not offered
+
+Ollama also serves `clef`, which is omitted here: Clef is the vision model and this node is text-only in v1.
 
 ### Testing
 

@@ -244,3 +244,40 @@ def test_delay_handles_bad_retry_after_ms_header(header_value):
     assert len(sleeps) > 0
     # Should not crash, should use a sane default
     assert 0 <= sleeps[0] <= 60.0
+
+
+def test_error_message_excludes_body_but_exc_body_keeps_it():
+    def handler(request):
+        return httpx.Response(422, json={'detail': 'echo: SECRET-DOC-TEXT ' + 'y' * 800})
+
+    with pytest.raises(SystemOneError) as exc:
+        _client(handler).decide('m', 's', {})
+    assert 'SECRET-DOC-TEXT' not in str(exc.value)
+    assert '422' in str(exc.value) and 'https://api.typesafe.ai/v1/systemone' in str(exc.value)
+    assert 'SECRET-DOC-TEXT' in exc.value.body and len(exc.value.body) <= 500
+
+
+@pytest.mark.parametrize(
+    'body, code',
+    [
+        ({'error': {'code': 'bad_option'}}, 'bad_option'),
+        ({'error': {'type': 'invalid_request'}}, 'invalid_request'),
+        ({'error': 'short message'}, 'short message'),
+        ({'error': 'z' * 81}, None),
+        ({'detail': 'x'}, None),
+    ],
+)
+def test_error_message_carries_only_a_short_code(body, code):
+    def handler(request):
+        return httpx.Response(400, json=body)
+
+    with pytest.raises(SystemOneError) as exc:
+        _client(handler).decide('m', 's', {})
+    message = str(exc.value)
+    assert (code in message) if code else ('z' * 81 not in message and 'detail' not in message)
+
+
+@pytest.mark.parametrize('base', ['api.typesafe.ai', 'localhost:11434/v1', '', 'ftp://x'])
+def test_scheme_less_base_url_rejected(base):
+    with pytest.raises(ValueError, match='http'):
+        SystemOneClient(base)

@@ -157,9 +157,9 @@ def build_wire_questions(specs: list[QuestionSpec], limits: DecisionLimits) -> d
     return wire
 
 
-def _spread_confidence(probabilities: dict) -> float:
-    n = len(probabilities)
-    if n < 2:
+def _spread_confidence(probabilities: dict, n: int) -> float:
+    """Return the spec 6.2 spread confidence; ``n`` is the number of options or levels asked."""
+    if n < 2 or not probabilities:
         return 1.0
     top = max(probabilities.values())
     return max(0.0, min(1.0, (top - 1 / n) / (1 - 1 / n)))
@@ -224,7 +224,7 @@ def map_answer(spec: QuestionSpec, wire: dict, *, model: str | None, source: str
             raise ProtocolError(f'{spec.name}: confidence must be a number, got {conf_raw!r}') from e
         _validate_probability(spec.name, confidence, 'confidence')
     else:
-        confidence = _spread_confidence(probabilities)
+        confidence = _spread_confidence(probabilities, len(spec.options) if spec.kind == PICK_ONE else len(spec.levels))
     if spec.kind == PICK_ONE:
         choice = wire.get('choice')
         try:

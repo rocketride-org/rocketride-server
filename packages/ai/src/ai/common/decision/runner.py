@@ -105,9 +105,16 @@ class DecisionRunner:
         reserved_bytes = self._questions_bytes + json_bytes(extras)
         kept, truncated = fit_content(content, self._limits, reserved_tokens, reserved_bytes)
         if truncated:
+            token_only_chars = max(
+                0, int((self._limits.max_state_tokens - reserved_tokens) * self._limits.chars_per_token)
+            )
+            if len(kept) < min(len(content), token_only_chars):
+                limit = f'{self._limits.max_body_bytes} bytes'
+            else:
+                limit = f'{self._limits.max_state_tokens} tokens'
             self._warn(
                 f'{source}: input truncated for the model from {len(content)} to {len(kept)} characters '
-                f'(backend limit {self._limits.max_state_tokens} tokens); downstream still gets the full document'
+                f'(backend limit {limit}); downstream still gets the full document'
             )
         try:
             try:
@@ -122,7 +129,10 @@ class DecisionRunner:
                 start_time = time.monotonic()
                 reply = self._ask(kept, extras)
                 latency_ms = (time.monotonic() - start_time) * 1000
-            answers = reply.get('answers') or {}
+            if not isinstance(reply, dict) or not isinstance(reply.get('answers'), dict):
+                raise ProtocolError('backend reply is not an object with an "answers" object')
+            answers = reply['answers']
+            usage = reply.get('usage') if isinstance(reply.get('usage'), dict) else None
             decisions = {}
             for spec in self._specs:
                 if spec.name not in answers:
@@ -131,15 +141,18 @@ class DecisionRunner:
             # R3 & R11: Log debug info with request_id if available
             debug_line = (
                 f'{source}: System One model={reply.get("model")} questions={len(self._specs)} '
-                f'input_tokens={(reply.get("usage") or {}).get("input_tokens")} latency={latency_ms:.0f}ms'
+                f'input_tokens={(usage or {}).get("input_tokens")} latency={latency_ms:.0f}ms'
             )
             request_id = getattr(self._client, 'last_request_id', None)
             if request_id:
                 debug_line += f' request_id={request_id}'
             self._debug(debug_line)
-            return DecisionResult(decisions, reply.get('usage'), truncated)
+            return DecisionResult(decisions, usage, truncated)
         except (SystemOneError, ProtocolError) as exc:
             error = exc if isinstance(exc, SystemOneError) else SystemOneError('protocol', str(exc))
+            # The backend body may echo document text, so it never goes above debug.
+            if error.body:
+                self._debug(f'{source}: backend error body: {error.body}')
             # R13: Configuration errors always fail regardless of on_error mode
             if isinstance(error, SystemOneError) and error.kind in CONFIG_ERROR_KINDS:
                 raise error

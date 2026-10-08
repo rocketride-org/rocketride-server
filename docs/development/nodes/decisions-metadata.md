@@ -3,12 +3,12 @@
 `metadata.decisions` is the contract a node uses to attach typed answers to a
 document so that later nodes can act on them. The System One Ask nodes
 ([`decision_systemone`](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/decision_systemone/README.md))
-write it, and the Router node reads it to branch.
+write it, and a downstream node, such as the Router (shipping separately), can read it to branch.
 
 ## For node authors
 
-Any node may write `metadata.decisions.<name>` using the shape below, so that the Router
-can branch on it. Follow the rules in [Location](#location): merge into the namespace,
+Any node may write `metadata.decisions.<name>` using the shape below, so that a downstream node,
+such as the Router (shipping separately), can branch on it. Follow the rules in [Location](#location): merge into the namespace,
 never replace it, and set `source` to your own component id. Keep `answer` a plain string,
 number or boolean, because that is the value routes match on.
 
@@ -51,7 +51,7 @@ When a call fails and `on_error = pass_through`, every question in the node gets
 
 `{kind, answer: 'error', uncertain: true, confidence: 0, error: '<message>', model: null, source}`
 
-The document is still forwarded, so a Router can send errors to their own branch.
+The document is still forwarded, so a downstream node, such as the Router (shipping separately), can send errors to their own branch.
 
 Configuration errors (HTTP 401, 403 and 404) are not covered by `pass_through`: they always
 fail the object.

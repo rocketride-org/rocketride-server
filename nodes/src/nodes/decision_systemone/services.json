@@ -12,7 +12,7 @@
 	"description": [
 		"Asks typed questions (yes/no, pick-one, rubric) about each document using any System One ",
 		"compatible endpoint (POST /v1/systemone), in one call per document. Answers are attached to the ",
-		"document as metadata.decisions for a Router to branch on; the document passes through unchanged."
+		"document as metadata.decisions for a downstream node, such as the Router (shipping separately), to branch on; the document passes through unchanged."
 	],
 	"icon": "util-text.svg",
 	"documentation": "https://docs.rocketride.org/nodes/decision_systemone",
