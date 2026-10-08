@@ -180,10 +180,6 @@ _LASTING_FAILURES = (
         'the database user was refused (permission denied); grant it INSERT on the table',
     ),
     (
-        re.compile(r'no unique or exclusion constraint matching|InvalidColumnReference|(?:^|: )Error 42P10: '),
-        'the table has no unique constraint capture can use; create it as the node README shows',
-    ),
-    (
         re.compile(r'column "[^"]*"(?: of relation "[^"]*")? does not exist|UndefinedColumn|(?:^|: )Error 42703: '),
         'a column capture writes does not exist in the table; create it as the node README shows',
     ),
@@ -608,11 +604,28 @@ def _is_missing_table(exc: BaseException, hide: tuple = ()) -> bool:
     Returns:
         bool: True for a missing table.
     """
+    text = _error_text(exc, hide)
+    return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or bool(_MISSING_TABLE_CODE_RE.search(text))
+
+
+def _error_text(exc: BaseException, hide: tuple = ()) -> str:
+    """The text of a failure with the row's own values taken out.
+
+    The three failure checks read this, never ``str(exc)``, so text the user
+    wrote cannot change how a failure is classified.
+
+    Args:
+        exc (BaseException): What the write raised.
+        hide (tuple): Row values to take out (see :func:`_is_hideable`).
+
+    Returns:
+        str: The message without those values.
+    """
     text = str(exc)
     for value in hide:
         if _is_hideable(value):
             text = text.replace(value, '')
-    return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or bool(_MISSING_TABLE_CODE_RE.search(text))
+    return text
 
 
 def _is_hideable(value: Any) -> bool:
@@ -644,10 +657,7 @@ def _lasting_cause(exc: BaseException, hide: tuple = ()) -> Optional[str]:
     """
     if isinstance(exc, _LastingFailure):
         return str(exc)
-    text = str(exc)
-    for value in hide:
-        if _is_hideable(value):
-            text = text.replace(value, '')
+    text = _error_text(exc, hide)
     for pattern, cause in _LASTING_FAILURES:
         if pattern.search(text):
             return cause
@@ -665,10 +675,7 @@ def _is_row_failure(exc: BaseException, hide: tuple = ()) -> bool:
     Returns:
         bool: True for a data exception or a row-level integrity check.
     """
-    text = str(exc)
-    for value in hide:
-        if _is_hideable(value):
-            text = text.replace(value, '')
+    text = _error_text(exc, hide)
     return _ROW_FAILURE_RE.search(text) is not None
 
 
@@ -1004,9 +1011,24 @@ class CaptureWriter:
         and the database node logs every failed statement at error level with
         its bound parameters -- the user's question among them. The check
         never fails that way. It runs once per run: a check that raises is a
-        failed write, and a later row asks again; a CREATE that fails ends
-        capture (see :meth:`_create_table`); an answer that cannot be read
-        leaves the INSERT-first fallback to do the work.
+        failed write, and a later row asks again; a CREATE refused for good
+        ends capture, any other failed CREATE is retried by a later row (see
+        :meth:`_create_table`); an answer that cannot be read leaves the
+        INSERT-first fallback to do the work.
+        """
+        if self._table_exists(pipe, node_id) is False:
+            self._create_table(pipe, node_id)
+        self._table_checked = True
+
+    def _table_exists(self, pipe: Any, node_id: str) -> Optional[bool]:
+        """Ask the database whether the capture table exists (``to_regclass``).
+
+        Args:
+            pipe (Any): The borrowed pipe.
+            node_id (str): The database node.
+
+        Returns:
+            Optional[bool]: True or False, or None when the answer cannot be read.
         """
         output = self._call_tool(
             pipe,
@@ -1014,22 +1036,36 @@ class CaptureWriter:
             'execute',
             {'sql': TABLE_EXISTS_SQL, 'params': [_quoted_table(self._table)], 'row_mode': 'array'},
         )
-        if _table_exists_answer(output) is False:
-            self._create_table(pipe, node_id)
-        self._table_checked = True
+        return _table_exists_answer(output)
 
     def _create_table(self, pipe: Any, node_id: str) -> None:
-        """Create the missing capture table, or raise :class:`_LastingFailure`.
+        """Create the missing capture table.
 
-        The table was just found missing, so the database answered a moment
-        ago: a CREATE that fails now is a missing right or a clash with an
-        object of that name, which the next row would only repeat. The
-        statement binds no values, so its error carries no row text.
+        A CREATE refused for good (no CREATE right on the schema) raises
+        :class:`_LastingFailure`, which ends capture for the run. Any other
+        failure is passed on unchanged and takes the usual backoff, with
+        ``_table_checked`` still False, so a later row checks again: a dropped
+        connection must not end capture. Two sources sharing one table can
+        race to create it, and PostgreSQL may then refuse the loser's CREATE
+        (23505 on ``pg_type``): when the table exists after a failed CREATE,
+        it is used. The statement binds no values, so its error carries no row
+        text.
+
+        Args:
+            pipe (Any): The borrowed pipe.
+            node_id (str): The database node.
+
+        Returns:
+            None
         """
         try:
             self._invoke(pipe, node_id, CREATE_TABLE_SQL(self._table), None)
         except Exception as e:
-            raise _LastingFailure(f'the table does not exist and could not be created ({_short_error(e)})') from e
+            if _lasting_cause(e) is not None:
+                raise _LastingFailure(f'the table does not exist and could not be created ({_short_error(e)})') from e
+            if self._table_exists(pipe, node_id) is True:
+                return
+            raise
 
     def _invoke(self, pipe: Any, node_id: str, sql: str, params: Optional[List[Any]]) -> Any:
         """Call the ``execute`` tool on ``node_id`` over ``pipe``."""

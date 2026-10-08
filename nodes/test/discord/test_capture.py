@@ -931,6 +931,61 @@ class TestWriterWrites:
         assert 'capture is off for this run' in warnings[0]
         assert target.borrowed == target.returned == 1
 
+    def test_a_create_that_fails_for_a_passing_reason_is_tried_again(self):
+        """#2548 review: a dropped connection during CREATE must not end capture for the run."""
+        clock = [1000.0]
+        pipe = _FakePipe(
+            table_exists=False,
+            create_fails=RuntimeError('SQL execution failed: Error 08006: server closed the connection unexpectedly'),
+        )
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings, clock=lambda: clock[0])
+
+        writer._write_one(_row())
+        assert writer.disabled is False
+        assert writer.failures == 1
+
+        pipe.create_fails = None
+        clock[0] += capture.BACKOFF_SECONDS
+        writer._write_one(_row())
+
+        assert writer.failures == 0
+        assert [call[2]['sql'] for call in pipe.calls] == [
+            CREATE_TABLE_SQL('discord_events'),
+            CREATE_TABLE_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+        ]
+        # The check, a second look after the failed CREATE (another source may
+        # have made the table), and the check again on the next try.
+        assert len(pipe.check_calls) == 3
+
+    def test_two_sources_creating_the_table_at_once_both_keep_writing(self):
+        """#2548 review: the source that loses the CREATE race finds the table and writes its row."""
+
+        class _RacePipe(_FakePipe):
+            def _answer(self, param, component_id):
+                if param.tool_name == 'execute' and 'CREATE TABLE' in param.input.get('sql', ''):
+                    self.table_exists = True  # the other source's CREATE won
+                    raise RuntimeError(
+                        'SQL execution failed: Error 23505: duplicate key value violates unique constraint '
+                        '"pg_type_typname_nsp_index"'
+                    )
+                super()._answer(param, component_id)
+
+        pipe = _RacePipe(table_exists=False)
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+
+        assert writer.disabled is False
+        assert writer.failures == 0
+        assert warnings == []
+        assert [call[2]['sql'] for call in pipe.calls] == [
+            CREATE_TABLE_SQL('discord_events'),
+            INSERT_SQL('discord_events'),
+        ]
+
     def test_an_insert_failing_for_another_reason_runs_no_ddl(self):
         pipe = _FakePipe(fail=RuntimeError('connection refused'))
         writer = _writer(_FakeTarget(pipe), [])
@@ -1471,7 +1526,6 @@ class TestWriterFailures:
 LASTING_FAILURES = [
     'SQL execution failed: permission denied for table discord_events',
     'SQL execution failed: (psycopg2.errors.InsufficientPrivilege) 42501',
-    'SQL execution failed: there is no unique or exclusion constraint matching the ON CONFLICT specification',
     'SQL execution failed: column "source" of relation "discord_events" does not exist',
     'execute tool is disabled for this node (set allow_execute=true)',
     'tool.invoke: execute not owned',
@@ -1510,10 +1564,9 @@ class TestWriterCircuitBreaker:
         'error, cause',
         [
             (LASTING_FAILURES[0], 'permission denied'),
-            (LASTING_FAILURES[2], 'no unique constraint'),
-            (LASTING_FAILURES[3], 'a column capture writes does not exist'),
-            (LASTING_FAILURES[4], 'Allow direct query execution'),
-            (LASTING_FAILURES[5], 'not a database node'),
+            (LASTING_FAILURES[2], 'a column capture writes does not exist'),
+            (LASTING_FAILURES[3], 'Allow direct query execution'),
+            (LASTING_FAILURES[4], 'not a database node'),
         ],
     )
     def test_the_warning_names_the_cause(self, error, cause):
