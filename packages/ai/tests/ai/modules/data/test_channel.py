@@ -131,8 +131,7 @@ def _engine_task(port):
     t._data_lock = asyncio.Lock()
     t._data_client = None
     t._data_token = TOKEN
-    t._data_port = port
-    t._engine_process = None
+    t._launch = SimpleNamespace(address=f'127.0.0.1:{port}', returncode=None)
     t.debug_message = MagicMock()
     Task._reset_channel_state(t)
     return t
