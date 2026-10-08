@@ -68,6 +68,10 @@ class LaunchSpec:
     shared_host: bool = False
     # Attach the VS Code debugger to the task (subprocess runtime only)
     debug_attach: bool = False
+    # A component opens the store from inside the task (tool_filesystem)
+    uses_store: bool = False
+    # The run's storage anchor (the task file's storage.root)
+    storage_root: str = ''
 
 
 def task_argv(
@@ -162,6 +166,11 @@ class Launcher(abc.ABC):
 
     # The runtime's name, as given to --runtime
     name: str = ''
+    # The task cannot see the engine's files, so Task says what it needs from them
+    isolated: bool = False
+
+    async def prepare(self) -> None:
+        """One-time work before the first task; ``TaskServer`` runs it at start."""
 
     @property
     @abc.abstractmethod

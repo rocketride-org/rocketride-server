@@ -460,6 +460,33 @@ def _accepts_credential(authorize: Callable[..., Any]) -> bool:
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
 
 
+# The node that opens the store from inside the task (its tool, source and store services)
+CONST_STORE_NODE_PATH = 'nodes.tool_filesystem'
+
+
+def pipeline_opens_store(pipeline: Dict[str, Any], get_service: Callable[[str], Any]) -> bool:
+    """
+    Whether a component of the pipeline opens the store from inside the task.
+
+    ``tool_filesystem`` does (its tool, source and store services alike), so a
+    runtime that isolates the task's files has to give it the run's store or
+    refuse the pipeline.
+
+    Args:
+        pipeline: The resolved pipeline.
+        get_service: ``rocketlib.getServiceDefinition`` in production.
+
+    Returns:
+        True if any component is served by ``nodes.tool_filesystem``.
+    """
+    for component in pipeline.get('components', []) or []:
+        provider = str(component.get('provider') or '')
+        service = get_service(provider) if provider else None
+        if str((service or {}).get('path') or '').lower() == CONST_STORE_NODE_PATH:
+            return True
+    return False
+
+
 def _is_saas_engine() -> bool:
     """True when this engine is the hosted (SaaS) one.
 
@@ -3040,6 +3067,13 @@ class Task(DAPBase):
                 await asyncio.to_thread(node_store.place, resolved)
             except Exception as e:
                 raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
+
+            # A runtime that isolates the task's files needs to know whether it opens the store
+            uses_store = False
+            if self._launcher.isolated:
+                from rocketlib import getServiceDefinition
+
+                uses_store = pipeline_opens_store(resolved, getServiceDefinition)
             del resolved
 
             # VS Code subprocess debugging goes through the python shim (subprocess runtime)
@@ -3107,6 +3141,8 @@ class Task(DAPBase):
                     hosted=_is_saas_engine(),
                     shared_host=self._shares_host(),
                     debug_attach=debug_attach,
+                    uses_store=uses_store,
+                    storage_root=self._storage_root() if uses_store else '',
                 )
             )
             del task_file
