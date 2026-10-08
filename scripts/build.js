@@ -41,6 +41,7 @@ async function handleTermination(signal) {
 // Linux-only: only the Linux clang flags file defines it
 const CMAKE_CONFIGS = ['Release', 'RelWithDebInfo', 'Sanitize'];
 
+// The command line as the actions it asks for, the global commands among them, and the options
 function parseArgs(args) {
 	const requests = [];
 	const options = {
@@ -138,6 +139,14 @@ function parseArgs(args) {
 			options.cmakeConfig = value;
 		} else if (arg.startsWith('--taskserver=')) {
 			options.taskserver = arg.substring('--taskserver='.length);
+		} else if (arg.startsWith('--runtime=')) {
+			// How the engine runs tasks (spawn | docker): node tests, server:dev
+			const runtime = arg.substring('--runtime='.length);
+			if (!['spawn', 'docker'].includes(runtime)) {
+				console.error(`Error: --runtime=${runtime}: expected 'spawn' or 'docker'`);
+				process.exit(1);
+			}
+			options.runtime = runtime;
 		} else if (arg.startsWith('--log=')) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
@@ -251,6 +260,7 @@ function expandGlobalCommands(globalCommands, registry, options) {
 	return requests;
 }
 
+// Usage, options and the actions the registry has, for --help
 function showHelp(registry, options) {
 	console.log(`
 Rocketride Build System
@@ -309,6 +319,8 @@ Options:
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
   --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt,
                       requirements.hash and the satisfied/ verdicts)
+  --runtime=spawn|docker  How the engine runs tasks (node tests, server:dev): a child process or a
+                      container; default spawn
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)

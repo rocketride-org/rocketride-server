@@ -24,8 +24,8 @@
 How a task is started: the ``Launcher`` seam and its runtimes.
 
 ``--runtime`` on ``eaas.py`` picks one; spawn, a child process of the engine,
-is the only one so far and the default. ``TaskServer`` keeps a single
-launcher per runtime and every ``TaskEngine`` of the process uses it.
+is the default. ``TaskServer`` keeps a single launcher per runtime and every
+``TaskEngine`` of the process uses it.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer
 
 # The runtimes --runtime accepts; the first is the default
-RUNTIMES = ('spawn',)
+RUNTIMES = ('spawn', 'docker')
 
 __all__ = [
     'RUNTIMES',
@@ -67,4 +67,8 @@ def create_launcher(runtime: str, server: 'TaskServer') -> Launcher:
     """
     if not runtime or runtime == 'spawn':
         return SubprocessLauncher(server)
+    if runtime == 'docker':
+        from .docker import DockerLauncher
+
+        return DockerLauncher(server)
     raise ValueError(f'Unknown runtime {runtime!r}; expected one of {", ".join(RUNTIMES)}')

@@ -80,7 +80,7 @@ jobs:
               - '.github/workflows/**'
               - 'package.json'
               - 'docker/**'
-            # What the node image is made of beyond the engine itself
+            # What the node image is made of beyond the engine itself, and the task launchers
             container:
               - 'docker/**'
               - 'nodes/scripts/tasks.js'
@@ -91,6 +91,7 @@ jobs:
               - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
               - 'packages/server/scripts/tasks.js'
               - '.github/workflows/_build.yaml'
+              - 'packages/ai/src/ai/modules/task/launcher/**'
             # What the sanitizer job builds, how it builds and runs it, and
             # how it reports. The node patterns go by file type, so a new C++
             # node needs no edit here. task_engine.py holds the environment
