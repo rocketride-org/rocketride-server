@@ -149,6 +149,13 @@ PIPELINE_WORKERS = 8
 # after this so the bot is still closed (its worker thread runs on regardless).
 SHUTDOWN_GRACE_SECONDS = 5
 
+# With capture on, stopping also drains the capture writer, and the engine
+# force-kills the subprocess five seconds after it asks it to stop. The
+# handler grace and the writer's whole stop budget therefore share those five
+# seconds, with room left for closing the Gateway client.
+CAPTURE_SHUTDOWN_GRACE_SECONDS = 2
+CAPTURE_STOP_SECONDS = 2.0
+
 
 class PipelineTimeout(Exception):
     """A pipeline run took longer than ``pipelineTimeoutSeconds``."""
@@ -927,9 +934,10 @@ class IEndpoint(IEndpointBase):
         """Gracefully tear down the Gateway client.
 
         Awaits in-flight message handlers (for at most
-        :data:`SHUTDOWN_GRACE_SECONDS`, then cancels those still running),
-        closes the bot connection, and cancels the background task. Clears the
-        monitor user-info panel.
+        :data:`SHUTDOWN_GRACE_SECONDS`, or :data:`CAPTURE_SHUTDOWN_GRACE_SECONDS`
+        while capture is on, then cancels those still running), closes the bot
+        connection, and cancels the background task. Clears the monitor
+        user-info panel.
 
         Returns:
             None
@@ -938,8 +946,10 @@ class IEndpoint(IEndpointBase):
         # intentional rather than a terminal failure.
         self._closing = True
 
+        # The capture drain that follows needs its share of the engine's kill.
+        grace = CAPTURE_SHUTDOWN_GRACE_SECONDS if self._capture is not None else SHUTDOWN_GRACE_SECONDS
         if self._inflight:
-            _, pending = await asyncio.wait(set(self._inflight), timeout=SHUTDOWN_GRACE_SECONDS)
+            _, pending = await asyncio.wait(set(self._inflight), timeout=grace)
             for task in pending:
                 task.cancel()
             if pending:
@@ -2825,15 +2835,21 @@ class IEndpoint(IEndpointBase):
         self._capture.start()
 
     def _stop_capture(self):
-        """Drain and stop the capture writer. Safe to call twice, or never."""
+        """Drain and stop the capture writer. Safe to call twice, or never.
+
+        The writer stays reachable until it has stopped, so an event a
+        handler still emits meanwhile reaches the closed writer, which counts
+        it as unwritten, instead of being dropped without a word.
+        """
         writer = self._capture
         if writer is None:
             return
-        self._capture = None
         try:
-            writer.stop(timeout=2.0)
+            writer.stop(timeout=CAPTURE_STOP_SECONDS)
         except Exception as e:
             debug(f'Discord: capture stop failed: {e}')
+        finally:
+            self._capture = None
 
     def _capture_event(self, event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any]):
         """Queue one event for the capture log.

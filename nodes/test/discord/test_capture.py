@@ -35,6 +35,7 @@ import queue
 import re
 import sys
 import threading
+import time
 import types
 from datetime import datetime, timezone
 from unittest import mock
@@ -1456,10 +1457,48 @@ class TestWriterThread:
         thread.join(5)
 
         assert not thread.is_alive()
-        assert target.borrowed == target.returned == 1
+        # The stop timed out, so the node may already be torn down: the pipe
+        # the stuck call held is not handed back to it.
+        assert target.borrowed == 1
+        assert target.returned == 0
         assert [warning for warning in warnings if 'unwritten' in warning] == [
             'Discord capture: stopped with 2 row(s) unwritten (the writer was still busy)'
         ]
+
+    def test_a_stop_that_does_not_time_out_still_returns_the_pipe(self):
+        release = threading.Event()
+        pipe = _StuckPipe(release)
+        target = _FakeTarget(pipe)
+        writer = _writer(target, [])
+        writer.start()
+        writer.submit(_row())
+        assert pipe.entered.wait(2)
+        threading.Timer(0.1, release.set).start()
+
+        writer.stop(timeout=5.0)
+
+        assert target.borrowed == target.returned == 1
+
+    def test_stop_keeps_to_its_budget_even_with_a_full_queue(self):
+        """Queueing the stop marker and the drain share one budget, not one each."""
+        release = threading.Event()
+        pipe = _StuckPipe(release)
+        writer = _writer(_FakeTarget(pipe), [])
+        writer.start()
+        thread = writer._thread
+        try:
+            writer.submit(_row())
+            assert pipe.entered.wait(2)
+            for _ in range(QUEUE_MAX_ROWS):
+                writer.submit(_row())
+            started = time.monotonic()
+            writer.stop(timeout=0.4)
+            elapsed = time.monotonic() - started
+        finally:
+            release.set()
+        thread.join(5)
+
+        assert elapsed < 0.6
 
     def test_a_full_queue_still_lets_the_worker_end(self):
         release = threading.Event()
@@ -1681,6 +1720,7 @@ def _load_endpoint_class():
 
 
 IEndpoint, endpoint_capture = _load_endpoint_class()
+endpoint_module = sys.modules['_discord_capture_node.IEndpoint']
 
 
 def _endpoint(pipe, *, capture_events, node_id='', table='discord_events', source=''):
@@ -1890,7 +1930,7 @@ class TestRunStopsAndDrains:
 
         assert not thread.is_alive()
         assert errors == []
-        writer.stop.assert_called_once_with(timeout=2.0)
+        writer.stop.assert_called_once_with(timeout=endpoint_module.CAPTURE_STOP_SECONDS)
 
     def test_a_terminal_failure_still_drains_and_fails_the_source(self):
         writer = mock.Mock()
@@ -1906,7 +1946,66 @@ class TestRunStopsAndDrains:
 
         assert not thread.is_alive()
         assert [str(e) for e in errors] == ['Discord: gateway closed']
-        writer.stop.assert_called_once_with(timeout=2.0)
+        writer.stop.assert_called_once_with(timeout=endpoint_module.CAPTURE_STOP_SECONDS)
+
+
+class TestStopBudget:
+    """With capture on, the handler grace and the drain must both fit inside the engine's kill."""
+
+    def test_grace_and_drain_fit_the_engines_five_seconds(self):
+        budget = endpoint_module.CAPTURE_SHUTDOWN_GRACE_SECONDS + endpoint_module.CAPTURE_STOP_SECONDS
+        assert budget <= 4.5
+        assert endpoint_module.CAPTURE_SHUTDOWN_GRACE_SECONDS == 2
+        assert endpoint_module.CAPTURE_STOP_SECONDS == 2.0
+
+    def test_without_capture_the_grace_is_unchanged(self):
+        assert endpoint_module.SHUTDOWN_GRACE_SECONDS == 5
+
+    @staticmethod
+    def _grace_used(capture):
+        """Run ``_shutdown`` with one stuck handler; return the timeout it waited with."""
+        endpoint = IEndpoint.__new__(IEndpoint)
+        endpoint._capture = capture
+        endpoint._bot = None
+        endpoint._bot_task = None
+        endpoint._pipeline_executor = None
+        seen = []
+
+        async def fake_wait(tasks, timeout=None):
+            seen.append(timeout)
+            return set(tasks), set()
+
+        async def go():
+            endpoint._inflight = {asyncio.ensure_future(asyncio.sleep(0))}
+            with mock.patch.object(endpoint_module.asyncio, 'wait', fake_wait):
+                await endpoint._shutdown()
+
+        asyncio.run(go())
+        return seen
+
+    def test_shutdown_waits_the_short_grace_when_capture_is_on(self):
+        assert self._grace_used(mock.Mock()) == [endpoint_module.CAPTURE_SHUTDOWN_GRACE_SECONDS]
+
+    def test_shutdown_waits_the_full_grace_when_capture_is_off(self):
+        assert self._grace_used(None) == [endpoint_module.SHUTDOWN_GRACE_SECONDS]
+
+    def test_an_event_arriving_while_the_writer_stops_is_counted(self):
+        """The writer stays reachable until it has stopped, so a late event is counted, not ignored."""
+        pipe = _PipelinePipe()
+        endpoint = _endpoint(pipe, capture_events=True)
+        writer = endpoint._capture
+        original_stop = writer.stop
+
+        def stop_with_a_late_event(timeout):
+            original_stop(timeout=timeout)
+            # A handler that is still finishing emits its event now.
+            endpoint._capture_event('outbound', _metadata(), {'text': 'late'})
+
+        writer.stop = stop_with_a_late_event
+        endpoint._stop_capture()
+
+        assert endpoint._capture is None
+        assert writer.unwritten == 1
 
 
 def _kept_rows(pipe):

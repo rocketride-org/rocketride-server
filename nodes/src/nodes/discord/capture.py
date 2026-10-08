@@ -677,6 +677,10 @@ class CaptureWriter:
         # Set by stop() once the writer has had its chance to drain: the worker
         # then borrows no more pipes, and drops and counts what is left.
         self._stopping = threading.Event()
+        # Set when stop() ran out of time with a write still in flight: the
+        # node is being torn down, so the pipe that write holds is not handed
+        # back to it. Nothing in the engine waits for a borrowed pipe.
+        self._abandoned = threading.Event()
         self._dialect_checked = False
         self._table_checked = False
         self._disabled = False
@@ -756,12 +760,16 @@ class CaptureWriter:
     def stop(self, timeout: float = 2.0) -> None:
         """Drain what is queued, then stop the worker. Safe to call twice.
 
-        The worker gets ``timeout`` to drain. If it is still busy after that
-        (a write stuck on the database), it is told to stop: once the stuck
-        call returns it borrows no more pipes, drops the rows still queued and
-        reports exactly how many. The thread is a daemon, so a call that never
-        returns cannot keep the process alive either.
+        ``timeout`` is the whole budget: queueing the stop marker behind the
+        rows already waiting and the worker writing them share it. If the
+        worker is still busy after that (a write stuck on the database), it is
+        told to stop: once the stuck call returns it borrows no more pipes,
+        does not hand back the one it held (the node may already be torn
+        down), drops the rows still queued and reports exactly how many. The
+        thread is a daemon, so a call that never returns cannot keep the
+        process alive either.
         """
+        deadline = time.monotonic() + max(0.0, timeout)
         with self._submit_lock:
             thread = self._thread
             if thread is None:
@@ -777,8 +785,10 @@ class CaptureWriter:
             # A full queue means well over `timeout` of work is outstanding:
             # stop now rather than wait for room the worker may never make.
             self._stopping.set()
-        thread.join(timeout)
+        thread.join(max(0.0, deadline - time.monotonic()))
         if thread.is_alive():
+            # Set before _stopping, which is what the worker checks first.
+            self._abandoned.set()
             self._stopping.set()
             # Said now, because the stuck call may never return to report the
             # exact count; the worker adds that if it does.
@@ -904,7 +914,7 @@ class CaptureWriter:
         else:
             self._on_success()
         finally:
-            if pipe is not None:
+            if pipe is not None and not self._abandoned.is_set():
                 self._target.putPipe(pipe)
 
     def _ensure_table(self, pipe: Any, node_id: str) -> None:
