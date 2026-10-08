@@ -963,14 +963,47 @@ class TestWriterNodeResolution:
         assert dialect in warnings[0]
         assert 'PostgreSQL' in warnings[0]
 
-    def test_a_configured_node_id_wins_and_skips_the_lookup(self):
+    def test_a_configured_node_id_wins_and_is_checked_once(self):
         pipe = _FakePipe(node_ids=('db_1', 'db_2'))
         writer = _writer(_FakeTarget(pipe), [], node_id='db_2')
 
         writer._write_one(_row())
+        writer._write_one(_row())
 
-        assert pipe.controller_queries == 0
-        assert pipe.calls[0][0] == 'db_2'
+        assert pipe.controller_queries == 1
+        assert [call[0] for call in pipe.calls] == ['db_2', 'db_2']
+
+    def test_a_configured_node_id_that_is_not_connected_turns_capture_off(self):
+        """A typo in captureNodeId must not fail every row, nor write somewhere unexpected."""
+        pipe = _FakePipe(node_ids=('db_1',))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings, node_id='db_9')
+
+        writer._write_one(_row())
+        writer._write_one(_row())
+
+        assert writer.disabled is True
+        assert pipe.calls == []
+        assert pipe.dialect_calls == []
+        assert pipe.controller_queries == 1
+        assert len(warnings) == 1
+        assert "captureNodeId 'db_9'" in warnings[0]
+        assert 'capture is off for this run' in warnings[0]
+
+    @pytest.mark.parametrize('dialect', ['', None])
+    def test_a_node_with_no_dialect_answer_is_not_a_database(self, dialect):
+        """A node that does not own the dialect tool lets the call through with no answer."""
+        pipe = _FakePipe(dialect=dialect)
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+        writer._write_one(_row())
+
+        assert writer.disabled is True
+        assert pipe.calls == []
+        assert len(warnings) == 1
+        assert 'not a database node' in warnings[0]
 
     def test_no_connected_node_disables_capture_with_one_warning(self):
         pipe = _FakePipe(node_ids=())
@@ -1033,6 +1066,18 @@ class TestWriterFailures:
         for warning in warnings:
             assert secret not in warning
             assert "'abcdefghijkl\u2026'" in warning
+
+    def test_a_configured_node_id_quoted_by_the_driver_is_hidden(self):
+        """CaptureNodeId may hold a pasted secret; the driver's own message must not echo it."""
+        node_id = 'capture_database_primary'
+        pipe = _FakePipe(node_ids=(node_id,), fail=RuntimeError(f'could not reach {node_id}: timeout'))
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings, node_id=node_id)
+
+        writer._write_one(_row())
+
+        assert len(warnings) == 1
+        assert 'could not reach <captureNodeId>: timeout' in warnings[0]
 
     def test_row_text_quoted_by_the_driver_never_reaches_the_warning(self):
         text = 'my account number is 12345678'

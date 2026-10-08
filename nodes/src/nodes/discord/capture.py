@@ -559,17 +559,19 @@ def _short_error(exc: BaseException, hide: tuple = ()) -> str:
 
     Args:
         exc (BaseException): The exception.
-        hide (tuple): Strings replaced by ``<row text>`` before the line is
-            cut, so a value the driver quoted never reaches the log.
+        hide (tuple): Values replaced before the line is cut, so one the
+            driver quoted never reaches the log: a string becomes
+            ``<row text>``, a ``(value, placeholder)`` pair its placeholder.
 
     Returns:
         str: The first line, at most 300 characters.
     """
     text = str(exc).strip().splitlines()
     line = text[0] if text else exc.__class__.__name__
-    for value in hide:
+    for item in hide:
+        value, placeholder = item if isinstance(item, tuple) else (item, '<row text>')
         if isinstance(value, str) and value.strip():
-            line = line.replace(value, '<row text>')
+            line = line.replace(value, placeholder)
     return line[:300]
 
 
@@ -609,6 +611,8 @@ class CaptureWriter:
         self._source = source
         self._table = table
         self._node_id = str(node_id or '')
+        # Whether the node id is known to be on this source's tool edge.
+        self._node_checked = False
         self._warn = warn or _engine_warning
         self._clock = clock
 
@@ -915,6 +919,11 @@ class CaptureWriter:
         self._dialect_checked = True
         if dialect.lower() in POSTGRES_DIALECTS:
             return True
+        if not dialect:
+            # A node that does not own the tool lets the call through
+            # unanswered rather than raising.
+            self._give_up('it is not a database node (it gave no answer to the dialect tool)')
+            return False
         self._disabled = True
         self._warn(
             f'Discord capture: {_shown_entry(node_id)} is a {dialect or "unknown"!r} database, and capture writes to '
@@ -925,17 +934,32 @@ class CaptureWriter:
     def _resolve_node_id(self, pipe: Any) -> Optional[str]:
         """Return the database component id to write to, resolving it once.
 
-        A configured ``captureNodeId`` wins outright. Otherwise the single
-        node on this source's ``tool`` control edge is it; none or several is
-        a wiring mistake the node cannot guess its way out of, so capture is
-        turned off with one warning rather than writing to the wrong database.
+        A configured ``captureNodeId`` wins, once it is found among the nodes
+        on this source's ``tool`` control edge: one that is not there (a typo,
+        or a node wired to something else) would fail every row, so capture
+        is turned off with one warning instead. Otherwise the single node on
+        that edge is it; none or several is a wiring mistake the node cannot
+        guess its way out of, so capture is turned off with one warning rather
+        than writing to the wrong database.
         """
-        if self._node_id:
+        if self._node_id and self._node_checked:
             return self._node_id
 
         ids = [str(node_id) for node_id in (pipe.getControllerNodeIds('tool') or [])]
+        if self._node_id:
+            self._node_checked = True
+            if self._node_id in ids:
+                return self._node_id
+            self._disabled = True
+            self._warn(
+                f'Discord capture: captureNodeId {_shown_entry(self._node_id)} is not connected to this source '
+                f'with a tool control edge; capture is off for this run.'
+            )
+            return None
+
         if len(ids) == 1:
             self._node_id = ids[0]
+            self._node_checked = True
             return self._node_id
 
         self._disabled = True
@@ -988,7 +1012,8 @@ class CaptureWriter:
             counts.append(f'{self._skipped} row(s) dropped while waiting to retry')
         suffix = f' ({", ".join(counts)})' if counts else ''
         # The driver's message can quote a bound value: never the user's text.
-        error = _short_error(exc, hide=(row.get('payload'), row.get('text')))
+        # Nor the node id, which may be a secret pasted into captureNodeId.
+        error = _short_error(exc, hide=(row.get('payload'), row.get('text'), (self._node_id, '<captureNodeId>')))
         self._warn_throttled(
             '_last_failure_warn',
             f'Discord capture: writing {row.get("event_type")} for message {row.get("message_id")} '
