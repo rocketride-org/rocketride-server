@@ -147,7 +147,7 @@ rocketride deploy get <projectId> --team <teamId>                   # one deploy
 rocketride deploy versions <projectId>                              # registry versions
 rocketride deploy artifact <projectId> <version>                    # fetch one registry version's artifact JSON
 rocketride deploy history <projectId>                               # deploy/publish audit trail
-rocketride deploy run <projectId> <sourceId> --team <teamId>        # trigger a run now
+rocketride deploy run <projectId> <sourceId> --team <teamId>        # run now; no run window: ends when the pipeline finishes or is terminated
 rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <teamId> --ttl 32400
 rocketride deploy schedule pause <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule resume <projectId> <sourceId> --team <teamId>

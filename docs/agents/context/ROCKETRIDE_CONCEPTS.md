@@ -125,10 +125,12 @@ an app package can never be scheduled) can run on a schedule:
 
 - A schedule attaches to **one source of one team deployment** — each source
   of a project schedules independently.
-- **`cron` fires the start; `ttl` bounds the window.** Cron cannot express
-  "run from 8 to 3" — that is a cron start (`0 8 * * 1,3,5` for
-  Mon/Wed/Fri 08:00) plus a ttl of 25200 seconds (7 h), after which the run
-  is ended. Standard crontab syntax, validated at set time.
+- **`cron` fires the start; `ttl` bounds the window.** A cron start
+  (`0 8 * * 1,3,5` for Mon/Wed/Fri 08:00) plus a ttl of 25200 seconds ends
+  the run once seven hours pass with no request. The window counts from the
+  run's last request, not from its start, so a request late in the window
+  extends it; there is no fixed stop time. Standard crontab syntax,
+  validated at set time.
 - Pausing a schedule keeps its cron and ttl configured; resuming picks them
   back up. An empty schedule means manual-only.
 

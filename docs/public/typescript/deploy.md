@@ -53,7 +53,9 @@ teammates via `client.log` with `teamId`. `deploy.run(projectId, sourceId, teamI
 triggers one deployed source **now** — the same trusted, actor-free team dispatch
 the scheduler uses — returning `{ token, version }`, and
 `deploy.setSourceConfig` sets per-source execution settings for deploy runs
-(`traceLevel`, `debugOut`).
+(`traceLevel`, `debugOut`). A manual run has no run window (the schedule's
+`ttl` applies to scheduled fires only): it runs until the pipeline finishes or
+its token is terminated.
 
 ## States
 

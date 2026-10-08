@@ -152,8 +152,12 @@ Every signed-in user gets their own instance. Start it once per session and
 keep the token; `useExisting: true` re-attaches after a reload instead of
 failing because the pipeline is already running. To run two instances for the
 same user at once, give each `use()` its own unguessable `token` (keep the
-`tk_` prefix). The pipeline ships with the app on deploy. Use this for work
-that happens when the user asks for it.
+`tk_` prefix). The instance stops by itself after about `ttl` seconds with
+no request and no pipeline event (15 minutes unless you pass one); the check
+runs once a minute, so the stop can come up to a minute early. The pipeline
+ships with the app on deploy. Use this for work that happens when the user
+asks for it; it is the default, and the right choice unless the pipeline is
+a service shared by a whole team.
 
 ### Outside the app: shared, on a schedule
 
@@ -173,16 +177,24 @@ import nightly from '../../../pipelines/nightly-report.pipe'; // identity only
 const projectId = String(nightly.project_id);
 ```
 
-Outside its schedule window there is no running instance and no token.
-That is the normal state, not an error; show the feature as offline and
+Outside its schedule window, unless someone started a run by hand, there
+is no running instance and no token. That is the normal state, not an error; show the feature as offline and
 check again later. Deploying the app does not carry this pipeline, so
 deploy it on its own whenever it changes.
+
+A deployed pipeline has no idle timeout, so give it a schedule with a run
+window (`--ttl`): each run stops when its window closes, counted from the
+last request it received. `rocketride deploy run` starts a run by hand
+with no window at all, even when a schedule is set; it keeps running, and
+billing, until the pipeline finishes or someone terminates it. Use it for a one-off run, never as the
+way to keep a service up.
 
 | | Inside the app | Outside the app |
 | --- | --- | --- |
 | Where the `.pipe` lives | in the app folder | its own project |
 | Who runs it | one instance per signed-in user | one instance for the team |
 | When it runs | when the app asks | on its schedule |
+| When it stops | idle for `ttl` | window (`ttl`) closes, or the pipeline finishes when no `ttl` is set; a `deploy run` only when the pipeline finishes or someone terminates it |
 | How it deploys | with the app | separately, `rocketride deploy` |
 
 ## Next steps
