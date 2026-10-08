@@ -2805,16 +2805,26 @@ class IEndpoint(IEndpointBase):
         default label is ``'discord:discord'`` for every Discord source — which
         is why ``captureSource`` is the setting that distinguishes them. Read
         defensively: this runs in a unit-test process too, where the endpoint
-        is a stand-in.
+        is a stand-in. An invalid ``captureSource`` (an unresolved variable
+        included) is reported in the task's warnings, like an invalid
+        ``captureTable``, and the default is used.
         """
+        endpoint = getattr(self, 'endpoint', None)
+        component = str(getattr(endpoint, 'key', '') or getattr(endpoint, 'logicalType', '') or 'discord')
+        default = f'discord:{component}'
         configured = getattr(self, '_capture_source_setting', '')
         if configured:
             if is_valid_source_label(configured):
                 return configured
-            debug('Discord: captureSource is not a valid label; using the default')
-        endpoint = getattr(self, 'endpoint', None)
-        component = str(getattr(endpoint, 'key', '') or getattr(endpoint, 'logicalType', '') or 'discord')
-        return f'discord:{component}'
+            problem = _unresolved_variable(configured)
+            if problem:
+                _config_warning(f'Discord: captureSource uses {problem}; capture rows use the label {default!r}')
+            else:
+                _config_warning(
+                    f'Discord: captureSource {_shown_entry(configured)} is not a valid label (letters, digits and '
+                    f'_ . : + @ - only, up to 128 characters); capture rows use the label {default!r}'
+                )
+        return default
 
     def _start_capture(self):
         """Build and start the capture writer, when ``captureEvents`` is on.

@@ -1867,6 +1867,34 @@ class TestEndpointCaptureWiring:
         inserts = [call[2]['params'] for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]
         assert inserts[0][11] == 'discord:discord_1'
 
+    @pytest.mark.parametrize(
+        'bad, shown',
+        [
+            ('has space', "captureSource 'has space' is not a valid label"),
+            ('a-secret-token.with.dots and-more', "captureSource 'a-secret-tok…' is not a valid label"),
+            ('${ROCKETRIDE_CAPTURE_LABEL}', 'captureSource uses the variable ROCKETRIDE_CAPTURE_LABEL'),
+            ('<REDACTED>', 'captureSource uses a variable without the ROCKETRIDE_ prefix'),
+        ],
+    )
+    def test_an_invalid_capture_source_is_reported_in_the_task_warnings(self, bad, shown):
+        pipe = _PipelinePipe()
+        with mock.patch.object(endpoint_module, '_config_warning') as warn:
+            endpoint = _endpoint(pipe, capture_events=True, source=bad)
+            endpoint._stop_capture()
+
+        (call,) = warn.call_args_list
+        message = call.args[0]
+        assert shown in message
+        assert 'discord:discord_1' in message
+        if len(bad) > 12 and not bad.startswith(('${', '<')):
+            assert bad not in message
+
+    def test_a_valid_capture_source_warns_nothing(self):
+        with mock.patch.object(endpoint_module, '_config_warning') as warn:
+            _endpoint(_PipelinePipe(), capture_events=True, source='support:prod')._stop_capture()
+
+        warn.assert_not_called()
+
     def test_the_bot_still_answers_when_every_capture_write_raises(self):
         """Capture is a side channel; a dead database is not a dead bot."""
         pipe = _PipelinePipe(fail=RuntimeError('capture database is down'))
