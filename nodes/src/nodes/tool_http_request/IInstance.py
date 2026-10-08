@@ -514,9 +514,7 @@ class IInstance(IInstanceBase):
             query_params=args.get('query_params'),
             auth=args.get('auth'),
         )
-        if url_patterns and not any(
-            _pattern_matches_canonical_url(pattern, resolved_url) for pattern in url_patterns
-        ):
+        if url_patterns and not any(_pattern_matches_canonical_url(pattern, resolved_url) for pattern in url_patterns):
             raise ValueError('URL does not match any allowed URL pattern.')
 
         headers = args.get('headers')

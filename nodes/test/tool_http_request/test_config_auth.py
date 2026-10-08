@@ -614,7 +614,7 @@ def test_default_headers_merge_under_per_call_headers(node_modules, monkeypatch)
             'defaultHeaders': [
                 {'headerName': 'Accept', 'headerValue': 'application/vnd.github+json'},
                 {'headerName': 'X-GitHub-Api-Version', 'headerValue': '2022-11-28'},
-            ]
+            ],
         },
     )
 
