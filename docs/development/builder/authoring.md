@@ -1399,6 +1399,35 @@ function makeBuildAction() {
 
 Now `./builder build` runs all described `*:build` actions. Same for `./builder test` (runs all described `*:test` actions).
 
+An action that must only ever be asked for by name — it is slow, or needs a daemon a plain build does not — says `global: false` next to its name. It stays public (listed in `--help`, callable), but `./builder build` and the like leave it out:
+
+```javascript
+// The node image: built when asked for, never by `./builder build`
+{ name: 'container:build', global: false, action: () => ({ description: 'Build the node container image', /* ... */ }) }
+```
+
+### Pattern: actions that run on some OSes only
+
+**Problem:** An action cannot work on every OS — it needs a Linux engine, or WSL — and a loud skip at run time hides that.
+
+**Solution:** List the `os.platform()` values it runs on in `platforms`, and say why it does not run elsewhere in `unavailable` (a string, or a function of the platform). Elsewhere the action is left out of `--help` and of global commands, and calling it by name, or as a step, fails with the reason:
+
+```javascript
+{
+    name: 'container:build-on-wsl',
+    platforms: ['win32'],
+    unavailable: () => 'it runs a build inside a WSL distribution, and WSL exists only on Windows',
+    action: (options) => ({ description: 'Build the node image in a WSL checkout: --checkout=<path in WSL> (required)', /* ... */ }),
+}
+```
+
+```text
+$ ./builder container:build-on-wsl
+Error: container:build-on-wsl is not available on Linux: it runs a build inside a WSL distribution, and WSL exists only on Windows
+```
+
+Say only why the action does not run here. Do not point at another action as its replacement unless the two really do the same thing: `--help` already lists what runs on this OS, with what each needs. `--list-actions` shows every action, marking those not available here.
+
 ### Pattern: passing options to actions
 
 **Problem:** Tests should accept pytest arguments like `-s -v` from the command line.

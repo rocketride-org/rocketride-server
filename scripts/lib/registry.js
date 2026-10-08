@@ -6,6 +6,9 @@
 const path = require('path');
 const { exists } = require('./fs');
 
+// os.platform() values as the "not available on" errors name them
+const PLATFORM_NAMES = { win32: 'Windows', linux: 'Linux', darwin: 'macOS' };
+
 class ModuleRegistry {
 	constructor() {
 		this.modules = new Map();
@@ -115,10 +118,39 @@ class ModuleRegistry {
 	}
 
 	/**
+	 * Whether an action runs on this OS. An action definition may list the
+	 * os.platform() values it runs on in `platforms`; without it, it runs everywhere.
+	 */
+	isAvailable(actionDef, platform = process.platform) {
+		return !actionDef?.platforms || actionDef.platforms.includes(platform);
+	}
+
+	/**
+	 * The error a call to an action gets on an OS it does not run on; the
+	 * definition's `unavailable(platform)` says why.
+	 */
+	unavailableMessage(actionDef, platform = process.platform) {
+		const why =
+			typeof actionDef.unavailable === 'function' ? actionDef.unavailable(platform) : actionDef.unavailable;
+		return `${actionDef.name} is not available on ${PLATFORM_NAMES[platform] || platform}${why ? `: ${why}` : ''}`;
+	}
+
+	/**
+	 * Whether a global command (`builder build`, `builder test`, ...) takes in
+	 * this action as one of its `<module>:<command>`. Not when it does not run
+	 * on this OS, nor when its definition says `global: false` — an action
+	 * that is only ever asked for by name.
+	 */
+	inGlobalCommands(actionDef, platform = process.platform) {
+		return actionDef?.global !== false && this.isAvailable(actionDef, platform);
+	}
+
+	/**
 	 * List all public actions (actions with descriptions)
 	 *
 	 * Actions with descriptions are shown in `builder --help`.
 	 * Actions without descriptions are internal/private but still callable.
+	 * Actions that do not run on this OS are left out.
 	 */
 	listCommands(options) {
 		const result = [];
@@ -127,6 +159,7 @@ class ModuleRegistry {
 			if (!mod.actions) continue;
 
 			for (const actionDef of mod.actions) {
+				if (!this.isAvailable(actionDef)) continue;
 				const actionObj = typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
 
 				// Only list actions that have descriptions (public actions)
@@ -182,6 +215,7 @@ class ModuleRegistry {
 					name: actionDef.name,
 					description: actionObj?.description || '',
 					module: moduleName,
+					available: this.isAvailable(actionDef),
 				});
 			}
 		}
