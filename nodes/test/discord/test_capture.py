@@ -174,6 +174,19 @@ class TestCaptureRowColumns:
         row = capture_row('no_reply', meta, {'reason': 'no_answer'}, source='s', now=NOW)
         assert row['message_id'] == '1001'
 
+    def test_a_skipped_message_records_its_own_text(self):
+        """A paused thread emits no `message` event, so the no_reply row IS the record."""
+        row = capture_row(
+            'no_reply',
+            _metadata(messageId='1002', threadId='1001'),
+            {'reason': 'paused', 'text': 'I will take this one'},
+            source='s',
+            now=NOW,
+        )
+        assert row['text'] == 'I will take this one'
+        assert row['event_key'] == 'paused'
+        assert row['thread_id'] == '1001'
+
     def test_ids_arriving_as_numbers_are_stored_as_text(self):
         """Discord snowflakes are TEXT in the contract; an int would not match."""
         row = capture_row(
@@ -190,7 +203,10 @@ class TestCaptureRowColumns:
 class TestCaptureRowEventKeys:
     """The ``event_key`` rules, which are what the unique key dedupes on."""
 
-    @pytest.mark.parametrize('reason', ['no_answer', 'send_failed', 'shutdown'])
+    @pytest.mark.parametrize(
+        'reason',
+        ['no_answer', 'non_answer', 'model_error', 'send_failed', 'shutdown', 'paused', 'aimed_elsewhere', 'timeout'],
+    )
     def test_a_known_no_reply_reason_is_its_own_key(self, reason):
         row = capture_row('no_reply', _metadata(), {'reason': reason}, source='s', now=NOW)
 
@@ -208,6 +224,11 @@ class TestCaptureRowEventKeys:
     def test_the_text_pass_is_keyed_text(self):
         row = capture_row('message', _metadata(), {'lane': 'text', 'text': 'x'}, source='s', now=NOW)
         assert row['event_key'] == 'text'
+
+    def test_a_retried_text_pass_is_keyed_by_its_attempt(self):
+        """Each retry is a separate pipeline run and must not collapse into one row."""
+        row = capture_row('message', _metadata(), {'lane': 'text', 'text': 'x', 'retry': 2}, source='s', now=NOW)
+        assert row['event_key'] == 'text:retry:2'
 
     def test_an_attachment_is_keyed_by_its_lane_and_group_index(self):
         row = capture_row(
@@ -244,8 +265,8 @@ class TestCaptureRowEventKeys:
 
     def test_a_no_reply_event_is_keyed_by_its_reason(self):
         """One message can be skipped for different reasons across runs."""
-        row = capture_row('no_reply', _metadata(), {'reason': 'send_failed'}, source='s', now=NOW)
-        assert row['event_key'] == 'send_failed'
+        row = capture_row('no_reply', _metadata(), {'reason': 'aimed_elsewhere'}, source='s', now=NOW)
+        assert row['event_key'] == 'aimed_elsewhere'
         assert row['text'] is None
 
     def test_a_reaction_is_keyed_by_user_emoji_direction_and_time(self):
@@ -1690,6 +1711,17 @@ class TestEveryMessagePartIsKept:
 
         assert len(_kept_rows(pipe)) == 2
 
+    def test_a_retried_text_pass_gets_its_own_row(self):
+        pipe = _PipelinePipe()
+        endpoint = _endpoint(pipe, capture_events=True)
+        try:
+            endpoint._capture_event('message', _metadata(), {'lane': 'text', 'text': 'hello'})
+            endpoint._capture_event('message', _metadata(), {'lane': 'text', 'text': 'hello', 'retry': 1})
+        finally:
+            endpoint._stop_capture()
+
+        assert [row[2] for row in _kept_rows(pipe)] == ['text', 'text:retry:1']
+
 
 class TestProcessedMessagesAreCaptured:
     """Whole messages through ``_process_message``, as the base node now handles them."""
@@ -1784,6 +1816,34 @@ class TestProcessedMessagesAreCaptured:
             endpoint._stop_capture()
 
         assert [(row[0], row[2]) for row in _kept_rows(pipe)] == [('no_reply', 'shutdown')]
+
+    def test_a_retried_text_pass_is_captured_through_process_message(self):
+        """A scratchpad first answer, then a real one: the retry keeps its own `text:retry:1` row."""
+        pipe = _PipelinePipe()
+        endpoint = self._endpoint(pipe)
+        endpoint._sanitize_replies = True
+        endpoint._non_answer_retries = 1
+        answers = iter(['Thought: I should look this up', 'The real answer'])
+
+        def new_entry(*args, **kwargs):
+            entry = mock.Mock()
+            entry.response.toDict.return_value = {'answers': [next(answers)]}
+            return entry
+
+        endpoint._new_entry = mock.Mock(side_effect=new_entry)
+        message = self._message('how do I deploy?')
+        try:
+            asyncio.run(endpoint._process_message(message))
+            # The Gateway can deliver the same message again after a resume.
+            answers = iter(['Thought: I should look this up', 'The real answer'])
+            asyncio.run(endpoint._process_message(message))
+        finally:
+            endpoint._stop_capture()
+
+        kept = _kept_rows(pipe)
+        assert sorted((row[0], row[2]) for row in kept) == [('message', 'text'), ('message', 'text:retry:1')]
+        inserted = [call[2]['params'] for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]
+        assert len(inserted) == 4
 
     @staticmethod
     def _record_sse(endpoint):
@@ -2035,3 +2095,41 @@ def test_a_reaction_key_uses_the_broadcast_occurred_at_over_the_clock():
         now=NOW,
     )
     assert row['event_key'] == '7:✅:add:1790000000123'
+
+
+def _emitted_fixed_no_reply_reasons():
+    """The string literals IEndpoint passes as the reason to ``_emit_no_reply_event``."""
+    import ast
+
+    with open(os.path.join(_NODE_DIR, 'IEndpoint.py'), encoding='utf-8') as handle:
+        tree = ast.parse(handle.read())
+
+    def literals(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return {node.value}
+        if isinstance(node, ast.IfExp):
+            return literals(node.body) | literals(node.orelse)
+        return set()
+
+    found = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == '_emit_no_reply_event'
+            and len(node.args) >= 2
+        ):
+            found |= literals(node.args[1])
+        # ``_skip_reason`` returns the reason that the caller passes on by name.
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == '_skip_reason':
+            for child in ast.walk(node):
+                if isinstance(child, ast.Return) and child.value is not None:
+                    found |= literals(child.value)
+    return found
+
+
+class TestEveryFixedNoReplyReasonHasAKey:
+    """A reason the node emits as a fixed code must not be keyed as `error`."""
+
+    def test_the_key_list_matches_the_reasons_the_node_emits(self):
+        assert _emitted_fixed_no_reply_reasons() == set(capture.NO_REPLY_REASON_CODES)
