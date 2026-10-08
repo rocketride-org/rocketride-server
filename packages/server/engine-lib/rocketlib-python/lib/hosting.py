@@ -32,7 +32,7 @@ task runs: a credit check before every pipe, no torch install or import.
 guards for a shared machine apply: the sandbox keeps to its default modules,
 ``tool_python`` ignores ``allowed_modules``, stdio MCP is refused.
 
-The engine passes them as it starts the task (task_engine). A pipeline's own
+The engine passes them as it starts the task (ai.modules.task.launcher). A pipeline's own
 args can add one, which only makes the task stricter. Standard library only: nodes and ``_depends_hooks.py`` files import this,
 and importing ``ai`` or ``ai.common`` would run ``depends()``.
 """
