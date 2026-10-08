@@ -81,6 +81,11 @@ COLUMNS = (
 
 DEFAULT_TABLE = 'discord_events'
 
+# The UNIQUE key that makes the log idempotent. ``source`` is part of it so two
+# Discord sources sharing one table each keep their own row for a message the
+# both of them saw, instead of the second being taken for a redelivery.
+DEDUPE_COLUMNS = ('source', 'message_id', 'event_type', 'event_key')
+
 # The contract clips the `text` column at 8000 characters; `payload` keeps the
 # text the node handed over, unclipped. A Discord message is at most 4000
 # characters, so this only ever bites on a text attachment asked about on its
@@ -203,7 +208,7 @@ def CREATE_TABLE_SQL(table: str) -> str:
         'payload JSONB NOT NULL, '
         "source TEXT NOT NULL DEFAULT '', "
         'captured_at TIMESTAMPTZ NOT NULL DEFAULT now(), '
-        f'CONSTRAINT {_quoted_table(table, "$dedupe")} UNIQUE (message_id, event_type, event_key)'
+        f'CONSTRAINT {_quoted_table(table, "$dedupe")} UNIQUE ({", ".join(DEDUPE_COLUMNS)})'
         '); '
         f'CREATE INDEX IF NOT EXISTS {_quoted_table(table, "$thread")} ON {name} (thread_id); '
         f'CREATE INDEX IF NOT EXISTS {_quoted_table(table, "$occurred")} ON {name} (occurred_at)'

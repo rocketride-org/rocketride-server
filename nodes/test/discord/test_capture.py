@@ -436,7 +436,12 @@ class TestSql:
         sql = CREATE_TABLE_SQL('discord_events')
         for column in ('seq', 'captured_at', *COLUMNS):
             assert column in sql, column
-        assert 'UNIQUE (message_id, event_type, event_key)' in sql
+        assert 'UNIQUE (source, message_id, event_type, event_key)' in sql
+
+    def test_the_dedupe_key_includes_the_source(self):
+        """Two Discord sources sharing one table must not dedupe each other's rows away."""
+        assert capture.DEDUPE_COLUMNS == ('source', 'message_id', 'event_type', 'event_key')
+        assert f'UNIQUE ({", ".join(capture.DEDUPE_COLUMNS)})' in CREATE_TABLE_SQL('discord_events')
 
     def test_seq_is_an_identity_column_so_insert_alone_is_enough(self):
         """A BIGSERIAL default calls nextval(), which needs USAGE on its sequence; an identity column does not."""
@@ -1657,13 +1662,14 @@ class TestRunStopsAndDrains:
 
 
 def _kept_rows(pipe):
-    """The INSERTs a real table keeps: ``ON CONFLICT DO NOTHING`` on the dedupe key."""
+    """The INSERTs a real table keeps: ``ON CONFLICT DO NOTHING`` against the UNIQUE dedupe key."""
+    positions = [COLUMNS.index(column) for column in capture.DEDUPE_COLUMNS]
     kept = {}
     for call in pipe.calls:
         if 'INSERT INTO' not in call[2]['sql']:
             continue
         params = call[2]['params']
-        kept.setdefault((params[1], params[0], params[2]), params)
+        kept.setdefault(tuple(params[position] for position in positions), params)
     return list(kept.values())
 
 
@@ -1731,6 +1737,22 @@ class TestEveryMessagePartIsKept:
             endpoint._stop_capture()
 
         assert [row[2] for row in _kept_rows(pipe)] == ['text', 'text:retry:1']
+
+    def test_two_sources_sharing_a_table_each_keep_their_row(self):
+        """The same message seen by two Discord sources is two rows, one per source."""
+        pipe = _PipelinePipe()
+        writers = [
+            _writer(_FakeTarget(pipe), [], source='support-bot'),
+            _writer(_FakeTarget(pipe), [], source='shadow-bot'),
+        ]
+        for writer in writers:
+            writer._write_one(capture_row('message', _metadata(), {'text': 'hello'}, source=writer._source, now=NOW))
+            # A redelivery to the same source still dedupes.
+            writer._write_one(capture_row('message', _metadata(), {'text': 'hello'}, source=writer._source, now=NOW))
+
+        kept = _kept_rows(pipe)
+        assert sorted(row[11] for row in kept) == ['shadow-bot', 'support-bot']
+        assert {row[1] for row in kept} == {'1001'}
 
 
 class TestProcessedMessagesAreCaptured:
