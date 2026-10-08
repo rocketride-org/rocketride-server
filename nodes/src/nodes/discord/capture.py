@@ -388,7 +388,7 @@ def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any
     * ``no_reply``  -- the reason code, because one message can be skipped for
       different reasons across runs (paused, then aimed_elsewhere); a reason
       that is exception text becomes ``error``, since that text can differ
-      between deliveries of the same message.
+      between deliveries of the same message (and the row never stores it).
     * ``reaction``  -- user, emoji, direction and time: the same person can
       add, remove and re-add the same emoji, and all three are real events.
 
@@ -398,7 +398,7 @@ def _event_key(event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any
     if event_type == 'no_reply':
         # A known reason is its own key. Anything else is exception text that
         # can differ between deliveries of one message, so it shares one stable
-        # key; the text itself stays in the payload.
+        # key (and capture_row stores ``error`` in its place).
         reason = str(payload.get('reason') or '')
         key = reason if reason in NO_REPLY_REASON_CODES else 'error'
     elif event_type == 'reaction':
@@ -447,6 +447,12 @@ def capture_row(
     """
     metadata = _scrub_nul(metadata or {})
     payload = _scrub_nul(payload or {})
+
+    # A no_reply reason that is not one of the fixed codes is exception text,
+    # which can carry account details, key fragments or internal URLs. The
+    # live broadcast keeps it; the durable row stores only ``error``.
+    if event_type == 'no_reply' and str(payload.get('reason') or '') not in NO_REPLY_REASON_CODES:
+        payload = dict(payload, reason='error')
 
     # The body `_send_sse` broadcasts, so a reader of this table and a live SSE
     # subscriber are looking at the same object -- except that a `message`

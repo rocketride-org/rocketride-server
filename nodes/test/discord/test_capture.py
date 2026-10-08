@@ -219,7 +219,24 @@ class TestCaptureRowEventKeys:
         again = capture_row('no_reply', _metadata(), {'reason': 'Timeout after 31.77s'}, source='s', now=NOW)
 
         assert first['event_key'] == again['event_key'] == 'error'
-        assert json.loads(first['payload'])['reason'] == 'Timeout after 30.01s'  # the text is kept
+
+    def test_an_exception_reason_is_stored_as_error_without_its_text(self):
+        """Exception text can carry account details or internal URLs; the durable row keeps only ``error``."""
+        reason = 'ConnectionError: https://internal.example/api?key=sk-live-123 refused'
+        payload = {'reason': reason}
+        row = capture_row('no_reply', _metadata(), payload, source='s', now=NOW)
+
+        body = json.loads(row['payload'])
+        assert body['reason'] == 'error'
+        assert reason not in row['payload']
+        assert row['text'] is None
+        assert payload == {'reason': reason}  # the caller's dict (the SSE body) is left alone
+
+    def test_a_known_reason_is_stored_as_it_is(self):
+        row = capture_row('no_reply', _metadata(), {'reason': 'paused', 'text': 'hi team'}, source='s', now=NOW)
+
+        assert json.loads(row['payload'])['reason'] == 'paused'
+        assert row['text'] == 'hi team'
 
     def test_the_text_pass_is_keyed_text(self):
         row = capture_row('message', _metadata(), {'lane': 'text', 'text': 'x'}, source='s', now=NOW)
