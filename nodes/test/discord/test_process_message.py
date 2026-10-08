@@ -939,6 +939,30 @@ def _thread_message(endpoint, thread, *, content='latest question', mentions=())
     return message
 
 
+class TestSendRoleIds:
+    """One rule for which roles a send may ping."""
+
+    def test_no_team_ping_means_no_roles(self):
+        endpoint = _make_endpoint()
+        endpoint._allowed_mention_role_ids = ['11', '22']
+
+        assert endpoint._send_role_ids(False, None) == []
+        assert endpoint._send_role_ids(False, ['11']) == []
+
+    def test_none_means_every_configured_role(self):
+        endpoint = _make_endpoint()
+        endpoint._allowed_mention_role_ids = ['11', '22']
+
+        assert endpoint._send_role_ids(True, None) == ['11', '22']
+
+    def test_an_explicit_list_is_used_as_given(self):
+        endpoint = _make_endpoint()
+        endpoint._allowed_mention_role_ids = ['11', '22']
+
+        assert endpoint._send_role_ids(True, ['22']) == ['22']
+        assert endpoint._send_role_ids(True, []) == []
+
+
 class TestThreadHistoryContext:
     """threadHistoryLimit carries the earlier thread messages as context."""
 

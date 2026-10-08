@@ -2892,7 +2892,8 @@ class IEndpoint(IEndpointBase):
             sse_text (Optional[str]): Text to broadcast instead of ``text`` —
                 the user's own message (or, for a file-only message, only the
                 files) when thread context was prepended; never the transcript.
-            context_chars (int): Size of the prepended thread transcript.
+            context_chars (int): How many characters the node added around the user's
+                own words: the thread transcript and any folded files.
             retry (int): Which non-answer retry this run is (1-based). Reported
                 on the ``message`` SSE event so a UI can tell a re-run from the
                 original, which carries no ``retry`` key.
@@ -3186,16 +3187,7 @@ class IEndpoint(IEndpointBase):
             allowed_mentions = self._allowed_mentions(ping_team=ping_team, role_ids=role_ids)
             # The roles this chunk pings if it is posted: allowed on it and
             # mentioned in it.
-            may_ping = (
-                [
-                    str(role_id)
-                    for role_id in (
-                        role_ids if role_ids is not None else getattr(self, '_allowed_mention_role_ids', []) or []
-                    )
-                ]
-                if ping_team
-                else []
-            )
+            may_ping = [str(role_id) for role_id in self._send_role_ids(ping_team, role_ids)]
             chunk_pings = [role_id for role_id in may_ping if f'<@&{role_id}>' in chunk]
             try:
                 thread = await self._send_chunk(
@@ -3237,6 +3229,24 @@ class IEndpoint(IEndpointBase):
             'pingedRoleIds': pinged_role_ids,
         }
 
+    def _send_role_ids(self, ping_team: bool, role_ids: Optional[List[str]]) -> List[str]:
+        """The roles one send may ping: the single rule behind its allowlist and its ping record.
+
+        Args:
+            ping_team (bool): False leaves every allowed role out.
+            role_ids (Optional[List[str]]): The allowed roles this send may
+                ping; None allows every role in ``allowedMentionRoleIds``.
+
+        Returns:
+            List[str]: Empty when ``ping_team`` is False, every configured role
+                when ``role_ids`` is None, else ``role_ids``.
+        """
+        if not ping_team:
+            return []
+        if role_ids is None:
+            return list(getattr(self, '_allowed_mention_role_ids', []) or [])
+        return role_ids
+
     def _allowed_mentions(self, *, ping_team: bool = True, role_ids: Optional[List[str]] = None):
         """Build the outbound mention allowlist; never permit everyone/here.
 
@@ -3250,11 +3260,8 @@ class IEndpoint(IEndpointBase):
         Returns:
             discord.AllowedMentions: The allowlist for one send.
         """
-        if role_ids is None:
-            role_ids = list(getattr(self, '_allowed_mention_role_ids', []) or [])
+        role_ids = self._send_role_ids(ping_team, role_ids)
         user_ids = getattr(self, '_allowed_mention_user_ids', [])
-        if not ping_team:
-            role_ids = []
         if not role_ids and not user_ids:
             return discord.AllowedMentions.none()
         return discord.AllowedMentions(
