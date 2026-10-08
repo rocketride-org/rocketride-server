@@ -179,6 +179,29 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 - Update API documentation for public interfaces
 - Include examples for new functionality
 
+## Apps for the Store Use Catalog Nodes Only
+
+Pipelines bundled in an app published to the RocketRide store may use only
+catalog nodes: the nodes that ship with the engine, kept under
+`nodes/src/nodes/` in this repository and listed in the node catalog on the
+docs site. A custom node under `local_nodes` loads only on an engine started
+with `--node_path`. RocketRide Cloud loads none (its engine starts without
+`--node_path`) and also refuses the few catalog nodes marked `nosaas`, so
+being in the catalog is necessary, not sufficient. Store reviewers reject a
+submission whose pipelines reference a node outside the catalog, and nothing
+before review checks this: the Package and Store preflights do not read
+`.pipe` providers, and a workspace's `.rocketride/services-catalog.json`
+mirrors whichever engine it last synced from, local nodes included.
+
+If the catalog has no node for a step, first ask whether it is app logic
+(the app sends documents, drives pipes and decides what runs next) or
+bounded Python an agent can run through `tool_python` (sandboxed:
+allowlisted imports only, no network, filesystem or subprocess access). Only
+a step that must run inside the engine is a candidate for a catalog node:
+open an issue, then follow
+[Prototyping Local Nodes](docs/development/nodes/index.md#prototyping-local-nodes)
+to a pull request. Settle this before building; reviewers check it.
+
 ## Reporting Issues
 
 When reporting issues, please include:

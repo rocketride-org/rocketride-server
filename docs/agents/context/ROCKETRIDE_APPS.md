@@ -870,6 +870,26 @@ object), never `filepath:` (Node-only). Read
 before authoring the `.pipe` content itself, and
 `ROCKETRIDE_typescript_API.md` for the full client reference.
 
+**Catalog nodes only.** A store app's pipelines may use only catalog nodes:
+the nodes that ship with the engine (`nodes/src/nodes` in the server repo;
+the node catalog on the docs site). A custom node (`local_nodes`, loaded
+with `--node_path`) exists only on the engine that loads it. RocketRide
+Cloud loads none, and also refuses the few catalog nodes marked `nosaas`,
+so being in the catalog is necessary, not sufficient. Store reviewers
+reject a submission whose pipelines reference a provider outside the
+catalog, and nothing before review checks it: the Package and Store
+preflights do not read `.pipe` providers, and
+`.rocketride/services-catalog.json` mirrors whichever engine the workspace
+last synced from, local nodes included, so on a self-hosted engine with
+`--node_path` that file is not the catalog. Decide this before building.
+If the catalog has no node for a step, keep that logic in the app (the app
+already sends documents, controls pipes and makes decisions), or give an
+agent step bounded Python through `tool_python` (sandboxed: allowlisted
+imports only, no network, filesystem or subprocess access). Only a step
+that must run inside the engine is a candidate for a catalog node, and
+that goes through an issue in the server repo, not into the app. Never
+scaffold a custom node for a store app.
+
 ### Secrets and configuration
 
 Pipeline configs reference secrets as `${ROCKETRIDE_*}` placeholders.
@@ -1560,6 +1580,10 @@ that audience again revives it.
   (review always tracks your current work — to ship older code, deploy it
   again as a new version). Submitting flips the version `private → submit`.
 - **Withdraw** cancels your own submission (`submit → private`).
+- Reviewers reject a submission whose bundled `.pipe` files reference a
+  node outside the catalog (see 'Catalog nodes only' under Embedding
+  Pipelines). No preflight checks this for you: read the providers in your
+  `.pipe` files before you submit.
 - The verdict lands as `ready` (approved — publishable to `@public`) or
   `rejected`, pushed live to your App Builder (`app:statusChanged`), with
   reviewer notes on rejection.

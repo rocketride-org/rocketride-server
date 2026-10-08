@@ -54,6 +54,11 @@ node scripts/build.js docs:check                     # export drift gate (CI-enf
 - **Branches**: `feat/RR-<ticket>-short-description`, `fix/RR-<ticket>-...`; PR base is `develop`.
 - **Python**: 3.10+, single quotes, ruff for lint/format.
 - **TypeScript**: tabs, single quotes, semicolons.
+- **Store apps**: pipelines bundled in an app for the public store use
+  catalog nodes only (the nodes that ship with the engine; see 'Catalog
+  nodes only' in `docs/agents/context/ROCKETRIDE_APPS.md`). `scaffold_node`
+  and `local_nodes` are for self-hosted engines and for nodes contributed
+  to the catalog, never for a store app.
 - **VS Code extension only**: wrap errors with `Callout.call()` (no raw
   try/catch), throw `AppError` (never plain `Error`), log via `logger.*`
   (never `console.log`). Docs-site theme components (`docs/docusaurus`) are

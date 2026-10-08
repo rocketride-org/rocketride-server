@@ -308,6 +308,12 @@ Its nodes are scanned like the built-in ones but imported as `local_nodes.<node>
 (set this in each `services.json` `"path"`), so they never clash with the
 built-in `nodes` package.
 
+A local node exists only on the engine that loads it. RocketRide Cloud loads
+none, so an app published to the store cannot depend on one, and store
+reviewers reject a pipeline that references a node outside the catalog (see
+[Apps for the Store Use Catalog Nodes Only](../../../CONTRIBUTING.md#apps-for-the-store-use-catalog-nodes-only)).
+Keep that step in the app, or contribute the node to the catalog (below).
+
 ```text
 my-workspace/
 └── local_nodes/
