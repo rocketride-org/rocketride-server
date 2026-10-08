@@ -18,7 +18,7 @@ the sibling for Cypher graph queries.
 
 | Connection | Required | Description |
 | --- | --- | --- |
-| llm | yes | Produces SQL from a natural-language question. |
+| llm | no | Produces SQL from a natural-language question. Not needed for execute (raw SQL). |
 
 ## Lanes
 

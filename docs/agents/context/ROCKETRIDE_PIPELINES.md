@@ -387,9 +387,14 @@ LLM/tool/memory node declares which component invokes it — `from` points at th
 - Tool components (classType `tool`) have empty `lanes` (`{}`): never wired via data lanes,
   only via `control`.
 - Invoke is not agent-only: `summarization`, `extract_data`, `extract_facts`, `dictionary`,
-  `preprocessor_llm`, `tool_chartjs`, the SQL nodes (`db_postgres`, `db_mysql`,
-  `db_clickhouse`, `db_supabase`, `db_arango`, `db_hotdata`, `rocketride_sql`, `aparavi_aql`)
-  and the graph stores all REQUIRE an `llm` control connection.
+  `preprocessor_llm`, `tool_chartjs`, `aparavi_aql` and the graph stores all REQUIRE an
+  `llm` control connection.
+- The SQL nodes (`db_postgres`, `db_supabase`, `db_mysql`, `db_clickhouse`, `db_hotdata`,
+  `rocketride_sql`) use an `llm` connection only to turn natural-language questions into
+  SQL. Raw SQL through their `execute` tool (`client.database.query`) needs no LLM, so a
+  pipeline that only stores or reads data with SQL should wire no LLM and no agent. Storing
+  through an agent ties every save to that agent's LLM provider and key: a missing key stops
+  the save.
 
 ### Invoke requirements by agent type
 
@@ -667,6 +672,24 @@ connection is REQUIRED (it crafts Cypher from the question). Config is profile-b
 (describe the schema so the LLM writes good Cypher); `graph_neo4j` defaults
 `database: "neo4j"`; `rocketride_graph` (built-in) needs no external server. Their classType
 also includes `tool`, so an agent can control a graph store as a tool instead.
+
+**Writing to a graph store** goes through its `execute` tool (node config
+`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. On `rocketride_graph`
+(Apache AGE 1.5.0):
+
+- Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
+  Cypher text: no escaping, and bound values do not count toward the 10,000-character query
+  limit. Only `rocketride_graph` accepts `params`; `graph_neo4j` / `graph_falkordb` reject them.
+- A bulk upsert is TWO calls. AGE applies SET / REMOVE / DELETE only to the first node or edge a
+  MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is rejected:
+
+  ```text
+  call 1:  UNWIND $rows AS row MERGE (:Item {id: row.id})
+  call 2:  UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name
+  ```
+
+- Remove repeated keys from `$rows` before the MERGE call: `UNWIND ... MERGE` creates one node
+  per row even when keys repeat.
 
 ### Pattern 15: Memory options
 
@@ -993,7 +1016,7 @@ Two Postgres providers, two different jobs; mixing them up fails validation:
 | --- | --- | --- |
 | Role | Vector store INSIDE your Postgres (pgvector extension) | Text-to-SQL over existing tables |
 | Lanes | `documents` in (terminal); `questions` in → `documents`/`answers`/`questions` | `questions` in → `table`/`text`/`answers` |
-| LLM | No `llm` port — never wire `control` to it | REQUIRES an `llm` control connection (writes the SQL; `max_attempts` retries via EXPLAIN; `allow_execute` off by default) |
+| LLM | No `llm` port — never wire `control` to it | `llm` control connection only for natural-language questions (writes the SQL; `max_attempts` retries via EXPLAIN); raw SQL through `execute` needs none (`allow_execute` off by default) |
 | Config | profile `local`: `host`, `port`, `user`, `password`, `database`, `collection` (table name), `similarity` (`cosine`/`l2`/`inner_product`); needs `embedding_transformer` in front of BOTH lanes | profile `default`: `host`, `user`, `password`, `database`, `table`, `db_description` (describe the schema — better SQL) |
 
 Wiring is identical to `qdrant` (Starter 2 / Pattern 3) — only the config block changes:
@@ -1004,15 +1027,16 @@ Wiring is identical to `qdrant` (Starter 2 / Pattern 3) — only the config bloc
 you already operate Postgres.
 
 > **Pitfall 15 — vector store wired like a SQL node (or vice versa).** `db_postgres` without
-> an `llm` control connection fails validation; `postgres` without an embedding node in front
-> stores nothing searchable (and search must use the SAME embedding model as ingestion).
+> an `llm` control connection cannot answer natural-language questions (raw SQL through
+> `execute` still works); `postgres` without an embedding node in front stores nothing
+> searchable (and search must use the SAME embedding model as ingestion).
 
 ### Pattern 29: Choosing a store — relational vs vector vs graph
 
 | You need | Family | Providers | Wiring shape |
 | --- | --- | --- | --- |
 | 'Find content like this' — semantic similarity over chunks | Vector | `qdrant`, `postgres` (pgvector), `pinecone`, `milvus`, `chroma`, `weaviate`, `rocketride_vector` (built-in) | `documents` in via embedding (ingest); `questions` in via embedding (search). No LLM port |
-| Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase`, `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED (crafts SQL). No ingestion lanes — data already lives in the DB |
+| Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase`, `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control for natural-language questions (crafts SQL), not needed for raw SQL via `execute`. No ingestion lanes — data already lives in the DB |
 | 'How is A connected to B' — relationship traversal | Graph | `graph_neo4j`, `graph_falkordb`, `rocketride_graph` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED (crafts Cypher). Queries an EXISTING graph (Pattern 14) |
 
 Rules of thumb: unstructured documents you must search → vector (Patterns 1/3). Numbers,

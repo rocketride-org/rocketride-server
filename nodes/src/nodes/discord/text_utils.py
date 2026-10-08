@@ -28,9 +28,10 @@ directly without a Gateway connection or the discord.py package installed.
 """
 
 import codecs
+import json
 import mimetypes
 import re
-from typing import Any, List, Optional, Sequence
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 DISCORD_MESSAGE_CHAR_LIMIT: int = 2000  # Discord's per-message cap
 
@@ -43,8 +44,99 @@ _SHOWN_ENTRY_CHARS = 12
 # A channel, role or user mention pasted where its id belongs.
 _MENTION_WRAPPER = re.compile(r'<(#|@&|@!?)([0-9]{1,20})>')
 
+# Default cap on the thread transcript handed to the pipeline as context.
+THREAD_HISTORY_MAX_CHARS: int = 6000
+
+# Cap on each message in the transcript, so one long message cannot fill the
+# whole transcript budget on its own.
+THREAD_HISTORY_MESSAGE_MAX_CHARS: int = 1000
+
+# Continuation lines of a message are indented by this much in the transcript,
+# so a newline inside one message cannot start another speaker's line.
+_TRANSCRIPT_CONTINUATION = '\n  '
+
+# A newline that starts a speaker line (not an indented continuation line).
+_SPEAKER_LINE_START = re.compile(r'\n(?!  )')
+
+# A line that opens with one of these labels is reasoning, not a hand-off line.
+_OPENS_WITH_REASONING = re.compile(r'^\s*(Thought|Action(?:\s+Input)?|Observation|Reasoning)\s*:', re.IGNORECASE)
+# A reply that opens with one of these is leaked agent scratchpad. A lone
+# ``Action:``, ``Observation:`` or ``Reasoning:`` also opens real answers (a
+# step, a finding), and no agent ends its output on ``Observation:`` (the
+# ReAct agents stop generating there).
+_OPENS_AS_SCRATCHPAD = re.compile(r'^\s*(?:Thought|Action\s+Input)\s*:', re.IGNORECASE)
+# A tool call, ``Action:`` with ``Action Input:`` on the next non-blank line,
+# also marks one: some agent runtimes strip the leading ``Thought:``.
+_REACT_STEP = re.compile(r'^[ \t]*Action[ \t]*:[^\n]*\n(?:[ \t]*\n)*[ \t]*Action[ \t]+Input[ \t]*:', re.MULTILINE)
+# Only at the start of a line: prose that mentions the label is not trimmed.
+_FINAL_ANSWER = re.compile(r'^[ \t]*Final Answer\s*:\s*', re.IGNORECASE | re.MULTILINE)
+
+# Some agent runtimes wrap the finished answer in a small JSON envelope instead
+# of writing it out: ``{"type": "final", "content": "<escaped string>"}``. It is
+# unwrapped only when it is the whole reply, or the end of a reply that opens as
+# scratchpad; an answer that shows one as an example is left alone.
+_FINAL_JSON = re.compile(r'\{\s*"type"\s*:\s*"final"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}')
+
+# A fenced code block, or an unclosed fence running to the end of the text.
+_CODE_FENCE = re.compile(r'```.*?(?:```|\Z)', re.DOTALL)
+# Any code: a fenced block, or an inline span on one line (``x`` or ````x````).
+_CODE = re.compile(r'```.*?(?:```|\Z)|`[^`\n]+`', re.DOTALL)
+
+# What a code block becomes before the error checks: a line of its own, so the
+# text after a leading block is not mistaken for the opening of the reply.
+_CODE_PLACEHOLDER = '\n[code]\n'
+
+# Engine and model failures can surface as the "answer" text — a provider API
+# error, a Python traceback, an engine stack frame, or an HTTP status with the
+# provider's payload. None of those may ever reach Discord, whatever the
+# settings. Each shape is matched only where the reply opens with it (each code
+# fence is replaced by a placeholder line first), so a support answer that
+# quotes the user's error is still posted.
+_ERROR_SIGNATURES = (
+    re.compile(r'^\s*[\w./\\-]*\b(chat|agent)\.py:\d+', re.IGNORECASE),
+    # The engine's own log line is ``agent base _run failed run_id=...``.
+    re.compile(r'^\s*(?:agent\s+base\s+)?_run failed\b', re.IGNORECASE),
+    # The header and the first frame under it; prose that names it is not one.
+    re.compile(r'^\s*Traceback \(most recent call last\):[ \t]*\r?\n[ \t]+File "', re.IGNORECASE),
+    # A provider error the agent wrapped in its own text: ``Deep agent <stage>
+    # failed: <Name>: ...`` (agent_deepagent), ``LangChain agent <stage>
+    # failed: <Name>: ...`` (agent_langchain), ``Unable to produce final
+    # answer: <exception>`` (agent_rocketride), and botocore's ``An error
+    # occurred (<Code>) when calling the <Operation> operation: ...``.
+    re.compile(r'^\s*(?:Deep agent|LangChain agent) \w+ failed: \w+:'),
+    re.compile(r'^\s*Unable to produce final answer:\s*\S'),
+    re.compile(r'^\s*An error occurred \(\w+\) when calling the \w+ operation:'),
+    # A provider status followed by its payload (``Error code: 429 - {...}``,
+    # a JSON list, or a proxy's HTML page; prose after the dash is an answer),
+    # optionally labelled by an exception name (``RateLimitError:``), never by
+    # an arbitrary word (``Note:``).
+    re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\s*-\s*[{\[<]', re.IGNORECASE),
+    # The engine's LLM layer reports a provider failure as the answer itself:
+    # ``**LLM error** — ValueError: An error occurred with the API.``
+    # (llm_base.py), and the RocketRide agent as ``LLM error: <exception>``.
+    # Prose that opens ``LLM error — this means...`` has no exception name.
+    re.compile(r'^\s*\*\*LLM error\*\*\s*[—–-]\s*\w+:'),
+    re.compile(r'^\s*(?:\*\*)?LLM error(?:\*\*)?:'),
+    # ...and the sentence a provider's mapped exception carries (``the API``,
+    # ``the OpenAI API``, ``the Baidu Qianfan API``), only as the whole answer:
+    # an answer that opens with it and goes on to explain it is posted.
+    re.compile(r'^\s*(?:\w+Error:\s*)?an error occurred with the[\w ]{0,41}? api\.?\s*$', re.IGNORECASE),
+)
+
+# Openings that are usually a failure but may open a real answer
+# (``Error: ENOENT means...``): an ``Error:`` / ``Exception:`` label, one named
+# after an exception (``ValueError:``), or a bare provider status. Counted only
+# when the caller asks for them (with ``sanitizeReplies`` on).
+_GENERIC_ERROR_SIGNATURES = (
+    re.compile(r'^\s*\w*(?:Exception|Error)\s*:', re.IGNORECASE),
+    re.compile(r'^\s*(?:\w*(?:Error|Exception)\s*:\s*)?Error code:\s*\d{3}\b', re.IGNORECASE),
+)
+
 # Chunk numbering: each chunk ends with '\n\n*(3/7)*' when it is turned on.
 _CHUNK_LABEL_OVERHEAD = len('\n\n*(/)*')
+
+# Prefix added to a capped transcript so the reader knows the head was dropped.
+_TRANSCRIPT_TRUNCATION_PREFIX = '…\n'
 
 # Suffix marking a folded attachment whose tail was dropped at the char cap.
 _ATTACHMENT_TRUNCATION_SUFFIX = '\n… (truncated)'
@@ -510,6 +602,79 @@ def should_process_message(
     return True
 
 
+def format_thread_transcript(
+    entries: Iterable[Tuple[str, str]],
+    max_chars: int = THREAD_HISTORY_MAX_CHARS,
+) -> str:
+    """Render prior thread messages as a plain ``<name>: <content>`` transcript.
+
+    One entry per message, oldest first, and a tail-capped result prefixed
+    with an ellipsis line when
+    the transcript is longer than ``max_chars`` (keeping the most recent
+    context, which is what the agent needs); the cut never leaves part of a
+    message at the top, unless that part is all there is. Each message is clipped to
+    :data:`THREAD_HISTORY_MESSAGE_MAX_CHARS`, a code block left open (by the
+    clip or by the message itself) is closed, and its continuation lines, after any line break, are
+    indented, so only the first line of a message starts with a speaker name:
+    one user cannot forge lines from another speaker, the bot included.
+
+    Args:
+        entries: ``(author_name, content)`` pairs, already ordered oldest first
+            and already filtered (no system messages, no empty content).
+        max_chars: Maximum transcript length before the head is dropped.
+
+    Returns:
+        str: The transcript, or '' when there is nothing to show.
+    """
+    lines: List[str] = []
+    for name, content in entries:
+        text = (content or '').strip()
+        if not text:
+            continue
+        if len(text) > THREAD_HISTORY_MESSAGE_MAX_CHARS:
+            text = text[:THREAD_HISTORY_MESSAGE_MAX_CHARS] + '…'
+        # A block left open (by the clip, or by the message itself) would put
+        # every later line in it.
+        if text.count('```') % 2:
+            text += '\n```'
+        # Every line break (``\r``, U+2028 and the rest too), so none of them
+        # can start a line that reads as another speaker's.
+        lines.append(f'{name}: ' + _TRANSCRIPT_CONTINUATION.join(text.splitlines()))
+    out = '\n'.join(lines)
+    if max_chars > 0 and len(out) > max_chars:
+        tail = out[-max_chars:]
+        on_line_start = out[-max_chars - 1] == '\n' and not tail.startswith(_TRANSCRIPT_CONTINUATION[1:])
+        if not on_line_start:
+            # The cut landed inside a message: start at the next speaker line.
+            start = _SPEAKER_LINE_START.search(tail)
+            if start is not None and tail[start.end() :]:
+                tail = tail[start.end() :]
+        out = _TRANSCRIPT_TRUNCATION_PREFIX + tail
+    return out
+
+
+def with_thread_context(content: str, transcript: str) -> str:
+    """Frame the latest message plus its thread transcript for the pipeline.
+
+    Returns ``content`` unchanged when there is no transcript, so a brand-new
+    thread is a no-op. A message with no text of its own (only attachments,
+    folded in after this framing) is named as such, so the model still reads
+    the history it follows on from.
+
+    Args:
+        content (str): The user's latest message text (may be empty).
+        transcript (str): The formatted transcript (see
+            :func:`format_thread_transcript`).
+
+    Returns:
+        str: The text to hand to the pipeline.
+    """
+    if not transcript:
+        return content
+    latest = content or '(no text; see the attached files below)'
+    return f"User's latest message: {latest}\n\nEarlier in this thread (oldest first, for context):\n{transcript}"
+
+
 def attachment_kind(mime_type: str) -> str:
     """Name the modality of an attachment as the merged question refers to it.
 
@@ -603,7 +768,7 @@ def compose_merged_question(user_text: str, blocks: Sequence[str]) -> str:
     """Join the user's words and the folded attachment blocks into one question.
 
     Args:
-        user_text (str): The user's message.
+        user_text (str): The user's message (already carrying thread context).
         blocks (Sequence[str]): Folded blocks, in the order they should appear.
 
     Returns:
@@ -618,6 +783,369 @@ def compose_merged_question(user_text: str, blocks: Sequence[str]) -> str:
     if user_text:
         return '\n\n'.join([user_text, *parts])
     return '\n\n'.join([NO_MESSAGE_FRAMING, *parts])
+
+
+def find_marker(text: str, markers: Sequence[str]) -> Optional[str]:
+    """Return the first configured escalation marker present in ``text``.
+
+    The markers are a configured list (plus the outbound-allowlisted role
+    mentions). A marker counts only as a whole word (``ESCALATED`` is not found in ``NOTESCALATED``;
+    an edge that is punctuation, as in ``<@&id>``, needs no boundary) and only
+    outside code (a fenced block or an inline backtick span).
+
+    Args:
+        text (str): The text to inspect (typically a pipeline answer).
+        markers (Sequence[str]): The effective escalation markers.
+
+    Returns:
+        Optional[str]: The first marker found, in configured order, else None.
+    """
+    if not text:
+        return None
+    for marker in markers or ():
+        if not marker:
+            continue
+        lead = r'(?<![\w/])' if re.match(r'\w', marker[0]) else ''
+        trail = r'(?!\w)' if re.match(r'\w', marker[-1]) else ''
+        pattern = re.compile(lead + re.escape(marker) + trail)
+        if _outside_code_fences(text, pattern.finditer(text)):
+            return marker
+    return None
+
+
+def looks_like_error(text: str, generic: bool = True) -> bool:
+    """Whether this "answer" is really an engine or model failure.
+
+    Counts the engine and provider failure shapes: an API error sentence, a
+    traceback, an engine stack frame, a provider status such as
+    ``Error code: 429 - {...}`` and,
+    when ``generic`` is on, a reply that opens with ``Exception:`` /
+    ``Error:`` / ``<Name>Error:`` or a bare ``Error code: 429``. The caller
+    suppresses these instead of relaying them to Discord.
+
+    Both the reply and the final text an agent wrapped in it (the last
+    ``Final Answer:``, or a ``{"type": "final"}`` envelope) are checked, so a
+    wrapped error is caught however the reply is posted.
+
+    Args:
+        text (str): The candidate reply.
+        generic (bool): Also count the generic error-shaped openings, which a
+            real answer may start with; off, only engine and provider
+            failures count.
+
+    Returns:
+        bool: True when the text is a failure rather than an answer.
+    """
+    if not text:
+        return False
+    patterns = _ERROR_SIGNATURES + (_GENERIC_ERROR_SIGNATURES if generic else ())
+    candidates = [text]
+    final, _found = _extract_final(text)
+    if final and final != text:
+        candidates.append(final)
+    for candidate in candidates:
+        candidate = _CODE_FENCE.sub(_CODE_PLACEHOLDER, candidate)
+        if any(pattern.search(candidate) for pattern in patterns):
+            return True
+    return False
+
+
+def _outside_code_fences(text: str, matches) -> list:
+    """Keep only the regex matches that do not start inside code.
+
+    Code is a fenced block or an inline backtick span.
+
+    Args:
+        text (str): The text the matches were found in.
+        matches: The ``re.Match`` objects, in any order.
+
+    Returns:
+        list: The matches outside code, in their original order.
+    """
+    fences = [fence.span() for fence in _CODE.finditer(text)]
+    return [match for match in matches if not any(start <= match.start() < end for start, end in fences)]
+
+
+def _is_scratchpad(text: str) -> bool:
+    """Whether a reply is raw agent scratchpad rather than an answer.
+
+    It opens with ``Thought:`` or ``Action Input:``, or holds a tool call (an
+    ``Action:`` line with ``Action Input:`` on the next non-blank line) outside
+    code.
+
+    Args:
+        text (str): The reply.
+
+    Returns:
+        bool: True when the reply is scratchpad.
+    """
+    if _OPENS_AS_SCRATCHPAD.match(text):
+        return True
+    return bool(_outside_code_fences(text, _REACT_STEP.finditer(text)))
+
+
+def _alias_pattern(alias: str) -> Optional['re.Pattern']:
+    """The regex that finds the team alias in an answer, or None for no alias.
+
+    Case-insensitive, and whitespace inside the alias matches any run of
+    whitespace, so a line break between the words still hits. Only a whole
+    word counts: not inside a longer word (``Support`` in ``supportive``) or a
+    URL path (``/support/``).
+
+    Args:
+        alias (str): The configured team alias.
+
+    Returns:
+        Optional[re.Pattern]: The compiled pattern, or None when the alias is
+            empty or only whitespace.
+    """
+    tokens = [re.escape(token) for token in (alias or '').split()]
+    if not tokens:
+        return None
+    return re.compile(r'(?<![\w/])' + r'\s+'.join(tokens) + r'(?!\w)', re.IGNORECASE)
+
+
+def contains_alias(text: str, alias: str) -> bool:
+    """Whether ``text`` names the team alias where it would be injected.
+
+    Args:
+        text (str): The answer.
+        alias (str): The configured alias (empty never matches).
+
+    Returns:
+        bool: True when :func:`inject_role_mention` would replace something.
+    """
+    pattern = _alias_pattern(alias)
+    if not text or pattern is None:
+        return False
+    return bool(_outside_code_fences(text, pattern.finditer(text)))
+
+
+def inject_role_mention(text: str, alias: str, role_mention: str) -> str:
+    """Turn the literal team name the model wrote into a real role mention.
+
+    The agent is prompted to hand off to "@RocketRide team", which Discord
+    renders as plain text and
+    pings nobody. Matching is case-insensitive, and whitespace inside the alias
+    matches any run of whitespace so a line break between the words still hits.
+    Only whole-word occurrences outside code (fenced or inline) are replaced, since
+    each replacement garbles the text it hits and sends a real ping.
+
+    Args:
+        text (str): The pipeline answer.
+        alias (str): The configured literal alias (empty disables this).
+        role_mention (str): The ``<@&id>`` mention to substitute.
+
+    Returns:
+        str: The answer with every occurrence of the alias replaced.
+    """
+    if not text or not alias or not role_mention:
+        return text
+    pattern = _alias_pattern(alias)
+    if pattern is None:
+        return text
+    outside = {match.start() for match in _outside_code_fences(text, pattern.finditer(text))}
+    # A function, not the string itself: a replacement is a template, and a
+    # backslash in it would otherwise be read as a group reference.
+    return pattern.sub(lambda match: role_mention if match.start() in outside else match.group(0), text)
+
+
+def _handoff_marker(scratchpad: str, markers: Sequence[str], alias: str) -> Optional[str]:
+    """The escalation marker on a scratchpad's final hand-off line, if any.
+
+    Only the last non-empty line counts, and only when it is not itself a
+    reasoning line: a ``Thought:`` that merely names the team ("I could hand
+    off to the team, but...") is not a hand-off.
+
+    Args:
+        scratchpad (str): A reply recognised as scratchpad.
+        markers (Sequence[str]): The effective escalation markers.
+        alias (str): The team alias, which also counts as a marker here.
+
+    Returns:
+        Optional[str]: The marker found (the alias as configured, with its
+            whitespace collapsed, when only the alias is there), else None.
+    """
+    lines = [line for line in scratchpad.split('\n') if line.strip()]
+    if not lines or _OPENS_WITH_REASONING.match(lines[-1]):
+        return None
+    last = lines[-1]
+    marker = find_marker(last, markers)
+    if marker:
+        return marker
+    pattern = _alias_pattern(alias)
+    if pattern is not None and pattern.search(last):
+        return ' '.join(alias.split())
+    return None
+
+
+def _extract_final(text: str) -> Tuple[str, bool]:
+    """The final text an agent wrapped its answer in, else the reply itself.
+
+    Unwraps a ``{"type": "final", "content": "..."}`` envelope (when it is the
+    whole reply, or the end of a reply that opens as scratchpad), then keeps
+    only what follows the LAST ``Final Answer:`` outside code (when non-empty).
+
+    Args:
+        text (str): The raw pipeline answer.
+
+    Returns:
+        Tuple[str, bool]: The stripped text, and whether an envelope or a
+            non-empty ``Final Answer:`` supplied it.
+    """
+    result = (text or '').strip()
+    if not result:
+        return result, False
+    found = False
+
+    envelope = _FINAL_JSON.search(result)
+    if envelope and (
+        envelope.end() != len(result) or (envelope.start() != 0 and not _is_scratchpad(result[: envelope.start()]))
+    ):
+        envelope = None
+    if envelope:
+        captured = envelope.group(1)
+        try:
+            # Not strict: a model often writes a raw newline inside the content.
+            result = json.loads(f'"{captured}"', strict=False)
+        except ValueError:
+            # An envelope we cannot decode still told us where the answer is.
+            result = captured
+        result = result.strip()
+        found = True
+        if not result:
+            return result, found
+
+    marks = _outside_code_fences(result, _FINAL_ANSWER.finditer(result))
+    if marks:
+        after = result[marks[-1].end() :].strip()
+        if after:
+            result = after
+            found = True
+    return result, found
+
+
+def handoff_part(text: str) -> Tuple[str, str, str]:
+    """Split a reply around the part of it that may hand the conversation over.
+
+    A reply that opens with ``Thought:`` or ``Action Input:``, or holds an
+    ``Action:`` / ``Action Input:`` tool call outside code, is a raw scratchpad: only its
+    final text (after the last ``Final Answer:``, or inside a final JSON
+    envelope) may name the team or carry an escalation marker, since a
+    ``Thought:`` that names the team is not a hand-off. Any other reply may
+    hand off anywhere.
+
+    Args:
+        text (str): The reply as it will be posted.
+
+    Returns:
+        Tuple[str, str, str]: ``(head, part, tail)`` with
+            ``head + part + tail == text``; ``part`` is '' when a scratchpad
+            has no final text.
+    """
+    text = text or ''
+    if not _is_scratchpad(text):
+        return '', text, ''
+    start, end, found = 0, len(text), False
+    envelope = _FINAL_JSON.search(text)
+    if envelope and not text[envelope.end() :].strip():
+        start, end = envelope.span(1)
+        found = True
+    final = text[start:end]
+    marks = _outside_code_fences(final, _FINAL_ANSWER.finditer(final))
+    if marks and final[marks[-1].end() :].strip():
+        start += marks[-1].end()
+        found = True
+    if not found or not text[start:end].strip():
+        return text, '', ''
+    return text[:start], text[start:end], text[end:]
+
+
+def sanitize_reply(text: str, markers: Sequence[str], alias: str = '') -> str:
+    """Strip leaked agent scratchpad from a reply before it is posted.
+
+    In order:
+
+    - unwrap a ``{"type": "final", "content": "..."}`` envelope;
+    - keep only what follows the LAST ``Final Answer:`` (when non-empty);
+    - if the result still opens with ``Thought:`` or ``Action Input:``, or
+      holds an ``Action:`` / ``Action Input:`` tool call outside code, it is
+      scratchpad, not an answer: when it came from a ``Final Answer:`` or envelope and its final
+      line (the last non-empty one, not itself a reasoning line) carries an
+      escalation marker it becomes a short hand-off line that keeps the
+      marker, otherwise it becomes '' so nothing is posted. A scratchpad with
+      no final answer is never a hand-off: its last line may be tool output
+      (an ``Observation:`` that names the team), not the agent handing off.
+
+    The team alias is not turned into a role mention here: the caller does that
+    on the text it finally posts, so reasoning that names the team never pings.
+
+    Args:
+        text (str): The raw pipeline answer.
+        markers (Sequence[str]): The effective escalation markers.
+        alias (str): The team alias, counted as a marker on the hand-off line.
+
+    Returns:
+        str: The reply to post, or '' when there is no real answer.
+    """
+    result, found = _extract_final(text)
+    if not result:
+        return result
+
+    if _is_scratchpad(result):
+        if not found:
+            return ''
+        marker = _handoff_marker(result, markers, alias)
+        if marker:
+            return f"Thanks for flagging this — I've looped in the team to take a look. {marker}"
+        return ''
+    return result
+
+
+def is_aimed_at_someone_else(
+    *,
+    is_bot_mentioned: bool,
+    mentioned_user_ids: Sequence[str],
+    bot_user_id: Optional[str],
+    role_mention_count: int,
+    is_reply: bool,
+    reply_target_is_bot: Optional[bool] = None,
+    reply_target_is_author: Optional[bool] = None,
+) -> bool:
+    """Decide whether a message is addressed to somebody other than the bot.
+
+    A direct mention of the bot always wins; otherwise a mention of another user or any role, or
+    a reply to a message the bot did not author, means the message belongs to
+    someone else's conversation. A reply to the author's own earlier message
+    (a common way to add details) is not.
+
+    Args:
+        is_bot_mentioned: Whether the bot is directly @mentioned.
+        mentioned_user_ids: The mentioned user ids, as strings.
+        bot_user_id: The bot's own user id as a string, or None if unknown.
+        role_mention_count: How many roles the message mentions.
+        is_reply: Whether the message replies to another message.
+        reply_target_is_bot: Whether the replied-to message is the bot's, or
+            None when it could not be fetched.
+        reply_target_is_author: Whether the replied-to message was written by
+            the author of this message, or None when it could not be fetched.
+
+    Returns:
+        bool: True when the message should be acknowledged rather than answered.
+    """
+    if is_bot_mentioned:
+        return False
+    mentions_others = any(str(user_id) != str(bot_user_id) for user_id in mentioned_user_ids or ()) or (
+        role_mention_count > 0
+    )
+    if not mentions_others and not is_reply:
+        return False
+    if is_reply and reply_target_is_bot:
+        return False
+    if is_reply and reply_target_is_author:
+        # Adding details to your own message; a mention still aims it elsewhere.
+        return mentions_others
+    return True
 
 
 def guess_media_type(filename: str, content_type: str = '') -> str:

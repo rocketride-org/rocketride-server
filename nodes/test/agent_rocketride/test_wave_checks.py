@@ -28,9 +28,6 @@ CHECK_ARGS = '{"target": "app"}'
 class _Host:
     """The driver side of call_tool. Every tool returns the same result, and "broken" raises."""
 
-    def __init__(self):
-        self.seen_results = {}
-
     def call_tool(self, context, tool, args):
         if tool == 'broken':
             raise RuntimeError('tool is down')
@@ -42,14 +39,14 @@ def _call(tool, **args):
 
 
 def _run_steps(wave, steps, **checks):
-    """Run each step through execute_wave with one run's call history, and return all the results in order."""
-    host, seen_calls = _Host(), {}
+    """Run each step through execute_wave with one run's state, and return all the results in order."""
+    host, state = _Host(), wave.run_state.RunState()
     context = SimpleNamespace(memory=SimpleNamespace(put=lambda key, value: {'ok': True}))
     run = wave.executor.execute_wave
     return [
         r
         for i, calls in enumerate(steps)
-        for r in run(calls, agent_base=host, context=context, wave_name=f'wave-{i}', seen_calls=seen_calls, **checks)
+        for r in run(calls, agent_base=host, context=context, wave_name=f'wave-{i}', state=state, **checks)
     ]
 
 
@@ -276,11 +273,12 @@ def test_a_done_reply_that_is_sent_back_keeps_its_fingerprints(wave, monkeypatch
         'tool_calls': [_call('broken')],
         'remove': ['wave-0.r0'],
     }
-    replies = iter([read, done])
+    replies, runs = iter([read, done]), []
 
-    def run(calls, agent_base, wave_name, **kw):
+    def run(calls, wave_name, state, **kw):
+        runs.append(state)
         if wave_name == 'wave-0':
-            agent_base.seen_results['read-a'] = 'wave-0.r0'
+            state.seen_results['read-a'] = 'wave-0.r0'
             return [{'tool': 'workspace.read', 'key': 'wave-0.r0', 'summary': 'ok: true'}]
         return [{'tool': 'broken', 'key': f'{wave_name}.r0', 'error': 'tool is down'}]
 
@@ -291,10 +289,13 @@ def test_a_done_reply_that_is_sent_back_keeps_its_fingerprints(wave, monkeypatch
     driver.sendSSE = lambda *a, **kw: None
     driver._synthesize = lambda **kw: 'synthesized'
 
-    answer, _ = driver._run(context=SimpleNamespace(run_id='run-1'), question=None)
+    context = wave.rocketride_agent.AgentContext(
+        invoker=None, llm=None, tools=None, memory=None, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+    )
+    answer, _ = driver._run(context=context, question=None)
 
     assert answer == 'synthesized', 'a failed call sends the done reply back'
-    assert driver.seen_results == {'read-a': 'wave-0.r0'}
+    assert runs[-1].seen_results == {'read-a': 'wave-0.r0'}
 
 
 def test_a_check_tool_that_is_not_connected_stops_the_run(wave, monkeypatch):

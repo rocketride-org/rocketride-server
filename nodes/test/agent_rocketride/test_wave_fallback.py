@@ -217,7 +217,10 @@ def test_a_planning_error_with_notes_still_gets_an_answer(wave, driver, monkeypa
     driver._max_waves = 3
     driver._synthesize = lambda **kw: f'answered from: {kw["scratch"]}'
 
-    answer, trace = driver._run(context=SimpleNamespace(run_id='run-1'), question=None)
+    context = wave.rocketride_agent.AgentContext(
+        invoker=None, llm=None, tools=None, memory=None, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+    )
+    answer, trace = driver._run(context=context, question=None)
 
     assert answer == 'answered from: src/App.css has 4 CSS rules.'
     assert trace['stop_reason'] == 'error'
@@ -232,11 +235,15 @@ def test_a_reply_cannot_remove_the_result_its_own_call_gets(wave, driver, monkey
     reply = {'done': False, 'tool_calls': [{'tool': 'workspace.read', 'args': {}}], 'remove': ['wave-0.r0']}
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: reply)
     monkeypatch.setattr(wave.rocketride_agent, 'execute_wave', lambda calls, **kw: [dict(READ)])
-    memory, seen = FakeMemory({'wave-0.r0': {'path': 'src/App.css'}}), {}
+    memory, seen = FakeMemory(), {}
     driver._max_waves = 1
-    driver._synthesize = lambda **kw: seen.update(kw) or 'synthesized'
+    # The run clears its own keys when it ends, so look at what was cleared before the answer.
+    driver._synthesize = lambda **kw: seen.update(kw, cleared=list(memory.cleared)) or 'synthesized'
+    context = wave.rocketride_agent.AgentContext(
+        invoker=None, llm=None, tools=None, memory=memory, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+    )
 
-    driver._run(context=SimpleNamespace(run_id='run-1', memory=memory), question=None)
+    driver._run(context=context, question=None)
 
-    assert memory.cleared == []
+    assert seen['cleared'] == []
     assert seen['waves'][0]['results'] == [READ]

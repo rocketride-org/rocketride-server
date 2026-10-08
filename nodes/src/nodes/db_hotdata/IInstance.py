@@ -211,6 +211,15 @@ class SqlStatementError(RuntimeError):
     """
 
 
+class MissingLlmError(RuntimeError):
+    """A natural-language question reached the node with no llm connected.
+
+    The llm connection is optional: only questions use it, while raw SQL through
+    ``execute`` never does. Its own type so ``writeQuestions`` can route this
+    configuration error to the caller even when no text/answers lane is wired.
+    """
+
+
 class RunInterrupted(RuntimeError):
     """Hotdata interrupted the run before it finished; the statement is untouched.
 
@@ -838,6 +847,15 @@ ORDER BY table_schema, table_name, ordinal_position"""
         lanes = self.instance.getListeners()
         try:
             result = self.get_data({'question': question_text})
+        except MissingLlmError as e:
+            # A configuration error: on the text/answers lanes when one is wired,
+            # otherwise through the engine's error path (a table-only pipeline
+            # has no lane that carries an error message).
+            error(f'db_hotdata: error handling question: {e}')
+            if 'text' not in lanes and 'answers' not in lanes:
+                raise
+            self._emitError(str(e), lanes)
+            return
         except Exception as e:
             error(f'db_hotdata: error handling question: {e}')
             self._emitError(str(e), lanes)
@@ -974,7 +992,26 @@ ORDER BY table_schema, table_name, ordinal_position"""
         previous_sql: str = '',
         previous_error: str = '',
     ) -> str:
-        """Translate a question to SQL with the bound LLM."""
+        """Translate a question to SQL with the bound LLM.
+
+        Args:
+            question_text (str): The natural-language question.
+            limit (int): Row limit the generated SQL must apply.
+            previous_sql (str): SQL rejected on the previous attempt, if any.
+            previous_error (str): Why that SQL was rejected.
+
+        Returns:
+            str: The generated SQL, without markdown fences.
+
+        Raises:
+            MissingLlmError: No LLM is connected to the node.
+            RuntimeError: The LLM returned no query.
+        """
+        if not self.instance.getControllerNodeIds('llm'):
+            raise MissingLlmError(
+                'No LLM is connected to this Hotdata node. Natural-language questions need an llm '
+                'connection; raw SQL through the execute tool (client.database.query) works without one.'
+            )
         glb = self.IGlobal
 
         q = Question(role='You are a Hotdata SQL query generator.')

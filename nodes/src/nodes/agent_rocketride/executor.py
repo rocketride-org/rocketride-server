@@ -28,8 +28,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextvars import copy_context
 from typing import AbstractSet, Any, Dict, List, Optional, Tuple
 
@@ -41,14 +44,19 @@ from ai.common.agent import AgentBase, AgentContext
 from ai.common.schema import Question
 
 from .formatters import format_data
+from .run_state import RunState
 
 # Maximum number of concurrent tool executions per wave.  Keeping this at 8
 # prevents runaway thread counts when the LLM issues many parallel calls.
 _MAX_WORKERS = 8
 
-# Hard timeout per individual tool call (seconds).  Prevents a slow external
-# API from blocking the entire wave indefinitely.
-_TOOL_TIMEOUT_S = 120
+# Time limit per tool call (seconds), counted from when the call starts, used when
+# the node does not set tool_timeout. Prevents a slow external API from blocking
+# the entire wave indefinitely: the call is reported as timed out and the wave
+# moves on. Five minutes covers most slow tools; a node whose tools are meant to run
+# longer raises tool_timeout (tool_python allows scripts up to 1,200 s, and another
+# agent called as a tool makes many model calls).
+_TOOL_TIMEOUT_S = 300
 
 # Indentation used when rendering nested structures.
 _INDENT = '  '
@@ -803,6 +811,10 @@ def _describe_dict(
 _MISSING = object()
 
 
+class _MissingRef(LookupError):
+    """A tool argument that is one whole {{memory.ref}} tag names a key that is not stored."""
+
+
 def _memory_get(key: str, context: AgentContext) -> Any:
     """Fetch a raw value from the memory store.
 
@@ -885,7 +897,10 @@ def _resolve_refs(
             path = exact.group(3)
             v = _memory_get(key, context)
             if v is _MISSING:
-                return None
+                # A tool must not run on data that is not there (the model removed the
+                # key, mistyped it, or the call that stored it timed out). A whole
+                # answer that is one tag never gets here: resolve_answer_refs marks it.
+                raise _MissingRef(f'{{{{memory.ref:{key}}}}} names no stored key, so the call did not run')
             # Apply JMESPath extraction before formatting so format receives
             # the narrowed slice, not the full stored object.
             if path:
@@ -1170,13 +1185,21 @@ def _with_call(
     return shown
 
 
+class _Unstored:
+    """A tool's raw result, not yet stored: the wave decides whether it still wants it."""
+
+    __slots__ = ('result',)
+
+    def __init__(self, result: Any):
+        self.result = result
+
+
 def _store_and_preview(
     tool: str,
     key: str,
     result: Any,
     context: AgentContext,
-    agent_base: AgentBase,
-    is_check: bool = False,
+    seen: Optional[Dict[str, str]],
 ) -> Dict[str, Any]:
     """Store *result* in memory under *key* and return a compact summary dict.
 
@@ -1193,6 +1216,7 @@ def _store_and_preview(
     A result identical to one already stored this run also carries `deduplicated`
     and a `note` naming the earlier key. It signals, it never blocks: repeating a
     call is often legitimate, so the call still ran and the result is still stored.
+    *seen* is this run's map of result fingerprints to keys (None skips the check).
     """
     try:
         context.memory.put(key, result)
@@ -1204,13 +1228,25 @@ def _store_and_preview(
     if _reports_failure(result):
         entry['failed'] = True
 
-    seen = getattr(agent_base, 'seen_results', None)
-    if seen is None or is_check:
-        return entry  # a check that passes again is news, not a repeat
+    if seen is None:
+        return entry
+    return _note_duplicate(entry, _result_fingerprint(result), seen)
 
-    fingerprint = _result_fingerprint(result)
+
+def _note_duplicate(entry: Dict[str, Any], fingerprint: Optional[str], seen: Dict[str, str]) -> Dict[str, Any]:
+    """Record a stored result's fingerprint; flag *entry* if an earlier key holds the same result.
+
+    Args:
+        entry: The result entry for the call, with its ``key``.
+        fingerprint: The result's fingerprint, or None if it could not be computed.
+        seen: This run's map of result fingerprints to keys.
+
+    Returns:
+        *entry*, with ``deduplicated`` and a ``note`` added when the result is a repeat.
+    """
     if fingerprint is None:
         return entry
+    key = entry['key']
 
     # A wave runs its calls on a thread pool, so two identical results can both read
     # an empty slot and neither would be flagged. setdefault is atomic and gives the
@@ -1239,8 +1275,8 @@ def _execute_wave_calls(
     agent_base: AgentBase,
     context: AgentContext,
     wave_name: str = 'wave-0',
-    seen_calls: Optional[Dict[str, str]] = None,
-    removed: AbstractSet[str] = frozenset(),
+    state: Optional[RunState] = None,
+    timeout: Optional[float] = None,
     check_tool: str = '',
     check_args: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
@@ -1253,6 +1289,16 @@ def _execute_wave_calls(
     Results are returned in the same order as *wave* regardless of completion
     order — the pre-allocated results list and index mapping guarantee ordering
     even when futures complete out of sequence.
+
+    Each call gets *timeout* seconds (default _TOOL_TIMEOUT_S; 0 means no limit)
+    from when it starts, and resolving its
+    arguments and storing its result count as part of the call. A call that runs
+    longer is reported as timed out and the wave goes on without it; a tool whose
+    arguments took the whole time to resolve is never started. Python cannot
+    stop a running thread, so the call finishes in the background, and its result
+    is then dropped: it is cleared from memory if it got there, and never reaches
+    the run's duplicate tracking. Such calls are recorded in the run's state, and
+    the run waits for every one before it ends (see run_state.BackgroundCalls).
     """
     if not wave:
         return []
@@ -1261,8 +1307,42 @@ def _execute_wave_calls(
     # the key assignment is deterministic and order-preserving.
     tagged: List[Dict[str, Any]] = [{**call, '_key': _auto_key(wave_name, i)} for i, call in enumerate(wave)]
 
-    def _run_one(call: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a single tool call and return a result dict that also shows the call."""
+    # This run's duplicate tracking; never the driver's, which every run shares.
+    seen_results = state.seen_results if state is not None else None
+    seen_calls = state.seen_calls if state is not None else None
+    removed = state.removed if state is not None else frozenset()
+
+    # When each call started, set by the worker thread that runs it. A call that
+    # is queued behind a full pool has not started, so its clock has not either.
+    started: Dict[int, float] = {}
+
+    # How each call ended: its worker published the result ('done'), or the wave gave
+    # up on it ('abandoned'). Decided under the lock, so exactly one wins, and a call
+    # the wave gave up on can never publish a late result. While a worker stores a
+    # result the call is 'storing': storing can hang too, so the wave can still give up.
+    # The lock is only ever held for these few lines, never across a tool or a store.
+    settled: Dict[int, str] = {}
+    lock = threading.Lock()
+    limit = _TOOL_TIMEOUT_S if timeout is None else timeout
+    if not limit or limit <= 0:
+        limit = math.inf  # the node turned the limit off
+    timed_out = f'TimeoutError: no result after {limit:g} s'
+
+    def _expired(idx: int) -> bool:
+        """True when the call has used its time. Call with the lock held."""
+        return time.monotonic() >= started[idx] + limit
+
+    def _run_one(call: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
+        """Execute a single tool call and return a result dict that also shows the call.
+
+        Returns None when the wave gave up on this call: it never ran, or its result
+        is dropped.
+        """
+        with lock:
+            if idx in settled:
+                # Reported as not run while it waited for a worker: keep that true.
+                return None
+            started[idx] = time.monotonic()
         tool = call.get('tool', '')
         key = call['_key']
         asked = call.get('args') or {}
@@ -1272,17 +1352,86 @@ def _execute_wave_calls(
         # Resolve any {{memory.ref:...}} template references in the args
         # before passing them to the tool.  This lets the LLM compose tool
         # inputs from previously stored results without extra peek calls.
-        args = _resolve_refs(asked, agent_base=agent_base, context=context)
+        try:
+            args = _resolve_refs(asked, agent_base=agent_base, context=context)
+        except _MissingRef as exc:
+            # Reported like any failed call: the model sees why, and the tool never ran.
+            with lock:
+                if settled.get(idx) == 'abandoned':
+                    return None
+                settled[idx] = 'done'
+            entry = {'tool': tool, 'key': key, 'error': str(exc)}
+            return _with_call(entry, tool, asked, seen_calls, removed, check_tool, check_args)
+
+        # Resolving can take long itself (a custom format asks the model). A tool
+        # the wave gave up on, or whose time is spent, must not start now.
+        with lock:
+            if settled.get(idx) == 'abandoned':
+                return None
+            if _expired(idx):
+                settled[idx] = 'abandoned'
+                return _gave_up(idx, timed_out)
 
         debug(f'rocketride wave execute tool={tool!r} key={key!r}')
-        # The model is shown the arguments as it wrote them, tags and all.
-        is_check = _is_check_call(tool, asked, check_tool, check_args)
-        return _with_call(
-            _call_one(tool, key, args, is_check), tool, asked, seen_calls, removed, check_tool, check_args
-        )
+        outcome = _call_one(tool, key, args)
+        with lock:
+            if settled.get(idx) == 'abandoned':
+                return None
+            settled[idx] = 'storing'
 
-    def _call_one(tool: str, key: str, args: Dict[str, Any], is_check: bool = False) -> Dict[str, Any]:
-        """Run one call (memory.peek locally, anything else through the host)."""
+        fingerprint, stores = None, isinstance(outcome, _Unstored)
+        if stores:
+            # Store the result in memory and return a structural summary.
+            # The summary is what gets injected into the next planning prompt;
+            # the full result stays in memory for later memory.peek access.
+            # Outside the lock: a store that hangs must not stop the wave giving up.
+            raw = outcome.result
+            # Hidden until the wave keeps it: a store can write the value and then
+            # hang, and a result the wave gives up on must never be read.
+            hold = getattr(context.memory, 'hold', None)
+            if hold is not None:
+                hold(key)
+            try:
+                outcome = _store_and_preview(tool, key, raw, context, None)
+            except Exception as exc:
+                outcome = {'tool': tool, 'key': key, 'error': f'{type(exc).__name__}: {exc}'}
+            else:
+                if seen_results is not None and not _is_check_call(tool, asked, check_tool, check_args):
+                    # A check that passes again is news, not a repeat.
+                    fingerprint = _result_fingerprint(raw)
+
+        with lock:
+            # Finished, but too late: the limit covers the whole call, storing included.
+            late = settled[idx] == 'storing' and _expired(idx)
+            if late:
+                settled[idx] = 'abandoned'
+            published = settled[idx] == 'storing'
+            if published:
+                settled[idx] = 'done'
+                # Recorded only now: a result the wave gave up on must not be named
+                # as the earlier copy of a later result.
+                if fingerprint is not None:
+                    outcome = _note_duplicate(outcome, fingerprint, seen_results)
+        if not published:
+            if stores:
+                # The wave gave up while the result was being stored: take it back out.
+                try:
+                    context.memory.clear(key)
+                except Exception as exc:
+                    error(f'rocketride wave could not clear timed-out key={key!r}: {exc}')
+            return _gave_up(idx, timed_out) if late else None
+        publish = getattr(context.memory, 'publish', None) if stores else None
+        if publish is not None:
+            publish(key)
+        # The model is shown the arguments as it wrote them, tags and all.
+        return _with_call(outcome, tool, asked, seen_calls, removed, check_tool, check_args)
+
+    def _call_one(tool: str, key: str, args: Dict[str, Any]) -> Any:
+        """Run one call (memory.peek locally, anything else through the host).
+
+        Returns a result entry, or an _Unstored result for the caller to store once
+        it knows the wave still wants it.
+        """
         try:
             # memory.peek is handled entirely within the executor rather than
             # being routed through the tool pipeline.  Reasons:
@@ -1350,12 +1499,7 @@ def _execute_wave_calls(
             # Regular tool — route through AgentBase.call_tool, which forwards
             # to context.tools.invoke (and ultimately the engine's control-plane
             # invoke seam at the appropriate node).
-            result = agent_base.call_tool(context, tool, args)
-
-            # Store the result in memory and return a structural summary.
-            # The summary is what gets injected into the next planning prompt;
-            # the full result stays in memory for later memory.peek access.
-            return _store_and_preview(tool, key, result, context, agent_base, is_check)
+            return _Unstored(agent_base.call_tool(context, tool, args))
 
         except Exception as exc:
             err_msg = f'{type(exc).__name__}: {exc}'
@@ -1365,31 +1509,128 @@ def _execute_wave_calls(
             return {'tool': tool, 'key': key, 'error': err_msg}
 
     # Cap workers to the actual number of calls — no point spinning up idle threads.
-    n = min(_MAX_WORKERS, len(tagged))
+    # Calls this run gave up on in earlier steps still hold their threads, so they
+    # count against the same limit: without that, every step that times out would
+    # add up to _MAX_WORKERS more threads that never end.
+    held = state.background.running() if state is not None else 0
+    n = min(_MAX_WORKERS - held, len(tagged))
 
     # Pre-allocate the results list so we can place results by index regardless
-    # of which future completes first (as_completed() returns in arbitrary order).
+    # of which future completes first (futures finish in arbitrary order).
     results: List[Any] = [None] * len(tagged)
 
-    with ThreadPoolExecutor(max_workers=n) as pool:
+    def _gave_up(idx: int, why: str) -> Dict[str, Any]:
+        call = tagged[idx]
+        args = call.get('args') if isinstance(call.get('args'), dict) else {}
+        entry = {'tool': call.get('tool', ''), 'key': call['_key'], 'error': why}
+        return _with_call(entry, call.get('tool', ''), args, seen_calls, removed, check_tool, check_args)
+
+    def _abandon(idx: int) -> bool:
+        """Claim a call as given up. False if its result was already published."""
+        with lock:
+            if settled.get(idx) == 'done':
+                return False
+            settled[idx] = 'abandoned'
+            return True
+
+    def _abandon_unstarted(idx: int) -> bool:
+        """Claim a call that has not started as given up. False if a worker started it."""
+        with lock:
+            if idx in started:
+                return False
+            settled[idx] = 'abandoned'
+            return True
+
+    if n <= 0:
+        # Every worker is still held by a call that timed out in an earlier step.
+        why = 'TimeoutError: not run, every worker is held by a call that timed out earlier in this run'
+        return [_gave_up(idx, why) for idx in range(len(tagged))]
+
+    # Not a `with` block: its exit waits for every thread, including a stuck one.
+    pool = ThreadPoolExecutor(max_workers=n)
+    abandoned = []  # futures given up on; a running one still holds its worker
+    future_to_idx = {}
+    finished = False
+    try:
         # Build a future→index mapping so we can place each result correctly.
         # Run each task under a copy of the current context: a raw submit does not
         # propagate context vars, so per-turn LLM usage (llm_adapter._TURN_CALLS) would
         # not reach the open turn's collector and the agent's answer would under-count.
-        future_to_idx = {pool.submit(copy_context().run, _run_one, call): i for i, call in enumerate(tagged)}
-        for future in as_completed(future_to_idx):
-            idx = future_to_idx[future]
-            try:
-                results[idx] = future.result()
-            except Exception as exc:
-                # future.result() should not raise since _run_one catches all
-                # exceptions internally, but handle defensively just in case.
-                call = tagged[idx]
-                results[idx] = {
-                    'tool': call.get('tool', ''),
-                    'key': call['_key'],
-                    'error': f'{type(exc).__name__}: {exc}',
-                }
+        for i, call in enumerate(tagged):
+            future_to_idx[pool.submit(copy_context().run, _run_one, call, i)] = i
+        pending = set(future_to_idx)
+
+        while pending:
+            # A worker held by a call we gave up on stays busy until that call
+            # returns. If every worker is held that way, the calls still queued
+            # can never start: report them now instead of waiting forever.
+            # Both counts can be stale by the time they are used: a stuck call may
+            # return and free its worker meanwhile. So a queued call is only
+            # reported as not run if it is claimed before a worker starts it; one
+            # that did start stays pending with its own deadline.
+            stuck = sum(1 for f in abandoned if not f.done())
+            queued = [f for f in pending if future_to_idx[f] not in started]
+            if queued and stuck >= n:
+                for future in queued:
+                    idx = future_to_idx[future]
+                    if _abandon_unstarted(idx):
+                        future.cancel()  # if a worker picks it up anyway, _run_one skips it
+                        results[idx] = _gave_up(
+                            idx, 'TimeoutError: not run, every worker was held by a call that timed out'
+                        )
+                        pending.discard(future)
+                continue
+
+            # Wait until a call finishes (ours, or a stuck one freeing its worker) or
+            # the next one is due to time out. A call that has not started yet cannot
+            # time out sooner than a full timeout from now, so that bounds the wait
+            # until its real start is known.
+            # A call already published ('done') is only finishing up and cannot time
+            # out any more; counting it would make this wait return at once, again
+            # and again, until its future completes.
+            now = time.monotonic()
+            due = [
+                started.get(future_to_idx[f], now) + limit for f in pending if settled.get(future_to_idx[f]) != 'done'
+            ]
+            remaining = min(due) - now if due else math.inf
+            watch = pending | {f for f in abandoned if not f.done()}
+            done, _ = wait(
+                watch, timeout=None if remaining == math.inf else max(0.0, remaining), return_when=FIRST_COMPLETED
+            )
+            for future in done & pending:
+                idx = future_to_idx[future]
+                pending.discard(future)
+                try:
+                    results[idx] = future.result()
+                except Exception as exc:
+                    # future.result() should not raise since _run_one catches all
+                    # exceptions internally, but handle defensively just in case.
+                    results[idx] = _gave_up(idx, f'{type(exc).__name__}: {exc}')
+
+            now = time.monotonic()
+            for future in list(pending):
+                idx = future_to_idx[future]
+                if idx in started and now >= started[idx] + limit and _abandon(idx):
+                    results[idx] = _gave_up(idx, timed_out)
+                    pending.discard(future)
+                    abandoned.append(future)
+        finished = True
+    finally:
+        if finished:
+            # wait=False: never hold the turn for a call that does not return.
+            pool.shutdown(wait=False, cancel_futures=True)
+            # A call given up on is still inside the engine's invoke. The run waits
+            # for it before it ends, so the engine does not tear the pipeline down
+            # under it.
+            if state is not None:
+                for future in abandoned:
+                    state.background.add(future)
+        else:
+            # The wave itself failed (a worker thread that could not start, say).
+            # submit() queues a call before it starts a worker, so a call whose submit
+            # failed may still be picked up, with no future to track it. Cancel what
+            # has not started and wait for the rest: the run is ending anyway.
+            pool.shutdown(wait=True, cancel_futures=True)
 
     # Filter out any None slots (shouldn't happen, but guards against bugs)
     return [r for r in results if r is not None]
@@ -1401,8 +1642,8 @@ def execute_wave(
     agent_base: AgentBase,
     context: AgentContext,
     wave_name: str = 'wave-0',
-    seen_calls: Optional[Dict[str, str]] = None,
-    removed: AbstractSet[str] = frozenset(),
+    state: Optional[RunState] = None,
+    timeout: Optional[float] = None,
     check_tool: str = '',
     check_args: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
@@ -1418,8 +1659,8 @@ def execute_wave(
             tool invocation through the AgentBase host adapter.
         context: The current agent run context (carries the host channels).
         wave_name: Name prefix for generated memory keys (e.g. ``"wave-0"``).
-        seen_calls: This run's map of call fingerprints to keys (a repeat gets a note).
-        removed: Keys the model removed in this run.
+        state: This run's state, for duplicate-result and repeated-call notes.
+        timeout: Seconds each call may take; None for the default, 0 for no limit.
         check_tool: The configured check tool; the repeat notes leave its check calls alone.
         check_args: The check's fixed arguments (verify_args), or None for any.
 
@@ -1431,8 +1672,8 @@ def execute_wave(
         agent_base=agent_base,
         context=context,
         wave_name=wave_name,
-        seen_calls=seen_calls,
-        removed=removed,
+        state=state,
+        timeout=timeout,
         check_tool=check_tool,
         check_args=check_args,
     )

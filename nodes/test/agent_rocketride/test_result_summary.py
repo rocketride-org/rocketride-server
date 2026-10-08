@@ -64,7 +64,7 @@ def _load_executor():
         # Registered but not executed: the relative imports only need the package to exist.
         sys.modules[_PKG] = importlib.util.module_from_spec(pkg_spec)
 
-        for sub in ('formatters', 'executor'):
+        for sub in ('formatters', 'run_state', 'executor'):
             spec = importlib.util.spec_from_file_location(f'{_PKG}.{sub}', os.path.join(_NODE_DIR, f'{sub}.py'))
             mod = importlib.util.module_from_spec(spec)
             sys.modules[f'{_PKG}.{sub}'] = mod
@@ -280,7 +280,7 @@ def test_a_cyclic_result_is_not_reported_as_an_error():
     result['self'] = result
     context, agent = _FakeContext(), _FakeAgent()
 
-    entry = executor._store_and_preview('drive.list', 'wave-0.r0', result, context, agent)
+    entry = executor._store_and_preview('drive.list', 'wave-0.r0', result, context, agent.seen_results)
 
     assert 'error' not in entry
     assert entry['key'] == 'wave-0.r0'
@@ -295,8 +295,8 @@ def test_fingerprinting_still_flags_a_repeat_of_an_encodable_result():
     context, agent = _FakeContext(), _FakeAgent()
     result = {'rows': [{'a': 1}]}
 
-    first = executor._store_and_preview('drive.list', 'wave-0.r0', result, context, agent)
-    second = executor._store_and_preview('drive.list', 'wave-1.r0', result, context, agent)
+    first = executor._store_and_preview('drive.list', 'wave-0.r0', result, context, agent.seen_results)
+    second = executor._store_and_preview('drive.list', 'wave-1.r0', result, context, agent.seen_results)
 
     assert 'deduplicated' not in first
     assert second['deduplicated'] is True
@@ -314,7 +314,7 @@ def test_a_result_with_unorderable_keys_is_not_reported_as_an_error():
     result = {1: 'first', 'name': 'mixed'}
     context, agent = _FakeContext(), _FakeAgent()
 
-    entry = executor._store_and_preview('db.query', 'wave-0.r0', result, context, agent)
+    entry = executor._store_and_preview('db.query', 'wave-0.r0', result, context, agent.seen_results)
 
     assert 'error' not in entry
     assert context.memory.store['wave-0.r0'] is result
@@ -327,7 +327,7 @@ def test_a_result_with_an_unencodable_key_is_not_reported_as_an_error():
     result = {(1, 2): 'tuple key'}
     context, agent = _FakeContext(), _FakeAgent()
 
-    entry = executor._store_and_preview('db.query', 'wave-0.r0', result, context, agent)
+    entry = executor._store_and_preview('db.query', 'wave-0.r0', result, context, agent.seen_results)
 
     assert 'error' not in entry
     assert context.memory.store['wave-0.r0'] is result

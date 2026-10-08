@@ -61,7 +61,10 @@ mod.actions.push({
 				task.output = 'No explorer-ui test files found';
 				return;
 			}
-			await execCommand('node', ['--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
+			await execCommand('node', ['--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], {
+				task,
+				cwd: APP_ROOT,
+			});
 		},
 	}),
 });

@@ -22,7 +22,11 @@
 # =============================================================================
 
 import asyncio
+import collections
+import concurrent.futures
 import contextlib
+import contextvars
+import functools
 import time
 import json
 import os
@@ -57,16 +61,26 @@ from .capture import CaptureWriter, capture_row, is_valid_source_label
 from .text_utils import (
     _MENTION_WRAPPER,
     _engine_warning,
+    _outside_code_fences,
     _shown_entry,
     attachment_kind,
+    contains_alias,
     chunk_message,
     clip_attachment_text,
     compose_merged_question,
     decode_text_attachment,
+    find_marker,
     fold_binary_answer,
     fold_text_attachment,
+    format_thread_transcript,
     guess_media_type,
+    handoff_part,
+    inject_role_mention,
+    is_aimed_at_someone_else,
+    looks_like_error,
+    sanitize_reply,
     should_process_message,
+    with_thread_context,
 )
 
 # Returned by ``_send_chunk`` in place of a thread when creating the response
@@ -93,6 +107,55 @@ MAX_NO_REPLY_REASON_CHARS = 200
 # attachments in memory until the pipeline answers.
 MAX_CONCURRENT_MESSAGES = 32
 MAX_ATTACHMENT_BYTES = 104857600
+
+# Upper bounds for the support-behavior numbers (the schema declares the same).
+# Each history fetch pages 100 messages at a time, and every backfilled
+# message runs a pipeline at startup, per channel.
+MAX_BACKFILL_LIMIT = 100
+MAX_THREAD_HISTORY_LIMIT = 100
+MAX_THREAD_HISTORY_MAX_CHARS = 20000
+
+# How many handled message ids are remembered. Shared by the live path and
+# backfill, so a message seen by both (or redelivered) is processed once;
+# bounded so a long-running bot does not grow it forever.
+HANDLED_MESSAGE_IDS_LIMIT = 1000
+
+# With teamMentionAlias set, at most one role ping per user (the message
+# author) in this many seconds, across every role in allowedMentionRoleIds.
+# Any user who gets the model to write the alias makes the bot ping the role,
+# so repeats within the window are posted with the alias as plain text and
+# the send withholds every allowed role. In memory only: a restart forgets it.
+TEAM_PING_COOLDOWN_SECONDS = 3600
+
+# A role mention as Discord writes it in message text.
+_ROLE_MENTION = re.compile(r'<@&(\d+)>')
+
+
+def _monotonic() -> float:
+    """``time.monotonic``, behind a name tests can patch without touching asyncio's clock.
+
+    Returns:
+        float: The monotonic clock, in seconds.
+    """
+    return time.monotonic()
+
+
+# Pipeline runs get their own bounded pool (and a semaphore of the same size),
+# so runs that hang cannot take the loop's default pool, which event emits use.
+PIPELINE_WORKERS = 8
+
+# How long shutdown waits for message handlers still running. ``_run`` gives
+# the whole shutdown 10 seconds; a handler stuck in a hung run is cancelled
+# after this so the bot is still closed (its worker thread runs on regardless).
+SHUTDOWN_GRACE_SECONDS = 5
+
+
+class PipelineTimeout(Exception):
+    """A pipeline run took longer than ``pipelineTimeoutSeconds``."""
+
+
+class ShuttingDown(Exception):
+    """A pipeline run was asked for after shutdown began."""
 
 
 # A ``${NAME}`` the engine could not resolve reaches the node as literal text.
@@ -288,7 +351,29 @@ class IEndpoint(IEndpointBase):
     _capture_source_label: str = ''
     _capture_source_setting: str = ''
     _include_member_metadata: bool = False
+    _backfill_limit: int = 0
+    # Support behaviors; all off by default so the node stays generic.
+    _thread_history_limit: int = 0
+    _thread_history_max_chars: int = 6000
+    _escalation_pause: bool = False
+    _escalation_markers: List[str]
+    _team_mention_alias: str = ''
+    _ignore_aimed_at_others: bool = False
+    _ack_emoji: str = ''
+    _feedback_reactions: bool = False
+    _feedback_emojis: List[str]
+    _sanitize_replies: bool = False
+    _non_answer_retries: int = 1
+    _pipeline_timeout_seconds: float = 0
     _config_error: Optional[str] = None
+    # Escalation-pause state for this process: threads gone quiet until the bot
+    # is @mentioned again, and threads whose state was already reconciled with
+    # Discord history. Per-instance (created in _pause_state / _startup).
+    _paused_threads: set
+    _resolved_threads: set
+    # thread id -> [asyncio.Lock, borrowers]; only populated while
+    # ``escalationPause`` is on. Created on demand by _thread_lock.
+    _thread_locks: Dict[str, List[Any]]
     _inflight: set
     _shutdown_event: threading.Event
     # Set to a human-readable message when the Gateway client terminally fails
@@ -593,6 +678,39 @@ class IEndpoint(IEndpointBase):
         self._capture_table = str(config.get('captureTable', '') or 'discord_events')
         self._capture_source_setting = str(config.get('captureSource', '') or '')
         self._include_member_metadata = parse_bool(config.get('includeMemberMetadata'), False)
+        # Zero turns each of these off (a negative value means the same), and
+        # each is clamped to the schema's maximum.
+        self._backfill_limit = max(0, min(MAX_BACKFILL_LIMIT, self._as_int(config.get('backfillLimit'), 0)))
+        self._thread_history_limit = max(
+            0, min(MAX_THREAD_HISTORY_LIMIT, self._as_int(config.get('threadHistoryLimit'), 0))
+        )
+        self._thread_history_max_chars = max(
+            0, min(MAX_THREAD_HISTORY_MAX_CHARS, self._as_int(config.get('threadHistoryMaxChars'), 6000))
+        )
+        self._escalation_pause = parse_bool(config.get('escalationPause'), False)
+        self._escalation_markers = self._as_str_list(
+            config.get('escalationMarkers'), field='escalationMarkers', split=False
+        )
+        # Engine-provided strings may be proxies; this one becomes a regex.
+        self._team_mention_alias = str(config.get('teamMentionAlias', '') or '')
+        self._ignore_aimed_at_others = parse_bool(config.get('ignoreAimedAtOthers'), False)
+        # Engine-provided strings may be proxies; discord.py needs a real str.
+        self._ack_emoji = str(config.get('ackEmoji', '') or '').strip()
+        self._feedback_reactions = parse_bool(config.get('feedbackReactions'), False)
+        self._feedback_emojis = self._as_str_list(
+            config.get('feedbackEmojis', ['✅', '❌']), field='feedbackEmojis', split=False
+        )
+        self._sanitize_replies = parse_bool(config.get('sanitizeReplies'), False)
+        # Clamped to the schema's 0..3; a malformed value falls back to the default.
+        # _as_int, not int(): engine number proxies are string-like with no __int__.
+        self._non_answer_retries = max(0, min(3, self._as_int(config.get('nonAnswerRetries'), 1)))
+        # Off (0) unless set: a pipeline is otherwise waited for as long as it takes.
+        try:
+            self._pipeline_timeout_seconds = max(0.0, float(str(config.get('pipelineTimeoutSeconds') or 0)))
+        except (TypeError, ValueError):
+            self._pipeline_timeout_seconds = 0
+        self._paused_threads = set()
+        self._resolved_threads = set()
         debug(f'Discord _run: token_present={bool(self._bot_token)} reply_mode={self._reply_mode!r}')
 
         # Discover the shared server lazily — node.py assigns its module-level
@@ -669,6 +787,13 @@ class IEndpoint(IEndpointBase):
         self._closing = False
         # Messages past the limit wait for a slot; none are dropped.
         self._message_slots = asyncio.Semaphore(self._max_concurrent_messages)
+        self._backfill_done = False
+        self._handled_message_ids = collections.OrderedDict()
+        self._pipeline_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=PIPELINE_WORKERS, thread_name_prefix='discord-pipeline'
+        )
+        self._pipeline_slots = asyncio.Semaphore(PIPELINE_WORKERS)
+        self._pause_state()
 
         if not self._bot_token:
             # Fail fast: a source with no token can never receive messages, so
@@ -711,6 +836,11 @@ class IEndpoint(IEndpointBase):
 
         @self._bot.event
         async def on_ready():
+            """Report the connected bot in the task's monitor once Discord is ready.
+
+            Returns:
+                None
+            """
             info = {
                 'url-text': 'Discord Bot',
                 'url-link': 'https://discord.com/',
@@ -719,6 +849,9 @@ class IEndpoint(IEndpointBase):
             }
             monitorOther('usr', json.dumps([info]))
             monitorStatus(f'Discord Bot ready - logged in as {self._bot.user}')
+            if self._backfill_limit > 0 and not getattr(self, '_backfill_done', False):
+                self._backfill_done = True
+                await self._run_backfill()
 
         @self._bot.event
         async def on_message(message: discord.Message):
@@ -793,8 +926,10 @@ class IEndpoint(IEndpointBase):
     async def _shutdown(self):
         """Gracefully tear down the Gateway client.
 
-        Awaits in-flight message handlers, closes the bot connection, and
-        cancels the background task. Clears the monitor user-info panel.
+        Awaits in-flight message handlers (for at most
+        :data:`SHUTDOWN_GRACE_SECONDS`, then cancels those still running),
+        closes the bot connection, and cancels the background task. Clears the
+        monitor user-info panel.
 
         Returns:
             None
@@ -804,7 +939,12 @@ class IEndpoint(IEndpointBase):
         self._closing = True
 
         if self._inflight:
-            await asyncio.gather(*self._inflight, return_exceptions=True)
+            _, pending = await asyncio.wait(set(self._inflight), timeout=SHUTDOWN_GRACE_SECONDS)
+            for task in pending:
+                task.cancel()
+            if pending:
+                debug(f'Discord _shutdown: cancelled {len(pending)} message handler(s) still running')
+                await asyncio.gather(*pending, return_exceptions=True)
 
         if self._bot is not None:
             try:
@@ -819,6 +959,12 @@ class IEndpoint(IEndpointBase):
             except asyncio.CancelledError:
                 pass
             self._bot_task = None
+
+        # Without waiting: a hung run would otherwise hold up the shutdown.
+        executor = getattr(self, '_pipeline_executor', None)
+        if executor is not None:
+            executor.shutdown(wait=False)
+            self._pipeline_executor = None
 
         monitorOther('usr')
 
@@ -885,14 +1031,208 @@ class IEndpoint(IEndpointBase):
                 is_mentioned=bool(bot_user is not None and bot_user in message.mentions),
             ):
                 return
+            if not self._mark_handled(message.id):
+                return
 
-            task = asyncio.create_task(self._process_message(message))
+            task = asyncio.create_task(self._process_serialized(message))
             self._inflight.add(task)
             task.add_done_callback(self._inflight.discard)
             if wait:
                 await task
         except Exception as e:
             debug(f'Discord _on_message: EXCEPTION {e}')
+
+    def _mark_handled(self, message_id: Any) -> bool:
+        """Remember a message id; False when it was already handled.
+
+        Keeps only the most recent :data:`HANDLED_MESSAGE_IDS_LIMIT` ids.
+
+        Args:
+            message_id (Any): The Discord message id.
+
+        Returns:
+            bool: True the first time an id is seen, False after that.
+        """
+        handled = getattr(self, '_handled_message_ids', None)
+        if handled is None:
+            handled = self._handled_message_ids = collections.OrderedDict()
+        key = str(message_id)
+        if key in handled:
+            return False
+        handled[key] = True
+        while len(handled) > HANDLED_MESSAGE_IDS_LIMIT:
+            handled.popitem(last=False)
+        return True
+
+    def _thread_lock(self, thread_id: str) -> asyncio.Lock:
+        """Borrow the serialization lock for one thread, creating it on demand.
+
+        Each entry is ``[lock, holders]``; the count is what lets the lock be
+        dropped exactly when nothing holds or waits on it (``Lock.locked()``
+        is already False while a waiter is still being woken, so it cannot
+        answer that on its own).
+
+        Args:
+            thread_id (str): The thread the caller is about to process in.
+
+        Returns:
+            asyncio.Lock: The lock to hold; release it with
+                :meth:`_release_thread_lock`.
+        """
+        locks = getattr(self, '_thread_locks', None)
+        if locks is None:
+            locks = self._thread_locks = {}
+        entry = locks.get(thread_id)
+        if entry is None:
+            entry = locks[thread_id] = [asyncio.Lock(), 0]
+        entry[1] += 1
+        return entry[0]
+
+    def _release_thread_lock(self, thread_id: str):
+        """Give back a borrowed lock, forgetting the thread once it is idle.
+
+        Args:
+            thread_id (str): The thread whose lock was borrowed.
+
+        Returns:
+            None
+        """
+        locks = getattr(self, '_thread_locks', None) or {}
+        entry = locks.get(thread_id)
+        if entry is None:
+            return
+        entry[1] -= 1
+        if entry[1] <= 0:
+            locks.pop(thread_id, None)
+
+    async def _process_serialized(self, message: discord.Message):
+        """Process one message, one at a time per thread when the pause is on.
+
+        ``escalationPause`` pauses a thread only once the escalating answer has
+        been posted. A follow-up that arrived while that answer was still being
+        produced therefore checked a pause that did not exist yet and was
+        answered as well — exactly the second answer the pause exists to
+        prevent. Holding a per-thread lock across the whole handler makes the
+        follow-up see the pause.
+
+        Only threads, and only with ``escalationPause`` on: with it off (the
+        default) nothing is serialized and processing stays as concurrent as it
+        was.
+
+        Args:
+            message (discord.Message): The message to process.
+
+        Returns:
+            None
+        """
+        channel = getattr(message, 'channel', None)
+        if not getattr(self, '_escalation_pause', False) or not isinstance(channel, discord.Thread):
+            await self._process_message(message)
+            return
+
+        thread_id = str(channel.id)
+        lock = self._thread_lock(thread_id)
+        try:
+            async with lock:
+                await self._process_message(message)
+        finally:
+            self._release_thread_lock(thread_id)
+
+    async def _run_backfill(self):
+        """Process the most recent configured messages, oldest first.
+
+        Skipped while ``sendResponses`` is off: with nothing posted, no answer
+        can be seen in the history, so every restart would replay (and emit
+        events for) every message in the window again.
+
+        Returns:
+            None
+        """
+        if not getattr(self, '_send_responses', True):
+            debug('Discord backfill: skipped while sendResponses is off')
+            return
+        try:
+            channels = []
+            if self._channel_ids:
+                for channel_id in self._channel_ids:
+                    # Per entry: one id that is not a number must not end the
+                    # backfill for every channel after it.
+                    try:
+                        channel = self._bot.get_channel(int(channel_id))
+                    except (TypeError, ValueError):
+                        debug(f'Discord backfill: skipping channel id {_shown_entry(str(channel_id))}: not a number')
+                        continue
+                    if channel is not None:
+                        channels.append(channel)
+            else:
+                # Every visible text channel, but only in allowed guilds: the
+                # gate would drop the rest anyway, after their history was read.
+                guild_ids = getattr(self, '_guild_ids', []) or []
+                channels = [
+                    channel
+                    for channel in self._bot.get_all_channels()
+                    if isinstance(channel, discord.TextChannel)
+                    and (not guild_ids or str(getattr(getattr(channel, 'guild', None), 'id', None)) in guild_ids)
+                ]
+        except Exception as e:
+            debug(f'Discord backfill error: {e}')
+            return
+
+        for channel in channels:
+            # Per channel: one the bot cannot read history in (a missing
+            # permission on a single channel is common) must not silently
+            # cancel the backfill for every channel after it.
+            try:
+                messages = [message async for message in channel.history(limit=self._backfill_limit)]
+                answered = self._answered_in_history(messages)
+                for message in reversed(messages):
+                    if str(getattr(message, 'id', None)) in answered:
+                        continue
+                    await self._on_message(message, wait=True)
+            except Exception as e:
+                debug(f'Discord backfill: skipping channel {getattr(channel, "id", "?")}: {e}')
+
+    def _answered_in_history(self, messages: List[Any]) -> set:
+        """Ids in a fetched backfill window that the bot already answered.
+
+        Uses only the window backfill fetched (newest first), so no extra API
+        call is made per message. A message counts as handled when it has a
+        thread, when a bot message in the window replies to it, when it carries
+        a reaction the bot added (an ``aimed_elsewhere`` acknowledgement), or,
+        in channel mode, when the bot posted in the channel after it. The
+        thread and reply checks apply in every reply mode, so changing
+        ``replyMode`` between runs does not answer old messages again.
+
+        Args:
+            messages (List[Any]): The channel history, newest first.
+
+        Returns:
+            set: The ids (as strings) to skip.
+        """
+        bot_user = getattr(getattr(self, '_bot', None), 'user', None)
+        bot_id = getattr(bot_user, 'id', None)
+        reply_mode = getattr(self, '_reply_mode', 'reply')
+        answered = set()
+        seen_bot_post = False
+        for message in messages:
+            author_id = getattr(getattr(message, 'author', None), 'id', None)
+            is_bot = bot_id is not None and author_id == bot_id
+            if is_bot:
+                reference = getattr(message, 'reference', None)
+                replied_to = getattr(reference, 'message_id', None)
+                if replied_to is not None:
+                    answered.add(str(replied_to))
+            if reply_mode == 'channel' and seen_bot_post:
+                answered.add(str(getattr(message, 'id', None)))
+            if getattr(message, 'thread', None) is not None:
+                answered.add(str(getattr(message, 'id', None)))
+            reactions = getattr(message, 'reactions', None)
+            if isinstance(reactions, (list, tuple)) and any(
+                getattr(reaction, 'me', False) is True for reaction in reactions
+            ):
+                answered.add(str(getattr(message, 'id', None)))
+            seen_bot_post = seen_bot_post or is_bot
+        return answered
 
     @staticmethod
     def _question_text(message: discord.Message) -> str:
@@ -1016,7 +1356,8 @@ class IEndpoint(IEndpointBase):
         if getattr(self, '_closing', False):
             return
         bot_user = getattr(getattr(self, '_bot', None), 'user', None)
-        # The node's own reactions are not feedback: emitting them would have
+        # The node's own feedback reactions (feedbackReactions adds ✅/❌ to every
+        # answer it posts) are affordances, not feedback: emitting them would have
         # a subscriber count a user grade on every answer before anyone reacted.
         if bot_user is not None and str(payload.user_id) == str(getattr(bot_user, 'id', None)):
             return
@@ -1101,6 +1442,645 @@ class IEndpoint(IEndpointBase):
             emit.add_done_callback(inflight.discard)
         await emit
 
+    # -------------------------------------------------------------------------
+    # Support behaviors (all opt-in)
+    # -------------------------------------------------------------------------
+
+    def _pause_state(self):
+        """Return the (paused, resolved) thread-id sets, creating them on demand.
+
+        Created lazily so the sets exist however the endpoint was brought up
+        (``_run`` / ``_startup`` in production, direct construction in tests).
+
+        Returns:
+            tuple: ``(paused_thread_ids, resolved_thread_ids)`` as str sets.
+        """
+        if getattr(self, '_paused_threads', None) is None:
+            self._paused_threads = set()
+        if getattr(self, '_resolved_threads', None) is None:
+            self._resolved_threads = set()
+        return self._paused_threads, self._resolved_threads
+
+    def _effective_markers(self) -> List[str]:
+        """The escalation markers that count for pausing and sanitizing.
+
+        The configured ``escalationMarkers`` plus a role mention for every id in
+        ``allowedMentionRoleIds`` — a role the node is allowed to ping is by
+        construction the team it escalates to.
+
+        Returns:
+            List[str]: Markers in configured order, role mentions appended.
+        """
+        markers = list(getattr(self, '_escalation_markers', []) or [])
+        for role_id in getattr(self, '_allowed_mention_role_ids', []) or []:
+            marker = f'<@&{role_id}>'
+            if marker not in markers:
+                markers.append(marker)
+        return markers
+
+    def _handoff_alias(self) -> str:
+        """The team alias, when there is a role to turn it into.
+
+        Returns:
+            str: ``teamMentionAlias`` when it and an allowed role id are both
+                configured, else ''.
+        """
+        alias = getattr(self, '_team_mention_alias', '')
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return alias if alias and role_ids else ''
+
+    def _team_mention(self) -> str:
+        """The team role's mention (``<@&id>``), when there is an alias for it.
+
+        Returns:
+            str: The mention of the first ``allowedMentionRoleIds`` entry, or ''
+                when no ``teamMentionAlias`` or no allowed role is configured.
+        """
+        if not self._handoff_alias():
+            return ''
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return f'<@&{role_ids[0]}>'
+
+    def _final_role_mentions(self, text: str) -> Dict[int, str]:
+        """The allowed role mentions that may ping, by their offset in ``text``.
+
+        Every role in ``allowedMentionRoleIds`` counts as the team (see
+        :meth:`_effective_markers`), and only a mention outside code in the
+        final part of a raw scratchpad (see ``handoff_part``) may ping it: one
+        in the reasoning or in code neither pings nor pauses the thread.
+
+        Args:
+            text (str): The reply about to be posted.
+
+        Returns:
+            Dict[int, str]: The role id of each such mention, keyed by where
+                the mention starts.
+        """
+        head, part, _tail = handoff_part(text)
+        start, end = len(head), len(head) + len(part)
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return {
+            match.start(): match.group(1)
+            for match in _outside_code_fences(text, _ROLE_MENTION.finditer(text))
+            if start <= match.start() < end and match.group(1) in role_ids
+        }
+
+    def _final_role_ids(self, text: str) -> List[str]:
+        """The allowed roles mentioned where a reply may hand off.
+
+        Args:
+            text (str): The reply about to be posted.
+
+        Returns:
+            List[str]: The allowed role ids with a mention that may ping (see
+                :meth:`_final_role_mentions`), in configured order.
+        """
+        found = set(self._final_role_mentions(text).values())
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        return [role_id for role_id in role_ids if role_id in found]
+
+    def _chunk_role_ids(self, text: str, chunks: List[str]) -> List[List[str]]:
+        """The allowed roles each chunk of a reply may ping.
+
+        A chunk may ping a role only when it carries one of that role's
+        mentions that may ping (see :meth:`_final_role_mentions`): a mention of
+        the same role in reasoning or code in another chunk must not ride on
+        it. Each mention in a chunk is matched to the next occurrence of the
+        same mention in ``text``; the chunker adds fences and labels but never
+        a role mention.
+
+        Args:
+            text (str): The reply.
+            chunks (List[str]): The chunks it is posted as, in order.
+
+        Returns:
+            List[List[str]]: For each chunk, the role ids it may ping, in
+                configured order.
+        """
+        pinging = self._final_role_mentions(text)
+        mentions = list(_ROLE_MENTION.finditer(text))
+        role_ids = getattr(self, '_allowed_mention_role_ids', []) or []
+        position = 0
+        plan: List[List[str]] = []
+        for chunk in chunks:
+            found = set()
+            for mention in _ROLE_MENTION.finditer(chunk):
+                while position < len(mentions) and mentions[position].group(0) != mention.group(0):
+                    position += 1
+                if position == len(mentions):
+                    break
+                if mentions[position].start() in pinging:
+                    found.add(mention.group(1))
+                position += 1
+            plan.append([role_id for role_id in role_ids if role_id in found])
+        return plan
+
+    def _team_ping_on_cooldown(self, author_id: Optional[str]) -> bool:
+        """Whether this user already had the team pinged within the cooldown.
+
+        Expired entries are dropped on the way.
+
+        Args:
+            author_id (Optional[str]): The id of the user who asked; None is
+                never on cooldown.
+
+        Returns:
+            bool: True when an allowed role was pinged for this user less than
+                :data:`TEAM_PING_COOLDOWN_SECONDS` ago.
+        """
+        pings = getattr(self, '_team_pings', None)
+        if pings is None:
+            pings = self._team_pings = {}
+        now = _monotonic()
+        for key in [key for key, pinged in pings.items() if now - pinged >= TEAM_PING_COOLDOWN_SECONDS]:
+            del pings[key]
+        return author_id is not None and author_id in pings
+
+    def _reserve_team_ping(self, author_id: Optional[str], reply: str) -> Optional[float]:
+        """Start a user's team-ping cooldown before the reply that pings goes out.
+
+        Called with no await since :meth:`_team_ping_on_cooldown`, so a second
+        message from the same user handled meanwhile sees the cooldown and does
+        not ping too. :meth:`_release_team_ping` undoes it when the send pinged
+        nobody.
+
+        Args:
+            author_id (Optional[str]): The id of the user who asked.
+            reply (str): The reply about to be sent.
+
+        Returns:
+            Optional[float]: The reservation's timestamp, or None when the
+                reply mentions no allowed role where it may hand off (or the
+                user is unknown).
+        """
+        if author_id is None or not self._final_role_ids(reply):
+            return None
+        if getattr(self, '_team_pings', None) is None:
+            self._team_pings = {}
+        reserved = self._team_pings[author_id] = _monotonic()
+        return reserved
+
+    def _release_team_ping(self, author_id: Optional[str], reserved: Optional[float], outbound: Dict[str, Any]) -> None:
+        """Drop a reservation when no posted chunk pinged a role.
+
+        A send that failed, or stopped before the chunk with the mention,
+        pinged nobody, so the user may still have the team pinged later. A
+        posted chunk whose mention was not allowed to ping (one in the
+        reasoning) does not count either.
+
+        Args:
+            author_id (Optional[str]): The id of the user who asked.
+            reserved (Optional[float]): What :meth:`_reserve_team_ping` returned.
+            outbound (Dict[str, Any]): The result of :meth:`_send_response`
+                (empty when it raised).
+
+        Returns:
+            None
+        """
+        if reserved is None:
+            return
+        if outbound.get('pingedRoleIds'):
+            return
+        pings = getattr(self, '_team_pings', None) or {}
+        if pings.get(author_id) == reserved:
+            del pings[author_id]
+
+    def _with_team_mention(self, text: str, on_cooldown: bool = False) -> str:
+        """Turn the configured team alias in an answer into a real role mention.
+
+        The agent is prompted to hand off to a literal team name, which Discord renders as plain text
+        and pings nobody; the first id in ``allowedMentionRoleIds`` is the role
+        the node may actually mention, so that is the one substituted.
+
+        Any user who gets the model to write the alias makes the bot ping the
+        role, so a user gets at most one team ping per
+        :data:`TEAM_PING_COOLDOWN_SECONDS`; within that window the alias is
+        posted as plain text (see :meth:`_team_ping_on_cooldown`).
+
+        Args:
+            text (str): The answer about to be posted.
+            on_cooldown (bool): Whether the asking user is on cooldown.
+
+        Returns:
+            str: The answer, unchanged unless the alias and an allowed role id
+                are configured, the answer names the alias, and the user is
+                not on cooldown.
+        """
+        alias = self._handoff_alias()
+        # In a raw scratchpad only the final text may hand off: a Thought that
+        # names the team must not ping it.
+        head, part, tail = handoff_part(text)
+        if not part or not alias or not contains_alias(part, alias):
+            return text
+        if on_cooldown:
+            debug('Discord: team ping on cooldown for this user; the alias is posted as plain text')
+            return text
+        return head + inject_role_mention(part, alias, self._team_mention()) + tail
+
+    def _is_escalation(self, text: str) -> bool:
+        """Whether a posted answer hands the conversation over.
+
+        It carries an escalation marker, or the team alias left as plain text
+        because the ping was on cooldown: the hand-off is just as real. In a
+        raw scratchpad only the final text counts (see ``handoff_part``).
+
+        Args:
+            text (str): The posted answer (or a bot message from the thread's
+                history, when the pause is rebuilt).
+
+        Returns:
+            bool: True when the text hands the conversation over.
+        """
+        part = handoff_part(text)[1]
+        return bool(find_marker(part, self._effective_markers())) or contains_alias(part, self._handoff_alias())
+
+    def _is_bot_mentioned(self, message: discord.Message) -> bool:
+        """Whether this bot is directly @mentioned (never @everyone/@here).
+
+        Args:
+            message (discord.Message): The incoming message.
+
+        Returns:
+            bool: True when the bot is in ``message.mentions``, which includes
+                the replied-to author of a Reply with its ping on.
+        """
+        bot_user = getattr(getattr(self, '_bot', None), 'user', None)
+        if bot_user is None:
+            return False
+        mentions = getattr(message, 'mentions', []) or []
+        if not isinstance(mentions, (list, tuple)):
+            return False
+        return bot_user in mentions
+
+    def _is_bot_named_in_text(self, message: discord.Message) -> bool:
+        """True when the message text itself holds ``<@bot>`` / ``<@!bot>``.
+
+        Discord's Reply (with its ping on, the default) adds the replied-to
+        author to ``mentions`` without any mention in the text, so a plain reply
+        to one of the bot's messages would count as a mention. Resuming a paused
+        thread needs somebody to actually ask the bot back in, so it reads
+        ``raw_mentions`` (the ids discord.py parses from the content) instead.
+
+        Args:
+            message (discord.Message): The incoming message.
+
+        Returns:
+            bool: True when the bot's id is in ``message.raw_mentions``.
+        """
+        bot_user_id = getattr(getattr(getattr(self, '_bot', None), 'user', None), 'id', None)
+        if bot_user_id is None:
+            return False
+        raw_mentions = getattr(message, 'raw_mentions', []) or []
+        if not isinstance(raw_mentions, (list, tuple)):
+            return False
+        return bot_user_id in raw_mentions
+
+    async def _paused_from_history(self, thread) -> Optional[bool]:
+        """Reconstruct a thread's escalation pause from its recent history.
+
+        Walk the last 50 messages oldest first; a bot message carrying an escalation marker
+        pauses, a later non-bot message whose text @mentions the bot resumes
+        (a reply ping alone does not). Used the first time this process sees a
+        thread, so a restart does not resume a conversation a human took over.
+
+        Args:
+            thread (discord.Thread): The thread to reconcile.
+
+        Returns:
+            Optional[bool]: True when the thread should be treated as paused,
+                False when it should not, and None when the history could not
+                be read — which is "unknown", not "not paused", so the caller
+                must try again on the next message rather than fixing the
+                thread as open for the rest of the process.
+        """
+        if not self._effective_markers() and not self._handoff_alias():
+            return False
+        bot_user = getattr(getattr(self, '_bot', None), 'user', None)
+        bot_user_id = getattr(bot_user, 'id', None)
+        try:
+            history = [item async for item in thread.history(limit=50)]
+        except Exception as e:
+            debug(f'Discord: pause-state history fetch failed: {e}')
+            return None
+
+        paused = False
+        for item in reversed(history):  # Discord returns newest first
+            author = getattr(item, 'author', None)
+            if getattr(author, 'id', None) == bot_user_id:
+                if self._is_escalation(getattr(item, 'content', '') or ''):
+                    paused = True
+            elif self._is_bot_named_in_text(item):
+                paused = False
+        return paused
+
+    async def _thread_transcript(self, message: discord.Message) -> str:
+        """Build the thread transcript handed to the pipeline as context.
+
+        Up to ``threadHistoryLimit`` prior messages, oldest first, excluding the
+        current message, system messages, and empty content; capped at
+        ``threadHistoryMaxChars``. Best-effort — a failed fetch means no context.
+
+        The fetch is bounded by ``before=message`` so the limit counts
+        ``threadHistoryLimit`` EARLIER messages: fetching the newest N included
+        the message being answered, which left N-1 of context (and none at all
+        at ``threadHistoryLimit=1``).
+
+        Args:
+            message (discord.Message): The message being processed (excluded).
+
+        Returns:
+            str: The transcript, or '' when there is nothing usable.
+        """
+        limit = getattr(self, '_thread_history_limit', 0)
+        max_chars = getattr(self, '_thread_history_max_chars', 6000)
+        # Either number at zero turns the context off.
+        if limit <= 0 or max_chars <= 0:
+            return ''
+        bot_user = getattr(getattr(self, '_bot', None), 'user', None)
+        bot_user_id = getattr(bot_user, 'id', None)
+        bot_name = getattr(bot_user, 'display_name', None) or getattr(bot_user, 'name', None) or 'assistant'
+        try:
+            history = [item async for item in message.channel.history(limit=limit, before=message)]
+        except Exception as e:
+            debug(f'Discord: thread history fetch failed: {e}')
+            return ''
+
+        starter_type = getattr(getattr(discord, 'MessageType', None), 'thread_starter_message', None)
+        team_mention = self._team_mention()
+        entries = []
+        for item in reversed(history):  # Discord returns newest first
+            # ``before`` already excludes it; kept as a harmless guard.
+            if getattr(item, 'id', None) == message.id:
+                continue
+            if starter_type is not None and getattr(item, 'type', None) == starter_type:
+                # A thread made from a message (``thread`` reply mode) opens
+                # with an empty starter that only references that message, so
+                # the question itself lives in the parent channel.
+                item = await self._thread_starter(item, message.channel)
+                if item is None:
+                    continue
+            is_system = getattr(item, 'is_system', None)
+            if callable(is_system) and is_system():
+                continue
+            content = getattr(item, 'content', '') or ''
+            if not content.strip():
+                continue
+            author = getattr(item, 'author', None)
+            author_id = getattr(author, 'id', None)
+            if (
+                author_id != bot_user_id
+                and getattr(author, 'bot', False) is True
+                and getattr(self, '_ignore_bots', True)
+                and str(author_id) not in (getattr(self, '_allowed_bot_ids', []) or [])
+            ):
+                # Another bot: one ``ignoreBots`` would drop must not speak in
+                # the context either.
+                continue
+            if author_id == bot_user_id:
+                # A fixed suffix no Discord username can carry, so a user
+                # named like the bot cannot speak as it in the transcript.
+                name = f'{bot_name} (this bot)'
+            else:
+                name = getattr(author, 'name', None) or 'user'
+                if getattr(author, 'bot', False) is True:
+                    # Bot and webhook names are free text, so they could copy
+                    # the "(this bot)" label: other bots are marked as such.
+                    name = f'{name} (bot)'
+            if team_mention:
+                # Shown as the alias the prompt tells the model to write, not
+                # as a raw mention for it to copy. Either way a ping in its
+                # answer goes through the same rules: final part only, outside
+                # code, and the per-user cooldown.
+                content = content.replace(team_mention, self._handoff_alias())
+            entries.append((str(name), str(content)))
+        return format_thread_transcript(entries, max_chars)
+
+    @staticmethod
+    async def _thread_starter(starter: Any, thread: Any) -> Any:
+        """The parent-channel message a thread's starter message stands for.
+
+        Tried in the order discord.py offers it: the referenced message sent
+        along by the Gateway, discord.py's cache, then a fetch from the parent
+        channel (a thread made from a message shares that message's id).
+
+        Args:
+            starter (Any): The ``thread_starter_message`` item.
+            thread (Any): The thread it opens.
+
+        Returns:
+            Any: The original message, or None when it cannot be read (it is
+                then left out of the transcript).
+        """
+        reference = getattr(starter, 'reference', None)
+        for candidate in (getattr(reference, 'resolved', None), getattr(reference, 'cached_message', None)):
+            if candidate is not None and getattr(candidate, 'author', None) is not None:
+                return candidate
+        try:
+            return await thread.parent.fetch_message(thread.id)
+        except Exception as e:
+            debug(f'Discord: could not read the message thread {getattr(thread, "id", "?")} was started from: {e}')
+            return None
+
+    @staticmethod
+    async def _replied_to_message(message: discord.Message) -> Any:
+        """The message ``message`` replies to, as discord.py exposes it.
+
+        discord.py has no ``Message.fetch_reference``. The Gateway usually sends
+        the replied-to message along (``reference.resolved``), discord.py may
+        hold it in its cache (``reference.cached_message``), and otherwise it is
+        fetched by id from the channel. A deleted target resolves to an object
+        without an author, so it falls through to the fetch, which then fails.
+
+        Args:
+            message (discord.Message): The reply.
+
+        Returns:
+            Any: The replied-to message, or None when the message is not a reply.
+
+        Raises:
+            Exception: Whatever the fetch raises (not found, no permission).
+        """
+        reference = getattr(message, 'reference', None)
+        if reference is None:
+            return None
+        for candidate in (getattr(reference, 'resolved', None), getattr(reference, 'cached_message', None)):
+            if candidate is not None and getattr(candidate, 'author', None) is not None:
+                return candidate
+        message_id = getattr(reference, 'message_id', None)
+        if message_id is None:
+            return None
+        return await message.channel.fetch_message(message_id)
+
+    async def _aimed_at_someone_else(self, message: discord.Message) -> bool:
+        """Whether this message belongs to someone else's conversation.
+
+        Gathers the plain values the pure predicate needs (mentions, role
+        mentions, reply reference) and fetches the replied-to message only when
+        it can change the answer. The fetch is best-effort.
+
+        Args:
+            message (discord.Message): The incoming message.
+
+        Returns:
+            bool: True when the node should acknowledge instead of answering.
+        """
+        bot_user = getattr(getattr(self, '_bot', None), 'user', None)
+        bot_user_id = getattr(bot_user, 'id', None)
+        is_mentioned = self._is_bot_mentioned(message)
+        reference = getattr(message, 'reference', None)
+        is_reply = reference is not None and getattr(reference, 'message_id', None) is not None
+        mentions = getattr(message, 'mentions', []) or []
+        mentions = mentions if isinstance(mentions, (list, tuple)) else []
+        role_mentions = getattr(message, 'role_mentions', []) or []
+        role_mentions = role_mentions if isinstance(role_mentions, (list, tuple)) else []
+        author_id = getattr(getattr(message, 'author', None), 'id', None)
+
+        reply_target_is_bot = None
+        reply_target_is_author = None
+        if is_reply and not is_mentioned:
+            try:
+                referenced = await self._replied_to_message(message)
+                author = getattr(referenced, 'author', None)
+                if author is not None:
+                    reply_target_is_bot = getattr(author, 'id', None) == bot_user_id
+                    reply_target_is_author = author_id is not None and getattr(author, 'id', None) == author_id
+            except Exception as e:
+                debug(f'Discord: could not look up the message replied to: {e}')
+
+        return is_aimed_at_someone_else(
+            is_bot_mentioned=is_mentioned,
+            # The author is never somebody else: a reply to their own message
+            # pings them, which puts them in ``mentions``.
+            mentioned_user_ids=[str(user.id) for user in mentions if user.id != author_id],
+            bot_user_id=str(bot_user_id) if bot_user_id is not None else None,
+            role_mention_count=len(role_mentions),
+            is_reply=is_reply,
+            reply_target_is_bot=reply_target_is_bot,
+            reply_target_is_author=reply_target_is_author,
+        )
+
+    async def _react(self, message: discord.Message, emoji: str) -> bool:
+        """Add one reaction, best-effort (needs the Add Reactions permission).
+
+        Args:
+            message (discord.Message): The message to react to.
+            emoji (str): The emoji to add.
+
+        Returns:
+            bool: True when the reaction was added; a failure is logged.
+        """
+        try:
+            await message.add_reaction(emoji)
+            return True
+        except Exception as e:
+            debug(f'Discord: reaction {_shown_entry(str(emoji))} failed (grant "Add Reactions"): {e}')
+            return False
+
+    async def _skip_reason(self, message: discord.Message) -> Optional[str]:
+        """Decide whether to stay quiet on this message.
+
+        Two opt-in gates, in this order: a thread that escalated
+        stays quiet until the bot is @mentioned again, and a message aimed at
+        somebody else gets an acknowledging reaction instead of an answer (and
+        pauses its thread, as the bot does).
+
+        Args:
+            message (discord.Message): The message about to be processed.
+
+        Returns:
+            Optional[str]: A ``no_reply`` reason (``'paused'`` /
+                ``'aimed_elsewhere'``) when the message must not be processed,
+                else None.
+        """
+        channel = message.channel
+        thread_id = str(channel.id) if isinstance(channel, discord.Thread) else None
+        escalation_pause = getattr(self, '_escalation_pause', False)
+
+        if escalation_pause and thread_id is not None:
+            paused, resolved = self._pause_state()
+            is_paused = thread_id in paused
+            reconciled = True
+            if not is_paused and thread_id not in resolved:
+                # First sight of this thread in this process: reconcile with
+                # Discord so a restart does not resume a handed-over thread.
+                from_history = await self._paused_from_history(channel)
+                if from_history is None:
+                    # The fetch failed, so nothing is known either way. Leave
+                    # the thread unreconciled so the next message asks again,
+                    # and answer this one: a transient permission or network
+                    # failure must not freeze a handed-over thread as open.
+                    reconciled = False
+                else:
+                    is_paused = from_history
+                    if is_paused:
+                        paused.add(thread_id)
+                        debug(f'Discord: thread {thread_id} restored as paused from history')
+            if reconciled:
+                resolved.add(thread_id)
+            if is_paused:
+                if not self._is_bot_named_in_text(message):
+                    return 'paused'
+                paused.discard(thread_id)  # the user re-engaged the bot
+                debug(f'Discord: thread {thread_id} re-engaged by mention')
+
+        if getattr(self, '_ignore_aimed_at_others', False) and await self._aimed_at_someone_else(message):
+            ack_emoji = getattr(self, '_ack_emoji', '')
+            if ack_emoji:
+                await self._react(message, ack_emoji)
+            if escalation_pause and thread_id is not None:
+                self._pause_state()[0].add(thread_id)
+            return 'aimed_elsewhere'
+
+        return None
+
+    async def _after_send(self, message: discord.Message, reply: str, outbound: Dict[str, Any]):
+        """Apply the post-reply side effects: the escalation pause and feedback.
+
+        Pauses the thread when the posted answer escalated (it carries an
+        escalation marker; after a partial delivery, in a chunk that was
+        posted), and adds the configured feedback affordances to the
+        last posted chunk when the whole answer went out. Both are best-effort
+        and never fail the reply.
+
+        Args:
+            message (discord.Message): The originating message.
+            reply (str): The answer that was posted.
+            outbound (Dict[str, Any]): The result of :meth:`_send_response`;
+                mutated with ``feedbackEmojis`` when reactions were applied.
+
+        Returns:
+            None
+        """
+        if not outbound.get('messageIds'):
+            return
+
+        escalated = getattr(self, '_escalation_pause', False) and self._is_escalation(reply)
+        if escalated and outbound.get('complete') is False:
+            # Only what reached Discord hands over: a hand-off in a chunk that
+            # failed was never seen (and pinged nobody), and the pause rebuilt
+            # after a restart reads the posted messages one by one too.
+            escalated = any(self._is_escalation(chunk) for chunk in outbound.get('postedChunks') or [])
+        if escalated:
+            thread_id = outbound.get('threadId')
+            if thread_id is None and isinstance(message.channel, discord.Thread):
+                thread_id = str(message.channel.id)
+            if thread_id is not None:
+                self._pause_state()[0].add(str(thread_id))
+                debug(f'Discord: escalated - thread {thread_id} paused')
+
+        # A partial delivery (``complete`` False) has no last chunk of the
+        # answer to grade: the reactions would land on a cut-off message.
+        if getattr(self, '_feedback_reactions', False) and outbound.get('complete', True):
+            sent_messages = outbound.get('messages') or []
+            if not sent_messages:
+                return
+            applied: List[str] = []
+            for emoji in getattr(self, '_feedback_emojis', []) or []:
+                if emoji and await self._react(sent_messages[-1], emoji):
+                    applied.append(emoji)
+            if applied:
+                outbound['feedbackEmojis'] = applied
+
     async def _process_message(self, message: discord.Message):
         """Route a message to the pipeline and send back its answer.
 
@@ -1144,22 +2124,49 @@ class IEndpoint(IEndpointBase):
             group_index = 0
             processing_errors: List[str] = []
             try:
+                # Paused thread / message aimed at somebody else: stay quiet without
+                # ingesting anything.
+                skip_reason = await self._skip_reason(message)
+                if skip_reason is not None:
+                    # The message itself still travels with the event: a team
+                    # member answering inside a paused thread is the signal that a
+                    # human took over, and no ``message`` event is emitted for it.
+                    content = message.content if isinstance(message.content, str) else str(message.content or '')
+                    await self._emit_no_reply_event(metadata, skip_reason, text=content[:2000])
+                    return
+
                 reply = ''
+                # What it would take to ask the text pass again; None when this
+                # message never had one (attachments only). Set by whichever branch
+                # below ran it, and consumed by the non-answer retry.
+                text_pass: Optional[Dict[str, Any]] = None
 
                 if merge:
                     reply = await self._process_merged(message, metadata, eligible_attachments, processing_errors)
+                    text_pass = metadata.pop('_textPass', None)
                 else:
                     if question:
                         text_meta = dict(metadata, groupIndex=group_index, groupSize=group_size)
                         group_index += 1
+                        # In a thread, carry the earlier conversation as context. The SSE
+                        # payload keeps the user's own words (plus how much context was
+                        # added) so a UI still shows the question that was asked.
+                        transcript = (
+                            await self._thread_transcript(message)
+                            if isinstance(message.channel, discord.Thread)
+                            else ''
+                        )
+                        pipeline_text = with_thread_context(question, transcript)
                         text_reply = await self._run_with_optional_typing(
                             message,
-                            lambda: asyncio.to_thread(
+                            lambda: self._run_pipeline(
                                 self._run_text_pipeline,
-                                question,
+                                pipeline_text,
                                 message.channel.id,
                                 message.id,
                                 text_meta,
+                                sse_text=question,
+                                context_chars=len(transcript),
                             ),
                         )
                         text_reply = self._answer_text(text_reply)
@@ -1167,6 +2174,12 @@ class IEndpoint(IEndpointBase):
                             reply = text_reply
                         if text_meta.get('_pipelineError'):
                             processing_errors.append(text_meta.pop('_pipelineError'))
+                        text_pass = {
+                            'text': pipeline_text,
+                            'meta': text_meta,
+                            'sseText': question,
+                            'contextChars': len(transcript),
+                        }
 
                     # A single Discord message can carry up to 10 attachments. As a
                     # source node we ingest every one (each is downloaded, routed, and
@@ -1184,8 +2197,67 @@ class IEndpoint(IEndpointBase):
                         if att_reply and not reply:
                             reply = att_reply
 
+                sanitize = bool(getattr(self, '_sanitize_replies', False))
+                if reply and looks_like_error(reply, generic=sanitize):
+                    # An engine or model failure arrived as the "answer" (a
+                    # provider error, a traceback). Whatever sanitizeReplies
+                    # says: a raw provider exception can carry account details
+                    # or internal URLs. Only the generic error-shaped openings,
+                    # which a real answer may start with, wait for
+                    # sanitizeReplies. It is not a transient non-answer, so it
+                    # is neither relayed nor retried.
+                    debug(f'Discord: suppressed an error-looking answer for {message.id} ({len(reply)} chars)')
+                    self._warn_suppressed(message)
+                    await self._emit_no_reply_event(metadata, 'model_error')
+                    return
+
+                if sanitize:
+                    # Leaked agent scratchpad is not an answer: post the hand-off
+                    # line when it escalated, otherwise ask once more (a ReAct agent
+                    # that stopped at "Thought:" usually answers on a second run)
+                    # before staying quiet. An empty answer is transient in the same
+                    # way, so it is retried too — unless the pipeline itself failed
+                    # for this message, where asking again only repeats the failure.
+                    sanitized = sanitize_reply(reply, self._effective_markers(), self._handoff_alias()) if reply else ''
+                    if not sanitized and text_pass is not None and (reply or not processing_errors):
+                        retry_errors: List[str] = []
+                        sanitized = await self._retry_non_answer(message, text_pass, retry_errors)
+                        if retry_errors:
+                            self._warn_suppressed(message)
+                            await self._emit_no_reply_event(metadata, 'model_error')
+                            return
+                    if reply and not sanitized:
+                        # The pipeline did answer; nothing in it was postable.
+                        await self._emit_no_reply_event(metadata, 'non_answer')
+                        return
+                    reply = sanitized
+
+                # The literal team alias becomes a real role mention only in the
+                # text that is posted, after sanitizing: reasoning that merely
+                # names the team must never ping it. Escalation detection after
+                # the send sees the injected mention.
+                author_id = getattr(getattr(message, 'author', None), 'id', None)
+                author_id = str(author_id) if author_id is not None else None
+                # The cooldown and the final-part rule come with the alias;
+                # without it every allowed role may ping, as it always could.
+                team_alias = bool(self._handoff_alias())
+                on_cooldown = team_alias and self._team_ping_on_cooldown(author_id)
+                reply = self._with_team_mention(reply, on_cooldown)
+                # With the alias set, on cooldown or when no allowed role is
+                # mentioned in the part of the reply that may hand off (a
+                # mention in raw reasoning does not count), the send withholds
+                # every allowed role, so a literal mention cannot ping either.
+                ping_team = not team_alias or (not on_cooldown and bool(self._final_role_ids(reply)))
+
                 if reply and self._send_responses:
-                    outbound = await self._send_response(message, reply)
+                    reserved = self._reserve_team_ping(author_id, reply) if team_alias and ping_team else None
+                    outbound: Dict[str, Any] = {}
+                    try:
+                        outbound = await self._send_response(message, reply, ping_team=ping_team)
+                    finally:
+                        self._release_team_ping(author_id, reserved, outbound)
+                    if getattr(self, '_escalation_pause', False) or getattr(self, '_feedback_reactions', False):
+                        await self._after_send(message, reply, outbound)
                     if outbound.get('messageIds'):
                         if getattr(self, '_emit_outbound', False):
                             await self._emit_outbound_event(message, metadata, reply, outbound)
@@ -1204,10 +2276,32 @@ class IEndpoint(IEndpointBase):
                     await self._emit_no_reply_event(
                         metadata, processing_errors[0] if processing_errors else 'no_answer'
                     )
+            except PipelineTimeout as e:
+                debug(f'Discord: {e} for {message.id}; its late answer will be dropped')
+                await self._emit_no_reply_event(metadata, 'timeout')
+            except ShuttingDown:
+                await self._emit_no_reply_event(metadata, 'shutdown')
             except Exception as e:
                 debug(f'Discord _process_message: EXCEPTION {e}')
                 if getattr(self, '_emit_no_reply', False):
                     await self._emit_no_reply_event(metadata, str(e))
+
+    @staticmethod
+    def _warn_suppressed(message: discord.Message) -> None:
+        """Report a suppressed error answer in the task's warnings.
+
+        Never names the answer itself: a provider error can carry account
+        details or key fragments.
+
+        Args:
+            message (discord.Message): The message whose answer was suppressed.
+
+        Returns:
+            None
+        """
+        _engine_warning(
+            f'Discord: the answer to message {message.id} looked like an error and was not posted (model_error)'
+        )
 
     async def _process_merged(
         self,
@@ -1293,22 +2387,101 @@ class IEndpoint(IEndpointBase):
             return first_answer
 
         text_meta = dict(metadata, groupIndex=0, groupSize=group_size)
-        pipeline_text = compose_merged_question(question, blocks)
+        # In a thread the merged question carries the earlier conversation too,
+        # also when the message is only attachments (the log the bot asked for).
+        transcript = await self._thread_transcript(message) if isinstance(message.channel, discord.Thread) else ''
+
+        pipeline_text = compose_merged_question(with_thread_context(question, transcript), blocks)
+        # The SSE event shows the user's own message (or only the files), never the transcript.
+        sse_text = question or compose_merged_question('', blocks)
         text_reply = await self._run_with_optional_typing(
             message,
-            lambda: asyncio.to_thread(
+            lambda: self._run_pipeline(
                 self._run_text_pipeline,
                 pipeline_text,
                 message.channel.id,
                 message.id,
                 text_meta,
-                sse_text=question or pipeline_text,
+                sse_text=sse_text,
                 capture_text=question,
+                context_chars=len(pipeline_text) - len(question),
             ),
         )
         if text_meta.get('_pipelineError'):
             processing_errors.append(text_meta.pop('_pipelineError'))
+        # Hand the text pass back to _process_message (which pops the key right
+        # away) so a non-answer can be retried. Set last: every dict copied from
+        # ``metadata`` above has already been made, so the key never reaches an
+        # object's tag metadata or an emitted event.
+        metadata['_textPass'] = {
+            'text': pipeline_text,
+            'meta': text_meta,
+            'sseText': sse_text,
+            'contextChars': len(pipeline_text) - len(question),
+        }
         return self._answer_text(text_reply) or first_answer
+
+    async def _retry_non_answer(
+        self,
+        message: discord.Message,
+        text_pass: Dict[str, Any],
+        errors: Optional[List[str]] = None,
+    ) -> str:
+        """Ask the text pass again after it produced nothing postable.
+
+        A ReAct agent that returned only scratchpad (``Thought:`` with no
+        ``Final Answer:``), or nothing at all, answers normally on a second
+        run, so up to ``nonAnswerRetries`` re-runs are attempted before the
+        node gives up. Each re-run uses the same pipeline text, metadata, and
+        SSE text as the original but a distinct object name, so a stateful
+        prompt node does not treat it as the object it already saw.
+
+        Args:
+            message (discord.Message): The message being answered.
+            text_pass (Dict[str, Any]): The original text pass (``text``,
+                ``meta``, ``sseText``, ``contextChars``).
+            errors (Optional[List[str]]): Collects ``'model_error'`` when a
+                re-run answered with an engine/model failure, which ends the
+                retries — the caller reports that instead of ``non_answer``.
+
+        Returns:
+            str: The first non-empty sanitized answer, or '' when none came.
+        """
+        retries = getattr(self, '_non_answer_retries', 0) or 0
+        markers = self._effective_markers()
+        for attempt in range(1, int(retries) + 1):
+            # No new pipeline run once shutdown has begun: the pipe is torn down.
+            if getattr(self, '_closing', False):
+                break
+            debug(f'Discord: non-answer reply for {message.id}, retry {attempt}/{retries}')
+            # A copy: a retry's pipeline error must not overwrite the original's.
+            meta = dict(text_pass['meta'])
+            answer = await self._run_with_optional_typing(
+                message,
+                lambda: self._run_pipeline(
+                    self._run_text_pipeline,
+                    text_pass['text'],
+                    message.channel.id,
+                    message.id,
+                    meta,
+                    f'{message.id}:retry{attempt}',
+                    sse_text=text_pass['sseText'],
+                    context_chars=text_pass['contextChars'],
+                    retry=attempt,
+                ),
+            )
+            answer = self._answer_text(answer)
+            reply = sanitize_reply(answer, markers, self._handoff_alias()) if answer else ''
+            # The raw answer and what sanitizing left of it: either may be the
+            # error once the agent's wrapper is gone.
+            if (answer and looks_like_error(answer)) or (reply and looks_like_error(reply)):
+                debug(f'Discord: retry {attempt} for {message.id} returned an error, not an answer')
+                if errors is not None:
+                    errors.append('model_error')
+                return ''
+            if reply:
+                return reply
+        return ''
 
     def _is_text_attachment(self, attachment: discord.Attachment) -> bool:
         """Whether this attachment is decoded as text instead of routed as binary.
@@ -1362,6 +2535,76 @@ class IEndpoint(IEndpointBase):
         block = fold_text_attachment(attachment.filename, decoded, getattr(self, '_text_attachment_max_chars', 12000))
         return block, None
 
+    async def _run_pipeline(self, func: Callable, *args, **kwargs):
+        """Run one blocking pipeline call on the node's own bounded pool.
+
+        Waits for a free slot first. The slot is given back when the call
+        returns, not when the caller stops waiting, so a run that timed out
+        keeps its worker until it finishes and the pool never holds more runs
+        than it has workers.
+
+        Args:
+            func (Callable): The blocking pipeline call.
+            *args: Its positional arguments.
+            **kwargs: Its keyword arguments.
+
+        Returns:
+            Any: What the call returned.
+
+        Raises:
+            ShuttingDown: Shutdown has begun; every run goes through here, so
+                none starts after that point (the pipe is being torn down).
+        """
+        if getattr(self, '_closing', False):
+            raise ShuttingDown('shutdown began before the pipeline run')
+        executor = getattr(self, '_pipeline_executor', None)
+        if executor is None:
+            executor = self._pipeline_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=PIPELINE_WORKERS, thread_name_prefix='discord-pipeline'
+            )
+        slots = getattr(self, '_pipeline_slots', None)
+        if slots is None:
+            slots = self._pipeline_slots = asyncio.Semaphore(PIPELINE_WORKERS)
+
+        await slots.acquire()
+        loop = asyncio.get_running_loop()
+        try:
+            # Like asyncio.to_thread: the call sees this task's context variables.
+            call = functools.partial(contextvars.copy_context().run, func, *args, **kwargs)
+            future = executor.submit(call)
+        except BaseException:
+            slots.release()
+            raise
+        future.add_done_callback(lambda _future: loop.call_soon_threadsafe(slots.release))
+        return await asyncio.wrap_future(future)
+
+    async def _await_pipeline(self, coro_factory):
+        """Await one pipeline run, giving up after ``pipelineTimeoutSeconds`` when set.
+
+        The limit covers waiting for a free pipeline slot as well as the run.
+        The run itself cannot be cancelled (it is a worker thread): on timeout
+        it keeps its worker until it finishes in the background, returns its
+        pipe, and its answer is dropped because nothing awaits it any more.
+
+        Args:
+            coro_factory (Callable[[], Awaitable[Any]]): Zero-arg callable
+                returning the awaitable that runs the pipeline; it is called
+                exactly once.
+
+        Returns:
+            Any: What the awaitable returned.
+
+        Raises:
+            PipelineTimeout: The run did not answer within the limit.
+        """
+        seconds = getattr(self, '_pipeline_timeout_seconds', 0) or 0
+        if seconds <= 0:
+            return await coro_factory()
+        try:
+            return await asyncio.wait_for(coro_factory(), timeout=seconds)
+        except asyncio.TimeoutError:
+            raise PipelineTimeout(f'pipeline gave no answer within {seconds:g}s') from None
+
     async def _run_with_optional_typing(self, message: discord.Message, coro_factory):
         """Run an awaitable, optionally showing the Discord typing indicator.
 
@@ -1378,7 +2621,7 @@ class IEndpoint(IEndpointBase):
             Any: The awaited result.
         """
         if not self._show_typing:
-            return await coro_factory()
+            return await self._await_pipeline(coro_factory)
 
         typing_cm = None
         try:
@@ -1389,7 +2632,7 @@ class IEndpoint(IEndpointBase):
             typing_cm = None
 
         try:
-            return await coro_factory()
+            return await self._await_pipeline(coro_factory)
         finally:
             if typing_cm is not None:
                 try:
@@ -1443,7 +2686,7 @@ class IEndpoint(IEndpointBase):
                 framed = f'[attachment {attachment.filename}]\n{decoded}'
                 return await self._run_with_optional_typing(
                     message,
-                    lambda: asyncio.to_thread(
+                    lambda: self._run_pipeline(
                         self._run_text_pipeline,
                         framed,
                         message.channel.id,
@@ -1455,7 +2698,7 @@ class IEndpoint(IEndpointBase):
                 )
             return await self._run_with_optional_typing(
                 message,
-                lambda: asyncio.to_thread(
+                lambda: self._run_pipeline(
                     self._run_binary_pipeline,
                     file_data,
                     mime_type,
@@ -1466,6 +2709,8 @@ class IEndpoint(IEndpointBase):
                     meta,
                 ),
             )
+        except (PipelineTimeout, ShuttingDown):
+            raise  # the whole message is given up, not just this attachment
         except Exception as e:
             debug(f'Discord: attachment {attachment.filename} error: {e}')
             if meta is not None:
@@ -1627,10 +2872,12 @@ class IEndpoint(IEndpointBase):
         attachment_id: Optional[int] = None,
         sse_text: Optional[str] = None,
         capture_text: Optional[str] = None,
+        context_chars: int = 0,
+        retry: int = 0,
     ) -> str:
         """Push a text message through the pipeline on the text lane.
 
-        Blocking; must be called via asyncio.to_thread.
+        Blocking; must be called via :meth:`_run_pipeline`.
 
         Args:
             text (str): The message text.
@@ -1643,7 +2890,12 @@ class IEndpoint(IEndpointBase):
             attachment_id (Optional[int]): Appended to the entry URL for a
                 text attachment; None for the message's own text.
             sse_text (Optional[str]): Text to broadcast instead of ``text`` —
-                the user's own message when attachments were folded in.
+                the user's own message (or, for a file-only message, only the
+                files) when thread context was prepended; never the transcript.
+            context_chars (int): Size of the prepended thread transcript.
+            retry (int): Which non-answer retry this run is (1-based). Reported
+                on the ``message`` SSE event so a UI can tell a re-run from the
+                original, which carries no ``retry`` key.
             capture_text (Optional[str]): Text for the capture row instead
                 of the broadcast text — the user's own message (possibly
                 empty) when attachments were folded in.
@@ -1664,7 +2916,13 @@ class IEndpoint(IEndpointBase):
             pipe.open(entry)
             self._send_metadata(pipe, obj_meta)
             broadcast_text = text if sse_text is None else sse_text
-            payload: Dict[str, Any] = {'lane': 'text', 'text': broadcast_text[:2000]}
+            payload: Dict[str, Any] = {
+                'lane': 'text',
+                'text': broadcast_text[:2000],
+                'contextChars': int(context_chars),
+            }
+            if retry > 0:
+                payload['retry'] = int(retry)
             self._send_sse(pipe, 'message', obj_meta, payload)
             # The 2000-character clip keeps the broadcast small; the capture
             # row is the durable record, so it gets the text whole (a Discord
@@ -1697,7 +2955,7 @@ class IEndpoint(IEndpointBase):
     ) -> str:
         """Push binary attachment data through the matching pipeline lane.
 
-        Blocking; must be called via asyncio.to_thread.
+        Blocking; must be called via :meth:`_run_pipeline`.
 
         Args:
             file_data (bytes): The raw attachment bytes.
@@ -1805,7 +3063,7 @@ class IEndpoint(IEndpointBase):
         finally:
             self.target.putPipe(pipe)
 
-    async def _emit_no_reply_event(self, metadata: Dict[str, Any], reason: str):
+    async def _emit_no_reply_event(self, metadata: Dict[str, Any], reason: str, text: Optional[str] = None):
         """Emit one ``no_reply`` event.
 
         The reason is clipped to :data:`MAX_NO_REPLY_REASON_CHARS` here, at the
@@ -1816,6 +3074,10 @@ class IEndpoint(IEndpointBase):
         Args:
             metadata (Dict[str, Any]): The message's metadata contract.
             reason (str): Why nothing was posted.
+            text (Optional[str]): The message content, for a message that was
+                skipped without being ingested — nothing else records it. Left
+                off every other reason, whose question is already on a
+                ``message`` event.
 
         Returns:
             None
@@ -1823,6 +3085,8 @@ class IEndpoint(IEndpointBase):
         if not getattr(self, '_emit_no_reply', False):
             return
         payload: Dict[str, Any] = {'reason': str(reason)[:MAX_NO_REPLY_REASON_CHARS]}
+        if text is not None:
+            payload['text'] = text
         await asyncio.to_thread(self._emit_event_pipeline, metadata, 'no_reply', payload)
 
     async def _emit_outbound_event(
@@ -1855,6 +3119,8 @@ class IEndpoint(IEndpointBase):
             'complete': bool(details.get('complete', True)),
             'text': text,
         }
+        if details.get('feedbackEmojis'):
+            payload['feedbackEmojis'] = details['feedbackEmojis']
         await asyncio.to_thread(
             self._emit_event_pipeline,
             dict(metadata, groupIndex=0, groupSize=1),
@@ -1866,7 +3132,7 @@ class IEndpoint(IEndpointBase):
     # Replies
     # -------------------------------------------------------------------------
 
-    async def _send_response(self, message: discord.Message, response: str):
+    async def _send_response(self, message: discord.Message, response: str, *, ping_team: bool = True):
         """Send the pipeline answer back to Discord per the configured mode.
 
         Long answers are chunked at Discord's 2000-character limit. discord.py
@@ -1878,6 +3144,11 @@ class IEndpoint(IEndpointBase):
         Args:
             message (discord.Message): The originating message.
             response (str): The pipeline answer text.
+            ping_team (bool): False leaves every allowed role out of the
+                allowed mentions, for a user on the team-ping cooldown; True
+                allows every allowed role or, with ``teamMentionAlias`` set,
+                on each chunk only the roles whose mention in that chunk may
+                hand off (see :meth:`_chunk_role_ids`).
 
         Returns:
             Dict[str, Any]: What was posted, with these keys:
@@ -1888,10 +3159,16 @@ class IEndpoint(IEndpointBase):
                 nothing was posted.
                 ``complete`` (bool): False when a chunk failed and the rest
                 were abandoned, so Discord shows only part of the answer.
+                ``threadId``, ``messages``, ``postedChunks`` (the text of
+                every posted chunk) and ``pingedRoleIds`` (the roles a posted
+                chunk was allowed to ping and mentioned) are internal.
         """
         thread = None
+        posted_chunks: List[str] = []
+        pinged_role_ids: List[str] = []
         sent_ids: List[str] = []
         destinations: List[str] = []
+        sent_messages: List[Any] = []
         # Earlier chunks may already be on Discord when a later one fails, so
         # "some ids came back" is not "the whole answer was posted".
         complete = True
@@ -1902,9 +3179,30 @@ class IEndpoint(IEndpointBase):
             for chunk in chunk_message(response, number=bool(getattr(self, '_number_chunks', False)))
             if chunk.strip()
         ]
-        for chunk in chunks:
+        # With the alias set, each chunk may ping only the roles whose
+        # mention in that chunk may hand off; without it, every allowed role.
+        role_plan = self._chunk_role_ids(response, chunks) if self._handoff_alias() else [None] * len(chunks)
+        for chunk, role_ids in zip(chunks, role_plan):
+            allowed_mentions = self._allowed_mentions(ping_team=ping_team, role_ids=role_ids)
+            # The roles this chunk pings if it is posted: allowed on it and
+            # mentioned in it.
+            may_ping = (
+                [
+                    str(role_id)
+                    for role_id in (
+                        role_ids if role_ids is not None else getattr(self, '_allowed_mention_role_ids', []) or []
+                    )
+                ]
+                if ping_team
+                else []
+            )
+            chunk_pings = [role_id for role_id in may_ping if f'<@&{role_id}>' in chunk]
             try:
-                thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations)
+                thread = await self._send_chunk(
+                    message, chunk, thread, sent_ids, destinations, sent_messages, allowed_mentions=allowed_mentions
+                )
+                posted_chunks.append(chunk)
+                pinged_role_ids.extend(chunk_pings)
             except discord.RateLimited as e:
                 # discord.py handles 429s internally (honoring Retry-After) and
                 # only surfaces RateLimited when the client sets
@@ -1913,7 +3211,11 @@ class IEndpoint(IEndpointBase):
                 debug(f'Discord: rate limited; retrying after {e.retry_after}s')
                 await asyncio.sleep(float(e.retry_after))
                 try:
-                    thread = await self._send_chunk(message, chunk, thread, sent_ids, destinations)
+                    thread = await self._send_chunk(
+                        message, chunk, thread, sent_ids, destinations, sent_messages, allowed_mentions=allowed_mentions
+                    )
+                    posted_chunks.append(chunk)
+                    pinged_role_ids.extend(chunk_pings)
                 except Exception as e2:
                     debug(f'Discord: send retry failed, abandoning remaining chunks: {e2}')
                     complete = False
@@ -1923,12 +3225,36 @@ class IEndpoint(IEndpointBase):
                 complete = False
                 break
         destination = destinations[0] if destinations else self._reply_mode
-        return {'messageIds': sent_ids, 'destination': destination, 'complete': complete}
+        # ``messages`` and ``threadId`` stay internal (the escalation pause and
+        # the feedback reactions need them); the emitted event keeps its shape.
+        return {
+            'messageIds': sent_ids,
+            'destination': destination,
+            'complete': complete,
+            'threadId': str(thread.id) if thread is not None and getattr(thread, 'id', None) is not None else None,
+            'messages': sent_messages,
+            'postedChunks': posted_chunks,
+            'pingedRoleIds': pinged_role_ids,
+        }
 
-    def _allowed_mentions(self):
-        """Build the outbound mention allowlist; never permit everyone/here."""
-        role_ids = getattr(self, '_allowed_mention_role_ids', [])
+    def _allowed_mentions(self, *, ping_team: bool = True, role_ids: Optional[List[str]] = None):
+        """Build the outbound mention allowlist; never permit everyone/here.
+
+        Args:
+            ping_team (bool): False leaves every allowed role out; allowed
+                users stay.
+            role_ids (Optional[List[str]]): The allowed roles this send may
+                ping (see :meth:`_chunk_role_ids`); None allows every role in
+                ``allowedMentionRoleIds``.
+
+        Returns:
+            discord.AllowedMentions: The allowlist for one send.
+        """
+        if role_ids is None:
+            role_ids = list(getattr(self, '_allowed_mention_role_ids', []) or [])
         user_ids = getattr(self, '_allowed_mention_user_ids', [])
+        if not ping_team:
+            role_ids = []
         if not role_ids and not user_ids:
             return discord.AllowedMentions.none()
         return discord.AllowedMentions(
@@ -1966,6 +3292,7 @@ class IEndpoint(IEndpointBase):
         destination: str,
         sent_ids: Optional[List[str]],
         destinations: Optional[List[str]],
+        sent_messages: Optional[List[Any]] = None,
     ):
         """Record one posted chunk in the caller's collectors.
 
@@ -1978,6 +3305,8 @@ class IEndpoint(IEndpointBase):
                 to skip.
             destinations (Optional[List[str]]): Collects the destination of
                 every chunk; None to skip.
+            sent_messages (Optional[List[Any]]): Collects the posted message
+                objects; None to skip.
 
         Returns:
             None
@@ -1986,6 +3315,8 @@ class IEndpoint(IEndpointBase):
             sent_ids.append(str(sent.id))
         if destinations is not None:
             destinations.append(destination)
+        if sent_messages is not None and sent is not None:
+            sent_messages.append(sent)
 
     async def _send_chunk(
         self,
@@ -1994,6 +3325,9 @@ class IEndpoint(IEndpointBase):
         thread,
         sent_ids: Optional[List[str]] = None,
         destinations: Optional[List[str]] = None,
+        sent_messages: Optional[List[Any]] = None,
+        *,
+        allowed_mentions: Any = None,
     ):
         """Send a single chunk using the configured reply mode.
 
@@ -2003,6 +3337,10 @@ class IEndpoint(IEndpointBase):
             thread: The thread created for a prior chunk, or None.
             sent_ids: Collects the posted message ids.
             destinations: Collects the destination used per chunk.
+            sent_messages: Collects the posted message objects (the feedback
+                reactions go on the last one).
+            allowed_mentions: The mention allowlist for this send; None builds
+                the default one (:meth:`_allowed_mentions`).
 
         Returns:
             The thread used (for 'thread' mode) so later chunks reuse it, else None.
@@ -2010,11 +3348,12 @@ class IEndpoint(IEndpointBase):
         # Outbound content is model-generated: by default all mentions are
         # suppressed. Only the explicitly configured allowedMentionRoleIds /
         # allowedMentionUserIds may ping; @everyone/@here are never allowed.
-        allowed_mentions = self._allowed_mentions()
+        if allowed_mentions is None:
+            allowed_mentions = self._allowed_mentions()
 
         if self._reply_mode == 'reply':
             sent = await message.reply(chunk, mention_author=False, allowed_mentions=allowed_mentions)
-            self._record_sent(sent, 'reply', sent_ids, destinations)
+            self._record_sent(sent, 'reply', sent_ids, destinations, sent_messages)
             return None
 
         if self._reply_mode == 'thread':
@@ -2052,16 +3391,16 @@ class IEndpoint(IEndpointBase):
                     # DMs and other non-threadable channels cannot host a
                     # thread; fall back to a plain reply.
                     sent = await message.reply(chunk, mention_author=False, allowed_mentions=allowed_mentions)
-                    self._record_sent(sent, 'reply', sent_ids, destinations)
+                    self._record_sent(sent, 'reply', sent_ids, destinations, sent_messages)
                     return None
             if thread is _THREAD_FALLBACK:
                 sent = await message.reply(chunk, mention_author=False, allowed_mentions=allowed_mentions)
-                self._record_sent(sent, 'reply', sent_ids, destinations)
+                self._record_sent(sent, 'reply', sent_ids, destinations, sent_messages)
                 return _THREAD_FALLBACK
             sent = await thread.send(chunk, allowed_mentions=allowed_mentions)
-            self._record_sent(sent, 'thread', sent_ids, destinations)
+            self._record_sent(sent, 'thread', sent_ids, destinations, sent_messages)
             return thread
 
         sent = await message.channel.send(chunk, allowed_mentions=allowed_mentions)
-        self._record_sent(sent, 'channel', sent_ids, destinations)
+        self._record_sent(sent, 'channel', sent_ids, destinations, sent_messages)
         return None

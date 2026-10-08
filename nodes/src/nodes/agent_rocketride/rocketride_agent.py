@@ -29,9 +29,9 @@ Token efficiency is achieved by:
 
 from __future__ import annotations
 
+import dataclasses
 import json
-
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from rocketlib import debug, error
 
@@ -44,6 +44,7 @@ from ai.common.utils import safe_str
 
 from .planner import plan as plan_wave
 from .executor import execute_wave, resolve_answer_refs
+from .run_state import RunMemory, RunState
 
 # Default hard cap on planning iterations before the synthesis fallback fires.
 # Prevents runaway loops if the LLM fails to converge on done=true.
@@ -54,6 +55,16 @@ _DEFAULT_MAX_WAVES = 10
 # targeted reads, so this is usually all of it; the cap bounds a wide one, and the
 # line then says where it was cut.
 _SYNTHESIS_PREVIEW_CHARS = 2000
+
+
+def _tool_timeout(value: Any) -> Optional[float]:
+    """Read the tool_timeout setting: seconds, None when unset (the executor's default), 0 for no limit."""
+    if value is None or value == '':
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _verify_args(value: Any) -> Optional[Dict[str, Any]]:
@@ -97,6 +108,7 @@ class RocketRideDriver(AgentBase):
     # default keeps a driver built without __init__ (as unit tests do) working.
     _verify_tool: str = ''
     _verify_args: Optional[Dict[str, Any]] = None
+    _tool_timeout_s: Optional[float] = None
 
     def __init__(self, iGlobal) -> None:
         """Initialize the Wave driver and load host services."""
@@ -110,6 +122,8 @@ class RocketRideDriver(AgentBase):
         # tool) could otherwise make a change through the check tool and have it count
         # as a passing check; with these set, only this exact call checks the work.
         self._verify_args = _verify_args(config.get('verify_args'))
+        # Seconds one tool call may take (0: no limit); unset uses the executor's default.
+        self._tool_timeout_s = _tool_timeout(config.get('tool_timeout'))
 
     # ------------------------------------------------------------------
     # Main driver
@@ -120,6 +134,44 @@ class RocketRideDriver(AgentBase):
         *,
         context: AgentContext,
         question: Question,
+    ) -> AgentRunResult:
+        """Run one request with its own state and its own memory key space.
+
+        This driver object is shared by every run of the node, and runs can
+        overlap, so nothing a run remembers is kept on ``self``. The run's memory
+        keys are cleared when it ends.
+
+        A tool call the wave gave up on is still running inside the engine, and
+        returns into the pipeline's state. The engine tears a pipeline down, or
+        hands it to the next request, once every request in it has ended, so the
+        run does not end while such a call is running: it waits for every one,
+        without a limit. A call returning into a torn-down or reused pipeline would
+        read freed state. The cost: a tool that never returns holds the run (the
+        model has already been told it timed out and has answered). Ending the run
+        sooner and safely needs the engine to track invokes in flight.
+        """
+        memory = RunMemory(context.memory, context.run_id) if context.memory is not None else None
+        run_context = dataclasses.replace(context, memory=memory)
+        state = RunState()
+        try:
+            return self._run_waves(context=run_context, question=question, state=state)
+        finally:
+            running = state.background.running()
+            if running:
+                error(
+                    f'rocketride wave: waiting for {running} timed-out tool call(s) to return before the run ends; '
+                    'a call still inside the engine must not outlive the pipeline'
+                )
+                state.background.wait(None)
+            if memory is not None:
+                memory.close()  # never raises: cleanup must not replace the answer
+
+    def _run_waves(
+        self,
+        *,
+        context: AgentContext,
+        question: Question,
+        state: RunState,
     ) -> AgentRunResult:
         """Execute the wave-planning loop.
 
@@ -148,20 +200,11 @@ class RocketRideDriver(AgentBase):
         # can inject all prior results into the prompt as context.
         waves: List[Dict[str, Any]] = []
 
-        # Fingerprint of each stored result mapped to the key holding it, so a later
-        # identical result can name it. Rebuilt per run, never shared across runs.
-        self.seen_results: Dict[str, str] = {}
-        # The same for the calls themselves (tool plus arguments), so a repeated
-        # call is pointed out even when it failed and stored no result. Kept when
-        # a key is removed: re-running a call whose result the model removed is
-        # the loop to point out (read, remove, read again). Local to this run: the
-        # driver serves every run of the node, and runs overlap.
-        seen_calls: Dict[str, str] = {}
-        removed_keys: Set[str] = set()
-
         # The last step whose checks all passed, and the last step that ran any other
-        # tool (even one that failed). -1 means "not yet". See _not_checked().
+        # tool (even one that failed) or saw a timed-out call return. -1 means "not
+        # yet". See _not_checked().
         last_check = last_change = -1
+        late_returns = 0
 
         # trace is returned to the caller and recorded for observability.
         # waves is shared by reference — appending to it here also updates trace.
@@ -228,7 +271,10 @@ class RocketRideDriver(AgentBase):
 
             tool_calls = result.get('tool_calls') or []
             if result.get('done') and not tool_calls:
-                refusal = self._not_checked(last_check, last_change)
+                running, returned = state.background.snapshot()
+                if returned != late_returns:
+                    late_returns, last_change = returned, wave_num
+                refusal = self._not_checked(last_check, last_change, running)
                 # Problems in this reply (an unusable "remove") are kept: in the trace
                 # when the run ends here, in the next prompt when it does not.
                 notes = [
@@ -279,15 +325,15 @@ class RocketRideDriver(AgentBase):
             # Keys this reply removes are cleared after the wave, so its calls can still
             # read them, but their result fingerprints are forgotten now: a duplicate
             # note made during this wave must not point at a key that is about to
-            # disappear. Call fingerprints stay, so a repeat of a removed call is named.
-            # A reply that asks to finish keeps its keys if it is sent back (see the
-            # pruning below), so it keeps their fingerprints too. Only results from
-            # earlier waves can be removed: a key this wave's calls are about to be
-            # stored under would otherwise clear a result just fetched.
+            # disappear. Call fingerprints stay, so a repeat of a removed call is named
+            # (see RunState.forget). A reply that asks to finish keeps its keys if it is
+            # sent back (see the pruning below), so it keeps their fingerprints too. Only
+            # results from earlier waves can be removed: a key this wave's calls are about
+            # to be stored under would otherwise clear a result just fetched.
             earlier = {r.get('key') for w in waves for r in w.get('results', [])}
             remove_keys = [k for k in result.get('remove') or [] if k in earlier]
             if remove_keys and not result.get('asked_done'):
-                self.seen_results = {f: k for f, k in self.seen_results.items() if k not in remove_keys}
+                state.forget(remove_keys)
 
             # Execute all tool calls in this wave concurrently.  Each result is
             # stored in memory under "wave-N.rM" and a structural summary is
@@ -298,8 +344,8 @@ class RocketRideDriver(AgentBase):
                 agent_base=self,
                 context=context,
                 wave_name=f'wave-{wave_num}',
-                seen_calls=seen_calls,
-                removed=removed_keys,
+                state=state,
+                timeout=self._tool_timeout_s,
                 check_tool=self._verify_tool,
                 check_args=self._verify_args,
             )
@@ -326,6 +372,13 @@ class RocketRideDriver(AgentBase):
                 # Any other call counts as a change, even one that failed: a write
                 # may have landed before its result could be stored.
                 last_change = wave_num
+            # One snapshot for this step's decisions: a call returning between two
+            # reads would be counted neither as running nor as returned.
+            running, returned = state.background.snapshot()
+            if returned != late_returns:
+                # A call the wave gave up on returned while this step ran, or before
+                # it: what it did may have landed after this step's check read the work.
+                late_returns, last_change = returned, wave_num
 
             # A reply that both asked for calls and set done=true: the calls have
             # run, and if every one succeeded its answer stands, with no extra
@@ -340,9 +393,11 @@ class RocketRideDriver(AgentBase):
                 results.append(
                     self._refusal(wave_num, f'Not finished: read the result of {self._verify_tool} before done=true.')
                 )
-            elif finished and self._not_checked(last_check, last_change):
-                finished = False
-                results.append(self._refusal(wave_num, self._not_checked(last_check, last_change)))
+            elif finished:
+                refusal = self._not_checked(last_check, last_change, running)
+                if refusal:
+                    finished = False
+                    results.append(self._refusal(wave_num, refusal))
 
             waves.append({'wave_num': wave_num, 'calls': tool_calls, 'results': results})
             self.sendSSE(context, 'thinking', message=f'Step {wave_num + 1} complete', results=len(results))
@@ -370,7 +425,7 @@ class RocketRideDriver(AgentBase):
             # yet read what these calls returned, and its next answer may still need them.
             if remove_keys and not result.get('asked_done'):
                 self._clear_keys(remove_keys, context)
-                removed_keys.update(remove_keys)
+                state.removed.update(remove_keys)
                 # Strip removed result entries from wave history to keep context lean
                 for w in waves:
                     w['results'] = [r for r in w.get('results', []) if r.get('key') not in remove_keys]
@@ -423,13 +478,20 @@ class RocketRideDriver(AgentBase):
         connected = ', '.join(sorted(names)) or 'none'
         raise ValueError(f'verify_tool {self._verify_tool!r} is not a connected tool (connected: {connected})')
 
-    def _not_checked(self, last_check: int, last_change: int) -> str:
+    def _not_checked(self, last_check: int, last_change: int, running: int = 0) -> str:
         """Return why the run may not finish yet, or '' if it may.
 
         With a check tool configured, the last change must be followed by a passing
         check in a later step. A check in the same step ran in parallel with the
-        change, so it may have checked the code before the change landed.
+        change, so it may have checked the code before the change landed. And while
+        a call the wave gave up on is still running, no check covers it: it may
+        still write. When it returns it counts as a change (see _run_waves).
         """
+        if self._verify_tool and running:
+            return (
+                f'Not finished: {running} call(s) that timed out are still running and may still change '
+                f'the work. A check cannot cover them yet; call {self._verify_tool} again after they end.'
+            )
         if self._verify_tool and last_change >= 0 and last_check <= last_change:
             return (
                 f'Not finished: call {self._check_call()} on its own, after your last change, '

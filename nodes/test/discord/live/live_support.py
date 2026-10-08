@@ -676,6 +676,22 @@ class LiveBot:
         posted = self.bot_messages(channel, after_id)
         assert posted == [], f'expected silence, found {[m.content[:60] for m in posted]}'
 
+    def reactions_on(self, channel, message_id: int, expected: int = 1, timeout: float = 20) -> List[str]:
+        """Poll a message until it carries ``expected`` reactions; returns the emojis.
+
+        Reactions the *node* adds (acknowledgement, feedback affordances) are
+        only visible after a refetch, and Discord occasionally lags a second
+        behind the API call that created them.
+        """
+        deadline = time.time() + timeout
+        emojis: List[str] = []
+        while True:
+            message = self.fetch(channel, message_id)
+            emojis = [str(reaction.emoji) for reaction in message.reactions]
+            if len(emojis) >= expected or time.time() >= deadline:
+                return emojis
+            time.sleep(1.0)
+
     def drain_reactions(self):
         self.raw_reactions = []
 
@@ -1140,6 +1156,12 @@ class DriverBot:
         self._last_post = time.time()
         self._posted.append(message)
         return message
+
+    def react(self, message: discord.Message, emoji: str, remove: bool = False):
+        if remove:
+            self.run(message.remove_reaction(emoji, self.client.user))
+        else:
+            self.run(message.add_reaction(emoji))
 
     def delete(self, message: discord.Message):
         self.run(message.delete())

@@ -207,7 +207,7 @@
 			"type": "array",
 			"items": {"type": "string"},
 			"title": "Allowed Mention Role IDs",
-			"description": "Role IDs that outbound pipeline responses may mention.",
+			"description": "Role IDs that outbound pipeline responses may mention. With Team Mention Alias set, a role is pinged only when its mention is in the answer itself (not in leaked agent reasoning or code), and each user gets at most one role ping per hour (reset on restart); within that hour no allowed role can be pinged in answers to that user. Without it, every listed role may be pinged in any answer.",
 			"optional": true,
 			"default": []
 		},
@@ -289,7 +289,7 @@
 		"discord.emitNoReply": {
 			"type": "boolean",
 			"title": "Emit No Reply Events",
-			"description": "Emit an event when processing produces no answer or raises an error. The reason is no_answer, send_failed or shutdown; any other value is an error message clipped to 200 characters.",
+			"description": "Emit an event when processing produces no answer or raises an error. The reason is no_answer, send_failed, shutdown, paused, aimed_elsewhere, non_answer, model_error or timeout; any other value is an error message clipped to 200 characters.",
 			"default": false,
 			"optional": true
 		},
@@ -335,6 +335,108 @@
 			"default": false,
 			"optional": true
 		},
+		"discord.backfillLimit": {
+			"type": "number",
+			"title": "Backfill Limit",
+			"description": "Most-recent messages to process per readable channel at startup, at most 100; messages the bot already replied to, made a thread for, or reacted to are skipped. Zero disables backfill, and it never runs while Send Responses is off.",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 100,
+			"optional": true
+		},
+		"discord.threadHistoryLimit": {
+			"type": "number",
+			"title": "Thread History Limit",
+			"description": "Prior thread messages fetched as conversation context for a message in a thread, at most 100. Zero disables it.",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 100,
+			"optional": true
+		},
+		"discord.threadHistoryMaxChars": {
+			"type": "number",
+			"title": "Thread History Max Characters",
+			"description": "Maximum characters of thread transcript passed as context, at most 20000; the oldest lines are dropped first. Zero disables the context, like Thread History Limit.",
+			"default": 6000,
+			"minimum": 0,
+			"maximum": 20000,
+			"optional": true
+		},
+		"discord.escalationPause": {
+			"type": "boolean",
+			"title": "Pause After Escalation",
+			"description": "After an answer containing an escalation marker is posted into a thread, stay quiet in that thread until the bot is mentioned again.",
+			"default": false,
+			"optional": true
+		},
+		"discord.escalationMarkers": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Escalation Markers",
+			"description": "Text markers that mark an answer as escalated (for example a team role mention). Allowed Mention Role IDs are added automatically.",
+			"default": [],
+			"optional": true
+		},
+		"discord.teamMentionAlias": {
+			"type": "string",
+			"title": "Team Mention Alias",
+			"description": "Literal team name the pipeline writes when it hands a question over, for example \"@RocketRide team\". Every occurrence is replaced with a real mention of the first role in Allowed Mention Role IDs, so the team is actually pinged. Any user who gets the model to write it triggers that ping, so each user gets at most one ping per hour (reset on restart); later answers to that user keep the alias as plain text and cannot ping any allowed role. While it is set, every allowed role pings only from the answer itself and shares that hourly limit. Empty leaves answers and role pings as they are.",
+			"default": "",
+			"optional": true
+		},
+		"discord.ignoreAimedAtOthers": {
+			"type": "boolean",
+			"title": "Ignore Messages Aimed At Others",
+			"description": "Skip messages that mention another user or role, or reply to a message the bot did not write, unless the bot is mentioned.",
+			"default": false,
+			"optional": true
+		},
+		"discord.ackEmoji": {
+			"type": "string",
+			"title": "Acknowledgement Emoji",
+			"description": "Emoji added to a message that is skipped as aimed at somebody else. Empty adds no reaction.",
+			"default": "",
+			"optional": true
+		},
+		"discord.feedbackReactions": {
+			"type": "boolean",
+			"title": "Feedback Reactions",
+			"description": "Add feedback emojis to the last posted answer chunk so readers can grade it in one click.",
+			"default": false,
+			"optional": true
+		},
+		"discord.feedbackEmojis": {
+			"type": "array",
+			"items": {"type": "string"},
+			"title": "Feedback Emojis",
+			"description": "Emojis added, in order, to the last posted answer chunk when Feedback Reactions is enabled.",
+			"default": ["✅", "❌"],
+			"optional": true
+		},
+		"discord.sanitizeReplies": {
+			"type": "boolean",
+			"title": "Sanitize Replies",
+			"description": "Strip leaked agent reasoning (Thought / Action / Observation / Final Answer) from an answer before posting it, and retry an answer that was only reasoning or empty: the text pass then runs up to 1 + Retries on a non-answer times per message, even for a pipeline that is silent on purpose. It also suppresses answers that open like an error (Error:, ValueError:, a bare Error code: 404); engine and provider errors (an LLM error, a traceback, Error code: 429 - {...}) are never posted, whether or not this is on.",
+			"default": false,
+			"optional": true
+		},
+		"discord.nonAnswerRetries": {
+			"type": "number",
+			"title": "Retries on a non-answer",
+			"description": "While Sanitize Replies is on, re-run the text pass up to this many times when the reply was only agent scratchpad (such as Thought: lines) or empty, so one message runs the pipeline at most 1 + this many times. An error answer is never retried. Zero never retries.",
+			"default": 1,
+			"minimum": 0,
+			"maximum": 3,
+			"optional": true
+		},
+		"discord.pipelineTimeoutSeconds": {
+			"type": "number",
+			"title": "Pipeline Timeout (seconds)",
+			"description": "Give up on a message whose pipeline has not answered after this many seconds and report a no_reply with reason timeout instead of posting. Each pipeline run (the question, each attachment, each retry) gets this long. The limit includes waiting for a free pipeline worker. The run itself is not stopped: it keeps its worker until it finishes in the background, and its late answer is dropped. Zero (default) waits as long as it takes.",
+			"default": 0,
+			"minimum": 0,
+			"optional": true
+		},
 		"Pipe.source.parameters": {
 			"section": "parameters",
 			"title": "Discord Bot Configuration",
@@ -367,7 +469,20 @@
 				"discord.captureNodeId",
 				"discord.captureTable",
 				"discord.captureSource",
-				"discord.includeMemberMetadata"
+								"discord.includeMemberMetadata",
+				"discord.backfillLimit",
+				"discord.threadHistoryLimit",
+				"discord.threadHistoryMaxChars",
+				"discord.escalationPause",
+				"discord.escalationMarkers",
+				"discord.teamMentionAlias",
+				"discord.ignoreAimedAtOthers",
+				"discord.ackEmoji",
+				"discord.feedbackReactions",
+				"discord.feedbackEmojis",
+				"discord.sanitizeReplies",
+				"discord.nonAnswerRetries",
+				"discord.pipelineTimeoutSeconds"
 			]
 		}
 	},

@@ -130,6 +130,16 @@ export interface RungPin {
 	deployedAt?: number;
 	/** A version awaiting review on this rung (public only), if any. */
 	pendingVersion?: string;
+	/** Whether a browser in this audience is actually served the pinned
+	 * version right now — the server's own serving gate. Absent from older
+	 * servers (the views then keep the review-gate wording). */
+	serving?: boolean;
+	/** Why the audience is not served ('' when serving): 'disabled',
+	 * 'building', 'build-failed', 'failed', 'in-review', 'rejected',
+	 * 'not-approved'. */
+	reason?: string;
+	/** True on the one pin the caller's own published resolution picks. */
+	servesYou?: boolean;
 }
 
 // =============================================================================
@@ -351,6 +361,12 @@ export interface IAppBuilderHost {
 	 * Returns unsubscribe.
 	 */
 	subscribeBuildStatus?: (listener: (tick: BuildStatusTick) => void) => () => void;
+	/**
+	 * Subscribe to deployment changes of this app (apaevt_deploy: a build
+	 * landed, or anyone in the org published, disabled, or removed a binding)
+	 * — a re-fetch signal only, no payload. Returns unsubscribe.
+	 */
+	subscribeDeployChanged?: (listener: () => void) => () => void;
 	/** Reload the preview surface. */
 	reloadPreview?: () => void;
 	/**

@@ -37,6 +37,7 @@
 				"instructions": [],
 				"max_waves": 10,
 				"require_tool_call": false,
+				"tool_timeout": 300,
 				"verify_tool": "",
 				"verify_args": ""
 			}
@@ -76,6 +77,14 @@
 			"default": false,
 			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
+		"tool_timeout": {
+			"type": "integer",
+			"title": "Tool time limit (seconds)",
+			"default": 300,
+			"minimum": 0,
+			"maximum": 7200,
+			"description": "Longest one tool call may run, counted from when it starts. A call that runs longer is reported to the agent as timed out, and the agent goes on without it. Raise it for tools that are meant to run long, such as a Python script with a long timeout or another agent called as a tool. 0 means no limit."
+		},
 		"verify_tool": {
 			"type": "string",
 			"title": "Check tool",
@@ -90,7 +99,7 @@
 			"optional": true,
 			"description": "The exact arguments of the check, as a JSON object (e.g. {\"command\": \"npm test\"}). Set this when the check tool can also change things, such as a command runner: then only this exact call counts as a check, and any other call to that tool counts as a change. Leave empty when the check tool only checks."
 		},
-		"agent_rocketride.default": { "object": "default", "properties": ["agent_description", "instructions", "max_waves", "require_tool_call", "verify_tool", "verify_args"] },
+		"agent_rocketride.default": { "object": "default", "properties": ["agent_description", "instructions", "max_waves", "require_tool_call", "tool_timeout", "verify_tool", "verify_args"] },
 		"agent_rocketride.profile": {
 			"title": "Profile",
 			"type": "string",
@@ -103,7 +112,7 @@
 		{
 			"section": "Pipe",
 			"title": "RocketRide Wave",
-			"properties": ["agent_description", "instructions", "max_waves", "require_tool_call", "verify_tool", "verify_args"]
+			"properties": ["agent_description", "instructions", "max_waves", "require_tool_call", "tool_timeout", "verify_tool", "verify_args"]
 		}
 	]
 }

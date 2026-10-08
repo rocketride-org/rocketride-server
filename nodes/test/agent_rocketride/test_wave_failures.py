@@ -98,8 +98,8 @@ def test_a_failed_result_is_marked_in_its_entry(wave):
     agent = SimpleNamespace(seen_results={})
     store = wave.executor._store_and_preview
 
-    failed = store('workspace.write', 'wave-0.r0', {'ok': False, 'error': 'conflict'}, context, agent)
-    worked = store('workspace.write', 'wave-0.r1', {'ok': True, 'revision': 2}, context, agent)
+    failed = store('workspace.write', 'wave-0.r0', {'ok': False, 'error': 'conflict'}, context, agent.seen_results)
+    worked = store('workspace.write', 'wave-0.r1', {'ok': True, 'revision': 2}, context, agent.seen_results)
 
     assert failed['failed'] is True
     assert 'failed' not in worked

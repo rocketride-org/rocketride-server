@@ -35,7 +35,27 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, exists, mkdir, syncDir, formatSyncStats, writeFile, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState, parseServerAddress } = require('../../../scripts/lib');
+const {
+	execCommand,
+	removeDirs,
+	removeDirAndParents,
+	PROJECT_ROOT,
+	BUILD_ROOT,
+	DIST_ROOT,
+	exists,
+	mkdir,
+	syncDir,
+	formatSyncStats,
+	writeFile,
+	startServer,
+	stopServer,
+	bracket,
+	parallel,
+	hasSourceChanged,
+	saveSourceHash,
+	setState,
+	parseServerAddress,
+} = require('../../../scripts/lib');
 const { stripDtsDir } = require('../../../scripts/lib/stripDts');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -202,7 +222,10 @@ function makeCreateNpmPackageAction() {
 			// packaged. --floors compiles the conformance file only, so additive
 			// work-in-progress still packs; only removals/narrowings fail here.
 			task.output = 'Checking contract floors...';
-			await execCommand('node', [path.join(__dirname, 'freeze-client-api.js'), '--floors'], { task, cwd: PACKAGE_DIR });
+			await execCommand('node', [path.join(__dirname, 'freeze-client-api.js'), '--floors'], {
+				task,
+				cwd: PACKAGE_DIR,
+			});
 
 			await mkdir(PACKAGE_DIST);
 			await execCommand('npm', ['pack', '--pack-destination', PACKAGE_DIST], { task, cwd: PACKAGE_DIR });
@@ -339,9 +362,7 @@ module.exports = {
 	description: 'TypeScript Client SDK',
 
 	// Co-located docs mounts gathered by docs:gather.
-	docs: [
-		{ source: 'docs/reference/pipeline', mount: 'reference/pipeline-reference' }
-	],
+	docs: [{ source: 'docs/reference/pipeline', mount: 'reference/pipeline-reference' }],
 
 	actions: [
 		// Internal actions
@@ -365,7 +386,24 @@ module.exports = {
 			name: 'client-typescript:build',
 			action: () => ({
 				description: 'Build client-typescript',
-				steps: ['client-docs:agent', 'client-common:stamp', 'client-typescript:sync-version', parallel(['client-typescript:compile-cjs', 'client-typescript:compile-esm', 'client-typescript:generate-types'], 'Compile sources'), 'client-typescript:compile-cli', 'client-typescript:post-build', 'client-typescript:create-package', 'client-typescript:sync', 'client-typescript:docs-generate'],
+				steps: [
+					'client-docs:agent',
+					'client-common:stamp',
+					'client-typescript:sync-version',
+					parallel(
+						[
+							'client-typescript:compile-cjs',
+							'client-typescript:compile-esm',
+							'client-typescript:generate-types',
+						],
+						'Compile sources'
+					),
+					'client-typescript:compile-cli',
+					'client-typescript:post-build',
+					'client-typescript:create-package',
+					'client-typescript:sync',
+					'client-typescript:docs-generate',
+				],
 			}),
 		},
 		{
@@ -374,7 +412,10 @@ module.exports = {
 				description: 'Testing client-typescript',
 				steps: [
 					'server:build',
-					parallel(['ai:build', 'nodes:build', 'client-python:build', 'client-typescript:build'], 'Build dependencies'),
+					parallel(
+						['ai:build', 'nodes:build', 'client-python:build', 'client-typescript:build'],
+						'Build dependencies'
+					),
 					bracket({
 						name: 'ts-test-server',
 						setup: makeStartTestServerAction(),
@@ -423,7 +464,11 @@ module.exports = {
 				description: 'Cleaning client-typescript',
 				run: async (ctx, task) => {
 					await removeDirs([LOCAL_DIST]);
-					await removeDirAndParents(PROJECT_ROOT, [PACKAGE_DIST, SERVER_STATIC_DIR, path.join(BUILD_ROOT, 'clients', 'typescript')]);
+					await removeDirAndParents(PROJECT_ROOT, [
+						PACKAGE_DIST,
+						SERVER_STATIC_DIR,
+						path.join(BUILD_ROOT, 'clients', 'typescript'),
+					]);
 					await setState(SRC_HASH_KEY, null);
 					task.output = 'Cleaned client-typescript';
 				},

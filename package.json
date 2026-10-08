@@ -31,6 +31,7 @@
 	"scripts": {
 		"prepare": "lefthook install --force",
 		"check:action-pins": "node scripts/verify-action-pins.mjs",
+		"lint:scripts": "eslint \"**/scripts/**/*.{js,cjs,mjs}\"",
 		"test:action-pins": "node --test scripts/verify-action-pins.test.mjs"
 	},
 	"packageManager": "pnpm@10.33.0",
@@ -41,6 +42,7 @@
 	"devDependencies": {
 		"@eslint/js": "^9.39.4",
 		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+		"@stylistic/eslint-plugin": "^5.0.0",
 		"@types/node": "^20.19.41",
 		"@types/react": "~18.3.31",
 		"@types/react-dom": "~18.3.7",
@@ -49,6 +51,7 @@
 		"dotenv": "^16.4.5",
 		"eslint": "^9.39.4",
 		"eslint-config-prettier": "^9.1.0",
+		"eslint-plugin-n": "^17.0.0",
 		"eslint-plugin-react": "^7.37.2",
 		"eslint-plugin-react-hooks": "^5.0.0",
 		"eslint-plugin-react-refresh": "^0.5.2",

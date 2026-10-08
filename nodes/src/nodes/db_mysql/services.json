@@ -62,8 +62,8 @@
 	//
 	"invoke": {
 		"llm": {
-			"description": "LLM to use to craft SQL queries from question",
-			"min": 1
+			"description": "LLM that writes SQL from a natural-language question; not needed for execute (raw SQL)",
+			"min": 0
 		}
 	},
 	//

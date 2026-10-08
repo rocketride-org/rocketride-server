@@ -33,13 +33,23 @@ def _question(wave):
     return q
 
 
-def _context():
-    return SimpleNamespace(run_id='run-1', tools=SimpleNamespace(list=[]), memory=None)
+def _context(wave):
+    """A real AgentContext: the driver copies it for each run with dataclasses.replace."""
+    return wave.rocketride_agent.AgentContext(
+        invoker=None,
+        llm=None,
+        tools=SimpleNamespace(list=[]),
+        memory=None,
+        run_id='run-1',
+        pipe_id=0,
+        framework='wave',
+        started_at='',
+    )
 
 
 def test_planning_prompt_has_each_instruction_once(wave):
     """The planner does not add an instruction the question already carries."""
-    q = wave.planner._build_wave_question(context=_context(), question=_question(wave), waves=[])
+    q = wave.planner._build_wave_question(context=_context(wave), question=_question(wave), waves=[])
 
     assert q.getPrompt().count(RULE) == 1
 
@@ -58,7 +68,7 @@ def test_driver_sends_each_instruction_once(wave):
 
     driver.call_llm_json = call_llm_json
 
-    answer, _ = driver._run(context=_context(), question=_question(wave))
+    answer, _ = driver._run(context=_context(wave), question=_question(wave))
 
     assert answer == 'OK'
     assert prompts[0].count(RULE) == 1

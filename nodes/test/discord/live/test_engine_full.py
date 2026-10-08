@@ -13,8 +13,10 @@ engine, driven by the driver bot in the test channel only:
   answer is the question's own text (plus whatever the node adds, such as
   merged attachments).
 - ``fake`` is discord -> prompt -> ``llm_openai_api`` pointed at
-  :mod:`fake_llm`, a scripted local endpoint for slow and delayed answers. No
-  real model is involved.
+  :mod:`fake_llm`, a scripted local endpoint for scratchpad, envelope, error,
+  empty, retry, raising and slow answers. No real model is involved.
+- **One realistic AI run** (F46) on a saved AI pipe, with any Slack tool and
+  database components removed.
 
 Each test posts messages tagged ``[e2e Fxx]``, one at a time, and records a
 result row (feature, case, expected, actual, pass/fail, evidence) to a JSONL
@@ -22,8 +24,11 @@ file under ``DISCORD_E2E_RESULTS_DIR`` (default: the system temp directory).
 
 Gates (all must hold, else the module skips): ``DISCORD_LIVE=1``,
 ``DISCORD_E2E_FULL=1`` (the run takes a while and restarts tasks many times),
-the L3 gates, and ``botUserId`` in the engine id block. Optional:
+the L3 gates, and ``botUserId`` in the engine id block. Optional gates:
 
+- ``DISCORD_E2E_ENGINE_DIR`` (+ ``DISCORD_E2E_ENGINE_LOG``): F45 kills and
+  restarts the engine process on ``engineUri``'s port.
+- ``DISCORD_E2E_AI_PIPE``: a saved AI pipe with a discord source, for F46.
 - ``DISCORD_E2E_ENGINE_LOG``: the engine's log file, grepped for evidence.
 - ``DISCORD_E2E_PG_CONTAINER`` / ``_PG_HOST`` / ``_PG_USER`` / ``_PG_DATABASE``
   (plus the engine variable ``ROCKETRIDE_DISCORD_PG_PASSWORD``): a disposable
@@ -42,16 +47,18 @@ import tempfile
 import time
 import wave
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 import discord
 import pytest
 
-from .fake_llm import FakeLLM
+from .fake_llm import ERROR_TEXT, FINAL_CONTENT, RETRY_ANSWER, FakeLLM
 from .live_support import EngineSession, engine_reachable, live_ids, live_only
 from .test_engine_e2e import SKIP_REASON as L3_SKIP_REASON
 
 TASK_STATE_RUNNING = 3
 PROJECT_ID = '5d1f0e2a-7c3b-4e9a-8f21-6b0c9d4e3a17'
+ESCALATION_LINE = 'Escalated to the RocketRide team.'
 FAKE_ROLE_ID = '900000000000000301'
 FAKE_CHANNEL_ID = '900000000000000302'
 QUIET_SECONDS = 15
@@ -59,11 +66,13 @@ RUN_STAMP = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
 RESULTS_DIR = os.environ.get('DISCORD_E2E_RESULTS_DIR', '') or os.path.join(tempfile.gettempdir(), 'discord-e2e-full')
 RESULTS_PATH = os.path.join(RESULTS_DIR, f'{RUN_STAMP}.jsonl')
 
+ENGINE_DIR = os.environ.get('DISCORD_E2E_ENGINE_DIR', '')
 ENGINE_LOG = os.environ.get('DISCORD_E2E_ENGINE_LOG', '')
 PG_CONTAINER = os.environ.get('DISCORD_E2E_PG_CONTAINER', '')
 PG_HOST = os.environ.get('DISCORD_E2E_PG_HOST', '')
 PG_USER = os.environ.get('DISCORD_E2E_PG_USER', '')
 PG_DATABASE = os.environ.get('DISCORD_E2E_PG_DATABASE', '')
+AI_PIPE = os.environ.get('DISCORD_E2E_AI_PIPE', '')
 
 
 def _full_gate() -> str:
@@ -115,6 +124,10 @@ def _require_disposable_database():
     assert others.isdigit(), f'cannot query {PG_DATABASE} in {PG_CONTAINER}: {others!r}'
     if others != '0':
         pytest.skip(f'{PG_DATABASE} holds {others} other table(s); the capture cases need a disposable database')
+
+
+needs_engine_dir = pytest.mark.skipif(not ENGINE_DIR, reason='DISCORD_E2E_ENGINE_DIR not set')
+needs_ai_pipe = pytest.mark.skipif(not AI_PIPE, reason='DISCORD_E2E_AI_PIPE not set')
 
 
 # -----------------------------------------------------------------------------
@@ -621,7 +634,8 @@ def test_f07_require_mention_per_channel(engine, engine_config, driver_bot, bot_
 
 def test_f08_guild_and_channel_filters(engine, engine_config, driver_bot):
     tag = _tag('F08')
-    other_guild = live_ids().get('guildId') or '900000000000000303'
+    # A guild id that does not exist, so the support channel's own guild is never allowlisted.
+    other_guild = '900000000000000303'
     rows = []
     for label, overrides in (
         ('other guild', {'guildIds': [other_guild]}),
@@ -845,6 +859,27 @@ def test_f13_mentions_only_allowlisted_ping(engine, engine_config, driver_bot):
     )
 
 
+def test_f14_team_mention_alias(engine, engine_config, driver_bot):
+    tag = _tag('F14')
+    _start(
+        engine,
+        _echo(_params(engine_config, teamMentionAlias='@RocketRide team', allowedMentionRoleIds=[FAKE_ROLE_ID])),
+    )
+    posted = driver_bot.post(f'{tag} handing over to @RocketRide team now')
+    answer = _answer(driver_bot, driver_bot.channel, posted, tag)
+    content = answer.content if answer else ''
+    ok = f'<@&{FAKE_ROLE_ID}>' in content and '@RocketRide team' not in content
+    _check(
+        'F14',
+        'teamMentionAlias',
+        'answer containing the literal alias',
+        'alias rewritten to the first allowlisted role mention',
+        ok,
+        f'answer has role mention={f"<@&{FAKE_ROLE_ID}>" in content}, literal alias left={"@RocketRide team" in content}',
+        f'answer {getattr(answer, "id", None)} (fake role id, nobody pinged)',
+    )
+
+
 # =============================================================================
 # Attachments
 # =============================================================================
@@ -958,6 +993,293 @@ def test_f18_oversized_and_unsupported(engine, engine_config, driver_bot, tmp_me
         ok2,
         f'binary lanes={mimes2}; posts={len(quiet)}; no_reply={reason}',
         f'{tag2} attachment-only message {posted2.id}',
+    )
+
+
+# =============================================================================
+# Support behaviour
+# =============================================================================
+
+
+def _node_section(fake: FakeLLM, question: str) -> str:
+    """What the node sent for ``question``: its framing line plus the transcript."""
+    needle = f"User's latest message: {question}"
+    for call in reversed(list(fake.calls)):
+        full = call.get('full', '')
+        index = full.rfind(needle)
+        if index >= 0:
+            return full[index:]
+    return ''
+
+
+def test_f20_thread_history_and_limits(engine, engine_config, driver_bot, fake_llm):
+    tag = _tag('F20')
+    # The fake model answers "Fake answer: <first line of the question>", so an
+    # answer never carries earlier turns and the transcript the node built is
+    # read straight from the model's request log.
+    params = _params(engine_config, replyMode='thread', threadHistoryLimit=2, threadHistoryMaxChars=4000)
+    _start(engine, _fake(params, fake_llm))
+    posted = driver_bot.post(f'{tag} opening question ALPHA')
+    thread = driver_bot.wait_for_thread(posted, timeout=45)
+    _answer(driver_bot, thread, posted, 'ALPHA') if thread else None
+    q1, q2 = f'{tag} follow-up BRAVO', f'{tag} follow-up CHARLIE'
+    f1 = driver_bot.post(q1, channel=thread)
+    a1 = _answer(driver_bot, thread, f1, 'BRAVO')
+    f2 = driver_bot.post(q2, channel=thread)
+    a2 = _answer(driver_bot, thread, f2, 'CHARLIE')
+    s1, s2 = _node_section(fake_llm, q1), _node_section(fake_llm, q2)
+    ev2 = _event(engine, 'message', f2.id) or {}
+    # The prompt node pads the user turn with blank lines; they are not transcript.
+    entries2 = s2.split('(oldest first, for context):\n', 1)[-1].rstrip().splitlines() if s2 else []
+
+    # Character cap: same thread, a long history, a tiny cap.
+    _start(engine, _fake(dict(params, threadHistoryLimit=10, threadHistoryMaxChars=80), fake_llm))
+    q3 = f'{tag} follow-up DELTA'
+    f3 = driver_bot.post(q3, channel=thread)
+    a3 = _answer(driver_bot, thread, f3, 'DELTA')
+    s3 = _node_section(fake_llm, q3)
+    transcript3 = s3.split('(oldest first, for context):\n', 1)[-1].rstrip() if s3 else ''
+    ev3 = _event(engine, 'message', f3.id) or {}
+    ok = (
+        a1 is not None
+        and 'ALPHA' in s1
+        and a2 is not None
+        and len(entries2) == 2
+        and 'ALPHA' not in s2
+        and str(ev2.get('text', '')) == q2
+        and a3 is not None
+        and transcript3.startswith('\u2026\n')
+        and len(transcript3) <= 82
+        and int(ev3.get('contextChars') or 0) <= 82
+    )
+    _check(
+        'F20',
+        'threadHistoryLimit / threadHistoryMaxChars',
+        'thread: opening, two follow-ups (limit 2); then a follow-up with an 80-char cap',
+        "follow-ups carry earlier turns; only the last 2 messages at limit 2; cap keeps the newest 80 chars behind an ellipsis; SSE text is the user's own words",
+        ok,
+        f'1st follow-up saw the opening={"ALPHA" in s1}; 2nd follow-up entries={len(entries2)} saw the opening={"ALPHA" in s2}; '
+        f'capped transcript {len(transcript3)} chars, ellipsis={transcript3.startswith(chr(8230))}, contextChars={ev3.get("contextChars")}',
+        f"transcripts read from the fake model's request log; thread {getattr(thread, 'id', None)}",
+    )
+
+
+def test_f21_escalation_pause_resume_team_reply_and_restart(engine, engine_config, driver_bot, bot_id):
+    tag = _tag('F21')
+    params = _params(engine_config, replyMode='thread', escalationPause=True, escalationMarkers=[ESCALATION_LINE])
+    _start(engine, _echo(params))
+    posted = driver_bot.post(f'{tag} billing problem. {ESCALATION_LINE}')
+    thread = driver_bot.wait_for_thread(posted, timeout=45)
+    first = _answer(driver_bot, thread, posted, tag) if thread else None
+    silent = driver_bot.post(f'{tag} silent follow-up', channel=thread)
+    silent_posts = _quiet(driver_bot, thread, silent, 'silent follow-up')
+    silent_reason = _reason(engine, silent.id)
+    team = driver_bot.post(f'{tag} team member: I will take this one', channel=thread)
+    team_event = _event(engine, 'no_reply', team.id) or {}
+    team_posts = _quiet(driver_bot, thread, team, 'team member', settle=8)
+    mention = driver_bot.post(
+        f'<@{bot_id}> {tag} mentioned follow-up',
+        channel=thread,
+        allowed_mentions=discord.AllowedMentions(users=[discord.Object(bot_id)]),
+    )
+    resumed = _answer(driver_bot, thread, mention, 'mentioned follow-up')
+    after = driver_bot.post(f'{tag} plain after resume', channel=thread)
+    after_answer = _answer(driver_bot, thread, after, 'plain after resume')
+    ok = (
+        first is not None
+        and not silent_posts
+        and silent_reason == 'paused'
+        and team_event.get('reason') == 'paused'
+        and 'I will take this one' in str(team_event.get('text', ''))
+        and not team_posts
+        and resumed is not None
+        and after_answer is not None
+    )
+    _check(
+        'F21',
+        'escalationPause / markers / resume / team reply',
+        'escalating answer, silent follow-up, team reply, @mention, plain follow-up',
+        'paused after the marker; silent and team replies -> no_reply paused (team text on the event); @mention answered and unpauses',
+        ok,
+        f'silent={silent_reason} posts={len(silent_posts)}; team={team_event.get("reason")} text_on_event='
+        f'{"I will take this one" in str(team_event.get("text", ""))}; mention answered={resumed is not None}; '
+        f'after resume answered={after_answer is not None}',
+        f'thread {getattr(thread, "id", None)}',
+    )
+
+    # Pause rebuilt after a pipeline restart: escalate again, restart, follow up.
+    again = driver_bot.post(f'{tag} still broken. {ESCALATION_LINE}', channel=thread)
+    _answer(driver_bot, thread, again, 'still broken')
+    _start(engine, _echo(params))
+    probe = driver_bot.post(f'{tag} after restart, no mention', channel=thread)
+    probe_posts = _quiet(driver_bot, thread, probe, 'after restart')
+    probe_reason = _reason(engine, probe.id)
+    _check(
+        'F22',
+        'escalationPause',
+        'pipeline restarted while the thread is escalated',
+        'pause rebuilt from thread history: follow-up gets no_reply paused, nothing posted',
+        not probe_posts and probe_reason == 'paused',
+        f'posts={len(probe_posts)} no_reply={probe_reason}',
+        f'thread {getattr(thread, "id", None)}',
+    )
+
+
+def test_f23_aimed_at_others_with_ack(engine, engine_config, driver_bot):
+    tag = _tag('F23')
+    driver_id = driver_bot.bot_id
+    _start(engine, _echo(_params(engine_config, ignoreAimedAtOthers=True, ackEmoji='\U0001f440')))
+    # Mention someone other than the bot: the driver mentions itself (harmless).
+    posted = driver_bot.post(
+        f'<@{driver_id}> {tag} this is for you, not the bot',
+        allowed_mentions=discord.AllowedMentions(users=[discord.Object(driver_id)]),
+    )
+    quiet = _quiet(driver_bot, driver_bot.channel, posted, tag, settle=10)
+    reactions = [str(r.emoji) for r in driver_bot.refetch(posted).reactions]
+    reason = _reason(engine, posted.id)
+    reply_to_other = driver_bot.post(f'{tag} replying to my own message', reference=posted)
+    quiet2 = _quiet(driver_bot, driver_bot.channel, reply_to_other, 'replying to my own', settle=10)
+    reason2 = _reason(engine, reply_to_other.id)
+    ok = (
+        not quiet
+        and '\U0001f440' in reactions
+        and reason == 'aimed_elsewhere'
+        and not quiet2
+        and reason2 == 'aimed_elsewhere'
+    )
+    _check(
+        'F23',
+        'ignoreAimedAtOthers / ackEmoji',
+        'message mentioning another user; reply to a non-bot message',
+        'acknowledged with the emoji only: nothing posted, no_reply aimed_elsewhere (both)',
+        ok,
+        f'mention: posts={len(quiet)} reactions={reactions} reason={reason}; reply: posts={len(quiet2)} reason={reason2}',
+        f'question {posted.id}',
+    )
+
+
+def test_f23b_reply_to_the_bot_is_answered(engine, engine_config, driver_bot):
+    # Review of #1503: the node looked up a reply's target with a method
+    # discord.py does not have, so every reply counted as aimed elsewhere.
+    tag = _tag('F23b')
+    _start(engine, _echo(_params(engine_config, ignoreAimedAtOthers=True, ackEmoji='\U0001f440')))
+    posted = driver_bot.post(f'{tag} first question')
+    answer = _answer(driver_bot, driver_bot.channel, posted, tag)
+    # A native reply with no ping: the bot is not in message.mentions, so only
+    # the reply-target lookup can tell the node this is for it.
+    reply = driver_bot.post(f'{tag} replying to the bot without a mention', reference=answer)
+    reply_answer = _answer(driver_bot, driver_bot.channel, reply, 'replying to the bot')
+    reactions = [str(r.emoji) for r in driver_bot.refetch(reply).reactions]
+    reason = _reason(engine, reply.id, timeout=3) if reply_answer is None else ''
+    _check(
+        'F23b',
+        'ignoreAimedAtOthers',
+        "a reply to the bot's own answer, without a mention",
+        'answered; no ack emoji, no aimed_elsewhere',
+        answer is not None and reply_answer is not None and '\U0001f440' not in reactions,
+        f'answered={reply_answer is not None}; reactions={reactions}; no_reply={reason or None}',
+        'driver reply has mention_author off, so the bot is not in its mentions',
+    )
+
+
+def test_f24_feedback_and_reaction_events(engine, engine_config, driver_bot):
+    tag = _tag('F24')
+    _start(engine, _echo(_params(engine_config, feedbackReactions=True, emitReactions=True)))
+    posted = driver_bot.post(f'{tag} feedback please')
+    answer = _answer(driver_bot, driver_bot.channel, posted, tag)
+    time.sleep(4)
+    bot_reactions = [str(r.emoji) for r in driver_bot.refetch(answer).reactions] if answer else []
+    outbound = _event(engine, 'outbound', posted.id) or {}
+    own_reaction_events = list(_events(engine, 'reaction', answer.id)) if answer else []
+    driver_bot.react(answer, '✅')
+    added = _event(engine, 'reaction', answer.id, timeout=20)
+    driver_bot.react(answer, '✅', remove=True)
+    time.sleep(5)
+    reaction_events = _events(engine, 'reaction', answer.id)
+    removed = [event for event in reaction_events if event.get('added') is False]
+    ok = (
+        set(bot_reactions) >= {'✅', '❌'}
+        and outbound.get('feedbackEmojis') == ['✅', '❌']
+        and not own_reaction_events
+        and added is not None
+        and added.get('added') is True
+        and str(added.get('userId')) == str(driver_bot.bot_id)
+        and removed
+    )
+    _check(
+        'F24',
+        'feedbackReactions / emitReactions',
+        'bot adds feedback emoji; driver adds then removes a reaction',
+        'bot adds the emoji (not emitted as events); driver add and remove each emit a reaction event',
+        ok,
+        f'bot reactions={bot_reactions}; outbound.feedbackEmojis={outbound.get("feedbackEmojis")}; '
+        f'events before driver={len(own_reaction_events)}; add event={added is not None}; remove events={len(removed)}',
+        f'answer {getattr(answer, "id", None)}',
+    )
+
+
+def test_f25_sanitize_replies(engine, engine_config, driver_bot, fake_llm):
+    tag = _tag('F25')
+    _start(engine, _fake(_params(engine_config, sanitizeReplies=True, nonAnswerRetries=1), fake_llm))
+    rows = {}
+
+    final = driver_bot.post(f'{tag} envelope [fake:final]')
+    final_answer = _answer(driver_bot, driver_bot.channel, final, FINAL_CONTENT, timeout=40)
+    rows['final'] = (final_answer is not None and '"type"' not in final_answer.content, 'posted unwrapped')
+
+    scratch = driver_bot.post(f'{tag} scratchpad [fake:scratchpad]')
+    posts = _quiet(driver_bot, driver_bot.channel, scratch, 'Thought:', settle=15)
+    calls = len(fake_llm.calls_matching(f'{tag} scratchpad'))
+    rows['scratchpad'] = (not posts and _reason(engine, scratch.id) == 'non_answer' and calls >= 2, f'calls={calls}')
+
+    error = driver_bot.post(f'{tag} raw error [fake:errtext]')
+    posts = _quiet(driver_bot, driver_bot.channel, error, 'Error code', settle=12)
+    rows['429 text'] = (not posts and _reason(engine, error.id) == 'model_error', 'model_error')
+
+    empty = driver_bot.post(f'{tag} empty [fake:empty]')
+    posts = _quiet(driver_bot, driver_bot.channel, empty, tag, settle=12)
+    empty_calls = len(fake_llm.calls_matching(f'{tag} empty'))
+    rows['empty'] = (not posts and _reason(engine, empty.id) == 'no_answer', f'calls={empty_calls}')
+
+    ok = all(passed for passed, _ in rows.values())
+    _check(
+        'F25',
+        'sanitizeReplies',
+        '{"type":"final"} envelope, scratchpad, a 429 error as the answer text, empty answer',
+        'envelope unwrapped and posted; scratchpad retried then dropped (non_answer); error text dropped (model_error); empty -> no_answer',
+        ok,
+        '; '.join(f'{name}: {"ok" if passed else "FAIL"} ({note})' for name, (passed, note) in rows.items()),
+        f'fake model; posted envelope answer {getattr(final_answer, "id", None)}; error text was {ERROR_TEXT[:30]!r}...',
+    )
+
+
+def test_f26_non_answer_retries(engine, engine_config, driver_bot, fake_llm):
+    tag = _tag('F26')
+    rows = []
+    for retries in (1, 0):
+        _start(engine, _fake(_params(engine_config, sanitizeReplies=True, nonAnswerRetries=retries), fake_llm))
+        posted = driver_bot.post(f'{tag} retries={retries} [fake:retry]')
+        answer = _answer(driver_bot, driver_bot.channel, posted, RETRY_ANSWER, timeout=40)
+        calls = len(fake_llm.calls_matching(f'{tag} retries={retries}'))
+        retry_events = [e for e in _events(engine, 'message', posted.id) if e.get('retry')]
+        rows.append((retries, answer is not None, calls, len(retry_events), _reason(engine, posted.id, timeout=5)))
+    with_retry, without = rows
+    ok = (
+        with_retry[1]
+        and with_retry[2] == 2
+        and with_retry[3] == 1
+        and not without[1]
+        and without[2] == 1
+        and without[4] == 'non_answer'
+    )
+    _check(
+        'F26',
+        'nonAnswerRetries',
+        'scratchpad first, real answer second; retries 1 then 0',
+        'retries=1: second call answers and is posted (message event retry=1); retries=0: one call, non_answer',
+        ok,
+        '; '.join(f'retries={r}: answered={a} calls={c} retry_events={e} no_reply={n}' for r, a, c, e, n in rows),
+        'fake model call log',
     )
 
 
@@ -1108,6 +1430,47 @@ def test_f34_database_down_mid_run(engine, engine_config, driver_bot):
 # =============================================================================
 
 
+def test_f35_backfill_with_unreadable_channel(engine, engine_config, driver_bot):
+    tag = _tag('F35')
+    # Nothing may answer the seeds: their replies would become the newest
+    # channel messages and push a seed out of the backfill window.
+    engine.terminate()
+    seed1 = driver_bot.post(f'{tag} backfill seed one')
+    seed2 = driver_bot.post(f'{tag} backfill seed two')
+    no_access = live_ids().get('noPermissionChannelId') or FAKE_CHANNEL_ID
+    mark = _log_size()
+    _start(
+        engine,
+        _echo(
+            _params(
+                engine_config,
+                backfillLimit=2,
+                sendResponses=False,
+                channelIds=['${ROCKETRIDE_DISCORD_SUPPORT_CHANNEL_ID}', str(no_access)],
+            )
+        ),
+    )
+    time.sleep(15)
+    got = [str(e['metadata']['messageId']) for e in engine.discord_events('message')]
+    running = engine.state() == TASK_STATE_RUNNING
+    log = _log_tail(mark, r'[Bb]ackfill')
+    ok = (
+        str(seed1.id) in got
+        and str(seed2.id) in got
+        and got.index(str(seed1.id)) < got.index(str(seed2.id))
+        and running
+    )
+    _check(
+        'F35',
+        'backfillLimit',
+        'limit 2 over the test channel plus a channel the bot cannot read',
+        'the 2 newest test-channel messages replayed oldest first; unreadable channel skipped; task keeps running',
+        ok,
+        f'replayed={[("seed1" if i == str(seed1.id) else "seed2" if i == str(seed2.id) else "other") for i in got]}; running={running}',
+        f'log: {log[:2]}',
+    )
+
+
 def test_f36_member_metadata_without_intent(engine, engine_config):
     outcome = _start_raw(engine, _echo(_params(engine_config, includeMemberMetadata=True)), settle=30)
     text = ' '.join(str(v) for v in outcome.values())
@@ -1234,6 +1597,37 @@ def test_f39_token_missing_and_invalid(engine, engine_config):
 # =============================================================================
 
 
+def test_f40_pipeline_throws(engine, engine_config, driver_bot, fake_llm):
+    tag = _tag('F40')
+    _start(engine, _fake(_params(engine_config, sanitizeReplies=True), fake_llm))
+    posted = driver_bot.post(f'{tag} provider rejects [fake:http429]')
+    started = time.time()
+    event = _event(engine, 'no_reply', posted.id, timeout=90)
+    took = time.time() - started
+    reason = str(event.get('reason')) if event else '<no no_reply event in 90 s>'
+    # Whatever the node posted in reply to this question, tagged or not.
+    quiet = [
+        m
+        for m in driver_bot.answers_after(driver_bot.channel, posted)
+        if m.reference is not None and m.reference.message_id == posted.id
+    ]
+    outbound = _event(engine, 'outbound', posted.id, timeout=2) or {}
+    calls = len(fake_llm.calls_matching(f'{tag} provider rejects'))
+    next_q = driver_bot.post(f'{tag} next question works')
+    next_answer = _answer(driver_bot, driver_bot.channel, next_q, 'next question works', timeout=40)
+    ok = not quiet and reason == 'model_error' and next_answer is not None
+    _check(
+        'F40',
+        'pipeline throws',
+        'model endpoint returns HTTP 429 on every call',
+        'nothing posted (no raw error); no_reply model_error; the next question is answered',
+        ok,
+        f'replies posted={[m.content[:70] for m in quiet]}; no_reply after {took:.0f}s={reason[:120]!r}; '
+        f'outbound={outbound.get("destination")}; model calls={calls}; next answered={next_answer is not None}',
+        f'question {posted.id}',
+    )
+
+
 def test_f41_pipeline_slow_beyond_a_minute(engine, engine_config, driver_bot, fake_llm):
     tag = _tag('F41')
     _start(engine, _fake(_params(engine_config), fake_llm))
@@ -1256,6 +1650,26 @@ def test_f41_pipeline_slow_beyond_a_minute(engine, engine_config, driver_bot, fa
         'the node has no pipeline timeout setting; the model client timed out or not as shown',
     )
     assert other_answer is not None, 'a slow pipeline blocked other questions'
+
+
+def test_f41b_pipeline_timeout(engine, engine_config, driver_bot, fake_llm):
+    tag = _tag('F41b')
+    _start(engine, _fake(_params(engine_config, pipelineTimeoutSeconds=15), fake_llm))
+    slow = driver_bot.post(f'{tag} very slow [fake:hang:45]')
+    started = time.time()
+    event = _event(engine, 'no_reply', slow.id, timeout=40)
+    took = time.time() - started
+    time.sleep(40)  # past the model's 45 s: the late answer must not be posted
+    late = [m for m in driver_bot.answers_after(driver_bot.channel, slow) if 'Fake answer after 45s' in m.content]
+    _check(
+        'F41b',
+        'pipelineTimeoutSeconds',
+        'limit 15 s, model takes 45 s',
+        'no_reply timeout after ~15 s; the late answer is dropped, nothing posted',
+        event is not None and event.get('reason') == 'timeout' and not late,
+        f'no_reply={event and event.get("reason")} after {took:.0f}s; late answer posted={bool(late)}',
+        'fake model',
+    )
 
 
 def test_f42_thread_creation_refused(engine, engine_config, driver_bot, fake_llm):
@@ -1340,3 +1754,141 @@ def test_f44_discord_rate_limit(engine, engine_config, driver_bot, tmp_media):
         f'span={round(stamps[-1] - stamps[0], 1) if stamps else 0}s',
         f'gaps between chunks={gaps}; mid-line cuts={midline}; log lines mentioning rate limit={len(limited)}',
     )
+
+
+# =============================================================================
+# The realistic AI run
+# =============================================================================
+
+
+def _ai_pipe_for_test(path: str, config: Dict[str, str]) -> Dict[str, Any]:
+    """Load a saved AI pipe and point its discord source at the test channel.
+
+    Components that reach outside Discord (a Slack tool) or write to a database
+    are dropped with their edges, so the run has no side effects beyond the
+    channel.
+    """
+    with open(path, encoding='utf-8') as handle:
+        pipeline = json.load(handle)
+    drop = {
+        c['id'] for c in pipeline['components'] if c.get('provider') in ('tool_slack', 'db_postgres', 'rocketride_sql')
+    }
+    components = []
+    for component in pipeline['components']:
+        if component['id'] in drop:
+            continue
+        for key in ('input', 'control'):
+            if component.get(key):
+                component[key] = [edge for edge in component[key] if edge.get('from') not in drop]
+        components.append(component)
+    pipeline['components'] = components
+    pipeline['project_id'] = PROJECT_ID
+
+    source = next(c for c in pipeline['components'] if c['provider'] == 'discord')
+    params = source['config']['parameters']
+    params.update(
+        {
+            'channelIds': ['${ROCKETRIDE_DISCORD_SUPPORT_CHANNEL_ID}'],
+            'guildIds': ['${ROCKETRIDE_DISCORD_GUILD_ID}'],
+            'allowedBotIds': [config['driverBotId']],
+            'allowedMentionRoleIds': [],
+            'replyMode': 'thread',
+            'threadAutoArchiveMinutes': 60,
+        }
+    )
+    assert not drop & {c['id'] for c in pipeline['components']}
+    return pipeline
+
+
+@needs_ai_pipe
+def test_f46_ai_run(engine, engine_config, driver_bot):
+    tag = _tag('F46')
+    _start(engine, _ai_pipe_for_test(AI_PIPE, engine_config))
+    posted = driver_bot.post(f'{tag} How do I run a pipeline from the Python SDK?')
+    thread = driver_bot.wait_for_thread(posted, timeout=60)
+    answer = driver_bot.wait_for_answer(thread, posted, timeout=150) if thread else None
+    outbound = _event(engine, 'outbound', posted.id, timeout=10) or {}
+    reason = _reason(engine, posted.id, timeout=2) if answer is None else ''
+    reactions = [str(r.emoji) for r in driver_bot.refetch(answer).reactions] if answer else []
+    content = answer.content if answer else ''
+    leaked = bool(re.search(r'Thought:|Error code|Traceback|"type"\s*:\s*"final"', content))
+    ok = answer is not None and not leaked and len(content) > 40
+    _check(
+        'F46',
+        'AI path (saved AI pipe, no Slack tool, no database)',
+        'one realistic support question',
+        'a sanitized model answer in a thread, with the feedback emoji',
+        ok,
+        f'answered={answer is not None} chars={len(content)} leaked scratchpad/error={leaked} reactions={reactions} '
+        f'chunks={len(outbound.get("messageIds") or [])} no_reply={reason}',
+        f'first 100 chars: {content[:100]!r}',
+    )
+
+
+# =============================================================================
+# Engine restart (last: it replaces the engine process)
+# =============================================================================
+
+
+@needs_engine_dir
+def test_f45_engine_restarts_mid_thread(engine, engine_config, driver_bot):
+    tag = _tag('F45')
+    params = _params(engine_config, replyMode='thread', threadHistoryLimit=10)
+    _start(engine, _echo(params))
+    posted = driver_bot.post(f'{tag} before restart ALPHA')
+    thread = driver_bot.wait_for_thread(posted, timeout=45)
+    _answer(driver_bot, thread, posted, tag)
+
+    port = urlparse(engine_config['engineUri']).port or 5565
+    pid = subprocess.run(['lsof', '-t', f'-iTCP:{port}', '-sTCP:LISTEN'], capture_output=True, text=True).stdout.split()
+    engine.token = None  # the task dies with the engine; nothing to terminate
+    for item in pid:
+        subprocess.run(['kill', item], timeout=10)
+    killed_at = time.time()
+    for _ in range(40):
+        if not subprocess.run(['lsof', '-t', f'-iTCP:{port}', '-sTCP:LISTEN'], capture_output=True, text=True).stdout:
+            break
+        time.sleep(1)
+    port_closed = time.time() - killed_at
+    # The engine closes its port first; the task process (still on the
+    # Gateway) exits later. "Down" means that process is gone.
+    for _ in range(90):
+        tasks = subprocess.run(['pgrep', '-f', 'node.py .*discord_1'], capture_output=True, text=True).stdout.split()
+        if not tasks:
+            break
+        time.sleep(1)
+    task_gone = time.time() - killed_at
+    while_down = driver_bot.post(f'{tag} posted while the engine is down BRAVO', channel=thread)
+    log = open(ENGINE_LOG or os.devnull, 'a')
+    subprocess.Popen(
+        ['./engine', 'ai/eaas.py', '--host=127.0.0.1', f'--port={port}'],
+        cwd=ENGINE_DIR,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    for _ in range(60):
+        if subprocess.run(['lsof', '-t', f'-iTCP:{port}', '-sTCP:LISTEN'], capture_output=True, text=True).stdout:
+            break
+        time.sleep(1)
+    time.sleep(5)
+    fresh = EngineSession(engine_config['engineUri'], engine_config['engineApiKey']).start()
+    try:
+        _start(fresh, _echo(params))
+        down_quiet = _quiet(driver_bot, thread, while_down, 'BRAVO', settle=8)
+        after = driver_bot.post(f'{tag} after restart CHARLIE', channel=thread)
+        answer = _answer(driver_bot, thread, after, 'CHARLIE')
+        content = answer.content if answer else ''
+        ok = answer is not None and 'ALPHA' in content and 'BRAVO' in content and not down_quiet
+        _check(
+            'F45',
+            'engine restart mid-thread',
+            'engine killed and restarted between turns of a thread; a message posted while it was down',
+            'after restart the thread is answered with the full history (incl. the message posted while down); the missed message is not answered on its own',
+            ok,
+            f'answered={answer is not None}; history has pre-restart turn={"ALPHA" in content}, '
+            f'missed message={"BRAVO" in content}; missed message answered on its own={bool(down_quiet)}',
+            f'thread {getattr(thread, "id", None)}; port closed after {port_closed:.0f}s, discord task process gone after {task_gone:.0f}s',
+        )
+    finally:
+        fresh.close()

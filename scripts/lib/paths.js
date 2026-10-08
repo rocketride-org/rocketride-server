@@ -1,6 +1,6 @@
 /**
  * Shared Path Constants
- * 
+ *
  * Common directory paths used throughout the build system.
  */
 const path = require('path');
@@ -23,23 +23,22 @@ const DIST_ROOT = path.join(PROJECT_ROOT, 'dist');
  * root before an overlay's builder forwards that one - so the last call wins
  */
 function setOverlayRoot(overlayRoot) {
-    const outputRoot = overlayRoot || PROJECT_ROOT;
+	const outputRoot = overlayRoot || PROJECT_ROOT;
 
-    module.exports.OVERLAY_ROOT = overlayRoot || null;
-    module.exports.BUILD_ROOT = path.join(outputRoot, 'build');
-    module.exports.DIST_ROOT = path.join(outputRoot, 'dist');
+	module.exports.OVERLAY_ROOT = overlayRoot || null;
+	module.exports.BUILD_ROOT = path.join(outputRoot, 'build');
+	module.exports.DIST_ROOT = path.join(outputRoot, 'dist');
 
-    // The rsbuild and esbuild configs, and the shell's packaging scripts, run
-    // as their own processes and read these to find the tree we write into
-    process.env.ROCKETRIDE_BUILD_ROOT = module.exports.BUILD_ROOT;
-    process.env.ROCKETRIDE_DIST_ROOT = module.exports.DIST_ROOT;
+	// The rsbuild and esbuild configs, and the shell's packaging scripts, run
+	// as their own processes and read these to find the tree we write into
+	process.env.ROCKETRIDE_BUILD_ROOT = module.exports.BUILD_ROOT;
+	process.env.ROCKETRIDE_DIST_ROOT = module.exports.DIST_ROOT;
 }
 
 module.exports = {
-    PROJECT_ROOT,
-    BUILD_ROOT,
-    DIST_ROOT,
-    OVERLAY_ROOT,
-    setOverlayRoot
+	PROJECT_ROOT,
+	BUILD_ROOT,
+	DIST_ROOT,
+	OVERLAY_ROOT,
+	setOverlayRoot,
 };
-

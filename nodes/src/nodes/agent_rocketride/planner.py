@@ -236,13 +236,16 @@ def _build_wave_question(
     # Memory usage instructions
     # ------------------------------------------------------------------
 
-    # Teach the LLM the two-level memory model:
+    # Teach the LLM how memory works: what it always sees, and three ways to use it:
     # 1. Structural summaries (always visible) — shape the LLM's awareness of
     #    what data exists without flooding the context with raw values.
     # 2. memory.peek (on demand) — lets the LLM pull specific values when the
     #    summary isn't enough.
     # 3. {{memory.ref:key:format:path}} (in final answer) — lets the LLM
     #    reference bulk data in the answer without ever loading it into context.
+    # 4. {{memory.ref:...}} as a whole tool argument — hands stored data straight
+    #    to the next tool. The executor always supported it; without this paragraph
+    #    the model never used it and paged through large results instead.
     q.addInstruction(
         'Memory',
         """\
@@ -251,9 +254,9 @@ def _build_wave_question(
         of the call that produced it and a structural summary — field names, array lengths,
         and sample values — so you can understand the data shape without loading it.
 
-        There are two distinct memory mechanisms. Use the right one:
+        There are three ways to use stored results. Use the right one:
 
-       - memory.peek (tool call)
+        - memory.peek (tool call)
         Use during a wave to extract specific scalar values into scratch.
           {"tool": "memory.peek", "args": {"key": "<key>", "path": "results[0].name"}}
           {"tool": "memory.peek", "args": {"key": "<key>", "path": "rows[0:5].city"}}
@@ -280,7 +283,16 @@ def _build_wave_question(
         If the structural summary confirms the data exists and looks complete, write
         done=true and embed it with {{memory.ref:key:format}} directly — do not peek it first.
 
-        Available formats: markdown_table, html_table, csv, json, text""",
+        Available formats: markdown_table, html_table, csv, json, text
+
+        - {{memory.ref:key}} (tool argument)
+        Use as a whole argument value to hand a stored result to a tool without reading it
+        yourself. The system substitutes the stored value before the tool runs, so large
+        data goes from one tool to the next without passing through this prompt. Format and
+        path work as in the answer template. If the key is not stored, the call fails without
+        running.
+          {"tool": "<name>", "args": {"data": "{{memory.ref:wave-1.r0}}"}}
+          {"tool": "<name>", "args": {"content": "{{memory.ref:wave-1.r0:text:content}}"}}""",
     )
 
     # ------------------------------------------------------------------

@@ -20,8 +20,8 @@
 	},
 	"invoke": {
 		"llm": {
-			"description": "LLM used to generate SQL from natural language",
-			"min": 1
+			"description": "LLM that writes SQL from a natural-language question; not needed for execute (raw SQL)",
+			"min": 0
 		}
 	},
 	"preconfig": {

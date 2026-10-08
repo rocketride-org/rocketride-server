@@ -82,7 +82,7 @@ function stripNonPublicMembers(dtsText, ts) {
 						node.name,
 						node.typeParameters,
 						node.heritageClauses,
-						kept,
+						kept
 					);
 				}
 				return node;
