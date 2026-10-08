@@ -273,10 +273,6 @@
 				"ROCKETRIDE_SYSTEMONE_OLLAMA"
 			],
 			"avoidMocks": true,
-			"chain": [
-				"preprocessor_langchain",
-				"*"
-			],
 			"profiles": [
 				"nimble"
 			],
@@ -295,16 +291,23 @@
 					}
 				]
 			},
-			"outputs": [
-				"answers"
-			],
+			"outputs": ["documents", "answers"],
 			"cases": [
 				{
 					"name": "Nimble classifies a ticket",
-					"text": "Our checkout has returned 500 errors since 9am.",
+					"documents": [
+						{
+							"page_content": "Our checkout has returned 500 errors since 9am.",
+							"metadata": { "objectId": "test-ticket-1", "chunkId": 0, "nodeId": "test-node", "parent": "/tickets/1.txt" }
+						}
+					],
 					"expect": {
-						"answers": {
-							"contains": "decisions"
+						"answers": { "contains": "decisions" },
+						"documents": {
+							"property": [
+								{ "path": "[0].metadata.decisions.team.answer", "equals": "bug" },
+								{ "path": "[0].page_content", "contains": "500 errors" }
+							]
 						}
 					}
 				}
