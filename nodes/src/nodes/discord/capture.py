@@ -375,6 +375,28 @@ def _clip_strings(value: Any) -> Any:
     return value
 
 
+def _occurred_at(event_type: str, metadata: Dict[str, Any], now: datetime) -> str:
+    """Return the row's ``occurred_at``: when the event happened.
+
+    A ``message`` happened when Discord says it was sent, its ``createdAt``,
+    so a message replayed by backfill at startup keeps its real time. Every
+    other event carries the question's metadata, whose ``createdAt`` is not
+    its own time, so it happened when the node saw it. A ``createdAt`` that
+    does not parse, or that has no time zone (a ``TIMESTAMPTZ`` would read it
+    as the server's local time), falls back to ``now`` too.
+    """
+    if event_type == 'message':
+        created = metadata.get('createdAt')
+        if isinstance(created, str) and created:
+            try:
+                parsed = datetime.fromisoformat(created)
+            except ValueError:
+                parsed = None
+            if parsed is not None and parsed.tzinfo is not None:
+                return parsed.isoformat()
+    return now.isoformat()
+
+
 def _message_part(metadata: Dict[str, Any], payload: Dict[str, Any]) -> str:
     """Name which part of one Discord message a ``message`` event is.
 
@@ -466,7 +488,8 @@ def capture_row(
             (for a ``message``, with the unclipped text the row should store).
         source (str): The writer's label: ``captureSource``, or
             ``'discord:<node type>'`` when it is not set.
-        now (datetime): Node-side event time; tz-aware.
+        now (datetime): Node-side event time; tz-aware. A ``message`` row's
+            ``occurred_at`` uses the metadata's ``createdAt`` instead.
 
     Returns:
         dict: One row, keyed by :data:`COLUMNS`.
@@ -509,7 +532,7 @@ def capture_row(
         'guild_id': _opt_text(metadata.get('guildId')),
         'author_id': _opt_text(metadata.get('authorId')),
         'author_is_bot': None if author_is_bot is None else bool(author_is_bot),
-        'occurred_at': now.isoformat(),
+        'occurred_at': _occurred_at(event_type, metadata, now),
         'text': _clip(payload.get('text')),
         # `default=str` rather than a raising dump: a payload this node cannot
         # serialise must degrade to a readable repr, never drop the row; that

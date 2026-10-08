@@ -122,9 +122,33 @@ class TestCaptureRowColumns:
         assert row['guild_id'] == '3003'
         assert row['author_id'] == '4004'
         assert row['author_is_bot'] is False
-        assert row['occurred_at'] == NOW.isoformat()
+        # Discord's send time, from the metadata, not the moment the node saw it.
+        assert row['occurred_at'] == '2026-03-04T05:06:00+00:00'
         assert row['text'] == 'how do I deploy?'
         assert row['source'] == 'discord:discord_1'
+
+    def test_a_backfilled_message_keeps_the_time_it_was_sent(self):
+        """A message replayed at startup happened when Discord says, not when it was replayed."""
+        sent = '2026-01-15T22:41:09.512000+00:00'
+        row = capture_row('message', _metadata(createdAt=sent), {'lane': 'text', 'text': 'x'}, source='s', now=NOW)
+
+        assert row['occurred_at'] == sent
+
+    @pytest.mark.parametrize('created_at', [None, '', 'yesterday', 12345, '2026-01-15T22:41:09'])
+    def test_a_message_without_a_usable_send_time_uses_now(self, created_at):
+        """Absent, unreadable, or without a time zone (a TIMESTAMPTZ would read it as server-local)."""
+        row = capture_row(
+            'message', _metadata(createdAt=created_at), {'lane': 'text', 'text': 'x'}, source='s', now=NOW
+        )
+
+        assert row['occurred_at'] == NOW.isoformat()
+
+    @pytest.mark.parametrize('event_type', ['outbound', 'no_reply', 'reaction'])
+    def test_other_events_happen_when_the_node_sees_them(self, event_type):
+        """They carry the question's metadata, so its createdAt is not their time."""
+        row = capture_row(event_type, _metadata(), {'reason': 'no_answer'}, source='s', now=NOW)
+
+        assert row['occurred_at'] == NOW.isoformat()
 
     def test_a_thread_follow_up_threads_on_the_thread_id(self):
         """In a thread the node already knows the root; the message id is not it."""
@@ -751,7 +775,7 @@ class TestWriterWrites:
             '3003',
             '4004',
             False,
-            NOW.isoformat(),
+            '2026-03-04T05:06:00+00:00',
             'hello',
             row['payload'],
             'discord:discord_1',
