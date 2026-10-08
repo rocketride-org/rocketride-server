@@ -70,7 +70,7 @@ def encode_json(value) -> bytes:
     """Return ``value`` as the UTF-8 bytes that will be sent in a request body.
 
     Uses compact encoding (no spaces, UTF-8 non-ASCII characters).
-    Lone surrogates are replaced with U+FFFD (the replacement character).
+    Lone surrogates, which UTF-8 cannot encode, are replaced with ``?``.
     """
     return json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8', errors='replace')
 

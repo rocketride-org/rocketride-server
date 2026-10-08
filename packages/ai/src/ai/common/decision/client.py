@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Callable
 
@@ -33,17 +34,28 @@ from .limits import encode_json
 
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 MAX_RETRY_DELAY = 60.0
+MAX_ERROR_CODE_CHARS = 80
+MAX_ERROR_BODY_CHARS = 500
 
 
 class SystemOneError(Exception):
     """A System One call failed; ``kind`` says how the caller should treat it."""
 
-    def __init__(self, kind: str, message: str, *, status: int | None = None, request_id: str | None = None):
-        """Create the error."""
+    def __init__(
+        self,
+        kind: str,
+        message: str,
+        *,
+        status: int | None = None,
+        request_id: str | None = None,
+        body: str | None = None,
+    ):
+        """Create the error; ``body`` is the truncated backend body, kept off the message (it may echo the request)."""
         super().__init__(message)
         self.kind = kind
         self.status = status
         self.request_id = request_id
+        self.body = body
 
 
 def _kind_for(status: int, text: str) -> str:
@@ -58,6 +70,22 @@ def _kind_for(status: int, text: str) -> str:
     if status >= 500:
         return 'server'
     return 'invalid'
+
+
+def _error_code(text: str) -> str | None:
+    """Return a short machine code from an error body (``error.code``, ``error.type`` or a short ``error``)."""
+    try:
+        error = json.loads(text).get('error')
+    except (ValueError, AttributeError):
+        return None
+    if isinstance(error, dict):
+        for key in ('code', 'type'):
+            if isinstance(error.get(key), str) and error[key]:
+                return error[key]
+        return None
+    if isinstance(error, str) and 0 < len(error) <= MAX_ERROR_CODE_CHARS:
+        return error
+    return None
 
 
 class SystemOneClient:
@@ -75,6 +103,8 @@ class SystemOneClient:
         sleep: Callable[[float], None] = time.sleep,
     ):
         """Create a client; ``transport`` is injectable for tests."""
+        if not base_url.startswith(('http://', 'https://')):
+            raise ValueError(f'System One server URL must start with http:// or https://, got {base_url!r}')
         base = base_url.rstrip('/')
         self._endpoint = f'{base}/systemone' if base.endswith('/v1') else f'{base}/v1/systemone'
         headers = {'Content-Type': 'application/json'}
@@ -137,11 +167,13 @@ class SystemOneClient:
                         ) from exc
                 if response.status_code not in RETRY_STATUSES or attempt >= self._max_retries:
                     text = response.text
+                    code = _error_code(text)
                     raise SystemOneError(
                         _kind_for(response.status_code, text),
-                        f'{response.status_code} from {self._endpoint}: {text[:500]}',
+                        f'{response.status_code} from {self._endpoint}' + (f' ({code})' if code else ''),
                         status=response.status_code,
                         request_id=response.headers.get('x-typesafe-request-id'),
+                        body=text[:MAX_ERROR_BODY_CHARS],
                     )
             self._sleep(self._delay(response, attempt))
             attempt += 1

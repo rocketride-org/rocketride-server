@@ -168,3 +168,48 @@ def test_config_errors_always_fail_even_with_pass_through(error_kind):
     with pytest.raises(SystemOneError) as exc:
         runner.decide('text', None, source='n')
     assert exc.value.kind == error_kind
+
+
+@pytest.mark.parametrize('bad_reply', [[], 'x', {'answers': []}, {'answers': 'u'}])
+def test_malformed_reply_envelope_honours_on_error(bad_reply):
+    """A reply that is not a dict, or whose answers are not a dict, is a protocol error (not a crash)."""
+    runner, warnings = _runner(FakeClient(bad_reply), on_error='pass_through')
+    result = runner.decide('text', None, source='n')
+    assert {d['answer'] for d in result.decisions.values()} == {'error'}
+    assert result.usage is None and any('protocol' in w for w in warnings)
+    runner, _ = _runner(FakeClient(bad_reply), on_error='fail')
+    with pytest.raises(SystemOneError) as exc:
+        runner.decide('text', None, source='n')
+    assert exc.value.kind == 'protocol'
+
+
+def test_non_dict_usage_is_treated_as_none():
+    runner, _ = _runner(FakeClient({**REPLY, 'usage': 'lots'}))
+    result = runner.decide('text', None, source='n')
+    assert result.usage is None and result.decisions['urgent']['answer'] == 'yes'
+
+
+def test_truncation_warning_cites_byte_limit_when_bytes_bind():
+    limits = DecisionLimits(26, 10, 64, max_state_tokens=100_000, chars_per_token=4.0, max_body_bytes=700)
+    runner, warnings = _runner(FakeClient(REPLY), limits=limits)
+    result = runner.decide('x' * 5000, None, source='n')
+    assert result.truncated is True
+    assert any('truncated' in w and 'bytes' in w and 'tokens' not in w for w in warnings)
+
+
+def test_truncation_warning_cites_token_limit_when_tokens_bind():
+    runner, warnings = _runner(
+        FakeClient(REPLY), limits=DecisionLimits(26, 10, 64, max_state_tokens=400, chars_per_token=4.0)
+    )
+    runner.decide('x' * 10_000, None, source='n')
+    assert any('truncated' in w and 'tokens' in w for w in warnings)
+
+
+def test_backend_body_goes_to_debug_never_to_warn():
+    error = SystemOneError('invalid', '422 from http://x/v1/systemone', status=422, body='SECRET-DOC-TEXT')
+    debug_logs = []
+    runner, warnings = _runner(FakeClient(error), on_error='pass_through', debug=debug_logs.append)
+    result = runner.decide('text', None, source='n')
+    assert any('SECRET-DOC-TEXT' in line for line in debug_logs)
+    assert not any('SECRET-DOC-TEXT' in w for w in warnings)
+    assert 'SECRET-DOC-TEXT' not in result.decisions['urgent']['error']
