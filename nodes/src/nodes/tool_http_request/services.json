@@ -115,7 +115,7 @@
 		"http_request.authType": {
 			"type": "string",
 			"title": "Authentication",
-			"description": "Credential applied to every request this node sends. Set it here with a ${ROCKETRIDE_*} placeholder (resolved on the engine from the org, team, and user environment) instead of passing tokens per call. When set, the URL whitelist must name at least one exact https host, and per-call auth is rejected.",
+			"description": "Credential applied to every request this node sends. Set it here with a ${ROCKETRIDE_*} placeholder (resolved on the engine from the org, team, and user environment) instead of passing tokens per call. When set, the URL whitelist must be non-empty and every pattern must pin one exact https host, and per-call auth is rejected.",
 			"default": "none",
 			"enum": [
 				["none", "None (caller supplies auth per request)"],
@@ -184,7 +184,7 @@
 		},
 		"http_request.defaultHeaders": {
 			"title": "Default headers",
-			"description": "Headers sent with every request, e.g. Accept or X-GitHub-Api-Version. A per-call header with the same name (case-insensitive) replaces the default. Authorization, Proxy-Authorization, Cookie, and Host are not allowed here; credentials belong in the Authentication fields. Blank rows are ignored.",
+			"description": "Headers sent with every request, e.g. Accept or X-GitHub-Api-Version. A per-call header with the same name (case-insensitive) replaces the default. Authorization, Proxy-Authorization, Cookie, Host, Content-Type, Content-Length, and Transfer-Encoding are not allowed here; credentials belong in the Authentication fields. Non-empty default headers require the same pinned https whitelist as Authentication. Blank rows are ignored.",
 			"type": "array",
 			"optional": true,
 			"minItems": 0,

@@ -39,7 +39,7 @@ from urllib.parse import urlsplit
 from rocketlib import IInstanceBase, tool_function
 
 from .http_client import _build_final_url, execute_request
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, _CREDENTIAL_HEADERS
 
 
 def _match(pattern, url):
@@ -445,9 +445,14 @@ class IInstance(IInstanceBase):
         if not isinstance(args, dict):
             raise ValueError('Tool input must be a JSON object (dict)')
 
+        # Snapshot before any work: endGlobal can clear these mid-call.
+        config_auth = self.IGlobal.config_auth
+        url_patterns = list(self.IGlobal.url_patterns or [])
+        enabled_methods = set(self.IGlobal.enabled_methods or ())
+        default_headers = dict(self.IGlobal.default_headers or {})
+
         # A configured credential is the only credential: reject per-call auth
         # before shortcuts fold it into the canonical ``auth`` object.
-        config_auth = self.IGlobal.config_auth
         if config_auth is not None:
             _reject_per_call_auth(args, config_auth)
 
@@ -456,7 +461,7 @@ class IInstance(IInstanceBase):
 
         # Resolve every URL-affecting option before whitelist matching. The
         # execution helper uses the same final-URL construction path.
-        self._validate_guardrails(args)
+        self._validate_guardrails(args, enabled_methods, url_patterns)
 
         # Enforce rate limits before executing the request
         rate_limiter = self.IGlobal.rate_limiter
@@ -469,7 +474,7 @@ class IInstance(IInstanceBase):
                 method=args.get('method', 'GET'),
                 query_params=args.get('query_params'),
                 path_params=args.get('path_params'),
-                headers=_merge_headers(self.IGlobal.default_headers, args.get('headers')),
+                headers=_merge_headers(default_headers, args.get('headers')),
                 auth=config_auth if config_auth is not None else args.get('auth'),
                 body=args.get('body'),
                 timeout=args.get('timeout'),
@@ -478,8 +483,13 @@ class IInstance(IInstanceBase):
             if rate_limiter is not None:
                 rate_limiter.release()
 
-    def _validate_guardrails(self, args):
+    def _validate_guardrails(self, args, enabled_methods=None, url_patterns=None):
         """Enforce allowed methods + URL whitelist from config."""
+        if enabled_methods is None:
+            enabled_methods = self.IGlobal.enabled_methods or set()
+        if url_patterns is None:
+            url_patterns = self.IGlobal.url_patterns or []
+
         valid_methods = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}
         valid_auth_types = {'none', 'basic', 'bearer', 'api_key'}
         valid_body_types = {'none', 'raw', 'form_data', 'x_www_form_urlencoded'}
@@ -490,9 +500,9 @@ class IInstance(IInstanceBase):
             raise ValueError('method is required and must be a non-empty string')
         if method.upper() not in valid_methods:
             raise ValueError(f'method must be one of {sorted(valid_methods)}; got {method!r}')
-        if method.upper() not in self.IGlobal.enabled_methods:
+        if method.upper() not in enabled_methods:
             raise ValueError(
-                f'HTTP method "{method.upper()}" is not allowed. Enabled methods: {", ".join(sorted(self.IGlobal.enabled_methods))}'
+                f'HTTP method "{method.upper()}" is not allowed. Enabled methods: {", ".join(sorted(enabled_methods))}'
             )
 
         url = args.get('url')
@@ -504,8 +514,8 @@ class IInstance(IInstanceBase):
             query_params=args.get('query_params'),
             auth=args.get('auth'),
         )
-        if self.IGlobal.url_patterns and not any(
-            _pattern_matches_canonical_url(pattern, resolved_url) for pattern in self.IGlobal.url_patterns
+        if url_patterns and not any(
+            _pattern_matches_canonical_url(pattern, resolved_url) for pattern in url_patterns
         ):
             raise ValueError('URL does not match any allowed URL pattern.')
 
@@ -567,7 +577,7 @@ def _reject_per_call_auth(args, config_auth):
     if auth is not None and not (isinstance(auth, dict) and str(auth.get('type', 'none')).strip().lower() == 'none'):
         supplied.append('auth')
 
-    reserved = {'authorization'}
+    reserved = set(_CREDENTIAL_HEADERS)
     if config_auth.get('type') == 'api_key':
         reserved.add(str(config_auth['api_key']['key']).lower())
     headers = args.get('headers')

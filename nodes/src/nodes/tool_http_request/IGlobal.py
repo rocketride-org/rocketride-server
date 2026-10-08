@@ -63,8 +63,12 @@ _ALL_AUTH_FIELDS = frozenset().union(*_AUTH_FIELDS.values())
 _UNRESOLVED_PLACEHOLDER = re.compile(r'\$\{[^}]*\}')
 # RFC 9110 field-name token.
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
-# Credential-bearing (or derived) headers that default headers must not set.
-_RESERVED_DEFAULT_HEADERS = frozenset({'authorization', 'proxy-authorization', 'cookie', 'host'})
+# Credential-bearing headers the agent must not set per call while config auth
+# is on, and must not place in defaultHeaders.
+_CREDENTIAL_HEADERS = frozenset({'authorization', 'proxy-authorization', 'cookie', 'host'})
+# Body-derived headers: a default would win over multipart/json boundaries.
+_BODY_HEADERS = frozenset({'content-type', 'content-length', 'transfer-encoding'})
+_RESERVED_DEFAULT_HEADERS = _CREDENTIAL_HEADERS | _BODY_HEADERS
 
 
 def _config_text(cfg: dict, key: str) -> str:
@@ -136,7 +140,9 @@ class IGlobal(IGlobalBase):
             )
         self.config_auth = self._build_config_auth(cfg)
         self.default_headers = self._build_default_headers(cfg)
-        self._require_pinned_whitelist(self.url_patterns, self.config_auth)
+        self._require_pinned_whitelist(
+            self.url_patterns, self._whitelist_reason(self.config_auth, self.default_headers)
+        )
         unused = self._unused_auth_fields(cfg)
         if unused:
             warning(f'authType is {_config_text(cfg, "authType") or "none"!r}; {", ".join(unused)} will not be sent')
@@ -151,6 +157,9 @@ class IGlobal(IGlobalBase):
         credential that is configured but silently dropped is the failure this
         node exists to avoid.
         """
+        raw_type = cfg.get('authType')
+        if raw_type is not None and not isinstance(raw_type, str):
+            raise ValueError(f'authType must be a string; got {type(raw_type).__name__}')
         auth_type = _config_text(cfg, 'authType').lower() or 'none'
         if auth_type not in _AUTH_FIELDS:
             raise ValueError(f'authType must be one of {sorted(_AUTH_FIELDS)}; got {auth_type!r}')
@@ -234,20 +243,29 @@ class IGlobal(IGlobalBase):
         return headers
 
     @staticmethod
-    def _require_pinned_whitelist(patterns: list[re.Pattern], config_auth: dict | None) -> None:
-        """A configured credential may only travel to hosts the whitelist names exactly."""
-        if config_auth is None:
+    def _whitelist_reason(config_auth: dict | None, default_headers: dict[str, str] | None) -> str | None:
+        """Why a pinned https whitelist is mandatory, or None when it is optional."""
+        if config_auth is not None:
+            return 'authType is set'
+        if default_headers:
+            return 'defaultHeaders is set'
+        return None
+
+    @staticmethod
+    def _require_pinned_whitelist(patterns: list[re.Pattern], reason: str | None) -> None:
+        """Configured credentials and default headers may only travel to exact https hosts."""
+        if not reason:
             return
         if not patterns:
             raise ValueError(
-                'authType is set but the URL whitelist is empty; add at least one '
-                '^https://<exact host> pattern so the configured credential only reaches approved hosts'
+                f'{reason} but the URL whitelist is empty; add at least one '
+                '^https://<exact host> pattern so configured values only reach approved hosts'
             )
         for pattern in patterns:
             if not _pattern_pins_https_host(pattern.pattern):
                 raise ValueError(
                     f'URL whitelist pattern {pattern.pattern!r} does not pin an exact https host; '
-                    'while authentication is configured every pattern must start with https:// '
+                    f'while {reason}, every pattern must start with https:// '
                     r'followed by a literal host with escaped dots, e.g. ^https://api\.github\.com/'
                 )
 
@@ -332,12 +350,12 @@ class IGlobal(IGlobalBase):
                 warning('serverName is required')
 
             _, patterns = self._build_guardrails(cfg)
-            if not patterns:
-                warning('URL whitelist is empty — all public URLs will be allowed')
-
             config_auth = self._build_config_auth(cfg)
-            self._build_default_headers(cfg)
-            self._require_pinned_whitelist(patterns, config_auth)
+            default_headers = self._build_default_headers(cfg)
+            reason = self._whitelist_reason(config_auth, default_headers)
+            if not patterns and not reason:
+                warning('URL whitelist is empty — all public URLs will be allowed')
+            self._require_pinned_whitelist(patterns, reason)
             unused = self._unused_auth_fields(cfg)
             if unused:
                 warning(

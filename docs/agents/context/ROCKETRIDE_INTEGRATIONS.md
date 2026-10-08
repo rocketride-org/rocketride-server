@@ -550,7 +550,7 @@ content_type}` — `json` is auto-parsed when the response is JSON, otherwise `n
 | `allowHEAD`, `allowOPTIONS` | `false` | Off by default |
 | `urlWhitelist` | empty | Rows of `{ "whitelistPattern": "<regex>" }` the final URL must match. **Empty allows ALL public URLs** (a config warning reminds you); mandatory, exact https hosts only, while `authType` is set |
 | `authType` | `none` | Credential sent with every request: `none`, `bearer` (`authToken`), `basic` (`authUsername` + `authPassword`), or `api_key` (`authHeaderName` + `authHeaderValue`, header only) |
-| `defaultHeaders` | empty | Rows of `{ "headerName", "headerValue" }` sent with every request; a per-call header of the same name wins. `Authorization`, `Proxy-Authorization`, `Cookie`, `Host` refused |
+| `defaultHeaders` | empty | Rows of `{ "headerName", "headerValue" }` sent with every request; a per-call header of the same name wins. `Authorization`, `Proxy-Authorization`, `Cookie`, `Host`, `Content-Type`, `Content-Length`, `Transfer-Encoding` refused. Non-empty rows require a pinned https whitelist |
 | `rateLimitPerSecond` | `10` | Token-bucket per-second cap |
 | `rateLimitPerMinute` | `100` | Broader throttle |
 | `maxConcurrentRequests` | `5` | In-flight cap |
@@ -583,8 +583,9 @@ when the pipeline starts, so it never reaches the browser, the agent, or the pip
 
 With `authType` set, the node refuses to start without an exact-host `https://` whitelist
 (a configured token must not be sendable to any host the agent names), fails loudly if the
-placeholder did not resolve, and rejects per-call `bearer_token`, `basic_auth`, `auth`, or
-`Authorization` headers so the agent cannot swap the credential. To fetch tokened and
+placeholder did not resolve, and rejects per-call `bearer_token`, `basic_auth`, `auth` other
+than `{type: none}`, and `Authorization` / `Proxy-Authorization` / `Cookie` / `Host` headers
+so the agent cannot swap the credential. To fetch tokened and
 anonymous hosts from the same agent, attach two `tool_http_request` nodes with different
 `serverName` values. Never hardcode secrets in the pipeline JSON, and do not route them
 through the agent's instructions: that puts the secret in the model context.

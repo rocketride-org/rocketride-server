@@ -61,10 +61,11 @@ either way. Non-empty patterns are matched against the request URL, so anchor th
 endpoint scope must be exact, for example `^https://api\.example\.com/`. Path-parameter
 replacements are percent-encoded to remain a single URL path segment.
 
-While Authentication is set the whitelist is mandatory, and every pattern must start with
-`https://` followed by a literal host with escaped dots. Whole-authority forms such as
+While Authentication is set the whitelist must be non-empty, and every pattern must pin
+one exact `https://` host with escaped dots. Whole-authority forms such as
 `^https://[^/]+/`, plain `http://`, and alternations are refused at startup, because a
-configured credential would otherwise travel to any host the agent names.
+configured credential would otherwise travel to any host the agent names. The same
+whitelist rule applies when any default header is configured.
 
 ### Authentication
 
@@ -78,8 +79,10 @@ pipeline is resolved, so the value never reaches the browser or the agent.
 
 Three rules apply as soon as the type is not `none`. The selected fields must be complete:
 an empty token or a placeholder that did not resolve fails the node at startup, naming
-the variable, instead of sending an anonymous request. The URL whitelist must hold at
-least one exact-host `https://` pattern. Per-call credentials are rejected. Fields that
+the variable, instead of sending an anonymous request. The URL whitelist must be
+non-empty, and every pattern must pin one exact `https://` host. Per-call credentials
+(`bearer_token`, `basic_auth`, `auth` other than `none`, and `Authorization` /
+`Proxy-Authorization` / `Cookie` / `Host` headers) are rejected. Fields that
 belong to another type are ignored with a warning. The credential is only ever sent as a
 header, never as a query parameter, and never to a redirect target.
 
@@ -88,9 +91,12 @@ header, never as a query parameter, and never to a redirect target.
 Rows of header name and value sent with every request, for example `Accept:
 application/vnd.github+json` or `X-GitHub-Api-Version: 2022-11-28`. A per-call header
 with the same name (matched case-insensitively) replaces the default. `Authorization`,
-`Proxy-Authorization`, `Cookie`, and `Host` are refused here; credentials belong in the
-Authentication fields. Blank rows are ignored. A value without a name, a duplicate name,
-or an unresolved `${ROCKETRIDE_*}` placeholder fails startup.
+`Proxy-Authorization`, `Cookie`, `Host`, `Content-Type`, `Content-Length`, and
+`Transfer-Encoding` are refused here; credentials belong in the Authentication fields,
+and body headers are derived from the request body. Configuring any default header
+requires the same pinned https whitelist as Authentication. Blank rows are ignored. A
+value without a name, a duplicate name, or an unresolved `${ROCKETRIDE_*}` placeholder
+fails startup.
 
 ### Network boundary
 
@@ -177,7 +183,7 @@ mandatory and turns per-call credentials into an error.
 | `allowHEAD` | boolean | Default false.  |
 | `allowOPTIONS` | boolean | Default false.  |
 | `whitelistPattern` | string | Default empty.  |
-| `urlWhitelist` | array | Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked. Mandatory, exact https hosts only, while `authType` is not `none`. |
+| `urlWhitelist` | array | Regex patterns for allowed public URLs. A request URL must match at least one pattern. If empty, all public URLs are allowed; non-public network destinations remain blocked. Mandatory and every pattern must pin one exact https host while `authType` is not `none` or any default header is set. |
 | `authType` | string | Default "none". Credential sent with every request: `none`, `bearer`, `basic`, or `api_key`. |
 | `authToken` | string | Bearer token for `authType: bearer`. Secure; use a `${ROCKETRIDE_*}` placeholder. |
 | `authUsername` | string | Username for `authType: basic`. |
@@ -186,7 +192,7 @@ mandatory and turns per-call credentials into an error.
 | `authHeaderValue` | string | Key sent in that header. Secure. |
 | `headerName` | string | Default empty. Name column of a `defaultHeaders` row. |
 | `headerValue` | string | Default empty. Value column of a `defaultHeaders` row. |
-| `defaultHeaders` | array | Headers sent with every request; a per-call header of the same name replaces one. `Authorization`, `Proxy-Authorization`, `Cookie`, and `Host` are refused. |
+| `defaultHeaders` | array | Headers sent with every request; a per-call header of the same name replaces one. `Authorization`, `Proxy-Authorization`, `Cookie`, `Host`, `Content-Type`, `Content-Length`, and `Transfer-Encoding` are refused. Requires a pinned https whitelist when any row is set. |
 | `rateLimitPerSecond` | number | Default 10. Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. |
 | `rateLimitPerMinute` | number | Default 100. Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. |
 | `maxConcurrentRequests` | number | Default 5. Maximum number of HTTP requests that can be in-flight simultaneously. |
@@ -328,6 +334,15 @@ non-zero value is clamped to a minimum of `1`.
 | `http_request.allowPATCH` | `boolean` | **PATCH** | `true` |
 | `http_request.allowPOST` | `boolean` | **POST** | `true` |
 | `http_request.allowPUT` | `boolean` | **PUT** | `true` |
+| `http_request.authHeaderName` | `string` | **API key header name**<br/>Header that carries the key when Authentication is API key header, e.g. X-API-Key. | `""` |
+| `http_request.authHeaderValue` | `string` | **API key value**<br/>Value sent in the API key header. A ${ROCKETRIDE_*} placeholder keeps it on the engine. | `""` |
+| `http_request.authPassword` | `string` | **Basic auth password**<br/>Used when Authentication is Basic. A ${ROCKETRIDE_*} placeholder keeps it on the engine. | `""` |
+| `http_request.authToken` | `string` | **Bearer token**<br/>Sent as "Authorization: Bearer <token>" when Authentication is Bearer token. Use a placeholder such as ${ROCKETRIDE_GITHUB_TOKEN} so the secret never leaves the engine. | `""` |
+| `http_request.authType` | `string` | **Authentication**<br/>Credential applied to every request this node sends. Set it here with a ${ROCKETRIDE_*} placeholder (resolved on the engine from the org, team, and user environment) instead of passing tokens per call. When set, the URL whitelist must be non-empty and every pattern must pin one exact https host, and per-call auth is rejected. | `"none"` |
+| `http_request.authUsername` | `string` | **Basic auth username**<br/>Used when Authentication is Basic. | `""` |
+| `http_request.defaultHeaders` | `array` | **Default headers**<br/>Headers sent with every request, e.g. Accept or X-GitHub-Api-Version. A per-call header with the same name (case-insensitive) replaces the default. Authorization, Proxy-Authorization, Cookie, Host, Content-Type, Content-Length, and Transfer-Encoding are not allowed here; credentials belong in the Authentication fields. Non-empty default headers require the same pinned https whitelist as Authentication. Blank rows are ignored. |  |
+| `http_request.headerName` | `string` | **Header name** | `""` |
+| `http_request.headerValue` | `string` | **Header value** | `""` |
 | `http_request.maxConcurrentRequests` | `number` | **Max concurrent requests**<br/>Maximum number of HTTP requests that can be in-flight simultaneously. | `5` |
 | `http_request.rateLimitPerMinute` | `number` | **Max requests per minute**<br/>Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. | `100` |
 | `http_request.rateLimitPerSecond` | `number` | **Max requests per second**<br/>Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. | `10` |

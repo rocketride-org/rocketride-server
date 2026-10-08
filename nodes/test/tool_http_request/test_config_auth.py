@@ -106,6 +106,8 @@ def test_api_key_config_auth_is_header_only(node_modules):
         ({'authType': 'api_key', 'authHeaderName': 'X-Key:', 'authHeaderValue': 'k'}, 'not a valid HTTP header name'),
         ({'authType': 'api_key', 'authHeaderName': 'host', 'authHeaderValue': 'k'}, 'cannot be Host'),
         ({'authType': 'bearer', 'authToken': 'abc\r\nX-Injected: 1'}, 'must not contain line breaks'),
+        ({'authType': ['bearer']}, 'authType must be a string'),
+        ({'authType': True}, 'authType must be a string'),
         ({'authType': 'basic', 'authUsername': 'u\nx', 'authPassword': 'p'}, 'must not contain line breaks'),
     ],
 )
@@ -208,6 +210,9 @@ def test_default_headers_accept_json_string_form(node_modules):
         ([{'headerName': 'Proxy-Authorization', 'headerValue': 'x'}], 'cannot be a default header'),
         ([{'headerName': 'Cookie', 'headerValue': 'a=b'}], 'cannot be a default header'),
         ([{'headerName': 'HOST', 'headerValue': 'evil.example'}], 'cannot be a default header'),
+        ([{'headerName': 'Content-Type', 'headerValue': 'application/json'}], 'cannot be a default header'),
+        ([{'headerName': 'Content-Length', 'headerValue': '0'}], 'cannot be a default header'),
+        ([{'headerName': 'Transfer-Encoding', 'headerValue': 'chunked'}], 'cannot be a default header'),
         (
             [{'headerName': 'Accept', 'headerValue': 'a'}, {'headerName': 'accept', 'headerValue': 'b'}],
             'more than once',
@@ -262,6 +267,17 @@ def test_begin_global_refuses_config_auth_without_whitelist(node_modules):
 
     with pytest.raises(ValueError, match='URL whitelist is empty'):
         _started_global(iglobal, {'authType': 'bearer', 'authToken': 'ghp_live'})
+
+
+def test_begin_global_refuses_default_headers_without_whitelist(node_modules):
+    """A default header can carry a resolved secret; pin the hosts it may reach."""
+    _http_client, iglobal, _iinstance = node_modules
+
+    with pytest.raises(ValueError, match='defaultHeaders is set but the URL whitelist is empty'):
+        _started_global(
+            iglobal,
+            {'defaultHeaders': [{'headerName': 'Accept', 'headerValue': 'application/vnd.github+json'}]},
+        )
 
 
 @pytest.mark.parametrize(
@@ -468,6 +484,9 @@ def test_config_api_key_header_is_sent(node_modules, monkeypatch):
         ({'headers': {'Authorization': 'Bearer ghp_call'}}, 'headers.Authorization'),
         ({'headers': {'authorization': 'Bearer ghp_call'}}, 'headers.authorization'),
         ({'headers': {'AUTHORIZATION': 'token x'}}, 'headers.AUTHORIZATION'),
+        ({'headers': {'Cookie': 'session=abc'}}, 'headers.Cookie'),
+        ({'headers': {'Proxy-Authorization': 'Basic x'}}, 'headers.Proxy-Authorization'),
+        ({'headers': {'Host': 'evil.example'}}, 'headers.Host'),
     ],
 )
 def test_per_call_credentials_are_rejected_when_config_auth_is_set(node_modules, monkeypatch, extra, named):
@@ -522,6 +541,24 @@ def test_per_call_header_cannot_shadow_config_api_key_header(node_modules, monke
     assert sent == {}
 
 
+def test_per_call_content_type_is_allowed_with_config_auth(node_modules, monkeypatch):
+    """Body headers stay per-call; they are reserved only as defaults."""
+    http_client, iglobal, iinstance = node_modules
+    sent = _capture_transport(monkeypatch, http_client)
+    tool = _instance(iinstance, _bearer_global(iglobal))
+
+    tool.http_request(
+        {
+            'url': 'https://api.github.com/user',
+            'method': 'GET',
+            'headers': {'Content-Type': 'application/json'},
+        }
+    )
+
+    assert sent['headers']['Content-Type'] == 'application/json'
+    assert sent['headers']['Authorization'] == 'Bearer ghp_config'
+
+
 def test_explicit_auth_none_is_allowed_with_config_auth(node_modules, monkeypatch):
     http_client, iglobal, iinstance = node_modules
     sent = _capture_transport(monkeypatch, http_client)
@@ -573,6 +610,7 @@ def test_default_headers_merge_under_per_call_headers(node_modules, monkeypatch)
     glb = _started_global(
         iglobal,
         {
+            'urlWhitelist': [{'whitelistPattern': GITHUB}],
             'defaultHeaders': [
                 {'headerName': 'Accept', 'headerValue': 'application/vnd.github+json'},
                 {'headerName': 'X-GitHub-Api-Version', 'headerValue': '2022-11-28'},
