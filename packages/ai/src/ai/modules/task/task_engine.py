@@ -460,6 +460,53 @@ def _accepts_credential(authorize: Callable[..., Any]) -> bool:
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
 
 
+# The nodes that open the store from inside the task: tool_filesystem (its tool, source and
+# store services), and tool_skills when it reads a skills folder
+CONST_STORE_NODE_PATH = 'nodes.tool_filesystem'
+CONST_SKILLS_NODE_PATH = 'nodes.tool_skills'
+
+
+def pipeline_opens_store(
+    pipeline: Dict[str, Any],
+    get_service: Callable[[str], Any],
+    get_node_config: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+) -> bool:
+    """
+    Whether a component of the pipeline opens the store from inside the task.
+
+    ``tool_filesystem`` does (its tool, source and store services alike), and
+    ``tool_skills`` does when it reads a skills folder, so a runtime that
+    isolates the task's files has to give it the run's store or refuse the
+    pipeline.
+
+    Args:
+        pipeline: The resolved pipeline.
+        get_service: in production the engine's registry, then the nodes
+            EaaS serves (``node_store.served``).
+        get_node_config: ``Config.getNodeConfig`` in production. The folder is
+            resolved the way the node resolves it; one that cannot be resolved
+            counts as a folder.
+
+    Returns:
+        True if any component is served by ``nodes.tool_filesystem``, or by
+        ``nodes.tool_skills`` with a skills folder.
+    """
+    for component in pipeline.get('components', []) or []:
+        provider = str(component.get('provider') or '')
+        service = get_service(provider) if provider else None
+        path = str((service or {}).get('path') or '').lower()
+        if path == CONST_STORE_NODE_PATH:
+            return True
+        if path == CONST_SKILLS_NODE_PATH:
+            try:
+                folder = str(get_node_config(provider, component.get('config') or {}).get('folder') or '').strip()
+            except Exception:
+                folder = 'unresolved'
+            if folder:
+                return True
+    return False
+
+
 def _is_saas_engine() -> bool:
     """True when this engine is the hosted (SaaS) one.
 
@@ -3040,6 +3087,19 @@ class Task(DAPBase):
                 await asyncio.to_thread(node_store.place, resolved)
             except Exception as e:
                 raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
+
+            # A runtime that isolates the task's files needs to know whether it opens the store
+            uses_store = False
+            if self._launcher.isolated:
+                from ai.common.config import Config
+                from rocketlib import getServiceDefinition
+
+                # A node EaaS serves is not in the engine's registry until a restart
+                uses_store = pipeline_opens_store(
+                    resolved,
+                    lambda provider: getServiceDefinition(provider) or node_store.served(provider),
+                    lambda provider, config: Config.getNodeConfig(provider, config, node_store.served(provider)),
+                )
             del resolved
 
             # VS Code subprocess debugging goes through the python shim (subprocess runtime)
@@ -3107,6 +3167,8 @@ class Task(DAPBase):
                     hosted=_is_saas_engine(),
                     shared_host=self._shares_host(),
                     debug_attach=debug_attach,
+                    uses_store=uses_store,
+                    storage_root=self._storage_root() if uses_store else '',
                 )
             )
             del task_file
