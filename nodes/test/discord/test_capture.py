@@ -1854,6 +1854,30 @@ class TestEndpointCaptureWiring:
         assert writer.disabled is True
         assert pipe.calls == []
 
+    @pytest.mark.parametrize('lane', ['text', 'binary'])
+    def test_the_question_is_captured_even_when_the_pipeline_cannot_open(self, lane):
+        """Question rows are always written: a pipe that fails to open still leaves the question on record."""
+
+        class _BrokenPipe(_PipelinePipe):
+            def open(self, entry):
+                raise RuntimeError('open failed')
+
+        pipe = _BrokenPipe()
+        endpoint = _endpoint(pipe, capture_events=True)
+        try:
+            if lane == 'text':
+                answer = endpoint._run_text_pipeline('hello', 2002, 1001, _metadata())
+            else:
+                answer = endpoint._run_binary_pipeline(
+                    b'%PDF-1.4', 'application/pdf', 6006, 2002, 1001, 1, _metadata(groupIndex=1, groupSize=2)
+                )
+        finally:
+            endpoint._stop_capture()
+
+        assert answer == ''
+        inserts = [call[2]['params'] for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]
+        assert [(params[0], params[2]) for params in inserts] == [('message', 'text' if lane == 'text' else 'binary:1')]
+
     def test_stopping_capture_twice_is_safe(self):
         endpoint = _endpoint(_PipelinePipe(), capture_events=True)
         endpoint._stop_capture()

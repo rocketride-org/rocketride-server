@@ -2931,24 +2931,26 @@ class IEndpoint(IEndpointBase):
                 'name': object_name or str(message_id),
             }
         )
+        broadcast_text = text if sse_text is None else sse_text
+        payload: Dict[str, Any] = {
+            'lane': 'text',
+            'text': broadcast_text[:2000],
+            'contextChars': int(context_chars),
+        }
+        if retry > 0:
+            payload['retry'] = int(retry)
+        # Captured before the pipe is touched, so the question is on record
+        # even when the pipeline cannot be opened. The 2000-character clip
+        # keeps the broadcast small; the capture row is the durable record,
+        # so it gets the text whole (a Discord message can be up to 4000
+        # characters).
+        stored_text = broadcast_text if capture_text is None else capture_text
+        self._capture_event('message', obj_meta, dict(payload, text=stored_text))
         pipe = self.target.getPipe()
         try:
             pipe.open(entry)
             self._send_metadata(pipe, obj_meta)
-            broadcast_text = text if sse_text is None else sse_text
-            payload: Dict[str, Any] = {
-                'lane': 'text',
-                'text': broadcast_text[:2000],
-                'contextChars': int(context_chars),
-            }
-            if retry > 0:
-                payload['retry'] = int(retry)
             self._send_sse(pipe, 'message', obj_meta, payload)
-            # The 2000-character clip keeps the broadcast small; the capture
-            # row is the durable record, so it gets the text whole (a Discord
-            # message can be up to 4000 characters).
-            stored_text = broadcast_text if capture_text is None else capture_text
-            self._capture_event('message', obj_meta, dict(payload, text=stored_text))
             pipe.writeText(text)
             pipe.close()
             results = entry.response.toDict()
@@ -3000,13 +3002,14 @@ class IEndpoint(IEndpointBase):
                 'mimeType': mime_type,
             }
         )
+        binary_payload = {'lane': 'binary', 'mimeType': mime_type, 'size': len(file_data)}
+        # Captured before the pipe is touched, as for the text pass.
+        self._capture_event('message', obj_meta, binary_payload)
         pipe = self.target.getPipe()
         try:
             pipe.open(entry)
             self._send_metadata(pipe, obj_meta)
-            binary_payload = {'lane': 'binary', 'mimeType': mime_type, 'size': len(file_data)}
             self._send_sse(pipe, 'message', obj_meta, binary_payload)
-            self._capture_event('message', obj_meta, binary_payload)
             if mime_type.startswith('image/'):
                 pipe.writeImage(AVI_ACTION.BEGIN, mime_type)
                 pipe.writeImage(AVI_ACTION.WRITE, mime_type, file_data)
