@@ -111,6 +111,8 @@ a node's `config` references the variable rather than the literal secret. See
 ## Related
 
 - [Cloud](/operate/cloud): the managed alternative.
+- [Tasks in containers](/operate/self-hosting/task-containers): run each
+  pipeline in a container of its own (`--runtime=docker`).
 - [WebSocket protocol](/connect/websocket): what clients speak to the engine.
 - [Runtime & engine](/concepts/runtime-engine): what the engine does with a
   pipeline.

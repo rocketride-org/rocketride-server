@@ -51,7 +51,8 @@ if TYPE_CHECKING:
 # Task subprocesses of a hosted engine get these flags on their command line
 # (see the hosting module): --hosted always, --shared-host when the task shares
 # the engine's host. Pipeline-supplied args can add flags but not remove these,
-# so the task can rely on them.
+# so the task can rely on them. Only this runtime passes them: under docker the
+# container is the boundary.
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
