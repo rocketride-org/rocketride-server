@@ -69,6 +69,8 @@ from ai.constants import (
     CONST_LOG_KF_OPEN_CEILING,
 )
 
+from ai.account.store import StorageNotFoundError
+
 if TYPE_CHECKING:
     from ai.account.file_store import FileStore
 
@@ -1348,7 +1350,8 @@ class RunLogReader:
             return writer._control
         try:
             raw = await self._store.read(self._control_path())
-        except Exception as exc:
+        except StorageNotFoundError as exc:
+            # Only a missing control means never logged; a failed read propagates.
             raise FileNotFoundError(f'No run log for stream {self._stream}') from exc
         return json.loads(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw)
 

@@ -41,7 +41,7 @@ import ai.modules.task.commands.cmd_log as cmd_mod
 from ai.modules.task.commands.cmd_log import LogCommands
 from ai.account.file_store import FileStore
 from ai.account.models import resolve_team_permissions
-from ai.account.store import Store
+from ai.account.store import Store, StorageError
 from ai.account.store_providers.filesystem import FilesystemStore
 
 from ..test_run_log import PROJECT, SOURCE, make_stamp, open_writer, output_event
@@ -293,3 +293,14 @@ class TestStreams:
         with pytest.raises(PermissionError):
             await _streams(conn)
         conn.verify_permission.assert_called_once_with('task.monitor')
+
+    @pytest.mark.asyncio
+    async def test_a_failed_read_surfaces_instead_of_dropping_the_scope(self, real_store, tmp_path, monkeypatch):
+        await _write_run('team', real_store, tmp_path)
+
+        async def failing_read(self, path, max_size=0):
+            raise StorageError('boom')
+
+        monkeypatch.setattr(FileStore, 'read', failing_read)
+        with pytest.raises(StorageError, match='boom'):
+            await _streams(_conn('task.monitor'))

@@ -5,7 +5,7 @@ import json
 from fnmatch import fnmatch
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from ...store import IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
+from ...store import IStore, StorageError, StorageNotFoundError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
 
 
 class AzureBlobStore(IStore):
@@ -111,7 +111,7 @@ class AzureBlobStore(IStore):
             raise
         except Exception as e:
             if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to read file {filename} from Azure: {e}') from e
 
     @retry(
@@ -147,7 +147,7 @@ class AzureBlobStore(IStore):
             raise
         except Exception as e:
             if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to read file {filename} from Azure: {e}') from e
 
     @retry(
@@ -247,7 +247,7 @@ class AzureBlobStore(IStore):
 
             except Exception as e:
                 if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
-                    raise StorageError(f'File not found: {filename}')
+                    raise StorageNotFoundError(f'File not found: {filename}')
                 raise
 
             # Delete the blob
@@ -297,7 +297,7 @@ class AzureBlobStore(IStore):
             try:
                 await asyncio.to_thread(src_client.get_blob_properties)
             except Exception as e:
-                raise StorageError(f'File not found: {src}') from e
+                raise StorageNotFoundError(f'File not found: {src}') from e
 
             # Without requires_sync the copy can return 'pending' having already started
             # overwriting the destination, which this process cannot undo.
@@ -504,7 +504,7 @@ class AzureBlobStore(IStore):
             return {'context': {'blob_name': blob_name}, 'size': size}
         except Exception as e:
             if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to open {filename} for reading: {e}') from e
 
     async def read_chunk(self, filename: str, context, offset: int, length: int = 4_194_304) -> bytes:
@@ -543,7 +543,7 @@ class AzureBlobStore(IStore):
             }
         except Exception as e:
             if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to get file info for {filename}: {e}') from e
 
     async def _stage_block(self, context: dict, data: bytes) -> None:
