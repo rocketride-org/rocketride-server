@@ -1367,6 +1367,19 @@ class TestWriterCircuitBreaker:
         assert len(warnings) == 1
         assert 'not a database node' in warnings[0]
 
+    def test_row_text_that_reads_like_a_missing_table_does_not_create_one(self):
+        """CodeRabbit on #2548: the user's words must not make a data error read as a missing table."""
+        text = 'why does it say relation "x" does not exist 42P01'
+        pipe = _FakePipe(fail=RuntimeError(f'invalid input syntax: "{text}"'))
+        writer = _writer(_FakeTarget(pipe), [])
+        writer._table_checked = True  # the table is known to exist
+
+        writer._write_one(_row(text=text))
+
+        assert not [call for call in pipe.calls if 'CREATE TABLE' in call[2]['sql']]
+        assert writer.disabled is False
+        assert writer._rows_rejected == 1
+
     def test_row_text_that_reads_like_a_lasting_failure_is_not_one(self):
         """A driver error quoting the user's own words must not switch capture off."""
         text = 'permission denied when I log in'

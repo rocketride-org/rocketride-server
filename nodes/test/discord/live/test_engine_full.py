@@ -1409,8 +1409,8 @@ def test_f33_every_part_kept_and_duplicates_ignored(engine, engine_config, drive
     keys = _psql(f'SELECT event_key FROM discord_events {where} ORDER BY event_key').splitlines()
     # A redelivered Gateway event reaches the table as the same INSERT again.
     _psql(
-        'INSERT INTO discord_events (event_type, message_id, event_key, occurred_at, payload) '
-        f'SELECT event_type, message_id, event_key, now(), payload FROM discord_events {where} '
+        'INSERT INTO discord_events (event_type, message_id, event_key, occurred_at, payload, source) '
+        f'SELECT event_type, message_id, event_key, now(), payload, source FROM discord_events {where} '
         'ON CONFLICT DO NOTHING'
     )
     after = _psql(f'SELECT count(*) FROM discord_events {where}')

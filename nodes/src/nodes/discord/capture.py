@@ -583,14 +583,25 @@ def _control_envelope(param: Any):
     return IInvoke(param=param, result=None)
 
 
-def _is_missing_table(exc: BaseException) -> bool:
+def _is_missing_table(exc: BaseException, hide: tuple = ()) -> bool:
     """Return True when a failed INSERT failed because the table does not exist.
 
     PostgreSQL reports it as SQLSTATE 42P01, ``relation "<name>" does not
     exist``; the database node passes the driver's message through, so the
     text is what reaches this side of the pipe.
+
+    Args:
+        exc (BaseException): What the INSERT raised.
+        hide (tuple): Row values taken out of the message first, so text the
+            user wrote cannot make a data error read as a missing table.
+
+    Returns:
+        bool: True for a missing table.
     """
     text = str(exc)
+    for value in hide:
+        if _is_hideable(value):
+            text = text.replace(value, '')
     return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or '42P01' in text
 
 
@@ -945,7 +956,7 @@ class CaptureWriter:
                 # allowed only to INSERT into an existing table must never
                 # need CREATE rights. This covers a table dropped after the
                 # check, or a check whose answer could not be read.
-                if not _is_missing_table(e):
+                if not _is_missing_table(e, hide=(row.get('payload'), row.get('text'))):
                     raise
                 self._create_table(pipe, node_id)
                 self._invoke(pipe, node_id, INSERT_SQL(self._table), row_params(row))
