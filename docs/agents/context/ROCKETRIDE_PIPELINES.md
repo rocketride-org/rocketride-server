@@ -389,11 +389,12 @@ LLM/tool/memory node declares which component invokes it — `from` points at th
 - Invoke is not agent-only: `summarization`, `extract_data`, `extract_facts`, `dictionary`,
   `preprocessor_llm`, `tool_chartjs`, `aparavi_aql` and the graph stores all REQUIRE an
   `llm` control connection.
-- The SQL nodes (`db_postgres`, `db_mysql`, `db_clickhouse`, `db_hotdata`, `rocketride_sql`)
-  use an `llm` connection only to turn natural-language questions into SQL. Raw SQL through
-  their `execute` tool (`client.database.query`) needs no LLM, so a pipeline that only stores
-  or reads data with SQL should wire no LLM and no agent. Storing through an agent ties every
-  save to that agent's LLM provider and key: a missing key stops the save.
+- The SQL nodes (`db_postgres`, `db_supabase`, `db_mysql`, `db_clickhouse`, `db_hotdata`,
+  `rocketride_sql`) use an `llm` connection only to turn natural-language questions into
+  SQL. Raw SQL through their `execute` tool (`client.database.query`) needs no LLM, so a
+  pipeline that only stores or reads data with SQL should wire no LLM and no agent. Storing
+  through an agent ties every save to that agent's LLM provider and key: a missing key stops
+  the save.
 
 ### Invoke requirements by agent type
 
