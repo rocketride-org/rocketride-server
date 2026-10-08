@@ -317,7 +317,7 @@
 		"discord.captureTable": {
 			"type": "string",
 			"title": "Capture Table",
-			"description": "Table the captured events are written to. Created on the first write that finds it missing. Letters, digits and underscore only, not starting with a digit, at most 54 characters (Postgres truncates identifiers at 63 bytes, and this table's index and constraint names are derived from its name). Used lower-case: Discord_Events means discord_events.",
+			"description": "Table the captured events are written to. Checked for once before the first insert of a run, and created if it does not exist. Letters, digits and underscore only, not starting with a digit, at most 54 characters (Postgres truncates identifiers at 63 bytes, and this table's index and constraint names are derived from its name). Used lower-case: Discord_Events means discord_events.",
 			"default": "discord_events",
 			"optional": true
 		},
@@ -469,7 +469,7 @@
 				"discord.captureNodeId",
 				"discord.captureTable",
 				"discord.captureSource",
-								"discord.includeMemberMetadata",
+				"discord.includeMemberMetadata",
 				"discord.backfillLimit",
 				"discord.threadHistoryLimit",
 				"discord.threadHistoryMaxChars",
