@@ -23,12 +23,18 @@ ENV UV_CACHE_DIR=/opt/uv-cache \
     UV_LINK_MODE=copy
 
 USER root
-RUN mkdir -p "$UV_CACHE_DIR" && chown rocketride:rocketride "$UV_CACHE_DIR"
+RUN mkdir -p "$UV_CACHE_DIR" && chown rocketride:rocketride "$UV_CACHE_DIR" && chmod 2775 "$UV_CACHE_DIR"
 COPY --chmod=0755 docker/warm-wheel-cache.sh /usr/local/bin/warm-wheel-cache
 USER rocketride
 
-# Downloaded here, never copied from the build host.
-RUN warm-wheel-cache
+# Downloaded here, never copied from the build host. Group-writable in the same
+# RUN, as engine-base does: a task may run as another uid in the image's group,
+# and uv writes into its cache.
+RUN touch /tmp/.layer-start \
+    && warm-wheel-cache \
+    && find "$UV_CACHE_DIR" /opt/rocketride -cnewer /tmp/.layer-start -user rocketride \
+            -perm -u=w ! -perm -g=w ! -type l -exec chmod g+w {} + \
+    && rm /tmp/.layer-start
 
 # The Launcher supplies the whole command line. tini reaps the uv processes a
 # task spawns.

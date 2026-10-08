@@ -295,9 +295,11 @@ def test_create_launcher_refuses_an_unknown_runtime():
         create_launcher('k8s', _server())
 
 
-def test_spawn_is_the_default_runtime():
-    """The first runtime --runtime accepts is its default: spawn."""
-    assert launcher_pkg.RUNTIMES[0] == 'spawn'
+@pytest.mark.parametrize('hosted, expected', [(False, 'spawn'), (True, 'docker')])
+def test_default_runtime_follows_the_hosted_flag(hosted, expected):
+    """Without --runtime: docker with --saas, spawn otherwise."""
+    assert launcher_pkg.default_runtime(hosted) == expected
+    assert expected in launcher_pkg.RUNTIMES
 
 
 def test_task_server_keeps_one_launcher_per_process():

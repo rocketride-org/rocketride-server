@@ -131,6 +131,14 @@ function parseArgs(args) {
 			options.cmakeConfig = value;
 		} else if (arg.startsWith('--taskserver=')) {
 			options.taskserver = arg.substring('--taskserver='.length);
+		} else if (arg.startsWith('--runtime=')) {
+			// How the engine runs tasks (spawn | docker): node tests, server:dev
+			const runtime = arg.substring('--runtime='.length);
+			if (!['spawn', 'docker'].includes(runtime)) {
+				console.error(`Error: --runtime=${runtime}: expected 'spawn' or 'docker'`);
+				process.exit(1);
+			}
+			options.runtime = runtime;
 		} else if (arg.startsWith('--log=')) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
@@ -296,6 +304,8 @@ Options:
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
   --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt,
                       requirements.hash and the satisfied/ verdicts)
+  --runtime=spawn|docker  How the engine runs tasks (node tests, server:dev): a child process or a
+                      container; default docker with --saas, spawn otherwise
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
