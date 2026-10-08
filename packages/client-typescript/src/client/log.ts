@@ -89,8 +89,13 @@ export class LogApi {
 	}
 
 	/**
-	 * Every continuum of projectId/source you may read (own dev, own @me deploy, each team deploy
-	 * you can monitor), each tagged with its scope and carrying the `chapters()` body.
+	 * Lists every continuum of one source that you may read, each with its chapters.
+	 *
+	 * Covers your own dev stream, your own @me deploy stream, and the deploy
+	 * stream of each team you can monitor. Never-logged scopes are absent.
+	 *
+	 * @param identity - Source identity (projectId + source); the scopes come from your permissions.
+	 * @returns One entry per readable stream: the `chapters()` body tagged with `teamId`, `teamName`, `runKind` and `ownerKind`.
 	 */
 	async streams(identity: LogStreamIdentity): Promise<LogStreamsResult> {
 		return this.client.call<LogStreamsResult>('rrext_log', {

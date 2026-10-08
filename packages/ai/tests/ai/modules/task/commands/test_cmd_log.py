@@ -284,3 +284,12 @@ class TestStreams:
     async def test_a_team_id_in_the_request_does_not_change_the_scopes(self, real_store, tmp_path):
         await _write_run('dev', real_store, tmp_path)
         assert [s['runKind'] for s in await _streams(_conn(), teamId=TEAM_UUID)] == ['dev']
+
+    @pytest.mark.asyncio
+    async def test_a_caller_without_monitor_rights_gets_no_streams(self, real_store, tmp_path):
+        await _write_run('dev', real_store, tmp_path)
+        conn = _conn('task.monitor')
+        conn.verify_permission.side_effect = PermissionError("Permission 'task.monitor' denied")
+        with pytest.raises(PermissionError):
+            await _streams(conn)
+        conn.verify_permission.assert_called_once_with('task.monitor')
