@@ -32,6 +32,8 @@ Types:
     LogChapter:        One run (track) inside the continuum.
     LogActivitySpan:   One segment time range for the activity bar.
     LogChaptersResult: Response of ``client.log.chapters()``.
+    LogStreamEntry:    One stream as ``client.log.streams()`` lists it.
+    LogStreamsResult:  Response of ``client.log.streams()``.
     LogEvent:          One logged event line (stamped DAP event message).
     LogReadResult:     Response of ``client.log.read()``.
     LogSegmentResult:  Response of ``client.log.segment()`` (raw chunk).
@@ -90,6 +92,22 @@ class LogChaptersResult(TypedDict, total=False):
     horizonSeq: int
     # True when no run is currently writing the stream.
     completed: bool
+
+
+class LogStreamEntry(LogChaptersResult, total=False):
+    """One stream as ``client.log.streams()`` lists it: its scope plus the chapters body."""
+
+    teamId: str  # '' = your own tree
+    teamName: str
+    runKind: LogRunKind
+    # Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind.
+    ownerKind: Literal['user', 'team']
+
+
+class LogStreamsResult(TypedDict, total=False):
+    """Response of ``client.log.streams()``; never-logged scopes are absent."""
+
+    streams: List[LogStreamEntry]
 
 
 class LogEvent(TypedDict, total=False):

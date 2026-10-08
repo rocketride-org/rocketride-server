@@ -35,7 +35,7 @@
 
 import type { RocketRideClient } from './client.js';
 import { LogEventStream } from './log-stream.js';
-import type { LogChaptersResult, LogDeleteResult, LogReadParams, LogReadResult, LogSegmentParams, LogSegmentResult, LogStreamRef } from './types/log.js';
+import type { LogChaptersResult, LogDeleteResult, LogReadParams, LogReadResult, LogSegmentParams, LogSegmentResult, LogStreamIdentity, LogStreamRef, LogStreamsResult } from './types/log.js';
 
 // =============================================================================
 // LOG API CLASS
@@ -85,6 +85,18 @@ export class LogApi {
 		return this.client.call<LogChaptersResult>('rrext_log', {
 			subcommand: 'chapters',
 			...stream,
+		});
+	}
+
+	/**
+	 * Every continuum of projectId/source you may read (own dev, own @me deploy, each team deploy
+	 * you can monitor), each tagged with its scope and carrying the `chapters()` body.
+	 */
+	async streams(identity: LogStreamIdentity): Promise<LogStreamsResult> {
+		return this.client.call<LogStreamsResult>('rrext_log', {
+			subcommand: 'streams',
+			projectId: identity.projectId,
+			source: identity.source,
 		});
 	}
 

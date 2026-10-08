@@ -660,6 +660,7 @@ interface LogStreamRef {
 }
 ```
 
+- `client.log.streams({ projectId, source }): Promise<LogStreamsResult>` — every continuum of that source you may read (own dev, own `@me` deploy, each team deploy you can monitor), each tagged with `teamId`, `teamName`, `runKind`, `ownerKind` and carrying the chapters body.
 - `client.log.chapters(stream): Promise<LogChaptersResult>` — the whole timeline in one small read: per-run chapters (`beginTime`, `beginSeq`, `endTime`, `outcome`), segment activity spans, the retained window, the retention horizon (`horizonSeq`), and `completed` (false while a run is writing)
 - `client.log.read(stream, params?): Promise<LogReadResult>` — read a seq/time range of events, paged. Range forms: `fromSeq`/`toSeq`, `fromTime`/`toTime` (omit the upper bound for "to now"), or `fromTime` → `toSegment`. Optional `types` filters server-side (e.g. `['output']`); `maxEvents`/`maxBytes` bound the page. When the response carries `nextSeq`, pass it back as `cursor` to continue; `truncatedAtSeq` means the request reached below the retention horizon
 - `client.log.segment(stream, segment, params?): Promise<LogSegmentResult>` — one segment's raw JSONL bytes, chunked by byte offset (the bulk replay path). Every chunk ends on a line boundary, so each parses standalone; repeat with the returned `nextOffset` until `final`. The segment table (ids + time extents) comes from `chapters()`
