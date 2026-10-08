@@ -45,7 +45,7 @@ Context manager: `async with RocketRideClient(...) as client:` — entering call
 | --- | --- | --- | --- |
 | `pipe` | `async def pipe(self, token: str, objinfo: dict = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe` | `DataPipe` | Creates a **streaming** pipe: open, then one or more writes, then close. Default MIME: `'application/octet-stream'`. `on_sse` receives server-sent events. |
 | `send` | `async def send(self, token: str, data: str \| bytes, objinfo: dict = None, mimetype: str = None, on_sse=None) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Sends data in **one shot** (open, write once, close). No MIME auto-detection — default is `'application/octet-stream'`. |
-| `send_files` | `async def send_files(self, files: List[str \| Tuple[str, dict] \| Tuple[str, dict, str]], token: str) -> List[UPLOAD_RESULT]` | `List[UPLOAD_RESULT]` | Uploads files concurrently (unbounded `asyncio.gather`). **Requires an API key** (`RuntimeError` without one); a missing file raises `ValueError`. Progress via `on_event` as `apaevt_status_upload`. |
+| `send_files` | `async def send_files(self, files: List[str \| Tuple[str, dict] \| Tuple[str, dict, str]], token: str, max_concurrent: int = 5) -> List[UPLOAD_RESULT]` | `List[UPLOAD_RESULT]` | Uploads files concurrently, at most `max_concurrent` transfers in flight at once (default 5); results keep the input order. **Requires an API key** (`RuntimeError` without one); a missing file or a non-positive `max_concurrent` raises `ValueError`. Progress via `on_event` as `apaevt_status_upload`. |
 
 ### Events
 
