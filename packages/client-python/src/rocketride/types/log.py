@@ -94,7 +94,7 @@ class LogChaptersResult(TypedDict, total=False):
     completed: bool
 
 
-class LogStreamEntry(LogChaptersResult, total=False):
+class LogStreamEntry(LogChaptersResult):
     """One stream as ``client.log.streams()`` lists it: its scope plus the chapters body."""
 
     teamId: str  # '' = your own tree
@@ -104,7 +104,7 @@ class LogStreamEntry(LogChaptersResult, total=False):
     ownerKind: Literal['user', 'team']
 
 
-class LogStreamsResult(TypedDict, total=False):
+class LogStreamsResult(TypedDict):
     """Response of ``client.log.streams()``; never-logged scopes are absent."""
 
     streams: List[LogStreamEntry]

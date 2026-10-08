@@ -34,6 +34,7 @@
 # the caller's own DEV stream — run kind is derived, not an argument.
 # =============================================================================
 
+import asyncio
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from ai.account import Store
@@ -254,14 +255,20 @@ class LogCommands(DAPConn):
         ]
 
         identity = {'projectId': args.get('projectId'), 'source': args.get('source')}
-        streams = []
-        for scope in scopes:
-            reader = self._reader_for({**identity, 'teamId': scope['teamId'], 'runKind': scope['runKind']})
-            try:
-                body = await reader.chapters()
-            except FileNotFoundError:
-                continue
-            streams.append({**scope, **body})
+        # One control-file read per scope, a few at a time: an org admin can monitor every team.
+        limit = asyncio.Semaphore(8)
+
+        async def chapters_of(scope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            async with limit:
+                try:
+                    return await self._reader_for(
+                        {**identity, 'teamId': scope['teamId'], 'runKind': scope['runKind']}
+                    ).chapters()
+                except FileNotFoundError:
+                    return None
+
+        bodies = await asyncio.gather(*(chapters_of(scope) for scope in scopes))
+        streams = [{**scope, **body} for scope, body in zip(scopes, bodies) if body is not None]
         return self.build_response(request, body={'streams': streams})
 
     # ── chapters ─────────────────────────────────────────────────────────────
