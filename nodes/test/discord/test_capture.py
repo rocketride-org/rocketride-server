@@ -372,6 +372,32 @@ class TestCaptureRowPayload:
         row = capture_row('message', _metadata(), {'text': 'a' * 20000}, source='s', now=NOW)
         assert len(json.loads(row['payload'])['text']) == 20000
 
+    def test_a_huge_payload_string_is_clipped_so_a_queued_row_stays_bounded(self):
+        """A text attachment with no character limit must not park megabytes on the queue."""
+        cap = capture.PAYLOAD_TEXT_MAX_CHARS
+        assert cap == 65536
+        huge = 'a' * (3 * 1024 * 1024)
+        row = capture_row(
+            'message',
+            _metadata(attachments=[{'filename': 'f' * (cap + 10)}]),
+            {'text': huge, 'nested': {'list': [huge]}},
+            source='s',
+            now=NOW,
+        )
+
+        body = json.loads(row['payload'])
+        assert body['text'] == 'a' * (cap - 1) + '…'
+        assert body['nested']['list'][0] == 'a' * (cap - 1) + '…'
+        assert len(body['metadata']['attachments'][0]['filename']) == cap
+        assert len(row['text']) == MAX_TEXT_CHARS
+        assert len(row['payload']) < 4 * cap
+
+    def test_a_string_at_the_cap_is_kept_whole(self):
+        text = 'b' * capture.PAYLOAD_TEXT_MAX_CHARS
+        row = capture_row('message', _metadata(), {'text': text}, source='s', now=NOW)
+
+        assert json.loads(row['payload'])['text'] == text
+
     def test_a_binary_lane_message_has_no_text(self):
         row = capture_row(
             'message',

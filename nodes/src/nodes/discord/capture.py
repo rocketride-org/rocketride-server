@@ -36,9 +36,11 @@ being able to hurt the bot:
 * **Off the answering path.** ``submit`` puts a finished row on a bounded
   queue and returns; one daemon thread does the talking. A database that
   hangs costs a queued row, never a Discord reply.
-* **Bounded.** The queue holds 1000 rows. When it is full the NEW row is
-  dropped and counted -- dropping the oldest would discard the question and
-  keep the reply, which is the wrong half.
+* **Bounded.** The queue holds 1000 rows, and every string in a row's
+  payload is clipped at 65536 characters, so no row holds a multi-megabyte
+  attachment text. When the queue is full the NEW row is dropped and
+  counted -- dropping the oldest would discard the question and keep the
+  reply, which is the wrong half.
 * **Quiet when broken.** A failure no retry can fix (a refused grant, a table
   of the wrong shape, no database behind the edge) turns capture off for the
   run with one warning. Any other failure drops rows for a minute before the
@@ -96,6 +98,13 @@ DEDUPE_COLUMNS = ('source', 'message_id', 'event_type', 'event_key')
 # own or a long answer: it keeps one of those from dominating the column every
 # query selects.
 MAX_TEXT_CHARS = 8000
+
+# Every string in the stored `payload` is clipped to this (with a trailing
+# `…`), so a queued row stays small: a text attachment decoded with
+# textAttachmentMaxChars 0 has no limit of its own, and up to QUEUE_MAX_ROWS
+# rows can wait at once. Far above anything a Discord message (4000
+# characters) or a reply needs.
+PAYLOAD_TEXT_MAX_CHARS = 65536
 
 # Roughly a minute of a very busy channel. Past this the database is not
 # keeping up and the right answer is to shed, not to buffer without limit.
@@ -349,6 +358,23 @@ def _scrub_nul(value: Any) -> Any:
     return value
 
 
+def _clip_strings(value: Any) -> Any:
+    """Return ``value`` with every string in it clipped to :data:`PAYLOAD_TEXT_MAX_CHARS`.
+
+    A clipped string ends in ``…`` and is exactly the cap long. Containers are
+    copied, never changed in place, as in :func:`_scrub_nul`.
+    """
+    if isinstance(value, str):
+        if len(value) <= PAYLOAD_TEXT_MAX_CHARS:
+            return value
+        return value[: PAYLOAD_TEXT_MAX_CHARS - 1] + '…'
+    if isinstance(value, dict):
+        return {_clip_strings(key): _clip_strings(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clip_strings(item) for item in value]
+    return value
+
+
 def _message_part(metadata: Dict[str, Any], payload: Dict[str, Any]) -> str:
     """Name which part of one Discord message a ``message`` event is.
 
@@ -457,8 +483,9 @@ def capture_row(
     # The body `_send_sse` broadcasts, so a reader of this table and a live SSE
     # subscriber are looking at the same object -- except that a `message`
     # row's text is the user's whole message, where the broadcast clips it at
-    # 2000 characters (the node passes the text it wants stored).
-    body = {'schemaVersion': 1, 'eventType': event_type, 'metadata': metadata, **payload}
+    # 2000 characters (the node passes the text it wants stored). Every string
+    # in it is clipped at PAYLOAD_TEXT_MAX_CHARS, so a queued row stays small.
+    body = _clip_strings({'schemaVersion': 1, 'eventType': event_type, 'metadata': metadata, **payload})
 
     message_id = _opt_text(metadata.get('messageId')) or _opt_text(metadata.get('correlationId')) or ''
 
@@ -487,7 +514,7 @@ def capture_row(
         # `default=str` rather than a raising dump: a payload this node cannot
         # serialise must degrade to a readable repr, never drop the row; that
         # repr is scrubbed of NUL like everything else.
-        'payload': json.dumps(body, default=lambda item: _scrub_nul(str(item)), ensure_ascii=False),
+        'payload': json.dumps(body, default=lambda item: _clip_strings(_scrub_nul(str(item))), ensure_ascii=False),
         'source': source,
     }
 
