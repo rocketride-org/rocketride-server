@@ -2,11 +2,6 @@
 
 absl-py==2.4.0
     # via mediapipe
-accelerate==1.14.0
-    # via
-    #   -r nodes/src/nodes/embedding_image/requirements.txt
-    #   -r nodes/src/nodes/embedding_video/requirements.txt
-    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
 addict==2.4.0
     # via misaki
 aiofiles==24.1.0
@@ -21,6 +16,7 @@ aiohttp==3.14.1
     #   aiohttp-retry
     #   daytona-api-client-async
     #   daytona-toolbox-api-client-async
+    #   discord-py
     #   firecrawl-py
     #   instructor
     #   kubernetes
@@ -79,6 +75,8 @@ attrs==26.1.0
     #   jsonschema
     #   phonemizer-fork
     #   referencing
+audioop-lts==0.2.2 ; python_full_version >= '3.13'
+    # via discord-py
 authlib==1.7.2
     # via
     #   -r nodes/src/nodes/store_weaviate/requirements.txt
@@ -267,6 +265,8 @@ deprecation==2.1.0
     #   lancedb
 dirtyjson==1.0.8
     # via llama-index-core
+discord-py==2.7.1
+    # via -r nodes/src/nodes/discord/requirements.txt
 distro==1.9.0
     # via
     #   anthropic
@@ -527,8 +527,6 @@ httpx-sse==0.4.3
 huggingface-hub==1.21.0
     # via
     #   -r nodes/src/nodes/audio_transcribe/requirements.txt
-    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
-    #   accelerate
     #   faster-whisper
     #   gliner
     #   kokoro
@@ -845,7 +843,6 @@ numpy==2.3.5 ; python_full_version < '3.13'
     #   -r nodes/src/nodes/store_milvus/requirements.txt
     #   -r nodes/src/nodes/store_qdrant/requirements.txt
     #   -r nodes/src/nodes/store_weaviate/requirements.txt
-    #   accelerate
     #   blis
     #   chromadb
     #   chromadb-client
@@ -885,7 +882,6 @@ numpy==2.5.0 ; python_full_version >= '3.13'
     #   -r nodes/src/nodes/store_milvus/requirements.txt
     #   -r nodes/src/nodes/store_qdrant/requirements.txt
     #   -r nodes/src/nodes/store_weaviate/requirements.txt
-    #   accelerate
     #   blis
     #   chromadb
     #   chromadb-client
@@ -1050,7 +1046,6 @@ overrides==7.7.0
     #   chromadb-client
 packaging==26.2
     # via
-    #   accelerate
     #   build
     #   crewai-cli
     #   crewai-core
@@ -1159,10 +1154,8 @@ protobuf==6.33.6
     #   pymilvus
     #   qdrant-client
     #   weaviate-client
-psutil==7.2.2
-    # via
-    #   accelerate
-    #   ipython
+psutil==7.2.2 ; sys_platform != 'cygwin' and sys_platform != 'emscripten'
+    # via ipython
 psycopg2-binary==2.9.12
     # via
     #   -r nodes/src/nodes/db_postgres/requirements.txt
@@ -1353,7 +1346,6 @@ pywin32==312 ; sys_platform == 'win32'
 pyyaml==6.0.3
     # via
     #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
-    #   accelerate
     #   cel-python
     #   chromadb
     #   chromadb-client
@@ -1467,9 +1459,7 @@ s3transfer==0.19.0
     # via boto3
 safetensors==0.8.0
     # via
-    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
-    #   accelerate
     #   transformers
 segments==2.4.0
     # via phonemizer-fork
@@ -1583,7 +1573,6 @@ tinytag==2.2.1
 tokenizers==0.22.2
     # via
     #   -r nodes/src/nodes/audio_transcribe/requirements.txt
-    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
     #   chromadb
     #   cohere
     #   crewai
@@ -1604,7 +1593,6 @@ tomli-w==1.1.0
     #   crewai-cli
 torch==2.10.0
     # via
-    #   accelerate
     #   curated-transformers
     #   gliner
     #   kokoro
@@ -1629,9 +1617,6 @@ traitlets==5.15.1
     #   matplotlib-inline
 transformers==5.6.2
     # via
-    #   -r nodes/src/nodes/embedding_image/requirements.txt
-    #   -r nodes/src/nodes/embedding_video/requirements.txt
-    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
     #   gliner
     #   kokoro
 tree-sitter==0.25.2
