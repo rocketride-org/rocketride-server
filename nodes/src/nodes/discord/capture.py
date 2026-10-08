@@ -39,9 +39,13 @@ being able to hurt the bot:
 * **Bounded.** The queue holds 1000 rows. When it is full the NEW row is
   dropped and counted -- dropping the oldest would discard the question and
   keep the reply, which is the wrong half.
-* **Quiet when broken.** The first failure is reported in full; after that at
-  most one warning per 30 seconds, carrying the running count, and one line
-  when writes start working again.
+* **Quiet when broken.** A failure no retry can fix (a refused grant, a table
+  of the wrong shape, no database behind the edge) turns capture off for the
+  run with one warning. Any other failure drops rows for a minute before the
+  next try: the database node logs each failed statement with its values, so
+  writing on into an outage would log every user's message. Warnings come at
+  most once per 30 seconds with the running counts, and one line says when
+  writes start working again.
 
 The module is pure Python with no engine imports at module scope (the
 ``IInvokeTool`` import is deferred into ``_invoke_param``), so it loads in a
@@ -100,6 +104,13 @@ QUEUE_MAX_ROWS = 1000
 # One warning per node per window while writes are failing.
 WARN_INTERVAL_SECONDS = 30.0
 
+# After a failed write that may fix itself (the database is down or slow), how
+# long rows are dropped and counted before the next one is tried. The database
+# node logs every failed statement at error level together with its bound
+# values, so writing every row into an outage would put every user's message
+# in the server log, once per row.
+BACKOFF_SECONDS = 60.0
+
 # Postgres truncates every identifier at 63 bytes. CREATE_TABLE_SQL derives the
 # constraint and index names from the table name, so a name allowed to use the
 # whole budget would have those derived names truncated -- and two capture
@@ -139,6 +150,32 @@ POSTGRES_DIALECTS = ('postgres', 'postgresql')
 # because a missing column (42703) reads ``column "x" of relation "<table>"
 # does not exist`` and must not be taken for a missing table.
 _MISSING_TABLE_RE = re.compile(r'(?:^|: )relation "[^"]*" does not exist')
+
+# Failures no retry can fix, as the database node passes them on (the driver's
+# primary message, sometimes with the exception class or SQLSTATE), each with
+# the cause a warning names. Checked in order; the first match wins.
+_LASTING_FAILURES = (
+    (
+        re.compile(r'\bnot owned\b'),
+        'it is not a database node (it does not offer the tools capture calls)',
+    ),
+    (
+        re.compile(r'execute tool is disabled'),
+        'its execute tool is disabled; turn on Allow direct query execution (allow_execute) on that node',
+    ),
+    (
+        re.compile(r'permission denied|InsufficientPrivilege|\b42501\b'),
+        'the database user was refused (permission denied); grant it INSERT on the table',
+    ),
+    (
+        re.compile(r'no unique or exclusion constraint matching|InvalidColumnReference|\b42P10\b'),
+        'the table has no unique constraint capture can use; create it as the node README shows',
+    ),
+    (
+        re.compile(r'column "[^"]*"(?: of relation "[^"]*")? does not exist|UndefinedColumn|\b42703\b'),
+        'a column capture writes does not exist in the table; create it as the node README shows',
+    ),
+)
 
 # Sentinel the worker loop reads as "the queue is drained, you may stop".
 _STOP = object()
@@ -488,6 +525,35 @@ def _is_missing_table(exc: BaseException) -> bool:
     return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or '42P01' in text
 
 
+class _LastingFailure(Exception):
+    """A failed write that no later row can get past; carries the cause to report."""
+
+
+def _lasting_cause(exc: BaseException, hide: tuple = ()) -> Optional[str]:
+    """Name the cause when ``exc`` is a failure no retry can fix, else None.
+
+    Args:
+        exc (BaseException): The failed call's exception.
+        hide (tuple): The row's values, removed before matching: a driver
+            error that quotes the user's words ("permission denied when I
+            log in") must not read as a refused grant.
+
+    Returns:
+        Optional[str]: A fixed description of the cause (never text from the
+            row), or None for a failure that may fix itself.
+    """
+    if isinstance(exc, _LastingFailure):
+        return str(exc)
+    text = str(exc)
+    for value in hide:
+        if isinstance(value, str) and value:
+            text = text.replace(value, '')
+    for pattern, cause in _LASTING_FAILURES:
+        if pattern.search(text):
+            return cause
+    return None
+
+
 def _short_error(exc: BaseException, hide: tuple = ()) -> str:
     """Return the first line of an exception, bounded, for a log line.
 
@@ -555,6 +621,10 @@ class CaptureWriter:
         self._table_checked = False
         self._disabled = False
         self._failures = 0
+        # While a failure that may fix itself backs off: the clock reading
+        # before which rows are dropped, and how many were.
+        self._retry_at = 0.0
+        self._skipped = 0
         self._dropped = 0
         self._unwritten = 0
         self._dropped_lock = threading.Lock()
@@ -601,6 +671,11 @@ class CaptureWriter:
     def failures(self) -> int:
         """Consecutive failed writes; reset by the next success."""
         return self._failures
+
+    @property
+    def skipped(self) -> int:
+        """Rows dropped while backing off after a failed write; reset by the next success."""
+        return self._skipped
 
     # -----------------------------------------------------------------------
     # Lifecycle
@@ -728,8 +803,16 @@ class CaptureWriter:
         self._warn(f'Discord capture: stopped with {unwritten} row(s) unwritten (the writer was still busy)')
 
     def _write_one(self, row: Dict[str, Any]) -> None:
-        """Write one row through the database node's ``execute`` tool."""
+        """Write one row through the database node's ``execute`` tool.
+
+        A failure no retry can fix turns capture off for the run; any other
+        failure starts a :data:`BACKOFF_SECONDS` window in which rows are
+        dropped and counted without borrowing a pipe.
+        """
         if self._disabled:
+            return
+        if self._retry_at and self._clock() < self._retry_at:
+            self._skipped += 1
             return
         pipe = None
         try:
@@ -747,14 +830,17 @@ class CaptureWriter:
                 # DDL only for a table that is really missing: a database user
                 # allowed only to INSERT into an existing table must never
                 # need CREATE rights. This covers a table dropped after the
-                # check, or a check whose answer could not be read. A CREATE
-                # that fails is a failed write, so the next row tries again.
+                # check, or a check whose answer could not be read.
                 if not _is_missing_table(e):
                     raise
-                self._invoke(pipe, node_id, CREATE_TABLE_SQL(self._table), None)
+                self._create_table(pipe, node_id)
                 self._invoke(pipe, node_id, INSERT_SQL(self._table), row_params(row))
         except Exception as e:
-            self._on_failure(row, e)
+            cause = _lasting_cause(e, hide=(row.get('payload'), row.get('text')))
+            if cause is not None:
+                self._give_up(cause)
+            else:
+                self._on_failure(row, e)
         else:
             self._on_success()
         finally:
@@ -767,9 +853,10 @@ class CaptureWriter:
         Without this, the first row into a new table is an INSERT that fails,
         and the database node logs every failed statement at error level with
         its bound parameters -- the user's question among them. The check
-        never fails that way. It runs once per run: a check or CREATE that
-        raises is a failed write, and the next row asks again; an answer that
-        cannot be read leaves the INSERT-first fallback to do the work.
+        never fails that way. It runs once per run: a check that raises is a
+        failed write, and a later row asks again; a CREATE that fails ends
+        capture (see :meth:`_create_table`); an answer that cannot be read
+        leaves the INSERT-first fallback to do the work.
         """
         output = self._call_tool(
             pipe,
@@ -778,8 +865,21 @@ class CaptureWriter:
             {'sql': TABLE_EXISTS_SQL, 'params': [_quoted_table(self._table)], 'row_mode': 'array'},
         )
         if _table_exists_answer(output) is False:
-            self._invoke(pipe, node_id, CREATE_TABLE_SQL(self._table), None)
+            self._create_table(pipe, node_id)
         self._table_checked = True
+
+    def _create_table(self, pipe: Any, node_id: str) -> None:
+        """Create the missing capture table, or raise :class:`_LastingFailure`.
+
+        The table was just found missing, so the database answered a moment
+        ago: a CREATE that fails now is a missing right or a clash with an
+        object of that name, which the next row would only repeat. The
+        statement binds no values, so its error carries no row text.
+        """
+        try:
+            self._invoke(pipe, node_id, CREATE_TABLE_SQL(self._table), None)
+        except Exception as e:
+            raise _LastingFailure(f'the table does not exist and could not be created ({_short_error(e)})') from e
 
     def _invoke(self, pipe: Any, node_id: str, sql: str, params: Optional[List[Any]]) -> Any:
         """Call the ``execute`` tool on ``node_id`` over ``pipe``."""
@@ -865,24 +965,48 @@ class CaptureWriter:
         setattr(self, slot, now)
         self._warn(message)
 
+    def _give_up(self, cause: str) -> None:
+        """Turn capture off for the run, with one warning naming ``cause``.
+
+        For a failure no retry can fix: writing on would fail every row, and
+        the database node would log each one with its values.
+        """
+        self._disabled = True
+        self._warn(
+            f'Discord capture: writing to {self._node_label()} table {_shown_entry(self._table)} cannot work: '
+            f'{cause}; capture is off for this run.'
+        )
+
     def _on_failure(self, row: Dict[str, Any], exc: BaseException) -> None:
-        """Count a failed write and report it, throttled after the first."""
+        """Count a failed write, start the backoff and report it, throttled after the first."""
         self._failures += 1
-        suffix = f' ({self._failures} failures so far)' if self._failures > 1 else ''
+        self._retry_at = self._clock() + BACKOFF_SECONDS
+        counts = []
+        if self._failures > 1:
+            counts.append(f'{self._failures} failures so far')
+        if self._skipped:
+            counts.append(f'{self._skipped} row(s) dropped while waiting to retry')
+        suffix = f' ({", ".join(counts)})' if counts else ''
         # The driver's message can quote a bound value: never the user's text.
         error = _short_error(exc, hide=(row.get('payload'), row.get('text')))
         self._warn_throttled(
             '_last_failure_warn',
             f'Discord capture: writing {row.get("event_type")} for message {row.get("message_id")} '
-            f'to {self._node_label()} table {_shown_entry(self._table)} failed{suffix}: {error}',
+            f'to {self._node_label()} table {_shown_entry(self._table)} failed{suffix}: {error}. '
+            f'Rows are dropped until writing is tried again in {int(BACKOFF_SECONDS)} seconds.',
         )
 
     def _on_success(self) -> None:
-        """Clear the failure streak, saying so when there was one."""
+        """Clear the failure streak and the backoff, saying so when there was one."""
+        self._retry_at = 0.0
         if not self._failures:
             return
-        self._warn(f'Discord capture: writes to {self._node_label()} recovered after {self._failures} failures')
+        skipped = f'; {self._skipped} row(s) were dropped while waiting to retry' if self._skipped else ''
+        self._warn(
+            f'Discord capture: writes to {self._node_label()} recovered after {self._failures} failures{skipped}'
+        )
         self._failures = 0
+        self._skipped = 0
         self._last_failure_warn = 0.0
 
     def _node_label(self) -> str:

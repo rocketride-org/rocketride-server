@@ -808,12 +808,14 @@ class TestWriterWrites:
         ]
 
     def test_a_failed_check_is_a_failed_write_and_is_asked_again(self):
+        clock = [1000.0]
         pipe = _FakePipe(check_fails=RuntimeError('connection refused'))
         warnings = []
-        writer = _writer(_FakeTarget(pipe), warnings)
+        writer = _writer(_FakeTarget(pipe), warnings, clock=lambda: clock[0])
 
         writer._write_one(_row())
         pipe.check_fails = None
+        clock[0] += capture.BACKOFF_SECONDS
         writer._write_one(_row())
 
         assert len(pipe.check_calls) == 2
@@ -838,19 +840,28 @@ class TestWriterWrites:
         ]
         assert writer.failures == 0
 
-    def test_a_failed_create_is_a_failed_write_and_is_tried_again_next_row(self):
-        """A table that could not be created must not be assumed to exist."""
-        pipe = _FakePipe(table_exists=False, create_fails=RuntimeError('permission denied for schema public'))
+    @pytest.mark.parametrize('check_output', [_FakePipe._ANSWER, None])
+    def test_a_missing_table_that_cannot_be_created_turns_capture_off(self, check_output):
+        """Found missing by the check, or by an INSERT: either way no later row can succeed."""
+        pipe = _FakePipe(
+            table_exists=False,
+            create_fails=RuntimeError('SQL execution failed: permission denied for schema public'),
+            check_output=check_output,
+        )
         warnings = []
-        writer = _writer(_FakeTarget(pipe), warnings)
+        target = _FakeTarget(pipe)
+        writer = _writer(target, warnings)
 
         writer._write_one(_row())
-        pipe.create_fails = None
         writer._write_one(_row())
 
-        assert sum(1 for call in pipe.calls if 'CREATE TABLE' in call[2]['sql']) == 2
-        assert 'permission denied' in warnings[0]
-        assert pipe.table_exists is True
+        assert sum(1 for call in pipe.calls if 'CREATE TABLE' in call[2]['sql']) == 1
+        assert writer.disabled is True
+        assert len(warnings) == 1
+        assert 'does not exist and could not be created' in warnings[0]
+        assert 'permission denied for schema public' in warnings[0]
+        assert 'capture is off for this run' in warnings[0]
+        assert target.borrowed == target.returned == 1
 
     def test_an_insert_failing_for_another_reason_runs_no_ddl(self):
         pipe = _FakePipe(fail=RuntimeError('connection refused'))
@@ -871,8 +882,8 @@ class TestWriterWrites:
         writer._write_one(_row())
 
         assert [call[2]['sql'] for call in pipe.calls] == [INSERT_SQL('discord_events')]
-        assert writer.failures == 1
-        assert 'column "event_key"' in warnings[0]
+        assert writer.disabled is True
+        assert 'a column capture writes does not exist' in warnings[0]
 
     @pytest.mark.parametrize(
         'message, missing',
@@ -1035,16 +1046,19 @@ class TestWriterFailures:
         assert text not in warnings[0]
         assert 'invalid input syntax: "<row text>"' in warnings[0]
 
-    def test_the_next_row_is_still_attempted_after_a_failure(self):
+    def test_the_next_row_after_the_backoff_is_attempted_again(self):
+        clock = [1000.0]
         pipe = _FakePipe(fail=RuntimeError('boom'))
         warnings = []
-        writer = _writer(_FakeTarget(pipe), warnings)
+        writer = _writer(_FakeTarget(pipe), warnings, clock=lambda: clock[0])
 
         writer._write_one(_row())
         pipe.fail = None
+        clock[0] += capture.BACKOFF_SECONDS
         writer._write_one(_row())
 
-        assert any('INSERT INTO' in call[2]['sql'] for call in pipe.calls)
+        assert len([call for call in pipe.calls if 'INSERT INTO' in call[2]['sql']]) == 2
+        assert writer.failures == 0
 
     def test_a_storm_of_failures_warns_at_most_once_per_window(self):
         clock = [1000.0]
@@ -1057,7 +1071,7 @@ class TestWriterFailures:
 
         assert len(warnings) == 1
 
-    def test_the_window_reopens_and_reports_the_running_count(self):
+    def test_the_next_failure_reports_the_running_counts(self):
         clock = [1000.0]
         pipe = _FakePipe(fail=RuntimeError('boom'))
         warnings = []
@@ -1065,25 +1079,32 @@ class TestWriterFailures:
 
         for _ in range(5):
             writer._write_one(_row())
-        clock[0] += capture.WARN_INTERVAL_SECONDS
+        clock[0] += capture.BACKOFF_SECONDS
         writer._write_one(_row())
 
         assert len(warnings) == 2
-        assert '6' in warnings[1]
+        assert '2 failures so far' in warnings[1]
+        assert '4 row(s) dropped while waiting to retry' in warnings[1]
 
     def test_recovery_is_reported_once(self):
+        clock = [1000.0]
         pipe = _FakePipe(fail=RuntimeError('boom'))
         warnings = []
-        writer = _writer(_FakeTarget(pipe), warnings)
+        writer = _writer(_FakeTarget(pipe), warnings, clock=lambda: clock[0])
 
+        writer._write_one(_row())
+        clock[0] += capture.BACKOFF_SECONDS
         writer._write_one(_row())
         writer._write_one(_row())
         pipe.fail = None
+        clock[0] += capture.BACKOFF_SECONDS
         writer._write_one(_row())
         writer._write_one(_row())
 
         recovered = [message for message in warnings if 'recovered' in message]
-        assert recovered == ["Discord capture: writes to 'db_1' recovered after 2 failures"]
+        assert recovered == [
+            "Discord capture: writes to 'db_1' recovered after 2 failures; 1 row(s) were dropped while waiting to retry"
+        ]
 
     def test_a_clean_run_never_warns(self):
         warnings = []
@@ -1093,6 +1114,121 @@ class TestWriterFailures:
             writer._write_one(_row())
 
         assert warnings == []
+
+
+# Failures PostgreSQL (or the database node) reports that no retry can fix, as
+# the database node passes them on.
+LASTING_FAILURES = [
+    'SQL execution failed: permission denied for table discord_events',
+    'SQL execution failed: (psycopg2.errors.InsufficientPrivilege) 42501',
+    'SQL execution failed: there is no unique or exclusion constraint matching the ON CONFLICT specification',
+    'SQL execution failed: column "source" of relation "discord_events" does not exist',
+    'execute tool is disabled for this node (set allow_execute=true)',
+    'tool.invoke: execute not owned',
+]
+
+
+class TestWriterCircuitBreaker:
+    """A failure that will not fix itself ends capture; any other one backs off.
+
+    The database node logs every failed statement at error level together
+    with its bound values, so each doomed INSERT puts a user's message in
+    the server log: a lasting failure must cost one row, not every row.
+    """
+
+    @pytest.mark.parametrize('error', LASTING_FAILURES)
+    def test_a_lasting_failure_turns_capture_off_with_one_warning(self, error):
+        text = 'my account number is 12345678'
+        pipe = _FakePipe(fail=RuntimeError(f'{error} "{text}"'))
+        warnings = []
+        target = _FakeTarget(pipe)
+        writer = _writer(target, warnings)
+
+        writer._write_one(_row(text=text))
+        writer._write_one(_row(text=text))
+        writer.submit(_row(text=text))
+
+        assert writer.disabled is True
+        assert len(pipe.calls) == 1
+        assert target.borrowed == target.returned == 1
+        assert len(warnings) == 1
+        assert 'capture is off for this run' in warnings[0]
+        assert text not in warnings[0]
+        assert writer._queue.empty()
+
+    @pytest.mark.parametrize(
+        'error, cause',
+        [
+            (LASTING_FAILURES[0], 'permission denied'),
+            (LASTING_FAILURES[2], 'no unique constraint'),
+            (LASTING_FAILURES[3], 'a column capture writes does not exist'),
+            (LASTING_FAILURES[4], 'Allow direct query execution'),
+            (LASTING_FAILURES[5], 'not a database node'),
+        ],
+    )
+    def test_the_warning_names_the_cause(self, error, cause):
+        warnings = []
+        _writer(_FakeTarget(_FakePipe(fail=RuntimeError(error))), warnings)._write_one(_row())
+
+        assert cause in warnings[0]
+        assert "'db_1'" in warnings[0]
+
+    def test_a_dialect_tool_the_node_does_not_own_means_not_a_database(self):
+        pipe = _FakePipe()
+
+        def answer(param, component_id):
+            raise RuntimeError('tool.invoke: dialect not owned')
+
+        pipe._answer = answer
+        warnings = []
+        writer = _writer(_FakeTarget(pipe), warnings)
+
+        writer._write_one(_row())
+        writer._write_one(_row())
+
+        assert writer.disabled is True
+        assert len(warnings) == 1
+        assert 'not a database node' in warnings[0]
+
+    def test_row_text_that_reads_like_a_lasting_failure_is_not_one(self):
+        """A driver error quoting the user's own words must not switch capture off."""
+        text = 'permission denied when I log in'
+        pipe = _FakePipe(fail=RuntimeError(f'invalid input syntax: "{text}"'))
+        writer = _writer(_FakeTarget(pipe), [])
+
+        writer._write_one(_row(text=text))
+
+        assert writer.disabled is False
+        assert writer.failures == 1
+
+    def test_any_other_failure_backs_off_then_retries(self):
+        clock = [1000.0]
+        pipe = _FakePipe(fail=RuntimeError('could not connect to server'))
+        target = _FakeTarget(pipe)
+        warnings = []
+        writer = _writer(target, warnings, clock=lambda: clock[0])
+
+        writer._write_one(_row())
+        for _ in range(3):
+            clock[0] += capture.BACKOFF_SECONDS / 4
+            writer._write_one(_row())
+
+        assert writer.disabled is False
+        assert len(pipe.calls) == 1
+        assert target.borrowed == 1
+        assert writer.skipped == 3
+        assert 'tried again in 60 seconds' in warnings[0]
+
+        clock[0] += capture.BACKOFF_SECONDS / 4
+        pipe.fail = None
+        writer._write_one(_row())
+
+        assert len(pipe.calls) == 2
+        assert writer.failures == 0
+
+    def test_the_backoff_is_long_enough_to_spare_the_log(self):
+        assert capture.BACKOFF_SECONDS >= capture.WARN_INTERVAL_SECONDS
+        assert capture.BACKOFF_SECONDS == 60.0
 
 
 class TestWriterQueue:

@@ -54,7 +54,8 @@ is off unless `DISCORD_LIVE=1` is set; a normal run collects and skips them.
     `text:1`), and inserting the same rows again adds nothing.
   - F34: the database container is stopped mid-run; the bot still answers,
     that question's rows are dropped and the failure is logged, and capture
-    resumes once the database is back, with a `recovered` log line. It passes
+    resumes once the database is back and the node's 60-second backoff has
+    passed, with a `recovered` log line. It passes
     only when both log lines are found, so it needs `DISCORD_E2E_ENGINE_LOG`
     and is skipped without it.
 

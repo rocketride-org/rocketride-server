@@ -62,6 +62,8 @@ ESCALATION_LINE = 'Escalated to the RocketRide team.'
 FAKE_ROLE_ID = '900000000000000301'
 FAKE_CHANNEL_ID = '900000000000000302'
 QUIET_SECONDS = 15
+# capture.BACKOFF_SECONDS: how long the node drops capture rows after a failed write.
+CAPTURE_BACKOFF_SECONDS = 60
 RUN_STAMP = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
 RESULTS_DIR = os.environ.get('DISCORD_E2E_RESULTS_DIR', '') or os.path.join(tempfile.gettempdir(), 'discord-e2e-full')
 RESULTS_PATH = os.path.join(RESULTS_DIR, f'{RUN_STAMP}.jsonl')
@@ -1446,6 +1448,9 @@ def test_f34_database_down_mid_run(engine, engine_config, driver_bot):
         if _psql('SELECT 1') == '1':
             break
         time.sleep(1)
+    # After a failed write the node drops rows for its 60-second backoff
+    # before it tries again; the outage question started that window.
+    time.sleep(CAPTURE_BACKOFF_SECONDS)
     up = driver_bot.post(f'{tag} after the database is back')
     up_answer = _answer(driver_bot, driver_bot.channel, up, 'after the database')
     time.sleep(10)
