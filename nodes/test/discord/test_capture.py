@@ -1904,6 +1904,32 @@ class TestProcessedMessagesAreCaptured:
         (broadcast,) = [payload for event_type, payload in sent if event_type == 'message']
         assert 'secret file body' in broadcast['text']
 
+    def test_a_retried_merge_pass_with_no_text_of_its_own_stores_no_text(self):
+        """The retry's row follows the same rule as the first pass: never the folded file contents."""
+        pipe = _PipelinePipe()
+        endpoint = self._endpoint(pipe, merge=True)
+        endpoint._sanitize_replies = True
+        endpoint._non_answer_retries = 1
+        answers = iter(['Thought: I should look this up', 'The real answer'])
+
+        def new_entry(*args, **kwargs):
+            entry = mock.Mock()
+            entry.response.toDict.return_value = {'answers': [next(answers)]}
+            return entry
+
+        endpoint._new_entry = mock.Mock(side_effect=new_entry)
+        notes = self._attachment('notes.txt', b'secret file body', 'text/plain', 6006)
+        try:
+            asyncio.run(endpoint._process_message(self._message('', notes)))
+        finally:
+            endpoint._stop_capture()
+
+        rows = sorted((row for row in _kept_rows(pipe) if row[0] == 'message'), key=lambda row: row[2])
+        assert [row[2] for row in rows] == ['text', 'text:retry:1']
+        for row in rows:
+            assert not row[9]
+            assert 'secret file body' not in row[10]
+
 
 # ===========================================================================
 # README

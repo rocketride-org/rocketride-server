@@ -2178,6 +2178,7 @@ class IEndpoint(IEndpointBase):
                             'text': pipeline_text,
                             'meta': text_meta,
                             'sseText': question,
+                            'captureText': question,
                             'contextChars': len(transcript),
                         }
 
@@ -2417,6 +2418,7 @@ class IEndpoint(IEndpointBase):
             'text': pipeline_text,
             'meta': text_meta,
             'sseText': sse_text,
+            'captureText': question,
             'contextChars': len(pipeline_text) - len(question),
         }
         return self._answer_text(text_reply) or first_answer
@@ -2432,14 +2434,14 @@ class IEndpoint(IEndpointBase):
         A ReAct agent that returned only scratchpad (``Thought:`` with no
         ``Final Answer:``), or nothing at all, answers normally on a second
         run, so up to ``nonAnswerRetries`` re-runs are attempted before the
-        node gives up. Each re-run uses the same pipeline text, metadata, and
-        SSE text as the original but a distinct object name, so a stateful
+        node gives up. Each re-run uses the same pipeline text, metadata, SSE
+        text and capture text as the original but a distinct object name, so a stateful
         prompt node does not treat it as the object it already saw.
 
         Args:
             message (discord.Message): The message being answered.
             text_pass (Dict[str, Any]): The original text pass (``text``,
-                ``meta``, ``sseText``, ``contextChars``).
+                ``meta``, ``sseText``, ``captureText``, ``contextChars``).
             errors (Optional[List[str]]): Collects ``'model_error'`` when a
                 re-run answered with an engine/model failure, which ends the
                 retries — the caller reports that instead of ``non_answer``.
@@ -2466,6 +2468,7 @@ class IEndpoint(IEndpointBase):
                     meta,
                     f'{message.id}:retry{attempt}',
                     sse_text=text_pass['sseText'],
+                    capture_text=text_pass.get('captureText'),
                     context_chars=text_pass['contextChars'],
                     retry=attempt,
                 ),
