@@ -186,6 +186,10 @@ _LASTING_FAILURES = (
     ),
 )
 
+# The shortest row value or node id an error message is searched for (to hide
+# it, or to keep it from reading as a lasting failure).
+MIN_HIDDEN_CHARS = 8
+
 # Sentinel the worker loop reads as "the queue is drained, you may stop".
 _STOP = object()
 
@@ -581,6 +585,16 @@ def _is_missing_table(exc: BaseException) -> bool:
     return bool(_MISSING_TABLE_RE.search(text)) or 'UndefinedTable' in text or '42P01' in text
 
 
+def _is_hideable(value: Any) -> bool:
+    """True when ``value`` is long enough to be replaced inside an error message.
+
+    A shorter value is left alone: replacing a one-letter message everywhere
+    it occurs would garble the error (every ``e`` in ``permission denied``),
+    and a value that short gives nothing away.
+    """
+    return isinstance(value, str) and len(value.strip()) >= MIN_HIDDEN_CHARS
+
+
 class _LastingFailure(Exception):
     """A failed write that no later row can get past; carries the cause to report."""
 
@@ -602,7 +616,7 @@ def _lasting_cause(exc: BaseException, hide: tuple = ()) -> Optional[str]:
         return str(exc)
     text = str(exc)
     for value in hide:
-        if isinstance(value, str) and value:
+        if _is_hideable(value):
             text = text.replace(value, '')
     for pattern, cause in _LASTING_FAILURES:
         if pattern.search(text):
@@ -618,6 +632,7 @@ def _short_error(exc: BaseException, hide: tuple = ()) -> str:
         hide (tuple): Values replaced before the line is cut, so one the
             driver quoted never reaches the log: a string becomes
             ``<row text>``, a ``(value, placeholder)`` pair its placeholder.
+            Only values of at least :data:`MIN_HIDDEN_CHARS` characters.
 
     Returns:
         str: The first line, at most 300 characters.
@@ -626,7 +641,7 @@ def _short_error(exc: BaseException, hide: tuple = ()) -> str:
     line = text[0] if text else exc.__class__.__name__
     for item in hide:
         value, placeholder = item if isinstance(item, tuple) else (item, '<row text>')
-        if isinstance(value, str) and value.strip():
+        if _is_hideable(value):
             line = line.replace(value, placeholder)
     return line[:300]
 

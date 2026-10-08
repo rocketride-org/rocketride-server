@@ -1147,6 +1147,27 @@ class TestWriterFailures:
         assert len(warnings) == 1
         assert 'could not reach <captureNodeId>: timeout' in warnings[0]
 
+    @pytest.mark.parametrize('text', ['a', 'e', 'ok', 'db_1', '1234567'])
+    def test_a_short_value_does_not_garble_the_error(self, text):
+        """Replacing a one-letter message everywhere it occurs would make the error unreadable."""
+        error = RuntimeError('could not connect to server db_1: connection refused (1234567)')
+
+        assert capture._short_error(error, hide=(text,)) == str(error)
+
+    def test_a_short_row_text_does_not_hide_a_lasting_failure(self):
+        """Removing every "e" from "permission denied" must not turn it into a failure that may fix itself."""
+        pipe = _FakePipe(fail=RuntimeError('SQL execution failed: permission denied for table discord_events'))
+        writer = _writer(_FakeTarget(pipe), [])
+
+        writer._write_one(_row(text='e'))
+
+        assert writer.disabled is True
+
+    def test_a_value_of_eight_characters_is_hidden(self):
+        error = RuntimeError('bad value "12345678"')
+
+        assert capture._short_error(error, hide=('12345678',)) == 'bad value "<row text>"'
+
     def test_row_text_quoted_by_the_driver_never_reaches_the_warning(self):
         text = 'my account number is 12345678'
         pipe = _FakePipe(fail=RuntimeError(f'invalid input syntax: "{text}"\nDETAIL: more'))
