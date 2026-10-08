@@ -207,6 +207,24 @@ expect a media lane to deliver multiple items per input object.
 `.rocketride/schema/<provider>.json` adds one component's description, invoke requirements,
 and config detail.
 
+### Ask nodes and `metadata.decisions`
+
+Ask nodes (`decision_typesafe`, `decision_openrouter`, `decision_ollama`, `decision_systemone`)
+answer typed questions (yes/no, pick-one, rubric) about each document with a System One decision
+model. Use one for cheap classification or gating before a costly step, for example "is this urgent?"
+or "which team owns this?" ahead of an LLM or agent. They do not generate text.
+
+- Lanes: `documents → documents, answers`. The document passes through unchanged. Wire the
+  `answers` lane only if you want the decisions as JSON.
+- Put **every** question for a document in **one** Ask node. All questions go to the model in one
+  call per document, and they are answered independently. Do not chain Ask nodes to ask more questions.
+- Read answers at `metadata.decisions.<name>.answer`. It is a string, number or boolean:
+  `yes`/`no` for yes/no, the option value for pick-one, the level index for a rubric. It is
+  `uncertain` below the question's `min_confidence` and `error` when a call failed under
+  `on_error: pass_through`.
+- Confidence is not comparable across backends, so set `min_confidence` per backend.
+- The full shape is in `docs/development/nodes/decisions-metadata.md`.
+
 ---
 
 ## Profiles & Config

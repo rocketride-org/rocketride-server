@@ -29,8 +29,12 @@ per-node schemas**. If a node you expect is missing from it, check `list_integra
    landing_ai_parse/landing_ai_extract) · `text` (extract_data/ner/anonymize_text/dictionary/prompt/summarization) ·
    `preprocessor` · `image` · `audio` · `video` · `embedding` · `llm` (14 providers) · `store`
    (vector DBs) · `database` (db_*) · `agent` · `tool` (tool_*) · `memory` · `rerank` · `search` ·
-   `guard` · `infrastructure`/`target`/`response_*` (terminals).
+   `guard` · `decision` (Ask nodes: `decision_*`) · `infrastructure`/`target`/`response_*` (terminals).
    For each relevant archetype, list the candidate nodes you see in the index.
+   Choose an Ask node when the task needs a cheap typed judgment on each document (yes/no, pick one of N
+   options, or a rubric score) to gate or classify before a costly step. Put all the questions in one
+   node, since each document costs one call; the answers land in `metadata.decisions.<name>.answer`. Don't
+   use one to generate text; that is an `llm`.
 3. **Select**, citing each: `Found in index: <name> · classType=[…] · lanes={…}`. A pipeline needs
    a resolvable **source** (one Source-mode node, or several with `source` naming the one that
    starts the run, in the file or at launch) and a **terminal** (`response_*` for a reply; a store / `db_*` for

@@ -355,6 +355,10 @@ Agent_2 has no `input` lanes: it is invoked as a tool by Agent_1. LLM_2 and Memo
 
 Tool components (classType `tool`) have empty `lanes` (`{}`). They are not connected via data lanes: they are invoked by agents at runtime. The tool declares which agent controls it via the `control` array with `"classType": "tool"`.
 
+### Ask Nodes (Decision Models)
+
+Ask nodes (classType `decision`) ask typed questions (yes/no, pick-one, rubric) about each document with a System One decision model, in one call per document. Four providers share one implementation: `decision_typesafe` (TypeSafe Jev), `decision_openrouter`, `decision_ollama` (local) and `decision_systemone` (any compatible endpoint). Lanes are `documents → documents, answers`; the document passes through unchanged and the answers are written to `metadata.decisions.<name>` for later nodes to read. Read the catalog for current fields and profiles.
+
 ---
 
 ## Config Patterns
