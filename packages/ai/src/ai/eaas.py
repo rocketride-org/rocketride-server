@@ -43,6 +43,7 @@ from typing import Any, Dict
 from rocketlib import warning
 
 from ai.constants import CONST_TASK_DATA_PATH
+from ai.modules.task.launcher import RUNTIMES
 from ai.proc_privacy import make_process_private, should_make_private
 from ai.web import WebServer
 
@@ -135,6 +136,14 @@ Examples:
         help='Base port for task data/debug allocation (default: 20000, range: base to base+9999)',
     )
 
+    # Task runtime
+    parser.add_argument(
+        '--runtime',
+        choices=RUNTIMES,
+        default=RUNTIMES[0],
+        help='How tasks run: spawn, a child process of this engine (default: spawn)',
+    )
+
     # Logging
     parser.add_argument(
         '--verbose',
@@ -175,10 +184,13 @@ async def run(config: Dict[str, Any] = None) -> None:
         config['port'] = args.port
         config['modelserver'] = args.modelserver
         config['base_port'] = args.base_port
+        config['runtime'] = args.runtime
         config['verbose'] = args.verbose
 
     if config.get('modelserver'):
         print(f'  Model Server: {config["modelserver"]}')
+    if config.get('runtime') and config['runtime'] != 'spawn':
+        print(f'  Task runtime: {config["runtime"]}')
     if config.get('verbose'):
         print('  Verbose logging: enabled')
 
