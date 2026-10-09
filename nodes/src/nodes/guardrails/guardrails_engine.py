@@ -191,13 +191,56 @@ class GuardrailsEngine:
     # -------------------------------------------------------------------------
     PII_PATTERNS: Dict[str, re.Pattern] = {
         'email': re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'),
-        'phone_us': re.compile(r'\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'),
+        # A bare run of ten digits is NOT a phone number. Every separator and the
+        # country code were optional here, so the pattern reduced to "ten digits" --
+        # and Unix timestamps, order ids and database keys are ten digits routinely.
+        # A Slack message ts like 1785525294.884619 matched, so one run over Slack
+        # content reported 124 phone numbers, every one of them a message id. A
+        # guardrail that fires every run teaches people to ignore it, which is worse
+        # than not having one. Real numbers carry formatting, so require at least one
+        # of: a +1 prefix, a parenthesised area code, or separators between groups.
+        'phone_us': re.compile(
+            r'(?:'
+            r'\+1[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'  # +1 (415) 555-0142
+            r'|\(\d{3}\)\s?\d{3}[-.\s]?\d{4}'  # (415) 555-0142
+            r'|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b'  # 415-555-0142
+            r')'
+        ),
         'ssn': re.compile(r'\b(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}\b'),
         'credit_card': re.compile(
             r'\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'
         ),
         'ip_address': re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'),
     }
+
+    #: Addresses that are never personal information, so they must not be reported
+    #: as a PII leak. Loopback and the unspecified address identify no one -- a
+    #: service URL like http://127.0.0.1:8791/health in an output is not a privacy
+    #: incident. Routable and private ranges are still reported, since those can
+    #: genuinely leak topology.
+    NON_PII_IP_PREFIXES = ('127.', '0.0.0.0')
+
+    @staticmethod
+    def _mask(value: Any) -> str:
+        """A recognisable but non-leaking sample of a match.
+
+        First two and last two characters, middle replaced. ``4111...1111`` stays
+        identifiably a card; ``17...19`` stays identifiably a timestamp. Short
+        values are masked entirely, since two of four characters is most of the
+        value.
+        """
+        text = str(value)
+        if len(text) <= 6:
+            return '*' * len(text)
+        return f'{text[:2]}{"*" * (len(text) - 4)}{text[-2:]}'
+
+    @classmethod
+    def _pii_matches(cls, name: str, pattern: re.Pattern, text: str) -> List[Any]:
+        """Matches for one PII type, minus the shapes that are never personal."""
+        found = pattern.findall(text)
+        if name == 'ip_address':
+            found = [m for m in found if not str(m).startswith(cls.NON_PII_IP_PREFIXES)]
+        return found
 
     def __init__(self, config: Dict[str, Any]):
         """Initialize the guardrails engine with configuration.
@@ -468,9 +511,15 @@ class GuardrailsEngine:
         """
         found_pii = []
         for pii_type, pattern in self.PII_PATTERNS.items():
-            matches = pattern.findall(text)
+            matches = self._pii_matches(pii_type, pattern, text)
             if matches:
-                found_pii.append(f'{pii_type}: {len(matches)} occurrence(s)')
+                # Include a masked sample. "credit_card: 1 occurrence(s)" says
+                # something was found but not what, so the only way to act on it is
+                # to re-derive the whole input and re-run the regex by hand. Every
+                # other rule in this file already names what it matched. Enough to
+                # recognise a false positive (a timestamp, an id, a UUID), never
+                # enough to be the leak.
+                found_pii.append(f'{pii_type}: {len(matches)} occurrence(s) [{self._mask(matches[0])}]')
 
         if found_pii:
             return {
