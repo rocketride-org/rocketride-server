@@ -15,9 +15,10 @@ The System One nodes are the first writers (see [System One as a worked example]
 
 ## The format
 
-This example has two System One groups (one on text, one on chunks) and one writer that isn't System One. Comments are explained below the block.
+This example has two System One groups (one on text, one on chunks) and one writer that isn't System One. Notes on the fields follow the block.
 
 ```jsonc
+{
 "decisions": {
   "decision_ollama_1": {
     "writer": "decision_ollama",
@@ -69,9 +70,10 @@ This example has two System One groups (one on text, one on chunks) and one writ
     ]
   }
 }
+}
 ```
 
-The `anomaly_detector_1` group is an illustration of a writer that isn't System One. No such node exists yet. The comments that would normally sit in the JSON:
+The `anomaly_detector_1` group is an illustration of a writer that isn't System One. No such node exists yet. Notes on the fields:
 
 - `writer` is the node type. The key (`decision_ollama_1`) is the component id.
 - `usage` is free-form. Numbers in it are added up across writes.
@@ -123,7 +125,9 @@ A Gate has to find the record that belongs to the item in front of it.
 
 Chunks made from a stamped document inherit `decision_refs` through the usual metadata copy. They resolve to their parent's item. That is intended: a whole-document decision applies to its chunks.
 
-When several object-level items exist in a group, a Gate prefers the one whose `lane` matches the incoming item's lane, then the `text` one, then the group's only object-level item. If more than one remains, or if two writers answer the same question name for the same item, the Gate raises an error ("`<question>` is answered by both `<a>` and `<b>`; rename one"). It never guesses. Use distinct question names across writers on the same path.
+Within one writer's group, a Gate looks for the object-level item (one with no `item` key) in this order: the one whose `lane` matches the incoming item's lane, then the `text` one, then the group's only object-level item. It uses the first tier that has any match. If that tier has more than one item, the Gate raises an error ("`<group>` holds N whole-object decisions that could apply to the <lane> lane") and does not fall through to the next tier.
+
+Separately, if two different writers answer the same question name for the same item, the Gate raises an error ("`<question>` is answered by both `<a>` and `<b>`; rename one"). It never guesses. Use distinct question names across writers on the same path.
 
 Per-item links for image, audio and video streams don't exist yet. Those lanes use the object-level decision.
 
@@ -137,7 +141,7 @@ from ai.common.decision import fingerprint, preview, record
 QUESTIONS = {'anomaly_score': {'kind': 'number'}}
 
 
-def write_table(self, table: str):
+def writeTable(self, table: str):
     """Record one anomaly score for ``table``, then forward the table unchanged."""
     # Look the path up fresh on every write. Don't keep the response between calls.
     record(
@@ -153,7 +157,7 @@ def write_table(self, table: str):
             'answers': {'anomaly_score': {'answer': score(table)}},
         },
     )
-    self.instance.writeTable(table)
+    # Don't call self.instance.writeTable(). The engine forwards the table by default.
 ```
 
 For documents, record the item, then stamp the copy you forward (`from ai.common.decision import record, stamp`):
@@ -172,7 +176,7 @@ Rules:
 - **A group's questions are fixed by its first write.** Writing again with different questions, or a different `writer`, to the same group id raises.
 - **Look the path up fresh on every write.** `response['decisions']` is a live view onto the stored value. Never hold on to it, or to anything under it, across writes or across objects. `record` already does this. If you read decisions yourself, call `snapshot(response)` for a plain copy (it returns `None` when nothing is recorded).
 - **Don't remove or edit earlier items.** Item positions are ids that `decision_refs` points to.
-- **Forward the object on the same lane.** Writing a decision doesn't change the data. If you forward a document, forward the stamped copy.
+- **Let unchanged data forward by default.** Writing a decision doesn't change the data. For lanes you pass on as they came (text, table, questions, answers), don't call `self.instance.write*`; the engine forwards the original. For documents, forward your stamped copies with `self.instance.writeDocuments(stamped)` and then `return self.preventDefault()`, so the unstamped originals aren't forwarded as well.
 - **Use your own component id as the group id** (the `id` of `self.instance.pipeType`), so two nodes of the same type don't share a group.
 
 ## System One as a worked example

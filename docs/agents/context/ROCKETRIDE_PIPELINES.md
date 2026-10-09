@@ -237,8 +237,9 @@ parse ─text─▶ system_one (is_spam) ─text─▶ gate (is_spam equals no) 
 - There is no "otherwise" branch. Add a second Gate with the opposite rule. `uncertain` is an ordinary
   answer value: `equals yes` is false for it and `not_equals yes` is true, so `not_equals` works as
   "otherwise".
-- Text, a table or a question over the model's limit fails the object. A chunk or table over the limit is
-  recorded as `too_long` and every Gate blocks it with a warning, so split long text first.
+- Text or an answer over the limit fails the object. A document or table over the limit is recorded as
+  `too_long` and every Gate blocks it with a warning. A question is shortened to fit (history oldest-first,
+  then documents last-first) and fails only if the question alone doesn't fit. Split long text first.
 - Confidence is not comparable across backends, so set `min_confidence` per backend.
 - The full shape is in `docs/development/nodes/decisions.md`.
 

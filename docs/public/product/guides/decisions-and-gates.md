@@ -23,7 +23,7 @@ parse ─text─▶ System One (is_spam) ─text─▶ Gate (is_spam equals no) 
 1. Add a System One node after the parser and give it a yes/no question named `is_spam`.
 2. Add a Gate after it. Set **Pass when** to `all`, and add one condition: Question `is_spam`, Operator `equals`, Value `no`. Only non-spam text continues.
 3. Add a second Gate on another wire from the same System One node, with `is_spam` `equals` `yes`, for the spam path. Each Gate sits on its own wire, so one System One node can feed several Gates.
-4. After the preprocessor splits the text into chunks, add a second System One node with a pick-one question named `topic` and the options `billing`, `legal` and `other`.
+4. After the preprocessor splits the text into chunks, add a second System One node with a pick-one question named `topic` and the options `billing`, `refund`, `legal` and `other`.
 5. Add a Gate after it with Question `topic`, Operator `is one of`, Value `billing, refund`. Only chunks about billing or refunds continue.
 
 A Gate has a **Pass when** setting (`all` or `any` of the conditions) and a list of **Conditions**. Each condition is a Question, an Operator and a Value.
