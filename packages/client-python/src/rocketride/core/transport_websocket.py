@@ -56,7 +56,7 @@ Usage (Internal):
 import json
 import asyncio
 from typing import Dict, Any, Union, Optional
-from .constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
+from .constants import CONST_DEFAULT_WEB_CLOUD, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 
 # Optional dependency handling for websockets library
 try:
@@ -134,7 +134,7 @@ class TransportWebSocket(TransportBase):
 
     def __init__(
         self,
-        uri: str = CONST_DEFAULT_SERVICE,
+        uri: str = CONST_DEFAULT_WEB_CLOUD,
         *,
         headers: Optional[Dict[str, str]] = None,
         **kwargs,
