@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# Dockerfile.node-overlay — a node image refreshed with this tree's Python
+#
+# MIT License
+# Copyright (c) 2026 RocketRide
+#
+# The edit loop of container:sync: the Python trees of dist/server copied over
+# the clean image of the same version, in seconds instead of a full build. The
+# binaries — the engine, libengine.so, libc++, lib/ and the C++ nodes — are the
+# clean image's and never change here; a change to them needs container:build.
+# Always FROM the -clean tag, never from a previous overlay, so layers do not
+# pile up. A local artifact: never pushed, release images are built from scratch.
+#
+#   docker build -f docker/Dockerfile.node-overlay \
+#     --build-arg NODE_CLEAN=rocketride/node:<version>-clean \
+#     -t rocketride/node:<version> .
+# ---------------------------------------------------------------------------
+
+ARG NODE_CLEAN=rocketride/node:local-clean
+FROM ${NODE_CLEAN}
+
+# Native files never come in (Dockerfile.node-overlay.dockerignore): a Windows
+# or macOS dist/server has its own, and a Linux one has the image's.
+COPY --chown=1000:1000 dist/server/ai/ /opt/rocketride/ai/
+COPY --chown=1000:1000 dist/server/nodes/ /opt/rocketride/nodes/
+COPY --chown=1000:1000 dist/server/rocketride/ /opt/rocketride/rocketride/
+COPY --chown=1000:1000 dist/server/rocketride_common/ /opt/rocketride/rocketride_common/
+
+# As engine-base does: whole-second mtimes on the requirement files, then the
+# engine recompiles constraints.txt once, here, so a task start reuses it. A
+# package new in ai/requirements.txt installs from the warmed cache. What this
+# RUN writes is made group-writable, as in engine-base.
+RUN find /opt/rocketride \( -name 'requirement*.txt' -o -name 'overrides.txt' \) -type f \
+    | while read -r f; do touch -d "@$(stat -c %Y "$f")" "$f"; done \
+    && touch /tmp/.layer-start \
+    && ./engine -c "from depends import depends; depends('nodes/requirements.txt'); import ai.web" \
+    && rm -rf /opt/rocketride/cache/satisfied /opt/rocketride/cache/install.lock /home/rocketride/.cache \
+    && test -s /opt/rocketride/cache/constraints.txt \
+    && find /opt/rocketride /home/rocketride -cnewer /tmp/.layer-start -user rocketride \
+            -perm -u=w ! -perm -g=w ! -type l -exec chmod g+w {} + \
+    && rm /tmp/.layer-start
