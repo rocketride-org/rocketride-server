@@ -1,0 +1,80 @@
+{
+	"title": "Web Scraper",
+	"protocol": "scraper_beautifulsoup://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.scraper_beautifulsoup",
+	"prefix": "scraper",
+	"icon": "scraper.svg",
+	"documentation": "https://docs.rocketride.org/nodes/scraper_beautifulsoup",
+	"description": ["Web scraping tools for agents, built on BeautifulSoup. No API key or paid service needed.", "fetch_page returns a public page as markdown, text, raw HTML or its links; extract pulls repeated items with CSS selectors; fetch_feed reads RSS/Atom; fetch_json calls public JSON APIs (GET or POST).", "Only public hosts are reachable: every request and redirect hop is re-validated, responses are size-capped, and requests to the same host are paced. An optional URL allow-list narrows it further."],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		}
+	},
+	"fields": {
+		"scraper.timeout": {
+			"type": "number",
+			"title": "Timeout (seconds)",
+			"description": "Per-request timeout, 1-120 seconds.",
+			"default": 20
+		},
+		"scraper.maxResponseKB": {
+			"type": "number",
+			"title": "Max response size (KB)",
+			"description": "Response bodies are read up to this size; anything beyond is dropped and the result is marked truncated.",
+			"default": 5120
+		},
+		"scraper.requestIntervalMs": {
+			"type": "number",
+			"title": "Delay between requests to one host (ms)",
+			"description": "Politeness pacing: minimum gap between two requests to the same host. 0 disables pacing.",
+			"default": 250
+		},
+		"scraper.maxBodyChars": {
+			"type": "number",
+			"title": "Max item body characters",
+			"description": "Feed item bodies are trimmed to this many characters.",
+			"default": 20000
+		},
+		"scraper.userAgent": {
+			"type": "string",
+			"title": "User agent",
+			"description": "User-Agent header sent with every request. Leave blank for the default.",
+			"default": "",
+			"optional": true
+		},
+		"scraper.allowPattern": {
+			"type": "string",
+			"title": "URL pattern (regex)",
+			"description": "Python regex searched against the full URL, e.g. ^https://news\\.ycombinator\\.com/",
+			"default": ""
+		},
+		"scraper.urlAllowList": {
+			"title": "URL allow-list",
+			"description": "Optional. When one or more patterns are set, a URL (and every redirect target) must match at least one. Empty allows every public URL; private and local addresses are always blocked.",
+			"type": "array",
+			"optional": true,
+			"minItems": 0,
+			"items": {
+				"type": "object",
+				"properties": ["scraper.allowPattern"]
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Web Scraper",
+			"properties": ["type", "scraper.timeout", "scraper.maxResponseKB", "scraper.requestIntervalMs", "scraper.maxBodyChars", "scraper.userAgent", "scraper.urlAllowList"]
+		}
+	]
+}
