@@ -1,6 +1,6 @@
 #!/bin/sh
 # Checks a node image as a task gets it: capabilities dropped, no network for
-# the installs. Used by `nodes:test-container` and by the release workflow
+# the installs. Used by `container:test` and by the release workflow
 # before the image is signed.
 #
 #   docker/test-node-image.sh <image>
@@ -61,4 +61,19 @@ if [ -n "$failed" ]; then
     echo "Rerun one to see why: docker run --rm --network none -e UV_OFFLINE=1 $image ./engine -c \"from depends import depends; depends('<file>')\""
     exit 1
 fi
-echo "$image: engine probe passed, $total requirement files installed offline"
+
+# A task runs as the engine's own uid in the image's group (the launcher's --user
+# and --group-add), and that uid is not always 1000: whatever a run writes must
+# be the group's to write, and an install must work as that uid.
+echo "Probing $image as another uid in the image's group..."
+first=$(echo "$warmed" | head -n 1)
+run --user 4321:4321 --group-add 1000 --network none -e UV_OFFLINE=1 "$image" ./engine -c "
+import os, sysconfig, tempfile
+from ai.constants import CONST_TASK_DATA_PATH
+for d in (CONST_TASK_DATA_PATH, os.environ['HOME'], os.environ['UV_CACHE_DIR'], 'cache', sysconfig.get_paths()['purelib']):
+    tempfile.NamedTemporaryFile(dir=d).close()
+from depends import depends
+depends('$first')
+print('another uid writes what a run writes and installs $first')
+"
+echo "$image: engine probe passed, $total requirement files installed offline, another uid works"

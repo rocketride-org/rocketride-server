@@ -114,6 +114,7 @@ const SPINE = [
 					// (plan phase 2); production is seeded from the old
 					// performance page's topology section.
 					{ id: 'operate/self-hosting/docker', label: 'Docker' },
+					{ id: 'operate/self-hosting/task-containers', label: 'Tasks in Containers' },
 					{ id: 'operate/self-hosting/kubernetes', label: 'Kubernetes' },
 					{ id: 'operate/self-hosting/production', label: 'Production' },
 				],

@@ -114,26 +114,33 @@ Named volumes persist data between restarts:
 
 | File | Built locally as | Published as | Purpose |
 | ---- | ---------------- | ------------ | ------- |
-| `Dockerfile.engine-base` | `rocketride/engine-base:<version>` (`nodes:build-container`), `rocketride/engine-base:local` (compose) | `ghcr.io/rocketride-org/rocketride-engine-base:<version>` | The engine from `dist/server`, its Python baseline installed, the libc++ load check. No entrypoint. |
+| `Dockerfile.engine-base` | `rocketride/engine-base:<version>` (`container:build`), `rocketride/engine-base:local` (compose) | `ghcr.io/rocketride-org/rocketride-engine-base:<version>` | The engine from `dist/server`, its Python baseline installed, the libc++ load check. No entrypoint. |
 | `Dockerfile.engine` | the compose `engine` service | `ghcr.io/rocketride-org/rocketride-engine:<version>` and `latest` | The server: engine-base plus `static/`, runs `ai/eaas.py`. |
-| `Dockerfile.node` | `rocketride/node:<version>` (`nodes:build-container`) | `ghcr.io/rocketride-org/rocketride-node:<version>`, never `latest` | One pipeline task: engine-base plus a warmed uv wheel cache; tini, no command. |
+| `Dockerfile.node` | `rocketride/node:<version>` (`container:build`) | `ghcr.io/rocketride-org/rocketride-node:<version>`, never `latest` | One pipeline task: engine-base plus a warmed uv wheel cache; tini, no command. |
 
 The engine and node images are built FROM the engine-base of the same version
-(`--build-arg ENGINE_BASE=...`). On Linux, `./builder nodes:build-container`
+(`--build-arg ENGINE_BASE=...`). On Linux, `./builder container:build`
 builds engine-base and the node image from the local `dist/server`; elsewhere
 `dist/server` is not a Linux engine and the task skips. `./builder
-nodes:test-container` builds them and checks the node image as a run gets it:
+container:test` builds them and checks the node image as a run gets it:
 with capabilities dropped the engine is non-dumpable, the shipped constraints
-are accepted as they are, and every requirement file the cache was warmed from
-installs from it with no network (`docker/test-node-image.sh`). Files whose
+are accepted as they are, every requirement file the cache was warmed from
+installs from it with no network, and a uid other than 1000 in the image's
+group can write what a run writes and install (`docker/test-node-image.sh`).
+That last one matters because a task runs as the engine's own uid and gid with
+`--group-add 1000`, so the image keeps everything a run writes — site-packages,
+`cache/`, the uv cache, `/opt/data`, `HOME` — writable by its group. Files whose
 resolution needs a local inference runtime — torch, or onnxruntime, which
 depends() installs as the 430 MB onnxruntime-gpu on Linux — are not warmed: the
 warm step lists them, and fails the build unless the file is installed only
 without a model server (`inference_allowed` in `docker/warm-wheel-cache.sh`) —
-otherwise every run would download it. A rebuild with no changes takes seconds:
-the builder builds both images without a provenance attestation, which records
-the build time and would give a cached engine-base a new digest every time, so
-the node image built FROM it would miss its cache.
+otherwise every run would download it. Then it runs `nodes:test` with every task
+in a container (`--runtime=docker`, see the self-hosting docs) and compares
+nothing by itself: the same tests pass under both runtimes. Without a daemon each
+step skips loudly. A rebuild with no changes takes seconds: the builder builds
+the images without a provenance attestation, which records the build time and
+would give a cached engine-base a new digest every time, so the node image built
+FROM it would miss its cache.
 CI runs it on Linux when the image's inputs change, and the release workflow
 runs the same script on the published node image before signing it. All three
 published images are cosign-signed. The node image has no `latest` tag on

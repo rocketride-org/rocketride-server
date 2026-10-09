@@ -70,7 +70,8 @@ Limits of `RR_PROC_PRIVATE`:
   If the engine itself cannot, it logs a warning and keeps serving.
 
 For strict separation between pipelines, run them under different OS users or
-in separate containers.
+in separate containers: `--runtime=docker` starts every task in a container of
+its own (see [Tasks in containers](/operate/self-hosting/task-containers)).
 
 ## Network exposure
 
