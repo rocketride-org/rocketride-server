@@ -99,7 +99,7 @@ class SystemOneClient:
         api_key: str | None = None,
         *,
         timeout: float = 30.0,
-        max_retries: int = CONST_CHAT_MAX_RETRIES,
+        max_attempts: int = CONST_CHAT_MAX_RETRIES,  # ChatBase's constant counts attempts in total, not retries
         backoff: float = CONST_CHAT_BASE_DELAY,
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -113,7 +113,7 @@ class SystemOneClient:
         if api_key:
             headers['Authorization'] = f'Bearer {api_key}'
         self._http = httpx.Client(headers=headers, timeout=timeout, transport=transport)
-        self._max_retries = max_retries
+        self._max_attempts = max(1, max_attempts)
         self._backoff = backoff
         self._sleep = sleep
         self.last_request_id: str | None = None
@@ -156,7 +156,7 @@ class SystemOneClient:
             try:
                 response = self._http.post(self._endpoint, content=content)
             except httpx.TransportError as exc:
-                if attempt >= self._max_retries:
+                if attempt + 1 >= self._max_attempts:
                     raise SystemOneError('network', f'{self._endpoint}: {exc}') from exc
             else:
                 self.last_request_id = response.headers.get('x-typesafe-request-id')
@@ -167,7 +167,7 @@ class SystemOneClient:
                         raise SystemOneError(
                             'protocol', 'backend returned non-JSON', status=response.status_code
                         ) from exc
-                if response.status_code not in RETRY_STATUSES or attempt >= self._max_retries:
+                if response.status_code not in RETRY_STATUSES or attempt + 1 >= self._max_attempts:
                     text = response.text
                     code = _error_code(text)
                     raise SystemOneError(

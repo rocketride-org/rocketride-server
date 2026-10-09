@@ -117,7 +117,7 @@ def test_retries_exhausted_raises_server():
         return httpx.Response(529, json={'error': 'overloaded'})
 
     with pytest.raises(SystemOneError) as exc:
-        _client(handler, max_retries=2).decide('m', 's', {})
+        _client(handler, max_attempts=3).decide('m', 's', {})
     assert exc.value.kind == 'server' and exc.value.status == 529
 
 
@@ -151,7 +151,7 @@ def test_network_error_retried_then_raised():
         raise httpx.ConnectError('refused', request=request)
 
     with pytest.raises(SystemOneError) as exc:
-        _client(handler, max_retries=1).decide('m', 's', {})
+        _client(handler, max_attempts=2).decide('m', 's', {})
     assert exc.value.kind == 'network'
 
 
@@ -284,7 +284,7 @@ def test_scheme_less_base_url_rejected(base):
 
 
 def test_defaults_match_chatbase_retries():
-    """Five retries, 1 s doubling backoff capped at 60 s (spec §6.2)."""
+    """Five attempts in total (ChatBase counts attempts), 1 s doubling backoff capped at 60 s (spec §1, §6.2)."""
     sleeps = []
     attempts = []
 
@@ -296,8 +296,22 @@ def test_defaults_match_chatbase_retries():
     with pytest.raises(SystemOneError) as caught:
         client.decide('m', 'state', {})
     assert caught.value.kind == 'server'
-    assert len(attempts) == 6  # first try + 5 retries
-    assert sleeps == [1.0, 2.0, 4.0, 8.0, 16.0]
+    assert len(attempts) == 5  # CONST_CHAT_MAX_RETRIES counts attempts, not retries
+    assert sleeps == [1.0, 2.0, 4.0, 8.0]
+
+
+def test_single_attempt_never_sleeps_or_retries():
+    sleeps = []
+    attempts = []
+
+    def handler(request):
+        attempts.append(request)
+        return httpx.Response(503, text='busy')
+
+    client = SystemOneClient('http://x', max_attempts=1, transport=httpx.MockTransport(handler), sleep=sleeps.append)
+    with pytest.raises(SystemOneError):
+        client.decide('m', 'state', {})
+    assert len(attempts) == 1 and sleeps == []
 
 
 def test_backoff_is_capped_at_sixty_seconds():

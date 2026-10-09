@@ -75,7 +75,7 @@ class SystemOneGlobalBase(IGlobalBase):
             model = self._model(config)
             parse_questions(config, self._limits(config))
             client = SystemOneClient(
-                self._base_url(config), self._api_key(config), timeout=self._timeout(config), max_retries=0
+                self._base_url(config), self._api_key(config), timeout=self._timeout(config), max_attempts=1
             )
             client.decide(model, PROBE_STATE, PROBE_QUESTIONS)
         except (ValueError, SystemOneError) as exc:

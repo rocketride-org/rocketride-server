@@ -196,12 +196,12 @@ input to fit and never sends part of it. What happens depends on the lane:
 | -------------------- | ------------------------------------------------------------------------------------------ |
 | `text`, `answers`    | The object fails, with a message to split the input first (for example with a preprocessor, then a System One node on the `documents` lane). |
 | `documents`, `table` | The item is recorded with status `too_long`, which every Gate blocks, and the node logs a warning. The object continues. |
-| `questions`          | History is dropped oldest first, then documents last first, until it fits. The recorded item is marked `truncated` and the node logs a warning. If the question alone does not fit, the object fails. |
+| `questions`          | History is dropped oldest first, then documents last first, until it fits. The recorded item is marked `truncated` and the node logs a warning. If the question and its context still do not fit, the object fails. |
 
 ### Errors and retries
 
-Calls to the backend are retried up to 5 times with exponential backoff starting at 1 s and
-capped at 60 s, honoring `Retry-After` and `retry-after-ms`. Retried responses are 429, 500,
+Each call to the backend is attempted up to 5 times in total (the first try plus 4 retries) with
+exponential backoff starting at 1 s and capped at 60 s, honoring `Retry-After` and `retry-after-ms`. Retried responses are 429, 500,
 502, 503, 504, 529 and network errors. Any failure to get a valid decision fails the object:
 there is no pass-through mode, because a missing decision would otherwise look like a pass.
 
