@@ -10,9 +10,9 @@
 	"path": "nodes.decision_systemone",
 	"prefix": "decision",
 	"description": [
-		"Asks typed questions (yes/no, pick-one, rubric) about each document using TypeSafe Jev, ",
-		"in one call per document. Answers are attached to the document as metadata.decisions ",
-		"for a downstream node, such as the Router (shipping separately), to branch on; the document passes through unchanged."
+		"Asks typed questions (yes/no, pick-one, rubric) about each item using TypeSafe Jev, ",
+		"in one call per item. Answers are recorded on the object (response.decisions) ",
+		"for a Gate node to branch on; documents are forwarded with a decision reference, everything else unchanged."
 	],
 	"icon": "typesafe.svg",
 	"documentation": "https://docs.rocketride.org/nodes/decision_systemone",
@@ -20,10 +20,11 @@
 		"Model: ${parameters.decision_typesafe.profile}"
 	],
 	"lanes": {
-		"documents": [
-			"documents",
-			"answers"
-		]
+		"text": ["text"],
+		"documents": ["documents"],
+		"table": ["table"],
+		"questions": ["questions"],
+		"answers": ["answers"]
 	},
 	"preconfig": {
 		"default": "jev-latest",
@@ -86,7 +87,7 @@
 		"decision.name": {
 			"type": "string",
 			"title": "Name",
-			"description": "Key under metadata.decisions (lowercase, digits, _)"
+			"description": "Question name; the Gate refers to it (lowercase, digits, _)"
 		},
 		"decision.question": {
 			"type": "string",
@@ -187,21 +188,6 @@
 			},
 			"description": "Metadata keys (one per line) sent alongside the content, e.g. parent"
 		},
-		"decision.on_error": {
-			"type": "string",
-			"title": "On error",
-			"default": "fail",
-			"enum": [
-				[
-					"fail",
-					"Fail the object"
-				],
-				[
-					"pass_through",
-					"Pass through with answer 'error'"
-				]
-			]
-		},
 		"decision.apikey": {
 			"type": "string",
 			"title": "API Key",
@@ -264,8 +250,7 @@
 				"decision.yes_no",
 				"decision.pick_one",
 				"decision.rubric",
-				"decision.state_metadata",
-				"decision.on_error"
+				"decision.state_metadata"
 			]
 		}
 	]

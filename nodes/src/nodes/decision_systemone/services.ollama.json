@@ -10,9 +10,9 @@
 	"path": "nodes.decision_systemone",
 	"prefix": "decision",
 	"description": [
-		"Asks typed questions (yes/no, pick-one, rubric) about each document using a local System One ",
-		"decision model served by Ollama, in one call per document. Answers are attached to the ",
-		"document as metadata.decisions for a downstream node, such as the Router (shipping separately), to branch on; the document passes through unchanged."
+		"Asks typed questions (yes/no, pick-one, rubric) about each item using a local System One ",
+		"decision model served by Ollama, in one call per item. Answers are recorded on the ",
+		"object (response.decisions) for a Gate node to branch on; documents are forwarded with a decision reference, everything else unchanged."
 	],
 	"icon": "ollama.svg",
 	"documentation": "https://docs.rocketride.org/nodes/decision_systemone",
@@ -20,10 +20,11 @@
 		"Model: ${parameters.decision_ollama.profile}"
 	],
 	"lanes": {
-		"documents": [
-			"documents",
-			"answers"
-		]
+		"text": ["text"],
+		"documents": ["documents"],
+		"table": ["table"],
+		"questions": ["questions"],
+		"answers": ["answers"]
 	},
 	"preconfig": {
 		"default": "nimble",
@@ -37,7 +38,7 @@
 					"max_options": 26,
 					"max_levels": 26,
 					"max_questions": 64,
-					"max_state_tokens": 32000,
+					"max_state_tokens": 8192,
 					"chars_per_token": 4,
 					"max_body_bytes": 65536,
 					"object_criteria": false
@@ -52,7 +53,7 @@
 					"max_options": 24,
 					"max_levels": 26,
 					"max_questions": 64,
-					"max_state_tokens": 32000,
+					"max_state_tokens": 2048,
 					"chars_per_token": 4,
 					"max_body_bytes": 65536,
 					"object_criteria": false
@@ -89,7 +90,7 @@
 		"decision.name": {
 			"type": "string",
 			"title": "Name",
-			"description": "Key under metadata.decisions (lowercase, digits, _)"
+			"description": "Question name; the Gate refers to it (lowercase, digits, _)"
 		},
 		"decision.question": {
 			"type": "string",
@@ -190,21 +191,6 @@
 			},
 			"description": "Metadata keys (one per line) sent alongside the content, e.g. parent"
 		},
-		"decision.on_error": {
-			"type": "string",
-			"title": "On error",
-			"default": "fail",
-			"enum": [
-				[
-					"fail",
-					"Fail the object"
-				],
-				[
-					"pass_through",
-					"Pass through with answer 'error'"
-				]
-			]
-		},
 		"decision_ollama.custom": {
 			"object": "custom",
 			"properties": [
@@ -262,8 +248,7 @@
 				"decision.yes_no",
 				"decision.pick_one",
 				"decision.rubric",
-				"decision.state_metadata",
-				"decision.on_error"
+				"decision.state_metadata"
 			]
 		}
 	],
@@ -291,10 +276,10 @@
 					}
 				]
 			},
-			"outputs": ["documents", "answers"],
+			"outputs": ["documents"],
 			"cases": [
 				{
-					"name": "Nimble classifies a ticket",
+					"name": "Nimble decides on a ticket and stamps a reference",
 					"documents": [
 						{
 							"page_content": "Our checkout has returned 500 errors since 9am.",
@@ -302,10 +287,9 @@
 						}
 					],
 					"expect": {
-						"answers": { "contains": "decisions" },
 						"documents": {
 							"property": [
-								{ "path": "[0].metadata.decisions.team.answer", "equals": "bug" },
+								{ "path": "[0].metadata", "hasProperty": "decision_refs" },
 								{ "path": "[0].page_content", "contains": "500 errors" }
 							]
 						}
