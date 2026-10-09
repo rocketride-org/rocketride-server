@@ -546,15 +546,16 @@ Space each parallel agent 160px apart on the y-axis. The response node sits at t
 
 ### Choose a Source Component
 
-| Need                                  | Use                | Client Method                                               |
-| ------------------------------------- | ------------------ | ----------------------------------------------------------- |
-| Chat/Q&A system                       | `chat`             | `client.chat()`                                             |
-| Document uploads                      | `webhook`          | `client.send()`, `client.sendFiles()`                       |
-| Drag & drop                           | `dropper`          | `client.sendFiles()`                                        |
-| Local file system ingestion           | `filesys`          | None: reads the server's file system when the pipeline runs |
-| Platform file-store ingestion         | `filestore_source` | None: reads the platform file store                         |
-| Telegram bot (text/image/audio/video) | `telegram`         | None: messages arrive via the Telegram Bot API              |
-| Host tools with no data flow          | `tools`            | None: transfers no data, exists only to host tool nodes     |
+| Need                                     | Use                | Client Method                                                          |
+| ---------------------------------------- | ------------------ | ---------------------------------------------------------------------- |
+| Chat/Q&A system                          | `chat`             | `client.chat()`                                                        |
+| Document uploads                         | `webhook`          | `client.send()`, `client.sendFiles()`                                  |
+| Drag & drop                              | `dropper`          | `client.sendFiles()`                                                   |
+| Local file system ingestion              | `filesys`          | None: reads the server's file system when the pipeline runs            |
+| Platform file-store ingestion            | `filestore_source` | None: reads the platform file store                                    |
+| Telegram bot (text/image/audio/video)    | `telegram`         | None: messages arrive via the Telegram Bot API                         |
+| Scheduled / timed run, no external input | `tick`             | None: fires once when the task starts; schedule it with the deploy API |
+| Host tools with no data flow             | `tools`            | None: transfers no data, exists only to host tool nodes                |
 
 ### Choose an LLM
 
