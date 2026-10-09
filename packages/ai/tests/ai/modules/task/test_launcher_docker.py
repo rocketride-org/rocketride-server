@@ -798,16 +798,25 @@ async def test_no_store_mount_without_tool_filesystem(tmp_path):
     assert 'run' not in cli.commands()
 
 
-async def test_node_test_mocks_are_mounted_read_only(tmp_path):
-    mocks = tmp_path / 'mocks'
-    mocks.mkdir()
+@pytest.mark.parametrize('path', ['/home/me/rr/nodes/test/mocks', 'E:\\rr\\nodes\\test\\mocks'])
+async def test_a_variable_named_in_mounts_is_mounted_and_points_at_the_mount(monkeypatch, path):
+    """The same on Linux and Windows: a Windows path is no path in a Linux container."""
+    monkeypatch.setattr(dk.os.path, 'isdir', lambda p: p == path)
     spec = _spec()
-    spec.env['ROCKETRIDE_MOCK'] = str(mocks)
+    spec.env['ROCKETRIDE_MOCK'] = path
+    cli = FakeCli()
+    await _launcher(cli, mounts='ROCKETRIDE_MOCK').start(spec)
+    create = cli.call('create')
+    assert create.args[create.args.index('-v') + 1] == f'{path}:/opt/mounts/ROCKETRIDE_MOCK:ro'
+    assert create.env['ROCKETRIDE_MOCK'] == '/opt/mounts/ROCKETRIDE_MOCK'
+
+
+async def test_a_variable_not_named_in_mounts_is_not_mounted(tmp_path):
+    spec = _spec()
+    spec.env['ROCKETRIDE_MOCK'] = str(tmp_path)
     cli = FakeCli()
     await _launcher(cli).start(spec)
-    create = cli.call('create')
-    assert create.args[create.args.index('-v') + 1] == f'{mocks}:{mocks}:ro'
-    assert create.env['ROCKETRIDE_MOCK'] == str(mocks)
+    assert '-v' not in cli.call('create').args
 
 
 def test_pipeline_opens_store_finds_tool_filesystem_by_node_path():
