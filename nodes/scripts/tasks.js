@@ -129,6 +129,22 @@ function makeSyncNodesAction() {
 	};
 }
 
+// A variable as the engine started here sees it: one in its environment hides the one
+// in its .env, which it loads without overriding. It expands ${NAME} and ${NAME:-default}
+// in the .env as python-dotenv does: from the environment, then the lines above, then the default.
+function engineVariable(name) {
+	if (Object.hasOwn(process.env, name)) return process.env[name];
+	const file = path.join(DIST_ROOT, 'server', '.env');
+	if (!fs.existsSync(file)) return undefined;
+	const values = {};
+	for (const [key, value] of Object.entries(require('dotenv').parse(fs.readFileSync(file)))) {
+		values[key] = value.replace(/\$\{([^}:]*)(?::-([^}]*))?\}/g, (_, ref, fallback = '') =>
+			Object.hasOwn(process.env, ref) ? process.env[ref] : Object.hasOwn(values, ref) ? values[ref] : fallback
+		);
+	}
+	return values[name];
+}
+
 // The test server: the one --taskserver names, or an engine started here with the
 // test mocks, under the runtime nodes:test asks for
 function makeStartTestServerAction(options = {}) {
@@ -158,6 +174,21 @@ function makeStartTestServerAction(options = {}) {
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
 					ROCKETRIDE_MOCK: mocksPath,
+					// Under --runtime=docker the mocks reach each task's container through a mount,
+					// next to whatever RR_DOCKER_MOUNTS already names, here or in the engine's .env
+					...(options.runtime === 'docker'
+						? {
+								RR_DOCKER_MOUNTS: [
+									...new Set([
+										...(engineVariable('RR_DOCKER_MOUNTS') || '')
+											.split(',')
+											.map((name) => name.trim())
+											.filter(Boolean),
+										'ROCKETRIDE_MOCK',
+									]),
+								].join(','),
+							}
+						: {}),
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;
@@ -387,9 +418,11 @@ function makeTestAction(options = {}) {
 		return { description: 'Planning node test model downloads', steps };
 	}
 
+	const warmup = options.test_full && options.warmup !== 'off' && !options.taskserver;
+
 	// A local daemon and its image, before anything is built, installed or started
 	if (options.runtime === 'docker' && !options.taskserver) {
-		steps.unshift({ name: 'nodes:docker-preflight', action: makeDockerPreflightAction() });
+		steps.unshift({ name: 'nodes:docker-preflight', action: makeDockerPreflightAction(warmup) });
 	}
 
 	// The collect-only modes above report the environment as it is; test runs complete it.
@@ -397,7 +430,7 @@ function makeTestAction(options = {}) {
 
 	// Download the selected heavy tests' models before the server starts, so the
 	// downloads don't count against test timeouts. Pointless for a remote server.
-	if (options.test_full && options.warmup !== 'off' && !options.taskserver) {
+	if (warmup) {
 		steps.push({ name: 'nodes:warmup-models', action: makeRunPytestAction({ ...options, mode: 'warmup' }) });
 	}
 	steps.push(
@@ -412,13 +445,16 @@ function makeTestAction(options = {}) {
 }
 
 // nodes:test --runtime=docker needs a daemon and the node image of this engine
-// version; without them every test would fail on its own
-function makeDockerPreflightAction() {
+// version; without them every test would fail on its own. A warmup ahead loads the project
+// .env before the server starts: it is loaded here first, so the image checked is the one
+// the server is given.
+function makeDockerPreflightAction(warmup) {
 	return {
 		run: async (ctx, task) => {
 			const name = 'nodes:test --runtime=docker';
+			if (warmup) require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 			await checkLocalDocker(name);
-			const image = process.env.RR_DOCKER_IMAGE || (await imageNames()).node;
+			const image = engineVariable('RR_DOCKER_IMAGE') || (await imageNames()).node;
 			if ((await imageLabels(image)) === null)
 				throw new Error(formatDiagnosis(name, missingImage(os.platform(), image)));
 			task.output = `${image} is on the daemon`;
