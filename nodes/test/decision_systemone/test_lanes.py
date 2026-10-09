@@ -50,6 +50,19 @@ def test_text_over_the_limit_fails_early_without_buffering_more(node):
     assert node.client.states == []
 
 
+def test_closing_after_a_too_long_text_failure_is_quiet_and_makes_no_call(node):
+    with pytest.raises(ValueError, match='too long'):
+        node.inst.writeText('x' * 2000)
+    node.inst.closing()  # must not raise a second too-long error
+    assert node.client.states == [] and node.written['text'] == []
+    assert node.inst._text is None or node.inst._text == []
+    node.inst.open(None)
+    with pytest.raises(Prevented):
+        node.inst.writeText('hello')
+    node.inst.closing()
+    assert len(node.client.states) == 1 and node.written['text'] == ['hello']
+
+
 def test_blank_text_fails_at_closing(node):
     with pytest.raises(Prevented):
         node.inst.writeText('   ')
@@ -122,6 +135,16 @@ def test_json_answer_is_sent_as_json_state(node):
 def test_text_answer_is_sent_as_text(node):
     node.inst.writeAnswers(Answer('the outage is urgent'))
     assert node.client.states == ['the outage is urgent']
+
+
+def test_json_flagged_plain_text_answer_is_sent_as_its_text(node):
+    node.inst.writeAnswers(Answer('the outage is urgent', expectJson=True))
+    assert node.client.states == ['the outage is urgent']
+
+
+def test_json_flagged_non_string_answer_is_sent_as_its_text(node):
+    node.inst.writeAnswers(Answer(42, expectJson=True))
+    assert node.client.states == ['42']
 
 
 def test_empty_answer_fails(node):

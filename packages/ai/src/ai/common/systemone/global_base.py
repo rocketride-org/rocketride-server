@@ -80,6 +80,8 @@ class SystemOneGlobalBase(IGlobalBase):
             client.decide(model, PROBE_STATE, PROBE_QUESTIONS)
         except (ValueError, SystemOneError) as exc:
             warning(str(exc))
+        except Exception as exc:
+            warning(f'System One config check failed: {exc}')
         finally:
             if client is not None:
                 client.close()

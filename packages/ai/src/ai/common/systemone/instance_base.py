@@ -48,6 +48,7 @@ class SystemOneInstanceBase(IInstanceBase):
 
     _tables: int = 0
     _text: list | None = None
+    _text_failed: bool = False
 
     def _source_id(self) -> str:
         """Return the component id (e.g. ``decision_ollama_1``), falling back to the logical type."""
@@ -86,6 +87,7 @@ class SystemOneInstanceBase(IInstanceBase):
     def open(self, obj):
         """Reset the per-object state (text buffer, table counter)."""
         self._text = None
+        self._text_failed = False
         self._tables = 0
 
     def writeDocuments(self, documents: List[Doc]):
@@ -156,6 +158,8 @@ class SystemOneInstanceBase(IInstanceBase):
         self._text.append(text)
         size = self.IGlobal.runner.oversize(''.join(self._text))
         if size is not None:
+            # The engine still calls closing() for this failed object; closing() must not decide again.
+            self._text_failed = True
             raise ValueError(self._too_long_for_whole('text', size))
         return self.preventDefault()
 
@@ -166,6 +170,9 @@ class SystemOneInstanceBase(IInstanceBase):
         replayed text reaches consumers that have not flushed yet (``endpoint.pipes.cpp``).
         """
         if self._text is None:
+            return
+        if self._text_failed:
+            self._text = None
             return
         buffered, self._text = self._text, None
         content = ''.join(buffered)
@@ -201,7 +208,12 @@ class SystemOneInstanceBase(IInstanceBase):
     def writeAnswers(self, answer: Answer):
         """Decide on one answer (JSON when it is JSON, else its text); forward it unchanged."""
         text = answer.getText()
-        state = answer.getJson() if answer.isJson() else text
+        state = text
+        if answer.isJson():
+            try:
+                state = answer.getJson()
+            except (ValueError, TypeError):
+                pass  # flagged JSON but not parseable: decide on its text
         if not text.strip() or state in (None, {}, []):
             raise ValueError(f'{self._source_id()}: the answer is empty; nothing to decide on')
         self._decide_whole({'lane': 'answers', 'preview': preview(text)}, state)

@@ -97,6 +97,13 @@ def test_bad_questions_warn_without_a_live_call(systemone, monkeypatch):
     assert 'must match' in systemone.warnings[0]
 
 
+def test_bad_limits_block_warns_once_and_does_not_escape(systemone, monkeypatch):
+    limits = {k: v for k, v in CONFIG['limits'].items() if k != 'max_options'}
+    _global(systemone, monkeypatch, {**CONFIG, 'limits': limits}).validateConfig()
+    assert len(systemone.warnings) == 1
+    assert 'System One config check failed' in systemone.warnings[0]
+
+
 def test_missing_model_warns(systemone, monkeypatch):
     _global(systemone, monkeypatch, {**CONFIG, 'model': ''}).validateConfig()
     assert systemone.warnings == ['System One node needs a model name']
