@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Question config parsing, System One wire format, and the decisions contract."""
+"""Question config parsing, the System One wire format, and mapping answers to the decisions contract."""
 
 from __future__ import annotations
 
@@ -28,12 +28,14 @@ import math
 import re
 from dataclasses import dataclass
 
+from ai.common.decision import UNCERTAIN
+
 from .limits import DecisionLimits
 
 YES_NO = 'yes_no'
 PICK_ONE = 'pick_one'
 RUBRIC = 'rubric'
-RESERVED_ANSWERS = frozenset({'uncertain', 'error'})
+RESERVED_ANSWERS = frozenset({UNCERTAIN})
 
 _WIRE_TYPE = {YES_NO: 'noul', PICK_ONE: 'choice', RUBRIC: 'score'}
 _NAME_RE = re.compile(r'^[a-z][a-z0-9_]{0,47}$')
@@ -88,6 +90,11 @@ def _parse_options(name: str, text, limits: DecisionLimits) -> tuple[tuple[str, 
 
 def _parse_levels(name: str, text, limits: DecisionLimits) -> tuple[str, ...]:
     levels = tuple(_lines(text))
+    for level in levels:
+        if level in RESERVED_ANSWERS:
+            raise QuestionConfigError(f'{name}: level "{level}" is reserved')
+    if len(set(levels)) != len(levels):
+        raise QuestionConfigError(f'{name}: duplicate level in {list(levels)}')
     if len(levels) < 2:
         raise QuestionConfigError(f'{name}: rubric needs at least 2 levels')
     if len(levels) > limits.max_levels:
@@ -157,6 +164,23 @@ def build_wire_questions(specs: list[QuestionSpec], limits: DecisionLimits) -> d
     return wire
 
 
+def describe_questions(specs: list[QuestionSpec]) -> dict:
+    """Return the group's ``questions`` header for ``response['decisions']`` (spec §3.2)."""
+    described = {}
+    for spec in specs:
+        entry: dict = {'kind': spec.kind, 'question': spec.question}
+        if spec.kind == YES_NO:
+            entry['threshold'] = spec.threshold
+        elif spec.kind == PICK_ONE:
+            entry['options'] = [value for value, _ in spec.options]
+        else:
+            entry['levels'] = list(spec.levels)
+        if spec.min_confidence:
+            entry['min_confidence'] = spec.min_confidence
+        described[spec.name] = entry
+    return described
+
+
 def _spread_confidence(probabilities: dict, n: int) -> float:
     """Return the spec 6.2 spread confidence; ``n`` is the number of options or levels asked."""
     if n < 2 or not probabilities:
@@ -167,9 +191,17 @@ def _spread_confidence(probabilities: dict, n: int) -> float:
 
 def _finish(spec: QuestionSpec, decision: dict) -> dict:
     if decision['confidence'] < spec.min_confidence:
-        decision['answer'] = 'uncertain'
-        decision['uncertain'] = True
+        decision['best'] = decision['answer']
+        decision['answer'] = UNCERTAIN
+        decision.pop('index', None)
     return decision
+
+
+def _check_sum(name: str, probabilities: dict, n: int) -> None:
+    """Raise ProtocolError unless the probabilities sum to 1 within ``1e-6 + n * 0.005``."""
+    total = sum(probabilities.values())
+    if abs(total - 1.0) > 1e-6 + n * 0.005:
+        raise ProtocolError(f'{name}: probabilities sum to {total:.4f}, not 1')
 
 
 def _validate_probability(name: str, value: float, field: str) -> None:
@@ -186,11 +218,10 @@ def _extract_wire_field(spec: QuestionSpec, wire: dict, field: str):
         raise ProtocolError(f'{spec.name}: failed to read {field}: {e}') from e
 
 
-def map_answer(spec: QuestionSpec, wire: dict, *, model: str | None, source: str) -> dict:
-    """Map one wire answer to a ``Decision`` dict (spec §6.2)."""
+def map_answer(spec: QuestionSpec, wire: dict) -> dict:
+    """Map one wire answer to a decisions-contract answer (spec §3.2); raise ProtocolError on a bad reply."""
     if not isinstance(wire, dict) or wire.get('type') != _WIRE_TYPE[spec.kind]:
         raise ProtocolError(f'{spec.name}: expected a {_WIRE_TYPE[spec.kind]} answer, got {wire!r}')
-    base = {'kind': spec.kind, 'uncertain': False, 'model': model, 'source': source}
     if spec.kind == YES_NO:
         try:
             p = float(_extract_wire_field(spec, wire, 'noul'))
@@ -200,15 +231,7 @@ def map_answer(spec: QuestionSpec, wire: dict, *, model: str | None, source: str
         t = spec.threshold
         answer = 'yes' if p >= t else 'no'
         confidence = (p - t) / (1 - t) if answer == 'yes' else (t - p) / t
-        return _finish(
-            spec,
-            {
-                **base,
-                'answer': answer,
-                'probability': p,
-                'confidence': max(0.0, min(1.0, confidence)),
-            },
-        )
+        return _finish(spec, {'answer': answer, 'confidence': max(0.0, min(1.0, confidence)), 'probability': p})
     try:
         prob_raw = wire.get('probabilities') or {}
         probabilities = {str(k): float(v) for k, v in prob_raw.items()}
@@ -216,6 +239,9 @@ def map_answer(spec: QuestionSpec, wire: dict, *, model: str | None, source: str
         raise ProtocolError(f'{spec.name}: probabilities must be a dict with numeric values: {e}') from e
     for prob_val in probabilities.values():
         _validate_probability(spec.name, prob_val, 'probability value')
+    n = len(spec.options) if spec.kind == PICK_ONE else len(spec.levels)
+    if probabilities:
+        _check_sum(spec.name, probabilities, n)
     conf_raw = wire.get('confidence')
     if conf_raw is not None:
         try:
@@ -224,7 +250,7 @@ def map_answer(spec: QuestionSpec, wire: dict, *, model: str | None, source: str
             raise ProtocolError(f'{spec.name}: confidence must be a number, got {conf_raw!r}') from e
         _validate_probability(spec.name, confidence, 'confidence')
     else:
-        confidence = _spread_confidence(probabilities, len(spec.options) if spec.kind == PICK_ONE else len(spec.levels))
+        confidence = _spread_confidence(probabilities, n)
     if spec.kind == PICK_ONE:
         choice = wire.get('choice')
         try:
@@ -234,31 +260,33 @@ def map_answer(spec: QuestionSpec, wire: dict, *, model: str | None, source: str
             raise ProtocolError(f'{spec.name}: choice must be a hashable value: {e}') from e
         if not probabilities and conf_raw is None:
             raise ProtocolError(f'{spec.name}: pick-one requires either probabilities or backend confidence')
-        return _finish(
-            spec,
-            {**base, 'answer': choice, 'probabilities': probabilities, 'confidence': confidence},
-        )
+        return _finish(spec, {'answer': choice, 'confidence': confidence, 'probabilities': probabilities})
     if not probabilities:
         raise ProtocolError(f'{spec.name}: rubric answer has no probabilities')
-    try:
-        index = int(max(probabilities, key=probabilities.get))
-    except (TypeError, ValueError) as e:
-        raise ProtocolError(f'{spec.name}: rubric index must be valid: {e}') from e
-    if index < 0 or index >= len(spec.levels):
-        raise ProtocolError(f'{spec.name}: rubric index {index} out of range [0, {len(spec.levels) - 1}]')
+    labelled = {}
+    for key, value in probabilities.items():
+        try:
+            position = int(key)
+        except ValueError:
+            raise ProtocolError(f'{spec.name}: rubric probability key {key!r} is not a level index') from None
+        if not 0 <= position < n:
+            raise ProtocolError(f'{spec.name}: rubric probability key {key!r} out of range [0, {n - 1}]')
+        labelled[spec.levels[position]] = value
+    index = spec.levels.index(max(labelled, key=labelled.get))
     try:
         score = float(_extract_wire_field(spec, wire, 'score'))
     except (TypeError, ValueError) as e:
         raise ProtocolError(f'{spec.name}: score must be a number, got {wire.get("score")!r}') from e
+    if not math.isfinite(score) or not 0 <= score <= n - 1:
+        raise ProtocolError(f'{spec.name}: score {score} out of range [0, {n - 1}]')
     return _finish(
         spec,
         {
-            **base,
-            'answer': index,
+            'answer': spec.levels[index],
+            'index': index,
             'score': score,
-            'level': spec.levels[index],
-            'probabilities': probabilities,
             'confidence': confidence,
+            'probabilities': labelled,
         },
     )
 
