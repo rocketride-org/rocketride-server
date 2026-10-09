@@ -127,7 +127,7 @@ separate caller choice rather than an accidental result of broad searching.
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `pinecone.collection` | `string` | **Collection**<br/>Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens | `"rocketride"` |
-| `pinecone.profile` | `string` | **Type of Pinecone Connection**<br/>Connect to... | `"pod-based"` |
+| `pinecone.profile` | `string` | **Type of Pinecone Connection**<br/>Connect to... | `"serverless-dense"` |
 | `pinecone.provider` | `string` |  | const: `"pinecone"` |
 | `pinecone.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'pinecone' exposes tools as pinecone.search / pinecone.upsert / pinecone.delete. Change this when running multiple Pinecone nodes in the same pipeline so their tool names do not collide. | `"pinecone"` |
 
