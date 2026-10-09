@@ -22,7 +22,7 @@
 
 import pytest
 
-from ai.account.store import StorageError, VersionMismatchError
+from ai.account.store import StorageError, StorageNotFoundError, VersionMismatchError
 from ai.account.store_providers.memory import MemoryStore
 
 
@@ -51,7 +51,7 @@ async def test_overwrite_returns_new_content(store):
 
 @pytest.mark.asyncio
 async def test_read_missing_file_raises(store):
-    with pytest.raises(StorageError, match='File not found'):
+    with pytest.raises(StorageNotFoundError, match='File not found'):
         await store.read_file('missing.txt')
 
 
@@ -79,7 +79,7 @@ async def test_version_increments_on_each_write(store):
 
 @pytest.mark.asyncio
 async def test_read_with_metadata_missing_file_raises(store):
-    with pytest.raises(StorageError, match='File not found'):
+    with pytest.raises(StorageNotFoundError, match='File not found'):
         await store.read_file_with_metadata('missing.txt')
 
 
@@ -142,7 +142,7 @@ async def test_delete_removes_file(store):
 
 @pytest.mark.asyncio
 async def test_delete_missing_file_raises(store):
-    with pytest.raises(StorageError, match='File not found'):
+    with pytest.raises(StorageNotFoundError, match='File not found'):
         await store.delete_file('missing.txt')
 
 

@@ -639,11 +639,22 @@ class RunLogWriter:
         """
         try:
             raw = await self._store.read(self._control_path())
-            control = json.loads(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw)
+        except StorageNotFoundError:
+            raw = None
+        # A failed read (anything but not-found) propagates: starting fresh
+        # here would write an empty control over the stored history.
+        try:
+            control = (
+                json.loads(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw)
+                if raw is not None
+                else None
+            )
         except Exception:
-            # First run of this stream (or unreadable control — rebuildable
-            # state, so start fresh; segments without a control entry are
-            # collected by the age sweep).
+            # Unreadable control: rebuildable state, start fresh; segments
+            # without a control entry are collected by the age sweep.
+            control = None
+        if control is None:
+            # First run of this stream.
             return {
                 'schemaVer': LOG_SCHEMA_VERSION,
                 'projectId': self._project_id,

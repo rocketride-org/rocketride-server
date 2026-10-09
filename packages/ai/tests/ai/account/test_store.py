@@ -24,7 +24,7 @@ import pytest
 
 from ai.account.file_store import FileStore
 from ai.account.models import RequestContext
-from ai.account.store import STORE_MAX_RETRY_ATTEMPTS, Store, StorageError
+from ai.account.store import STORE_MAX_RETRY_ATTEMPTS, Store, StorageError, StorageNotFoundError
 from ai.account.store_providers.azure import AzureBlobStore
 from ai.account.store_providers.filesystem import FilesystemStore
 from ai.account.store_providers.filesystem.filesystem import _os_path
@@ -72,11 +72,17 @@ class BaseStoreTest:
 
     @pytest.mark.asyncio
     async def test_read_nonexistent_file(self, store):
-        """Test reading a file that doesn't exist."""
-        with pytest.raises(StorageError) as exc_info:
+        """A missing file is StorageNotFoundError, not just any StorageError."""
+        with pytest.raises(StorageNotFoundError) as exc_info:
             await store.read_file('nonexistent.txt')
 
         assert 'File not found' in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_open_read_nonexistent_file(self, store):
+        """open_read is the path FileStore.read takes; a missing file must be StorageNotFoundError there too."""
+        with pytest.raises(StorageNotFoundError, match='File not found'):
+            await store.open_read('nonexistent.txt')
 
     @pytest.mark.asyncio
     async def test_unicode_content(self, store):
@@ -804,7 +810,7 @@ class TestS3StoreMocked:
         mock_s3_client.exceptions.NoSuchKey = NoSuchKeyError
         mock_s3_client.get_object.side_effect = NoSuchKeyError('Not found')
 
-        with pytest.raises(StorageError) as exc_info:
+        with pytest.raises(StorageNotFoundError) as exc_info:
             await store.read_file('nonexistent.txt')
 
         assert 'File not found' in str(exc_info.value)
@@ -1192,6 +1198,32 @@ class TestAzureBlobStoreMocked:
         """Test Azure URL parsing."""
         assert store._container == 'test-container'
         assert store._prefix == 'prefix'
+
+    @pytest.mark.asyncio
+    async def test_open_read_missing_blob_is_not_found(self, store, mock_blob_client):
+        """A BlobNotFound error on the properties call is StorageNotFoundError; anything else is not."""
+        mock_client, mock_blob = mock_blob_client
+        mock_blob.get_blob_properties.side_effect = Exception('BlobNotFound: the specified blob does not exist')
+        with pytest.raises(StorageNotFoundError, match='File not found'):
+            await store.open_read('missing.txt')
+
+        mock_blob.get_blob_properties.side_effect = Exception('ServerBusy')
+        with pytest.raises(StorageError) as exc_info:
+            await store.open_read('missing.txt')
+        assert not isinstance(exc_info.value, StorageNotFoundError)
+
+    @pytest.mark.asyncio
+    async def test_move_file_tells_missing_from_failed(self, store, mock_blob_client):
+        """move_file reports a missing source as StorageNotFoundError and any other properties error as a plain StorageError."""
+        mock_client, mock_blob = mock_blob_client
+        mock_blob.get_blob_properties.side_effect = Exception('BlobNotFound')
+        with pytest.raises(StorageNotFoundError, match='File not found'):
+            await store.move_file('a.txt', 'b.txt')
+
+        mock_blob.get_blob_properties.side_effect = Exception('ServerBusy')
+        with pytest.raises(StorageError) as exc_info:
+            await store.move_file('a.txt', 'b.txt')
+        assert not isinstance(exc_info.value, StorageNotFoundError)
 
     @pytest.mark.asyncio
     async def test_write_file(self, store, mock_blob_client):

@@ -26,8 +26,8 @@
 # ONE read path over the per-task run-log continuum: EaaS serves every log
 # read (live and completed alike) by composing store segments + local spool
 # via the stream's control file — clients never touch storage directly.
-# Dispatches on ``arguments.subcommand`` (chapters / read / segment / delete),
-# the same shape as rrext_store and rrext_deploy. Streams are addressed by the plain
+# Dispatches on ``arguments.subcommand`` (streams / chapters / read / segment /
+# delete), the same shape as rrext_store and rrext_deploy. Streams are addressed by the plain
 # identity pair (projectId + source) — NEVER by token: tokens are
 # credentials and appear nowhere in the log system. The SCOPE IS THE KIND:
 # ``teamId`` present addresses that team's DEPLOY continuum, absent addresses

@@ -297,7 +297,9 @@ class AzureBlobStore(IStore):
             try:
                 await asyncio.to_thread(src_client.get_blob_properties)
             except Exception as e:
-                raise StorageNotFoundError(f'File not found: {src}') from e
+                if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
+                    raise StorageNotFoundError(f'File not found: {src}') from e
+                raise
 
             # Without requires_sync the copy can return 'pending' having already started
             # overwriting the destination, which this process cannot undo.
