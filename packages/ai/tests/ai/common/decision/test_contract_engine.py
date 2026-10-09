@@ -20,34 +20,30 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Writer-neutral decisions on ``currentObject.response['decisions']`` and gate rules (any node may write them)."""
+"""Contract on the real engine IJson: nested writes land in place (spec §3.1)."""
 
-from .contract import (
-    DECISIONS_KEY,
-    OK,
-    PREVIEW_CHARS,
-    UNCERTAIN,
-    DecisionError,
-    NotDecided,
-    fingerprint,
-    preview,
-    record,
-    resolve,
-    snapshot,
-    stamp,
-)
+import json
 
-__all__ = [
-    'DECISIONS_KEY',
-    'DecisionError',
-    'NotDecided',
-    'OK',
-    'PREVIEW_CHARS',
-    'UNCERTAIN',
-    'fingerprint',
-    'preview',
-    'record',
-    'resolve',
-    'snapshot',
-    'stamp',
-]
+from rocketlib import IJson
+
+from ai.common.decision.contract import record, snapshot
+
+QUESTIONS = {'is_spam': {'kind': 'yes_no'}}
+
+
+def _item(answer):
+    return {'lane': 'text', 'status': 'ok', 'answers': {'is_spam': {'answer': answer, 'confidence': 0.5}}}
+
+
+def test_record_writes_in_place_into_engine_json():
+    response = IJson()
+    response['text'] = ['hello']
+    assert snapshot(response) is None
+    assert record(response, 'g1', writer='w', questions=QUESTIONS, item=_item('no'), usage={'calls': 1}) == 0
+    assert record(response, 'g1', writer='w', questions=QUESTIONS, item=_item('yes'), usage={'calls': 1}) == 1
+    plain = json.loads(str(response))
+    assert plain['text'] == ['hello']
+    assert plain['result_types'] == {'decisions': 'decisions'}
+    assert [i['answers']['is_spam']['answer'] for i in plain['decisions']['g1']['items']] == ['no', 'yes']
+    assert plain['decisions']['g1']['usage'] == {'calls': 2}
+    assert snapshot(response) == plain['decisions']
