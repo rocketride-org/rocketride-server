@@ -1,0 +1,147 @@
+{
+  "components": [
+    {
+      "id": "agent_llamaindex_1",
+      "provider": "agent_llamaindex",
+      "name": "LlamaIndex",
+      "config": {
+        "agent_description": "General-purpose assistant that can call tools to answer questions.",
+        "instructions": [
+          "You are a helpful assistant. Use the available tools when they help, then give a clear final answer."
+        ],
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "webhook_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_anthropic_1",
+      "provider": "llm_anthropic",
+      "name": "Anthropic",
+      "config": {
+        "profile": "claude-sonnet-4-6",
+        "claude-sonnet-4-6": {
+          "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
+        },
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 130,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_llamaindex_1"
+        }
+      ]
+    },
+    {
+      "id": "tool_http_request_1",
+      "provider": "tool_http_request",
+      "name": "HTTP Request",
+      "config": {
+        "allowDELETE": true,
+        "allowGET": true,
+        "allowHEAD": false,
+        "allowOPTIONS": false,
+        "allowPATCH": true,
+        "allowPOST": true,
+        "allowPUT": true,
+        "maxConcurrentRequests": 5,
+        "rateLimitPerMinute": 100,
+        "rateLimitPerSecond": 10,
+        "type": "tool_http_request",
+        "urlWhitelist": [
+          {
+            "whitelistPattern": "https://catfact.ninja/fact"
+          }
+        ],
+        "parameters": {
+          "google": {}
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 350,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_llamaindex_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_llamaindex_1"
+        }
+      ]
+    },
+    {
+      "id": "webhook_1",
+      "provider": "webhook",
+      "name": "Web Hook",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "webhook",
+        "name": "Web Hook"
+      },
+      "ui": {
+        "position": {
+          "x": -80,
+          "y": 160
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "d5c00369-00fe-469b-a861-320d4a2cd586",
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 27
+}
