@@ -18,14 +18,20 @@ Designed for integration with a FastAPI application and built on top of the ai.w
 """
 
 from typing import TYPE_CHECKING, Optional
+import hashlib
+import hmac
 from fastapi import WebSocket
 from dataclasses import dataclass
+from starlette.websockets import WebSocketState
 from rocketlib import IEndpointBase
 from ai.common.dap import DAPBase, TransportWebSocket
 from .data_conn import DataConn
 
 if TYPE_CHECKING:
     from ai.web import WebServer
+
+# Close code for a refused connection; before accept the client sees HTTP 403
+CONST_DATA_REFUSED = 1008
 
 
 @dataclass
@@ -55,7 +61,7 @@ class DataServer(DAPBase):
         Client (Data Tools) → ALB → DataServer → Backend Data Engine
     """
 
-    def __init__(self, server: 'WebServer', **kwargs) -> None:
+    def __init__(self, server: 'WebServer', token_sha256: Optional[str] = None, **kwargs) -> None:
         """Initialize the DataServer with a back-reference for lazy target lookup.
 
         For sourceless pipelines (agentic, etc.) ``state.target`` is never
@@ -64,10 +70,18 @@ class DataServer(DAPBase):
 
         Args:
             server: The parent WebServer; used for lazy ``state.target`` reads.
+            token_sha256: Hex SHA-256 of the run's channel token, which a
+                connection must present; ``None`` refuses every connection.
             **kwargs: Additional arguments passed to the parent ``DAPBase``.
         """
         # Hold the server reference for lazy target lookup.
         self._server = server
+
+        # Only the token's hash is known here; None fails closed
+        self._token_sha256 = token_sha256
+
+        # Socket currently holding the channel (one live connection at a time)
+        self._live: Optional[WebSocket] = None
 
         # Initialize parent with server identification
         super().__init__(module='DATA-SERVER', **kwargs)
@@ -108,9 +122,48 @@ class DataServer(DAPBase):
         # Log the disconnection for debugging purposes
         self.debug_message('Data connection disconnected.')
 
+    def _authorized(self, websocket: WebSocket) -> bool:
+        """
+        Check the handshake's ``Authorization`` header against the run's token hash.
+
+        Args:
+            websocket (WebSocket): The connection, not yet accepted.
+
+        Returns:
+            bool: True when the SHA-256 of the presented token is this run's;
+            False otherwise, and always False when the server has no hash.
+        """
+        if not self._token_sha256:
+            return False
+
+        presented = websocket.headers.get('authorization', '').removeprefix('Bearer ').strip()
+        digest = hashlib.sha256(presented.encode('utf-8')).hexdigest()
+
+        # Bytes, so a malformed non-ASCII expected value is a mismatch rather than a TypeError
+        return hmac.compare_digest(digest.encode('ascii'), self._token_sha256.encode('utf-8'))
+
+    def _channel_busy(self) -> bool:
+        """
+        Tell whether another connection holds the channel.
+
+        The holder counts until either side has closed it, not until its
+        handlers drain, so a reconnect is never blocked by a slow handler.
+
+        Returns:
+            bool: True while the holder is handshaking or open.
+        """
+        live = self._live
+        if live is None:
+            return False
+        return WebSocketState.DISCONNECTED not in (live.client_state, live.application_state)
+
     async def listen(self, websocket: WebSocket) -> None:
         """
-        Accept an incoming WebSocket connection and start listening for messages.
+        Authenticate an incoming WebSocket connection, accept it and service it.
+
+        The run's token is checked on the handshake, before accept: a
+        connection without it, or arriving while another one is live, is
+        closed unaccepted (HTTP 403) and never reaches a ``DataConn``.
 
         Listen is not a traditional receive loop. Since we are using
         FastAPI and websockets, listen has already established the connection
@@ -121,19 +174,37 @@ class DataServer(DAPBase):
         Args:
             websocket (WebSocket): The FastAPI WebSocket object.
         """
-        # Create the transport and accept the connection
-        transport = TransportWebSocket()
+        if not self._authorized(websocket):
+            self.debug_message('Data connection refused: missing or wrong token')
+            await websocket.close(code=CONST_DATA_REFUSED)
+            return
 
-        # Allocate a new connection
-        conn = DataConn(server=self, transport=transport)
+        if self._channel_busy():
+            self.debug_message('Data connection refused: the channel is in use')
+            await websocket.close(code=CONST_DATA_REFUSED)
+            return
 
-        # Signal we are connected
-        await self._dapbase_on_connected(conn)
+        # Claim the channel before the first await, so a concurrent handshake sees it
+        self._live = websocket
 
-        # Accept the connection and start servicing it. This will not
-        # return until the connection is closed
-        await transport.accept(websocket=websocket)
+        try:
+            # Create the transport and accept the connection
+            transport = TransportWebSocket()
 
-        # Signal we are disconnected
-        await self._dapbase_on_disconnected(conn)
-        return
+            # Allocate a new connection
+            conn = DataConn(server=self, transport=transport)
+
+            # Signal we are connected
+            await self._dapbase_on_connected(conn)
+
+            # Accept the connection and start servicing it. This will not
+            # return until the connection is closed
+            await transport.accept(websocket=websocket)
+
+            # Signal we are disconnected
+            await self._dapbase_on_disconnected(conn)
+
+        finally:
+            # A newer connection may already hold the channel
+            if self._live is websocket:
+                self._live = None
