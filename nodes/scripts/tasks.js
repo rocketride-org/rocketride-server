@@ -158,6 +158,15 @@ function makeStartTestServerAction(options = {}) {
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
 					ROCKETRIDE_MOCK: mocksPath,
+					// Under --runtime=docker the mocks reach each task's container through a mount,
+					// next to whatever RR_DOCKER_MOUNTS already names
+					...(options.runtime === 'docker'
+						? {
+								RR_DOCKER_MOUNTS: [process.env.RR_DOCKER_MOUNTS, 'ROCKETRIDE_MOCK']
+									.filter(Boolean)
+									.join(','),
+							}
+						: {}),
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;
