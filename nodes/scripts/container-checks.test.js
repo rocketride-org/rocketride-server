@@ -15,6 +15,8 @@ const {
 	diagnoseLocalDocker,
 	diagnoseWsl,
 	missingImage,
+	diagnoseTestTarget,
+	withDotenv,
 	unavailableReason,
 	formatDiagnosis,
 } = require('./container-checks');
@@ -204,6 +206,91 @@ test('a missing image names the tasks that make it', () => {
 		'docker tag ghcr.io/rocketride-org/rocketride-node:3.4.0 rocketride/node:3.4.0',
 	]);
 	assert.deepStrictEqual(missingImage('linux', 'x').fix, ['./builder container:build']);
+	// Those tasks make only the default image: one a variable names is pulled, or the variable goes
+	const named = missingImage('linux', 'example/custom:dev', 'RR_DOCKER_IMAGE');
+	assert.strictEqual(named.problem, 'example/custom:dev, named by RR_DOCKER_IMAGE, is not on this daemon');
+	assert.deepStrictEqual(named.fix, [
+		'docker pull example/custom:dev, or load it into this daemon',
+		'or unset RR_DOCKER_IMAGE to use rocketride/node:<version>',
+	]);
+	assert.doesNotMatch(missingImage('win32', 'x', 'RR_K8S_IMAGE').fix.join('\n'), /builder/);
+});
+
+test('container:test runs the nodes in the image it built, on the daemon it built it on', () => {
+	const id = (value) => ({ code: 0, stdout: `${value}\n` });
+	const built = 'rocketride/node:3.4.0';
+	assert.strictEqual(diagnoseTestTarget({ built, here: id('A'), engine: id('A') }), null);
+	assert.strictEqual(diagnoseTestTarget({ built, image: built, here: id('A'), engine: id('A') }), null);
+	const named = diagnoseTestTarget({ built, image: 'mine:dev', here: id('A'), engine: id('A') });
+	assert.match(named.problem, /tasks in mine:dev \(RR_DOCKER_IMAGE\), not in rocketride\/node:3\.4\.0/);
+	assert.match(named.fix[0], /unset RR_DOCKER_IMAGE/);
+	const elsewhere = diagnoseTestTarget({ built, here: id('A'), engine: id('B') });
+	assert.match(elsewhere.problem, /another docker daemon than the one rocketride\/node:3\.4\.0 was built on/);
+	assert.match(elsewhere.fix[0], /DOCKER_HOST or DOCKER_CONTEXT in dist\/server\/\.env/);
+	const remote = diagnoseTestTarget({ built, here: id('A'), engine: id('A'), taskserver: '5565' });
+	assert.match(remote.problem, /tests would run on the server at 5565/);
+	assert.match(remote.fix[0], /container:build, then nodes:test --runtime=docker --taskserver=5565/);
+	// A daemon that does not answer the engine is left to the preflight, which says why
+	assert.strictEqual(diagnoseTestTarget({ built, here: id('A'), engine: { code: 1, stdout: '' } }), null);
+});
+
+test("the engine's .env adds the names its environment lacks and replaces none", () => {
+	const env = { DOCKER_HOST: 'unix:///var/run/docker.sock', HOME: '/home/me' };
+	const values = { DOCKER_HOST: 'unix:///run/user/1000/docker.sock', KUBECONFIG: '/home/me/kind.yaml' };
+	assert.deepStrictEqual(withDotenv(env, values), {
+		DOCKER_HOST: 'unix:///var/run/docker.sock',
+		HOME: '/home/me',
+		KUBECONFIG: '/home/me/kind.yaml',
+	});
+	// A copy: the builder's own environment stays as it was
+	assert.deepStrictEqual(env, { DOCKER_HOST: 'unix:///var/run/docker.sock', HOME: '/home/me' });
+});
+
+test('${NAME} expands from the environment, then the lines above, then the default', () => {
+	const values = {
+		XDG_RUNTIME_DIR: '/run/user/0',
+		SOCKET: '${XDG_RUNTIME_DIR}/docker.sock',
+		DOCKER_HOST: 'unix://${SOCKET}',
+		KUBECONFIG: '${KUBE_DIR:-/home/me/.kube}/kind.yaml',
+		UNSET: '${NOWHERE}',
+		EARLY: '${LATE:-none}',
+		LATE: 'late',
+	};
+	const loaded = withDotenv({ XDG_RUNTIME_DIR: '/run/user/1000' }, values);
+	assert.strictEqual(loaded.SOCKET, '/run/user/1000/docker.sock');
+	assert.strictEqual(loaded.DOCKER_HOST, 'unix:///run/user/1000/docker.sock');
+	assert.strictEqual(loaded.KUBECONFIG, '/home/me/.kube/kind.yaml');
+	assert.strictEqual(loaded.UNSET, '');
+	assert.strictEqual(loaded.EARLY, 'none');
+	assert.strictEqual(withDotenv({ KUBE_DIR: '/k' }, values).KUBECONFIG, '/k/kind.yaml');
+});
+
+test('on Windows the engine holds each name in upper case, whatever case its .env uses', () => {
+	// Path, as process.env spells it there
+	const env = { Path: 'C:\\Windows' };
+	const values = {
+		rr_docker_image: 'example/custom:dev',
+		FOO: 'a',
+		foo: 'b',
+		path: 'C:\\elsewhere',
+		REFS: '${PATH}|${Path}|${foo}',
+	};
+	// Twins in case: the first one stays. ${NAME} finds the environment's names in upper case only
+	assert.deepStrictEqual(withDotenv(env, values, 'win32'), {
+		Path: 'C:\\Windows',
+		RR_DOCKER_IMAGE: 'example/custom:dev',
+		FOO: 'a',
+		REFS: 'C:\\Windows||b',
+	});
+	assert.deepStrictEqual(withDotenv({}, { rr_docker_image: 'x' }, 'linux'), { rr_docker_image: 'x' });
+});
+
+test('Path and PATH are one name on Windows', { skip: process.platform !== 'win32' }, () => {
+	const name = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH');
+	const loaded = withDotenv(process.env, { [name === 'PATH' ? 'Path' : 'PATH']: 'C:\\elsewhere' }, process.platform);
+	const paths = Object.keys(loaded).filter((key) => key.toUpperCase() === 'PATH');
+	assert.deepStrictEqual(paths, [name]);
+	assert.strictEqual(loaded[name], process.env[name]);
 });
 
 test('a task missing on this OS says why, and offers no other task in its place', () => {

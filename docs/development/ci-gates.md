@@ -43,7 +43,7 @@ The `changes` job (`dorny/paths-filter`) computes these booleans:
 | Filter | Paths |
 | --- | --- |
 | `code` | `packages/**`, `nodes/**`, `apps/**`, `scripts/**`, `builder`, `builder.cmd`, `.github/workflows/**`, `package.json`, `docker/**` |
-| `container` | `docker/**`, `nodes/scripts/tasks.js`, the `requirement*.txt` and `overrides.txt` files under `nodes/` and `packages/ai/`, `packages/server/engine-lib/rocketlib-python/lib/depends.py`, `packages/server/scripts/tasks.js`, `.github/workflows/_build.yaml`, the task launchers `packages/ai/src/ai/modules/task/launcher/**` |
+| `container` | `docker/**`, `nodes/scripts/tasks.js`, `nodes/scripts/container-checks.js`, the `requirement*.txt` and `overrides.txt` files under `nodes/` and `packages/ai/`, `packages/server/engine-lib/rocketlib-python/lib/depends.py`, `packages/server/scripts/tasks.js`, `.github/workflows/_build.yaml`, the task launchers `packages/ai/src/ai/modules/task/launcher/**` |
 | `cpp` | `packages/server/**`, the C/C++ sources and `CMakeLists.txt` files under `nodes/`, `packages/vcpkg/**`, the C++ build scripts (`scripts/build.js`, `scripts/compiler.js`, `scripts/compiler-unix.js`, `scripts/compiler-unix.sh`, `scripts/lib/cmake.js`, `scripts/lib/toolchain.js`, `nodes/scripts/node-build.js`, `nodes/scripts/tasks.js`), `packages/ai/src/ai/modules/task/task_engine.py`, `.github/workflows/_sanitize.yaml`, `scripts/ci/**` |
 
 `code == false` skips `build` (a `build-skip` job reports success under the same

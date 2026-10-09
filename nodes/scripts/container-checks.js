@@ -284,9 +284,21 @@ function diagnoseWsl({ distro, list, facts, probeError = '', needJammy = false, 
  * What to do when the node image is not on the daemon.
  * @param {string} platform - os.platform()
  * @param {string} image - The image the docker runtime starts
+ * @param {string} [variable] - The variable that named the image, when one did
  * @returns {{problem: string, fix: string[]}}
  */
-function missingImage(platform, image) {
+function missingImage(platform, image, variable) {
+	// The build tasks make only the default image
+	if (variable) {
+		const daemon = platform === 'win32' ? "Docker Desktop's daemon" : 'this daemon';
+		return {
+			problem: `${image}, named by ${variable}, is not on ${daemon}`,
+			fix: [
+				`docker pull ${image}, or load it into ${daemon}`,
+				`or unset ${variable} to use rocketride/node:<version>`,
+			],
+		};
+	}
 	if (platform === 'win32') {
 		return {
 			problem: `${image} is not on Docker Desktop's daemon`,
@@ -303,6 +315,77 @@ function missingImage(platform, image) {
 		problem: `${image} is not on this daemon`,
 		fix: [`docker pull ${published}`, `docker tag ${published} ${image}`],
 	};
+}
+
+/**
+ * Whether the engine that container:test starts would run its tasks in the
+ * image container:test built, on the daemon it was built on: the build runs in
+ * this environment, the engine in this one plus its .env.
+ * @param {object} p
+ * @param {string} p.built - The image container:test built and probed
+ * @param {string} [p.image] - RR_DOCKER_IMAGE as the engine sees it
+ * @param {{code: number, stdout: string}} p.here - `docker info --format {{.ID}}` in this environment
+ * @param {{code: number, stdout: string}} p.engine - The same in the engine's
+ * @param {string} [p.taskserver] - --taskserver, when given
+ * @returns {{problem: string, fix: string[]}|null}
+ */
+function diagnoseTestTarget({ built, image = '', here, engine, taskserver = '' }) {
+	if (taskserver) {
+		return {
+			problem:
+				`the tests would run on the server at ${taskserver}, ` +
+				'which container:test neither starts nor checks',
+			fix: [
+				'container:test tests the image it builds on a server it starts: drop --taskserver, ' +
+					`or run container:build, then nodes:test --runtime=docker --taskserver=${taskserver}`,
+			],
+		};
+	}
+	if (image && image !== built) {
+		return {
+			problem:
+				`the engine would run the tasks in ${image} (RR_DOCKER_IMAGE), ` +
+				`not in ${built}, the image built here`,
+			fix: ['container:test tests the image it builds: unset RR_DOCKER_IMAGE, here or in dist/server/.env'],
+		};
+	}
+	// A daemon that does not answer the engine is for the preflight after this to diagnose
+	if (here.code !== 0 || engine.code !== 0 || here.stdout.trim() === engine.stdout.trim()) return null;
+	return {
+		problem: `the engine would run the tasks on another docker daemon than the one ${built} was built on`,
+		fix: ['DOCKER_HOST or DOCKER_CONTEXT in dist/server/.env: set the same here, or remove it there'],
+	};
+}
+
+/**
+ * An environment once a .env is loaded into it as the engine loads its own
+ * (python-dotenv, without override): each name it lacks is added, none it has
+ * is replaced. ${NAME} and ${NAME:-default} expand as python-dotenv expands
+ * them: from the environment, then the lines above, then the default.
+ * @param {Object<string, string>} env - The environment, left unchanged
+ * @param {Object<string, string>} values - The .env as dotenv.parse() reads it
+ * @param {string} [platform] - os.platform(): on win32 the engine's os.environ
+ *   holds each name in upper case, so a name it adds is the upper-case one, and
+ *   one it has in another case, or added already, is not added again
+ * @returns {Object<string, string>} A copy of env with the names added
+ */
+function withDotenv(env, values, platform) {
+	const name = (key) => (platform === 'win32' ? key.toUpperCase() : key);
+	// The names as the engine's os.environ holds them; ${NAME} looks there by exact name
+	const environ = Object.fromEntries(Object.keys(env).map((key) => [name(key), env[key]]));
+	const loaded = {};
+	for (const [key, value] of Object.entries(values)) {
+		loaded[key] = value.replace(/\$\{([^}:]*)(?::-([^}]*))?\}/g, (_, ref, fallback = '') =>
+			Object.hasOwn(environ, ref) ? environ[ref] : Object.hasOwn(loaded, ref) ? loaded[ref] : fallback
+		);
+	}
+	const result = { ...env };
+	for (const [key, value] of Object.entries(loaded)) {
+		if (Object.hasOwn(environ, name(key))) continue;
+		environ[name(key)] = value;
+		result[name(key)] = value;
+	}
+	return result;
 }
 
 const ENGINES = { win32: 'a Windows engine', darwin: 'a macOS engine' };
@@ -354,6 +437,8 @@ module.exports = {
 	diagnoseLocalDocker,
 	diagnoseWsl,
 	missingImage,
+	diagnoseTestTarget,
+	withDotenv,
 	unavailableReason,
 	formatDiagnosis,
 };
