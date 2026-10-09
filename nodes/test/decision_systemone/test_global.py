@@ -44,8 +44,8 @@ CONFIG = {
 class ProbeClient:
     instances = []
 
-    def __init__(self, base_url, api_key=None, *, timeout=30.0, max_retries=5, **_):
-        self.args = (base_url, api_key, timeout, max_retries)
+    def __init__(self, base_url, api_key=None, *, timeout=30.0, max_attempts=5, **_):
+        self.args = (base_url, api_key, timeout, max_attempts)
         self.calls, self.closed, self.error = [], False, None
         ProbeClient.instances.append(self)
 
@@ -68,10 +68,10 @@ def _global(systemone, monkeypatch, config):
     return glb
 
 
-def test_probe_makes_one_yes_no_call_without_retries_and_closes(systemone, monkeypatch):
+def test_probe_makes_one_yes_no_call_with_a_single_attempt_and_closes(systemone, monkeypatch):
     _global(systemone, monkeypatch, CONFIG).validateConfig()
     (client,) = ProbeClient.instances
-    assert client.args == ('http://localhost:11434', None, 120.0, 0)
+    assert client.args == ('http://localhost:11434', None, 120.0, 1)
     model, state, questions = client.calls[0]
     assert model == 'nimble' and isinstance(state, str) and questions['probe']['type'] == 'noul'
     assert client.closed and systemone.warnings == []
