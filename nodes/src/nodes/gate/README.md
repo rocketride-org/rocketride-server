@@ -12,7 +12,7 @@ The Gate reads `response.decisions` and evaluates its rule against the answers r
 
 `parse → system_one (is_spam) → gate (is_spam equals no) → preprocessor → system_one (topic) → gate (topic is one of billing, refund) → response`
 
-The first System One node classifies the whole text, and the first Gate passes it only when `is_spam` is `no`. The preprocessor splits the text into documents, a second System One node classifies each one, and the second Gate forwards only the documents whose `topic` is `billing` or `refund`. A second Gate with `is_spam equals yes` on another branch from the first System One node handles the other side.
+The first System One node classifies the whole text, and the first Gate passes it only when `is_spam` is `no`. The preprocessor splits the text into documents, a second System One node classifies each one as `billing`, `refund`, `legal` or `other`, and the second Gate forwards only the documents whose `topic` is `billing` or `refund`. A second Gate with `is_spam equals yes` on another branch from the first System One node handles the other side.
 
 ## Lanes
 
