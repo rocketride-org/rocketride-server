@@ -66,6 +66,7 @@ const {
 	diagnoseLocalDocker,
 	diagnoseWsl,
 	missingImage,
+	withDotenv,
 	unavailableReason,
 	formatDiagnosis,
 } = require('./container-checks');
@@ -129,6 +130,19 @@ function makeSyncNodesAction() {
 	};
 }
 
+// The environment of an engine started here, and of the docker it runs: this
+// one, and each name of its .env this one lacks, which it loads without overriding.
+function engineEnvironment() {
+	const file = path.join(DIST_ROOT, 'server', '.env');
+	return withDotenv(process.env, fs.existsSync(file) ? require('dotenv').parse(fs.readFileSync(file)) : {});
+}
+
+// A variable as the engine started here sees it
+function engineVariable(name) {
+	// process.env matches a name in any case on Windows, as the engine's environment does; a copy does not
+	return Object.hasOwn(process.env, name) ? process.env[name] : engineEnvironment()[name];
+}
+
 // The test server: the one --taskserver names, or an engine started here with the
 // test mocks, under the runtime nodes:test asks for
 function makeStartTestServerAction(options = {}) {
@@ -158,6 +172,21 @@ function makeStartTestServerAction(options = {}) {
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
 					ROCKETRIDE_MOCK: mocksPath,
+					// Under --runtime=docker the mocks reach each task's container through a mount,
+					// next to whatever RR_DOCKER_MOUNTS already names, here or in the engine's .env
+					...(options.runtime === 'docker'
+						? {
+								RR_DOCKER_MOUNTS: [
+									...new Set([
+										...(engineVariable('RR_DOCKER_MOUNTS') || '')
+											.split(',')
+											.map((name) => name.trim())
+											.filter(Boolean),
+										'ROCKETRIDE_MOCK',
+									]),
+								].join(','),
+							}
+						: {}),
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;
@@ -387,9 +416,11 @@ function makeTestAction(options = {}) {
 		return { description: 'Planning node test model downloads', steps };
 	}
 
+	const warmup = options.test_full && options.warmup !== 'off' && !options.taskserver;
+
 	// A local daemon and its image, before anything is built, installed or started
 	if (options.runtime === 'docker' && !options.taskserver) {
-		steps.unshift({ name: 'nodes:docker-preflight', action: makeDockerPreflightAction() });
+		steps.unshift({ name: 'nodes:docker-preflight', action: makeDockerPreflightAction(warmup) });
 	}
 
 	// The collect-only modes above report the environment as it is; test runs complete it.
@@ -397,7 +428,7 @@ function makeTestAction(options = {}) {
 
 	// Download the selected heavy tests' models before the server starts, so the
 	// downloads don't count against test timeouts. Pointless for a remote server.
-	if (options.test_full && options.warmup !== 'off' && !options.taskserver) {
+	if (warmup) {
 		steps.push({ name: 'nodes:warmup-models', action: makeRunPytestAction({ ...options, mode: 'warmup' }) });
 	}
 	steps.push(
@@ -412,14 +443,19 @@ function makeTestAction(options = {}) {
 }
 
 // nodes:test --runtime=docker needs a daemon and the node image of this engine
-// version; without them every test would fail on its own
-function makeDockerPreflightAction() {
+// version; without them every test would fail on its own. A warmup ahead loads the project
+// .env before the server starts: it is loaded here first, so the image checked is the one
+// the server is given. docker is asked with the environment the engine's docker gets, a
+// DOCKER_HOST of its .env included.
+function makeDockerPreflightAction(warmup) {
 	return {
 		run: async (ctx, task) => {
 			const name = 'nodes:test --runtime=docker';
-			await checkLocalDocker(name);
-			const image = process.env.RR_DOCKER_IMAGE || (await imageNames()).node;
-			if ((await imageLabels(image)) === null)
+			if (warmup) require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
+			const env = engineEnvironment();
+			await checkLocalDocker(name, env);
+			const image = engineVariable('RR_DOCKER_IMAGE') || (await imageNames()).node;
+			if ((await imageLabels(image, env)) === null)
 				throw new Error(formatDiagnosis(name, missingImage(os.platform(), image)));
 			task.output = `${image} is on the daemon`;
 		},
@@ -538,15 +574,14 @@ function capture(command, args, options = {}) {
 	});
 }
 
-// The labels of a local image, or null when the daemon has no such image
-async function imageLabels(image) {
-	const { code, stdout } = await capture('docker', [
-		'image',
-		'inspect',
-		'--format',
-		'{{json .Config.Labels}}',
-		image,
-	]);
+// The labels of a local image, or null when the daemon has no such image; env is the
+// environment docker runs in, this one by default
+async function imageLabels(image, env) {
+	const { code, stdout } = await capture(
+		'docker',
+		['image', 'inspect', '--format', '{{json .Config.Labels}}', image],
+		{ env }
+	);
 	if (code !== 0) return null;
 	try {
 		return JSON.parse(stdout.trim()) || {};
@@ -594,11 +629,12 @@ async function checkWsl(taskName, distro, { needJammy = false, checkout = '' } =
 	if (problem) throw new Error(formatDiagnosis(taskName, problem));
 }
 
-// The local daemon, or an error saying how to get one
-async function checkLocalDocker(taskName) {
+// The local daemon, or an error saying how to get one; env is the environment docker runs
+// in, this one by default
+async function checkLocalDocker(taskName, env) {
 	const problem = diagnoseLocalDocker({
 		platform: os.platform(),
-		...(await capture('docker', ['info', '--format', '{{.OSType}}'])),
+		...(await capture('docker', ['info', '--format', '{{.OSType}}'], { env })),
 	});
 	if (problem) throw new Error(formatDiagnosis(taskName, problem));
 }

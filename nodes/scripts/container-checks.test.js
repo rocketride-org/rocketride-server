@@ -15,6 +15,7 @@ const {
 	diagnoseLocalDocker,
 	diagnoseWsl,
 	missingImage,
+	withDotenv,
 	unavailableReason,
 	formatDiagnosis,
 } = require('./container-checks');
@@ -189,6 +190,45 @@ test('a docker that is there but cannot start is not called missing', () => {
 test('a missing image names the tasks that make it', () => {
 	assert.match(missingImage('win32', 'rocketride/node:3.4.0').fix.join('\n'), /build-on-wsl[\s\S]*sync-from-wsl/);
 	assert.deepStrictEqual(missingImage('linux', 'x').fix, ['./builder container:build']);
+});
+
+test("the engine's .env adds the names its environment lacks and replaces none", () => {
+	const env = { DOCKER_HOST: 'unix:///var/run/docker.sock', HOME: '/home/me' };
+	const values = { DOCKER_HOST: 'unix:///run/user/1000/docker.sock', KUBECONFIG: '/home/me/kind.yaml' };
+	assert.deepStrictEqual(withDotenv(env, values), {
+		DOCKER_HOST: 'unix:///var/run/docker.sock',
+		HOME: '/home/me',
+		KUBECONFIG: '/home/me/kind.yaml',
+	});
+	// A copy: the builder's own environment stays as it was
+	assert.deepStrictEqual(env, { DOCKER_HOST: 'unix:///var/run/docker.sock', HOME: '/home/me' });
+});
+
+test('${NAME} expands from the environment, then the lines above, then the default', () => {
+	const values = {
+		XDG_RUNTIME_DIR: '/run/user/0',
+		SOCKET: '${XDG_RUNTIME_DIR}/docker.sock',
+		DOCKER_HOST: 'unix://${SOCKET}',
+		KUBECONFIG: '${KUBE_DIR:-/home/me/.kube}/kind.yaml',
+		UNSET: '${NOWHERE}',
+		EARLY: '${LATE:-none}',
+		LATE: 'late',
+	};
+	const loaded = withDotenv({ XDG_RUNTIME_DIR: '/run/user/1000' }, values);
+	assert.strictEqual(loaded.SOCKET, '/run/user/1000/docker.sock');
+	assert.strictEqual(loaded.DOCKER_HOST, 'unix:///run/user/1000/docker.sock');
+	assert.strictEqual(loaded.KUBECONFIG, '/home/me/.kube/kind.yaml');
+	assert.strictEqual(loaded.UNSET, '');
+	assert.strictEqual(loaded.EARLY, 'none');
+	assert.strictEqual(withDotenv({ KUBE_DIR: '/k' }, values).KUBECONFIG, '/k/kind.yaml');
+});
+
+test('Path and PATH are one name on Windows', { skip: process.platform !== 'win32' }, () => {
+	const name = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH');
+	const loaded = withDotenv(process.env, { [name === 'PATH' ? 'Path' : 'PATH']: 'C:\\elsewhere' });
+	const paths = Object.keys(loaded).filter((key) => key.toUpperCase() === 'PATH');
+	assert.deepStrictEqual(paths, [name]);
+	assert.strictEqual(loaded[name], process.env[name]);
 });
 
 test('a task missing on this OS says why, and offers no other task in its place', () => {

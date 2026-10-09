@@ -290,6 +290,28 @@ function missingImage(platform, image) {
 	return { problem: `${image} is not on this daemon`, fix: [`docker pull ${image}`] };
 }
 
+/**
+ * An environment once a .env is loaded into it as the engine loads its own
+ * (python-dotenv, without override): each name it lacks is added, none it has
+ * is replaced. ${NAME} and ${NAME:-default} expand as python-dotenv expands
+ * them: from the environment, then the lines above, then the default.
+ * @param {Object<string, string>} env - The environment, left unchanged; pass
+ *   process.env itself, which on Windows matches a name in any case
+ * @param {Object<string, string>} values - The .env as dotenv.parse() reads it
+ * @returns {Object<string, string>} A copy of env with the names added
+ */
+function withDotenv(env, values) {
+	const loaded = {};
+	for (const [key, value] of Object.entries(values)) {
+		loaded[key] = value.replace(/\$\{([^}:]*)(?::-([^}]*))?\}/g, (_, ref, fallback = '') =>
+			Object.hasOwn(env, ref) ? env[ref] : Object.hasOwn(loaded, ref) ? loaded[ref] : fallback
+		);
+	}
+	const result = { ...env };
+	for (const [key, value] of Object.entries(loaded)) if (!Object.hasOwn(env, key)) result[key] = value;
+	return result;
+}
+
 const ENGINES = { win32: 'a Windows engine', darwin: 'a macOS engine' };
 
 /**
@@ -339,6 +361,7 @@ module.exports = {
 	diagnoseLocalDocker,
 	diagnoseWsl,
 	missingImage,
+	withDotenv,
 	unavailableReason,
 	formatDiagnosis,
 };
