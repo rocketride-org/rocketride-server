@@ -98,9 +98,29 @@ def test_text_is_blocked_when_the_rule_fails():
 def test_missing_decision_names_question_lane_and_fix():
     inst, _ = _gate(NOT_SPAM)
     with pytest.raises(DecisionError) as caught:
-        inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+        inst.writeText('hello')
     message = str(caught.value)
-    assert '"is_spam"' in message and 'image lane' in message and 'downstream' in message
+    assert '"is_spam"' in message and 'text lane' in message and 'downstream' in message
+
+
+@pytest.mark.parametrize('call', ['writeImage', 'writeAudio', 'writeVideo'])
+def test_missing_decision_on_a_media_lane_explains_the_text_only_writer(call):
+    inst, _ = _gate(NOT_SPAM)
+    lane = call.removeprefix('write').lower()
+    with pytest.raises(DecisionError) as caught:
+        getattr(inst, call)(AVI_ACTION.BEGIN, 'x/y', b'')
+    message = str(caught.value)
+    assert '"is_spam"' in message and f'{lane} lane' in message
+    assert f'before this {lane} item arrived' in message and 'text lanes only' in message
+
+
+def test_missing_decision_on_the_json_lane_explains_the_text_only_writer():
+    inst, _ = _gate(NOT_SPAM)
+    with pytest.raises(DecisionError) as caught:
+        inst.writeJson({'a': 1})
+    message = str(caught.value)
+    assert '"is_spam"' in message and 'json lane' in message
+    assert 'before this json item arrived' in message and 'text lanes only' in message
 
 
 def test_documents_are_filtered_per_document():
@@ -153,6 +173,29 @@ def test_too_long_item_is_blocked_whatever_the_rule_and_warned(monkeypatch):
         inst.writeDocuments([_doc('huge', {'so_2': 0})])
     assert out['documents'] == []
     assert 'too_long' in warnings[0]
+
+
+def test_too_long_first_question_does_not_hide_a_missing_second_decision(monkeypatch):
+    """Spec 7.2: every question is resolved before a NotDecided item may block."""
+    warnings = []
+    monkeypatch.setattr(gate_instance, 'warning', warnings.append)
+    inst, _ = _gate(
+        [
+            {'question': 'topic', 'op': 'not_equals', 'value': 'billing'},
+            {'question': 'is_spam', 'op': 'equals', 'value': 'no'},
+        ]
+    )
+    record(
+        inst.instance.currentObject.response,
+        'so_2',
+        writer='w',
+        questions=TOPIC,
+        item={'lane': 'documents', 'status': 'too_long', 'item': {'chunkId': 0}},
+    )
+    with pytest.raises(DecisionError) as caught:
+        inst.writeDocuments([_doc('huge', {'so_2': 0})])
+    assert '"is_spam"' in str(caught.value)
+    assert warnings == []
 
 
 def test_chunk_without_its_own_ref_uses_the_whole_object_decision():

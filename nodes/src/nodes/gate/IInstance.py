@@ -37,28 +37,41 @@ def _refs(doc) -> dict | None:
     return dict(refs) if isinstance(refs, dict) else None
 
 
+_TEXT_ONLY_LANES = ('image', 'audio', 'video', 'json')
+
+
+def _missing_message(question: str, lane: str, text) -> str:
+    """Explain a missing decision; the media and json lanes get the text-only-writer hint."""
+    head = f'Gate: no decision for "{question}" on the {lane} lane (item: "{preview(text)}"). '
+    if lane in _TEXT_ONLY_LANES:
+        return (
+            head + f'No decision was recorded for this object before this {lane} item arrived '
+            "(System One decides on text lanes only; text decisions are made when the object's text ends)."
+        )
+    return head + f'Put the Gate downstream of the node that answers "{question}", on the same path.'
+
+
 class IInstance(IInstanceBase):
     """Filters data writes; open, closing and close always continue."""
 
     IGlobal: IGlobal
 
     def _passes(self, decisions, lane: str, text, *, refs=None, table_key=None) -> bool:
-        """Resolve every question the rule reads, then evaluate it; a non-ok item always blocks."""
+        """Resolve every question the rule reads, then evaluate it; a non-ok item always blocks (spec 7.2)."""
         rule = self.IGlobal.rule
         answers = {}
         for question in rule.questions:
             found = resolve(decisions, lane, question, refs=refs, table_key=table_key)
             if found is None:
-                raise DecisionError(
-                    f'Gate: no decision for "{question}" on the {lane} lane (item: "{preview(text)}"). '
-                    f'Put the Gate downstream of the node that answers "{question}", on the same path.'
-                )
-            if isinstance(found, NotDecided):
-                warning(
-                    f'Gate: blocked a {lane} item ("{preview(text)}"): {found.group} recorded "{found.status}" for it'
-                )
-                return False
+                raise DecisionError(_missing_message(question, lane, text))
             answers[question] = found
+        # A missing decision is a wiring error and must surface even when another question blocks the item first.
+        undecided = [
+            f'{found.group} recorded "{found.status}"' for found in answers.values() if isinstance(found, NotDecided)
+        ]
+        if undecided:
+            warning(f'Gate: blocked a {lane} item ("{preview(text)}"): {"; ".join(undecided)} for it')
+            return False
         return evaluate(rule, answers)
 
     def _gate(self, lane: str, text, **keys):
