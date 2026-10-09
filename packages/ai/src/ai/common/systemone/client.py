@@ -30,10 +30,12 @@ from typing import Callable
 
 import httpx
 
+from ai.constants import CONST_CHAT_BASE_DELAY, CONST_CHAT_MAX_DELAY, CONST_CHAT_MAX_RETRIES
+
 from .limits import encode_json
 
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
-MAX_RETRY_DELAY = 60.0
+MAX_RETRY_DELAY = CONST_CHAT_MAX_DELAY
 MAX_ERROR_CODE_CHARS = 80
 MAX_ERROR_BODY_CHARS = 500
 
@@ -97,8 +99,8 @@ class SystemOneClient:
         api_key: str | None = None,
         *,
         timeout: float = 30.0,
-        max_retries: int = 3,
-        backoff: float = 0.5,
+        max_retries: int = CONST_CHAT_MAX_RETRIES,
+        backoff: float = CONST_CHAT_BASE_DELAY,
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
