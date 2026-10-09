@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Engine glue: build a DecisionRunner from the node's merged config."""
+"""Engine glue: build a DecisionRunner from the node's merged config, and probe it in validateConfig."""
 
 from __future__ import annotations
 
@@ -28,14 +28,17 @@ from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 
 from ai.common.config import Config
 
-from .client import SystemOneClient
+from .client import SystemOneClient, SystemOneError
 from .limits import DecisionLimits
 from .questions import parse_questions
 from .runner import DecisionRunner
 
+PROBE_STATE = 'Hello, this is a short test message.'
+PROBE_QUESTIONS = {'probe': {'type': 'noul', 'instructions': 'Is this text a greeting?'}}
+
 
 class SystemOneGlobalBase(IGlobalBase):
-    """Shared IGlobal for System One Ask nodes; vendors override the hooks if needed."""
+    """Shared IGlobal for System One nodes; vendors differ only in their services.*.json."""
 
     runner: DecisionRunner | None = None
     _client: SystemOneClient | None = None
@@ -55,32 +58,45 @@ class SystemOneGlobalBase(IGlobalBase):
         """Return this backend's limits (from the profile's ``limits`` block)."""
         return DecisionLimits.from_config(config)
 
+    def _model(self, config: dict) -> str:
+        model = str(config.get('model', '')).strip()
+        if not model:
+            raise ValueError('System One node needs a model name')
+        return model
+
+    def _timeout(self, config: dict) -> float:
+        return float(config.get('timeout') or 30)
+
+    def validateConfig(self):
+        """Check the questions and server fields, then make one live yes/no call (spec §6.4)."""
+        client = None
+        try:
+            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            model = self._model(config)
+            parse_questions(config, self._limits(config))
+            client = SystemOneClient(
+                self._base_url(config), self._api_key(config), timeout=self._timeout(config), max_retries=0
+            )
+            client.decide(model, PROBE_STATE, PROBE_QUESTIONS)
+        except (ValueError, SystemOneError) as exc:
+            warning(str(exc))
+        finally:
+            if client is not None:
+                client.close()
+
     def beginGlobal(self):
         """Validate the questions and build the runner (skipped in CONFIG mode)."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        model = str(config.get('model', '')).strip()
-        if not model:
-            raise ValueError('System One node needs a model name')
+        model = self._model(config)
         limits = self._limits(config)
         specs = parse_questions(config, limits)
-        self._client = SystemOneClient(
-            self._base_url(config), self._api_key(config), timeout=float(config.get('timeout') or 30)
-        )
+        self._client = SystemOneClient(self._base_url(config), self._api_key(config), timeout=self._timeout(config))
         state_metadata = tuple(
             line.strip() for line in str(config.get('state_metadata') or '').splitlines() if line.strip()
         )
-        self.runner = DecisionRunner(
-            self._client,
-            model,
-            specs,
-            limits,
-            state_metadata=state_metadata,
-            on_error=str(config.get('on_error') or 'fail'),
-            warn=warning,
-            debug=debug,
-        )
+        self.runner = DecisionRunner(self._client, model, specs, limits, state_metadata=state_metadata, debug=debug)
         debug(f'    System One: {self._client.endpoint} model={model} questions={len(specs)}')
 
     def endGlobal(self):

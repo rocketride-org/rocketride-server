@@ -29,7 +29,7 @@ from typing import List
 from rocketlib import IInstanceBase, warning
 
 from ai.common.decision import fingerprint, preview, record, stamp
-from ai.common.schema import Doc, DocMetadata
+from ai.common.schema import Answer, Doc, DocMetadata, Question
 
 TEXT_DOC_TYPES = frozenset({'Document', 'Text'})
 NOT_TEXT = 'System One reads text; convert this content to text first (e.g. OCR or caption)'
@@ -47,6 +47,7 @@ class SystemOneInstanceBase(IInstanceBase):
     """Shared IInstance for every System One vendor node."""
 
     _tables: int = 0
+    _text: list | None = None
 
     def _source_id(self) -> str:
         """Return the component id (e.g. ``decision_ollama_1``), falling back to the logical type."""
@@ -83,7 +84,8 @@ class SystemOneInstanceBase(IInstanceBase):
         return {**item, 'status': 'ok', 'answers': outcome.answers}, outcome.usage
 
     def open(self, obj):
-        """Reset the per-object state."""
+        """Reset the per-object state (text buffer, table counter)."""
+        self._text = None
         self._tables = 0
 
     def writeDocuments(self, documents: List[Doc]):
@@ -132,3 +134,74 @@ class SystemOneInstanceBase(IInstanceBase):
         self._tables += 1
         item, usage = self._decide_item(item, table)
         self._record(item, usage)
+
+    def _too_long_for_whole(self, lane: str, size: dict) -> str:
+        return (
+            f'{self._source_id()}: the {lane} input is too long for the model ({_size_text(size)}). '
+            'System One never decides on part of an input; split it first '
+            '(e.g. a preprocessor, then a System One node on the documents lane).'
+        )
+
+    def _decide_whole(self, item: dict, state) -> None:
+        """Decide a whole-object input (text, question, answer); too long fails the object."""
+        outcome = self.IGlobal.runner.decide(state, source=self._source_id())
+        if outcome.size is not None:
+            raise ValueError(self._too_long_for_whole(item['lane'], outcome.size))
+        self._record({**item, 'status': 'ok', 'answers': outcome.answers}, outcome.usage)
+
+    def writeText(self, text: str):
+        """Buffer the object's text; nothing goes downstream until ``closing`` has decided."""
+        if self._text is None:
+            self._text = []
+        self._text.append(text)
+        size = self.IGlobal.runner.oversize(''.join(self._text))
+        if size is not None:
+            raise ValueError(self._too_long_for_whole('text', size))
+        return self.preventDefault()
+
+    def closing(self):
+        """Decide on the whole text, record it, then replay the buffered text downstream in order.
+
+        Works because the engine binds ``closing`` upstream-first in topological order, so the
+        replayed text reaches consumers that have not flushed yet (``endpoint.pipes.cpp``).
+        """
+        if self._text is None:
+            return
+        buffered, self._text = self._text, None
+        content = ''.join(buffered)
+        if not content.strip():
+            raise ValueError(f"{self._source_id()}: no text to decide on (the object's text is empty)")
+        self._decide_whole({'lane': 'text', 'preview': preview(content)}, content)
+        for text in buffered:
+            self.instance.writeText(text)
+
+    def writeQuestions(self, question: Question):
+        """Decide on the question (history and documents dropped to fit, with a warning); forward it unchanged."""
+        state = {
+            'question': '\n'.join(q.text for q in question.questions or [] if q.text),
+            'history': [{'role': h.role, 'content': h.content} for h in question.history or []],
+            'context': [str(c) for c in question.context or []],
+            'documents': [d.page_content or '' for d in question.documents or []],
+        }
+        if not state['question'].strip():
+            raise ValueError(f'{self._source_id()}: the question has no text to decide on')
+        try:
+            fitted, size = self.IGlobal.runner.fit_question(state)
+        except ValueError as exc:
+            raise ValueError(f'{self._source_id()}: {exc}') from exc
+        item = {'lane': 'questions', 'preview': preview(state['question'])}
+        if size is not None:
+            warning(
+                f'{self._source_id()}: question input truncated to fit the model ({_size_text(size)}); '
+                'dropped oldest history first, then the last documents'
+            )
+            item.update(truncated=True, size=size)
+        self._decide_whole(item, fitted)
+
+    def writeAnswers(self, answer: Answer):
+        """Decide on one answer (JSON when it is JSON, else its text); forward it unchanged."""
+        text = answer.getText()
+        state = answer.getJson() if answer.isJson() else text
+        if not text.strip() or state in (None, {}, []):
+            raise ValueError(f'{self._source_id()}: the answer is empty; nothing to decide on')
+        self._decide_whole({'lane': 'answers', 'preview': preview(text)}, state)

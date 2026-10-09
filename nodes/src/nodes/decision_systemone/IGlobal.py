@@ -20,10 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""System One Ask node: global state (shared by every vendor profile)."""
+"""System One node: global state (shared by every vendor profile)."""
 
 from ai.common.systemone.global_base import SystemOneGlobalBase
 
 
 class IGlobal(SystemOneGlobalBase):
-    """System One Ask node (all vendors share this; differences live in services.*.json)."""
+    """System One node (all vendors share this; differences live in services.*.json)."""

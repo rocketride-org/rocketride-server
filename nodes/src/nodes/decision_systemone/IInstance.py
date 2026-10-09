@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""System One Ask node: per-pipeline instance."""
+"""System One node: per-pipeline instance."""
 
 from ai.common.systemone.instance_base import SystemOneInstanceBase
 
@@ -28,6 +28,6 @@ from .IGlobal import IGlobal
 
 
 class IInstance(SystemOneInstanceBase):
-    """System One Ask node instance."""
+    """System One node instance."""
 
     IGlobal: IGlobal

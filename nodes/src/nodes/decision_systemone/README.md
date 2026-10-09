@@ -1,6 +1,6 @@
 # decision_systemone
 
-A RocketRide pipeline node that asks typed questions (yes/no, pick-one, rubric) about each document with a System One decision model, and attaches the answers to the document as metadata.
+A RocketRide pipeline node that asks typed questions (yes/no, pick-one, rubric) about each item with a System One decision model and records the answers on the object at `response.decisions`, where Gate nodes read them.
 
 ## About TypeSafe
 
@@ -11,42 +11,29 @@ served by several other backends, including Ollama.
 
 ## What it does
 
-For every document on the `documents` lane, the node sends all of its configured
-questions to a System One backend in **one call** (`POST /v1/systemone`) and writes
-the answers to `metadata.decisions.<name>`. The document itself passes through
-unchanged, so a downstream node, such as the Router (shipping separately), can branch on the answers. The same answers
-are also emitted as JSON on the `answers` lane when something is connected to it.
-Use it for cheap classification and gating ahead of costly steps; it does not
-generate text and is not an agent tool. The shape of `metadata.decisions` is defined in
-[Decisions metadata](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/development/nodes/decisions-metadata.md).
+The node makes **one model call per item** (`POST /v1/systemone`) and sends all of its
+configured questions in that call. An item is the whole text of an object (buffered until
+the object's text ends), each document, each table, the question, or the answer. Several
+lanes may be wired on one node, and every lane gets the same questions. The answers are
+recorded on the object at `response.decisions`, where a Gate node reads them to pass or
+block. Documents are forwarded with `metadata.decision_refs` pointing at their recorded
+answers; text, tables, questions and answers are forwarded unchanged. The node never
+decides on part of an input. Use it for cheap classification and gating ahead of costly
+steps; it does not generate text and is not an agent tool. The recorded format is
+described in [Decisions](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/development/nodes/decisions.md); routing on it is done by the Gate node.
 
 ## Lanes
 
-| Lane in     | Lane out    | Description                                                                              |
-| ----------- | ----------- | ---------------------------------------------------------------------------------------- |
-| `documents` | `documents` | The input documents, forwarded once with `metadata.decisions` added                      |
-| `documents` | `answers`   | One JSON answer per document, written only when something is wired to the `answers` lane |
+| Lane in     | Lane out    | Description                                                                                  |
+| ----------- | ----------- | -------------------------------------------------------------------------------------------- |
+| `text`      | `text`      | One item per object: all of its text, decided once when the text ends, then replayed in order |
+| `documents` | `documents` | One item per document; forwarded stamped with `metadata.decision_refs`                        |
+| `table`     | `table`     | One item per table, recorded under its fingerprint; forwarded unchanged                       |
+| `questions` | `questions` | One item per question, with its history, context and documents; forwarded unchanged           |
+| `answers`   | `answers`   | One item per answer (its JSON when it is JSON, else its text); forwarded unchanged            |
 
-The `answers` payload has the document's identity, the decisions, and the token usage the
-backend reported:
-
-```json
-{
-	"objectId": "...",
-	"chunkId": 0,
-	"parent": "tickets/123.txt",
-	"decisions": {
-		"urgent": { "kind": "yes_no", "answer": "yes", "probability": 0.93, "confidence": 0.86, "uncertain": false, "model": "jev-1.13.0", "source": "decision_typesafe_1" },
-		"team": { "kind": "pick_one", "answer": "technical", "probabilities": { "billing": 0.08, "technical": 0.9, "sales": 0.02 }, "confidence": 0.85, "uncertain": false, "model": "jev-1.13.0", "source": "decision_typesafe_1" }
-	},
-	"usage": { "input_tokens": 296, "output_tokens": 20 }
-}
-```
-
-Each entry under `decisions` is a full decision object, as described in the
-metadata contract. `usage` is `null` when a call failed under `pass_through`.
-A document with empty content is not sent to the backend: the node logs a warning,
-forwards the document without decisions, and writes nothing to `answers` for it.
+A document or table with empty content, a document that is not text, and an empty text,
+question or answer fail the object with an error that names the node.
 
 ## Profiles
 
@@ -72,7 +59,8 @@ of them. Pick the profile first; on the custom endpoint node, also set the serve
 (`/v1/systemone` is appended unless the URL already ends in `/v1`) and the model name as
 the endpoint serves it. The per-backend limits are listed under [Limits by backend](#limits-by-backend).
 
-The question set is checked when the pipeline starts, before any document flows. The
+The question set is checked when the pipeline starts, before any item flows. Validating the
+configuration also makes one live yes/no call to the backend and reports a failure as a warning. The
 node refuses to start if a name is invalid or duplicated, an option or level count is
 outside the backend's limits, or no question is configured.
 
@@ -81,13 +69,13 @@ outside the backend's limits, or no question is configured.
 There are three arrays, one per question kind. Every question needs a `name` and a
 `question`.
 
-| Array      | Kind       | Answer written to `metadata.decisions.<name>.answer`          |
+| Array      | Kind       | Recorded `answer`                                             |
 | ---------- | ---------- | ------------------------------------------------------------- |
 | `yes_no`   | Yes/No     | `yes`, `no` or `uncertain`                                    |
 | `pick_one` | Pick-one   | The chosen option value, or `uncertain`                       |
 | `rubric`   | Rubric     | The index of the most probable level (integer), or `uncertain` |
 
-- **Name** is the key under `metadata.decisions`. It must be lowercase letters, digits
+- **Name** is the question name; a Gate node refers to it. It must be lowercase letters, digits
   and `_`, start with a letter, and be at most 48 characters. Names must be unique across
   all three arrays, and a node holds at most 64 questions.
 - **Question** is sent to the model as the instructions. For a yes/no question, phrase it
@@ -97,7 +85,7 @@ There are three arrays, one per question kind. Every question needs a `name` and
 
 Write questions about what the document says, and phrase each one so that the answer
 you want is the one the model scores. Breaking a judgment into several small questions
-and combining the answers downstream works better than one broad question.
+and combining the answers in a Gate works better than one broad question.
 
 ### Yes/No questions
 
@@ -109,9 +97,9 @@ reported probability of yes is at least the threshold. Raise it to make `yes` ra
 ### Options
 
 For a pick-one question, enter one option per line as `value | optional description`.
-The value is what ends up in `answer` and what a downstream node matches on, so it must be 1 to 64
-characters of letters, digits, `_` or `-`. `uncertain` and `error` are reserved and cannot be
-used as values. Values must be unique within a question, and the count must be between 2
+The value is what ends up in `answer` and what a Gate node matches on, so it must be 1 to 64
+characters of letters, digits, `_` or `-`. `uncertain` is reserved and cannot be
+used as a value. Values must be unique within a question, and the count must be between 2
 and the backend's option limit.
 
 ```text
@@ -142,8 +130,7 @@ Something is broken and there is no workaround
 
 The model returns a confidence with every answer. When it is below the question's
 **Minimum confidence** (default 0, so never), the answer is replaced with the string
-`uncertain` and `uncertain` is set to `true`, so a downstream node, such as the Router (shipping separately), can send the document to a review
-branch. Confidence is computed as follows:
+`uncertain` and `uncertain` is set to `true`, so a Gate node can block it or send it to review. Confidence is computed as follows:
 
 - Yes/No: the margin from the threshold, scaled to 0 to 1. For `yes`, `(p - t) / (1 - t)`;
   for `no`, `(t - p) / t`, where `p` is the probability of yes and `t` the threshold.
@@ -154,26 +141,11 @@ Confidence is not comparable across backends. See [Notes](#confidence-does-not-t
 
 ### Metadata to include
 
-By default the model sees only the document text. To also give it metadata, list the keys
+By default the model sees only the document text. This setting applies to the `documents` lane. To also give it metadata, list the keys
 (one per line, for example `parent`). The model then receives an object holding the
 `content` and each listed key that the document actually has, and questions can refer to
 those parts by name. Keys the document does not have are skipped. Included metadata
 counts against the backend's input limits.
-
-### On error
-
-Controls what happens when a call fails for a reason specific to the document or the
-moment (bad request, rate limit still failing after retries, server error, network
-failure, an answer that does not match the question):
-
-- **Fail the object** (default): the object fails.
-- **Pass through with answer `error`**: the document is forwarded, and every question
-  gets `answer: 'error'`, `uncertain: true`, `confidence: 0` and an `error` message, so
-  a downstream node, such as the Router (shipping separately), can send it to its own branch.
-
-Configuration errors are not affected by this setting. A 401, 403 or 404 response always
-fails the object, even under pass-through, because every later document would fail the
-same way.
 
 ## Authentication
 
@@ -196,48 +168,51 @@ omitted when the field is empty.
 ### Limits by backend
 
 Limits belong to the model, so each profile carries its own. The node checks the question
-set against them at startup and truncates oversized input (see below).
+set against them at startup and checks each input against the input limit (see [Too long](#too-long)).
 
 | Limit                  | Custom endpoint | TypeSafe Jev, OpenRouter (all profiles) | Ollama `nimble` | Ollama `tev1` | Ollama `custom` |
 | ---------------------- | --------------- | --------------------------------------- | --------------- | ------------- | --------------- |
 | Options per question   | 26              | 255                                     | 26              | 24            | 26              |
 | Levels per rubric      | 26              | 10                                      | 26              | 26            | 26              |
 | Questions per node     | 64              | 64                                      | 64              | 64            | 64              |
-| Input, in tokens       | 8,000           | 32,000                                  | 32,000          | 32,000        | 8,000           |
+| Input, in tokens       | 8,000           | 32,000                                  | 8,192           | 2,048         | 8,000           |
 | Characters per token   | 4               | 6                                       | 4               | 4             | 4               |
 | Request body           | 65,536 bytes    | no cap applied                          | 65,536 bytes    | 65,536 bytes  | 65,536 bytes    |
 | Option descriptions    | strings only    | objects allowed                         | strings only    | strings only  | strings only    |
 
 The custom endpoint uses conservative, Ollama-level limits because the node cannot know
 what an arbitrary server accepts. Characters per token is the node's own estimate, used
-only to decide when to truncate.
+only to decide when an input is too long.
 
-### Truncation
+### Too long
 
-If the document text plus the questions would exceed the backend's input limit (estimated
-from characters per token, after reserving about 260 tokens of request overhead and room
-for the longest question and any included metadata), or the request body would exceed the
-body cap, the node cuts the text from the end and keeps the head. For each such document it
-logs a warning with the original and kept sizes, and sets `metadata.decisions_truncated`
-to `true` on the forwarded document.
+The input limit is checked before the call, from characters per token, after reserving about
+260 tokens of request overhead and room for the longest question and any included metadata,
+and against the request body cap. If the backend still rejects the request as too large
+(HTTP 413 or `max_tokens_exceeded`), the input counts as too long. The node never cuts an
+input to fit and never sends part of it. What happens depends on the lane:
 
-Truncation only affects what the model sees. Downstream nodes receive the full document.
-
-If the backend still rejects the request as too large (HTTP 413 or `max_tokens_exceeded`),
-the node retries once with the kept text cut by another 25% and logs a second warning for the
-retry, then applies **On error**.
+| Lane                 | When the input is too long                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| `text`, `answers`    | The object fails, with a message to split the input first (for example with a preprocessor, then a System One node on the `documents` lane). |
+| `documents`, `table` | The item is recorded with status `too_long`, which every Gate blocks, and the node logs a warning. The object continues. |
+| `questions`          | History is dropped oldest first, then documents last first, until it fits. The recorded item is marked `truncated` and the node logs a warning. If the question alone does not fit, the object fails. |
 
 ### Errors and retries
 
-| Response                         | Handling                                                                    |
-| -------------------------------- | --------------------------------------------------------------------------- |
-| 401, 403                         | Configuration error. Always fails the object, regardless of **On error**.   |
-| 404                              | Configuration error. Always fails the object. On Ollama it usually means the model is not pulled; run `ollama pull <model>`. |
-| 400, 422                         | Item error: follows **On error**.                                           |
-| 413, `max_tokens_exceeded`       | One retry with shorter text (see Truncation), then **On error**.            |
-| 429, 500, 502, 503, 504, 529, network errors | Retried up to 3 times with exponential backoff, honoring `Retry-After` and `retry-after-ms`; then **On error**. |
+Calls to the backend are retried up to 5 times with exponential backoff starting at 1 s and
+capped at 60 s, honoring `Retry-After` and `retry-after-ms`. Retried responses are 429, 500,
+502, 503, 504, 529 and network errors. Any failure to get a valid decision fails the object:
+there is no pass-through mode, because a missing decision would otherwise look like a pass.
 
-An answer that is missing, of the wrong type, or out of range is also an item error.
+| Response                         | Meaning                                                                     |
+| -------------------------------- | --------------------------------------------------------------------------- |
+| 401, 403                         | Configuration error: check the API key.                                     |
+| 404                              | Configuration error. On Ollama it usually means the model is not pulled; run `ollama pull <model>`. |
+| 400, 422                         | The backend rejected the request.                                           |
+| 413, `max_tokens_exceeded`       | The input is too long (see above).                                          |
+
+An answer that is missing, of the wrong type, or out of range also fails the object.
 
 ### Confidence does not transfer between backends
 
@@ -274,8 +249,8 @@ Ollama also serves `clef`, which is omitted here: Clef is the vision model and t
 
 ### Testing
 
-`services.ollama.json` carries a `test` block that runs a Nimble classification against a
-local Ollama. It is skipped unless `ROCKETRIDE_SYSTEMONE_OLLAMA` is set.
+`services.ollama.json` carries a `test` block that runs a Nimble decision against a
+local Ollama and checks that the forwarded document carries a decision reference. It is skipped unless `ROCKETRIDE_SYSTEMONE_OLLAMA` is set.
 
 ## Upstream docs
 
@@ -298,9 +273,8 @@ local Ollama. It is skipped unless `ROCKETRIDE_SYSTEMONE_OLLAMA` is set.
 | `decision.levels` | `string` | **Levels**<br/>One per line, level 0 first; describe the situation, not a degree |  |
 | `decision.min_confidence` | `number` | **Minimum confidence**<br/>Below this the answer is 'uncertain'. Confidence is not comparable across backends. | `0` |
 | `decision.model` | `string` | **Model**<br/>Model name as served by the backend |  |
-| `decision.name` | `string` | **Name**<br/>Key under metadata.decisions (lowercase, digits, _) |  |
+| `decision.name` | `string` | **Name**<br/>Question name; the Gate refers to it (lowercase, digits, _) |  |
 | `decision.no_means` | `string` | **No means** |  |
-| `decision.on_error` | `string` | **On error** | `"fail"` |
 | `decision.options` | `string` | **Options**<br/>One per line: value \| optional description |  |
 | `decision.pick_one` | `array` | **Pick-one questions** |  |
 | `decision.question` | `string` | **Question**<br/>Phrase it so a high value means yes |  |
@@ -319,9 +293,8 @@ local Ollama. It is skipped unless `ROCKETRIDE_SYSTEMONE_OLLAMA` is set.
 | `decision.levels` | `string` | **Levels**<br/>One per line, level 0 first; describe the situation, not a degree |  |
 | `decision.min_confidence` | `number` | **Minimum confidence**<br/>Below this the answer is 'uncertain'. Confidence is not comparable across backends. | `0` |
 | `decision.model` | `string` | **Model**<br/>Model name as served by the backend |  |
-| `decision.name` | `string` | **Name**<br/>Key under metadata.decisions (lowercase, digits, _) |  |
+| `decision.name` | `string` | **Name**<br/>Question name; the Gate refers to it (lowercase, digits, _) |  |
 | `decision.no_means` | `string` | **No means** |  |
-| `decision.on_error` | `string` | **On error** | `"fail"` |
 | `decision.options` | `string` | **Options**<br/>One per line: value \| optional description |  |
 | `decision.pick_one` | `array` | **Pick-one questions** |  |
 | `decision.question` | `string` | **Question**<br/>Phrase it so a high value means yes |  |
@@ -341,9 +314,8 @@ local Ollama. It is skipped unless `ROCKETRIDE_SYSTEMONE_OLLAMA` is set.
 | `decision.levels` | `string` | **Levels**<br/>One per line, level 0 first; describe the situation, not a degree |  |
 | `decision.min_confidence` | `number` | **Minimum confidence**<br/>Below this the answer is 'uncertain'. Confidence is not comparable across backends. | `0` |
 | `decision.model` | `string` | **Model**<br/>Model name as served by the backend |  |
-| `decision.name` | `string` | **Name**<br/>Key under metadata.decisions (lowercase, digits, _) |  |
+| `decision.name` | `string` | **Name**<br/>Question name; the Gate refers to it (lowercase, digits, _) |  |
 | `decision.no_means` | `string` | **No means** |  |
-| `decision.on_error` | `string` | **On error** | `"fail"` |
 | `decision.options` | `string` | **Options**<br/>One per line: value \| optional description |  |
 | `decision.pick_one` | `array` | **Pick-one questions** |  |
 | `decision.question` | `string` | **Question**<br/>Phrase it so a high value means yes |  |
@@ -363,9 +335,8 @@ local Ollama. It is skipped unless `ROCKETRIDE_SYSTEMONE_OLLAMA` is set.
 | `decision.levels` | `string` | **Levels**<br/>One per line, level 0 first; describe the situation, not a degree |  |
 | `decision.min_confidence` | `number` | **Minimum confidence**<br/>Below this the answer is 'uncertain'. Confidence is not comparable across backends. | `0` |
 | `decision.model` | `string` | **Model**<br/>Model name as served by the backend |  |
-| `decision.name` | `string` | **Name**<br/>Key under metadata.decisions (lowercase, digits, _) |  |
+| `decision.name` | `string` | **Name**<br/>Question name; the Gate refers to it (lowercase, digits, _) |  |
 | `decision.no_means` | `string` | **No means** |  |
-| `decision.on_error` | `string` | **On error** | `"fail"` |
 | `decision.options` | `string` | **Options**<br/>One per line: value \| optional description |  |
 | `decision.pick_one` | `array` | **Pick-one questions** |  |
 | `decision.question` | `string` | **Question**<br/>Phrase it so a high value means yes |  |
