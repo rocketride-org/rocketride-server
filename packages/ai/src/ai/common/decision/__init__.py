@@ -20,39 +20,4 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""System One decision models: shared, vendor-neutral building blocks."""
-
-from .client import SystemOneClient, SystemOneError
-from .limits import DecisionLimits
-from .questions import (
-    PICK_ONE,
-    RUBRIC,
-    YES_NO,
-    ProtocolError,
-    QuestionConfigError,
-    QuestionSpec,
-    build_wire_questions,
-    error_decision,
-    map_answer,
-    parse_questions,
-)
-from .runner import DecisionResult, DecisionRunner, merge_decisions
-
-__all__ = [
-    'DecisionLimits',
-    'DecisionResult',
-    'DecisionRunner',
-    'PICK_ONE',
-    'ProtocolError',
-    'RUBRIC',
-    'SystemOneClient',
-    'SystemOneError',
-    'YES_NO',
-    'QuestionConfigError',
-    'QuestionSpec',
-    'build_wire_questions',
-    'error_decision',
-    'map_answer',
-    'merge_decisions',
-    'parse_questions',
-]
+"""Writer-neutral decisions on ``currentObject.response['decisions']`` and gate rules (any node may write them)."""

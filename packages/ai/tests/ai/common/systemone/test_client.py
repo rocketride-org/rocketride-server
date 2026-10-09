@@ -20,14 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Unit tests for ai.common.decision.client (httpx.MockTransport, no network)."""
+"""Unit tests for ai.common.systemone.client (httpx.MockTransport, no network)."""
 
 import json
 
 import httpx
 import pytest
 
-from ai.common.decision.client import SystemOneClient, SystemOneError
+from ai.common.systemone.client import SystemOneClient, SystemOneError
 
 OK = {
     'model': 'jev-1.13.0',
@@ -162,7 +162,7 @@ def test_non_json_success_is_protocol_error():
 
 
 def test_non_ascii_state_and_content_type():
-    from ai.common.decision.limits import encode_json
+    from ai.common.systemone.limits import encode_json
 
     seen = {}
 
