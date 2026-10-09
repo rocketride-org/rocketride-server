@@ -22,7 +22,18 @@
 # =============================================================================
 
 from typing import Dict
-from rocketlib import IGlobalBase
+from rocketlib import IGlobalBase, warning
+
+
+RESERVED_KEYS = frozenset({'decisions'})
+RESERVED_MESSAGE = "'decisions' is reserved for decision nodes"
+
+
+def _reserved_key_used(config: dict) -> bool:
+    names = [config.get('laneName')] + [
+        info.get('laneName') for info in config.get('lanes') or [] if isinstance(info, dict)
+    ]
+    return any(name in RESERVED_KEYS for name in names)
 
 
 class IGlobal(IGlobalBase):
@@ -55,3 +66,12 @@ class IGlobal(IGlobalBase):
 
                 # Add the lane to the global lanes dictionary
                 self.lanes[laneId] = laneName
+
+        # 'decisions' belongs to decision nodes (System One, ...); a lane writing there would clobber them.
+        if _reserved_key_used(config):
+            raise ValueError(RESERVED_MESSAGE)
+
+    def validateConfig(self):
+        """Reject result keys reserved for other writers."""
+        if _reserved_key_used(self.glb.connConfig):
+            warning(RESERVED_MESSAGE)
