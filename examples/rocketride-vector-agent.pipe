@@ -1,0 +1,102 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      }
+    },
+    {
+      "id": "agent_1",
+      "provider": "agent_rocketride",
+      "config": {
+        "instructions": [
+          "You manage a document knowledge base kept in the team's RocketRide vector store, attached to you as tools.",
+          "Always answer from the tools, never from memory: objdir lists the stored documents as a map of parent path to object id, stats gives the row count, embedding model and vector size, get returns the chunks of one document by object_id, search finds documents by meaning when the store has an embedding provider.",
+          "upsert and delete are offered only when the store's 'Allow writes through tools' setting is on. If a tool you need is not available, say so plainly and stop; do not invent a workaround.",
+          "Answer briefly and quote the exact object ids and paths you saw."
+        ],
+        "max_waves": 6,
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_1",
+      "provider": "llm_anthropic",
+      "config": {
+        "profile": "claude-haiku-4-5",
+        "claude-haiku-4-5": {
+          "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}"
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "memory_1",
+      "provider": "memory_internal",
+      "config": {
+        "type": "memory_internal"
+      },
+      "control": [
+        {
+          "classType": "memory",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "rrvector_1",
+      "provider": "rocketride_vector",
+      "config": {
+        "profile": "cloud",
+        "cloud": {
+          "collection": "knowledge_base",
+          "allow_write": false
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "response_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "d917416e-8bd1-4ecb-977f-f0a51e083245",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

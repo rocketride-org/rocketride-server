@@ -34,7 +34,8 @@ that name. The read functions are always offered. `upsert` and `delete` are offe
 is on, because they change the team's managed database; while it is off they
 are left out of the tool list: an agent's call fails with "not found in tool
 catalog", and an app's `client.tool` call fails with the engine's "No handler
-found for tool" error.
+found for tool" error. `examples/rocketride-vector-agent.pipe` in the
+repository is a chat agent wired to this node's tools.
 
 | Function | Description |
 | --- | --- |

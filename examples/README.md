@@ -119,6 +119,28 @@ chat -> LlamaIndex agent -> response
 
 ---
 
+### rocketride-vector-agent.pipe
+
+**Knowledge-base agent** on RocketRide Cloud: an agent manages the documents in the team's managed vector store through the store's tools.
+
+```text
+chat -> RocketRide agent -> response
+              |
+        +-----+-----+
+        |           |
+       LLM      rocketride_vector
+     (Claude)      (tools)
+```
+
+- The agent lists the stored documents (`objdir`), reads one back (`get`), reports the store's statistics (`stats`) and searches by meaning (`search`, when the store node has an embedding provider configured)
+- `upsert` and `delete` are offered to the agent only when the store node's "Allow writes through tools" setting is on; it is off in this template, so asked to delete, the agent reports that it has no delete tool
+- The store is the team's RocketRide cloud database, so the template runs on RocketRide Cloud or on a self-hosted engine with a database broker; on a local engine use `store_postgres` with your own PostgreSQL instead
+- Seed the store first through a pipeline that writes to the node's `documents` lane, then ask the agent about what is there
+
+**Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`
+
+---
+
 ### slack-agent.pipe
 
 **Slack-connected agent** that can post messages, list channels, and read channel history.
