@@ -223,7 +223,23 @@ def _build_rr_env(monkeypatch):
                 self._createCollection(len(documents[0].embedding))
             return True
 
+    class _StubStoreGlobalBase:
+        """Stand-in for StoreGlobalBase: rocketride_vector's IGlobal sits on it since #2587.
+
+        These tests drive the driver Store directly, so only the names the node
+        module imports are needed, not the base's lifecycle.
+        """
+
+        serverName = ''
+        store = None
+        allow_write = True
+
+    class _StubStoreInstanceBase:
+        pass
+
     store_mod.DocumentStoreBase = _StubDocumentStoreBase
+    store_mod.StoreGlobalBase = _StubStoreGlobalBase
+    store_mod.StoreInstanceBase = _StubStoreInstanceBase
 
     monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
     monkeypatch.setitem(sys.modules, 'ai.common', common_pkg)
@@ -620,6 +636,16 @@ class TestRocketrideVectorE2E:
         assert results, 'semantic search returned nothing'
         assert results[0].page_content == 'doc 17'
         assert results[0].score > 0.99
+
+    def test_listing_skips_the_schema_row_and_deleted_documents(self, rr_env, vec_store):
+        rng = np.random.default_rng(43)
+        docs = self._chunks(rr_env.schema, [('one', _unit_vec(rng)), ('two', _unit_vec(rng))])
+        docs[1].metadata.parent = '/other'
+        vec_store.addChunks(docs)
+        vec_store.markDeleted(['obj-1'])
+
+        # No None key for the schema row, and the soft-deleted document is gone.
+        assert vec_store.getPaths() == {'/test': 'obj-0'}
 
     def test_upsert_replaces_same_object_id(self, rr_env, vec_store):
         rng = np.random.default_rng(31)

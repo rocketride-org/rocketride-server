@@ -13,13 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["store"],
+	"classType": ["store", "tool"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
 	//     engine
 	//
-	"capabilities": [],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A RocketRide-managed vector store backed by PostgreSQL + pgvector. Stores ", "and semantically searches high-dimensional embeddings in your own provisioned ", "RocketRide cloud database with zero setup — no host, user, or password to enter; ", "the connection is resolved automatically from your signed-in RocketRide identity. ", "An HNSW index is created on first write so semantic search is fast from the start."],
+	"description": ["A RocketRide-managed vector store backed by PostgreSQL + pgvector. Stores ", "and semantically searches high-dimensional embeddings in your own provisioned ", "RocketRide cloud database with zero setup — no host, user, or password to enter; ", "the connection is resolved automatically from your signed-in RocketRide identity. ", "An HNSW index is created on first write so semantic search is fast from the start. ", "Agents and apps can also use the store as tools: search, objdir, get and stats always, ", "upsert and delete when writes through tools are allowed."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -84,7 +84,9 @@
 				"score": 0.5,
 				"similarity": "cosine",
 				"hnsw_m": 16,
-				"hnsw_ef_construction": 64
+				"hnsw_ef_construction": 64,
+				"serverName": "rrvector",
+				"allow_write": false
 			}
 		}
 	},
@@ -130,9 +132,22 @@
 			"minimum": 4,
 			"maximum": 1000
 		},
+		"rrvector.serverName": {
+			"type": "string",
+			"title": "Tool Server Name",
+			"description": "Label for this store in the messages its tool functions return (for example a refused write names rrvector.delete). Agents see the functions as <node id>.search, objdir, get, stats, and upsert / delete when writes through tools are allowed; apps call client.tool with the function name and the node id.",
+			"default": "rrvector",
+			"minLength": 1
+		},
+		"rrvector.allow_write": {
+			"type": "boolean",
+			"title": "Allow writes through tools",
+			"default": false,
+			"description": "Permit the upsert and delete tool functions to change this table in your RocketRide cloud database. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, get, stats) are unaffected."
+		},
 		"rrvector.cloud": {
 			"object": "cloud",
-			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction"]
+			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.serverName", "rrvector.allow_write"]
 		},
 		"rrvector.profile": {
 			"hidden": true,

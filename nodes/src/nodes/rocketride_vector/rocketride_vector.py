@@ -476,7 +476,9 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return {}
 
-        where_clauses = ['chunkId = 0']
+        # First chunks only, and never the store's own schema row or a
+        # soft-deleted document (both carry isDeleted).
+        where_clauses = ['chunkId = 0', 'isDeleted = FALSE']
         params = []
 
         if parent is not None:

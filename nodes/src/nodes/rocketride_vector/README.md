@@ -9,9 +9,10 @@ over the SQL and graph nodes for retrieval-augmented document search.
 The node writes documents from the documents lane into a pgvector-backed table,
 replacing existing chunks for the same object IDs. Questions can produce
 matching documents, answers, or enriched questions through the three configured
-question outputs. Use it when retrieval should flow through a pipeline; unlike
-the tool-capable sibling stores, this node registers no agent tools or raw-SQL
-execution surface.
+question outputs. Use it when retrieval should flow through a pipeline. The
+same store is available to an agent or app as tools: the read tools are always
+on, and the write tools are opt-in because the table lives in the team's
+managed database. There is no raw-SQL execution surface.
 
 ## Lanes
 
@@ -21,6 +22,34 @@ execution surface.
 | questions | documents | Returns matching documents. |
 | questions | answers | Returns matching documents as answers. |
 | questions | questions | Enriches a question with matching documents. |
+
+## As a tool
+
+An agent node in the same pipeline sees each function as
+`<node id>.<function>`, where the node id is this node's id in the pipeline
+(for example `rrvector_1.search`). An app calls `client.tool` with the bare
+function name and this node's id (`tool='search', node_id='rrvector_1'`); with
+no node id the call goes to the first node in the pipeline that owns a tool of
+that name. The read functions are always offered. `upsert` and `delete` are offered only while Allow writes through tools
+is on, because they change the team's managed database; while it is off they
+are left out of the tool list: an agent's call fails with "not found in tool
+catalog", and an app's `client.tool` call fails with the engine's "No handler
+found for tool" error.
+
+| Function | Description |
+| --- | --- |
+| `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and a metadata `filter` (`objectId`, `nodeId`, `parent`) and returns matching content, metadata, and scores. Needs the node's Embedding setting (the embedding sub-block under Parameters) configured; without it the tool returns a failure object naming the node. |
+| `objdir` | Lists the distinct parent paths in the table as a map of parent path to one object ID each; accepts optional `parent`, `offset`, and `limit`. Documents that share a parent path appear as one entry, so give each document its own parent to list them all. Deleted documents are not listed. |
+| `get` | Returns up to `limit` chunks of one document by `object_id`, sorted by chunk ID; this store does not apply `offset`. |
+| `stats` | Returns the row (chunk) count of the whole table, including the store's one internal schema row and soft-deleted documents, the embedding model name, and the vector size. |
+| `upsert` | Adds or replaces a non-empty `documents` array (content, object ID, optional metadata, optional embedding and model). Offered only while writes are allowed. |
+| `delete` | Deletes the chunks of a non-empty `object_ids` array and returns the deleted count. Offered only while writes are allowed. |
+
+The functions return `{"success": false, "error": "..."}` for a missing or
+invalid input, a missing embedding provider, or a refused write. `upsert`
+reports database errors the same way. `search` falls back to a keyword search
+when the semantic search fails and reports a failure object only if that fails
+too; `delete`, `objdir`, `get`, and `stats` raise database errors.
 
 ## Configuration
 
@@ -70,6 +99,21 @@ supported ranges (m 2–100 and ef_construction 4–1,000), and ef_construction 
 raised to at least twice m. These values do not rebuild an index that already
 exists.
 
+### Tool Server Name
+
+The tool-server name defaults to `rrvector`. It labels this node in the
+messages the tool functions return (for example a refused write names
+`rrvector.delete`); agents and apps address the functions by the node's
+pipeline id, which already keeps several vector stores apart.
+
+### Allow writes through tools
+
+Off by default. When off, `upsert` and `delete` are not offered: an agent's
+call fails with "not found in tool catalog", an app's with the engine's "No
+handler found for tool" error. `search`, `objdir`, `get`, and `stats` keep
+working, and the documents lane still writes. Turn it on only for a pipeline
+whose agent or app is meant to manage the documents in this table.
+
 ## Notes
 
 ### Storage and retrieval behavior
@@ -93,12 +137,14 @@ for a re-ingested object.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
+| `rrvector.allow_write` | `boolean` | **Allow writes through tools**<br/>Permit the upsert and delete tool functions to change this table in your RocketRide cloud database. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, get, stats) are unaffected. | `false` |
 | `rrvector.collection` | `string` | **Table**<br/>Name of the table to store vectors in your RocketRide cloud database. | `"rocketride"` |
 | `rrvector.hnsw_ef_construction` | `integer` | **HNSW ef_construction**<br/>HNSW build-time candidate list size used when the index is first created. | `64` |
 | `rrvector.hnsw_m` | `integer` | **HNSW m**<br/>HNSW graph degree (max connections per layer) used when the index is first created. | `16` |
 | `rrvector.profile` | `string` | **RocketRide cloud database**<br/>Connect to... | `"cloud"` |
 | `rrvector.provider` | `string` |  | const: `"rocketride_vector"` |
 | `rrvector.score` | `number` | **Score threshold**<br/>Minimum similarity score for a document to be returned by search. | `0.5` |
+| `rrvector.serverName` | `string` | **Tool Server Name**<br/>Label for this store in the messages its tool functions return (for example a refused write names rrvector.delete). Agents see the functions as <node id>.search, objdir, get, stats, and upsert / delete when writes through tools are allowed; apps call client.tool with the function name and the node id. | `"rrvector"` |
 | `rrvector.similarity` | `string` | **Similarity Metric**<br/>The similarity metric to use for vector search. Also selects the HNSW index operator class. | `"cosine"` |
 
 ## Dependencies

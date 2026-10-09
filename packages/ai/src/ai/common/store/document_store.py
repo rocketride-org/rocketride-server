@@ -674,7 +674,22 @@ class VectorStoreToolMixin:
     ``<serverName>.upsert`` and ``<serverName>.delete`` where ``serverName``
     comes from ``self.IGlobal.serverName`` (user-configurable via
     ``services.json``). This prevents tool-name collisions when a pipeline
-    contains more than one vectordb node.
+    contains more than one vectordb node. An agent node in the same pipeline
+    addresses them by the store node's pipeline id instead
+    (``<node id>.search``, see ``ai.common.agent``); there ``serverName``
+    only labels the tools' messages.
+
+    The write tools (``upsert`` and ``delete``) honour an optional
+    ``IGlobal.allow_write`` switch (``StoreGlobalBase`` resolves it from the
+    node config): a node that does not define it allows writes, a node whose
+    store is shared or managed (``rocketride_vector`` writes to the team's
+    tenant database) defaults it to off. While writes are off the two tools
+    are left out of ``_collect_tool_methods``, so the engine neither lists nor
+    dispatches them (an invoke fails as a tool the node has no handler for);
+    the check inside each tool is a second line of defence for direct calls
+    and returns ``{"success": false, "error": ...}`` like the mixin's other
+    failures. The SQL nodes keep raw execution behind an ``allow_execute``
+    switch in the same spirit (there, ``execute`` raises).
     """
 
     # --- Configuration knobs (override via IGlobal) ------------------------
@@ -723,6 +738,45 @@ class VectorStoreToolMixin:
         name = name.strip().strip('.')
         return name or _VECTORDB_DEFAULT_SERVER_NAME
 
+    def _vectordb_allow_write(self) -> bool:
+        """Whether the ``upsert`` and ``delete`` tools may change the store.
+
+        Reads ``self.IGlobal.allow_write``. A node that does not define the
+        attribute allows writes, which keeps every existing store node as it
+        was; a node that sets it (from its configuration) decides per node.
+        A string value is parsed like a config switch, so ``'false'`` and
+        ``'0'`` are off rather than truthy.
+        """
+        from ai.common.utils import parse_bool
+
+        glb = getattr(self, 'IGlobal', None)
+        return parse_bool(getattr(glb, 'allow_write', True), default=True)
+
+    def _vectordb_write_refused(self, tool: str) -> Dict[str, Any]:
+        """The failure object a write tool returns when writes are off for this node."""
+        return {
+            'success': False,
+            'error': (
+                f'{self._vectordb_server_name()}.{tool} is disabled for this node: writes through tools are '
+                'off (set allow_write=true in the node configuration to enable)'
+            ),
+        }
+
+    _VECTORDB_WRITE_TOOLS = frozenset({'upsert', 'delete'})
+
+    def _collect_tool_methods(self):
+        """Advertise the write tools only when the node allows writes.
+
+        The engine's ``tool.query`` discovery walks this; leaving ``upsert`` and
+        ``delete`` out while writes are off means an agent never sees a tool it
+        cannot call (the pattern ``tool_filesystem`` uses for its allow flags).
+        A direct invocation is still refused by the tools themselves.
+        """
+        methods = super()._collect_tool_methods()
+        if self._vectordb_allow_write():
+            return methods
+        return {name: method for name, method in methods.items() if name not in self._VECTORDB_WRITE_TOOLS}
+
     def _vectordb_compute_embedding(self, query_text: str) -> Optional[List[float]]:
         """Attempt to compute a query embedding for semantic search.
 
@@ -752,10 +806,6 @@ class VectorStoreToolMixin:
             return None
         return list(embedding)
 
-    # --- Tool descriptor / dispatch plumbing ------------------------------
-    #
-    # Override ``_collect_tool_methods`` so that our bare Python method
-    # names ``search``/``upsert``/``delete`` are exposed to the engine as
     # --- Tool methods ------------------------------------------------------
 
     @tool_function(
@@ -981,6 +1031,8 @@ class VectorStoreToolMixin:
     def upsert(self, args):
         """Add or update documents in the vector database."""
         args = _normalize_vectordb_tool_input(args)
+        if not self._vectordb_allow_write():
+            return self._vectordb_write_refused('upsert')
         store = self._vectordb_store()
 
         raw_docs = args.get('documents', [])
@@ -1066,6 +1118,8 @@ class VectorStoreToolMixin:
     def delete(self, args):
         """Delete documents from the vector database by object IDs."""
         args = _normalize_vectordb_tool_input(args)
+        if not self._vectordb_allow_write():
+            return self._vectordb_write_refused('delete')
         store = self._vectordb_store()
 
         object_ids = args.get('object_ids', [])

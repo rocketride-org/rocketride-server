@@ -24,60 +24,56 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task.
 #
-# Mirrors vectordb_postgres/IGlobal, differing only in how it connects: there
-# are no host/user/password fields; the per-tenant DSN is resolved from the
-# account layer (keyed by the authenticated client_id).
+# Sits on the shared store base like store_postgres, differing only in how it
+# connects: there are no host/user/password fields; the per-tenant DSN is
+# resolved from the account layer. The base supplies the lifecycle (open the
+# store outside CONFIG mode, wire the tool-path embedder, register the
+# transform key) and, through StoreInstanceBase, the agent tools.
+#
+# The upsert and delete tools change the team's managed database, so they are
+# opt-in through the allow_write setting (off by default). The data lanes and
+# the read tools (search, objdir, get, stats) are always available.
 # ------------------------------------------------------------------------------
+import os
 import re
-from rocketlib import OPEN_MODE, warning
-from ai.common.transform import IGlobalTransform
-from ai.common.config import Config
+from typing import Any, Dict
+
+from rocketlib import warning
+
 from ai.common.rocketride_db import resolve_rocketride_dsn
+from ai.common.store import StoreGlobalBase
 
 # Valid unquoted PostgreSQL identifier: letter/underscore start, alphanumeric/underscore body, max 63 chars
 VALID_TABLE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
 
 
-class IGlobal(IGlobalTransform):
-    def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Import store definition - even though
-            from .rocketride_vector import Store
+class IGlobal(StoreGlobalBase):
+    serverName: str = 'rrvector'
 
-            # Declare store
-            self.store: Store | None = None
+    # Read by VectorStoreToolMixin before upsert/delete run. The base resolves
+    # the rrvector.allow_write setting at start; this class default keeps
+    # writes off when nothing is configured.
+    allow_write: bool = False
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
+    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
+        """Return the driver's Store, imported lazily so config mode never loads the driver."""
+        from .rocketride_vector import Store
 
-            # Get the passed configuration
-            connConfig = self.getConnConfig()
+        return Store(logical_type, conn_config, bag)
 
-            # Get the configuration
-            self.store = Store(self.glb.logicalType, connConfig, bag)
+    def _sub_key(self) -> str:
+        """Return the transform sub-key, scoped by tenant.
 
-            # Get the info about our store
-            collection = self.store.collection
+        The resolved DSN points at the per-tenant database, so key on that
+        database: the store must not be shared across tenants even when the
+        pooler host/port are identical. (Identity rides the task file since
+        #1686; env identity is untrusted, and the tenant DB is the actual
+        isolation unit.)
+        """
+        tenant_scope = self.store.database or f'{self.store.host}:{self.store.port}'
+        return f'{tenant_scope}/{self.store.collection}'
 
-            # Scope the subKey by tenant: the resolved DSN points at the
-            # per-tenant database, so key on that database — the store must
-            # not be shared across tenants even when the pooler host/port are
-            # identical. (Identity rides the task file since #1686; env
-            # identity is untrusted, and the tenant DB is the actual
-            # isolation unit.)
-            tenant_scope = self.store.database or f'{self.store.host}:{self.store.port}'
-            subKey = f'{tenant_scope}/{collection}'
-
-            # Call the base
-            super().beginGlobal(subKey)
-            return
-
-    def validateConfig(self):
+    def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate the RocketRide cloud vector store config with fast, read-only probes.
 
@@ -87,9 +83,8 @@ class IGlobal(IGlobalTransform):
         - Surface raw provider errors without truncation.
         """
         try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             # Support legacy key 'collection' if the UI still sends it
-            table = ((cfg.get('table') or cfg.get('collection')) or '').strip()
+            table = ((config.get('table') or config.get('collection')) or '').strip()
 
             # Table name validation: unquoted identifier rules, total ≤63 chars
             if not VALID_TABLE.fullmatch(table or ''):
@@ -105,8 +100,6 @@ class IGlobal(IGlobalTransform):
             # .rocketride_vector (where the node's other depends() lives), so
             # this is the only thing that installs the driver at save time —
             # same pattern as store_postgres and the other DB nodes.
-            import os
-
             from depends import depends  # type: ignore
 
             depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
@@ -131,10 +124,6 @@ class IGlobal(IGlobalTransform):
                     pass
         except Exception as e:
             warning(_format_error(e))
-
-    def endGlobal(self):
-        # Release the index and embeddings
-        self.store = None
 
 
 def _format_error(e: Exception) -> str:

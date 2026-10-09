@@ -247,3 +247,53 @@ def test_lane_handlers_delegate_to_store_when_present():
 
     kinds = [c[0] for c in store.calls]
     assert kinds == ['search', 'add']
+
+
+# ---------------------------------------------------------------------------
+# 5. allow_write resolution from merged config (#2587)
+# ---------------------------------------------------------------------------
+
+
+class _ManagedGlobal(_TestableGlobal):
+    """A driver whose store is shared or managed: writes through tools are off unless configured."""
+
+    allow_write = False
+
+
+@pytest.mark.parametrize(
+    'value, expected', [(True, True), ('true', True), ('on', True), (False, False), ('false', False), ('0', False)]
+)
+def test_allow_write_taken_from_config_when_present(monkeypatch, value, expected):
+    """A configured allow_write wins over the class default, with config-style string parsing."""
+    _patch_config(monkeypatch, {'allow_write': value})
+    g = _make()
+    g.beginGlobal()
+    assert g.allow_write is expected
+
+
+@pytest.mark.parametrize('node_config', [{}, {'allow_write': None}, {'allow_write': 'maybe'}])
+def test_allow_write_class_default_survives_when_absent_or_unrecognised(monkeypatch, node_config):
+    """An absent or garbage value falls back to the driver's class default.
+
+    True for an ordinary store, False for a managed one, so no existing driver changes behaviour.
+    """
+    _patch_config(monkeypatch, node_config)
+    g = _make()
+    g.beginGlobal()
+    assert g.allow_write is True
+
+    managed = _ManagedGlobal(store=_FakeStore())
+    managed.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
+    managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
+    managed.beginGlobal()
+    assert managed.allow_write is False
+
+
+def test_managed_driver_can_be_opened_up_through_config(monkeypatch):
+    """The node owner opts in with allow_write=true on a driver that defaults to off."""
+    _patch_config(monkeypatch, {'allow_write': 'true'})
+    managed = _ManagedGlobal(store=_FakeStore())
+    managed.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
+    managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
+    managed.beginGlobal()
+    assert managed.allow_write is True

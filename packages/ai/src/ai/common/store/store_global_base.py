@@ -54,6 +54,13 @@ class StoreGlobalBase(IGlobalTransform, ABC):
     # Overridden by the driver and, when present, by the merged node config.
     serverName: str = ''
 
+    # Whether the upsert/delete tools may change the store (read by
+    # VectorStoreToolMixin). True keeps every existing driver as it was; a
+    # driver whose store is shared or managed sets the class default to False
+    # and lets the node owner opt in through an ``allow_write`` config field.
+    # Resolved from the merged node config in beginGlobal, like serverName.
+    allow_write: bool = True
+
     # The live store, opened in beginGlobal and read by StoreInstanceBase.
     store: Optional[DocumentStoreBase] = None
 
@@ -111,6 +118,16 @@ class StoreGlobalBase(IGlobalTransform, ABC):
         resolved_name = cfg.get('serverName') if hasattr(cfg, 'get') else None
         if isinstance(resolved_name, str) and resolved_name.strip():
             self.serverName = resolved_name.strip()
+
+        # Same source for the write switch: profile defaults and user overrides
+        # both count, strings such as 'false' / '0' stay off, and an absent or
+        # unrecognised value falls back to the driver's class default. Imported
+        # here: ai.common.utils pulls requests and tenacity at import time,
+        # which every store node would otherwise load.
+        from ai.common.utils import parse_bool
+
+        raw_allow_write = cfg.get('allow_write') if hasattr(cfg, 'get') else None
+        self.allow_write = parse_bool(raw_allow_write, default=type(self).allow_write)
 
         # Open the driver's store, then wire an optional embedder for the tool path.
         # Pass the raw connConfig, not the merged cfg above: each driver's Store

@@ -464,6 +464,10 @@ def _vector_store_cls(monkeypatch):
             self.threshold_search = 0.5
 
     store_mod.DocumentStoreBase = _StubDocumentStoreBase
+    # rocketride_vector's IGlobal / IInstance sit on the store base since #2587;
+    # these tests drive the driver Store directly, so only the names matter.
+    store_mod.StoreGlobalBase = type('StoreGlobalBase', (), {'serverName': '', 'store': None, 'allow_write': True})
+    store_mod.StoreInstanceBase = type('StoreInstanceBase', (), {})
     config = types.ModuleType('ai.common.config')
     config.Config = types.SimpleNamespace(getNodeConfig=lambda provider, connConfig: dict(connConfig))
     transform = types.ModuleType('ai.common.transform')
