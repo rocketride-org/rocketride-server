@@ -66,6 +66,9 @@ CONST_CONTAINER_DATA_PATH = '/opt/data'
 # Where a run's store subtree is mounted inside its container
 CONST_CONTAINER_STORE_ROOT = '/opt/store'
 
+# Where the host directories named in docker.mounts are mounted inside a container
+CONST_CONTAINER_MOUNT_ROOT = '/opt/mounts'
+
 # The image's own user and group (rocketride); the group can write what a run installs
 CONST_IMAGE_UID = 1000
 CONST_IMAGE_GID = 1000
@@ -140,6 +143,7 @@ DEFAULT_CONFIG: Dict[str, str] = {
     'cpus': '1',
     'network': 'bridge',
     'models': '',
+    'mounts': '',
     'log_driver': 'none',
     'instance': '',
 }
@@ -901,8 +905,8 @@ class DockerLauncher(Launcher):
         run's ``storage.root`` subtree, and its store points there. Where that
         cannot work the pipeline is refused before anything starts, rather than
         left writing into the container's own tree and losing it with ``rm -f``.
-        The node test mocks (``ROCKETRIDE_MOCK``) are mounted read-only at the
-        path the variable names.
+        Each variable named in ``docker.mounts`` that names a host directory has
+        it mounted read-only at ``/opt/mounts/<NAME>``, and points there.
 
         Args:
             spec: What to launch.
@@ -916,9 +920,14 @@ class DockerLauncher(Launcher):
         mounts: List[Tuple[str, str, str]] = []
         overrides: Dict[str, str] = {}
 
-        mock = spec.env.get('ROCKETRIDE_MOCK')
-        if mock and os.path.isdir(mock):
-            mounts.append((mock, mock, 'ro'))
+        # Host directories a task is told about through a variable: mounted read-only,
+        # and the variable follows them into the container
+        for name in filter(None, (n.strip() for n in self.config['mounts'].split(','))):
+            path = spec.env.get(name)
+            if path and os.path.isdir(path):
+                target = f'{CONST_CONTAINER_MOUNT_ROOT}/{name}'
+                mounts.append((path, target, 'ro'))
+                overrides[name] = target
 
         if not (spec.uses_store and spec.storage_root):
             return mounts, overrides

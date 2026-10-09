@@ -97,6 +97,9 @@ function resolveAction(step, options) {
 		if (!found) {
 			throw new Error(`Action not found in registry: ${step}`);
 		}
+		if (!registry.isAvailable(found)) {
+			throw new Error(registry.unavailableMessage(found));
+		}
 		const actionObj = typeof found.action === 'function' ? found.action(options) : found.action;
 		return { name: step, actionObj };
 	}

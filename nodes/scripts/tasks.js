@@ -63,6 +63,16 @@ const {
 	isWindows,
 	loadPackageJson,
 } = require('../../scripts/lib');
+const {
+	WSL_ENV,
+	WSL_PROBE_SCRIPT,
+	parseFacts,
+	diagnoseLocalDocker,
+	diagnoseWsl,
+	missingImage,
+	unavailableReason,
+	formatDiagnosis,
+} = require('./container-checks');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 
@@ -166,6 +176,8 @@ function makeStartTestServerAction(options = {}) {
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
 					ROCKETRIDE_MOCK: mocksPath,
+					// Under --runtime=docker the mocks reach each task's container through a mount
+					...(options.runtime === 'docker' ? { RR_DOCKER_MOUNTS: 'ROCKETRIDE_MOCK' } : {}),
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;
@@ -393,6 +405,11 @@ function makeTestAction(options = {}) {
 		return { description: 'Planning node test model downloads', steps };
 	}
 
+	// A local daemon and its image, before anything is built, installed or started
+	if (options.runtime === 'docker' && !options.taskserver) {
+		steps.unshift({ name: 'nodes:docker-preflight', action: makeDockerPreflightAction() });
+	}
+
 	// The collect-only modes above report the environment as it is; test runs complete it.
 	steps.push({ name: 'nodes:install-test-deps', action: makeInstallTestDepsAction() });
 
@@ -412,16 +429,29 @@ function makeTestAction(options = {}) {
 	return { description: 'Testing nodes', steps };
 }
 
-// Why the container tasks cannot run here, or null. Linux only: elsewhere
-// dist/server holds a Windows or macOS engine, which cannot go into a Linux image.
+// Why the image tasks cannot run here, or null. They are Linux only (elsewhere
+// dist/server holds an engine that cannot go into a Linux image), so a daemon is all they can miss.
 async function containerUnavailable() {
-	if (!isLinux()) return 'Linux only; dist/server here is not a Linux engine. Pull a published engine-base instead';
-	try {
-		await execCommand('docker', ['info'], { stdio: 'ignore', silent: true });
-	} catch {
-		return 'no Docker daemon reachable';
-	}
-	return null;
+	const problem = diagnoseLocalDocker({
+		platform: 'linux',
+		...(await capture('docker', ['info', '--format', '{{.OSType}}'])),
+	});
+	return problem && `${problem.problem}: ${problem.fix.join('; ')}`;
+}
+
+// nodes:test --runtime=docker needs a daemon and the node image of this engine
+// version; without them every test would fail on its own
+function makeDockerPreflightAction() {
+	return {
+		run: async (ctx, task) => {
+			const name = 'nodes:test --runtime=docker';
+			await checkLocalDocker(name);
+			const image = process.env.RR_DOCKER_IMAGE || (await imageNames()).node;
+			if ((await imageLabels(image)) === null)
+				throw new Error(formatDiagnosis(name, missingImage(os.platform(), image)));
+			task.output = `${image} is on the daemon`;
+		},
+	};
 }
 
 function skipLoudly(taskName, task, reason) {
@@ -521,16 +551,21 @@ function makeTestImageAction(options = {}) {
 	};
 }
 
-// One command to completion with stdout and stderr apart: for parsing, not for logs
+// One command to completion with stdout and stderr apart: for parsing, not for logs.
+// options.input is written to its stdin.
 function capture(command, args, options = {}) {
+	const { input, ...spawnOptions } = options;
 	return new Promise((resolve) => {
 		let proc;
 		try {
-			proc = spawnProcess(command, args, { shell: false, windowsHide: true, ...options });
+			proc = spawnProcess(command, args, { shell: false, windowsHide: true, ...spawnOptions });
 		} catch (err) {
 			resolve({ code: -1, stdout: '', stderr: String(err) });
 			return;
 		}
+		// A command that failed to start closes stdin under the write
+		proc.stdin.on('error', () => {});
+		proc.stdin.end(input);
 		let stdout = '';
 		let stderr = '';
 		proc.stdout.on('data', (d) => {
@@ -573,45 +608,40 @@ function engineSha256() {
 	});
 }
 
-// KEY=value lines of /etc/os-release
-function parseOsRelease(text) {
-	const values = {};
-	for (const line of text.split(/\r?\n/)) {
-		const m = line.match(/^([A-Z_]+)=(.*)$/);
-		if (m) values[m[1]] = m[2].replace(/^"(.*)"$/, '$1');
-	}
-	return values;
-}
-
 // The WSL distribution named by --distro / RR_WSL_DISTRO, Ubuntu-22.04 by default
 function wslDistro(options) {
 	return options.distro || process.env.RR_WSL_DISTRO || 'Ubuntu-22.04';
 }
 
-// The distribution must match the image base (jammy, 22.04) and reach a daemon:
-// an engine built on a newer glibc does not start in the image.
-async function checkWslDistro(distro) {
-	const release = await capture('wsl.exe', ['-d', distro, '--', 'cat', '/etc/os-release']);
-	if (release.code !== 0) {
-		throw new Error(
-			`WSL distribution ${distro} is not available (--distro=, RR_WSL_DISTRO): ` +
-				(release.stderr || release.stdout).trim()
-		);
-	}
-	const version = parseOsRelease(release.stdout).VERSION_ID;
-	if (version !== '22.04') {
-		throw new Error(
-			`${distro} is Ubuntu ${version}; the image base is 22.04 (jammy), and an engine built on a newer ` +
-				'glibc does not start in it. Pick a 22.04 distribution with --distro='
-		);
-	}
-	const info = await capture('wsl.exe', ['-d', distro, '--', 'docker', 'info', '--format', '{{.ID}}']);
-	if (info.code !== 0) {
-		throw new Error(
-			`docker does not work inside ${distro}: ` +
-				"turn on Docker Desktop's WSL integration for it, or start its daemon"
-		);
-	}
+// Everything the WSL side needs — WSL, the distribution on WSL 2, Ubuntu 22.04
+// when the image is built there (an engine built on a newer glibc does not start
+// in it), the checkout, a docker daemon — or an error naming the first missing
+// piece and how to add it. One wsl.exe call lists, one probes.
+async function checkWsl(taskName, distro, { needJammy = false, checkout = '' } = {}) {
+	const env = { ...process.env, ...WSL_ENV };
+	const list = await capture('wsl.exe', ['-l', '-v'], { env });
+	const probe = await capture('wsl.exe', ['-d', distro, '--exec', 'sh', '-s', '--', checkout], {
+		env,
+		input: WSL_PROBE_SCRIPT,
+	});
+	const problem = diagnoseWsl({
+		distro,
+		list,
+		facts: probe.code === 0 ? parseFacts(probe.stdout) : null,
+		probeError: probe.stderr || probe.stdout,
+		needJammy,
+		checkout,
+	});
+	if (problem) throw new Error(formatDiagnosis(taskName, problem));
+}
+
+// The local daemon, or an error saying how to get one
+async function checkLocalDocker(taskName) {
+	const problem = diagnoseLocalDocker({
+		platform: os.platform(),
+		...(await capture('docker', ['info', '--format', '{{.OSType}}'])),
+	});
+	if (problem) throw new Error(formatDiagnosis(taskName, problem));
 }
 
 // container:sync — this tree's Python over the clean image of the same version.
@@ -619,8 +649,7 @@ async function checkWslDistro(distro) {
 function makeSyncImageAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			const daemon = await capture('docker', ['info', '--format', '{{.ID}}']);
-			if (daemon.code !== 0) return skipLoudly('container:sync', task, 'no Docker daemon reachable');
+			await checkLocalDocker('container:sync');
 
 			const { node, clean } = await imageNames();
 			let cleanLabels = await imageLabels(clean);
@@ -689,21 +718,16 @@ function makeSyncImageAction(options = {}) {
 function makeBuildOnWslAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			if (!isWindows())
-				return skipLoudly(
-					'container:build-on-wsl',
-					task,
-					isLinux() ? 'already on Linux: run container:build' : 'Windows only: WSL builds the Linux engine'
-				);
 			const checkout = options.checkout || process.env.RR_WSL_CHECKOUT;
 			if (!checkout) {
 				throw new Error(
-					'container:build-on-wsl needs the WSL checkout to build in: ' +
+					'container:build-on-wsl needs the WSL checkout to build in, ' +
+						'a rocketride-server clone built there: ' +
 						'--checkout=/home/<you>/rocketride-server or RR_WSL_CHECKOUT'
 				);
 			}
 			const distro = wslDistro(options);
-			await checkWslDistro(distro);
+			await checkWsl('container:build-on-wsl', distro, { needJammy: true, checkout });
 
 			const there = await capture('wsl.exe', ['-d', distro, '--cd', checkout, '--', 'git', 'rev-parse', 'HEAD']);
 			if (there.code !== 0)
@@ -774,13 +798,12 @@ function pipeSaveLoad(distro, images, task) {
 function makeSyncFromWslAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			if (!isWindows())
-				return skipLoudly('container:sync-from-wsl', task, 'not Windows: the image is already on this daemon');
 			const distro = wslDistro(options);
+			await checkLocalDocker('container:sync-from-wsl');
+			await checkWsl('container:sync-from-wsl', distro);
 			const here = await capture('docker', ['info', '--format', '{{.ID}}']);
-			if (here.code !== 0) throw new Error('no Docker daemon reachable from Windows');
 			const there = await capture('wsl.exe', ['-d', distro, '--', 'docker', 'info', '--format', '{{.ID}}']);
-			if (there.code !== 0) throw new Error(`docker does not work inside ${distro} (--distro=, RR_WSL_DISTRO)`);
+			if (here.code !== 0 || there.code !== 0) throw new Error(`docker info failed on Windows or in ${distro}`);
 			if (here.stdout.trim() === there.stdout.trim()) {
 				task.output = `${distro} and Windows see one daemon: nothing to copy`;
 				return;
@@ -804,8 +827,8 @@ function makeSyncFromWslAction(options = {}) {
 			}
 			if (!images.includes(node)) {
 				throw new Error(
-					`${node} (this checkout's version ${version}) is not on ${distro}'s daemon: ` +
-						`build it there from a checkout at ${version}`
+					`${node} (this checkout's version ${version}) is not on ${distro}'s daemon: build it there ` +
+						`from a checkout at ${version}: .\\builder container:build-on-wsl --checkout=<that checkout>`
 				);
 			}
 			console.warn(
@@ -818,15 +841,8 @@ function makeSyncFromWslAction(options = {}) {
 }
 
 // T2's docker arm: nodes:test with every task in a container. Without a daemon
-// it skips loudly, as the image steps before it do.
+// or the image it fails, saying how to get them.
 function makeContainerRuntimeTestAction(options = {}) {
-	if (!isLinux()) {
-		return {
-			description: 'Testing nodes in containers',
-			run: async (ctx, task) =>
-				skipLoudly('container:test', task, 'Linux only; dist/server here is not a Linux engine'),
-		};
-	}
 	return makeTestAction({ ...options, test_full: false, runtime: 'docker' });
 }
 
@@ -885,16 +901,24 @@ const containerModule = {
 	description: 'Node container image',
 
 	actions: [
+		// Linux only: elsewhere dist/server holds an engine that cannot go into a Linux image.
+		// Never part of `builder build`: the image is asked for by name (CI has a step of its own).
 		{
 			name: 'container:build',
+			platforms: ['linux'],
+			global: false,
+			unavailable: (platform) => unavailableReason('container:build', platform),
 			action: (options) => ({
 				description: 'Build the node container image',
 				steps: ['nodes:build', { name: 'container:build-image', action: makeBuildImageAction(options) }],
 			}),
 		},
-		// Not part of nodes:test: it needs a daemon, and skips loudly without one
+		// Not part of nodes:test nor of `builder test`: it builds the image first
 		{
 			name: 'container:test',
+			platforms: ['linux'],
+			global: false,
+			unavailable: (platform) => unavailableReason('container:test', platform),
 			action: (options) => ({
 				description: 'Test the node container image, then the nodes through the docker runtime',
 				steps: [
@@ -907,9 +931,11 @@ const containerModule = {
 				],
 			}),
 		},
-		// The edit loop: Python only, over <version>-clean
+		// The edit loop: Python only, over <version>-clean. Not part of `builder sync`:
+		// it needs a daemon and an image a plain sync of the tree does not
 		{
 			name: 'container:sync',
+			global: false,
 			action: (options) => ({
 				description: "Refresh the local node image with this tree's Python (binaries untouched)",
 				steps: [
@@ -920,18 +946,22 @@ const containerModule = {
 				],
 			}),
 		},
-		// Optional, Windows only, not in the Windows pipeline
+		// Windows only, and not in the Windows pipeline: no container:build runs there
 		{
 			name: 'container:build-on-wsl',
+			platforms: ['win32'],
+			unavailable: (platform) => unavailableReason('container:build-on-wsl', platform),
 			action: (options) => ({
-				description: 'Run container:build in a WSL checkout (Windows)',
+				description: 'Build the node image in a WSL checkout: --checkout=<path in WSL> (required), --distro=',
 				steps: [{ name: 'container:build-in-wsl', action: makeBuildOnWslAction(options) }],
 			}),
 		},
 		{
 			name: 'container:sync-from-wsl',
+			platforms: ['win32'],
+			unavailable: (platform) => unavailableReason('container:sync-from-wsl', platform),
 			action: (options) => ({
-				description: "Copy the node image from WSL's daemon when it is not Windows' (Windows)",
+				description: "Copy the node image from WSL's own daemon to Docker Desktop: --distro=",
 				steps: [{ name: 'container:copy-image', action: makeSyncFromWslAction(options) }],
 			}),
 		},

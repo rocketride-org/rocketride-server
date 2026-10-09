@@ -241,7 +241,8 @@ function expandGlobalCommands(globalCommands, registry, options) {
 		for (const moduleName of registry.names()) {
 			const actionName = `${moduleName}:${command}`;
 			const actionDef = registry.getAction(actionName);
-			if (actionDef) {
+			// Actions that do not run on this OS, or only run by name, are left out, not failed
+			if (actionDef && registry.inGlobalCommands(actionDef)) {
 				const actionObj = typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
 				// Only expand to public actions (those with descriptions)
 				if (actionObj?.description) {
@@ -436,7 +437,8 @@ async function main() {
 		const allActions = registry.listActions(options);
 		for (const action of allActions) {
 			const desc = action.description ? ` - ${action.description}` : '';
-			console.log(`  ${action.name}${desc}`);
+			const where = action.available ? '' : ' (not on this OS)';
+			console.log(`  ${action.name}${desc}${where}`);
 		}
 		console.log(`\nTotal: ${allActions.length} actions\n`);
 		process.exit(0);
@@ -477,7 +479,9 @@ async function main() {
 			console.log(`${command}`);
 			console.log('─'.repeat(40));
 
-			if (actionDef) {
+			if (actionDef && !registry.isAvailable(actionDef)) {
+				console.log(`  ✖ ${registry.unavailableMessage(actionDef)}\n`);
+			} else if (actionDef) {
 				const actionObj = typeof actionDef.action === 'function' ? actionDef.action(options) : actionDef.action;
 				if (actionObj?.steps) {
 					printFlowDiagram({ steps: actionObj.steps });
@@ -507,12 +511,17 @@ async function main() {
 				.map((a) => a.name)
 				.filter((n) => {
 					const def = registry.getAction(n);
+					if (!registry.isAvailable(def)) return false;
 					const obj = typeof def?.action === 'function' ? def.action(options) : def?.action;
 					return obj?.description;
 				});
 			if (availableActions.length > 0) {
 				console.error(`Available actions: ${availableActions.join(', ')}`);
 			}
+			process.exit(1);
+		}
+		if (!registry.isAvailable(actionDef)) {
+			console.error(`Error: ${registry.unavailableMessage(actionDef)}`);
 			process.exit(1);
 		}
 	}

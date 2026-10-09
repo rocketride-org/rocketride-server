@@ -44,16 +44,17 @@ An engine started with `--saas` runs tasks in containers without the flag; give 
 
 Everything else is set in the engine's environment or its `.env` file:
 
-| Variable               | Default                     | Effect                                                                                                                                |
-| ---------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `RR_DOCKER_IMAGE`      | `rocketride/node:<version>` | The node image. Never `latest`: a task protocol of another version is not compatible.                                                 |
-| `RR_DOCKER_PUBLISH`    | `auto`                      | `true` dials a port published on `127.0.0.1`, `false` dials the container's IP; `auto` decides from the daemon (below).               |
-| `RR_DOCKER_MEMORY`     | `2g`                        | Memory limit per task.                                                                                                                |
-| `RR_DOCKER_CPUS`       | `1`                         | CPU limit per task.                                                                                                                   |
-| `RR_DOCKER_NETWORK`    | `bridge`                    | The Docker network tasks join.                                                                                                        |
-| `RR_DOCKER_MODELS`     | none                        | A host directory of model files, mounted read-only at `/models`, with `HF_HOME` pointing there.                                       |
-| `RR_DOCKER_LOG_DRIVER` | `none`                      | The containers' log driver. Task output always reaches the engine; `json-file` also makes `docker logs` work while a task runs.       |
-| `RR_DOCKER_INSTANCE`   | `<hostname>:<engine port>`  | Labels the engine's containers. It must stay the same across restarts so the engine can remove containers an earlier run left behind. |
+| Variable               | Default                     | Effect                                                                                                                                                                                                                    |
+| ---------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_DOCKER_IMAGE`      | `rocketride/node:<version>` | The node image. Never `latest`: a task protocol of another version is not compatible.                                                                                                                                     |
+| `RR_DOCKER_PUBLISH`    | `auto`                      | `true` dials a port published on `127.0.0.1`, `false` dials the container's IP; `auto` decides from the daemon (below).                                                                                                   |
+| `RR_DOCKER_MEMORY`     | `2g`                        | Memory limit per task.                                                                                                                                                                                                    |
+| `RR_DOCKER_CPUS`       | `1`                         | CPU limit per task.                                                                                                                                                                                                       |
+| `RR_DOCKER_NETWORK`    | `bridge`                    | The Docker network tasks join.                                                                                                                                                                                            |
+| `RR_DOCKER_MODELS`     | none                        | A host directory of model files, mounted read-only at `/models`, with `HF_HOME` pointing there.                                                                                                                           |
+| `RR_DOCKER_MOUNTS`     | none                        | Comma-separated names of variables that name host directories a task needs; each is mounted read-only at `/opt/mounts/<name>`, and the variable points there inside the container. The node tests use it for their mocks. |
+| `RR_DOCKER_LOG_DRIVER` | `none`                      | The containers' log driver. Task output always reaches the engine; `json-file` also makes `docker logs` work while a task runs.                                                                                           |
+| `RR_DOCKER_INSTANCE`   | `<hostname>:<engine port>`  | Labels the engine's containers. It must stay the same across restarts so the engine can remove containers an earlier run left behind.                                                                                     |
 
 ## How the engine reaches a task
 
