@@ -29,7 +29,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ai.common.decision.runner import DecisionResult
+from ai.common.systemone.runner import DecisionResult
 
 
 class _Meta(SimpleNamespace):
@@ -75,10 +75,10 @@ def node(monkeypatch):
     config.Config = SimpleNamespace(getNodeConfig=lambda *_a, **_k: {})
     for name, mod in {'rocketlib': rocketlib, 'ai.common.schema': schema, 'ai.common.config': config}.items():
         monkeypatch.setitem(sys.modules, name, mod)
-    monkeypatch.delitem(sys.modules, 'ai.common.decision.instance_base', raising=False)
-    module = importlib.import_module('ai.common.decision.instance_base')
+    monkeypatch.delitem(sys.modules, 'ai.common.systemone.instance_base', raising=False)
+    module = importlib.import_module('ai.common.systemone.instance_base')
 
-    class Node(module.DecisionInstanceBase):
+    class Node(module.SystemOneInstanceBase):
         pass
 
     inst = Node()
@@ -109,8 +109,8 @@ def node(monkeypatch):
     inst.IGlobal = SimpleNamespace(runner=FakeRunner())
     yield SimpleNamespace(inst=inst, written=written, calls=calls, listeners=listeners)
     # The module was imported against the stubs; don't let it outlive them on this worker.
-    sys.modules.pop('ai.common.decision.instance_base', None)
-    package = sys.modules.get('ai.common.decision')
+    sys.modules.pop('ai.common.systemone.instance_base', None)
+    package = sys.modules.get('ai.common.systemone')
     if package is not None and hasattr(package, 'instance_base'):
         delattr(package, 'instance_base')
 

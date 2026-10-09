@@ -22,12 +22,12 @@
 # =============================================================================
 """System One Ask node: per-pipeline instance."""
 
-from ai.common.decision.instance_base import DecisionInstanceBase
+from ai.common.systemone.instance_base import SystemOneInstanceBase
 
 from .IGlobal import IGlobal
 
 
-class IInstance(DecisionInstanceBase):
+class IInstance(SystemOneInstanceBase):
     """System One Ask node instance."""
 
     IGlobal: IGlobal

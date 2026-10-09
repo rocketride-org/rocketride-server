@@ -34,7 +34,7 @@ from .questions import parse_questions
 from .runner import DecisionRunner
 
 
-class DecisionGlobalBase(IGlobalBase):
+class SystemOneGlobalBase(IGlobalBase):
     """Shared IGlobal for System One Ask nodes; vendors override the hooks if needed."""
 
     runner: DecisionRunner | None = None

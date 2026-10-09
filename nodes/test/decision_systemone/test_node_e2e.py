@@ -36,10 +36,10 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from ai.common.decision.client import SystemOneClient
-from ai.common.decision.limits import DecisionLimits
-from ai.common.decision.questions import PICK_ONE, RUBRIC, YES_NO, QuestionSpec
-from ai.common.decision.runner import DecisionRunner
+from ai.common.systemone.client import SystemOneClient
+from ai.common.systemone.limits import DecisionLimits
+from ai.common.systemone.questions import PICK_ONE, RUBRIC, YES_NO, QuestionSpec
+from ai.common.systemone.runner import DecisionRunner
 
 LIMITS = DecisionLimits(max_options=26, max_levels=10, max_questions=64, max_state_tokens=10_000)
 SPECS = [
@@ -114,8 +114,8 @@ def e2e(monkeypatch):
     schema.Doc, schema.DocMetadata, schema.Answer = _Doc, _Meta, _Answer
     for name, mod in {'rocketlib': rocketlib, 'ai.common.schema': schema}.items():
         monkeypatch.setitem(sys.modules, name, mod)
-    monkeypatch.delitem(sys.modules, 'ai.common.decision.instance_base', raising=False)
-    module = importlib.import_module('ai.common.decision.instance_base')
+    monkeypatch.delitem(sys.modules, 'ai.common.systemone.instance_base', raising=False)
+    module = importlib.import_module('ai.common.systemone.instance_base')
 
     requests = []
 
@@ -128,7 +128,7 @@ def e2e(monkeypatch):
     )
     runner = DecisionRunner(client, 'jev-latest', SPECS, LIMITS, warn=lambda _m: None)
 
-    class Node(module.DecisionInstanceBase):
+    class Node(module.SystemOneInstanceBase):
         pass
 
     inst = Node()
@@ -149,8 +149,8 @@ def e2e(monkeypatch):
     inst.IGlobal = SimpleNamespace(runner=runner)
     yield SimpleNamespace(inst=inst, written=written, requests=requests, prevented=prevented)
     client.close()
-    sys.modules.pop('ai.common.decision.instance_base', None)
-    package = sys.modules.get('ai.common.decision')
+    sys.modules.pop('ai.common.systemone.instance_base', None)
+    package = sys.modules.get('ai.common.systemone')
     if package is not None and hasattr(package, 'instance_base'):
         delattr(package, 'instance_base')
 

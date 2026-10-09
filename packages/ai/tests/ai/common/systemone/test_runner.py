@@ -20,14 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Unit tests for ai.common.decision.runner (fake client, no HTTP)."""
+"""Unit tests for ai.common.systemone.runner (fake client, no HTTP)."""
 
 import pytest
 
-from ai.common.decision.client import SystemOneError
-from ai.common.decision.limits import DecisionLimits
-from ai.common.decision.questions import PICK_ONE, YES_NO, QuestionSpec
-from ai.common.decision.runner import DecisionRunner, merge_decisions
+from ai.common.systemone.client import SystemOneError
+from ai.common.systemone.limits import DecisionLimits
+from ai.common.systemone.questions import PICK_ONE, YES_NO, QuestionSpec
+from ai.common.systemone.runner import DecisionRunner, merge_decisions
 
 LIM = DecisionLimits(max_options=26, max_levels=10, max_questions=64, max_state_tokens=1000, chars_per_token=4.0)
 SPECS = [

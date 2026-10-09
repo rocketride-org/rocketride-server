@@ -20,12 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Unit tests for ai.common.decision.questions."""
+"""Unit tests for ai.common.systemone.questions."""
 
 import pytest
 
-from ai.common.decision.limits import DecisionLimits
-from ai.common.decision.questions import (
+from ai.common.systemone.limits import DecisionLimits
+from ai.common.systemone.questions import (
     PICK_ONE,
     RUBRIC,
     YES_NO,

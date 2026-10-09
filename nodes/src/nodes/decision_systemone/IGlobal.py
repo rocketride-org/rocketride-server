@@ -22,8 +22,8 @@
 # =============================================================================
 """System One Ask node: global state (shared by every vendor profile)."""
 
-from ai.common.decision.global_base import DecisionGlobalBase
+from ai.common.systemone.global_base import SystemOneGlobalBase
 
 
-class IGlobal(DecisionGlobalBase):
+class IGlobal(SystemOneGlobalBase):
     """System One Ask node (all vendors share this; differences live in services.*.json)."""

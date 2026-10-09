@@ -33,7 +33,7 @@ from ai.common.schema import Answer, Doc, DocMetadata
 from .runner import merge_decisions
 
 
-class DecisionInstanceBase(IInstanceBase):
+class SystemOneInstanceBase(IInstanceBase):
     """Shared IInstance for System One Ask nodes (documents lane)."""
 
     def _source_id(self) -> str:
