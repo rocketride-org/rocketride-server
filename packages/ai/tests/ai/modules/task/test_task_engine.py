@@ -10,7 +10,6 @@ Focus areas:
 
 - ``_check_pipeline`` — source-component validation + status.name composition
 - ``_build_task`` — subprocess-config shape
-- ``_file_checksum`` — SHA-256 of a real temp file
 - ``_is_debugging`` / ``_get_attach_subprocesses`` — sys.modules probes
 - ``is_task_complete`` / ``is_attached`` / ``has_attached_debugger`` /
   ``get_connection_count`` / ``get_status`` — accessors
@@ -19,7 +18,11 @@ Focus areas:
 Two methods are already exercised by separate, security-focused tests:
 
 - ``_resolve_pipeline`` — see ``test_env_var_exfil.py``
-- ``_write_task_file`` — see ``test_temp_file_security.py``
+- ``_task_file_bytes`` with the subprocess runtime's writer — see
+  ``test_temp_file_security.py``
+
+The subprocess runtime itself (argv, python shim, ``file_checksum``) is in
+``test_launcher_subprocess.py``.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ import pytest
 from rocketride import TASK_STATE
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
+from ai.modules.task.launcher import SubprocessLauncher
 from ai.modules.task.task_engine import (
     CONST_TRACE_PAYLOAD_CAP,
     CONST_TRACE_PREVIEW_BYTES,
@@ -267,31 +271,6 @@ def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):
     t = _task(pipeline=pipeline)
     config = Task._build_task(t, pipeline)
     assert config['config']['pipeline']['version'] == 1
-
-
-# ---------------------------------------------------------------------------
-# _file_checksum
-# ---------------------------------------------------------------------------
-
-
-def test_file_checksum_matches_sha256_of_file_contents(tmp_path):
-    """The function returns the SHA-256 hex digest of the file body."""
-    p = tmp_path / 'sample.bin'
-    body = b'hello world\n' * 1024  # spans multiple 8 KiB reads
-    p.write_bytes(body)
-
-    t = _task()
-    result = Task._file_checksum(t, str(p))
-    assert result == hashlib.sha256(body).hexdigest()
-
-
-def test_file_checksum_empty_file_yields_empty_sha256(tmp_path):
-    """SHA-256 of an empty file is the canonical e3b0...b855."""
-    p = tmp_path / 'empty.bin'
-    p.write_bytes(b'')
-
-    t = _task()
-    assert Task._file_checksum(t, str(p)) == hashlib.sha256(b'').hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -1680,14 +1659,14 @@ class _ExitingProcess:
 @pytest.mark.asyncio
 async def test_exit_code_is_read_after_the_process_is_reaped():
     t = _exit_task()
-    t._engine_process = _ExitingProcess(1)
+    t._launch = _ExitingProcess(1)
     assert await Task._process_exit_code(t) == 1
 
 
 @pytest.mark.asyncio
 async def test_no_process_counts_as_failed():
     t = _exit_task()
-    t._engine_process = None
+    t._launch = None
     assert await Task._process_exit_code(t) == 1
 
 
@@ -1714,9 +1693,9 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
 
     monkeypatch.setattr(te, 'CONST_CANCEL_WAIT_TIMEOUT_SECONDS', 0.05)
     t = _exit_task()
-    t._engine_process = _LingeringProcess()
+    t._launch = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
-    assert t._engine_process.killed
+    assert t._launch.killed
 
 
 # ---------------------------------------------------------------------------
@@ -1731,8 +1710,9 @@ class _LaunchStop(Exception):
 def _startable_task(monkeypatch):
     """Build a Task that start_task can drive up to the subprocess launch.
 
-    The launch itself is stubbed: ``create_subprocess_exec`` records its
-    arguments and raises ``_LaunchStop``, so no process starts.
+    The task runs the real subprocess runtime, whose launch is stubbed:
+    ``create_subprocess_exec`` records its arguments and raises
+    ``_LaunchStop``, so no process starts.
 
     Args:
         monkeypatch: pytest fixture.
@@ -1748,12 +1728,13 @@ def _startable_task(monkeypatch):
     t._launch_args = {}
     t._resolve_pipeline = MagicMock(return_value={'components': []})
     t._check_pipeline = MagicMock()
-    t._write_task_file = AsyncMock(return_value='/tmp/task-1.json')
+    t._task_file_bytes = MagicMock(return_value=b'{}')
     t._is_debugging = MagicMock(return_value=False)
     t._send_status_update = AsyncMock()
     t._build_subprocess_env = AsyncMock(return_value={'PATH': '/usr/bin'})
     t._terminated = AsyncMock()
-    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), _config={})
+    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), release_port=MagicMock(), _config={})
+    t._launcher = SubprocessLauncher(t._server)
 
     launches = []
 
@@ -1818,9 +1799,8 @@ async def test_data_connection_presents_the_token(monkeypatch):
     t._is_terminating = False
     t._data_lock = asyncio.Lock()
     t._data_client = None
-    t._data_port = 20001
     t._data_token = 'run-token'
-    t._engine_process = None
+    t._launch = SimpleNamespace(address='127.0.0.1:20001', returncode=None)
     t._provider = None
 
     await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
@@ -1841,9 +1821,8 @@ async def test_data_request_without_a_token_fails_at_once(monkeypatch):
     t._is_terminating = False
     t._data_lock = asyncio.Lock()
     t._data_client = None
-    t._data_port = None
     t._data_token = None
-    t._engine_process = None
+    t._launch = None
 
     with pytest.raises(RuntimeError, match='not running'):
         await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
