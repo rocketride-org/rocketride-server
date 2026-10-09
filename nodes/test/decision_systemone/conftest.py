@@ -75,7 +75,15 @@ class Answer:
         return json.dumps(self.answer) if isinstance(self.answer, (dict, list)) else str(self.answer)
 
     def getJson(self):
-        return self.answer
+        """Mirror the real Answer.getJson: parse strings, raise ValueError on non-JSON, TypeError on other types."""
+        if self.answer is None:
+            return None
+        if isinstance(self.answer, (dict, list)):
+            return self.answer
+        try:
+            return json.loads(self.answer)
+        except json.JSONDecodeError:
+            raise ValueError('Answer is not in JSON format.')
 
     def isJson(self):
         return self.expectJson

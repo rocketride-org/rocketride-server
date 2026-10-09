@@ -17,7 +17,7 @@ time_machine
 # here. Unpinned to track the source packages' own (unpinned) declarations.
 #   pillow -> from PIL import Image (tests/ai/common/image, .../models/vision)
 pillow
-#   httpx -> httpx.MockTransport (tests/ai/common/decision)
+#   httpx -> httpx.MockTransport (tests/ai/common/systemone)
 httpx
 
 # AI module dependencies — each sub-package declares its own deps and
