@@ -207,23 +207,40 @@ expect a media lane to deliver multiple items per input object.
 `.rocketride/schema/<provider>.json` adds one component's description, invoke requirements,
 and config detail.
 
-### Ask nodes and `metadata.decisions`
+### System One nodes, Gates and `response.decisions`
 
-Ask nodes (`decision_typesafe`, `decision_openrouter`, `decision_ollama`, `decision_systemone`)
-answer typed questions (yes/no, pick-one, rubric) about each document with a System One decision
-model. Use one for cheap classification or gating before a costly step, for example "is this urgent?"
-or "which team owns this?" ahead of an LLM or agent. They do not generate text.
+System One nodes (`decision_typesafe`, `decision_openrouter`, `decision_ollama`, `decision_systemone`)
+answer typed questions (yes/no, pick-one, rubric) about an item with a System One decision model.
+Use one for cheap classification before a costly step, for example "is this spam?" or "which team
+owns this?" ahead of an LLM or agent. They do not generate text, and they read text only (convert
+images and audio to text first). A **Gate** (`gate`) then passes or blocks items on those answers.
 
-- Lanes: `documents → documents, answers`. The document passes through unchanged. Wire the
-  `answers` lane only if you want the decisions as JSON.
-- Put **every** question for a document in **one** Ask node. All questions go to the model in one
-  call per document, and they are answered independently. Do not chain Ask nodes to ask more questions.
-- Read answers at `metadata.decisions.<name>.answer`. It is a string, number or boolean:
-  `yes`/`no` for yes/no, the option value for pick-one, the level index for a rubric. It is
-  `uncertain` below the question's `min_confidence` and `error` when a call failed under
-  `on_error: pass_through`.
+Pattern: whole document, then each chunk.
+
+```
+parse ─text─▶ system_one (is_spam) ─text─▶ gate (is_spam equals no) ─text─▶ preprocessor
+   ─documents─▶ system_one (topic) ─documents─▶ gate (topic in [billing, refund]) ─▶ …
+```
+
+- Put whole-document questions on `text`, before any splitting. Put per-chunk questions on
+  `documents`, after the preprocessor. A chunk with no decision of its own uses the whole-document one.
+- Lanes in: `text`, `documents`, `table`, `questions`, `answers`. Each goes out on the same lane
+  unchanged. There is no `answers` output lane that carries the decisions.
+- Put **every** question for an item in **one** System One node. All questions go to the model in one
+  call per item, and they are answered independently. Do not chain System One nodes to ask more questions.
+- Decisions are recorded once on the object at `response.decisions`, keyed by the node's component id,
+  and appear in the result under `decisions`. A recorded `answer` is a string, number or boolean:
+  `yes`/`no`, the option value for pick-one, the level label for a rubric (its position is `index`).
+  It is `uncertain` below the question's `min_confidence`.
+- A Gate must be **downstream of the node that answers its questions, on the same path**. A Gate on a
+  sibling branch can run before the decision exists and fails with a missing-decision error.
+- There is no "otherwise" branch. Add a second Gate with the opposite rule. `uncertain` is an ordinary
+  answer value: `equals yes` is false for it and `not_equals yes` is true, so `not_equals` works as
+  "otherwise".
+- Text, a table or a question over the model's limit fails the object. A chunk or table over the limit is
+  recorded as `too_long` and every Gate blocks it with a warning, so split long text first.
 - Confidence is not comparable across backends, so set `min_confidence` per backend.
-- The full shape is in `docs/development/nodes/decisions-metadata.md`.
+- The full shape is in `docs/development/nodes/decisions.md`.
 
 ---
 
