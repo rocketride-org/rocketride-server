@@ -30,7 +30,7 @@ Usage:
     from echo_pipeline import get_echo_pipeline
 
     pipeline = get_echo_pipeline()
-    token = await client.use(pipeline)
+    token = (await client.use(pipeline=pipeline))['token']
 """
 
 from typing import Dict, Any

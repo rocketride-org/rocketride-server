@@ -81,7 +81,7 @@ Usage:
     }
 
     # Use the pipeline
-    token = await client.use(pipeline=config)
+    token = (await client.use(pipeline=config))['token']
 """
 
 from typing import Any, TypedDict, Optional
