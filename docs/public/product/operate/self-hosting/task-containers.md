@@ -50,17 +50,18 @@ An engine started with `--saas` runs tasks in containers without the flag; give 
 
 Everything else is set in the engine's environment or its `.env` file:
 
-| Variable               | Default                     | Effect                                                                                                                                |
-| ---------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `RR_DOCKER_IMAGE`      | `rocketride/node:<version>` | The node image. Never `latest`: a task protocol of another version is not compatible.                                                 |
-| `RR_DOCKER_PUBLISH`    | `auto`                      | `true` dials a port published on `127.0.0.1`, `false` dials the container's IP; `auto` decides from the daemon (below).               |
-| `RR_DOCKER_MEMORY`     | `2g`                        | Memory limit per task.                                                                                                                |
-| `RR_DOCKER_CPUS`       | `1`                         | CPU limit per task.                                                                                                                   |
-| `RR_DOCKER_PIDS_LIMIT` | `4096`                      | Processes and threads per task, so that one task cannot use up the host's process table and stop the others.                          |
-| `RR_DOCKER_NETWORK`    | `bridge`                    | The Docker network tasks join. `host`, `none` and `container:<name>` are refused: each task needs a network of its own.               |
-| `RR_DOCKER_MODELS`     | none                        | A host directory of model files, mounted read-only at `/models`, with `HF_HOME` pointing there.                                       |
-| `RR_DOCKER_LOG_DRIVER` | `none`                      | The containers' log driver. Task output always reaches the engine; `json-file` also makes `docker logs` work while a task runs.       |
-| `RR_DOCKER_INSTANCE`   | `<hostname>:<engine port>`  | Labels the engine's containers. It must stay the same across restarts so the engine can remove containers an earlier run left behind. |
+| Variable               | Default                     | Effect                                                                                                                                                                                                                    |
+| ---------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_DOCKER_IMAGE`      | `rocketride/node:<version>` | The node image. Never `latest`: a task protocol of another version is not compatible. An image of your own must keep the default one's user, uid and gid 1000, and its entrypoint (tini) or have none.                    |
+| `RR_DOCKER_PUBLISH`    | `auto`                      | `true` dials a port published on `127.0.0.1`, `false` dials the container's IP; `auto` decides from the daemon (below).                                                                                                   |
+| `RR_DOCKER_MEMORY`     | `2g`                        | Memory limit per task.                                                                                                                                                                                                    |
+| `RR_DOCKER_CPUS`       | `1`                         | CPU limit per task.                                                                                                                                                                                                       |
+| `RR_DOCKER_PIDS_LIMIT` | `4096`                      | Processes and threads per task, so that one task cannot use up the host's process table and stop the others.                                                                                                              |
+| `RR_DOCKER_NETWORK`    | `bridge`                    | The Docker network tasks join. `host`, `none` and `container:<name>` are refused: each task needs a network of its own.                                                                                                   |
+| `RR_DOCKER_MODELS`     | none                        | A host directory of model files, mounted read-only at `/models`, with `HF_HOME` pointing there. The daemon must find it at the same path: one it does not find is created on its host, empty.                             |
+| `RR_DOCKER_MOUNTS`     | none                        | Comma-separated names of variables that name host directories a task needs; each is mounted read-only at `/opt/mounts/<name>`, and the variable points there inside the container. The node tests use it for their mocks. |
+| `RR_DOCKER_LOG_DRIVER` | `none`                      | The containers' log driver. Task output always reaches the engine; `json-file` also makes `docker logs` work while a task runs.                                                                                           |
+| `RR_DOCKER_INSTANCE`   | `<hostname>:<engine port>`  | Labels the engine's containers. It must stay the same across restarts so the engine can remove containers an earlier run left behind.                                                                                     |
 
 ## How the engine reaches a task
 
@@ -160,6 +161,19 @@ The probe looks at the store's own directory only, so the daemon's host must
 have the same files at the same paths everywhere under the store, for as long
 as the engine runs: a mount inside the store that only the engine's container
 has is not seen by tasks, which get what the host has at that path.
+
+The directories `RR_DOCKER_MOUNTS` names are not probed: the daemon must find
+them at the same paths, as it does when the engine runs on the daemon's host,
+which is how the node tests use them for their mocks. A directory the daemon
+does not find is created on its host, empty, and the task sees an empty mount.
+
+A task reads them as the user it runs as (the image's user for an engine that
+runs as root, or on Windows), so that user must be able to read them. A
+variable a child process would not get (see [Security](/operate/security)) is
+skipped: list it in `RR_SUBPROCESS_ENV` as well. On Docker Engine older than
+25.0, or on Linux kernels older than 5.12, Docker leaves a mount inside such a
+directory writable, so name none that has mounts inside it. The same holds for
+the `RR_DOCKER_MODELS` directory.
 
 ## Logs and cleanup
 
