@@ -162,13 +162,15 @@ def _load_node(real_discord: bool = True):
         pass
 
     rocketlib.IEndpointBase = _IEndpointBase
-    for _name in ('monitorOther', 'monitorStatus', 'monitorCompleted', 'monitorFailed', 'debug'):
+    # ``warning`` too: ai.common.utils (parse_bool) imports it from rocketlib.
+    for _name in ('monitorOther', 'monitorStatus', 'monitorCompleted', 'monitorFailed', 'debug', 'warning'):
         setattr(rocketlib, _name, mock.Mock(name=_name))
 
     def _get_object(obj):
         return Entry(obj)
 
     rocketlib.getObject = _get_object
+    rocketlib.isCancelled = mock.Mock(name='isCancelled', return_value=False)
 
     class _AVI_ACTION:
         BEGIN = 'BEGIN'

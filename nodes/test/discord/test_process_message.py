@@ -126,6 +126,7 @@ def _load_endpoint_class():
     for _name in ('monitorOther', 'monitorStatus', 'monitorCompleted', 'monitorFailed', 'debug'):
         setattr(rocketlib, _name, mock.Mock(name=_name))
     rocketlib.getObject = mock.Mock(name='getObject')
+    rocketlib.isCancelled = mock.Mock(name='isCancelled', return_value=False)
 
     class _AVI_ACTION:
         BEGIN = 'BEGIN'
@@ -693,7 +694,7 @@ class TestAttachmentMerge:
 
 
 class TestMetadataAndEvents:
-    """Object identity, metadata, and optional events stay consistent."""
+    """Object identity, metadata, and optional event capture stay consistent."""
 
     @staticmethod
     def _pipeline_endpoint():
@@ -936,6 +937,30 @@ def _thread_message(endpoint, thread, *, content='latest question', mentions=())
     message.mentions = list(mentions)
     del endpoint  # only here to keep call sites symmetric
     return message
+
+
+class TestSendRoleIds:
+    """One rule for which roles a send may ping."""
+
+    def test_no_team_ping_means_no_roles(self):
+        endpoint = _make_endpoint()
+        endpoint._allowed_mention_role_ids = ['11', '22']
+
+        assert endpoint._send_role_ids(False, None) == []
+        assert endpoint._send_role_ids(False, ['11']) == []
+
+    def test_none_means_every_configured_role(self):
+        endpoint = _make_endpoint()
+        endpoint._allowed_mention_role_ids = ['11', '22']
+
+        assert endpoint._send_role_ids(True, None) == ['11', '22']
+
+    def test_an_explicit_list_is_used_as_given(self):
+        endpoint = _make_endpoint()
+        endpoint._allowed_mention_role_ids = ['11', '22']
+
+        assert endpoint._send_role_ids(True, ['22']) == ['22']
+        assert endpoint._send_role_ids(True, []) == []
 
 
 class TestThreadHistoryContext:
@@ -2842,7 +2867,7 @@ class TestOwnReactionsIgnored:
         assert payload['added'] is True
 
     def test_a_reaction_is_stamped_once_with_occurred_at(self):
-        """One timestamp, in the broadcast itself, so every consumer keys it the same."""
+        """One timestamp, in the broadcast itself, so live capture and a later log import key it the same."""
         import time as _time
 
         endpoint = self._endpoint()
@@ -3199,7 +3224,7 @@ class TestSendFailure:
 
 
 class TestNoReplyReasonLength:
-    """A ``no_reply`` reason can come from an exception message, so it is bounded."""
+    """A ``no_reply`` reason can be exception text, so it is clipped to keep the event bounded."""
 
     @staticmethod
     def _endpoint():
@@ -3655,6 +3680,7 @@ class TestNumericAndMentionConfig:
         'emitReactions': ('_emit_reactions', False),
         'emitNoReply': ('_emit_no_reply', False),
         'emitOutbound': ('_emit_outbound', False),
+        'captureEvents': ('_capture_events', False),
         'includeMemberMetadata': ('_include_member_metadata', False),
         'escalationPause': ('_escalation_pause', False),
         'ignoreAimedAtOthers': ('_ignore_aimed_at_others', False),
@@ -3687,6 +3713,11 @@ class TestNumericAndMentionConfig:
 
         assert endpoint._send_responses is send_responses
         assert endpoint._require_mention is require_mention
+
+    @pytest.mark.parametrize(('value', 'expected'), [('false', False), ('0', False), ('true', True), (True, True)])
+    def test_capture_events_reads_bools_and_strings(self, value, expected):
+        # A string 'false' is truthy: read by truthiness it would turn capture on.
+        assert self._parse({'captureEvents': value})._capture_events is expected
 
     def test_booleans_are_read_with_the_shared_parse_bool(self):
         assert not hasattr(IEndpoint, '_as_bool')

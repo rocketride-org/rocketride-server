@@ -32,6 +32,7 @@ import json
 import os
 import re
 import threading
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from rocketlib import (
@@ -42,6 +43,7 @@ from rocketlib import (
     monitorFailed,
     debug,
     getObject,
+    isCancelled,
     AVI_ACTION,
 )
 
@@ -55,8 +57,12 @@ from discord.ext import commands
 
 from ai.common.utils import parse_bool
 
+from .capture import CaptureWriter, capture_row, is_valid_source_label
 from .text_utils import (
+    _MENTION_WRAPPER,
+    _engine_warning,
     _outside_code_fences,
+    _shown_entry,
     attachment_kind,
     contains_alias,
     chunk_message,
@@ -90,9 +96,10 @@ THREAD_ARCHIVE_DURATIONS = (60, 1440, 4320, 10080)
 # Discord rejects a thread name outside 1..100 characters.
 THREAD_NAME_MAX_CHARS = 100
 
-# Some ``no_reply`` reasons are built from an exception message. Clipped here,
-# at the one place every reason passes through, so a runaway string cannot
-# reach the emitted event.
+# Some ``no_reply`` reasons are built from an exception message, which is
+# unbounded. Clipped here, at the one place every reason passes through, so the
+# event (and the capture row that stores it) stays bounded. Capture keys such a
+# reason as ``error``, never by its text.
 MAX_NO_REPLY_REASON_CHARS = 200
 
 # Upper bounds for maxConcurrentMessages and maxAttachmentBytes (the schema
@@ -142,6 +149,13 @@ PIPELINE_WORKERS = 8
 # after this so the bot is still closed (its worker thread runs on regardless).
 SHUTDOWN_GRACE_SECONDS = 5
 
+# With capture on, stopping also drains the capture writer, and the engine
+# force-kills the subprocess five seconds after it asks it to stop. The
+# handler grace and the writer's whole stop budget therefore share those five
+# seconds, with room left for closing the Gateway client.
+CAPTURE_SHUTDOWN_GRACE_SECONDS = 2
+CAPTURE_STOP_SECONDS = 2.0
+
 
 class PipelineTimeout(Exception):
     """A pipeline run took longer than ``pipelineTimeoutSeconds``."""
@@ -186,13 +200,7 @@ def _unresolved_variable(value: Any) -> Optional[str]:
 # 20 digits: two ids pasted together are not one.
 _NUMERIC_ID = re.compile(r'[0-9]{1,20}')
 
-# Messages about a list entry show at most this many of its characters. The
-# entry may be a bot token or a secret ${ROCKETRIDE_*} value pasted by mistake,
-# and the message reaches the task status, the start error and the logs.
-_SHOWN_ENTRY_CHARS = 12
-
-# A channel, role or user mention pasted where its id belongs.
-_MENTION_WRAPPER = re.compile(r'<(#|@&|@!?)([0-9]{1,20})>')
+# The mention kinds ``_MENTION_WRAPPER`` (text_utils) matches.
 _MENTION_KIND = {'#': 'channel', '@&': 'role', '@': 'user', '@!': 'user'}
 
 # What each list holds, as a mention kind; a server has no mention form.
@@ -207,22 +215,6 @@ _LIST_ID_KIND = {
 def _is_numeric_id(item: str) -> bool:
     """Whether a list entry is an id Discord could have issued (ASCII digits, 64-bit)."""
     return _NUMERIC_ID.fullmatch(item) is not None and int(item) < 2**64
-
-
-def _shown_entry(item: str) -> str:
-    """Quote a list entry for a message without ever echoing a secret in full.
-
-    Args:
-        item (str): The entry.
-
-    Returns:
-        str: The quoted entry, whole when it is a mention (``<#123>``) or at
-            most ``_SHOWN_ENTRY_CHARS`` long, else its first
-            ``_SHOWN_ENTRY_CHARS`` characters followed by ``…``.
-    """
-    if len(item) <= _SHOWN_ENTRY_CHARS or _MENTION_WRAPPER.fullmatch(item):
-        return repr(item)
-    return repr(item[:_SHOWN_ENTRY_CHARS] + '…')
 
 
 def _non_numeric_id(field: str, item: str) -> str:
@@ -250,15 +242,6 @@ def _non_numeric_id(field: str, item: str) -> str:
             target = f'a {noun} id' if noun else 'an id'
             hint = f'that is a {kind} mention, not {target}; use the numeric id'
     return f'{field} has {_shown_entry(item)}, which is not a numeric Discord id; {hint}'
-
-
-def _engine_warning(message: str) -> None:
-    """Log through the engine's logger when there is one."""
-    try:
-        from rocketlib import warning  # type: ignore  # engine-only module
-    except ImportError:
-        return
-    warning(message)
 
 
 def _config_warning(message: str) -> None:
@@ -365,6 +348,15 @@ class IEndpoint(IEndpointBase):
     _emit_reactions: bool = False
     _emit_no_reply: bool = False
     _emit_outbound: bool = False
+    # Durable capture of the same bodies `_send_sse` broadcasts; all off by
+    # default, and `_capture` stays None unless `captureEvents` is on, so a
+    # node that does not want it never starts a thread or looks for a database.
+    _capture_events: bool = False
+    _capture_node_id: str = ''
+    _capture_table: str = 'discord_events'
+    _capture: Optional[CaptureWriter] = None
+    _capture_source_label: str = ''
+    _capture_source_setting: str = ''
     _include_member_metadata: bool = False
     _backfill_limit: int = 0
     # Support behaviors; all off by default so the node stays generic.
@@ -686,6 +678,12 @@ class IEndpoint(IEndpointBase):
         self._emit_reactions = parse_bool(config.get('emitReactions'), False)
         self._emit_no_reply = parse_bool(config.get('emitNoReply'), False)
         self._emit_outbound = parse_bool(config.get('emitOutbound'), False)
+        self._capture_events = parse_bool(config.get('captureEvents'), False)
+        # Engine-provided strings may be proxies; both of these are substituted
+        # into SQL identifiers / compared to component ids, so coerce to str.
+        self._capture_node_id = str(config.get('captureNodeId', '') or '')
+        self._capture_table = str(config.get('captureTable', '') or 'discord_events')
+        self._capture_source_setting = str(config.get('captureSource', '') or '')
         self._include_member_metadata = parse_bool(config.get('includeMemberMetadata'), False)
         # Zero turns each of these off (a negative value means the same), and
         # each is clamped to the schema's maximum.
@@ -741,6 +739,10 @@ class IEndpoint(IEndpointBase):
         # failure that fires before the event existed would otherwise hang).
         self._shutdown_event = threading.Event()
 
+        # Started alongside the Gateway client and torn down with it, so the
+        # writer thread's lifetime is exactly the bot's.
+        self._start_capture()
+
         try:
             startup_future = asyncio.run_coroutine_threadsafe(self._startup(), server_loop)
             startup_future.result(timeout=30)
@@ -748,19 +750,29 @@ class IEndpoint(IEndpointBase):
             # Startup validation failed (e.g. missing token): fail the source
             # promptly rather than blocking forever with no bot.
             debug(f'Discord _startup raised: {e}')
+            self._stop_capture()
             raise
 
-        # Block scanObjects() until shutdown or a terminal Gateway failure. In
-        # production the subprocess is terminated by EaaS, interrupting this
-        # wait — mirroring how uvicorn's server.run() blocked until the same
-        # external signal. _bot_runner sets this event on a terminal failure.
-        self._shutdown_event.wait()
+        # Block scanObjects() until a stop or a terminal Gateway failure.
+        # Stopping the task sends SIGTERM, which sets the engine's cancellation
+        # flag; the supervisor force-kills only CONST_CANCEL_WAIT_TIMEOUT_SECONDS
+        # later. This source emits no scan callbacks, so it polls the flag
+        # itself (as the webhook source does), and the teardown below -- the
+        # capture drain included -- runs on a normal stop too. _bot_runner
+        # sets the event on a terminal failure.
+        while not isCancelled():
+            if self._shutdown_event.wait(timeout=0.1):
+                break
 
         try:
             shutdown_future = asyncio.run_coroutine_threadsafe(self._shutdown(), server_loop)
             shutdown_future.result(timeout=10)
         except Exception as e:
             debug(f'Discord _shutdown raised: {e}')
+
+        # After the handlers have stopped producing events, so the drain is
+        # bounded by what is already queued.
+        self._stop_capture()
 
         # A terminal Gateway failure (invalid token, missing intent, unexpected
         # disconnect) surfaces as a failed source instead of a silent no-op.
@@ -922,9 +934,10 @@ class IEndpoint(IEndpointBase):
         """Gracefully tear down the Gateway client.
 
         Awaits in-flight message handlers (for at most
-        :data:`SHUTDOWN_GRACE_SECONDS`, then cancels those still running),
-        closes the bot connection, and cancels the background task. Clears the
-        monitor user-info panel.
+        :data:`SHUTDOWN_GRACE_SECONDS`, or :data:`CAPTURE_SHUTDOWN_GRACE_SECONDS`
+        while capture is on, then cancels those still running), closes the bot
+        connection, and cancels the background task. Clears the monitor
+        user-info panel.
 
         Returns:
             None
@@ -933,8 +946,10 @@ class IEndpoint(IEndpointBase):
         # intentional rather than a terminal failure.
         self._closing = True
 
+        # The capture drain that follows needs its share of the engine's kill.
+        grace = CAPTURE_SHUTDOWN_GRACE_SECONDS if self._capture is not None else SHUTDOWN_GRACE_SECONDS
         if self._inflight:
-            _, pending = await asyncio.wait(set(self._inflight), timeout=SHUTDOWN_GRACE_SECONDS)
+            _, pending = await asyncio.wait(set(self._inflight), timeout=grace)
             for task in pending:
                 task.cancel()
             if pending:
@@ -1421,8 +1436,8 @@ class IEndpoint(IEndpointBase):
                 metadata,
                 'reaction',
                 # occurredAt is stamped once, here, so every consumer of this event — the
-                # broadcast and a later import from the task log — keys the same
-                # reaction identically.
+                # broadcast, live capture and a later import from the task log — keys
+                # the same reaction identically.
                 {
                     'emoji': str(payload.emoji),
                     'added': added,
@@ -2173,6 +2188,7 @@ class IEndpoint(IEndpointBase):
                             'text': pipeline_text,
                             'meta': text_meta,
                             'sseText': question,
+                            'captureText': question,
                             'contextChars': len(transcript),
                         }
 
@@ -2398,6 +2414,7 @@ class IEndpoint(IEndpointBase):
                 message.id,
                 text_meta,
                 sse_text=sse_text,
+                capture_text=question,
                 context_chars=len(pipeline_text) - len(question),
             ),
         )
@@ -2411,6 +2428,7 @@ class IEndpoint(IEndpointBase):
             'text': pipeline_text,
             'meta': text_meta,
             'sseText': sse_text,
+            'captureText': question,
             'contextChars': len(pipeline_text) - len(question),
         }
         return self._answer_text(text_reply) or first_answer
@@ -2426,14 +2444,14 @@ class IEndpoint(IEndpointBase):
         A ReAct agent that returned only scratchpad (``Thought:`` with no
         ``Final Answer:``), or nothing at all, answers normally on a second
         run, so up to ``nonAnswerRetries`` re-runs are attempted before the
-        node gives up. Each re-run uses the same pipeline text, metadata, and
-        SSE text as the original but a distinct object name, so a stateful
+        node gives up. Each re-run uses the same pipeline text, metadata, SSE
+        text and capture text as the original but a distinct object name, so a stateful
         prompt node does not treat it as the object it already saw.
 
         Args:
             message (discord.Message): The message being answered.
             text_pass (Dict[str, Any]): The original text pass (``text``,
-                ``meta``, ``sseText``, ``contextChars``).
+                ``meta``, ``sseText``, ``captureText``, ``contextChars``).
             errors (Optional[List[str]]): Collects ``'model_error'`` when a
                 re-run answered with an engine/model failure, which ends the
                 retries — the caller reports that instead of ``non_answer``.
@@ -2460,6 +2478,7 @@ class IEndpoint(IEndpointBase):
                     meta,
                     f'{message.id}:retry{attempt}',
                     sse_text=text_pass['sseText'],
+                    capture_text=text_pass.get('captureText'),
                     context_chars=text_pass['contextChars'],
                     retry=attempt,
                 ),
@@ -2770,6 +2789,105 @@ class IEndpoint(IEndpointBase):
         except Exception as e:
             debug(f'Discord: monitorSSE failed: {e}')
 
+    # -------------------------------------------------------------------------
+    # Durable event capture (opt-in)
+    # -------------------------------------------------------------------------
+
+    def _capture_source(self) -> str:
+        """The label recorded in every captured row's ``source`` column.
+
+        ``captureSource`` when it is set and valid, so a pipeline can say what
+        kind of pipeline wrote a row, and so two Discord sources sharing one
+        capture table can be told apart.
+
+        Otherwise ``'discord:<node type>'``: ``endpoint.key`` is the node's
+        logical type in the engine, not its per-pipeline component id, so the
+        default label is ``'discord:discord'`` for every Discord source — which
+        is why ``captureSource`` is the setting that distinguishes them. Read
+        defensively: this runs in a unit-test process too, where the endpoint
+        is a stand-in. An invalid ``captureSource`` (an unresolved variable
+        included) is reported in the task's warnings, like an invalid
+        ``captureTable``, and the default is used.
+        """
+        endpoint = getattr(self, 'endpoint', None)
+        component = str(getattr(endpoint, 'key', '') or getattr(endpoint, 'logicalType', '') or 'discord')
+        default = f'discord:{component}'
+        configured = getattr(self, '_capture_source_setting', '')
+        if configured:
+            if is_valid_source_label(configured):
+                return configured
+            problem = _unresolved_variable(configured)
+            if problem:
+                _config_warning(f'Discord: captureSource uses {problem}; capture rows use the label {default!r}')
+            else:
+                _config_warning(
+                    f'Discord: captureSource {_shown_entry(configured)} is not a valid label (letters, digits and '
+                    f'_ . : + @ - only, up to 128 characters); capture rows use the label {default!r}'
+                )
+        return default
+
+    def _start_capture(self):
+        """Build and start the capture writer, when ``captureEvents`` is on.
+
+        A no-op otherwise, and that is the contract: with capture off this
+        node starts no thread, borrows no pipe, and never asks the engine
+        which tool nodes are connected to it.
+        """
+        if not getattr(self, '_capture_events', False) or self._capture is not None:
+            return
+        self._capture_source_label = self._capture_source()
+        self._capture = CaptureWriter(
+            self.target,
+            source=self._capture_source_label,
+            table=self._capture_table,
+            node_id=self._capture_node_id,
+        )
+        self._capture.start()
+
+    def _stop_capture(self):
+        """Drain and stop the capture writer. Safe to call twice, or never.
+
+        The writer stays reachable until it has stopped, so an event a
+        handler still emits meanwhile reaches the closed writer, which counts
+        it as unwritten, instead of being dropped without a word.
+        """
+        writer = self._capture
+        if writer is None:
+            return
+        try:
+            writer.stop(timeout=CAPTURE_STOP_SECONDS)
+        except Exception as e:
+            debug(f'Discord: capture stop failed: {e}')
+        finally:
+            self._capture = None
+
+    def _capture_event(self, event_type: str, metadata: Dict[str, Any], payload: Dict[str, Any]):
+        """Queue one event for the capture log.
+
+        Called for every event that is broadcast with ``_send_sse``, with the
+        same three arguments (a ``message`` passes its text unclipped, where
+        the broadcast clips it at 2000 characters), so the durable row and the
+        live broadcast describe the same event. It runs before the pipeline
+        object is opened, so the row is queued even when opening fails. Best-effort in the strongest sense: building the row is pure
+        and queueing it cannot block, and anything that still goes wrong is a
+        debug line, never an exception on the answering path.
+        """
+        writer = self._capture
+        if writer is None:
+            return
+        try:
+            writer.submit(
+                capture_row(
+                    event_type,
+                    metadata,
+                    payload,
+                    source=self._capture_source_label,
+                    now=datetime.now(timezone.utc),
+                )
+            )
+        except Exception as e:
+            debug(f'Discord: capture row failed: {e}')
+
     def _new_entry(self, obj: Dict[str, Any]):
         """Create an engine entry for a Discord object."""
         return getObject(obj=obj)
@@ -2783,6 +2901,7 @@ class IEndpoint(IEndpointBase):
         object_name: Optional[str] = None,
         attachment_id: Optional[int] = None,
         sse_text: Optional[str] = None,
+        capture_text: Optional[str] = None,
         context_chars: int = 0,
         retry: int = 0,
     ) -> str:
@@ -2803,10 +2922,14 @@ class IEndpoint(IEndpointBase):
             sse_text (Optional[str]): Text to broadcast instead of ``text`` —
                 the user's own message (or, for a file-only message, only the
                 files) when thread context was prepended; never the transcript.
-            context_chars (int): Size of the prepended thread transcript.
+            context_chars (int): How many characters the node added around the user's
+                own words: the thread transcript and any folded files.
             retry (int): Which non-answer retry this run is (1-based). Reported
                 on the ``message`` SSE event so a UI can tell a re-run from the
                 original, which carries no ``retry`` key.
+            capture_text (Optional[str]): Text for the capture row instead
+                of the broadcast text — the user's own message (possibly
+                empty) when attachments were folded in.
 
         Returns:
             str: The first pipeline answer, or '' on error / no answers.
@@ -2819,18 +2942,25 @@ class IEndpoint(IEndpointBase):
                 'name': object_name or str(message_id),
             }
         )
+        broadcast_text = text if sse_text is None else sse_text
+        payload: Dict[str, Any] = {
+            'lane': 'text',
+            'text': broadcast_text[:2000],
+            'contextChars': int(context_chars),
+        }
+        if retry > 0:
+            payload['retry'] = int(retry)
+        # Captured before the pipe is touched, so the question is on record
+        # even when the pipeline cannot be opened. The 2000-character clip
+        # keeps the broadcast small; the capture row is the durable record,
+        # so it gets the text whole (a Discord message can be up to 4000
+        # characters).
+        stored_text = broadcast_text if capture_text is None else capture_text
+        self._capture_event('message', obj_meta, dict(payload, text=stored_text))
         pipe = self.target.getPipe()
         try:
             pipe.open(entry)
             self._send_metadata(pipe, obj_meta)
-            broadcast_text = text if sse_text is None else sse_text
-            payload: Dict[str, Any] = {
-                'lane': 'text',
-                'text': broadcast_text[:2000],
-                'contextChars': int(context_chars),
-            }
-            if retry > 0:
-                payload['retry'] = int(retry)
             self._send_sse(pipe, 'message', obj_meta, payload)
             pipe.writeText(text)
             pipe.close()
@@ -2883,11 +3013,13 @@ class IEndpoint(IEndpointBase):
                 'mimeType': mime_type,
             }
         )
+        binary_payload = {'lane': 'binary', 'mimeType': mime_type, 'size': len(file_data)}
+        # Captured before the pipe is touched, as for the text pass.
+        self._capture_event('message', obj_meta, binary_payload)
         pipe = self.target.getPipe()
         try:
             pipe.open(entry)
             self._send_metadata(pipe, obj_meta)
-            binary_payload = {'lane': 'binary', 'mimeType': mime_type, 'size': len(file_data)}
             self._send_sse(pipe, 'message', obj_meta, binary_payload)
             if mime_type.startswith('image/'):
                 pipe.writeImage(AVI_ACTION.BEGIN, mime_type)
@@ -2945,6 +3077,9 @@ class IEndpoint(IEndpointBase):
                 'name': f'{message_id}:{event_type}',
             }
         )
+        # Captured before the pipe is touched, like a question: the event is on
+        # record even when the pipeline object cannot be opened.
+        self._capture_event(event_type, event_meta, payload)
         pipe = self.target.getPipe()
         data = json.dumps({'eventType': event_type, 'metadata': event_meta, **payload}).encode('utf-8')
         try:
@@ -2969,7 +3104,8 @@ class IEndpoint(IEndpointBase):
 
         The reason is clipped to :data:`MAX_NO_REPLY_REASON_CHARS` here, at the
         one place every reason passes through: a reason built from an exception
-        message is unbounded.
+        message is unbounded, and the clip keeps the event bounded. (Capture
+        keys such a reason as ``error``, not by its text.)
 
         Args:
             metadata (Dict[str, Any]): The message's metadata contract.
@@ -3086,16 +3222,7 @@ class IEndpoint(IEndpointBase):
             allowed_mentions = self._allowed_mentions(ping_team=ping_team, role_ids=role_ids)
             # The roles this chunk pings if it is posted: allowed on it and
             # mentioned in it.
-            may_ping = (
-                [
-                    str(role_id)
-                    for role_id in (
-                        role_ids if role_ids is not None else getattr(self, '_allowed_mention_role_ids', []) or []
-                    )
-                ]
-                if ping_team
-                else []
-            )
+            may_ping = [str(role_id) for role_id in self._send_role_ids(ping_team, role_ids)]
             chunk_pings = [role_id for role_id in may_ping if f'<@&{role_id}>' in chunk]
             try:
                 thread = await self._send_chunk(
@@ -3137,6 +3264,24 @@ class IEndpoint(IEndpointBase):
             'pingedRoleIds': pinged_role_ids,
         }
 
+    def _send_role_ids(self, ping_team: bool, role_ids: Optional[List[str]]) -> List[str]:
+        """The roles one send may ping: the single rule behind its allowlist and its ping record.
+
+        Args:
+            ping_team (bool): False leaves every allowed role out.
+            role_ids (Optional[List[str]]): The allowed roles this send may
+                ping; None allows every role in ``allowedMentionRoleIds``.
+
+        Returns:
+            List[str]: Empty when ``ping_team`` is False, every configured role
+                when ``role_ids`` is None, else ``role_ids``.
+        """
+        if not ping_team:
+            return []
+        if role_ids is None:
+            return list(getattr(self, '_allowed_mention_role_ids', []) or [])
+        return role_ids
+
     def _allowed_mentions(self, *, ping_team: bool = True, role_ids: Optional[List[str]] = None):
         """Build the outbound mention allowlist; never permit everyone/here.
 
@@ -3150,11 +3295,8 @@ class IEndpoint(IEndpointBase):
         Returns:
             discord.AllowedMentions: The allowlist for one send.
         """
-        if role_ids is None:
-            role_ids = list(getattr(self, '_allowed_mention_role_ids', []) or [])
+        role_ids = self._send_role_ids(ping_team, role_ids)
         user_ids = getattr(self, '_allowed_mention_user_ids', [])
-        if not ping_team:
-            role_ids = []
         if not role_ids and not user_ids:
             return discord.AllowedMentions.none()
         return discord.AllowedMentions(

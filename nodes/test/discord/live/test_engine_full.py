@@ -30,6 +30,13 @@ the L3 gates, and ``botUserId`` in the engine id block. Optional gates:
   restarts the engine process on ``engineUri``'s port.
 - ``DISCORD_E2E_AI_PIPE``: a saved AI pipe with a discord source, for F46.
 - ``DISCORD_E2E_ENGINE_LOG``: the engine's log file, grepped for evidence.
+- ``DISCORD_E2E_PG_CONTAINER`` / ``_PG_HOST`` / ``_PG_USER`` / ``_PG_DATABASE``
+  (plus the engine variable ``ROCKETRIDE_DISCORD_PG_PASSWORD``): a disposable
+  PostgreSQL container for the capture cases (F32..F34). They drop and create
+  the capture table in that database, and F34 stops and starts the container,
+  so they also need ``DISCORD_E2E_PG_DISPOSABLE`` set to exactly
+  ``<container>/<database>``, and they refuse a database that holds any other
+  table.
 """
 
 import json
@@ -55,12 +62,18 @@ ESCALATION_LINE = 'Escalated to the RocketRide team.'
 FAKE_ROLE_ID = '900000000000000301'
 FAKE_CHANNEL_ID = '900000000000000302'
 QUIET_SECONDS = 15
+# capture.BACKOFF_SECONDS: how long the node drops capture rows after a failed write.
+CAPTURE_BACKOFF_SECONDS = 60
 RUN_STAMP = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
 RESULTS_DIR = os.environ.get('DISCORD_E2E_RESULTS_DIR', '') or os.path.join(tempfile.gettempdir(), 'discord-e2e-full')
 RESULTS_PATH = os.path.join(RESULTS_DIR, f'{RUN_STAMP}.jsonl')
 
 ENGINE_DIR = os.environ.get('DISCORD_E2E_ENGINE_DIR', '')
 ENGINE_LOG = os.environ.get('DISCORD_E2E_ENGINE_LOG', '')
+PG_CONTAINER = os.environ.get('DISCORD_E2E_PG_CONTAINER', '')
+PG_HOST = os.environ.get('DISCORD_E2E_PG_HOST', '')
+PG_USER = os.environ.get('DISCORD_E2E_PG_USER', '')
+PG_DATABASE = os.environ.get('DISCORD_E2E_PG_DATABASE', '')
 AI_PIPE = os.environ.get('DISCORD_E2E_AI_PIPE', '')
 
 
@@ -78,6 +91,43 @@ def _full_gate() -> str:
 
 FULL_SKIP = _full_gate()
 pytestmark = [live_only, pytest.mark.skipif(bool(FULL_SKIP), reason=FULL_SKIP or 'full suite enabled')]
+PG_DISPOSABLE = os.environ.get('DISCORD_E2E_PG_DISPOSABLE', '')
+
+
+def _pg_gate() -> str:
+    """Why the capture cases cannot run, or '' when they may.
+
+    F32 drops the capture table and F34 stops the container, so naming a
+    database is not enough: the operator must also confirm that exact
+    container and database are disposable.
+    """
+    if not (PG_CONTAINER and PG_HOST and PG_USER and PG_DATABASE):
+        return 'DISCORD_E2E_PG_* not set'
+    expected = f'{PG_CONTAINER}/{PG_DATABASE}'
+    if PG_DISPOSABLE != expected:
+        return (
+            f'DISCORD_E2E_PG_DISPOSABLE must be "{expected}" to confirm that container may be stopped '
+            'and that database may have its discord_events table dropped'
+        )
+    return ''
+
+
+PG_SKIP = _pg_gate()
+needs_pg = pytest.mark.skipif(bool(PG_SKIP), reason=PG_SKIP or 'capture cases enabled')
+
+
+def _require_disposable_database():
+    """Refuse to touch a database that holds anything but the capture table."""
+    others = _psql(
+        "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') "
+        "AND tablename <> 'discord_events'"
+    )
+    # The cases are switched on, so an unreachable database is a setup error.
+    assert others.isdigit(), f'cannot query {PG_DATABASE} in {PG_CONTAINER}: {others!r}'
+    if others != '0':
+        pytest.skip(f'{PG_DATABASE} holds {others} other table(s); the capture cases need a disposable database')
+
+
 needs_engine_dir = pytest.mark.skipif(not ENGINE_DIR, reason='DISCORD_E2E_ENGINE_DIR not set')
 needs_ai_pipe = pytest.mark.skipif(not AI_PIPE, reason='DISCORD_E2E_AI_PIPE not set')
 
@@ -196,6 +246,39 @@ def _fake(params: Dict[str, Any], fake: FakeLLM) -> Dict[str, Any]:
     }
 
 
+def _with_capture(pipeline: Dict[str, Any], source: Optional[str] = 'e2e:full', user: str = '') -> Dict[str, Any]:
+    """Add a db_postgres capture component, in the disposable test database.
+
+    The database node is connected to the Discord source only, as the node
+    README requires of a capture database. ``user`` replaces
+    ``DISCORD_E2E_PG_USER`` as the database user (same password).
+    """
+    params = pipeline['components'][0]['config']['parameters']
+    params.update({'captureEvents': True, 'captureNodeId': 'capture_db'})
+    if source:
+        params['captureSource'] = source
+    pipeline['components'].append(
+        {
+            'id': 'capture_db',
+            'provider': 'db_postgres',
+            'config': {
+                'profile': 'default',
+                'default': {
+                    'host': PG_HOST,
+                    'user': user or PG_USER,
+                    'password': '${ROCKETRIDE_DISCORD_PG_PASSWORD}',
+                    'database': PG_DATABASE,
+                    'table': 'discord_events',
+                    'allow_execute': True,
+                },
+                'parameters': {},
+            },
+            'control': [{'classType': 'tool', 'from': 'discord_1'}],
+        }
+    )
+    return pipeline
+
+
 def _start(engine: EngineSession, pipeline: Dict[str, Any]) -> str:
     """(Re)start ``pipeline`` and wait for the node to log in."""
     engine.start_pipe(pipeline, mode=f'run-{time.time()}', login_timeout=45)
@@ -285,6 +368,17 @@ def _log_tail(since_bytes: int, pattern: str) -> List[str]:
 
 def _log_size() -> int:
     return os.path.getsize(ENGINE_LOG) if ENGINE_LOG and os.path.exists(ENGINE_LOG) else 0
+
+
+def _psql(sql: str) -> str:
+    """Run ``sql`` in the test database through ``psql`` inside its container."""
+    result = subprocess.run(
+        ['docker', 'exec', PG_CONTAINER, 'psql', '-U', PG_USER, '-d', PG_DATABASE, '-tAc', sql],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return (result.stdout or result.stderr).strip()
 
 
 def _media(tmpdir: str) -> Dict[str, str]:
@@ -1220,6 +1314,168 @@ def test_f27_system_and_empty_messages(engine, engine_config, driver_bot):
         ok,
         f'embed-only message events={len(late)}; posts={len(posts)}; driver message events in window={len(message_events)}',
         f'driver thread {thread.id}',
+    )
+
+
+# =============================================================================
+# Capture
+# =============================================================================
+
+
+@needs_pg
+def test_f32_capture_into_postgres(engine, engine_config, driver_bot):
+    tag = _tag('F32')
+    _require_disposable_database()
+    _psql('DROP TABLE IF EXISTS discord_events')
+    _start(engine, _with_capture(_echo(_params(engine_config))))
+    posted = driver_bot.post(f'{tag} capture me')
+    answer = _answer(driver_bot, driver_bot.channel, posted, tag)
+    time.sleep(10)
+    table = _psql("SELECT to_regclass('public.discord_events') IS NOT NULL")
+    rows = _psql(
+        "SELECT event_type || '|' || event_key || '|' || source FROM discord_events "
+        f"WHERE message_id = '{posted.id}' ORDER BY seq"
+    ).splitlines()
+    ok = answer is not None and table == 't' and 'message|text|e2e:full' in rows and 'outbound||e2e:full' in rows
+    _check(
+        'F32',
+        'captureEvents / captureSource / default table',
+        'question and answer with capture on, no captureTable set, and no table yet',
+        'the check before the first INSERT finds no table, discord_events is created; '
+        'message and outbound rows with source e2e:full',
+        ok,
+        f'discord_events exists={table}; rows={rows}',
+        f'database {PG_DATABASE}',
+    )
+
+
+INSERT_ONLY_ROLE = 'discord_capture_insert_only'
+
+
+@needs_pg
+def test_f32b_capture_with_an_insert_only_role(engine, engine_config, driver_bot):
+    """A database user granted only INSERT on an existing table captures every row.
+
+    PostgreSQL wants SELECT on the columns of a named ``ON CONFLICT`` target,
+    even for ``DO NOTHING``, so this is the case that broke when the insert
+    named one. The role gets the same password as ``DISCORD_E2E_PG_USER``,
+    which the engine already holds as ``ROCKETRIDE_DISCORD_PG_PASSWORD``; the
+    test process must have that variable too.
+    """
+    tag = _tag('F32b')
+    password = os.environ.get('ROCKETRIDE_DISCORD_PG_PASSWORD', '')
+    if not password:
+        pytest.skip('F32b needs ROCKETRIDE_DISCORD_PG_PASSWORD in the test environment too')
+    _require_disposable_database()
+    if _psql("SELECT to_regclass('public.discord_events') IS NOT NULL") != 't':
+        pytest.skip('F32b writes into the table F32 creates; run F32 first')
+    quoted = password.replace("'", "''")
+    _psql(f'DO $$ BEGIN CREATE ROLE {INSERT_ONLY_ROLE} LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$')
+    _psql(f"ALTER ROLE {INSERT_ONLY_ROLE} PASSWORD '{quoted}'")
+    _psql(f'REVOKE ALL ON discord_events FROM {INSERT_ONLY_ROLE}')
+    _psql(f'GRANT INSERT ON discord_events TO {INSERT_ONLY_ROLE}')
+    _start(engine, _with_capture(_echo(_params(engine_config)), user=INSERT_ONLY_ROLE))
+    posted = driver_bot.post(f'{tag} capture me with INSERT only')
+    answer = _answer(driver_bot, driver_bot.channel, posted, tag)
+    time.sleep(10)
+    rows = _psql(
+        f"SELECT event_type || '|' || event_key FROM discord_events WHERE message_id = '{posted.id}' ORDER BY seq"
+    ).splitlines()
+    grants = _psql(
+        "SELECT string_agg(privilege_type, ',' ORDER BY privilege_type) FROM information_schema.role_table_grants "
+        f"WHERE grantee = '{INSERT_ONLY_ROLE}' AND table_name = 'discord_events'"
+    )
+    ok = answer is not None and grants == 'INSERT' and 'message|text' in rows and 'outbound|' in rows
+    _check(
+        'F32b',
+        'captureEvents with an INSERT-only database user',
+        'existing discord_events, database user granted only INSERT on it',
+        'message and outbound rows written; no SELECT grant needed',
+        ok,
+        f'grants={grants}; rows={rows}',
+        f'database {PG_DATABASE}, role {INSERT_ONLY_ROLE}',
+    )
+
+
+@needs_pg
+def test_f33_every_part_kept_and_duplicates_ignored(engine, engine_config, driver_bot, tmp_media):
+    tag = _tag('F33')
+    _require_disposable_database()
+    _start(engine, _with_capture(_echo(_params(engine_config, textAttachmentExtensions=['.md']))))
+    posted = driver_bot.post(f'{tag} text and a file', files=_files(tmp_media['md']))
+    answer = _answer(driver_bot, driver_bot.channel, posted, tag)
+    time.sleep(10)
+    where = f"WHERE message_id = '{posted.id}' AND event_type = 'message'"
+    keys = _psql(f'SELECT event_key FROM discord_events {where} ORDER BY event_key').splitlines()
+    # A redelivered Gateway event reaches the table as the same INSERT again.
+    _psql(
+        'INSERT INTO discord_events (event_type, message_id, event_key, occurred_at, payload, source) '
+        f'SELECT event_type, message_id, event_key, now(), payload, source FROM discord_events {where} '
+        'ON CONFLICT DO NOTHING'
+    )
+    after = _psql(f'SELECT count(*) FROM discord_events {where}')
+    ok = answer is not None and keys == ['text', 'text:1'] and after == '2'
+    _check(
+        'F33',
+        'capture keys and dedupe',
+        'text + .md attachment, mergeAttachments off; then the same rows inserted again',
+        'two message rows (text, text:1); the repeated inserts are ignored (ON CONFLICT DO NOTHING)',
+        ok,
+        f'message keys={keys}; rows after the repeat={after}',
+        f'message {posted.id}',
+    )
+
+
+@needs_pg
+def test_f34_database_down_mid_run(engine, engine_config, driver_bot):
+    tag = _tag('F34')
+    # The pass condition includes the failed / recovered log lines.
+    if not ENGINE_LOG:
+        pytest.skip('F34 checks the capture log lines; set DISCORD_E2E_ENGINE_LOG')
+    # Checked before anything starts capturing into that database.
+    engine.terminate()
+    _require_disposable_database()
+    _start(engine, _with_capture(_echo(_params(engine_config))))
+    mark = _log_size()
+    subprocess.run(['docker', 'stop', PG_CONTAINER], capture_output=True, timeout=60)
+    try:
+        down = driver_bot.post(f'{tag} while the database is down')
+        down_answer = _answer(driver_bot, driver_bot.channel, down, tag, timeout=60)
+        time.sleep(8)
+    finally:
+        subprocess.run(['docker', 'start', PG_CONTAINER], capture_output=True, timeout=60)
+    for _ in range(30):
+        if _psql('SELECT 1') == '1':
+            break
+        time.sleep(1)
+    # After a failed write the node drops rows for its 60-second backoff
+    # before it tries again; the outage question started that window.
+    time.sleep(CAPTURE_BACKOFF_SECONDS)
+    up = driver_bot.post(f'{tag} after the database is back')
+    up_answer = _answer(driver_bot, driver_bot.channel, up, 'after the database')
+    time.sleep(10)
+    up_rows = _psql(f"SELECT count(*) FROM discord_events WHERE message_id = '{up.id}'")
+    down_rows = _psql(f"SELECT count(*) FROM discord_events WHERE message_id = '{down.id}'")
+    failed = _log_tail(mark, r'Discord capture: writing .* failed')
+    recovered = _log_tail(mark, r'Discord capture: writes to .* recovered after')
+    ok = (
+        down_answer is not None
+        and up_answer is not None
+        and up_rows not in ('', '0')
+        and down_rows == '0'
+        and bool(failed)
+        and bool(recovered)
+    )
+    _check(
+        'F34',
+        'capture: database down mid-run',
+        'container stopped, question, container started, question',
+        'answered while down; the failed capture write is logged and dropped; '
+        'next question captured again and the recovery logged',
+        ok,
+        f'answered while down={down_answer is not None}; rows for outage question={down_rows}; '
+        f'answered after={up_answer is not None}; rows after={up_rows}',
+        f'log: failed={failed[:1]} recovered={recovered[:1]}',
     )
 
 
