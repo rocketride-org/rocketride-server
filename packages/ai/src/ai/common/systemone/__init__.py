@@ -33,16 +33,15 @@ from .questions import (
     QuestionSpec,
     build_wire_questions,
     describe_questions,
-    error_decision,
     map_answer,
     parse_questions,
 )
-from .runner import DecisionResult, DecisionRunner, merge_decisions
+from .runner import DecisionRunner, Outcome
 
 __all__ = [
     'DecisionLimits',
-    'DecisionResult',
     'DecisionRunner',
+    'Outcome',
     'PICK_ONE',
     'ProtocolError',
     'RUBRIC',
@@ -53,8 +52,6 @@ __all__ = [
     'QuestionSpec',
     'build_wire_questions',
     'describe_questions',
-    'error_decision',
     'map_answer',
-    'merge_decisions',
     'parse_questions',
 ]

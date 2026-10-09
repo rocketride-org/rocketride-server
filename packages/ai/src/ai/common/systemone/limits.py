@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Per-backend limits for System One decision models, and input truncation."""
+"""Per-backend limits for System One decision models, and size estimates."""
 
 from __future__ import annotations
 
@@ -78,33 +78,3 @@ def encode_json(value) -> bytes:
 def json_bytes(value) -> int:
     """Return the number of bytes ``value`` occupies once JSON-encoded."""
     return len(encode_json(value))
-
-
-def fit_content(content: str, limits: DecisionLimits, reserved_tokens: int, reserved_bytes: int) -> tuple[str, bool]:
-    """Cut ``content`` from the end so the request fits the backend's limits.
-
-    Args:
-        content: The document text that goes into the state.
-        limits: The backend's limits.
-        reserved_tokens: Tokens already spent by overhead, the longest question and other state parts.
-        reserved_bytes: Bytes of the request body excluding ``content``.
-
-    Returns:
-        ``(kept_content, truncated)``. The head of the text is always the part kept.
-    """
-    kept = content
-    token_budget = limits.max_state_tokens - reserved_tokens
-    max_chars = max(0, int(token_budget * limits.chars_per_token))
-    if len(kept) > max_chars:
-        kept = kept[:max_chars]
-    if limits.max_body_bytes is not None:
-        byte_budget = max(0, limits.max_body_bytes - reserved_bytes)
-        while kept and json_bytes(kept) > byte_budget:
-            overshoot = json_bytes(kept) - byte_budget
-            kept = kept[: max(0, len(kept) - max(1, overshoot // 12))]
-    return kept, kept != content
-
-
-def shrink(content: str, factor: float = 0.75) -> str:
-    """Return the head ``factor`` of ``content`` (used for the one too-large retry)."""
-    return content[: int(len(content) * factor)]

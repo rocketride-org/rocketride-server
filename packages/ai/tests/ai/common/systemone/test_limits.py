@@ -27,9 +27,7 @@ import pytest
 from ai.common.systemone.limits import (
     DecisionLimits,
     estimate_tokens,
-    fit_content,
     json_bytes,
-    shrink,
 )
 
 
@@ -67,35 +65,6 @@ def test_estimate_tokens_rounds_up():
     assert estimate_tokens('', 4.0) == 0
 
 
-def test_fit_content_under_budget_untouched():
-    text, truncated = fit_content('x' * 100, _limits(), reserved_tokens=10, reserved_bytes=0)
-    assert text == 'x' * 100 and truncated is False
-
-
-def test_fit_content_cuts_tail_keeps_head():
-    text = 'HEAD' + 'y' * 1000
-    out, truncated = fit_content(text, _limits(), reserved_tokens=50, reserved_bytes=0)
-    assert truncated is True
-    assert out.startswith('HEAD')
-    assert len(out) == (100 - 50) * 4
-
-
-def test_fit_content_reserved_exceeds_budget_returns_empty():
-    out, truncated = fit_content('abc', _limits(), reserved_tokens=500, reserved_bytes=0)
-    assert out == '' and truncated is True
-
-
-def test_fit_content_respects_utf8_json_byte_budget():
-    # Each emoji is 4 UTF-8 bytes in compact encoding.
-    text = '\U0001f600' * 1000
-    lim = _limits(max_state_tokens=10_000_000, max_body_bytes=2000)
-    out, truncated = fit_content(text, lim, reserved_tokens=0, reserved_bytes=500)
-    assert truncated is True
-    assert out  # non-empty
-    assert text.startswith(out)
-    assert json_bytes(out) <= 1500
-
-
 def test_json_bytes_counts_utf8_non_ascii():
     # Quoted é (2 quote bytes) + 2-byte UTF-8 é = 4 bytes total.
     assert json_bytes('é') == 4
@@ -106,7 +75,3 @@ def test_json_bytes_handles_lone_surrogate():
     # Should not raise UnicodeEncodeError.
     result = json_bytes('\ud800')
     assert result > 0
-
-
-def test_shrink_keeps_three_quarters():
-    assert shrink('a' * 100) == 'a' * 75
