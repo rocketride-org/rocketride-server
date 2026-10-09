@@ -73,7 +73,7 @@ There are three arrays, one per question kind. Every question needs a `name` and
 | ---------- | ---------- | ------------------------------------------------------------- |
 | `yes_no`   | Yes/No     | `yes`, `no` or `uncertain`                                    |
 | `pick_one` | Pick-one   | The chosen option value, or `uncertain`                       |
-| `rubric`   | Rubric     | The index of the most probable level (integer), or `uncertain` |
+| `rubric`   | Rubric     | The text of the most probable level (its position is recorded as `index`), or `uncertain` |
 
 - **Name** is the question name; a Gate node refers to it. It must be lowercase letters, digits
   and `_`, start with a letter, and be at most 48 characters. Names must be unique across
@@ -117,8 +117,8 @@ description.
 For a rubric question, enter one level description per line, level 0 first. There must be
 between 2 and the backend's level limit. Describe a situation rather than a degree:
 "Something is broken but there is a workaround" is more useful to the model than
-"Moderate". The answer is the integer index of the most probable level; the decision also
-carries the expected `score` and the text of the chosen `level`.
+"Moderate". The answer is the text of the most probable level; the record also
+carries its position as `index` (level 0 is `0`) and the expected `score`. A Gate's numeric operators compare `index`.
 
 ```text
 Nothing is wrong
@@ -245,7 +245,7 @@ that is done.
 
 ### Clef is not offered
 
-Ollama also serves `clef`, which is omitted here: Clef is the vision model and this node is text-only in v1.
+Ollama also serves `clef`, which is omitted here: Clef is the vision model and this node reads text only. It takes text on five lanes (text, documents, table, questions and answers); a non-text document fails the object with "System One reads text; convert this content to text first (e.g. OCR or caption)".
 
 ### Testing
 

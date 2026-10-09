@@ -355,9 +355,13 @@ Agent_2 has no `input` lanes: it is invoked as a tool by Agent_1. LLM_2 and Memo
 
 Tool components (classType `tool`) have empty `lanes` (`{}`). They are not connected via data lanes: they are invoked by agents at runtime. The tool declares which agent controls it via the `control` array with `"classType": "tool"`.
 
-### Ask Nodes (Decision Models)
+### System One Nodes (Decision Models)
 
-Ask nodes (classType `decision`) ask typed questions (yes/no, pick-one, rubric) about each document with a System One decision model, in one call per document. Four providers share one implementation: `decision_typesafe` (TypeSafe Jev), `decision_openrouter`, `decision_ollama` (local) and `decision_systemone` (any compatible endpoint). Lanes are `documents → documents, answers`; the document passes through unchanged and the answers are written to `metadata.decisions.<name>` for later nodes to read. Read the catalog for current fields and profiles.
+System One nodes (classType `decision`) ask typed questions (yes/no, pick-one, rubric) about an item with a System One decision model, in one call per item. Four providers share one implementation: `decision_typesafe` (TypeSafe Jev), `decision_openrouter`, `decision_ollama` (local) and `decision_systemone` (any compatible endpoint). Input lanes are `text`, `documents`, `table`, `questions` and `answers`, and each is forwarded on the same lane unchanged. The answers are recorded once on the object at `response.decisions` (keyed by this node's component id), not on the items. Documents are forwarded stamped with `metadata.decision_refs` so a later node can find their record. System One reads text only: a non-text document fails the object, so convert images and audio to text first. Read the catalog for current fields and profiles.
+
+### Gate
+
+`gate` (classType `decision`) passes or blocks items by the decisions recorded upstream. It calls no model and works with any node that writes `response.decisions`. Every lane in is the same lane out (`text`, `documents`, `table`, `questions`, `answers`, `json`, `image`, `audio`, `video`). Config: `match` (`all` or `any`) and `conditions`, a list of `{question, op, value}`. `op` is one of `equals`, `not_equals`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`, `between` (value `[low, high]`, inclusive), `exists` (answered, not `uncertain`) and `not_exists` (is `uncertain`). `question` is a question name configured on the System One node that answers it. A passing item is forwarded; a failing item is dropped. Place a Gate downstream of the node that answers its questions, on the same path.
 
 ---
 

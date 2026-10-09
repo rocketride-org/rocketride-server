@@ -20,8 +20,8 @@ thing.
 >
 > For the file format, see [Node Service Definitions](services-schema.md); for the
 > README contract, [Node README Schema](readme-schema.md); for testing,
-> [Node Testing](testing.md). Nodes that attach typed answers to documents follow the
-> [Decisions metadata](decisions-metadata.md) contract.
+> [Node Testing](testing.md). Nodes that record decisions on the object for later nodes to route on follow the
+> [Decisions (`response.decisions`)](decisions.md) contract.
 
 ---
 
