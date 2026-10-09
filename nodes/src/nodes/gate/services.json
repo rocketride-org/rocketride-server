@@ -1,0 +1,87 @@
+{
+	"title": "Gate",
+	"protocol": "gate://",
+	"classType": ["decision"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.gate",
+	"prefix": "gate",
+	"description": ["Passes or blocks each item on its wire by the decisions recorded on the object (response.decisions), ", "for example by a System One node upstream. Put one Gate on each branch with the rule for that branch. ", "Accepts any lane and sends it out on the same lane."],
+	"icon": "util-infrastructure.svg",
+	"documentation": "https://docs.rocketride.org/nodes/gate",
+	"tile": ["Pass when ${parameters.gate.match}"],
+	"lanes": {
+		"text": ["text"],
+		"documents": ["documents"],
+		"table": ["table"],
+		"questions": ["questions"],
+		"answers": ["answers"],
+		"json": ["json"],
+		"image": ["image"],
+		"audio": ["audio"],
+		"video": ["video"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": { "match": "all", "conditions": [] }
+		}
+	},
+	"fields": {
+		"gate.match": {
+			"type": "string",
+			"title": "Pass when",
+			"default": "all",
+			"enum": [
+				["all", "All conditions hold"],
+				["any", "Any condition holds"]
+			]
+		},
+		"gate.question": {
+			"type": "string",
+			"title": "Question",
+			"description": "Question name as configured on the node that answers it, e.g. is_spam"
+		},
+		"gate.op": {
+			"type": "string",
+			"title": "Operator",
+			"default": "equals",
+			"enum": [
+				["equals", "equals"],
+				["not_equals", "does not equal"],
+				["in", "is one of"],
+				["not_in", "is none of"],
+				["gt", ">"],
+				["gte", "≥"],
+				["lt", "<"],
+				["lte", "≤"],
+				["between", "between (inclusive)"],
+				["exists", "is answered (not uncertain)"],
+				["not_exists", "is uncertain"]
+			]
+		},
+		"gate.value": {
+			"type": "string",
+			"title": "Value",
+			"optional": true,
+			"description": "One value; a comma-separated list for 'is one of'; 'low, high' for between; empty for answered/uncertain"
+		},
+		"gate.conditions": {
+			"type": "array",
+			"title": "Conditions",
+			"minItems": 1,
+			"items": {
+				"type": "object",
+				"properties": ["gate.question", "gate.op", "gate.value"]
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Gate",
+			"properties": ["gate.match", "gate.conditions"]
+		}
+	]
+}
