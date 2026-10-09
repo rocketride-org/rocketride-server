@@ -31,6 +31,7 @@ import { getExtensionContext } from '../extension';
 import { ensureAppTrigger, ensureProjectId } from './appMarker';
 import { vendorAppTypes } from './appTypes';
 import { getWatchManager } from './watchManager';
+import { MISSING_PNPM_MESSAGE, checkPnpmInstalled, promptMissingPnpm } from './pnpm';
 
 // =============================================================================
 // VALIDATION
@@ -199,6 +200,13 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	}
 	if (folderTaken) {
 		throw new Error(`Folder "apps/${folderName}" already exists in the workspace.`);
+	}
+
+	// Ensure pnpm is available — creating and running apps requires pnpm.
+	const hasPnpm = await checkPnpmInstalled();
+	if (!hasPnpm) {
+		void promptMissingPnpm();
+		throw new Error(MISSING_PNPM_MESSAGE);
 	}
 
 	// ── 3. Render + write the tree ───────────────────────────────────────

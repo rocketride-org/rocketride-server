@@ -31,6 +31,7 @@ import { DEV_SESSION_NONCE } from './devSession';
 import { appIconDataUri } from './appScan';
 import type { ScannedApp } from './appScan';
 import type { AppScreenProvider, AppWatchStatus } from '../providers/AppScreenProvider';
+import { MISSING_PNPM_MESSAGE, isPnpmMissingError, promptMissingPnpm, isWindowsMissingPnpmShellExit } from './pnpm';
 
 // =============================================================================
 // TYPES
@@ -758,9 +759,23 @@ export class WatchManager {
 				// Flush the carried partials so a final unterminated line still shows.
 				if (pendingOut.trim()) this.consoleAllLines('log', pendingOut);
 				if (pendingErr.trim()) this.consoleAllLines('warn', pendingErr);
+				if (isWindowsMissingPnpmShellExit(code, output)) {
+					void promptMissingPnpm();
+					finish({ ok: false, output, code, failureReason: MISSING_PNPM_MESSAGE });
+					return;
+				}
 				finish({ ok: code === 0, output, code });
 			});
-			proc.on('error', (err) => finish({ ok: false, output, code: null, failureReason: `pnpm could not be started: ${err.message}` }));
+			proc.on('error', (err) => {
+				const isMissing = isPnpmMissingError(err);
+				const failureReason = isMissing
+					? MISSING_PNPM_MESSAGE
+					: `pnpm could not be started: ${err.message}`;
+				if (isMissing) {
+					void promptMissingPnpm();
+				}
+				finish({ ok: false, output, code: null, failureReason });
+			});
 		});
 	}
 

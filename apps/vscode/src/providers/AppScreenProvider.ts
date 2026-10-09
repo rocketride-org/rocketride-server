@@ -28,6 +28,7 @@ import type { AppListing } from '../appdev/appMarker';
 import { ensureWatch, getWatchManager } from '../appdev/watchManager';
 import { deployApp } from '../appdev/publish';
 import { vendorAppTypes } from '../appdev/appTypes';
+import { checkPnpmInstalled, promptMissingPnpm } from '../appdev/pnpm';
 import { getLogger } from '../shared/util/output';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConfigManager } from '../config';
@@ -171,6 +172,14 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			localResourceRoots: [this.context.extensionUri],
 		};
 		this.panels.set(appId, panel);
+
+		// Proactively check if pnpm is installed when App Builder editor opens
+		void checkPnpmInstalled().then((hasPnpm) => {
+			if (!hasPnpm) {
+				void promptMissingPnpm();
+			}
+		});
+
 		// The build ticker + compile feed are org-scoped DEPLOY-type pushes:
 		// without this monitor the server filters every apaevt_build* event
 		// out for this connection (only the pipeline editor armed 'deploy'
