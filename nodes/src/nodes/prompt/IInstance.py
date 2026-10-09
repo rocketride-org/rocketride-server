@@ -27,6 +27,23 @@ from ai.common.schema import Question
 from rocketlib import debug, error, Entry
 
 
+# Appended when retrieval ran and returned something, so the answer is drawn from the
+# documents rather than from what the model happens to remember.
+_GROUNDING_INSTRUCTION = (
+    'Base your answer on the documents and context provided below. Do not introduce '
+    'facts, figures or dates that do not appear there.'
+)
+
+# Appended when retrieval ran and returned nothing. The node cannot tell a question
+# that needs the missing material from a greeting or a follow-up that does not, so the
+# condition is left to the model: answering from memory is what this rules out, not
+# answering at all.
+_ABSTAIN_INSTRUCTION = (
+    'No documents were retrieved for this question. If answering it needs that '
+    'material, say you do not have the information rather than answering from memory.'
+)
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -56,6 +73,8 @@ class IInstance(IInstanceBase):
         this on its way out, after setting it.
         """
         self.question = Question()
+        # A previous turn's retrieval must not decide this turn's instruction.
+        self.retrieval_ran = False
 
     def open(self, entry: Entry):
         # The turn starts here, so the question does too.
@@ -73,7 +92,9 @@ class IInstance(IInstanceBase):
         """
         Collect documents for merging.
         """
-        # Create a question from documents
+        # A store dispatches this lane even when its search found nothing, so being
+        # called at all is what separates "retrieval missed" from "no retrieval here".
+        self.retrieval_ran = True
         self.question.addDocuments(documents)
 
     def writeText(self, text: str):
@@ -127,6 +148,14 @@ class IInstance(IInstanceBase):
             for i, instruction in enumerate(instructions):
                 instruction_name = f'User Instruction {i + 1}' if len(instructions) > 1 else 'User Instruction'
                 self.question.addInstruction(instruction_name, instruction)
+
+            # Only a pipeline that retrieves gets a grounding rule, so a prompt node
+            # merging branches is left exactly as it was. A miss forces an abstention
+            # only when no other lane supplied context that could answer the question.
+            if self.retrieval_ran:
+                grounded = self.question.documents or self.question.context
+                body = _GROUNDING_INSTRUCTION if grounded else _ABSTAIN_INSTRUCTION
+                self.question.addInstruction('Grounding', body)
 
             debug(f'Enhanced question: {self.question.getPrompt()}')
 

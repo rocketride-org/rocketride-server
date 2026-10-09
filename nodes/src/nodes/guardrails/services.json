@@ -125,6 +125,7 @@
 				"enable_content_safety": false,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": false,
+				"require_grounding": false,
 				"max_input_length": 0,
 				"max_tokens_estimate": 0,
 				"expected_format": "",
@@ -138,6 +139,7 @@
 				"enable_content_safety": true,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
+				"require_grounding": true,
 				"max_input_length": 50000,
 				"max_tokens_estimate": 4096,
 				"expected_format": "",
@@ -151,6 +153,7 @@
 				"enable_content_safety": true,
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
+				"require_grounding": false,
 				"max_input_length": 0,
 				"max_tokens_estimate": 0,
 				"expected_format": "",
@@ -208,6 +211,12 @@
 			"type": "boolean",
 			"title": "Enable hallucination check",
 			"description": "Verify that output claims are grounded in source documents",
+			"default": false
+		},
+		"require_grounding": {
+			"type": "boolean",
+			"title": "Require grounding",
+			"description": "After a retrieval returns nothing, treat an answer as a violation when it states a figure, unless the answer declines to give one. Greetings, acknowledgements and refusals are unaffected, and a non-numeric claim is not checked. Needs the documents lane wired to have any effect.",
 			"default": false
 		},
 		"max_input_length": {
@@ -274,6 +283,7 @@
 				"enable_content_safety",
 				"enable_pii_detection",
 				"enable_hallucination_check",
+				"require_grounding",
 				"max_input_length",
 				"max_tokens_estimate",
 				"expected_format",
@@ -291,6 +301,7 @@
 			"object": "strict",
 			"properties": [
 				"policy_mode",
+				"require_grounding",
 				"max_tokens_estimate",
 				"expected_format"
 			]
