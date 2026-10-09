@@ -33,7 +33,7 @@ from ai.common.systemone.questions import (
     QuestionConfigError,
     QuestionSpec,
     build_wire_questions,
-    error_decision,
+    describe_questions,
     map_answer,
     parse_questions,
 )
@@ -105,47 +105,42 @@ def test_yes_no_omits_criteria_when_unset():
 
 def test_map_yes_no_margin_confidence():
     spec = QuestionSpec('urgent', YES_NO, 'q', threshold=0.5)
-    d = map_answer(spec, {'type': 'noul', 'noul': 0.95}, model='jev-1.13.0', source='n1')
+    d = map_answer(spec, {'type': 'noul', 'noul': 0.95})
     assert d['answer'] == 'yes' and d['probability'] == 0.95
     assert d['confidence'] == pytest.approx(0.9)
-    assert d['uncertain'] is False and d['model'] == 'jev-1.13.0' and d['source'] == 'n1' and d['kind'] == YES_NO
-    d = map_answer(spec, {'type': 'noul', 'noul': 0.2}, model=None, source='n1')
+    d = map_answer(spec, {'type': 'noul', 'noul': 0.2})
     assert d['answer'] == 'no' and d['confidence'] == pytest.approx(0.6)
 
 
 def test_map_yes_no_custom_threshold():
     spec = QuestionSpec('urgent', YES_NO, 'q', threshold=0.8)
-    d = map_answer(spec, {'type': 'noul', 'noul': 0.7}, model=None, source='n')
+    d = map_answer(spec, {'type': 'noul', 'noul': 0.7})
     assert d['answer'] == 'no' and d['confidence'] == pytest.approx(0.125)
 
 
 def test_map_uncertain_below_min_confidence():
     spec = QuestionSpec('urgent', YES_NO, 'q', min_confidence=0.5)
-    d = map_answer(spec, {'type': 'noul', 'noul': 0.6}, model=None, source='n')
-    assert d['answer'] == 'uncertain' and d['uncertain'] is True and d['probability'] == 0.6
+    d = map_answer(spec, {'type': 'noul', 'noul': 0.6})
+    assert d['answer'] == 'uncertain' and d['best'] == 'yes' and d['probability'] == 0.6
 
 
 def test_map_pick_one_uses_backend_confidence():
     spec = QuestionSpec('team', PICK_ONE, 'q', options=(('billing', None), ('bug', None)))
     wire = {'type': 'choice', 'choice': 'bug', 'probabilities': {'billing': 0.1, 'bug': 0.9}, 'confidence': 0.8}
-    d = map_answer(spec, wire, model=None, source='n')
+    d = map_answer(spec, wire)
     assert d['answer'] == 'bug' and d['probabilities'] == {'billing': 0.1, 'bug': 0.9} and d['confidence'] == 0.8
 
 
 def test_map_pick_one_computes_confidence_when_absent():
     spec = QuestionSpec('team', PICK_ONE, 'q', options=(('a', None), ('b', None)))
-    d = map_answer(
-        spec, {'type': 'choice', 'choice': 'a', 'probabilities': {'a': 0.75, 'b': 0.25}}, model=None, source='n'
-    )
+    d = map_answer(spec, {'type': 'choice', 'choice': 'a', 'probabilities': {'a': 0.75, 'b': 0.25}})
     assert d['confidence'] == pytest.approx(0.5)
 
 
 def test_spread_confidence_uses_option_count_not_returned_probabilities():
     """Spec 6.2: n is the number of options, even if the backend returns fewer probabilities."""
     spec = QuestionSpec('team', PICK_ONE, 'q', options=(('a', None), ('b', None), ('c', None)))
-    d = map_answer(
-        spec, {'type': 'choice', 'choice': 'a', 'probabilities': {'a': 0.8, 'b': 0.2}}, model=None, source='n'
-    )
+    d = map_answer(spec, {'type': 'choice', 'choice': 'a', 'probabilities': {'a': 0.8, 'b': 0.2}})
     assert d['confidence'] == pytest.approx((0.8 - 1 / 3) / (1 - 1 / 3))
 
 
@@ -158,32 +153,19 @@ def test_map_rubric_argmax_and_level_text():
         'probabilities': {'0': 0.0, '1': 0.95, '2': 0.05},
         'confidence': 0.92,
     }
-    d = map_answer(spec, wire, model=None, source='n')
-    assert d['answer'] == 1 and d['score'] == 1.05 and d['level'] == 'Frustrated' and d['confidence'] == 0.92
+    d = map_answer(spec, wire)
+    assert d['answer'] == 'Frustrated' and d['index'] == 1 and d['score'] == 1.05 and d['confidence'] == 0.92
 
 
 def test_map_wrong_type_raises_protocol_error():
     with pytest.raises(ProtocolError):
-        map_answer(QuestionSpec('u', YES_NO, 'q'), {'type': 'choice', 'choice': 'x'}, model=None, source='n')
+        map_answer(QuestionSpec('u', YES_NO, 'q'), {'type': 'choice', 'choice': 'x'})
 
 
 def test_map_unknown_choice_raises_protocol_error():
     spec = QuestionSpec('team', PICK_ONE, 'q', options=(('a', None), ('b', None)))
     with pytest.raises(ProtocolError):
-        map_answer(spec, {'type': 'choice', 'choice': 'zzz', 'probabilities': {}}, model=None, source='n')
-
-
-def test_error_decision_shape():
-    d = error_decision(QuestionSpec('u', YES_NO, 'q'), 'boom', source='n')
-    assert d == {
-        'kind': YES_NO,
-        'answer': 'error',
-        'uncertain': True,
-        'confidence': 0.0,
-        'error': 'boom',
-        'model': None,
-        'source': 'n',
-    }
+        map_answer(spec, {'type': 'choice', 'choice': 'zzz', 'probabilities': {}})
 
 
 @pytest.mark.parametrize(
@@ -302,4 +284,97 @@ def test_error_decision_shape():
 def test_map_malformed_payloads_raise_protocol_error(spec_obj, wire, description):
     """Test that malformed backend answers raise ProtocolError instead of crashing."""
     with pytest.raises(ProtocolError):
-        map_answer(spec_obj, wire, model=None, source='n')
+        map_answer(spec_obj, wire)
+
+
+_LIMITS_V2 = DecisionLimits(max_options=26, max_levels=10, max_questions=64, max_state_tokens=8192)
+_RUBRIC = QuestionSpec('severity', RUBRIC, 'How urgent?', levels=('low', 'medium', 'high'))
+
+
+def test_yes_no_maps_to_answer_confidence_probability():
+    spec = QuestionSpec('is_spam', YES_NO, 'Spam?', threshold=0.5)
+    assert map_answer(spec, {'type': 'noul', 'noul': 0.9}) == {
+        'answer': 'yes',
+        'confidence': pytest.approx(0.8),
+        'probability': 0.9,
+    }
+
+
+def test_pick_one_maps_to_choice_and_probabilities():
+    spec = QuestionSpec('topic', PICK_ONE, 'Topic?', options=(('billing', None), ('legal', None)))
+    wire = {'type': 'choice', 'choice': 'legal', 'probabilities': {'billing': 0.2, 'legal': 0.8}, 'confidence': 0.6}
+    assert map_answer(spec, wire) == {
+        'answer': 'legal',
+        'confidence': 0.6,
+        'probabilities': {'billing': 0.2, 'legal': 0.8},
+    }
+
+
+def test_rubric_answer_is_the_level_label_with_index_and_labelled_probabilities():
+    wire = {'type': 'score', 'score': 1.87, 'probabilities': {'0': 0.03, '1': 0.07, '2': 0.9}, 'confidence': 0.85}
+    assert map_answer(_RUBRIC, wire) == {
+        'answer': 'high',
+        'index': 2,
+        'score': 1.87,
+        'confidence': 0.85,
+        'probabilities': {'low': 0.03, 'medium': 0.07, 'high': 0.9},
+    }
+
+
+def test_below_min_confidence_becomes_uncertain_with_best_and_no_index():
+    spec = QuestionSpec('severity', RUBRIC, 'How urgent?', levels=('low', 'medium', 'high'), min_confidence=0.9)
+    wire = {'type': 'score', 'score': 1.87, 'probabilities': {'0': 0.03, '1': 0.07, '2': 0.9}, 'confidence': 0.85}
+    mapped = map_answer(spec, wire)
+    assert mapped['answer'] == 'uncertain' and mapped['best'] == 'high' and 'index' not in mapped
+
+
+@pytest.mark.parametrize('score', [-0.1, 2.01, float('nan')])
+def test_rubric_score_out_of_range_is_a_protocol_error(score):
+    wire = {'type': 'score', 'score': score, 'probabilities': {'0': 0.1, '1': 0.1, '2': 0.8}}
+    with pytest.raises(ProtocolError, match='score'):
+        map_answer(_RUBRIC, wire)
+
+
+def test_rubric_probability_key_must_be_a_level_index():
+    with pytest.raises(ProtocolError, match='level index'):
+        map_answer(_RUBRIC, {'type': 'score', 'score': 1, 'probabilities': {'0': 0.5, 'x': 0.5}})
+    with pytest.raises(ProtocolError, match='out of range'):
+        map_answer(_RUBRIC, {'type': 'score', 'score': 1, 'probabilities': {'0': 0.5, '3': 0.5}})
+
+
+def test_probabilities_must_sum_to_one_within_tolerance():
+    spec = QuestionSpec('topic', PICK_ONE, 'Topic?', options=(('billing', None), ('legal', None)))
+    ok = {'type': 'choice', 'choice': 'legal', 'probabilities': {'billing': 0.2, 'legal': 0.805}}
+    assert map_answer(spec, ok)['answer'] == 'legal'  # 1.005 is inside 1e-6 + 2 * 0.005
+    bad = {'type': 'choice', 'choice': 'legal', 'probabilities': {'billing': 0.2, 'legal': 0.9}}
+    with pytest.raises(ProtocolError, match='sum to'):
+        map_answer(spec, bad)
+    with pytest.raises(ProtocolError, match='sum to'):
+        map_answer(_RUBRIC, {'type': 'score', 'score': 1, 'probabilities': {'0': 0.1, '1': 0.1, '2': 0.1}})
+
+
+def test_rubric_levels_reject_reserved_and_duplicates():
+    with pytest.raises(QuestionConfigError, match='reserved'):
+        parse_questions({'rubric': [{'name': 'r', 'question': 'q', 'levels': 'low\nuncertain'}]}, _LIMITS_V2)
+    with pytest.raises(QuestionConfigError, match='duplicate level'):
+        parse_questions({'rubric': [{'name': 'r', 'question': 'q', 'levels': 'low\nlow'}]}, _LIMITS_V2)
+
+
+def test_error_is_no_longer_a_reserved_option():
+    specs = parse_questions({'pick_one': [{'name': 't', 'question': 'q', 'options': 'error\nfine'}]}, _LIMITS_V2)
+    assert specs[0].options[0][0] == 'error'
+
+
+def test_describe_questions_for_the_group_header():
+    specs = [
+        QuestionSpec('is_spam', YES_NO, 'Spam?', threshold=0.6),
+        QuestionSpec(
+            'topic', PICK_ONE, 'Topic?', options=(('billing', 'Payments'), ('legal', None)), min_confidence=0.3
+        ),
+        _RUBRIC,
+    ]
+    assert describe_questions(specs) == {
+        'is_spam': {'kind': 'yes_no', 'question': 'Spam?', 'threshold': 0.6},
+        'topic': {'kind': 'pick_one', 'question': 'Topic?', 'options': ['billing', 'legal'], 'min_confidence': 0.3},
+        'severity': {'kind': 'rubric', 'question': 'How urgent?', 'levels': ['low', 'medium', 'high']},
+    }
