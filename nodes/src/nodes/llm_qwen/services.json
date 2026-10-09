@@ -245,6 +245,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 8192, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -255,7 +258,7 @@
 				"model": "qwen3-235b-a22b-2507",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelOutputTokens": 235929, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -267,6 +270,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 117964, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -300,6 +306,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 81920, // openrouter
 				"modelOutputTokens": 32768, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -321,7 +330,7 @@
 				"model": "qwen3.5-122b-a10b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 81920, // openrouter
+				"modelOutputTokens": 65536, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -343,7 +352,7 @@
 				"model": "qwen3.5-35b-a3b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelOutputTokens": 235929, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -354,7 +363,7 @@
 				"model": "qwen3.5-397b-a17b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelOutputTokens": 235929, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -365,7 +374,7 @@
 				"model": "qwen3.5-9b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 235929, // openrouter
+				"modelOutputTokens": 32768, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -375,8 +384,8 @@
 				"title": "Qwen: Qwen3.5-9B (batch)",
 				"model": "qwen3.5-9b:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 235929, // openrouter
+				"modelTotalTokens": 262144, // manual
+				"modelOutputTokens": 235929, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the DashScope API serves no model with this ID. Please use 'qwen3.5-9b' instead.",
 				"capabilities": {
@@ -422,7 +431,7 @@
 				"model": "qwen3.6-27b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelOutputTokens": 262140, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -445,6 +454,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -477,7 +489,7 @@
 				"model": "qwen3.8-2.4t-a95b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 262144, // openrouter
+				"modelOutputTokens": 131072, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -487,8 +499,8 @@
 				"title": "Qwen: Qwen3.8 2.4T A95B (batch)",
 				"model": "qwen3.8-2.4t-a95b:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1010000, // openrouter
-				"modelOutputTokens": 909000, // openrouter
+				"modelTotalTokens": 1010000, // manual
+				"modelOutputTokens": 909000, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the DashScope API serves no model with this ID. Please use 'qwen3.8-2.4t-a95b' instead.",
 				"capabilities": {
@@ -535,6 +547,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 8192, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -590,6 +605,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -601,6 +619,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -612,6 +633,9 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -633,7 +657,21 @@
 				"model": "qwen3-next-80b-a3b-thinking",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 235929, // openrouter
+				"modelOutputTokens": 32768, // openrouter
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-10-09). Please select a current model.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-8-max-prime": {
+				"title": "Qwen: Qwen3.8 Max Prime",
+				"model": "qwen3.8-max-prime",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 131072, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -1110,6 +1148,12 @@
 					"properties": [
 						"qwen.qwen3-next-80b-a3b-thinking"
 					]
+				},
+				{
+					"value": "qwen3-8-max-prime",
+					"properties": [
+						"qwen.qwen3-8-max-prime"
+					]
 				}
 			]
 		},
@@ -1367,6 +1411,13 @@
 		},
 		"qwen.qwen3-next-80b-a3b-thinking": {
 			"object": "qwen3-next-80b-a3b-thinking",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"qwen.qwen3-8-max-prime": {
+			"object": "qwen3-8-max-prime",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

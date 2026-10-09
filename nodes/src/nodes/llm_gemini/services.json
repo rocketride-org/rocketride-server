@@ -88,7 +88,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 1048576, // sync_models.config.json
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-3_1-flash-image-preview": {
 				"title": "Gemini 3.1 Flash Image Preview",
@@ -96,7 +99,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 131072, // sync_models.config.json
 				"modelOutputTokens": 58982, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-3_1-flash-lite-preview": {
 				"title": "Gemini 3.1 Flash Lite",
@@ -104,7 +110,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 1048576, // sync_models.config.json
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-3-flash-preview": {
 				"title": "Gemini 3 Flash Preview",
@@ -112,7 +121,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 1048576, // sync_models.config.json
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-3-pro-image-preview": {
 				"title": "Gemini 3 Pro Image Preview",
@@ -120,7 +132,10 @@
 				"modelSource": "manual",
 				"modelTotalTokens": 65536, // sync_models.config.json
 				"modelOutputTokens": 32768, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2_5-pro": {
 				"title": "Gemini 2.5 Pro",
@@ -130,7 +145,10 @@
 				"modelOutputTokens": 65536, // openrouter
 				"deprecated": true,
 				"migration": "Please use 'gemini-3.1-pro-preview' instead",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2_5-flash": {
 				"title": "Gemini 2.5 Flash",
@@ -140,7 +158,10 @@
 				"modelOutputTokens": 65535, // openrouter
 				"deprecated": true,
 				"migration": "Please use 'gemini-3.6-flash' instead",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2_5-flash-lite": {
 				"title": "Gemini 2.5 Flash Lite",
@@ -150,7 +171,10 @@
 				"modelOutputTokens": 65535, // openrouter
 				"deprecated": true,
 				"migration": "Please use 'gemini-3.5-flash-lite' instead",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2_5-flash-image": {
 				"title": "Gemini 2.5 Flash Image",
@@ -178,7 +202,10 @@
 				"modelOutputTokens": 32768, // openrouter
 				"deprecated": true,
 				"migration": "Please use 'gemini-3-pro-image-preview' instead",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"gemini-2_0-flash": {
 				"title": "Gemini 2.0 Flash",
@@ -217,14 +244,17 @@
 				"modelOutputTokens": 65536, // openrouter
 				"deprecated": true,
 				"migration": "Model no longer available from the Gemini API. Please select a current model.",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-2-5-pro-preview-05-06": {
 				"title": "Google: Gemini 2.5 Pro Preview 05-06",
 				"model": "models/gemini-2.5-pro-preview-05-06",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65535, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65535, // manual
 				"deprecated": true,
 				"migration": "Model no longer available from the Gemini API. Please select a current model.",
 				"apikey": ""
@@ -235,7 +265,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // sync_models.config.json
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-flash-latest": {
 				"title": "Google Gemini Flash Latest",
@@ -243,7 +276,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-pro-latest": {
 				"title": "Google Gemini Pro Latest",
@@ -251,7 +287,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-3-1-flash-image": {
 				"title": "Google: Nano Banana 2 (Gemini 3.1 Flash Image)",
@@ -259,7 +298,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 32768, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-3-1-flash-lite": {
 				"title": "Google: Gemini 3.1 Flash Lite",
@@ -267,7 +309,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-3-1-flash-lite-image": {
 				"title": "Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)",
@@ -275,7 +320,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 65536, // openrouter
 				"modelOutputTokens": 58982, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-3-5-flash": {
 				"title": "Google: Gemini 3.5 Flash",
@@ -283,7 +331,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-3-5-flash-lite": {
 				"title": "Google: Gemini 3.5 Flash Lite",
@@ -291,7 +342,10 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-3-6-flash": {
 				"title": "Google: Gemini 3.6 Flash",
@@ -299,14 +353,17 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-2-5-flash-batch": {
 				"title": "Google: Gemini 2.5 Flash (batch)",
 				"model": "models/gemini-2.5-flash:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65535, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65535, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-2.5-flash' instead.",
 				"apikey": ""
@@ -315,8 +372,8 @@
 				"title": "Google: Gemini 2.5 Flash Lite (batch)",
 				"model": "models/gemini-2.5-flash-lite:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65535, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65535, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-2.5-flash-lite' instead.",
 				"apikey": ""
@@ -325,8 +382,8 @@
 				"title": "Google: Gemini 2.5 Pro (batch)",
 				"model": "models/gemini-2.5-pro:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-2.5-pro' instead.",
 				"apikey": ""
@@ -335,8 +392,8 @@
 				"title": "Google: Gemini 3.1 Flash Lite (batch)",
 				"model": "models/gemini-3.1-flash-lite:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.1-flash-lite' instead.",
 				"apikey": ""
@@ -345,8 +402,8 @@
 				"title": "Google: Gemini 3.1 Pro Preview (batch)",
 				"model": "models/gemini-3.1-pro-preview:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.1-pro-preview' instead.",
 				"apikey": ""
@@ -355,8 +412,8 @@
 				"title": "Google: Gemini 3.5 Flash (batch)",
 				"model": "models/gemini-3.5-flash:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.5-flash' instead.",
 				"apikey": ""
@@ -365,8 +422,8 @@
 				"title": "Google: Gemini 3.5 Flash Lite (batch)",
 				"model": "models/gemini-3.5-flash-lite:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.5-flash-lite' instead.",
 				"apikey": ""
@@ -375,8 +432,8 @@
 				"title": "Google: Gemini 3.6 Flash (batch)",
 				"model": "models/gemini-3.6-flash:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.6-flash' instead.",
 				"apikey": ""
@@ -387,14 +444,17 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-3-7-flash-batch": {
 				"title": "Google: Gemini 3.7 Flash (batch)",
 				"model": "models/gemini-3.7-flash:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.7-flash' instead.",
 				"apikey": ""
@@ -405,14 +465,17 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"models-gemini-3-8-flash-batch": {
 				"title": "Google: Gemini 3.8 Flash (batch)",
 				"model": "models/gemini-3.8-flash:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.8-flash' instead.",
 				"apikey": ""
@@ -421,8 +484,8 @@
 				"title": "Google: Gemini 3 Flash Preview (batch)",
 				"model": "models/gemini-3-flash-preview:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 65536, // openrouter
+				"modelTotalTokens": 1048576, // manual
+				"modelOutputTokens": 65536, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3-flash-preview' instead.",
 				"apikey": ""

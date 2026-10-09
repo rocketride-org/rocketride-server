@@ -361,7 +361,7 @@
 				"title": "Mistral: Mistral Small 3.2 24B",
 				"model": "mistral-small-3.2-24b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
+				"modelTotalTokens": 256000, // openrouter
 				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
@@ -369,8 +369,8 @@
 				"title": "Mistral: Mistral Medium 3.5 (batch)",
 				"model": "mistral-medium-3-5:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 26214, // openrouter
+				"modelTotalTokens": 32768, // manual
+				"modelOutputTokens": 26214, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Mistral API serves no model with this ID. Please use 'mistral-medium-3-5' instead.",
 				"capabilities": {
