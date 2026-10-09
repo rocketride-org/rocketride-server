@@ -281,3 +281,25 @@ def test_error_message_carries_only_a_short_code(body, code):
 def test_scheme_less_base_url_rejected(base):
     with pytest.raises(ValueError, match='http'):
         SystemOneClient(base)
+
+
+def test_defaults_match_chatbase_retries():
+    """Five retries, 1 s doubling backoff capped at 60 s (spec §6.2)."""
+    sleeps = []
+    attempts = []
+
+    def handler(request):
+        attempts.append(request)
+        return httpx.Response(503, text='busy')
+
+    client = SystemOneClient('http://x', transport=httpx.MockTransport(handler), sleep=sleeps.append)
+    with pytest.raises(SystemOneError) as caught:
+        client.decide('m', 'state', {})
+    assert caught.value.kind == 'server'
+    assert len(attempts) == 6  # first try + 5 retries
+    assert sleeps == [1.0, 2.0, 4.0, 8.0, 16.0]
+
+
+def test_backoff_is_capped_at_sixty_seconds():
+    client = SystemOneClient('http://x', transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    assert client._delay(None, 10) == 60.0
