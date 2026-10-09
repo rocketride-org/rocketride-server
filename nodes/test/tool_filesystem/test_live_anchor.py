@@ -44,10 +44,18 @@ nodes on the control-plane tool channel, driven directly via client.tool()
 
 Requires a running server (skips otherwise, like every live node test).
 Run: scripts/run_node_test.cmd live_anchor
+
+Under ``--runtime=docker`` the store reaches a task only through a mount of
+its own subtree, the task running as the engine's own user; where the engine
+cannot mount it (a daemon that does not see its files or remaps users, S3
+through a web-identity token) it refuses the pipeline before it starts. These
+tests then assert that refusal instead — only under docker, and only with that
+reason.
 """
 
 from __future__ import annotations
 
+import os
 import uuid
 
 import pytest
@@ -55,6 +63,10 @@ import pytest
 # Unique per-run workspace so repeated runs and parallel sessions never collide.
 _RUN_ID = uuid.uuid4().hex[:8]
 _WORKDIR = f'e2e_anchor_{_RUN_ID}'
+
+# The runtime the test server runs tasks with (set by the builder)
+_DOCKER = os.environ.get('ROCKETRIDE_TEST_RUNTIME') == 'docker'
+_DOCKER_REFUSAL = 'tool_filesystem is not available under --runtime=docker'
 
 
 # The 'tools' endpoint holds the pipeline open; the tool node attaches via
@@ -78,11 +90,22 @@ _PIPELINE = {
 
 @pytest.fixture
 async def tool_pipeline(client):
-    """Start the webhook+tool_filesystem pipeline; yield (client, token)."""
-    result = await client.use(pipeline=_PIPELINE)
+    """Start the webhook+tool_filesystem pipeline; yield (client, token, refusal).
+
+    ``refusal`` is the docker runtime's reason for not starting the pipeline,
+    or None when it started.
+    """
+    try:
+        result = await client.use(pipeline=_PIPELINE)
+    except Exception as e:
+        # Only the docker runtime may refuse, and only with its own reason
+        if _DOCKER and _DOCKER_REFUSAL in str(e):
+            yield client, None, str(e)
+            return
+        raise
     token = result.get('token')
     assert token, f'client.use returned no token: {result}'
-    yield client, token
+    yield client, token, None
     # Terminate the task and remove the scratch dir from the user tree.
     try:
         await client.terminate(token)
@@ -109,7 +132,10 @@ async def test_tool_writes_land_in_the_callers_own_tree(tool_pipeline):
     rrext_store surface. If the identity or anchor plumbing broke anywhere
     (task file, getTask, engine_file_store), the session read 404s.
     """
-    client, token = tool_pipeline
+    client, token, refusal = tool_pipeline
+    if refusal:
+        assert _DOCKER_REFUSAL in refusal
+        return
     content = f'written inside the engine subprocess ({_RUN_ID})'
 
     result = await _tool(client, token, 'write_file', path=f'{_WORKDIR}/from_tool.txt', content=content)
@@ -128,7 +154,10 @@ async def test_tool_writes_land_in_the_callers_own_tree(tool_pipeline):
 @pytest.mark.asyncio
 async def test_session_writes_visible_to_the_tool(tool_pipeline):
     """The mirror direction: session fs write -> subprocess tool read."""
-    client, token = tool_pipeline
+    client, token, refusal = tool_pipeline
+    if refusal:
+        assert _DOCKER_REFUSAL in refusal
+        return
     content = f'written by the session ({_RUN_ID})'
 
     await client.fs_write_string(f'{_WORKDIR}/from_session.txt', content)
@@ -145,7 +174,10 @@ async def test_session_writes_visible_to_the_tool(tool_pipeline):
 @pytest.mark.asyncio
 async def test_tool_listing_and_lifecycle(tool_pipeline):
     """list/stat/delete through the tool operate on the anchored tree."""
-    client, token = tool_pipeline
+    client, token, refusal = tool_pipeline
+    if refusal:
+        assert _DOCKER_REFUSAL in refusal
+        return
 
     await _tool(client, token, 'create_directory', path=f'{_WORKDIR}/sub')
     await _tool(client, token, 'write_file', path=f'{_WORKDIR}/sub/x.txt', content='x')

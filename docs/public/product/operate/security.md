@@ -70,7 +70,8 @@ Limits of `RR_PROC_PRIVATE`:
   If the engine itself cannot, it logs a warning and keeps serving.
 
 For strict separation between pipelines, run them under different OS users or
-in separate containers.
+in separate containers: `--runtime=docker` starts every task in a container of
+its own (see [Tasks in containers](/operate/self-hosting/task-containers)).
 
 ## Network exposure
 
@@ -80,6 +81,10 @@ The engine binds to `localhost` by default:
 - **Source-node HTTP endpoints** (Webhook, Chat, Dropper) — the port is set
   per node in the pipeline config; 5567 is the conventional choice used in
   examples and integrations, not a fixed engine bind.
+- **Task data ports** — each running pipeline listens on `localhost`, on a port
+  from a pool starting at 20000, for the engine only. It accepts a connection
+  only with that pipeline run's own token, which the engine keeps and replaces
+  on every start; the pipeline's process is given only a hash of it.
 
 Only the source-node HTTP port needs to be accessible to external callers when
 you're using a webhook-based source. Port 5565 is a management interface;
