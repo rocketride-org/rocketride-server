@@ -36,15 +36,23 @@ from .contract import (
     snapshot,
     stamp,
 )
+from .rules import OPS, Condition, Rule, RuleConfigError, check, evaluate, parse_rule
 
 __all__ = [
+    'Condition',
     'DECISIONS_KEY',
     'DecisionError',
     'NotDecided',
     'OK',
+    'OPS',
     'PREVIEW_CHARS',
+    'Rule',
+    'RuleConfigError',
     'UNCERTAIN',
+    'check',
+    'evaluate',
     'fingerprint',
+    'parse_rule',
     'preview',
     'record',
     'resolve',
