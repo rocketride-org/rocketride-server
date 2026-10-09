@@ -49,7 +49,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Optional
 
 from .log_stream import LogEventStream
-from .types.log import LogChaptersResult, LogDeleteResult, LogReadResult, LogSegmentResult
+from .types.log import LogChaptersResult, LogDeleteResult, LogReadResult, LogSegmentResult, LogStreamsResult
 
 if TYPE_CHECKING:
     from .client import RocketRideClient
@@ -127,6 +127,23 @@ class LogApi:
         elif run_kind == 'deploy':
             kwargs['runKind'] = run_kind
         return await self._client.call('rrext_log', **kwargs)
+
+    async def streams(self, project_id: str, source: str) -> LogStreamsResult:
+        """
+        List every continuum of one source that you may read, each with its chapters.
+
+        Covers your own dev stream, your own @me deploy stream, and the deploy
+        stream of each team you can monitor. Never-logged scopes are absent.
+
+        Args:
+            project_id: Pipeline project id.
+            source: Source component id.
+
+        Returns:
+            ``{'streams': [...]}``: one ``chapters()`` body per readable stream,
+            tagged with ``teamId``, ``teamName``, ``runKind`` and ``ownerKind``.
+        """
+        return await self._client.call('rrext_log', subcommand='streams', projectId=project_id, source=source)
 
     async def read(
         self,
