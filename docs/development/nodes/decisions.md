@@ -121,7 +121,7 @@ A Gate has to find the record that belongs to the item in front of it.
 |---|---|
 | text, questions, answers, json, image, audio, video | **Object level.** Write an item with no `item` key. It applies to everything on these lanes. |
 | documents | **Stamp the document.** `stamp(doc, group_id, index)` sets `doc.metadata.decision_refs = {"<component id>": <item index>}`. Several writers each add their own key. |
-| table | **Fingerprint.** Put `fingerprint(table)` in `item` as `fingerprint`, and a running `table_index`. The fingerprint is `"sha256:"` plus the SHA-256 of the table string as UTF-8. |
+| table | **Fingerprint.** Put `fingerprint(table)` in `item` as `fingerprint`, and a running `table_index`. The fingerprint is `"sha256:"` plus the SHA-256 of the table string as UTF-8. When no fingerprint matches the table, the Gate falls back to the object-level decision. |
 
 Chunks made from a stamped document inherit `decision_refs` through the usual metadata copy. They resolve to their parent's item. That is intended: a whole-document decision applies to its chunks.
 
@@ -130,6 +130,8 @@ Within one writer's group, a Gate looks for the object-level item (one with no `
 Separately, if two different writers answer the same question name for the same item, the Gate raises an error ("`<question>` is answered by both `<a>` and `<b>`; rename one"). It never guesses. Use distinct question names across writers on the same path.
 
 Per-item links for image, audio and video streams don't exist yet. Those lanes use the object-level decision.
+
+In v1 the only decision writer (System One) reads text-based lanes, so a Gate on an image, audio, video or json lane has no decision to read and fails the object. Those lanes are for future writers that record an object-level decision before the item arrives.
 
 ## How to write decisions
 
