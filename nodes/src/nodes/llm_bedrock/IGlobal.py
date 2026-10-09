@@ -223,11 +223,8 @@ class IGlobal(IGlobalBase):
         # Get our bag
         bag = self.IEndpoint.endpoint.bag
 
-        # Get this nodes config
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
         # Get a chat to interface
-        self._chat = Chat(self.glb.logicalType, config, bag)
+        self._chat = Chat(self.glb.logicalType, self.glb.connConfig, bag)
 
     def endGlobal(self):
         """Clean up global filter state by clearing the chat instance.
