@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Ask every configured question about one document in a single System One call."""
+"""Ask every configured question about one item (one state) in a single System One call."""
 
 from __future__ import annotations
 
@@ -33,29 +33,24 @@ from .limits import (
     QUESTION_CHARS_PER_TOKEN,
     REQUEST_OVERHEAD_TOKENS,
     DecisionLimits,
+    encode_json,
     estimate_tokens,
-    fit_content,
     json_bytes,
-    shrink,
 )
-from .questions import ProtocolError, QuestionSpec, build_wire_questions, error_decision, map_answer
-
-# Configuration error kinds that always fail regardless of on_error mode.
-CONFIG_ERROR_KINDS = frozenset({'auth', 'not_found'})
+from .questions import ProtocolError, QuestionSpec, build_wire_questions, describe_questions, map_answer
 
 
 @dataclass
-class DecisionResult:
-    """Outcome of asking one document's questions."""
+class Outcome:
+    """Result of one item: ``answers`` when decided, ``size`` when the input is too long for the model."""
 
-    decisions: dict
-    usage: dict | None
-    truncated: bool
-    skipped: bool = False
+    answers: dict | None = None
+    usage: dict | None = None
+    size: dict | None = None
 
 
 class DecisionRunner:
-    """Turns documents into decisions with one backend call each."""
+    """Turns one state into answers with one backend call; never sends part of an input."""
 
     def __init__(
         self,
@@ -65,117 +60,103 @@ class DecisionRunner:
         limits: DecisionLimits,
         *,
         state_metadata: tuple[str, ...] = (),
-        on_error: str = 'fail',
-        warn: Callable[[str], None] = print,
         debug: Callable[[str], None] = lambda _m: None,
     ):
         """Create a runner; ``client`` needs only ``decide(model, state, questions)``."""
-        if on_error not in ('fail', 'pass_through'):
-            raise ValueError(f'on_error must be "fail" or "pass_through", got {on_error!r}')
         self._client = client
-        self._model = model
-        self._specs = specs
+        self.model = model
+        self.specs = specs
+        self.questions = describe_questions(specs)
         self._limits = limits
         self._state_metadata = tuple(state_metadata)
-        self._on_error = on_error
-        self._warn = warn
         self._debug = debug
         self._wire = build_wire_questions(specs, limits)
         longest = max(len(str(q)) for q in self._wire.values())
         self._reserved_tokens = REQUEST_OVERHEAD_TOKENS + estimate_tokens('x' * longest, QUESTION_CHARS_PER_TOKEN)
         self._questions_bytes = json_bytes(self._wire) + json_bytes(model) + 64
 
-    def _extras(self, metadata: dict | None) -> dict:
+    def state(self, content: str, metadata: dict | None = None):
+        """Return the state for one document: the text, plus the configured metadata keys when present."""
         metadata = metadata or {}
-        return {key: metadata[key] for key in self._state_metadata if metadata.get(key) is not None}
-
-    def _state(self, content: str, extras: dict):
+        extras = {key: metadata[key] for key in self._state_metadata if metadata.get(key) is not None}
         return {'content': content, **extras} if extras else content
 
-    def _ask(self, content: str, extras: dict):
-        return self._client.decide(self._model, self._state(content, extras), self._wire)
+    def _tokens(self, state) -> int:
+        text = state if isinstance(state, str) else encode_json(state).decode('utf-8')
+        return self._reserved_tokens + estimate_tokens(text, self._limits.chars_per_token)
 
-    def decide(self, content: str | None, metadata: dict | None, *, source: str) -> DecisionResult:
-        """Ask all questions about one document; never mutates its inputs."""
-        if not content or not content.strip():
-            self._warn(f'{source}: document has empty content; no decisions made')
-            return DecisionResult({}, None, False, skipped=True)
-        extras = self._extras(metadata)
-        reserved_tokens = self._reserved_tokens + estimate_tokens(str(extras), self._limits.chars_per_token)
-        reserved_bytes = self._questions_bytes + json_bytes(extras)
-        kept, truncated = fit_content(content, self._limits, reserved_tokens, reserved_bytes)
-        if truncated:
-            token_only_chars = max(
-                0, int((self._limits.max_state_tokens - reserved_tokens) * self._limits.chars_per_token)
-            )
-            if len(kept) < min(len(content), token_only_chars):
-                limit = f'{self._limits.max_body_bytes} bytes'
+    def oversize(self, state) -> dict | None:
+        """Return the measured size when ``state`` is over this backend's limits, else None."""
+        tokens = self._tokens(state)
+        if tokens > self._limits.max_state_tokens:
+            return {'tokens': tokens, 'limit': self._limits.max_state_tokens}
+        if self._limits.max_body_bytes is not None:
+            body = self._questions_bytes + json_bytes(state)
+            if body > self._limits.max_body_bytes:
+                return {'bytes': body, 'limit': self._limits.max_body_bytes}
+        return None
+
+    def fit_question(self, state: dict) -> tuple[dict, dict | None]:
+        """Drop history oldest-first, then documents last-first, until the question state fits (spec §4.2)."""
+        size = self.oversize(state)
+        if size is None:
+            return state, None
+        fitted = {**state, 'history': list(state['history']), 'documents': list(state['documents'])}
+        while self.oversize(fitted) is not None:
+            if fitted['history']:
+                fitted['history'].pop(0)
+            elif fitted['documents']:
+                fitted['documents'].pop()
             else:
-                limit = f'{self._limits.max_state_tokens} tokens'
-            self._warn(
-                f'{source}: input truncated for the model from {len(content)} to {len(kept)} characters '
-                f'(backend limit {limit}); downstream still gets the full document'
-            )
+                raise ValueError(
+                    f'the question does not fit the model limit ({size["limit"]}) even without history and documents'
+                )
+        return fitted, size
+
+    def decide(self, state, *, source: str) -> Outcome:
+        """Ask all questions about one state; a too-long state comes back as ``Outcome(size=...)``."""
+        size = self.oversize(state)
+        if size is not None:
+            return Outcome(size=size)
+        start_time = time.monotonic()
         try:
+            reply = self._client.decide(self.model, state, self._wire)
+        except SystemOneError as exc:
+            # The backend body may echo the input, so it never goes above debug.
+            if exc.body:
+                self._debug(f'{source}: backend error body: {exc.body}')
+            if exc.kind == 'too_large':
+                return Outcome(
+                    size={
+                        'tokens': self._tokens(state),
+                        'limit': self._limits.max_state_tokens,
+                        'rejected_by': 'backend',
+                    }
+                )
+            raise
+        latency_ms = (time.monotonic() - start_time) * 1000
+        if not isinstance(reply, dict) or not isinstance(reply.get('answers'), dict):
+            raise ProtocolError(f'{source}: backend reply is not an object with an "answers" object')
+        answers = {}
+        for spec in self.specs:
+            if spec.name not in reply['answers']:
+                raise ProtocolError(f'{source}: {spec.name}: backend returned no answer')
             try:
-                start_time = time.monotonic()
-                reply = self._ask(kept, extras)
-                latency_ms = (time.monotonic() - start_time) * 1000
-            except SystemOneError as exc:
-                if exc.kind != 'too_large':
-                    raise
-                kept, truncated = shrink(kept), True
-                self._warn(f'{source}: backend rejected the input as too large; retrying with {len(kept)} characters')
-                start_time = time.monotonic()
-                reply = self._ask(kept, extras)
-                latency_ms = (time.monotonic() - start_time) * 1000
-            if not isinstance(reply, dict) or not isinstance(reply.get('answers'), dict):
-                raise ProtocolError('backend reply is not an object with an "answers" object')
-            answers = reply['answers']
-            usage = reply.get('usage') if isinstance(reply.get('usage'), dict) else None
-            decisions = {}
-            for spec in self._specs:
-                if spec.name not in answers:
-                    raise ProtocolError(f'{spec.name}: backend returned no answer')
-                decisions[spec.name] = map_answer(spec, answers[spec.name], model=reply.get('model'), source=source)
-            # R3 & R11: Log debug info with request_id if available
-            debug_line = (
-                f'{source}: System One model={reply.get("model")} questions={len(self._specs)} '
-                f'input_tokens={(usage or {}).get("input_tokens")} latency={latency_ms:.0f}ms'
-            )
-            request_id = getattr(self._client, 'last_request_id', None)
-            if request_id:
-                debug_line += f' request_id={request_id}'
-            self._debug(debug_line)
-            return DecisionResult(decisions, usage, truncated)
-        except (SystemOneError, ProtocolError) as exc:
-            error = exc if isinstance(exc, SystemOneError) else SystemOneError('protocol', str(exc))
-            # The backend body may echo document text, so it never goes above debug.
-            if error.body:
-                self._debug(f'{source}: backend error body: {error.body}')
-            # R13: Configuration errors always fail regardless of on_error mode
-            if isinstance(error, SystemOneError) and error.kind in CONFIG_ERROR_KINDS:
-                raise error
-            if self._on_error == 'fail':
-                if error is exc:
-                    raise
-                raise error from exc
-            # R3 & R11: Include request_id in warning if available when handling errors
-            warn_msg = f'{source}: decision call failed ({error.kind}): {error}; passing document through'
-            if isinstance(error, SystemOneError) and error.request_id:
-                warn_msg += f' request_id={error.request_id}'
-            self._warn(warn_msg)
-            return DecisionResult(
-                {s.name: error_decision(s, str(error), source=source) for s in self._specs}, None, truncated
-            )
-
-
-def merge_decisions(existing: dict | None, new: dict, *, warn: Callable[[str], None]) -> dict:
-    """Merge ``new`` into a copy of ``existing``; warn when a name is overwritten."""
-    merged = dict(existing or {})
-    for name, decision in new.items():
-        if name in merged:
-            previous = (merged[name] or {}).get('source', 'an earlier node')
-            warn(f'decisions.{name} written by {previous} is overwritten by {decision.get("source")}')
-        merged[name] = decision
-    return merged
+                answers[spec.name] = map_answer(spec, reply['answers'][spec.name])
+            except ProtocolError as exc:
+                raise ProtocolError(f'{source}: {exc}') from exc
+        raw_usage = reply.get('usage') if isinstance(reply.get('usage'), dict) else {}
+        usage = {'calls': 1}
+        for key in ('input_tokens', 'output_tokens'):
+            value = raw_usage.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                usage[key] = value
+        debug_line = (
+            f'{source}: System One model={reply.get("model")} questions={len(self.specs)} '
+            f'input_tokens={usage.get("input_tokens")} latency={latency_ms:.0f}ms'
+        )
+        request_id = getattr(self._client, 'last_request_id', None)
+        if request_id:
+            debug_line += f' request_id={request_id}'
+        self._debug(debug_line)
+        return Outcome(answers=answers, usage=usage)

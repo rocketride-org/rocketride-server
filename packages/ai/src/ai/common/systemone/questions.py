@@ -289,16 +289,3 @@ def map_answer(spec: QuestionSpec, wire: dict) -> dict:
             'probabilities': labelled,
         },
     )
-
-
-def error_decision(spec: QuestionSpec, message: str, *, source: str) -> dict:
-    """Return the ``pass_through`` error decision for one question (spec §6.3)."""
-    return {
-        'kind': spec.kind,
-        'answer': 'error',
-        'uncertain': True,
-        'confidence': 0.0,
-        'error': message,
-        'model': None,
-        'source': source,
-    }
