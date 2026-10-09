@@ -108,9 +108,10 @@ class DecisionRunner:
             elif fitted['documents']:
                 fitted['documents'].pop()
             else:
-                raise ValueError(
-                    f'the question does not fit the model limit ({size["limit"]}) even without history and documents'
+                subject = (
+                    'the question and its context do not fit' if fitted['context'] else 'the question does not fit'
                 )
+                raise ValueError(f'{subject} the model limit ({size["limit"]}) even without history and documents')
         return fitted, size
 
     def decide(self, state, *, source: str) -> Outcome:

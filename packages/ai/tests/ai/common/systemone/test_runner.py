@@ -161,3 +161,36 @@ def test_fit_question_raises_when_the_question_alone_is_too_long():
     state = {'question': 'q' * 3000, 'history': [{'role': 'user', 'content': 'x'}], 'context': [], 'documents': []}
     with pytest.raises(ValueError, match='question does not fit'):
         _runner().fit_question(state)
+
+
+def test_fit_question_blames_the_context_too_when_context_is_present():
+    state = {'question': 'q', 'history': [], 'context': ['c' * 3000], 'documents': []}
+    with pytest.raises(ValueError, match=r'question and its context do not fit the model limit \(400\)') as caught:
+        _runner().fit_question(state)
+    assert 'even without history and documents' in str(caught.value)
+
+
+def test_fit_question_message_names_only_the_question_when_there_is_no_context():
+    state = {'question': 'q' * 3000, 'history': [], 'context': [], 'documents': []}
+    with pytest.raises(ValueError) as caught:
+        _runner().fit_question(state)
+    assert 'context' not in str(caught.value)
+
+
+@pytest.mark.parametrize('kind', ['server', 'invalid'])
+def test_backend_error_body_goes_to_debug_only(kind):
+    debug = []
+    client = FakeClient(SystemOneError(kind, 'boom', body='SECRET DOC TEXT'))
+    with pytest.raises(SystemOneError) as caught:
+        _runner(client, debug=debug.append).decide('hello', source='n1')
+    assert any('SECRET DOC TEXT' in line for line in debug)
+    assert 'SECRET DOC TEXT' not in str(caught.value)
+
+
+def test_too_large_body_goes_to_debug_only_and_returns_an_outcome():
+    debug = []
+    client = FakeClient(SystemOneError('too_large', '413 from x', status=413, body='SECRET DOC TEXT'))
+    outcome = _runner(client, debug=debug.append).decide('hello', source='n1')
+    assert outcome.answers is None and outcome.size['rejected_by'] == 'backend'
+    assert any('SECRET DOC TEXT' in line for line in debug)
+    assert 'SECRET DOC TEXT' not in repr(outcome)
