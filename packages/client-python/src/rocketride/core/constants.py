@@ -39,10 +39,10 @@ Constants:
                          operations while still detecting dead connections.
 
 Usage:
-    from rocketride.core.constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT
+    from rocketride.core.constants import CONST_DEFAULT_WEB_CLOUD, CONST_SOCKET_TIMEOUT
 
     # Use default service endpoint
-    client = RocketRideClient(uri=CONST_DEFAULT_SERVICE, auth='api_key')
+    client = RocketRideClient(uri=CONST_DEFAULT_WEB_CLOUD, auth='api_key')
 
     # Access timeout for custom configurations
     custom_timeout = CONST_SOCKET_TIMEOUT * 2  # Double the default timeout
