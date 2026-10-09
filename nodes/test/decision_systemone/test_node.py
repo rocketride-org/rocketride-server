@@ -20,160 +20,126 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Node-level tests for decision_systemone with a stubbed engine and a fake runner."""
-
-import importlib
-import sys
-import types
-from types import SimpleNamespace
+"""System One node v2: documents and table lanes."""
 
 import pytest
 
-from ai.common.systemone.runner import DecisionResult
+from ai.common.decision import fingerprint, resolve, snapshot
+from ai.common.systemone.client import SystemOneError
+
+from .conftest import Doc, Meta, Prevented, group
 
 
-class _Meta(SimpleNamespace):
-    def __init__(self, pInstance=None, chunkId=0, **kw):
-        super().__init__(chunkId=chunkId, **kw)
-
-    def model_dump(self):
-        return dict(vars(self))
+def _doc(text, chunk=0, **kw):
+    return Doc(text, Meta(objectId='o1', parent='a.txt', chunkId=chunk), **kw)
 
 
-class _Doc(SimpleNamespace):
-    def model_copy(self, deep=False):
-        meta = _Meta(**vars(self.metadata)) if self.metadata is not None else None
-        return _Doc(page_content=self.page_content, metadata=meta)
+def test_documents_record_one_item_each_and_forward_stamped_copies_once(node):
+    originals = [_doc('hello', 0), _doc('world', 1)]
+    with pytest.raises(Prevented):
+        node.inst.writeDocuments(originals)
+    assert len(node.written['documents']) == 1
+    forwarded = node.written['documents'][0]
+    assert [d.metadata.decision_refs for d in forwarded] == [{'decision_ollama_1': 0}, {'decision_ollama_1': 1}]
+    assert all(not hasattr(d.metadata, 'decision_refs') for d in originals)
+    g = group(node)
+    assert g['writer'] == 'decision_ollama' and g['model'] == 'nimble'
+    assert g['questions'] == {'urgent': {'kind': 'yes_no', 'question': 'Is it urgent?', 'threshold': 0.5}}
+    assert [i['item'] for i in g['items']] == [{'chunkId': 0}, {'chunkId': 1}]
+    assert [i['answers']['urgent']['answer'] for i in g['items']] == ['yes', 'yes']
+    assert g['usage'] == {'calls': 2, 'input_tokens': 14}
+    assert node.inst.instance.currentObject.response['result_types'] == {'decisions': 'decisions'}
+    assert node.client.states == ['hello', 'world']
 
 
-class _Answer:
-    """Mirror of the real Answer: keyword-only ``expectJson``, payload set via ``setAnswer``."""
-
-    def __init__(self, expectJson=False):
-        self.expectJson = expectJson
-        self.answer = None
-
-    def setAnswer(self, value):
-        self.answer = value
-
-
-class _PreventDefault(Exception):
-    pass
-
-
-@pytest.fixture
-def node(monkeypatch):
-    rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IGlobalBase = object
-    rocketlib.IInstanceBase = object
-    rocketlib.OPEN_MODE = SimpleNamespace(CONFIG='config')
-    rocketlib.warning = lambda *_a, **_k: None
-    rocketlib.debug = lambda *_a, **_k: None
-    schema = types.ModuleType('ai.common.schema')
-    schema.Doc, schema.DocMetadata, schema.Answer = _Doc, _Meta, _Answer
-    config = types.ModuleType('ai.common.config')
-    config.Config = SimpleNamespace(getNodeConfig=lambda *_a, **_k: {})
-    for name, mod in {'rocketlib': rocketlib, 'ai.common.schema': schema, 'ai.common.config': config}.items():
-        monkeypatch.setitem(sys.modules, name, mod)
-    monkeypatch.delitem(sys.modules, 'ai.common.systemone.instance_base', raising=False)
-    module = importlib.import_module('ai.common.systemone.instance_base')
-
-    class Node(module.SystemOneInstanceBase):
-        pass
-
-    inst = Node()
-    written = {'documents': [], 'answers': []}
-    listeners = {'answers'}
-    inst.instance = SimpleNamespace(
-        writeDocuments=lambda docs: written['documents'].append(docs),
-        writeAnswers=lambda ans: written['answers'].append(ans),
-        hasListener=lambda lane: lane in listeners,
-        pipeType={'id': 'decision_ollama_1'},
+def test_second_list_continues_item_indexes(node):
+    for texts in (['a', 'b'], ['c']):
+        with pytest.raises(Prevented):
+            node.inst.writeDocuments([_doc(t) for t in texts])
+    refs = [d.metadata.decision_refs['decision_ollama_1'] for batch in node.written['documents'] for d in batch]
+    assert refs == [0, 1, 2]
+    decisions = snapshot(node.inst.instance.currentObject.response)
+    assert (
+        resolve(decisions, 'documents', 'urgent', refs={'decision_ollama_1': 2})
+        == group(node)['items'][2]['answers']['urgent']
     )
 
-    def prevent():
-        raise _PreventDefault()
 
-    inst.preventDefault = prevent
-    calls = []
-
-    class FakeRunner:
-        def decide(self, content, metadata, *, source):
-            calls.append((content, metadata, source))
-            if not content.strip():
-                return DecisionResult({}, None, False, skipped=True)
-            return DecisionResult(
-                {'urgent': {'answer': 'yes', 'source': source}}, {'input_tokens': 5, 'output_tokens': 1}, False
-            )
-
-    inst.IGlobal = SimpleNamespace(runner=FakeRunner())
-    yield SimpleNamespace(inst=inst, written=written, calls=calls, listeners=listeners)
-    # The module was imported against the stubs; don't let it outlive them on this worker.
-    sys.modules.pop('ai.common.systemone.instance_base', None)
-    package = sys.modules.get('ai.common.systemone')
-    if package is not None and hasattr(package, 'instance_base'):
-        delattr(package, 'instance_base')
+def test_too_long_document_is_recorded_warned_and_still_forwarded(node):
+    with pytest.raises(Prevented):
+        node.inst.writeDocuments([_doc('x' * 2000, 0), _doc('hello', 1)])
+    first, second = group(node)['items']
+    assert first['status'] == 'too_long' and first['size']['limit'] == 400 and 'answers' not in first
+    assert second['status'] == 'ok'
+    assert node.client.states == ['hello']  # no paid call for the too-long one
+    assert any('too_long' in w for w in node.warnings)
+    assert len(node.written['documents'][0]) == 2
 
 
-def _doc(text, meta=True):
-    return _Doc(page_content=text, metadata=_Meta(objectId='o1', parent='a.txt') if meta else None)
+def test_non_text_document_fails_before_any_call(node):
+    with pytest.raises(ValueError, match='convert this content to text first'):
+        node.inst.writeDocuments([_doc('hello'), _doc('', type='Image')])
+    assert node.client.states == []
+    assert 'decisions' not in node.inst.instance.currentObject.response
 
 
-def test_writes_documents_once_with_decisions_and_prevents_default(node):
-    with pytest.raises(_PreventDefault):
-        node.inst.writeDocuments([_doc('hello'), _doc('world')])
-    assert len(node.written['documents']) == 1
-    docs = node.written['documents'][0]
-    assert [d.metadata.decisions['urgent']['answer'] for d in docs] == ['yes', 'yes']
-    assert node.calls[0][2] == 'decision_ollama_1'
+def test_empty_document_fails_before_any_call(node):
+    with pytest.raises(ValueError, match='no text to decide on'):
+        node.inst.writeDocuments([_doc('hello'), _doc('   ')])
+    assert node.client.states == []
 
 
-def test_input_docs_not_mutated(node):
-    original = _doc('hello')
-    with pytest.raises(_PreventDefault):
-        node.inst.writeDocuments([original])
-    assert not hasattr(original.metadata, 'decisions')
-
-
-def test_none_metadata_gets_created(node):
-    with pytest.raises(_PreventDefault):
-        node.inst.writeDocuments([_doc('hello', meta=False)])
-    assert node.written['documents'][0][0].metadata.decisions['urgent']['answer'] == 'yes'
-
-
-def test_answers_emitted_only_when_listened(node):
-    with pytest.raises(_PreventDefault):
+def test_backend_too_large_becomes_too_long(node):
+    node.client.error = SystemOneError('too_large', '413', status=413)
+    with pytest.raises(Prevented):
         node.inst.writeDocuments([_doc('hello')])
-    payload = node.written['answers'][0].answer
-    assert payload['parent'] == 'a.txt' and payload['decisions']['urgent']['answer'] == 'yes'
-    assert node.written['answers'][0].expectJson is True
-    node.listeners.clear()
-    node.written['answers'].clear()
-    with pytest.raises(_PreventDefault):
+    assert group(node)['items'][0]['status'] == 'too_long'
+    assert group(node)['items'][0]['size']['rejected_by'] == 'backend'
+
+
+def test_backend_failure_is_a_pipe_error(node):
+    node.client.error = SystemOneError('server', '503 from x')
+    with pytest.raises(SystemOneError):
         node.inst.writeDocuments([_doc('hello')])
-    assert node.written['answers'] == []
 
 
-def test_skipped_empty_doc_forwarded_without_decisions(node):
-    with pytest.raises(_PreventDefault):
-        node.inst.writeDocuments([_doc('   ')])
-    assert not hasattr(node.written['documents'][0][0].metadata, 'decisions')
+def test_document_without_metadata_gets_metadata_and_a_ref(node):
+    with pytest.raises(Prevented):
+        node.inst.writeDocuments([Doc('hello', None)])
+    assert node.written['documents'][0][0].metadata.decision_refs == {'decision_ollama_1': 0}
 
 
-def test_truncated_flag_set(node):
-    node.inst.IGlobal.runner.decide = lambda c, m, *, source: DecisionResult({'u': {'source': source}}, None, True)
-    with pytest.raises(_PreventDefault):
-        node.inst.writeDocuments([_doc('hello')])
-    assert node.written['documents'][0][0].metadata.decisions_truncated is True
+def test_table_gets_a_fingerprint_item_and_is_forwarded_by_default(node):
+    assert node.inst.writeTable('| a | b |') is None
+    assert node.inst.writeTable('| c |') is None
+    items = group(node)['items']
+    assert [i['item'] for i in items] == [
+        {'table_index': 0, 'fingerprint': fingerprint('| a | b |')},
+        {'table_index': 1, 'fingerprint': fingerprint('| c |')},
+    ]
+    assert items[0]['lane'] == 'table' and items[0]['status'] == 'ok'
 
 
-def test_source_falls_back_to_logical_type_when_pipe_type_is_an_object(node):
-    node.inst.instance.pipeType = SimpleNamespace(id='decision_typesafe_2')
-    with pytest.raises(_PreventDefault):
-        node.inst.writeDocuments([_doc('hello')])
-    assert node.calls[0][2] == 'decision_typesafe_2'
+def test_table_index_resets_per_object(node):
+    node.inst.writeTable('| a |')
+    node.inst.open(None)
+    node.inst.writeTable('| b |')
+    assert group(node)['items'][1]['item']['table_index'] == 0
+
+
+def test_too_long_table_is_recorded_and_forwarded(node):
+    assert node.inst.writeTable('x' * 2000) is None
+    assert group(node)['items'][0]['status'] == 'too_long'
+    assert node.client.states == []
+
+
+def test_empty_table_fails(node):
+    with pytest.raises(ValueError, match='no content'):
+        node.inst.writeTable('  ')
+
+
+def test_group_id_falls_back_to_logical_type(node):
     node.inst.instance.pipeType = None
-    node.inst.IGlobal.glb = SimpleNamespace(logicalType='decision_ollama')
-    with pytest.raises(_PreventDefault):
-        node.inst.writeDocuments([_doc('hello')])
-    assert node.calls[1][2] == 'decision_ollama'
+    node.inst.IGlobal.glb.logicalType = 'decision_ollama'
+    node.inst.writeTable('| a |')
+    assert 'decision_ollama' in node.inst.instance.currentObject.response['decisions']
