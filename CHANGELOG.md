@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — since 2026-09-22
 
 ### Added
+- **nodes**: add Atlas Cloud (`llm_atlascloud://`) as a branded preset of `llm_openai_api`, with `sync_models` upkeep through `ROCKETRIDE_ATLASCLOUD_KEY` (#2544)
 - **docker**: releases publish `rocketride-node`, an image that runs one pipeline task (engine-base plus a warmed wheel cache), and `rocketride-engine-base`; both cosign-signed, the node image checked before signing and never tagged `latest`.
 
 ### Changed

@@ -30,9 +30,12 @@ and message, truncated to 500 characters.
 
 Generic endpoint default: **Custom OpenAI-compatible endpoint** (`custom`).
 Nebius preset default: **Llama 3.3 70B Instruct** (`llama-3-3-70b`).
+Atlas Cloud preset default: **DeepSeek V4 Flash** (`deepseek-v4-flash`).
 
-The directory documents the generic endpoint and the Nebius branded preset in one
-combined profile table.
+Each default belongs to its own registration: `custom` to the generic
+OpenAI-compatible service, `llama-3-3-70b` to the Nebius preset, and
+`deepseek-v4-flash` to the Atlas Cloud preset. The directory documents all
+three in one combined profile table.
 
 | Profile | Model | Context tokens | Source |
 | ------- | ----- | -------------- | ------ |
@@ -40,11 +43,13 @@ combined profile table.
 | `llama-3-3-70b` **(default)** | `meta-llama/Llama-3.3-70B-Instruct` | 131,072 | Nebius Token Factory |
 | `qwen3-235b` | `Qwen/Qwen3-235B-A22B` | 131,072 | Nebius Token Factory |
 | `deepseek-v3` | `deepseek-ai/DeepSeek-V3` | 131,072 | Nebius Token Factory |
+| `deepseek-v4-flash` **(default)** | `deepseek-ai/deepseek-v4-flash` | 1,048,576 | Atlas Cloud |
+| `glm-5-3-flash` | `zai-org/glm-5.3-flash` | 1,048,576 | Atlas Cloud |
 
 ## Configuration
 
 Choose `custom` for a generic provider and set its model ID, base URL, context limit,
-output limit (4,096 tokens unless changed) and API key. Choose one of the named Nebius profiles when using Token Factory; those
+output limit (4,096 tokens unless changed) and API key. Choose one of the named Nebius or Atlas Cloud profiles when using those gateways; those
 profiles pin the model ID, endpoint, and context limit.
 
 ### Generic OpenAI-compatible endpoints
@@ -68,11 +73,26 @@ output limit of 4,096 tokens unless changed. The
 combined table represents the duplicate `custom` key once, using the generic service's
 merged 32,768-token default.
 
+### Atlas Cloud preset
+
+`services.atlascloud.json` registers **Atlas Cloud** (`llm_atlascloud://`) as a branded
+preset of this node. It uses the same Python implementation and pins the base URL to
+`https://api.atlascloud.ai/v1/`. The two named Atlas Cloud profiles in the combined
+table require no model or endpoint edits.
+
+Atlas Cloud profiles default the API key to the `${ROCKETRIDE_ATLASCLOUD_KEY}`
+environment substitution, so no per-node key entry is needed when that variable is set.
+The Atlas Cloud service also exposes its own `custom` option for another Atlas Cloud
+model, retaining the pinned endpoint, environment-backed key, and 131,072-token context
+limit, with an output limit of 4,096 tokens unless changed. Its duplicate `custom` key
+is likewise represented once in the combined table.
+
 ## Authentication
 
 For `custom`, provide the API key expected by the configured endpoint. Nebius named
-profiles use `${ROCKETRIDE_NEBIUS_KEY}` by default; replace it only when the credential
-must be supplied directly in the node configuration.
+profiles use `${ROCKETRIDE_NEBIUS_KEY}` and Atlas Cloud named profiles use
+`${ROCKETRIDE_ATLASCLOUD_KEY}` by default; replace either only when the credential must
+be supplied directly in the node configuration.
 
 ## Notes
 
@@ -95,7 +115,7 @@ Anything else falls through to the shared LLM base's default retry and mapping l
 test server with a mocked `langchain_openai`, so no real API key is required.
 `ROCKETRIDE_MOCK` must point to `nodes/test/mocks`.
 
-### Model sync (Nebius service only)
+### Model sync (Nebius and Atlas Cloud services only)
 
 The profiles in `services.nebius.json` are maintained by the `sync_models` tooling
 (`llm_nebius` provider, `ROCKETRIDE_NEBIUS_KEY`), which reads Nebius Token Factory's
@@ -107,6 +127,13 @@ so the context window is its choice, and the same model is served with a differe
 window by every other host. The sync runs **only** with that key, because Nebius IDs
 (`Qwen/Qwen3-235B-A22B`) appear in no other catalogue and a keyless run would mark
 these profiles deprecated — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
+The profiles in `services.atlascloud.json` are maintained the same way
+(`llm_atlascloud` provider, `ROCKETRIDE_ATLASCLOUD_KEY`). Atlas Cloud both runs
+open-weight models and resells vendor APIs, so it is treated like GMI Cloud: token
+limits for an open-weight model come only from Atlas Cloud, while the models it proxies
+(`openai/gpt-*`, `anthropic/claude-*`, `google/gemini-*`, `xai/grok-*`) are looked up
+under the vendor's own ID, where the vendor's published limits apply.
 
 The generic `services.json` profiles are **not** synced: the model is whatever the
 user types for their own OpenAI-compatible endpoint.

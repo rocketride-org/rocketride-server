@@ -85,6 +85,7 @@ python tools/sync_models/src/sync_models.py --provider llm_openai --model-source
 | `llm_glm`                | `llm_glm`                                 | `ROCKETRIDE_GLM_KEY`           |                  |
 | `llm_gmi_cloud`          | `llm_gmi_cloud`                           | `ROCKETRIDE_GMI_CLOUD_KEY`     | key only         |
 | `llm_nebius`             | `llm_openai_api` (`services.nebius.json`) | `ROCKETRIDE_NEBIUS_KEY`        | key only         |
+| `llm_atlascloud`         | `llm_openai_api` (`services.atlascloud.json`) | `ROCKETRIDE_ATLASCLOUD_KEY` | key only         |
 | `llm_vision_openai`      | `llm_vision_openai`                       | `ROCKETRIDE_OPENAI_KEY`        | key only, vision |
 | `llm_vision_gemini`      | `llm_vision_gemini`                       | `ROCKETRIDE_GEMINI_KEY`        | key only, vision |
 | `llm_vision_mistral`     | `llm_vision_mistral`                      | `ROCKETRIDE_MISTRAL_KEY`       | key only, vision |
@@ -171,7 +172,7 @@ The sync has two distinct modes:
 
 ### Why some providers need their own key
 
-Seven of the providers above carry `require_api_key: true`. Without their key the sync does **nothing** for them — no enrichment, no deprecation, no discovery — and the report says so. That is deliberate. Running them from OpenRouter instead does not give a worse answer; it gives a wrong one, in four ways.
+Eight of the providers above carry `require_api_key: true`. Without their key the sync does **nothing** for them — no enrichment, no deprecation, no discovery — and the report says so. That is deliberate. Running them from OpenRouter instead does not give a worse answer; it gives a wrong one, in four ways.
 
 **1. OpenRouter decides what still exists, and it does not know these IDs.**
 With no key, OpenRouter becomes the model source, and any profile it does not list is marked `deprecated`. These nodes store IDs it has never heard of:
@@ -180,6 +181,7 @@ With no key, OpenRouter becomes the model source, and any profile it does not li
 | ------------------------ | ---------------------------------------------------- |
 | `llm_gmi_cloud`          | 21 of 21                                             |
 | `llm_nebius`             | 3 of 3                                               |
+| `llm_atlascloud`         | 2 of 2                                               |
 | `llm_vision_mistral`     | 2 of 6 (`mistral-medium-2508`, `mistral-small-2506`) |
 | `accessibility_describe` | 1 of 3 (`gemini-2.0-flash`)                          |
 | `llm_baidu_qianfan`      | 3 of 3                                               |
@@ -205,8 +207,12 @@ The image check needs a real API client. Keyless discovery would add models with
 
 These serve many vendors' models behind one API, and their token data needs care. A host runs an open-weight model on its own hardware, so its context window is that host's choice: OpenRouter shows `meta-llama/llama-3.3-70b-instruct` served with 12288, 24000, 128000 **and** 131072 tokens by different hosts, and LiteLLM's entry for such an ID is likewise some other host's deployment (its `max_tokens` is often an output limit, not the window). Neither answers for our host, so:
 
-- `allowed_sources` drops LiteLLM for both. Nebius keeps only `provider`.
-- `vendor_proxy_prefixes` lists the models the host **resells** rather than runs — `openai/gpt-5.2`, `anthropic/claude-opus-4.5`, `google/gemini-3-flash-preview` on GMI Cloud. There the vendor's own published limits apply, and OpenRouter files them under the bare vendor ID, so those profiles get the same numbers as `llm_openai`, `llm_anthropic` and `llm_gemini`. Everything else keeps its host ID, which matches nothing on purpose.
+Atlas Cloud is a third such host and is configured the same way; the heading keeps
+its original wording so the existing `#model-hosts-gmi-cloud-nebius` anchors elsewhere
+in the docs keep resolving.
+
+- `allowed_sources` drops LiteLLM for all three. Nebius keeps only `provider`; GMI Cloud and Atlas Cloud keep `openrouter` as well, for the vendor models they proxy.
+- `vendor_proxy_prefixes` lists the models the host **resells** rather than runs — `openai/gpt-5.2`, `anthropic/claude-opus-4.5`, `google/gemini-3-flash-preview` on GMI Cloud, and the same families plus `xai/grok-*` on Atlas Cloud. There the vendor's own published limits apply, and OpenRouter files them under the bare vendor ID, so those profiles get the same numbers as `llm_openai`, `llm_anthropic` and `llm_gemini`. Everything else keeps its host ID, which matches nothing on purpose.
 - The open-weight families under a vendor's name (`openai/gpt-oss-*`) are deliberately **not** listed: the org is the model's author, not the API vendor.
 - `extra_profile_fields` gives each new profile the host's shared endpoint, because both nodes need one in the profile: GMI Cloud's driver refuses to start without it, and the Nebius service pins its base URL. For GMI the shared endpoint is the honest value — discovery smoke-tests each new model against it. A deploy-on-demand model still needs the URL from the GMI console, entered per pipeline.
 
@@ -422,3 +428,8 @@ full list).
 6. Add the path to `SERVICES_JSON_PATHS` in `tools/sync_models/scripts/tasks.js`
 7. For a new key, add a skip marker to `test/markers.py` and a live test to `test/test_sync_live.py`
 8. Run `pytest tools/sync_models/test/test_new_providers.py`, then `python tools/sync_models/src/sync_models.py --provider <name>` to verify
+
+A provider that syncs a **branded preset** rather than its own node (`llm_nebius`,
+`llm_atlascloud`) also needs the node-side files the preset is made of: its
+`services.<name>.json`, its icon, and a row per seeded profile in the node's README
+profile table — `scripts/validate-node-readme.py <node-dir>` is the gate for the last one.
