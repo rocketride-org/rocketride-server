@@ -345,7 +345,7 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 				// the engine endpoint, not a browsable dashboard) and no
 				// authenticated client to ask the server for one.
 				vscode.window.showErrorMessage(
-					'RocketRide Cloud sign-in succeeded, but no active API key was found for this account. Sign in to RocketRide Cloud in your browser to create or reactivate a key, then try again.'
+					'RocketRide Cloud sign-in succeeded, but no active API key was found for this account. Sign in to RocketRide Cloud in your browser to create a new key, then try again.'
 				);
 			}
 		} catch (error) {
