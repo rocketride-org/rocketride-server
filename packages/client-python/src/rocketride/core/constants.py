@@ -28,10 +28,13 @@ These constants provide default values, timeouts, and service endpoints that
 ensure consistent behavior across all client operations.
 
 Constants:
-    CONST_DEFAULT_SERVICE: Default RocketRide service URI. This is used when no
+    CONST_DEFAULT_WEB_CLOUD: Default RocketRide service URI. This is used when no
                           custom service URI is provided during client initialization.
                           Points to the official RocketRide Enterprise as a Service (EaaS)
                           endpoint.
+
+    CONST_DEFAULT_SERVICE: Deprecated alias for CONST_DEFAULT_WEB_CLOUD. Use
+                          CONST_DEFAULT_WEB_CLOUD instead.
 
     CONST_SOCKET_TIMEOUT: WebSocket timeout in seconds. This value controls how long
                          the client will wait for server responses before timing out.
