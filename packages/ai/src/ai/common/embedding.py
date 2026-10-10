@@ -50,8 +50,8 @@ def getEmbedding(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])
     """
     Examine configuration and return and initializes an embedding.
     """
-    # Build up the module name - it will be in the store dir
-    name = 'connectors.' + provider
+    # Embedding providers ship in the nodes package.
+    name = 'nodes.' + provider
 
     # Get the module
     module = importlib.import_module(name)
