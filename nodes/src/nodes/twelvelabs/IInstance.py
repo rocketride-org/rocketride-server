@@ -73,7 +73,7 @@ class IInstance(IInstanceBase):
             self._submit_video()
 
     def closing(self) -> None:
-        """Release a stream still open when the instance is torn down (no END arrived)."""
+        """Release a stream still open when its document closes without an END."""
         self._discard_tmp_file()
 
     def _discard_tmp_file(self) -> None:
