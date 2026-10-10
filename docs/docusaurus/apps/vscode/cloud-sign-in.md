@@ -86,8 +86,10 @@ extension sends is the usual cause.
 `error_description`. `redirect_uri is missing in the client configuration`
 means the registration you reached does not list your editor's scheme.
 
-**Sign-in reports success but you are still signed out.** Report it. That
-combination should not be reachable, and it hides its own cause.
+**Sign-in reports success but you are still signed out.** Report it — unless
+the message is "No active API key was found for this account," which is a
+known, separate case covered just below. Otherwise this combination should
+not be reachable, and it hides its own cause.
 
 **"No active API key was found for this account."** Authentication itself
 succeeded — the account exists and is not on the access waitlist — but the
