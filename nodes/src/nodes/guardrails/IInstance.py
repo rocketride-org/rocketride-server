@@ -24,6 +24,10 @@
 from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
+from .nonce_fencer import SecurityError
+
+# Subtitle used for the nonce-fencing directive injected into Question.instructions.
+NONCE_FENCE_INSTRUCTION_TITLE = 'Security Directive'
 
 
 class IInstance(IInstanceBase):
@@ -39,11 +43,14 @@ class IInstance(IInstanceBase):
         self.source_documents = []
 
     def writeQuestions(self, question: Question):
-        """Run input guardrails on the question before forwarding.
+        """Run input guardrails on the question, apply nonce fencing, then forward.
 
-        Extracts the question text, runs input-mode evaluation, then
-        either blocks, warns (logs + forwards), or passes (forwards
-        silently) depending on the policy mode.
+        1. Extract text and run the guardrails engine (injection, topic, length).
+        2. Block or warn according to the policy mode.
+        3. If nonce fencing is enabled and the question was not blocked, wrap
+           every question text and context string in cryptographic nonce
+           delimiters and inject a system directive telling the LLM to treat
+           fenced content as data-only.
 
         Args:
             question: The incoming Question object.
@@ -79,6 +86,42 @@ class IInstance(IInstanceBase):
         if result['action'] == 'warn':
             for violation in result['violations']:
                 warning(f'Guardrails input warning: {violation["rule"]} \u2014 {violation["details"]}')
+
+        # Nonce fencing — wrap untrusted text so the LLM treats it as data
+        nonce_fencer = getattr(self.IGlobal, 'nonce_fencer', None)
+        if nonce_fencer is not None:
+            try:
+                # Collect all content that will be fenced so we can pick a
+                # nonce that does not collide with any of it.
+                all_content = []
+                if question.questions:
+                    all_content.extend(q.text for q in question.questions if q.text)
+                if question.context:
+                    all_content.extend(str(ctx) for ctx in question.context if ctx)
+                combined = '\n'.join(all_content)
+
+                nonce = nonce_fencer.new_cycle(exclude=combined)
+
+                # Fence each question text individually
+                if question.questions:
+                    for q in question.questions:
+                        if q.text:
+                            q.text = nonce_fencer.fence(q.text, nonce)
+
+                # Fence context strings
+                if question.context:
+                    question.context = [nonce_fencer.fence(ctx, nonce) for ctx in question.context]
+
+                # Inject the system-level directive via instructions
+                addendum = nonce_fencer.build_system_addendum(nonce)
+                if question.instructions is None:
+                    question.instructions = []
+                question.addInstruction(NONCE_FENCE_INSTRUCTION_TITLE, addendum)
+
+            except SecurityError as exc:
+                warning(f'[Guardrails] Nonce fencing failed: {exc}; blocking question')
+                self.preventDefault()
+                return
 
         # Forward the question downstream
         self._forward_question(question)
