@@ -639,6 +639,34 @@ export function resolveServerEntry(a: ServerAppEntry): string | null {
 	return typeof a.registryVersion === 'number' ? versionedEntryUrl(a.id, a.registryVersion) : null;
 }
 
+/**
+ * The published bundle a dev-overlay entry falls back to when its dev
+ * server is unreachable.
+ *
+ * The server's dev overlay is per USER, not per device: while an editor
+ * dev-serves an app, every shell that user signs in to gets the dev entry
+ * (typically http://localhost:<port>/remoteEntry.js). On the editor's own
+ * machine that is the live build; on a phone or a second laptop localhost
+ * is that device, the script never loads, and the app is dead until the
+ * registration expires. Falling back to the published version there keeps
+ * the dev machine on the live build and every other device working.
+ *
+ * Only the overlay DEFAULT falls back. A page the editor launched (session
+ * nonce match) asked for that dev server specifically, and an explicit
+ * version override already resolved to a server version — both keep their
+ * failure visible.
+ *
+ * @param a - The server app entry.
+ * @param nonce - This tab's editor session nonce ('' when none).
+ * @returns The published versioned URL, or null when no fallback applies.
+ */
+export function devFallbackEntry(a: ServerAppEntry, nonce: string): string | null {
+	if (!a.dev || typeof a.registryVersion !== 'number') return null;
+	if (nonce && a.devEntries?.some((d) => d.session === nonce)) return null;
+	if (getAppVersionOverrides()[a.id]) return null;
+	return versionedEntryUrl(a.id, a.registryVersion);
+}
+
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
 	const overrides = getAppVersionOverrides();
 	const nonce = sessionNonce();
@@ -720,7 +748,20 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 			// Pending marks the container committed for the WHOLE load — the
 			// dev takeover must not force-register it mid-flight.
 			pendingModules.add(a.moduleId);
-			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
+			const load = () => loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>;
+			const fallback = devFallbackEntry(a, nonce);
+			return load()
+				.catch((err: unknown) => {
+					// The dev server is unreachable from this device (see
+					// devFallbackEntry). The container never initialized, so a
+					// forced re-register is safe; retry ONCE on the published
+					// bundle. Embedder-owned containers keep their failure.
+					if (!fallback || devRemoteModules.has(a.moduleId) || loadedModules.has(a.moduleId)) throw err;
+					console.warn(`[appLoader] dev entry for "${a.id}" failed to load — falling back to the published bundle at ${fallback}`);
+					registerRemotes([{ name: a.moduleId, entry: fallback }], { force: true });
+					registeredEntries.set(a.moduleId, fallback);
+					return load();
+				})
 				.then((m) => {
 					// A resolved remote commits this container to its version
 					// for the document's lifetime (see isRemoteLoaded).
