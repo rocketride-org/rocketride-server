@@ -28,10 +28,13 @@ These constants provide default values, timeouts, and service endpoints that
 ensure consistent behavior across all client operations.
 
 Constants:
-    CONST_DEFAULT_SERVICE: Default RocketRide service URI. This is used when no
+    CONST_DEFAULT_WEB_CLOUD: Default RocketRide service URI. This is used when no
                           custom service URI is provided during client initialization.
                           Points to the official RocketRide Enterprise as a Service (EaaS)
                           endpoint.
+
+    CONST_DEFAULT_SERVICE: Deprecated alias for CONST_DEFAULT_WEB_CLOUD. Use
+                          CONST_DEFAULT_WEB_CLOUD instead.
 
     CONST_SOCKET_TIMEOUT: WebSocket timeout in seconds. This value controls how long
                          the client will wait for server responses before timing out.
@@ -39,10 +42,10 @@ Constants:
                          operations while still detecting dead connections.
 
 Usage:
-    from rocketride.core.constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT
+    from rocketride.core.constants import CONST_DEFAULT_WEB_CLOUD, CONST_SOCKET_TIMEOUT
 
     # Use default service endpoint
-    client = RocketRideClient(uri=CONST_DEFAULT_SERVICE, auth='api_key')
+    client = RocketRideClient(uri=CONST_DEFAULT_WEB_CLOUD, auth='api_key')
 
     # Access timeout for custom configurations
     custom_timeout = CONST_SOCKET_TIMEOUT * 2  # Double the default timeout

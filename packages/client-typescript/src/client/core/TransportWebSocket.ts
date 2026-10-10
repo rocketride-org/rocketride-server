@@ -24,7 +24,7 @@
 
 import { TransportBase } from './TransportBase.js';
 import { DAPMessage } from '../types/index.js';
-import { CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT } from '../constants.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT } from '../constants.js';
 
 let NodeWebSocket: typeof import('ws') | undefined;
 let NodeWebSocketPromise: Promise<typeof import('ws') | undefined> | null = null;
@@ -87,7 +87,7 @@ export class TransportWebSocket extends TransportBase {
 	private _messageTasks = new Set<Promise<void>>();
 	private _cleanupOperations = new Set<Promise<void>>();
 
-	constructor(uri = CONST_DEFAULT_SERVICE) {
+	constructor(uri = CONST_DEFAULT_WEB_CLOUD) {
 		super();
 		this._uri = uri;
 	}
