@@ -88,6 +88,25 @@ SQL_QUERIES = {
 }
 
 
+# The writable columns defined by create_collection. DocMetadata carries
+# fields the table has no column for (signature, and anything its
+# extra='allow' config lets through), so an insert must take these only.
+CHUNK_COLUMNS = (
+    'content',
+    'objectId',
+    'nodeId',
+    'parent',
+    'permissionId',
+    'isDeleted',
+    'chunkId',
+    'isTable',
+    'tableId',
+    'vectorSize',
+    'modelName',
+    'embedding',
+)
+
+
 class Store(DocumentStoreBase):
     apikey: str | None = None
     node: str = 'rocketride'
@@ -490,24 +509,38 @@ class Store(DocumentStoreBase):
             return
 
         objectIds = {chunk.metadata.objectId for chunk in chunks}
-        self.remove(list(objectIds))
-
-        with self.client.cursor() as cur:
-            for chunk in chunks:
-                data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
-                if 'vectorSize' not in data or data['vectorSize'] is None:
-                    data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
-                if 'modelName' not in data or data['modelName'] is None:
-                    data['modelName'] = ''
-                columns = ', '.join(data.keys())
-                placeholders = ', '.join(['%s'] * len(data))
-                cur.execute(
-                    SQL_QUERIES['insert_chunk'].format(
-                        collection=self.collection, columns=columns, placeholders=placeholders
-                    ),
-                    list(data.values()),
-                )
+        try:
+            with self.client.cursor() as cur:
+                # Replace in one transaction: an invalid new chunk must leave
+                # the previously stored document intact.
+                cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
+                for chunk in chunks:
+                    data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
+                    if 'vectorSize' not in data or data['vectorSize'] is None:
+                        data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
+                    if 'modelName' not in data or data['modelName'] is None:
+                        data['modelName'] = ''
+                    # Only the table's columns: DocMetadata.model_dump() also
+                    # yields signature and any extra keys, which have none.
+                    data = {key: value for key, value in data.items() if key in CHUNK_COLUMNS}
+                    columns = ', '.join(data.keys())
+                    placeholders = ', '.join(['%s'] * len(data))
+                    cur.execute(
+                        SQL_QUERIES['insert_chunk'].format(
+                            collection=self.collection, columns=columns, placeholders=placeholders
+                        ),
+                        list(data.values()),
+                    )
             self.client.commit()
+        except Exception:
+            # Leave the connection usable: an aborted transaction would fail
+            # every later statement until it is rolled back. A rollback that
+            # fails itself (a broken connection) must not replace the write error.
+            try:
+                self.client.rollback()
+            except Exception as rollback_error:  # noqa: BLE001
+                warning(f'{self.collection}: rollback after a failed write also failed: {rollback_error}')
+            raise
 
     def remove(self, objectIds: List[str]) -> None:
         """
