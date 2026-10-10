@@ -24,6 +24,7 @@
 from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
+from .nonce_fencer import SecurityError
 
 # Subtitle used for the nonce-fencing directive injected into Question.instructions.
 NONCE_FENCE_INSTRUCTION_TITLE = 'Security Directive'
@@ -87,31 +88,19 @@ class IInstance(IInstanceBase):
                 warning(f'Guardrails input warning: {violation["rule"]} \u2014 {violation["details"]}')
 
         # Nonce fencing — wrap untrusted text so the LLM treats it as data
-        nonce_fencer = self.IGlobal.nonce_fencer
+        nonce_fencer = getattr(self.IGlobal, 'nonce_fencer', None)
         if nonce_fencer is not None:
-            from .nonce_fencer import SecurityError
-
             try:
                 # Collect all content that will be fenced so we can pick a
-                # nonce that does not collide with any of it.  This avoids the
-                # case where fence() silently replaces the nonce for one piece
-                # of content while the rest keep the original.
+                # nonce that does not collide with any of it.
                 all_content = []
                 if question.questions:
                     all_content.extend(q.text for q in question.questions if q.text)
                 if question.context:
-                    all_content.extend(ctx for ctx in question.context if ctx)
+                    all_content.extend(str(ctx) for ctx in question.context if ctx)
                 combined = '\n'.join(all_content)
 
-                nonce = nonce_fencer.new_cycle()
-                retries = 0
-                while nonce in combined:
-                    retries += 1
-                    if retries > nonce_fencer.MAX_COLLISION_RETRIES:
-                        raise SecurityError(
-                            f'Nonce collision could not be resolved after {nonce_fencer.MAX_COLLISION_RETRIES} attempts'
-                        )
-                    nonce = nonce_fencer.new_cycle()
+                nonce = nonce_fencer.new_cycle(exclude=combined)
 
                 # Fence each question text individually
                 if question.questions:

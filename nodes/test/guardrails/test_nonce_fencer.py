@@ -168,3 +168,20 @@ class TestCollision:
         content_containing_nonce = 'a' * 32
         with pytest.raises(SecurityError, match='collision'):
             fencer.fence(content_containing_nonce, 'a' * 32)
+
+    def test_new_cycle_excludes_colliding_content(self, monkeypatch):
+        """new_cycle skips nonces found in exclude."""
+        fencer = NonceFencer(nonce_length=16)
+        calls = ['a' * 32, 'b' * 32]
+        monkeypatch.setattr('secrets.token_hex', lambda n: calls.pop(0))
+
+        nonce = fencer.new_cycle(exclude='something with ' + ('a' * 32))
+        assert nonce == 'b' * 32
+
+    def test_new_cycle_raises_on_collision_exhaustion(self, monkeypatch):
+        """When token_hex always collides with exclude, SecurityError is raised."""
+        fencer = NonceFencer(nonce_length=16)
+        monkeypatch.setattr('secrets.token_hex', lambda n: 'a' * 32)
+
+        with pytest.raises(SecurityError, match='collision'):
+            fencer.new_cycle(exclude='a' * 32)

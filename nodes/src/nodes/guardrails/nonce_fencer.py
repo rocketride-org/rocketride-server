@@ -33,36 +33,32 @@ class NonceFencer:
             raise ValueError(f'nonce_length must be >= 16, got {nonce_length}')
         self.nonce_length = nonce_length
 
-    def new_cycle(self) -> str:
+    def new_cycle(self, exclude: str = '') -> str:
         """Generate a new cryptographic nonce for the current execution cycle.
 
+        If *exclude* is given, guarantees the generated nonce does not appear in it.
         Returns a hex string of length ``nonce_length * 2``.
         """
-        return secrets.token_hex(self.nonce_length)
+        for _ in range(self.MAX_COLLISION_RETRIES + 1):
+            nonce = secrets.token_hex(self.nonce_length)
+            if not exclude or nonce not in exclude:
+                return nonce
+        raise SecurityError(f'Nonce collision could not be resolved after {self.MAX_COLLISION_RETRIES} attempts')
 
     def fence(self, content: str, nonce: str) -> str:
         """Wrap *content* between nonce-delimited markers.
 
         Returns *content* unchanged if it is empty or ``None``.
-        Raises :class:`SecurityError` if a nonce collision cannot be resolved
-        after :attr:`MAX_COLLISION_RETRIES` attempts.
+        Raises :class:`SecurityError` if *nonce* appears within *content*.
         """
         if not content:
             return content
 
-        # Collision check: regenerate nonce if it appears in content
-        current_nonce = nonce
-        retries = 0
-        while current_nonce in content:
-            retries += 1
-            if retries > self.MAX_COLLISION_RETRIES:
-                raise SecurityError(
-                    f'Nonce collision could not be resolved after {self.MAX_COLLISION_RETRIES} attempts'
-                )
-            current_nonce = secrets.token_hex(self.nonce_length)
+        if nonce in content:
+            raise SecurityError(f'Nonce collision could not be resolved after {self.MAX_COLLISION_RETRIES} attempts')
 
-        fence_open = f'<<<UNTRUSTED_DATA_{current_nonce}>>>'
-        fence_close = f'<<<END_UNTRUSTED_DATA_{current_nonce}>>>'
+        fence_open = f'<<<UNTRUSTED_DATA_{nonce}>>>'
+        fence_close = f'<<<END_UNTRUSTED_DATA_{nonce}>>>'
 
         return f'{fence_open}\n{content}\n{fence_close}'
 

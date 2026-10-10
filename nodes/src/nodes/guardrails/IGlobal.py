@@ -57,7 +57,7 @@ class IGlobal(IGlobalBase):
                 from .nonce_fencer import NonceFencer
 
                 nonce_length = self.config.get('nonce_length', 16)
-                if not isinstance(nonce_length, int) or nonce_length < 16:
+                if not isinstance(nonce_length, int) or isinstance(nonce_length, bool) or nonce_length < 16:
                     warning(f'[Guardrails] nonce_length must be integer >= 16, got {nonce_length!r}; using 16')
                     nonce_length = 16
                 elif nonce_length > 128:
