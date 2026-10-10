@@ -534,8 +534,12 @@ class Store(DocumentStoreBase):
             self.client.commit()
         except Exception:
             # Leave the connection usable: an aborted transaction would fail
-            # every later statement until it is rolled back.
-            self.client.rollback()
+            # every later statement until it is rolled back. A rollback that
+            # fails itself (a broken connection) must not replace the write error.
+            try:
+                self.client.rollback()
+            except Exception as rollback_error:  # noqa: BLE001
+                warning(f'{self.collection}: rollback after a failed write also failed: {rollback_error}')
             raise
 
     def remove(self, objectIds: List[str]) -> None:

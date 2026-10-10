@@ -47,18 +47,18 @@ def store_env(monkeypatch, request):
             pytest.fail('Required PostgreSQL test database is unavailable')
         pytest.skip('PostgreSQL test database is unavailable')
 
-    for src in ('packages/ai/src', 'packages/client-python/src', 'nodes/src'):
-        monkeypatch.syspath_prepend(str(_REPO / src))
-    monkeypatch.setenv('ROCKETRIDE_DB_DSN', dsn)
-    node = request.param
-    driver = 'rocketride_vector' if node == 'rocketride_vector' else 'postgres'
-    node_dir = _REPO / 'nodes/src/nodes' / node
-    pkg = types.ModuleType(f'nodes.{node}')
-    pkg.__path__ = [str(node_dir)]
-    monkeypatch.setitem(sys.modules, pkg.__name__, pkg)
     store = None
     table = 'rr_write_test_' + uuid4().hex
     try:
+        for src in ('packages/ai/src', 'packages/client-python/src', 'nodes/src'):
+            monkeypatch.syspath_prepend(str(_REPO / src))
+        monkeypatch.setenv('ROCKETRIDE_DB_DSN', dsn)
+        node = request.param
+        driver = 'rocketride_vector' if node == 'rocketride_vector' else 'postgres'
+        node_dir = _REPO / 'nodes/src/nodes' / node
+        pkg = types.ModuleType(f'nodes.{node}')
+        pkg.__path__ = [str(node_dir)]
+        monkeypatch.setitem(sys.modules, pkg.__name__, pkg)
         for name in ('IGlobal', driver):
             spec = importlib.util.spec_from_file_location(f'nodes.{node}.{name}', node_dir / f'{name}.py')
             module = importlib.util.module_from_spec(spec)
@@ -77,14 +77,18 @@ def store_env(monkeypatch, request):
         store = module.Store(driver, config, {})
         yield store, raw, table
     finally:
-        if store is not None and store.client is not None:
-            store.client.close()
-            store.client = None
-        raw.rollback()
-        with raw.cursor() as cur:
-            cur.execute(f'DROP TABLE IF EXISTS {table}')
-        raw.commit()
-        raw.close()
+        try:
+            if store is not None and store.client is not None:
+                store.client.close()
+                store.client = None
+        finally:
+            try:
+                raw.rollback()
+                with raw.cursor() as cur:
+                    cur.execute(f'DROP TABLE IF EXISTS {table}')
+                raw.commit()
+            finally:
+                raw.close()
 
 
 def _doc(object_id='a', chunk_id=0, content='original', **metadata):
