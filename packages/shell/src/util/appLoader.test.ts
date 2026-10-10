@@ -28,7 +28,7 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
-import { devPreviewHoldRemainingMs, isDevPreviewPending, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
+import { devFallbackEntry, devPreviewHoldRemainingMs, isDevPreviewPending, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
 import type { AppDescriptor } from '../components/workspace/types';
 
 // In the browser the rsbuild MF plugin creates the host instance; stand one
@@ -122,4 +122,43 @@ test('a dev registration for the locked app is not reported as a mismatch', () =
 	const warn = mock.method(console, 'warn', () => {});
 	registerDevRemote('org.match', 'org_match', 'Match', 'http://localhost:1/remoteEntry.js');
 	assert.equal(warn.mock.callCount(), 0);
+});
+
+// =============================================================================
+// devFallbackEntry — a dev overlay entry another device cannot reach
+// =============================================================================
+
+const devApp = {
+	id: 'personal.daybook',
+	moduleId: 'personal_daybook',
+	name: 'Daybook',
+	dev: true,
+	entry: 'http://localhost:3030/remoteEntry.js?t=1',
+	registryVersion: 4,
+	devEntries: [{ url: 'http://localhost:3030/remoteEntry.js?t=1', session: 's-editor' }],
+};
+
+test('overlay default falls back to the published version', () => {
+	stubPage('', false);
+	assert.equal(devFallbackEntry(devApp, ''), '/apps/personal.daybook/v4/remoteEntry.js');
+});
+
+test('a page the editor launched keeps its dev failure', () => {
+	stubPage('', false);
+	assert.equal(devFallbackEntry(devApp, 's-editor'), null);
+});
+
+test('another editor session still falls back', () => {
+	stubPage('', false);
+	assert.equal(devFallbackEntry(devApp, 's-other'), '/apps/personal.daybook/v4/remoteEntry.js');
+});
+
+test('a never-published dev app has nothing to fall back to', () => {
+	stubPage('', false);
+	assert.equal(devFallbackEntry({ ...devApp, registryVersion: undefined }, ''), null);
+});
+
+test('a non-dev entry never falls back', () => {
+	stubPage('', false);
+	assert.equal(devFallbackEntry({ ...devApp, dev: false }, ''), null);
 });
