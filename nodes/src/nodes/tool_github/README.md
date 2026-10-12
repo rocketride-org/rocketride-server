@@ -207,12 +207,14 @@ The option for unattended pipelines against an organization's repositories. Conf
   installed (the number at the end of the installation's settings URL).
 
 Give the App the repository permissions that match the PAT scopes above: Contents,
-Issues, Pull requests and Actions (read, or read and write for the write tools). An App
-with fewer permissions gets `403 Resource not accessible by integration` on the first
-tool that needs them. An installation token has no user behind it: `user_get_repos`
-without a `username` lists the repositories the installation can access instead of a
-user's repositories. The MCP credentials catalog auto-wires the PAT only; App auth is
-configured on the node.
+Issues, Pull requests and Actions (read, or read and write for the write tools). Two
+cases need one more: `user_invite` needs the organization permission Members (write),
+and the file tools need Workflows (write) to change a file under `.github/workflows/`.
+An App with fewer permissions gets `403 Resource not accessible by integration` on the
+first tool that needs them. An installation token has no user behind it:
+`user_get_repos` without a `username` lists the repositories the installation can
+access instead of a user's repositories. The MCP credentials catalog auto-wires the PAT
+only; App auth is configured on the node.
 
 The node signs a short-lived JWT with the private key, exchanges it for an installation
 access token (`POST /app/installations/{id}/access_tokens`), and caches the result.
