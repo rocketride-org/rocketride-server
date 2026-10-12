@@ -359,11 +359,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				await settle(EMPTY_FILE_SETTLE_MS);
 				await this.reconcileProjectId(uri, event, true);
 				return;
-			case 'seed-empty':
-				// Only reachable through the settled re-entry above, so `text` was
-				// read after the wait. writePipeText re-checks the disposed flag.
+			case 'seed-empty': {
+				// Only reachable through the settled re-entry above. Look once more
+				// right before writing: a save that landed since the settled read
+				// must not be replaced by the skeleton. writePipeText re-checks the
+				// disposed flag.
+				const latest = await this.readPipeText(uri);
+				if (latest === undefined || latest.trim() !== '') return;
 				await this.writePipeText(uri, emptyPipelineSkeleton(crypto.randomUUID()), 'new empty file, wrote the starter pipeline');
 				return;
+			}
 			case 'assign-id':
 				await this.assignProjectId(uri, readPipeProjectId(text) ?? null, 'had no project_id, assigned one');
 				return;
