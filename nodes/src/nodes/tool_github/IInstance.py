@@ -168,7 +168,7 @@ class IInstance(IInstanceBase):
     # -----------------------------------------------------------------------
 
     def _token(self) -> str:
-        return self.IGlobal.token
+        return self.IGlobal.get_token()
 
     def _repo(self, args: dict) -> str:
         repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()

@@ -17,22 +17,65 @@
 		"profiles": {
 			"default": {
 				"title": "GitHub",
+				"authType": "pat",
 				"token": "",
+				"appId": "",
+				"privateKey": "",
+				"installationId": "",
 				"defaultRepo": "",
 				"readOnly": false
 			}
 		}
 	},
 	"fields": {
+		"github.authType": {
+			"type": "string",
+			"title": "Authentication method",
+			"default": "pat",
+			"enum": [
+				["pat", "Personal Access Token"],
+				["app", "GitHub App (installation token)"]
+			],
+			"conditional": [
+				{ "value": "pat", "properties": ["github.token"] },
+				{ "value": "app", "properties": ["github.appId", "github.privateKey", "github.installationId"] }
+			],
+			"description": "Personal Access Token is simplest for individual/dev use. GitHub App auth mints short-lived, auto-rotating installation tokens — recommended for unattended pipelines against an org's repos."
+		},
 		"github.token": {
 			"type": "string",
 			"title": "Personal Access Token",
 			"description": "GitHub PAT with repo, issues, pull_requests, and workflows scopes. Use a fine-grained token scoped to only the repos you need.",
 			"default": "",
+			"optional": true,
 			"secure": true,
 			"ui": {
 				"ui:widget": "ApiKeyWidget"
 			}
+		},
+		"github.appId": {
+			"type": "string",
+			"title": "App ID",
+			"description": "The numeric App ID from your GitHub App's settings page.",
+			"default": "",
+			"optional": true
+		},
+		"github.privateKey": {
+			"type": "string",
+			"format": "data-url",
+			"title": "App Private Key (.pem)",
+			"description": "Upload the PEM private key generated for your GitHub App. Used to sign short-lived JWTs; never sent to GitHub directly.",
+			"default": "",
+			"optional": true,
+			"secure": true,
+			"ui:options:accept": ".pem"
+		},
+		"github.installationId": {
+			"type": "string",
+			"title": "Installation ID",
+			"description": "The installation ID for the org/account where the App is installed (found in the installation's settings URL).",
+			"default": "",
+			"optional": true
 		},
 		"github.defaultRepo": {
 			"type": "string",
@@ -56,7 +99,16 @@
 		{
 			"section": "Pipe",
 			"title": "GitHub",
-			"properties": ["type", "github.token", "github.defaultRepo", "github.readOnly"]
+			"properties": [
+				"type",
+				"github.authType",
+				"github.token",
+				"github.appId",
+				"github.privateKey",
+				"github.installationId",
+				"github.defaultRepo",
+				"github.readOnly"
+			]
 		}
 	]
 }
