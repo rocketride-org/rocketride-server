@@ -46,6 +46,9 @@ from . import github_client
 # Refresh an installation token this many seconds before its actual expiry, so
 # an in-flight request never races a token that dies mid-call.
 REFRESH_SKEW_SECONDS = 60
+# After a failed early refresh, wait this long before asking GitHub again, so parallel
+# tool calls do not queue behind a hanging token request while the cached token is valid.
+REFRESH_RETRY_SECONDS = 15
 
 AUTH_TYPES = ('pat', 'app')
 _INSTALLATION_ID_RE = re.compile(r'[0-9]+')
@@ -121,6 +124,7 @@ class IGlobal(IGlobalBase):
 
     _cached_token: str = ''
     _cached_expiry: float = 0.0
+    _refresh_failed_at: float = 0.0
     _lock: threading.Lock
 
     def beginGlobal(self) -> None:
@@ -132,6 +136,7 @@ class IGlobal(IGlobalBase):
         self.read_only = bool(cfg.get('readOnly', False))
         self._cached_token = ''
         self._cached_expiry = 0.0
+        self._refresh_failed_at = 0.0
         self._lock = threading.Lock()
 
         auth = _read_auth(cfg)
@@ -159,6 +164,7 @@ class IGlobal(IGlobalBase):
         self.read_only = False
         self._cached_token = ''
         self._cached_expiry = 0.0
+        self._refresh_failed_at = 0.0
 
     def get_token(self) -> str:
         """Return a currently-valid token, minting/refreshing an installation
@@ -168,14 +174,18 @@ class IGlobal(IGlobalBase):
             return self.token
         with self._lock:
             now = time.time()
-            if not self._cached_token or now >= self._cached_expiry - REFRESH_SKEW_SECONDS:
+            still_valid = bool(self._cached_token) and now < self._cached_expiry
+            needs_refresh = not still_valid or now >= self._cached_expiry - REFRESH_SKEW_SECONDS
+            backing_off = still_valid and now < self._refresh_failed_at + REFRESH_RETRY_SECONDS
+            if needs_refresh and not backing_off:
                 try:
                     self._cached_token, self._cached_expiry = github_client.mint_installation_token(
                         self.app_id, self.private_key_pem, self.installation_id
                     )
                 except Exception:
                     # A failed early refresh must not discard a token GitHub still accepts.
-                    if not self._cached_token or now >= self._cached_expiry:
+                    if not still_valid:
                         raise
+                    self._refresh_failed_at = now
                     warning('tool_github: token refresh failed; using the cached token until it expires')
             return self._cached_token
