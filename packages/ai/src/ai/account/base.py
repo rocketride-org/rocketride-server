@@ -32,6 +32,19 @@
 
 import os
 from abc import ABC, abstractmethod
+from typing import NamedTuple
+
+
+class DbDecision(NamedTuple):
+    """Answer of ``AccountBase.authorize_db_target``.
+
+    Same shape as the SaaS ``extension.saas.datacore_access.DbDecision``:
+    callers read ``.allowed`` and ``.reason`` and never import either class.
+    """
+
+    allowed: bool
+    reason: str
+    audit: bool = False
 
 
 class AccountBase(ABC):
@@ -332,6 +345,31 @@ class AccountBase(ABC):
     # =========================================================================
     # CLOUD DATABASE — env-gated broker call; raises when unconfigured
     # =========================================================================
+
+    async def authorize_db_target(self, identity: dict, target: dict | None = None) -> DbDecision:
+        """
+        Decide whether a run (or caller) may receive a cloud database DSN.
+
+        Called before every ``resolve_db_dsn``: by the task engine at task
+        start, once per distinct ``(scope, target)`` its DB nodes ask for.
+        The SaaS edition overrides this with the live org/team/user check
+        and its audit log (``extension/saas``, SDD 4.4). This default is for
+        editions with no orgs or teams: one tenant, so only the org scope
+        exists and anything else is refused.
+
+        Args:
+            identity: ``{org_id, user_id, team_id, run_kind, owner_kind,
+                public_endpoint, path, task_id}``. Unused here.
+            target: ``{scope, team_id, user_id}``, or None for the org
+                database.
+
+        Returns:
+            DbDecision(allowed, reason, audit).
+        """
+        scope = (target or {}).get('scope', 'org')
+        if scope == 'org':
+            return DbDecision(True, 'single_tenant')
+        return DbDecision(False, 'scope_needs_rocketride_cloud')
 
     async def resolve_db_dsn(self, client_id: str) -> str:
         """
