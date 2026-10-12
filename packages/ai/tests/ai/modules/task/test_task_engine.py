@@ -2074,6 +2074,18 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     assert t._status.exitCode == 1
 
 
+@pytest.mark.asyncio
+async def test_on_event_dump_tells_the_launch():
+    """A container holds its task's dump, so the runtime has to hear the task announce one."""
+    t = _event_task()
+    t._launch = MagicMock()
+
+    await Task.on_event(t, {'event': 'apaevt_dump', 'body': {'file': 'engine.7.dmp'}})
+
+    t._launch.crash_dump_announced.assert_called_once_with('engine.7.dmp')
+    t._forward_task_event.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # on_event / apaevt_trace — the trace level that means "no traces"
 # ---------------------------------------------------------------------------
