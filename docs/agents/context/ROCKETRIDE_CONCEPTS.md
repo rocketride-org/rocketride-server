@@ -127,9 +127,10 @@ an app package can never be scheduled) can run on a schedule:
   of a project schedules independently.
 - **`cron` fires the start; `ttl` bounds the window.** A cron start
   (`0 8 * * 1,3,5` for Mon/Wed/Fri 08:00) plus a ttl of 25200 seconds ends
-  the run once seven hours pass with no request. The window counts from the
-  run's last request, not from its start, so a request late in the window
-  extends it; there is no fixed stop time. Standard crontab syntax,
+  the run after approximately seven hours with no pipeline data request.
+  Each such request restarts the timer; emitted pipeline events and status
+  polling do not. A late data request extends the window, so there is no
+  fixed stop time. Standard crontab syntax,
   validated at set time.
 - Pausing a schedule keeps its cron and ttl configured; resuming picks them
   back up. An empty schedule means manual-only.
