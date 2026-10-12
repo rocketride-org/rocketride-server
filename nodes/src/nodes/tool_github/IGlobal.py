@@ -183,9 +183,11 @@ class IGlobal(IGlobalBase):
                         self.app_id, self.private_key_pem, self.installation_id
                     )
                 except Exception:
+                    # Re-read the clock: the request may have hung for DEFAULT_TIMEOUT.
                     # A failed early refresh must not discard a token GitHub still accepts.
-                    if not still_valid:
+                    failed_at = time.time()
+                    if not self._cached_token or failed_at >= self._cached_expiry:
                         raise
-                    self._refresh_failed_at = now
+                    self._refresh_failed_at = failed_at
                     warning('tool_github: token refresh failed; using the cached token until it expires')
             return self._cached_token

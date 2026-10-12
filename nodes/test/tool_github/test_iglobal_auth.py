@@ -312,6 +312,56 @@ def test_get_token_does_not_retry_refresh_within_backoff_window(rsa_private_key_
             assert warning.call_count == 2
 
 
+def test_get_token_backoff_window_starts_when_the_slow_refresh_fails(rsa_private_key_pem):
+    with scoped_stubs(_app_config(rsa_private_key_pem)):
+        from tool_github.IGlobal import IGlobal
+
+        glb = _make_global(IGlobal)
+        glb.beginGlobal()
+
+        with (
+            patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
+            patch('tool_github.IGlobal.time.time') as mock_time,
+        ):
+            mock_mint.return_value = ('ghs_token1', 2000.0)
+            mock_time.return_value = 1000.0
+            assert glb.get_token() == 'ghs_token1'
+
+            # The request starts at 1945 (inside the refresh window) and hangs until 1975 before failing.
+            mock_mint.side_effect = ValueError('GitHub App token request failed: 503')
+            mock_time.side_effect = [1945.0, 1975.0]
+            assert glb.get_token() == 'ghs_token1'
+            assert mock_mint.call_count == 2
+
+            # 1975 + 15 = 1990: a call at 1985 must not send the request again.
+            mock_time.side_effect = None
+            mock_time.return_value = 1985.0
+            assert glb.get_token() == 'ghs_token1'
+            assert mock_mint.call_count == 2
+
+
+def test_get_token_raises_when_the_slow_refresh_fails_after_expiry(rsa_private_key_pem):
+    with scoped_stubs(_app_config(rsa_private_key_pem)):
+        from tool_github.IGlobal import IGlobal
+
+        glb = _make_global(IGlobal)
+        glb.beginGlobal()
+
+        with (
+            patch('tool_github.IGlobal.github_client.mint_installation_token') as mock_mint,
+            patch('tool_github.IGlobal.time.time') as mock_time,
+        ):
+            mock_mint.return_value = ('ghs_token1', 2000.0)
+            mock_time.return_value = 1000.0
+            assert glb.get_token() == 'ghs_token1'
+
+            # Starts at 1975 with a valid token, fails at 2005: the token died while waiting.
+            mock_mint.side_effect = ValueError('GitHub App token request failed: 503')
+            mock_time.side_effect = [1975.0, 2005.0]
+            with pytest.raises(ValueError, match='token request failed'):
+                glb.get_token()
+
+
 def test_get_token_backoff_ends_at_expiry(rsa_private_key_pem):
     with scoped_stubs(_app_config(rsa_private_key_pem)):
         from tool_github.IGlobal import IGlobal
