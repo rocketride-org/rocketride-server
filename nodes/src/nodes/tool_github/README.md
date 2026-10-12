@@ -141,7 +141,7 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 | Tool             | Description                                                            |
 |------------------|------------------------------------------------------------------------|
 | `org_list_repos` | List repos in an organization (filter by type)                         |
-| `user_get_repos` | List repos for a user, omit `username` for the authenticated user     |
+| `user_get_repos` | List repos for a user; omit `username` for the token's own repos      |
 | `user_invite`    | Invite a user to an organization by email (role: `admin` · `direct_member` · `billing_manager`) |
 
 ### Search & commits
@@ -209,7 +209,9 @@ The option for unattended pipelines against an organization's repositories. Conf
 Give the App the repository permissions that match the PAT scopes above: Contents,
 Issues, Pull requests and Actions (read, or read and write for the write tools). An App
 with fewer permissions gets `403 Resource not accessible by integration` on the first
-tool that needs them. The MCP credentials catalog auto-wires the PAT only; App auth is
+tool that needs them. An installation token has no user behind it: `user_get_repos`
+without a `username` lists the repositories the installation can access instead of a
+user's repositories. The MCP credentials catalog auto-wires the PAT only; App auth is
 configured on the node.
 
 The node signs a short-lived JWT with the private key, exchanges it for an installation

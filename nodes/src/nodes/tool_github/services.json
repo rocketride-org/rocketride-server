@@ -99,16 +99,7 @@
 		{
 			"section": "Pipe",
 			"title": "GitHub",
-			"properties": [
-				"type",
-				"github.authType",
-				"github.token",
-				"github.appId",
-				"github.privateKey",
-				"github.installationId",
-				"github.defaultRepo",
-				"github.readOnly"
-			]
+			"properties": ["type", "github.authType", "github.defaultRepo", "github.readOnly"]
 		}
 	]
 }

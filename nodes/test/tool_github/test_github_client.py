@@ -39,6 +39,57 @@ def test_file_get_404_ambiguous():
         assert result == {'found': False, 'message': 'GitHub API 404: No commit found for the ref X'}
 
 
+def test_file_get_token_error_is_not_reported_as_missing_file():
+    """A 404 from the installation-token endpoint must propagate, not become found=False."""
+    inst = Mock()
+    inst._token.side_effect = GitHubAPIError(404, 'Integration not found')
+    inst._repo.return_value = 'owner/repo'
+
+    with patch('tool_github.IInstance.call') as mock_call:
+        with pytest.raises(GitHubAPIError, match='Integration not found'):
+            IInstance.file_get(inst, {'path': 'README.md'})
+        mock_call.assert_not_called()
+
+
+def _repos_instance(auth_type: str) -> Mock:
+    inst = Mock()
+    inst._token.return_value = 'token'
+    inst.IGlobal = Mock()
+    inst.IGlobal.auth_type = auth_type
+    return inst
+
+
+def test_user_get_repos_without_username_under_app_auth_lists_installation_repos():
+    inst = _repos_instance('app')
+    with patch('tool_github.IInstance.call') as mock_call:
+        mock_call.return_value = {'total_count': 1, 'repositories': [{'full_name': 'o/r', 'name': 'r'}]}
+        result = IInstance.user_get_repos(inst, {})
+
+    assert [r['full_name'] for r in result] == ['o/r']
+    args, kwargs = mock_call.call_args
+    assert args[1:] == ('GET', '/installation/repositories')
+    assert 'type' not in kwargs['params']
+
+
+def test_user_get_repos_without_username_under_pat_lists_own_repos():
+    inst = _repos_instance('pat')
+    with patch('tool_github.IInstance.call') as mock_call:
+        mock_call.return_value = [{'full_name': 'me/r', 'name': 'r'}]
+        result = IInstance.user_get_repos(inst, {})
+
+    assert [r['full_name'] for r in result] == ['me/r']
+    assert mock_call.call_args.args[1:] == ('GET', '/user/repos')
+
+
+def test_user_get_repos_with_username_under_app_auth_uses_users_endpoint():
+    inst = _repos_instance('app')
+    with patch('tool_github.IInstance.call') as mock_call:
+        mock_call.return_value = []
+        IInstance.user_get_repos(inst, {'username': 'octocat'})
+
+    assert mock_call.call_args.args[1:] == ('GET', '/users/octocat/repos')
+
+
 @patch('tool_github.github_client.requests.request')
 def test_non_rate_limit_403(mock_request):
     """Test that a 403 that is not a rate limit raises GitHubAPIError immediately."""

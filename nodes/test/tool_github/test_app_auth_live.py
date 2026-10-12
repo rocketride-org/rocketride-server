@@ -32,7 +32,7 @@ INSTALLATION_ID = os.getenv('GITHUB_APP_INSTALLATION_ID', '')
 REPO = os.getenv('GITHUB_TEST_REPO', '')
 
 _private_key_env = os.getenv('GITHUB_APP_PRIVATE_KEY', '')
-if _private_key_env and Path(_private_key_env).is_file():
+if _private_key_env and '-----BEGIN' not in _private_key_env and Path(_private_key_env).is_file():
     PRIVATE_KEY = Path(_private_key_env).read_text()
 else:
     PRIVATE_KEY = _private_key_env
