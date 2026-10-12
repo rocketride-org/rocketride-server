@@ -113,8 +113,10 @@ raw Cypher through `execute` or `QuestionType.EXECUTE`, because that path skips
 both LLM translation and the read-only gate and can write to the database.
 Raw execution is still limited to 25,000 returned rows; exceeding that limit
 raises an error and rolls the statement back, so nothing is saved and a retry
-is safe. Batched `CALL { ... } IN TRANSACTIONS` statements are the exception:
-Neo4j commits each batch as it runs, so keep what they return under the limit.
+is safe. Batched statements are the exception: `CALL { ... } IN TRANSACTIONS`
+and, on Neo4j 4, `USING PERIODIC COMMIT`. Neo4j commits each batch as it runs,
+so a retry after the error can repeat writes; keep what these statements
+return under the limit.
 
 ## Authentication
 

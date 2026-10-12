@@ -131,7 +131,9 @@ class GraphGlobalBase(IGlobalBase, ABC):
         Only reachable when the node owner sets ``allow_execute``. Must cap rows
         at ``max_execute_rows`` so one query cannot exhaust worker memory. On an
         engine with transactions, check the cap before commit, so a statement
-        over it saves nothing and a retry cannot duplicate its writes.
+        over it saves nothing and a retry cannot duplicate its writes. A
+        statement the engine commits in batches on its own is outside that
+        guarantee.
 
         A driver that sets ``supports_execute_params`` also accepts
         ``params: Optional[Dict]`` — bound values for ``$name`` placeholders.

@@ -79,8 +79,10 @@ def strip_cypher_literals(cypher: str) -> str:
 
     Keyword scans run on the result, so a keyword that is only data (a
     commented-out DELETE, or ``n.op = "CREATE"``) is not seen as a clause.
+    Each removed span becomes a space: a comment separates tokens in Cypher, so
+    ``n/**/DELETE`` must still read as two words.
     """
-    return _STRIP_LITERALS.sub('', cypher)
+    return _STRIP_LITERALS.sub(' ', cypher)
 
 
 def is_cypher_safe(cypher: str) -> bool:

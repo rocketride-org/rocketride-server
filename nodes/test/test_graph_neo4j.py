@@ -284,6 +284,8 @@ class _FakeTransaction:
 
     def run(self, query, params=None):
         self._driver.calls.append((str(query), params))
+        if self._driver.raise_error:
+            raise self._driver.raise_error
         return self._driver.result
 
 
@@ -404,6 +406,13 @@ def test_execute_raw_rolls_back_over_max_execute_rows():
     assert driver.tx_events == ['begin', 'rollback']
 
 
+def test_execute_raw_rolls_back_when_the_driver_raises():
+    driver = _FakeDriver(raise_error=_StubNeo4jError('boom'))
+    with pytest.raises(_StubNeo4jError, match='boom'):
+        _FakeGlobal(driver)._run_query_raw('CREATE (:Item)')
+    assert driver.tx_events == ['begin', 'rollback']
+
+
 def test_execute_raw_binds_params():
     driver = _FakeDriver(_FakeResult())
     rows = [{'id': 1}, {'id': 2}]
@@ -420,6 +429,7 @@ def test_execute_raw_binds_params():
         'CALL { CREATE (:Item) }\n  IN 4 CONCURRENT TRANSACTIONS OF 100 ROWS',
         'CALL { CREATE (:Item) } IN CONCURRENT TRANSACTIONS',
         'CALL { CREATE (:Item) } /* batched */ IN TRANSACTIONS',
+        'CALL { CREATE (:Item) } IN/*c*/TRANSACTIONS',
         'USING PERIODIC COMMIT 500 LOAD CSV FROM "file:///items.csv" AS row CREATE (:Item)',
     ],
 )
