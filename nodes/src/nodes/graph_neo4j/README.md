@@ -62,7 +62,8 @@ instead of rows.
 
 `get_schema` accepts an optional `label`; an unknown label returns an `error`,
 otherwise the response includes `{database, labels, nodes, relationships}`.
-`execute` requires a non-empty raw `query` and returns `{rows, affected_rows}`;
+`execute` requires a non-empty raw `query`, accepts an optional object `params`
+whose values bind to `$name` placeholders, and returns `{rows, affected_rows}`;
 it raises an error while direct execution is disabled. `dialect` accepts no
 meaningful arguments. Generation failures return an error rather than an
 executable query, and `get_cypher` preserves those outcomes while adding
@@ -111,7 +112,9 @@ READ access-mode session. Turn it on only for a trusted caller that must issue
 raw Cypher through `execute` or `QuestionType.EXECUTE`, because that path skips
 both LLM translation and the read-only gate and can write to the database.
 Raw execution is still limited to 25,000 returned rows; exceeding that limit
-raises an error.
+raises an error and rolls the statement back, so nothing is saved and a retry
+is safe. Batched `CALL { ... } IN TRANSACTIONS` statements are the exception:
+Neo4j commits each batch as it runs, so keep what they return under the limit.
 
 ## Authentication
 

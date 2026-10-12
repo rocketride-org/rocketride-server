@@ -679,7 +679,7 @@ also includes `tool`, so an agent can control a graph store as a tool instead.
 
 - Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
   Cypher text: no escaping, and bound values do not count toward the 10,000-character query
-  limit. Only `rocketride_graph` accepts `params`; `graph_neo4j` / `graph_falkordb` reject them.
+  limit. `graph_neo4j` accepts `params` too; `graph_falkordb` rejects them.
 - A bulk upsert is TWO calls. AGE applies SET / REMOVE / DELETE only to the first node or edge a
   MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is rejected:
 
