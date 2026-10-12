@@ -1061,7 +1061,7 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
-        if not username and getattr(self.IGlobal, 'auth_type', 'pat') == 'app':
+        if not username and self.IGlobal.auth_type == 'app':
             # An installation token has no user, so GET /user/repos is 403; list the
             # installation's repositories instead (no `type` filter on that endpoint).
             params.pop('type', None)
