@@ -54,6 +54,11 @@ from rocketlib import debug
 
 from ..base import AccountBase
 
+# What clients see in place of a stored environment value. A secret is
+# written once and never read back; sending the mask back keeps the value.
+# The SaaS service (extension/saas/account_service.py) uses the same string.
+ENV_MASK = '••••••••'
+
 
 class Account(AccountBase):
     """
@@ -409,8 +414,9 @@ class Account(AccountBase):
         """
         Handle ``rrext_account_me`` for env subcommands only.
 
-        OSS supports ``get_env`` (reads ROCKETRIDE_* from os.environ) and
-        ``set_env`` (writes to os.environ + persists to .env file).
+        OSS supports ``get_env`` (the ROCKETRIDE_* names in os.environ, values
+        masked) and ``set_env`` (merges into os.environ and the .env file: a
+        value is set, None deletes, the mask keeps what is stored).
         All other account commands raise NotImplementedError.
 
         Args:
@@ -423,13 +429,36 @@ class Account(AccountBase):
 
         if command == 'rrext_account_me':
             if sub == 'get_env':
-                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+                env = {k: ENV_MASK for k in os.environ if k.startswith('ROCKETRIDE_')}
                 return conn.build_response(request, body={'env': env})
 
             if sub == 'set_env':
-                # Only accept ROCKETRIDE_* keys — reject anything else
-                raw = args.get('env', {})
-                env = {k: v for k, v in raw.items() if k.startswith('ROCKETRIDE_')}
+                # The SDKs send deletions as a `delete` list, which a server
+                # with the old full-replacement contract ignores; None values
+                # are accepted from direct callers.
+                changes = dict(args.get('env', {}))
+                changes.update({name: None for name in args.get('delete', [])})
+                rejected = sorted(k for k in changes if not k.startswith('ROCKETRIDE_'))
+                if rejected:
+                    # Names only: the values are secrets and must not reach the client.
+                    return conn.build_error(
+                        request,
+                        'Unsupported environment variable name(s): '
+                        + ', '.join(rejected)
+                        + ". Only names beginning with 'ROCKETRIDE_' are accepted; nothing was saved.",
+                    )
+                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+                unmasked = sorted(k for k, v in changes.items() if v == ENV_MASK and k not in env)
+                if unmasked:
+                    return conn.build_error(
+                        request,
+                        'No stored value to keep for: ' + ', '.join(unmasked) + '. Send a value; nothing was saved.',
+                    )
+                for name, value in changes.items():
+                    if value is None:
+                        env.pop(name, None)
+                    elif value != ENV_MASK:
+                        env[name] = value
 
                 # Step 1: Remove existing ROCKETRIDE_* keys from os.environ
                 # so that deleted keys don't linger in memory.
@@ -470,7 +499,7 @@ class Account(AccountBase):
         lines: List[str] = []
         written_keys: set = set()
         try:
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 for line in f:
                     stripped = line.strip()
                     if stripped and not stripped.startswith('#') and '=' in stripped:
@@ -488,7 +517,7 @@ class Account(AccountBase):
             if k not in written_keys:
                 lines.append(f'{k}={v}\n')
 
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             f.writelines(lines)
 
     # generate_token is inherited from AccountBase.

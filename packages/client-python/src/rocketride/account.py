@@ -434,14 +434,18 @@ class AccountApi:
         scope_id: str | None = None,
     ) -> dict[str, str]:
         """
-        Read the environment dict for a scope (org, team, or user).
+        List the environment names stored at a scope (org, team, or user).
+
+        Values are write-only: every name maps to a mask, never to the
+        stored value. Pass the dict back to ``set_env`` unchanged to keep
+        the values it masks.
 
         Args:
             scope: One of 'org', 'team', 'user'.
             scope_id: For org: orgId. For team: teamId. For user: omit.
 
         Returns:
-            Decrypted key-value dict of ROCKETRIDE_* variables.
+            Dict of stored ROCKETRIDE_* names to the mask.
         """
         if scope == 'org':
             command = 'rrext_account_org'
@@ -463,31 +467,38 @@ class AccountApi:
     async def set_env(
         self,
         scope: str,
-        env: dict[str, str],
+        env: dict[str, str | None],
         scope_id: str | None = None,
     ) -> None:
         """
-        Write the full environment dict for a scope (org, team, or user).
+        Merge environment changes into a scope (org, team, or user).
 
-        Replaces the entire set of keys at that scope level.
+        A name with a value is set, a name with ``None`` is deleted, and a
+        name whose value is the mask from ``get_env`` keeps its stored value.
+        Names not in ``env`` are left as they are. A name outside
+        ``ROCKETRIDE_*`` rejects the whole write.
 
         Args:
             scope: One of 'org', 'team', 'user'.
-            env: Full key-value dict to store.
+            env: Names to set, delete (``None``) or keep (mask).
             scope_id: For org: orgId. For team: teamId. For user: omit.
         """
+        # Deletions travel as a list: a server with the old full-replacement
+        # contract ignores it instead of storing None as a value.
+        to_set = {name: value for name, value in env.items() if value is not None}
+        to_delete = [name for name, value in env.items() if value is None]
         if scope == 'org':
             command = 'rrext_account_org'
-            kwargs = {'subcommand': 'set_env', 'env': env}
+            kwargs = {'subcommand': 'set_env', 'env': to_set, 'delete': to_delete}
             if scope_id:
                 kwargs['orgId'] = scope_id
         elif scope == 'team':
             command = 'rrext_account_teams'
-            kwargs = {'subcommand': 'set_env', 'env': env}
+            kwargs = {'subcommand': 'set_env', 'env': to_set, 'delete': to_delete}
             if scope_id:
                 kwargs['teamId'] = scope_id
         else:
             command = 'rrext_account_me'
-            kwargs = {'subcommand': 'set_env', 'env': env}
+            kwargs = {'subcommand': 'set_env', 'env': to_set, 'delete': to_delete}
 
         await self._client.call(command, **kwargs)
