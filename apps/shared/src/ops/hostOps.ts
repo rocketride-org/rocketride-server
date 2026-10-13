@@ -114,7 +114,7 @@ export interface HostOpMap extends ShellOpMap {
 	 *  need no handler: their Environment surface reads the realm client. */
 	'host.env.get': ShellOpSpec<{ scope: 'org' | 'team' | 'user'; scopeId?: string; connection?: 'dev' | 'deploy' }, Record<string, string>>;
 	/** Slot-resolved env write — the counterpart of `host.env.get`. */
-	'host.env.set': ShellOpSpec<{ scope: 'org' | 'team' | 'user'; env: Record<string, string>; scopeId?: string; connection?: 'dev' | 'deploy' }, void>;
+	'host.env.set': ShellOpSpec<{ scope: 'org' | 'team' | 'user'; env: Record<string, string | null>; scopeId?: string; connection?: 'dev' | 'deploy' }, void>;
 	/** Opens a framework page by registry name, from ANY realm. The host's
 	 *  page directory is the allowlist; an unknown name rejects. `popup`
 	 *  asks for an overlay where the host has one (cloud); hosts without

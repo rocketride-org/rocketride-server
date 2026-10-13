@@ -7,9 +7,9 @@
  * EnvironmentPanel — ROCKETRIDE_* environment variable editor.
  *
  * Renders a card per scope (Organization, Team, User) with a key-value
- * editor for encrypted pipeline secrets. Values are masked by default
- * with a reveal toggle. The full dict is read and written as a set —
- * no per-key server calls.
+ * editor for encrypted pipeline secrets. Values are write-only: the server
+ * returns a mask per stored name, a typed value replaces it, and a deleted
+ * row is sent as null. One save call per card.
  *
  * Permission gating is handled server-side; the UI shows/hides scope
  * cards based on the `isOrgAdmin` / `isTeamAdmin` props.
@@ -77,11 +77,11 @@ export interface EnvironmentPanelProps {
 	/** User env dict (null while loading). */
 	userEnv: Record<string, string>;
 	/** Saves the full org env dict. */
-	onSaveOrgEnv: (env: Record<string, string>) => Promise<void>;
+	onSaveOrgEnv: (env: Record<string, string | null>) => Promise<void>;
 	/** Saves the full team env dict. */
-	onSaveTeamEnv: (env: Record<string, string>) => Promise<void>;
+	onSaveTeamEnv: (env: Record<string, string | null>) => Promise<void>;
 	/** Saves the full user env dict. */
-	onSaveUserEnv: (env: Record<string, string>) => Promise<void>;
+	onSaveUserEnv: (env: Record<string, string | null>) => Promise<void>;
 }
 
 // =============================================================================
@@ -103,8 +103,8 @@ export const EnvScopeCard: React.FC<{
 	 * a re-render with the loaded values.
 	 */
 	onRequestLoad?: () => void;
-	/** Saves the full dict. */
-	onSave: (env: Record<string, string>) => Promise<void>;
+	/** Saves the changes: typed or kept values, and null for each deleted name. */
+	onSave: (env: Record<string, string | null>) => Promise<void>;
 	/** Keys that must have non-empty values before save is allowed. */
 	requiredKeys?: string[];
 }> = ({ label, env, onRequestLoad, onSave, requiredKeys }) => {
@@ -167,16 +167,19 @@ export const EnvScopeCard: React.FC<{
 		return requiredKeys.some((key) => (draftMap.get(key) ?? '').length === 0);
 	}, [requiredKeys, draft]);
 
-	/** Saves the draft as a dict. */
+	/** Saves the draft as a dict; a stored name missing from the draft is sent as null. */
 	const handleSave = useCallback(async () => {
 		setSaving(true);
 		setError(null);
 		try {
 			// Build dict, skip empty keys
-			const result: Record<string, string> = {};
+			const result: Record<string, string | null> = {};
 			for (const [k, v] of draft) {
 				const key = k.trim();
 				if (key) result[key] = v;
+			}
+			for (const key of Object.keys(env ?? {})) {
+				if (!(key in result)) result[key] = null;
 			}
 			await onSave(result);
 			setDirty(false);
@@ -187,7 +190,7 @@ export const EnvScopeCard: React.FC<{
 		} finally {
 			setSaving(false);
 		}
-	}, [draft, onSave]);
+	}, [draft, env, onSave]);
 
 	return (
 		<div style={{ ...commonStyles.card, marginBottom: 14 }}>

@@ -84,15 +84,13 @@ export const EnvironmentSection: React.FC<IEnvironmentSectionProps> = ({ slot, l
 		[cm]
 	);
 
-	/** Persists env data for a scope and updates the local cache. */
+	/** Persists env changes for a scope, then reloads the masked names so the cache never holds a typed value. */
 	const handleSaveEnv = useCallback(
-		async (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => {
+		async (slotId: string, scope: EnvironmentScope, env: Record<string, string | null>, scopeId?: string) => {
 			await cm.request('host.env.set', { scope, env, scopeId, connection: connectionOf(slotId) });
-			const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
-			setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
-			setError(null);
+			handleLoadEnv(slotId, scope, scopeId);
 		},
-		[cm]
+		[cm, handleLoadEnv]
 	);
 
 	const slotConfig: EnvironmentSlotConfig = {
