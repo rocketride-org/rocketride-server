@@ -22,13 +22,14 @@
 // =============================================================================
 
 /**
- * What the container tasks need from Docker and WSL, and what to do when a
- * piece is missing.
+ * What the container tasks need from Docker, WSL and Kubernetes, and what to
+ * do when a piece is missing.
  *
  * tasks.js gathers the facts (`docker info`, `wsl.exe -l -v`, a probe run
- * inside the distribution); the functions here only read them, so every case
- * is testable on any OS. A diagnosis is `{ problem, fix }` — what is missing
- * and the lines that add it — or null when nothing is.
+ * inside the distribution, `kubectl config current-context`); the functions
+ * here only read them, so every case is testable on any OS. A diagnosis is
+ * `{ problem, fix }` — what is missing and the lines that add it — or null
+ * when nothing is.
  */
 
 const ENGINE_INSTALL_URL = 'https://docs.docker.com/engine/install/ubuntu/';
@@ -290,6 +291,137 @@ function missingImage(platform, image) {
 	return { problem: `${image} is not on this daemon`, fix: [`docker pull ${image}`] };
 }
 
+const KUBECTL_INSTALL_URL = 'https://kubernetes.io/docs/tasks/tools/';
+
+// The contexts of clusters that run on this machine: the node tests run against no other
+const LOCAL_CONTEXTS = [/^docker-desktop$/, /^kind-/, /^k3d-/, /^minikube$/, /^rancher-desktop$/, /^orbstack$/];
+
+/**
+ * Whether a kubectl context names a cluster on this machine.
+ * @param {string} context - The context's name
+ * @returns {boolean}
+ */
+function isLocalContext(context) {
+	return LOCAL_CONTEXTS.some((pattern) => pattern.test(context));
+}
+
+// The names a local cluster's API server answers at: loopback, and Docker Desktop's own
+const LOCAL_SERVER_HOSTS = ['localhost', '0.0.0.0', '::1', 'kubernetes.docker.internal', 'host.docker.internal'];
+
+// minikube's VM drivers give its API server an address of a private network
+const PRIVATE_NETWORK = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+
+/**
+ * Whether a context's API server is on this machine: a context can be named
+ * like a local one and point at a cluster elsewhere.
+ * @param {string} server - The server URL of the context's cluster
+ * @param {string} context - The context's name
+ * @returns {boolean}
+ */
+function isLocalServer(server, context) {
+	let host;
+	try {
+		host = new URL(server).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+	} catch {
+		return false;
+	}
+	if (LOCAL_SERVER_HOSTS.includes(host) || /^127\./.test(host)) return true;
+	return context === 'minikube' && PRIVATE_NETWORK.test(host);
+}
+
+/**
+ * A string as the k8s runtime writes it into a label: at most 63 of
+ * [A-Za-z0-9._-], a letter or digit at both ends (label_value in launcher/k8s.py).
+ * @param {string} text - An instance id
+ * @returns {string}
+ */
+function k8sLabelValue(text) {
+	return String(text)
+		.replace(/[^A-Za-z0-9._-]/g, '_')
+		.slice(0, 63)
+		.replace(/^[._-]+|[._-]+$/g, '');
+}
+
+/**
+ * The cluster `nodes:test --runtime=k8s` runs its tasks in: kubectl, a local
+ * context whose API server is on this machine, then the namespace. The cluster
+ * is asked about the namespace only once its context is known to be local, so
+ * `server` and `found` are null on the first call, and `found` on the second.
+ * @param {object} p
+ * @param {string} [p.context] - RR_K8S_CONTEXT; empty for kubectl's current one
+ * @param {{code: number, stdout?: string, stderr?: string}} p.current - `kubectl config current-context`
+ * @param {string} p.namespace - The namespace tasks run in
+ * @param {string|null} [p.server] - The context's API server from the kubeconfig; '' when it could not be read
+ * @param {{code: number, stdout?: string, stderr?: string}|null} [p.found] - `kubectl get namespace <namespace>`
+ * @returns {{problem: string, fix: string[]}|null}
+ */
+function diagnoseKubernetes({ context = '', current, namespace, server = null, found = null }) {
+	if (current.code === -1 || /ENOENT/.test(current.stderr || '')) {
+		return {
+			problem: 'kubectl is not installed',
+			fix: [
+				`Install kubectl: ${KUBECTL_INSTALL_URL}`,
+				'Docker Desktop brings one with its cluster: Settings → Kubernetes → Enable Kubernetes',
+			],
+		};
+	}
+	const name = context || (current.code === 0 ? String(current.stdout || '').trim() : '');
+	if (!name) {
+		return {
+			problem: 'kubectl has no current context',
+			fix: [
+				'kubectl config use-context docker-desktop   (its cluster: Settings → Kubernetes → Enable Kubernetes)',
+				'or name the context of a local cluster in RR_K8S_CONTEXT',
+			],
+		};
+	}
+	if (!isLocalContext(name)) {
+		return {
+			problem:
+				`the kubectl context ${name} is not a cluster on this machine, ` +
+				'and the node tests run against no other',
+			fix: [
+				'Use a local one: docker-desktop, kind-*, k3d-*, minikube, rancher-desktop or orbstack',
+				'kubectl config use-context <context>, or set RR_K8S_CONTEXT',
+			],
+		};
+	}
+	if (server !== null && !isLocalServer(server, name)) {
+		const where = server ? `points at ${server}` : 'names no server kubectl could read';
+		return {
+			problem:
+				`the kubectl context ${name} ${where}, ` +
+				'not a cluster on this machine, and the node tests run against no other',
+			fix: [
+				'Use the context of a cluster that runs here, or point this one at it',
+				'kubectl config use-context <context>, or set RR_K8S_CONTEXT',
+			],
+		};
+	}
+	if (found && found.code !== 0) {
+		const said = String(found.stderr || found.stdout || '').trim();
+		if (/not ?found/i.test(said)) {
+			return {
+				problem: `the namespace ${namespace} does not exist in ${name}`,
+				fix: [
+					`kubectl --context ${name} create namespace ${namespace}`,
+					'or name the namespace tasks run in with RR_K8S_NAMESPACE',
+				],
+			};
+		}
+		return {
+			problem: `the cluster of the context ${name} does not answer`,
+			fix: [
+				name === 'docker-desktop'
+					? 'Start Docker Desktop and wait for "Kubernetes running" (Settings → Kubernetes)'
+					: 'Start the cluster',
+				...(said ? [`kubectl said: ${said.split(/\r?\n/)[0]}`] : []),
+			],
+		};
+	}
+	return null;
+}
+
 const ENGINES = { win32: 'a Windows engine', darwin: 'a macOS engine' };
 
 /**
@@ -339,6 +471,10 @@ module.exports = {
 	diagnoseLocalDocker,
 	diagnoseWsl,
 	missingImage,
+	isLocalContext,
+	isLocalServer,
+	k8sLabelValue,
+	diagnoseKubernetes,
 	unavailableReason,
 	formatDiagnosis,
 };
