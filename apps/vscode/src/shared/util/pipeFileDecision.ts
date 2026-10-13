@@ -145,7 +145,12 @@ export function withProjectId(text: string, projectId: string): string | undefin
 		// (an escaped key such as "project\u005fid"), and the safe path is
 		// the re-serialisation below.
 		const matches = [...text.matchAll(PROJECT_ID_PROPERTY)];
-		if (matches.length === 1 && matches[0][2] === current) return text.replace(PROJECT_ID_PROPERTY, `$1${projectId}$3`);
+		if (matches.length === 1 && matches[0][2] === current) {
+			const updated = text.replace(PROJECT_ID_PROPERTY, `$1${projectId}$3`);
+			// A nested id can have the same value as an escaped pipeline id.
+			// Confirm that the swap changed the pipeline's id, not that nested one.
+			if (readPipeProjectId(updated) === projectId) return updated;
+		}
 	}
 
 	parsed.target.project_id = projectId;

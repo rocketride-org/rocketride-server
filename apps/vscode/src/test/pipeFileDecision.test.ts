@@ -163,6 +163,16 @@ test('a lone project_id string that is not the target falls back as well', () =>
 	assert.equal(out.components[0].config.project_id, 'x');
 });
 
+test('a nested id matching an escaped pipeline id is not replaced', () => {
+	const bare = `{"components":[{"config":{"project_id":"${ID_A}"}}],"project\\u005fid":"${ID_A}"}`;
+	for (const text of [bare, `{"pipeline":${bare}}`]) {
+		const root = JSON.parse(withProjectId(text, ID_B) ?? '');
+		const pipeline = root.pipeline ?? root;
+		assert.equal(pipeline.project_id, ID_B);
+		assert.equal(pipeline.components[0].config.project_id, ID_A);
+	}
+});
+
 test('the wrapped shape gets its id on the inner pipeline object', () => {
 	const out = JSON.parse(withProjectId(JSON.stringify({ pipeline: { components: [] } }), ID_B) ?? '');
 	assert.equal(out.pipeline.project_id, ID_B);
