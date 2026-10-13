@@ -119,6 +119,13 @@ starts moto (S3), Azurite, and Postgres (pgvector on `:55432`, Apache AGE 1.5.0 
 tests (`nodes/test/test_*_live.py`), then runs the graph suite once more against
 AGE 1.6.0.
 
+Ubuntu also runs `./builder container:test` — the node image probes, then the
+node tests with every task in a container (`--runtime=docker`) — on a PR only
+when the image's inputs or the task launchers changed (the `container` path
+filter in `ci.yml`), and on every other trigger. CI has no Kubernetes cluster,
+so `nodes:test --runtime=k8s` runs only on your machine: see
+[Testing the task runtimes](engine/task-runtimes.md).
+
 Per-module equivalents when you only touched one area:
 
 ```bash
