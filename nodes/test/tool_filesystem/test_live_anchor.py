@@ -48,9 +48,10 @@ Run: scripts/run_node_test.cmd live_anchor
 Under ``--runtime=docker`` the store reaches a task only through a mount of
 its own subtree, the task running as the engine's own user; where the engine
 cannot mount it (a daemon that does not see its files or remaps users, S3
-through a web-identity token) it refuses the pipeline before it starts. These
-tests then assert that refusal instead — only under docker, and only with that
-reason.
+through a web-identity token) it refuses the pipeline before it starts. Under
+``--runtime=k8s`` a pod sees none of the engine's files, so a filesystem store
+is always refused. These tests then assert that refusal instead — only under
+those runtimes, and only with the runtime's own reason.
 """
 
 from __future__ import annotations
@@ -65,8 +66,10 @@ _RUN_ID = uuid.uuid4().hex[:8]
 _WORKDIR = f'e2e_anchor_{_RUN_ID}'
 
 # The runtime the test server runs tasks with (set by the builder)
-_DOCKER = os.environ.get('ROCKETRIDE_TEST_RUNTIME') == 'docker'
-_DOCKER_REFUSAL = 'tool_filesystem is not available under --runtime=docker'
+_RUNTIME = os.environ.get('ROCKETRIDE_TEST_RUNTIME', 'spawn')
+# The runtimes that keep a task away from the engine's files may refuse, each in its own words
+_MAY_REFUSE = _RUNTIME in ('docker', 'k8s')
+_REFUSAL = f'tool_filesystem is not available under --runtime={_RUNTIME}'
 
 
 # The 'tools' endpoint holds the pipeline open; the tool node attaches via
@@ -92,14 +95,14 @@ _PIPELINE = {
 async def tool_pipeline(client):
     """Start the webhook+tool_filesystem pipeline; yield (client, token, refusal).
 
-    ``refusal`` is the docker runtime's reason for not starting the pipeline,
-    or None when it started.
+    ``refusal`` is the runtime's reason for not starting the pipeline, or None
+    when it started.
     """
     try:
         result = await client.use(pipeline=_PIPELINE)
     except Exception as e:
-        # Only the docker runtime may refuse, and only with its own reason
-        if _DOCKER and _DOCKER_REFUSAL in str(e):
+        # Only the docker and k8s runtimes may refuse, and only with their own reason
+        if _MAY_REFUSE and _REFUSAL in str(e):
             yield client, None, str(e)
             return
         raise
@@ -134,7 +137,7 @@ async def test_tool_writes_land_in_the_callers_own_tree(tool_pipeline):
     """
     client, token, refusal = tool_pipeline
     if refusal:
-        assert _DOCKER_REFUSAL in refusal
+        assert _REFUSAL in refusal
         return
     content = f'written inside the engine subprocess ({_RUN_ID})'
 
@@ -156,7 +159,7 @@ async def test_session_writes_visible_to_the_tool(tool_pipeline):
     """The mirror direction: session fs write -> subprocess tool read."""
     client, token, refusal = tool_pipeline
     if refusal:
-        assert _DOCKER_REFUSAL in refusal
+        assert _REFUSAL in refusal
         return
     content = f'written by the session ({_RUN_ID})'
 
@@ -176,7 +179,7 @@ async def test_tool_listing_and_lifecycle(tool_pipeline):
     """list/stat/delete through the tool operate on the anchored tree."""
     client, token, refusal = tool_pipeline
     if refusal:
-        assert _DOCKER_REFUSAL in refusal
+        assert _REFUSAL in refusal
         return
 
     await _tool(client, token, 'create_directory', path=f'{_WORKDIR}/sub')

@@ -98,7 +98,10 @@ The engine binds to `localhost` by default:
   engine cannot dial the container's own address, that port is also published
   on a pool port of the host's `127.0.0.1`. Other containers on the same Docker
   network can reach port 5570 too, so there the per-run token is what keeps
-  them out.
+  them out. Under `--runtime=k8s` it listens on port 5570 of its own pod, which
+  the engine dials at the pod's address or through a forwarded pool port of its
+  own `127.0.0.1`; any pod the cluster's network lets through can reach that
+  port, and the token keeps those out as well.
 
 Only the source-node HTTP port needs to be accessible to external callers when
 you're using a webhook-based source. Port 5565 is a management interface;
