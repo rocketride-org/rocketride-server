@@ -50,7 +50,7 @@ from rocketlib import warning
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
-from ai.common.rocketride_db import parse_dsn_fields, resolve_rocketride_dsn
+from ai.common.rocketride_db import db_target, parse_dsn_fields, resolve_rocketride_dsn
 from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
@@ -171,12 +171,11 @@ class Store(DocumentStoreBase):
             self.hnsw_ef_construction = 64
         self.hnsw_ef_construction = max(self.hnsw_ef_construction, 2 * self.hnsw_m)
 
-        # RocketRide cloud: no host/user/password fields. Resolve the
-        # per-tenant DSN (task-engine injected, or via the account broker) and
-        # connect directly. host/port/database are parsed only for bookkeeping
-        # (the connection subKey keys on database); the DSN is the source of
-        # truth.
-        dsn = resolve_rocketride_dsn()
+        # RocketRide cloud: no host/user/password fields. Read the DSN the
+        # task engine delivered for this node's scope / target and connect
+        # directly. host/port/database are parsed only for bookkeeping (the
+        # connection subKey keys on database); the DSN is the source of truth.
+        dsn = resolve_rocketride_dsn(*db_target(config))
         fields = parse_dsn_fields(dsn)
         self.host = fields['host']
         self.port = fields['port'] or DEFAULT_POSTGRES_PORT

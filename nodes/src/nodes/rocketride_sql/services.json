@@ -124,9 +124,24 @@
 			"default": false,
 			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
 		},
+		"rocketridesql.scope": {
+			"hidden": true,
+			"type": "string",
+			"title": "Database",
+			"default": "org",
+			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
+			"description": "Which RocketRide cloud database this node uses: the organization's, a team's, or your own"
+		},
+		"rocketridesql.target": {
+			"hidden": true,
+			"type": "string",
+			"title": "Team or user",
+			"default": "",
+			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
+		},
 		"rocketridesql.default": {
 			"object": "default",
-			"properties": ["rocketridesql.db_description", "rocketridesql.table", "rocketridesql.max_attempts", "rocketridesql.allow_execute"]
+			"properties": ["rocketridesql.db_description", "rocketridesql.table", "rocketridesql.max_attempts", "rocketridesql.allow_execute", "rocketridesql.scope", "rocketridesql.target"]
 		},
 		"rocketridesql.profile": {
 			"hidden": true,

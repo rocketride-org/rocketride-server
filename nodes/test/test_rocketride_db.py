@@ -368,6 +368,44 @@ class TestRocketrideSqlConnection:
         url = glb._build_connection_url(params)
         assert 'evil' not in url
 
+    def test_connection_params_read_the_nodes_scope(self, monkeypatch):
+        """A team-scoped node gets the team entry of the map, not the org's."""
+        cls, _ = _sql_iglobal_cls(monkeypatch)
+        team_dsn = 'postgresql://team_rw:pw@pooler:5432/t_team'
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN, 'team': team_dsn}))
+        glb = cls()
+        params = glb._connection_params({'scope': 'team', 'table': 'widgets'})
+        assert params['database'] == 't_team'
+        assert glb._build_connection_url(params) == 'postgresql+psycopg2://team_rw:pw@pooler:5432/t_team'
+
+    def test_save_time_probe_outside_a_task_is_silent(self, monkeypatch):
+        """No DSN in the server process: static checks only, no warning (any
+        warning keeps the node config panel open), no connection attempt.
+        """
+        cls, rrdb_mod = _sql_iglobal_cls(monkeypatch)
+        monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
+        monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
+        monkeypatch.delenv('ROCKETRIDE_DB_RESOLVE_ERROR', raising=False)
+        warnings = []
+        iglobal_mod = sys.modules['nodes.rocketride_sql.IGlobal']
+        monkeypatch.setattr(iglobal_mod, 'warning', warnings.append)
+        monkeypatch.setattr(iglobal_mod.DatabaseGlobalBase, 'validateConfig', lambda self: warnings.append('probed'))
+        glb = cls()
+        glb.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'scope': 'team'})
+        glb.validateConfig()
+        assert warnings == []
+
+    def test_save_time_probe_reports_a_bad_scope(self, monkeypatch):
+        cls, _ = _sql_iglobal_cls(monkeypatch)
+        warnings = []
+        iglobal_mod = sys.modules['nodes.rocketride_sql.IGlobal']
+        monkeypatch.setattr(iglobal_mod, 'warning', warnings.append)
+        monkeypatch.setattr(iglobal_mod.Config, 'getNodeConfig', lambda provider, cfg: dict(cfg))
+        glb = cls()
+        glb.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'scope': 'everyone'})
+        glb.validateConfig()
+        assert len(warnings) == 1 and 'scope must be one of org, team, user' in warnings[0]
+
 
 # ---------------------------------------------------------------------------
 # rocketride_vector: HNSW default-index logic
@@ -491,6 +529,46 @@ def _make_store(cls, config):
 
 
 class TestRocketrideVectorStore:
+    def test_store_connects_to_its_scopes_database(self, monkeypatch):
+        cls, _ = _vector_store_cls(monkeypatch)
+        user_dsn = 'postgresql://u_rw:pw@pooler:5432/t_user_u1'
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN, 'user:u-1': user_dsn}))
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'scope': 'user', 'target': 'u-1'})
+        assert store.database == 't_user_u1'
+
+    def test_store_refuses_a_scope_the_task_was_not_given(self, monkeypatch):
+        cls, _ = _vector_store_cls(monkeypatch)
+        with pytest.raises(ValueError, match="was not given the team database 't-9'"):
+            _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'scope': 'team', 'target': 't-9'})
+
+    def test_save_time_probe_outside_a_task_is_silent(self, monkeypatch):
+        _vector_store_cls(monkeypatch)
+        monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
+        iglobal_mod = sys.modules['nodes.rocketride_vector.IGlobal']
+        warnings = []
+        monkeypatch.setattr(iglobal_mod, 'warning', warnings.append)
+        connects = []
+        monkeypatch.setattr(sys.modules['psycopg2'], 'connect', lambda *a, **kw: connects.append(a))
+        glb = iglobal_mod.IGlobal()
+        glb.glb = types.SimpleNamespace(
+            logicalType='rocketride_vector', connConfig={'collection': 'rr_vec', 'scope': 'team'}
+        )
+        glb.validateConfig()
+        assert warnings == [] and connects == []
+
+    def test_save_time_probe_still_checks_the_scope(self, monkeypatch):
+        _vector_store_cls(monkeypatch)
+        monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
+        iglobal_mod = sys.modules['nodes.rocketride_vector.IGlobal']
+        warnings = []
+        monkeypatch.setattr(iglobal_mod, 'warning', warnings.append)
+        glb = iglobal_mod.IGlobal()
+        glb.glb = types.SimpleNamespace(
+            logicalType='rocketride_vector', connConfig={'collection': 'rr_vec', 'scope': 'org', 'target': 't-1'}
+        )
+        glb.validateConfig()
+        assert len(warnings) == 1 and 'the org scope takes no target' in warnings[0]
+
     def test_connects_via_resolved_dsn(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
         store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
@@ -599,3 +677,91 @@ class TestRocketrideVectorStore:
         store._createCollection(vectorSize=2000)
         assert any('USING hnsw' in sql for sql in store.client.executed)
         assert not warnings
+
+
+# ---------------------------------------------------------------------------
+# rocketride_graph: scope-aware connection and the save-time probe
+# ---------------------------------------------------------------------------
+
+_GRAPH_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_graph'
+
+
+class _GraphCursor(_FakeCursor):
+    def fetchone(self):
+        return ('1.5.0',)
+
+
+class _GraphClient(_FakeClient):
+    def cursor(self):
+        return _GraphCursor(self.executed, self.fetch_batches)
+
+
+def _graph_iglobal(monkeypatch):
+    """Load rocketride_graph/IGlobal with its graph base and driver stubbed."""
+    warnings: list[str] = []
+    connects: list[str] = []
+
+    rocketlib = types.ModuleType('rocketlib')
+    rocketlib.warning = warnings.append
+    monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
+
+    psycopg2_mod = types.ModuleType('psycopg2')
+
+    def connect(dsn, **kw):
+        connects.append(dsn)
+        return _GraphClient()
+
+    psycopg2_mod.connect = connect
+    psycopg2_mod.sql = types.ModuleType('psycopg2.sql')
+    monkeypatch.setitem(sys.modules, 'psycopg2', psycopg2_mod)
+    monkeypatch.setitem(sys.modules, 'psycopg2.sql', psycopg2_mod.sql)
+
+    ai_pkg = types.ModuleType('ai')
+    ai_pkg.__path__ = []
+    common_pkg = types.ModuleType('ai.common')
+    common_pkg.__path__ = []
+    graph_pkg = types.ModuleType('ai.common.graph')
+    graph_pkg.__path__ = []
+    graph_pkg.GraphGlobalBase = type(
+        'GraphGlobalBase', (), {'_config_int': staticmethod(lambda cfg, key, default: default)}
+    )
+    age = types.ModuleType('ai.common.graph.age')
+    for name in ('AgeTranslationError', 'FirewallConfig', 'TranslatedQuery'):
+        setattr(age, name, type(name, (), {}))
+    age.TranslateMode = types.SimpleNamespace(SAFE='safe')
+    for name in ('decode_agtype', 'decode_row', 'translate'):
+        setattr(age, name, lambda *a, **kw: None)
+    for name, mod in (
+        ('ai', ai_pkg),
+        ('ai.common', common_pkg),
+        ('ai.common.graph', graph_pkg),
+        ('ai.common.graph.age', age),
+    ):
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
+    monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
+    for name in ('ROCKETRIDE_DB_DSNS', 'ROCKETRIDE_DB_DSN', 'ROCKETRIDE_DB_RESOLVE_ERROR'):
+        monkeypatch.delenv(name, raising=False)
+
+    iglobal = _load_from_path('nodes.rocketride_graph.IGlobal', _GRAPH_NODE_DIR / 'IGlobal.py')
+    return iglobal.IGlobal(), warnings, connects
+
+
+class TestRocketrideGraphConnection:
+    def test_open_driver_connects_to_its_scopes_database(self, monkeypatch):
+        glb, _, connects = _graph_iglobal(monkeypatch)
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN, 'team:t-1': 'postgresql://t1'}))
+        glb._open_driver({'scope': 'team', 'target': 't-1'})
+        assert connects == ['postgresql://t1']
+
+    def test_save_time_probe_outside_a_task_is_silent(self, monkeypatch):
+        glb, warnings, connects = _graph_iglobal(monkeypatch)
+        glb._probe_connection({'scope': 'user'})
+        assert warnings == [] and connects == []
+
+    def test_save_time_probe_still_checks_the_scope(self, monkeypatch):
+        glb, warnings, connects = _graph_iglobal(monkeypatch)
+        glb._probe_connection({'scope': 'team', 'target': 'team:x'})
+        assert connects == []
+        assert len(warnings) == 1 and 'not a valid team or user id' in warnings[0]

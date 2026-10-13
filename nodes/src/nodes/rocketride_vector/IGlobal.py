@@ -25,14 +25,14 @@
 # This class controls the data shared between all threads for the task.
 #
 # Mirrors vectordb_postgres/IGlobal, differing only in how it connects: there
-# are no host/user/password fields; the per-tenant DSN is resolved from the
-# account layer (keyed by the authenticated client_id).
+# are no host/user/password fields; the DSN is the one the task engine
+# delivered for this node's scope / target (ai.common.rocketride_db).
 # ------------------------------------------------------------------------------
 import re
 from rocketlib import OPEN_MODE, warning
 from ai.common.transform import IGlobalTransform
 from ai.common.config import Config
-from ai.common.rocketride_db import resolve_rocketride_dsn
+from ai.common.rocketride_db import DsnNotDelivered, db_target, resolve_rocketride_dsn
 
 # Valid unquoted PostgreSQL identifier: letter/underscore start, alphanumeric/underscore body, max 63 chars
 VALID_TABLE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
@@ -82,7 +82,9 @@ class IGlobal(IGlobalTransform):
         Validate the RocketRide cloud vector store config with fast, read-only probes.
 
         - Enforce a safe unquoted identifier for the table (collection).
-        - Resolve the per-tenant DSN, connect with a short timeout, run SELECT 1.
+        - Check scope / target. Outside a task no DSN is delivered, so stop
+          there: connectivity is checked when the pipeline runs.
+        - Inside a task, connect with a short timeout, run SELECT 1.
         - Verify pgvector availability via ``SELECT NULL::vector``.
         - Surface raw provider errors without truncation.
         """
@@ -98,8 +100,11 @@ class IGlobal(IGlobalTransform):
                 )
                 return
 
-            # No host/user/password fields — resolve the per-tenant DSN.
-            dsn = resolve_rocketride_dsn()
+            # No host/user/password fields: read the delivered DSN.
+            try:
+                dsn = resolve_rocketride_dsn(*db_target(cfg))
+            except DsnNotDelivered:
+                return
 
             # Load deps on demand: in CONFIG mode beginGlobal never imports
             # .rocketride_vector (where the node's other depends() lives), so

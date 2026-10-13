@@ -130,9 +130,24 @@
 			"minimum": 4,
 			"maximum": 1000
 		},
+		"rrvector.scope": {
+			"hidden": true,
+			"type": "string",
+			"title": "Database",
+			"default": "org",
+			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
+			"description": "Which RocketRide cloud database this node uses: the organization's, a team's, or your own"
+		},
+		"rrvector.target": {
+			"hidden": true,
+			"type": "string",
+			"title": "Team or user",
+			"default": "",
+			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
+		},
 		"rrvector.cloud": {
 			"object": "cloud",
-			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction"]
+			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.scope", "rrvector.target"]
 		},
 		"rrvector.profile": {
 			"hidden": true,
