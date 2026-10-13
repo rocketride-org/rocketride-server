@@ -67,7 +67,7 @@ const {
 	sequence,
 	whenNot,
 	fingerprint,
-	contentHash,
+	cachedContentHash,
 	taskDebug,
 	STATE_FILE,
 } = require('../../../scripts/lib');
@@ -79,6 +79,11 @@ const SERVER_DIR = path.join(PACKAGES_DIR, 'server');
 const DIST_DIR = path.join(DIST_ROOT, 'server');
 const VCPKG_DIR = path.join(BUILD_ROOT, 'vcpkg');
 const DIST_ARTIFACTS_DIR = path.join(DIST_ROOT, 'artifacts');
+
+// configure_file writes version.h into our own sources, with the version and
+// the commit of the build making it - never part of what the sources are
+const SOURCE_EXCLUDE = ['version.h'];
+
 
 // =============================================================================
 // Platform Detection
@@ -632,12 +637,12 @@ async function forceRpath(elfFile) {
 function makeDownloadAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			// Compute content hash of local source (always, ~110ms)
-			task.output = 'Computing source hash...';
-			const localHash = await contentHash(SERVER_DIR, {
-				log: (msg) => {
-					task.output = msg;
-				},
+			// The hash of the local source, read from the fingerprint cache
+			// unless something moved - reading the whole tree takes ~10s
+			task.output = 'Computing server source hash...';
+			const localHash = await cachedContentHash(SERVER_DIR, 'server.sourceHash', {
+				task,
+				exclude: SOURCE_EXCLUDE,
 			});
 			ctx.serverSourceHash = localHash;
 			ctx.serverReady = false;
@@ -966,7 +971,9 @@ function makeCompileEngineAction(options = {}) {
 			task.output = `Compiling v${version}...`;
 
 			if (!ctx.serverSourceHash) {
-				ctx.serverSourceHash = await contentHash(SERVER_DIR);
+				ctx.serverSourceHash = await cachedContentHash(SERVER_DIR, 'server.sourceHash', {
+					exclude: SOURCE_EXCLUDE,
+				});
 			}
 
 			const baseEnv = await getBuildBaseEnv(task);
