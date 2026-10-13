@@ -56,6 +56,7 @@ from ai.constants import (
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
+from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
 from rocketride import (
@@ -689,9 +690,9 @@ class Task(DAPBase):
         """
         return resolve_pipeline_env(pipeline, self._env)
 
-    # Providers that connect to the per-tenant RocketRide cloud database and
-    # therefore need ROCKETRIDE_DB_DSN injected into the task subprocess.
-    _ROCKETRIDE_DB_PROVIDERS = frozenset({'rocketride_sql', 'rocketride_vector', 'rocketride_graph'})
+    # Providers that connect to a RocketRide cloud database and therefore need
+    # their DSNs delivered to the task subprocess.
+    _ROCKETRIDE_DB_PROVIDERS = DB_PROVIDERS
 
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
@@ -718,6 +719,104 @@ class Task(DAPBase):
             for component in components
         )
 
+    def _db_targets(self) -> List[Tuple[str, str]]:
+        """Every distinct ``(scope, target)`` the pipeline's DB nodes ask for.
+
+        Read through ``Config.getNodeConfig``, the resolver the node itself
+        uses, so the engine authorizes exactly the key the node will look up.
+        A malformed scope or target fails the task start.
+        """
+        from ai.common.config import Config
+
+        targets: List[Tuple[str, str]] = []
+        for component in self._pipeline.get('components') or []:
+            if not isinstance(component, dict) or component.get('provider') not in self._ROCKETRIDE_DB_PROVIDERS:
+                continue
+            try:
+                pair = db_target(Config.getNodeConfig(component['provider'], component.get('config') or {}))
+            except ValueError as e:
+                raise ValueError(f'{component.get("id") or component["provider"]}: {e}') from e
+            if pair not in targets:
+                targets.append(pair)
+        return targets
+
+    def _db_owner(self, scope: str, target: str) -> str:
+        """The team or user id a ``(scope, target)`` names: the target, or
+        the run's own (team scope: the run's team; user scope: the run's
+        user, which a team deploy doesn't have). '' for the org scope.
+        """
+        if scope == 'org':
+            return ''
+        if target:
+            return target
+        return (self.team_id if scope == 'team' else self.client_id) or ''
+
+    def _db_identity(self) -> Dict[str, Any]:
+        """The run's identity for ``authorize_db_target`` (SDD 4.4)."""
+        return {
+            'org_id': self.org_id or '',
+            'user_id': self.client_id or '',
+            'team_id': self.team_id or '',
+            'run_kind': self._run_kind,
+            'owner_kind': self._owner_kind,
+            'public_endpoint': exposes_public_endpoint(self._pipeline.get('components') or []),
+            'path': 'pipeline',
+            'task_id': self.id,
+        }
+
+    async def _authorize_db_targets(self) -> List[Tuple[str, str, str]]:
+        """Authorize every database the pipeline's DB nodes use (SDD 4.4).
+
+        Runs before anything is provisioned. The account layer reads
+        membership live on every call; nothing is cached here.
+
+        Returns:
+            ``(scope, target, owner)`` per distinct node ``(scope, target)``,
+            where ``owner`` is the team or user id the target resolves to.
+
+        Raises:
+            ValueError: a DB node has a malformed scope or target.
+            PermissionError: a database was denied; carries the reason.
+        """
+        from ai.account import account
+
+        wanted = [(scope, target, self._db_owner(scope, target)) for scope, target in self._db_targets()]
+        identity = self._db_identity()
+        for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in wanted):
+            request: Dict[str, Any] = {'scope': scope}
+            if scope == 'team':
+                request['team_id'] = owner
+            elif scope == 'user':
+                request['user_id'] = owner
+            decision = await account.authorize_db_target(identity, request)
+            if not decision.allowed:
+                named = f' {owner!r}' if owner else ''
+                raise PermissionError(
+                    f'this run may not use the RocketRide cloud {scope} database{named}: {decision.reason}'
+                )
+        return wanted
+
+    async def _resolve_db_dsns(self, wanted: List[Tuple[str, str, str]]) -> Dict[str, str]:
+        """Resolve each authorized database once and key it for the nodes.
+
+        Returns:
+            The ``ROCKETRIDE_DB_DSNS`` map: ``dsn_key(scope, target)`` -> DSN.
+        """
+        from ai.account import account
+
+        dsns: Dict[Tuple[str, str], str] = {}
+        for scope, _, owner in wanted:
+            if (scope, owner) in dsns:
+                continue
+            if scope == 'org':
+                # Unchanged single-tenant call: the tenant is the ORG (a team
+                # deploy has client_id='', and an org switch must not re-point
+                # a user's nodes). client_id is the fallback with no orgs.
+                dsns[(scope, owner)] = await account.resolve_db_dsn(self.org_id or self.client_id)
+            else:
+                dsns[(scope, owner)] = await account.resolve_db_dsn(self.org_id, scope=scope, owner_id=owner)
+        return {dsn_key(scope, target): dsns[(scope, owner)] for scope, target, owner in wanted}
+
     async def _build_subprocess_env(self) -> Dict[str, str]:
         """Build the environment for the task subprocess.
 
@@ -740,7 +839,7 @@ class Task(DAPBase):
           pipelines that didn't resolve one (and must not survive a broker
           failure as a stale value pointing at who-knows-which tenant).
 
-        Children only ever get the single DSN resolved here, for pipelines
+        Children only ever get the DSNs resolved here, for pipelines
         that actually contain one of the DB nodes. Identity is NOT delivered
         through the environment (it rides the task file's 'identity' block —
         the ROCKETRIDE_* env namespace is caller-influenced by design).
@@ -749,28 +848,21 @@ class Task(DAPBase):
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
+        subprocess_env.pop('ROCKETRIDE_DB_DSNS', None)
         subprocess_env.pop('ROCKETRIDE_DB_DSN', None)
         subprocess_env.pop('ROCKETRIDE_DB_RESOLVE_ERROR', None)
 
-        # Resolve the per-tenant DSN server-side (the SaaS account context
-        # exists only in this process) and hand it to the node subprocess via
-        # env. Scoped to pipelines that actually contain one of the DB nodes
-        # so unrelated tasks never trigger provisioning. Resolution failure is
-        # non-fatal here: the node surfaces its own clear error, with the
-        # failure reason passed down so it isn't misreported as a missing
-        # identity.
+        # Authorize and resolve every database the DB nodes use, server-side
+        # (the SaaS account context exists only in this process), and hand
+        # the DSNs to the node subprocess as a map. Scoped to pipelines that
+        # actually contain one of the DB nodes so unrelated tasks never
+        # trigger provisioning. A denial or a malformed scope fails the task
+        # start. A resolution failure is non-fatal here: the node surfaces
+        # its own clear error, with the reason passed down.
         if self._pipeline_uses_rocketride_db():
+            wanted = await self._authorize_db_targets()
             try:
-                from ai.account import account
-
-                # Tenant = the ORG (fixes the two holes of user keying: a
-                # team deploy run has client_id='' and would die at the
-                # resolver's empty-tenant guard, and an org switch would
-                # silently re-point a user's DB nodes at a different
-                # database). client_id remains the OSS/single-user fallback
-                # where no org exists.
-                dsn = await account.resolve_db_dsn(self.org_id or self.client_id)
-                subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
+                dsns = await self._resolve_db_dsns(wanted)
             except NotImplementedError:
                 # Missing broker config is normal on a local engine, but on
                 # Cloud it is an operator problem, not a reason to swap nodes.
@@ -784,6 +876,11 @@ class Task(DAPBase):
                 self.debug_message(f'RocketRide DB DSN resolution failed: {e}')
                 reason = (str(e).strip().splitlines() or [repr(e)])[0]
                 subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = reason
+            else:
+                subprocess_env['ROCKETRIDE_DB_DSNS'] = json.dumps(dsns)
+                if 'org' in dsns:
+                    # The org entry on its own, for older nodes.
+                    subprocess_env['ROCKETRIDE_DB_DSN'] = dsns['org']
 
         return subprocess_env
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import sys
 from types import SimpleNamespace
@@ -806,6 +807,7 @@ async def test_subprocess_env_scrubs_broker_credentials(monkeypatch):
     monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'https://broker.example')
     monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'super-secret')
     monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/db')
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', '{"org": "postgresql://stale@parent/db"}')
     monkeypatch.setenv('ROCKETRIDE_DB_RESOLVE_ERROR', 'stale reason')
 
     env = await Task._build_subprocess_env(_env_task())  # no DB nodes
@@ -813,6 +815,7 @@ async def test_subprocess_env_scrubs_broker_credentials(monkeypatch):
     assert 'ROCKETRIDE_DB_BROKER_URL' not in env
     assert 'ROCKETRIDE_DB_BROKER_TOKEN' not in env
     assert 'ROCKETRIDE_DB_DSN' not in env
+    assert 'ROCKETRIDE_DB_DSNS' not in env
     assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
     # Identity rides the task file (#1686), never the environment.
     assert 'ROCKETRIDE_CLIENT_ID' not in env
@@ -946,6 +949,167 @@ async def test_subprocess_env_hosted_missing_broker_warns_and_directs_to_operato
         assert name not in env
     warn.assert_called_once_with(f'RocketRide DB DSN not resolved: {reason}')
     t.debug_message.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _build_subprocess_env — per-scope authorization and the DSN map (SDD 4.6)
+# ---------------------------------------------------------------------------
+
+# One component per node type, in the shapes the canvas saves: nested under
+# the profile name (sql 'default', vector 'cloud'), or flat.
+_SCOPED_PIPELINE = {
+    'components': [
+        {'id': 'chat_1', 'provider': 'chat', 'config': {'mode': 'Source'}},
+        {'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'profile': 'default', 'default': {'table': 't'}}},
+        {'id': 'vec_1', 'provider': 'rocketride_vector', 'config': {'profile': 'cloud', 'cloud': {'scope': 'team'}}},
+        {'id': 'graph_1', 'provider': 'rocketride_graph', 'config': {'scope': 'user', 'target': 'user-2'}},
+    ]
+}
+
+
+def _fake_db_account(monkeypatch, deny=None):
+    """Swap the account's authorize/resolve for recorders. ``deny(target)``
+    returns a reason to refuse that target, or None to allow it.
+    """
+    import ai.account
+    from ai.account.base import DbDecision
+
+    calls = {'authorize': [], 'resolve': []}
+
+    async def authorize(identity, target=None):
+        calls['authorize'].append((identity, target))
+        reason = deny(target) if deny else None
+        return DbDecision(False, reason, True) if reason else DbDecision(True, 'ok', False)
+
+    async def resolve(client_id, scope='org', owner_id=''):
+        calls['resolve'].append((client_id, scope, owner_id))
+        return f'postgresql://{scope}-{owner_id or client_id}@pooler/db'
+
+    monkeypatch.setattr(ai.account.account, 'authorize_db_target', authorize)
+    monkeypatch.setattr(ai.account.account, 'resolve_db_dsn', resolve)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_db_dsn_map_has_one_entry_per_scope(monkeypatch):
+    calls = _fake_db_account(monkeypatch)
+    env = await Task._build_subprocess_env(_env_task(pipeline=_SCOPED_PIPELINE))
+
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {
+        'org': 'postgresql://org-org-1@pooler/db',
+        'team': 'postgresql://team-team-1@pooler/db',
+        'user:user-2': 'postgresql://user-user-2@pooler/db',
+    }
+    # The org entry on its own, for older nodes.
+    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://org-org-1@pooler/db'
+    assert [target for _, target in calls['authorize']] == [
+        {'scope': 'org'},
+        {'scope': 'team', 'team_id': 'team-1'},
+        {'scope': 'user', 'user_id': 'user-2'},
+    ]
+    # The org call is the unchanged single-tenant one; team and user are scoped.
+    assert calls['resolve'] == [('org-1', 'org', ''), ('org-1', 'team', 'team-1'), ('org-1', 'user', 'user-2')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('client_id', 'run_kind', 'owner_kind', 'expected_user'),
+    [
+        ('user-1', 'dev', 'user', 'user-1'),  # builder run, store app, pk_ fed dev run
+        ('', 'deploy', 'team', ''),  # @team deploy: no user
+        ('user-1', 'deploy', 'user', 'user-1'),  # @me deploy
+    ],
+)
+async def test_db_identity_comes_from_the_task(monkeypatch, client_id, run_kind, owner_kind, expected_user):
+    calls = _fake_db_account(monkeypatch)
+    t = _env_task(pipeline=_DB_PIPELINE)
+    t.client_id, t._run_kind, t._owner_kind = client_id, run_kind, owner_kind
+    await Task._build_subprocess_env(t)
+
+    identity, target = calls['authorize'][0]
+    assert target == {'scope': 'org'}
+    assert identity == {
+        'org_id': 'org-1',
+        'user_id': expected_user,
+        'team_id': 'team-1',
+        'run_kind': run_kind,
+        'owner_kind': owner_kind,
+        'public_endpoint': False,
+        'path': 'pipeline',
+        'task_id': 'task-test',
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('source', 'public'),
+    [('chat', True), ('dropper', True), ('webhook', True), ('discord', True), ('telegram', True), ('tools', False)],
+)
+async def test_public_endpoint_comes_from_the_source_nodes(monkeypatch, source, public):
+    """Every task carries a pk_ token (_task sets public_auth), so the token
+    can't decide this: the pipeline's source providers do (OQ 14).
+    """
+    calls = _fake_db_account(monkeypatch)
+    pipeline = {'components': [{'id': 's', 'provider': source}, {'id': 'db', 'provider': 'rocketride_sql'}]}
+    await Task._build_subprocess_env(_env_task(pipeline=pipeline))
+    assert calls['authorize'][0][0]['public_endpoint'] is public
+
+
+@pytest.mark.asyncio
+async def test_denial_fails_task_start_before_anything_is_provisioned(monkeypatch):
+    calls = _fake_db_account(
+        monkeypatch, deny=lambda target: 'public_endpoint_cannot_use_user_db' if target['scope'] == 'user' else None
+    )
+    with pytest.raises(PermissionError, match="user database 'user-2': public_endpoint_cannot_use_user_db"):
+        await Task._build_subprocess_env(_env_task(pipeline=_SCOPED_PIPELINE))
+    assert calls['resolve'] == []
+
+
+@pytest.mark.asyncio
+async def test_team_deploy_asks_for_a_user_database_with_no_user(monkeypatch):
+    """A team deploy has no user: the request carries user_id='' and the
+    account layer refuses it (hard rule 1). Nothing is resolved.
+    """
+    calls = _fake_db_account(
+        monkeypatch, deny=lambda target: 'team_deploy_has_no_user' if target['scope'] == 'user' else None
+    )
+    t = _env_task(pipeline={'components': [{'id': 'g', 'provider': 'rocketride_graph', 'config': {'scope': 'user'}}]})
+    t.client_id, t._run_kind, t._owner_kind = '', 'deploy', 'team'
+    with pytest.raises(PermissionError, match='team_deploy_has_no_user'):
+        await Task._build_subprocess_env(t)
+    assert calls['authorize'][0][1] == {'scope': 'user', 'user_id': ''}
+    assert calls['resolve'] == []
+
+
+@pytest.mark.asyncio
+async def test_own_team_named_twice_is_one_database(monkeypatch):
+    """scope=team with no target and with the run's own team id are the same
+    database: authorized and resolved once, delivered under both keys.
+    """
+    calls = _fake_db_account(monkeypatch)
+    pipeline = {
+        'components': [
+            {'id': 'a', 'provider': 'rocketride_sql', 'config': {'scope': 'team'}},
+            {'id': 'b', 'provider': 'rocketride_graph', 'config': {'scope': 'team', 'target': 'team-1'}},
+        ]
+    }
+    env = await Task._build_subprocess_env(_env_task(pipeline=pipeline))
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {
+        'team': 'postgresql://team-team-1@pooler/db',
+        'team:team-1': 'postgresql://team-team-1@pooler/db',
+    }
+    assert len(calls['authorize']) == 1 and len(calls['resolve']) == 1
+    # No org database in this pipeline, so no legacy single DSN either.
+    assert 'ROCKETRIDE_DB_DSN' not in env
+
+
+@pytest.mark.asyncio
+async def test_malformed_scope_fails_task_start(monkeypatch):
+    calls = _fake_db_account(monkeypatch)
+    pipeline = {'components': [{'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {'scope': 'everyone'}}]}
+    with pytest.raises(ValueError, match='sql_1: scope must be one of org, team, user'):
+        await Task._build_subprocess_env(_env_task(pipeline=pipeline))
+    assert calls['authorize'] == []
 
 
 # ---------------------------------------------------------------------------
