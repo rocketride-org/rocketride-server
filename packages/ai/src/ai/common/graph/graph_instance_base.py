@@ -233,6 +233,13 @@ class GraphInstanceBase(IInstanceBase, ABC):
             'properties': {
                 'rows': {'type': 'array', 'items': {'type': 'object'}},
                 'affected_rows': {'type': 'integer'},
+                'truncated': {
+                    'type': 'boolean',
+                    'description': (
+                        'Present and true when a write returned more rows than the row cap on an engine '
+                        'that cannot roll back: the write is saved and only the first rows are returned.'
+                    ),
+                },
             },
         },
         description=lambda self: (
@@ -250,7 +257,9 @@ class GraphInstanceBase(IInstanceBase, ABC):
                 ``params`` (dict, optional) — values for ``$name`` placeholders.
 
         Returns:
-            dict: ``{'rows': [...], 'affected_rows': int}``.
+            dict: ``{'rows': [...], 'affected_rows': int}``, plus
+            ``'truncated': True`` when the driver reports a saved write whose
+            result passed the row cap.
 
         Raises:
             ValueError: execute is disabled, the statement is missing,
@@ -277,10 +286,13 @@ class GraphInstanceBase(IInstanceBase, ABC):
             result = self.IGlobal._run_query_raw(query, params=params)
         else:
             result = self.IGlobal._run_query_raw(query)
-        return {
+        out = {
             'rows': [self._sanitize_row(row) for row in result.get('rows', [])],
             'affected_rows': result.get('affected_rows', 0),
         }
+        if result.get('truncated'):
+            out['truncated'] = True
+        return out
 
     @tool_function(
         input_schema={'type': 'object', 'properties': {}},

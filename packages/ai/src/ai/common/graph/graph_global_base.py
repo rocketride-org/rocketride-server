@@ -133,7 +133,9 @@ class GraphGlobalBase(IGlobalBase, ABC):
         engine with transactions, check the cap before commit, so a statement
         over it saves nothing and a retry cannot duplicate its writes. A
         statement the engine commits in batches on its own is outside that
-        guarantee.
+        guarantee. On an engine with no rollback, a write over the cap is
+        already saved: return the capped rows with ``'truncated': True`` rather
+        than raise, so the caller does not retry it.
 
         A driver that sets ``supports_execute_params`` also accepts
         ``params: Optional[Dict]`` — bound values for ``$name`` placeholders.

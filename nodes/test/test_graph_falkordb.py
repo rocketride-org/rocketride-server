@@ -230,7 +230,9 @@ class _FakeResult:
             'properties_set',
             'properties_removed',
             'labels_added',
+            'labels_removed',
             'indices_created',
+            'indices_deleted',
         ):
             setattr(self, attr, stats.get(attr, 0))
 
@@ -478,12 +480,23 @@ def test_execute_tool_treats_empty_params_as_none(params):
     assert out['affected_rows'] == 1
 
 
-def test_execute_tool_refuses_params_the_driver_cannot_bind():
-    # FalkorDB's _run_query_raw takes no params: refuse rather than drop them.
-    glb = _FakeGlobal(_FakeGraph())
+def test_execute_tool_binds_params():
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
     glb.allow_execute = True
+    _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
+    assert graph.calls == [('query', 'CREATE (n:Person {name: $n})', {'n': 'Ada'}, 30000)]
+
+
+def test_execute_tool_refuses_params_the_driver_cannot_bind():
+    # A driver whose _run_query_raw takes no params: refuse rather than drop them.
+    graph = _FakeGraph()
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    glb.supports_execute_params = False
     with pytest.raises(ValueError, match='not supported'):
         _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
+    assert graph.calls == []
 
 
 @pytest.mark.parametrize('params', [0, False, '', 'rows', 42])
@@ -522,9 +535,9 @@ def test_execute_tool_accepts_object_row_mode():
 
 def test_execute_schema_lists_params_only_when_supported():
     glb = _FakeGlobal(_FakeGraph())
-    assert 'params' not in _instance(glb)._execute_input_schema()['properties']
-    glb.supports_execute_params = True
     assert 'params' in _instance(glb)._execute_input_schema()['properties']
+    glb.supports_execute_params = False
+    assert 'params' not in _instance(glb)._execute_input_schema()['properties']
 
 
 def test_execute_tool_refuses_positional_params():
@@ -729,6 +742,127 @@ def test_affected_rows_reported_for_write_that_also_returns_rows():
 
     assert out['rows']  # the RETURN produced a row
     assert out['affected_rows'] == 2  # ...and the write is still counted
+
+
+def test_affected_rows_counts_label_removal_and_index_drop():
+    """A write counted as 0 would be taken for a read by the row-cap check."""
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], labels_removed=2, indices_deleted=1))
+
+    out = _FakeGlobal(graph)._run_query_raw('MATCH (n) REMOVE n:Tmp')
+
+    assert out['affected_rows'] == 3
+
+
+# ---------------------------------------------------------------------------
+# EXECUTE row cap: FalkorDB has saved the statement by the time rows are counted
+# ---------------------------------------------------------------------------
+
+
+def _result_of(count, **stats):
+    """A reply of ``count`` rows, one ``id`` column numbered from 0."""
+    return _FakeResult(result_set=[[i] for i in range(count)], header=[[1, 'id']], **stats)
+
+
+def _over_cap_result(**stats):
+    """Five rows against a cap of three."""
+    return _result_of(5, **stats)
+
+
+def test_execute_raw_read_over_the_cap_raises():
+    glb = _FakeGlobal(_FakeGraph(_over_cap_result()))
+    glb.max_execute_rows = 3
+    with pytest.raises(ValueError, match='max_execute_rows=3'):
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+
+@pytest.mark.parametrize('counter', ['nodes_created', 'properties_set', 'labels_removed', 'indices_deleted'])
+def test_execute_raw_write_over_the_cap_returns_truncated_rows(counter):
+    # The write is stored already: an error would make the caller retry it and store it twice.
+    glb = _FakeGlobal(_FakeGraph(_over_cap_result(**{counter: 5})))
+    glb.max_execute_rows = 3
+
+    out = glb._run_query_raw('UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
+
+    assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 5, 'truncated': True}
+
+
+def test_execute_raw_write_within_the_cap_is_not_flagged():
+    result = _FakeResult(result_set=[[0], [1], [2]], header=[[1, 'id']], nodes_created=3)
+    glb = _FakeGlobal(_FakeGraph(result))
+    glb.max_execute_rows = 3
+
+    out = glb._run_query_raw('UNWIND range(1, 3) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
+
+    assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 3}
+
+
+def test_execute_tool_reports_a_truncated_write():
+    glb = _FakeGlobal(_FakeGraph(_over_cap_result(nodes_created=5)))
+    glb.allow_execute = True
+    glb.max_execute_rows = 3
+
+    out = _instance(glb).execute({'query': 'UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id'})
+
+    assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 5, 'truncated': True}
+
+
+def test_execute_tool_leaves_truncated_out_of_a_complete_result():
+    graph = _FakeGraph(_FakeResult(result_set=[[0]], header=[[1, 'id']], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+
+    out = _instance(glb).execute({'query': 'CREATE (n:Item {id: 0}) RETURN n.id AS id'})
+
+    assert out == {'rows': [{'id': 0}], 'affected_rows': 1}
+
+
+# The same rules at the cap a node has when its owner sets none.
+_DEFAULT_CAP = graph_base.DEFAULT_MAX_EXECUTE_ROWS
+_BULK_WRITE = 'UNWIND $rows AS row CREATE (n:Item {id: row.id}) RETURN n.id AS id'
+
+
+@pytest.mark.parametrize('stats', [{}, {'nodes_created': _DEFAULT_CAP}], ids=['read', 'write'])
+def test_execute_raw_result_of_exactly_the_default_cap_is_complete(stats):
+    glb = _FakeGlobal(_FakeGraph(_result_of(_DEFAULT_CAP, **stats)))
+
+    out = glb._run_query_raw(_BULK_WRITE)
+
+    assert len(out['rows']) == _DEFAULT_CAP
+    assert 'truncated' not in out
+
+
+@pytest.mark.parametrize('over', [1, 35000])
+def test_execute_raw_read_over_the_default_cap_raises(over):
+    glb = _FakeGlobal(_FakeGraph(_result_of(_DEFAULT_CAP + over)))
+    with pytest.raises(ValueError, match=f'max_execute_rows={_DEFAULT_CAP}'):
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+
+@pytest.mark.parametrize('over', [1, 35000])
+def test_execute_raw_write_over_the_default_cap_is_cut_to_it(over):
+    total = _DEFAULT_CAP + over
+    glb = _FakeGlobal(_FakeGraph(_result_of(total, nodes_created=total)))
+
+    out = glb._run_query_raw(_BULK_WRITE)
+
+    # The first rows, in order; every stored write is still counted.
+    assert len(out['rows']) == _DEFAULT_CAP
+    assert out['rows'][0] == {'id': 0}
+    assert out['rows'][-1] == {'id': _DEFAULT_CAP - 1}
+    assert out['affected_rows'] == total
+    assert out['truncated'] is True
+
+
+def test_execute_tool_cuts_a_write_over_the_default_cap():
+    total = _DEFAULT_CAP + 1
+    glb = _FakeGlobal(_FakeGraph(_result_of(total, nodes_created=total)))
+    glb.allow_execute = True
+
+    out = _instance(glb).execute({'query': _BULK_WRITE, 'params': {'rows': [{'id': 0}]}})
+
+    assert len(out['rows']) == _DEFAULT_CAP
+    assert out['affected_rows'] == total
+    assert out['truncated'] is True
 
 
 # ---------------------------------------------------------------------------
