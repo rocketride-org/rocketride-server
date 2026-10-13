@@ -117,9 +117,7 @@ async function getPackageInfo(options = {}) {
 	const baseName = `rocketride-${releaseTag}-${platform.name}`;
 	const manifestFilename = `${baseName}.manifest.json`;
 	const distFilename = `${baseName}.${platform.ext}`;
-	const symDistFilename = isWindows() ? `${baseName}.symbols.${platform.ext}` : null;
 	const distFile = path.join(DIST_ARTIFACTS_DIR, distFilename);
-	const symDistFile = symDistFilename ? path.join(DIST_ARTIFACTS_DIR, symDistFilename) : null;
 
 	return {
 		releaseTag,
@@ -127,9 +125,7 @@ async function getPackageInfo(options = {}) {
 		baseName,
 		manifestFilename,
 		distFilename,
-		symDistFilename,
 		distFile,
-		symDistFile,
 	};
 }
 
@@ -674,8 +670,7 @@ function makeDownloadAction(options = {}) {
 				return;
 			}
 
-			const { releaseTag, prereleaseTag, manifestFilename, distFilename, symDistFilename } =
-				await getPackageInfo(options);
+			const { releaseTag, prereleaseTag, manifestFilename, distFilename } = await getPackageInfo(options);
 
 			// Try stable release first, then prerelease
 			const tagsToTry = [releaseTag, prereleaseTag];
@@ -736,23 +731,9 @@ function makeDownloadAction(options = {}) {
 			}
 			task.output = `Downloaded ${distFilename}`;
 
-			let symDistPath = null;
-			if (symDistFilename) {
-				task.output = `Downloading ${symDistFilename}...`;
-				symDistPath = await downloadGitHubFile(matchedTag, symDistFilename, task);
-				if (symDistPath) task.output = `Downloaded ${symDistFilename}`;
-				else task.output = `⚠️ Symbol dist file ${symDistFilename} not available, skipping`;
-			}
-
 			task.output = `Extracting ${distFilename}...`;
 			await extractArchive(distPath, DIST_DIR);
 			task.output = `Extracted ${distFilename}`;
-
-			if (symDistPath) {
-				task.output = `Extracting ${symDistFilename}...`;
-				await extractArchive(symDistPath, DIST_DIR);
-				task.output = `Extracted ${symDistFilename}`;
-			}
 
 			task.output = `Downloaded server from ${matchedTag}`;
 			await setState('server.buildHash', releaseHash);
@@ -1024,8 +1005,10 @@ function makeCompileEngineAction(options = {}) {
 			if (isWindows()) {
 				const engineSym = getSymName(engineName);
 				const engineModSym = getSymName(engineModName);
-				await syncFile(path.join(engineDir, engineSym), path.join(DIST_DIR, engineSym));
-				await syncFile(path.join(BUILD_ROOT, 'engine-mod', engineModSym), path.join(DIST_DIR, engineModSym));
+				await syncFile(path.join(engineDir, engineSym), path.join(DIST_DIR, engineSym), { package: true });
+				await syncFile(path.join(BUILD_ROOT, 'engine-mod', engineModSym), path.join(DIST_DIR, engineModSym), {
+					package: true,
+				});
 			} else {
 				// crashpad_handler must ship next to the engine (runtime finds it via
 				// execDir()). Windows keeps its native MiniDumpWriteDump path.
@@ -1564,14 +1547,7 @@ function makePackageAction(options = {}) {
 	return {
 		description: 'Packaging server',
 		run: async (_ctx, _task) => {
-			const { manifestFilename, distFilename, symDistFilename, distFile, symDistFile } =
-				await getPackageInfo(options);
-			const symFilenames = isWindows()
-				? [
-						getSymName(getExecName('engine')), // engine.exe.pdb
-						getSymName(getSharedName('engine')), // engine.dll.pdb
-					]
-				: null;
+			const { manifestFilename, distFilename, distFile } = await getPackageInfo(options);
 
 			const sourceHash = await getState('server.buildHash');
 			const packageHash = await getState('server.packageHash');
@@ -1597,13 +1573,6 @@ function makePackageAction(options = {}) {
 				await createArchive(distFile, DIST_DIR, packageEntries);
 				_task.output = `Packaged ${distFilename}`;
 
-				if (symDistFile) {
-					_task.output = `Packaging ${symDistFilename}...`;
-					await removeFile(symDistFile);
-					await createArchive(symDistFile, DIST_DIR, symFilenames);
-					_task.output = `Packaged ${symDistFilename}`;
-				}
-
 				await setState('server.packageHash', sourceHash);
 
 				// Copy state.json without releases as build manifest for download validation
@@ -1612,9 +1581,6 @@ function makePackageAction(options = {}) {
 				await writeJson(path.join(DIST_ARTIFACTS_DIR, manifestFilename), state);
 			} catch (err) {
 				await removeFile(distFile);
-				if (symDistFile) {
-					await removeFile(symDistFile);
-				}
 				throw err;
 			}
 		},
