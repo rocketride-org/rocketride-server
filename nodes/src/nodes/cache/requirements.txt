@@ -1,0 +1,5 @@
+# Vector math for the in-memory semantic cache.
+# The embedding model itself is loaded via ai.common.models.SentenceTransformer,
+# which installs and caches its own (heavier) dependencies on first use — exactly
+# as the embedding_transformer node does.
+numpy
