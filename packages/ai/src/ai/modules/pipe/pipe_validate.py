@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional
 from rocketlib import validatePipeline
+from ai.common.rocketride_db import DB_PROVIDERS
 from ai.web import response, exception, ResultBase, Request
 
 
@@ -29,6 +30,22 @@ async def pipe_Validate(request: Request, pipeline: Dict[str, Any], source: Opti
         # The engine dispatches on a root-level 'component'; wrapping it hides
         # that key and the engine answers "'pipeline.components' must be an array".
         if 'component' in pipeline and 'components' not in pipeline:
+            component = pipeline['component']
+            if isinstance(component, dict) and component.get('provider') in DB_PROVIDERS:
+                # Public route, no caller identity: never probe a RocketRide
+                # cloud database here (datacore isolation SDD 4.6). The node is
+                # checked when the pipeline runs, under the run's identity.
+                return response(
+                    {
+                        **pipeline,
+                        'warnings': [
+                            {
+                                'id': component.get('id', ''),
+                                'message': 'RocketRide cloud database nodes are checked when the pipeline runs',
+                            }
+                        ],
+                    }
+                )
             data = validatePipeline(pipeline)
             return response(data)
 

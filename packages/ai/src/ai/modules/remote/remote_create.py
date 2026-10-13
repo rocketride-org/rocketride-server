@@ -57,7 +57,12 @@ def remote_create(
         if pipeKey in pipes:
             return error(f'Pipe {pipe} already exists')
 
-        # Instantiate a data loader and initialize it with the provided pipeline configuration
+        # Instantiate a data loader and initialize it with the provided pipeline configuration.
+        # beginLoad runs every node's validateConfig AND beginGlobal in THIS
+        # (server) process, with no run identity. RocketRide cloud DB nodes
+        # fail closed here (no DSN is delivered outside a task). If this route
+        # is ever revived, refuse rocketride_* providers before this call
+        # (datacore isolation SDD 4.6).
         loader = ILoader()
         loader.beginLoad(pipeline)
 
