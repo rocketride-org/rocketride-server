@@ -38,7 +38,7 @@ import argparse
 import asyncio
 import os
 import tempfile
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from rocketlib import warning
 
@@ -72,6 +72,27 @@ def _make_engine_private() -> None:
         make_process_private()
     except Exception as e:
         warning(f'could not make the engine process private: {e}')
+
+
+def modelserver_of(args: argparse.Namespace) -> Optional[str]:
+    """
+    The model server address tasks are given: ``--modelserver`` in full.
+
+    A bare port means this host, so ``5590`` becomes ``localhost:5590``. Left
+    bare it reaches the client as a host name, and a task in a container
+    could not tell it from a port of its own. Any other form is passed as given.
+
+    Args:
+        args: The parsed command line.
+
+    Returns:
+        The address, or None without a model server.
+    """
+    address = args.modelserver
+    port = (address or '').strip()
+    if port.isascii() and port.isdigit():
+        return f'localhost:{port}'
+    return address
 
 
 def _require_writable_task_data(path: str = CONST_TASK_DATA_PATH) -> None:
@@ -138,7 +159,7 @@ Examples:
         '--modelserver',
         metavar='ADDRESS',
         default=None,
-        help='Model server address (PORT or HOST:PORT). Passed to tasks for AI model inference.',
+        help='Model server address (PORT or HOST:PORT; a bare PORT is localhost:PORT). Passed to tasks in full for AI model inference.',
     )
 
     # Task port allocation
@@ -196,7 +217,7 @@ async def run(config: Dict[str, Any] = None) -> None:
 
         config['host'] = args.host
         config['port'] = args.port
-        config['modelserver'] = args.modelserver
+        config['modelserver'] = modelserver_of(args)
         config['base_port'] = args.base_port
         config['runtime'] = runtime_of(args)
         config['verbose'] = args.verbose
