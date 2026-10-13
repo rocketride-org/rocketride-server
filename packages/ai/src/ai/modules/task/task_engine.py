@@ -477,9 +477,19 @@ class Task(DAPBase):
         async def on_disconnected(self, reason=None, has_error=False):
             """
             Handle unusual disconnection on the data channel.
+
+            Forgets the channel so the next data request reconnects, and fails
+            the requests still waiting on it so their callers get an error
+            instead of waiting forever.
+
+            Args:
+                reason: Why the channel closed, if the transport knows.
+                has_error: True when the channel closed because of an error.
             """
             # Clear it so the next time we come through, we try again
             self._parent_task._data_client = None
+            # Nothing can answer the requests still waiting on this channel
+            await super().on_disconnected(reason or 'Task data connection closed', has_error)
 
     def __init__(
         self,

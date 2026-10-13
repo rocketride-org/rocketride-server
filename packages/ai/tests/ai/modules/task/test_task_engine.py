@@ -1712,3 +1712,62 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+
+# ---------------------------------------------------------------------------
+# TaskData — the engine's data channel to the task
+# ---------------------------------------------------------------------------
+
+
+class _SilentTransport:
+    """A connected transport that accepts every message and never answers."""
+
+    def bind(self, **callbacks):
+        """Accept the client's callbacks; the test drives them directly.
+
+        Args:
+            **callbacks: Handlers a real transport would call.
+        """
+
+    def is_connected(self):
+        """Report the transport as open so requests are sent.
+
+        Returns:
+            bool: Always True.
+        """
+        return True
+
+    async def send(self, message):
+        """Swallow the message.
+
+        Args:
+            message: The DAP message that will never be answered.
+        """
+
+    def disconnect(self):
+        """Nothing to close."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'reason, expected',
+    [
+        ('task exited', 'task exited'),
+        (None, 'Task data connection closed'),
+    ],
+)
+async def test_data_channel_disconnect_fails_pending_requests(reason, expected):
+    """A request waiting on the data channel fails when the channel closes, instead of waiting forever."""
+    parent = SimpleNamespace(_data_client=None)
+    client = Task.TaskData(parent_task=parent, module='DATA-test', transport=_SilentTransport())
+    parent._data_client = client
+
+    pending = asyncio.ensure_future(client.dap_request(command='rrext_process', arguments={'subcommand': 'open'}))
+    await asyncio.sleep(0)
+    assert client._pending_requests
+
+    await client.on_disconnected(reason, has_error=True)
+
+    with pytest.raises(ConnectionError, match=expected):
+        await asyncio.wait_for(pending, timeout=1)
+    assert parent._data_client is None
