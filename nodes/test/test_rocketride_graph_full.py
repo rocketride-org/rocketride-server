@@ -26,8 +26,8 @@
 """Integration tests for rocketride_graph against a real Postgres + Apache AGE.
 
 Runs the node end-to-end on the live pin (PG16 + AGE 1.5.0) through the real
-seam (env ``ROCKETRIDE_CLIENT_ID`` + a fake, injectable
-``Account.resolve_db_dsn``). Container:
+seam (the DSN delivered in ``ROCKETRIDE_DB_DSNS``, as the task engine does).
+Container:
 
     docker run -d --name rr-pg-phase2 -p 55433:5432 \
         -e POSTGRES_PASSWORD=rrpass -e POSTGRES_USER=rruser -e POSTGRES_DB=rrtenant \
@@ -44,6 +44,7 @@ Skips cleanly when the database is unreachable.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import types
@@ -60,7 +61,6 @@ _RRDB_PATH = _AI_SRC / 'ai' / 'common' / 'rocketride_db.py'
 _NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_graph'
 
 TEST_DSN = os.environ.get('RR_TEST_AGE_DSN', 'postgresql://rruser:rrpass@localhost:55433/rrtenant')
-TEST_CLIENT_ID = 'tenant-graph-test'
 GRAPH = 'rr_graph_e2e'
 
 # RR_REQUIRE_DB_TESTS (set by CI once its DB containers are healthy) turns
@@ -164,16 +164,8 @@ def rr_env(monkeypatch):
     graph_pkg = _load_from_path('ai.common.graph', _GRAPH_PKG / '__init__.py', is_package=True)
     monkeypatch.setitem(sys.modules, 'ai.common.graph', graph_pkg)
 
-    # The injectable fake resolver — the same seam a SaaS build fills in.
-    account_mod = types.ModuleType('ai.account')
-
-    async def fake_resolve_db_dsn(client_id):
-        assert client_id == TEST_CLIENT_ID
-        return TEST_DSN
-
-    account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake_resolve_db_dsn)
-    monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
-    monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', TEST_CLIENT_ID)
+    # Deliver the DSN the way the task engine does: nodes never resolve one.
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
     monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     iglobal = _load_from_path('nodes.rocketride_graph.IGlobal', _NODE_DIR / 'IGlobal.py')

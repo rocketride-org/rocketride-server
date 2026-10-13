@@ -27,9 +27,8 @@
 
 Runs the ``rocketride_sql`` and ``rocketride_vector`` nodes end-to-end against
 a local PostgreSQL container standing in for the cloud data-core, connected
-through the real seam (env ``ROCKETRIDE_CLIENT_ID`` + a fake, injectable
-``Account.resolve_db_dsn`` — exactly how tests are meant to swap the resolver;
-node code is identical regardless of which resolver is active).
+through the real seam (the DSN delivered in ``ROCKETRIDE_DB_DSNS``, as the
+task engine does).
 
 Requires a container on the live pin (PG16 + pgvector), e.g.::
 
@@ -48,6 +47,7 @@ Skips cleanly when the database is unreachable.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import urllib.parse
@@ -69,7 +69,6 @@ TEST_DSN = os.environ.get('RR_TEST_PG_DSN', 'postgresql://rruser:rrpass@localhos
 # Derived, not hardcoded: the suite must also run against a provisioned tenant
 # DSN (e.g. t_<slug>_<hash> through a pooler), not just the default container.
 TEST_DB_NAME = urllib.parse.urlparse(TEST_DSN).path.lstrip('/')
-TEST_CLIENT_ID = 'tenant-integration-test'
 
 # RR_REQUIRE_DB_TESTS (set by CI once its DB containers are healthy) turns
 # every skip in this module into a hard failure: a broken container or missing
@@ -245,16 +244,8 @@ def _build_rr_env(monkeypatch):
     rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH, register=False)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
 
-    # The injectable fake resolver: same seam a SaaS build fills in.
-    account_mod = types.ModuleType('ai.account')
-
-    async def fake_resolve_db_dsn(client_id):
-        assert client_id == TEST_CLIENT_ID
-        return TEST_DSN
-
-    account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake_resolve_db_dsn)
-    monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
-    monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', TEST_CLIENT_ID)
+    # Deliver the DSN the way the task engine does: nodes never resolve one.
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
     monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     return types.SimpleNamespace(schema=schema, warnings=warnings)
@@ -399,18 +390,11 @@ class TestRocketrideSqlE2E:
         finally:
             glb.endGlobal()
 
-    def test_begin_global_via_injected_env_dsn(self, rr_env, monkeypatch, sql_table):
-        """The production delivery path: the task engine resolves server-side and
-        injects ROCKETRIDE_DB_DSN; the node-side account is never consulted.
+    def test_begin_global_via_legacy_env_dsn(self, rr_env, monkeypatch, sql_table):
+        """An org-scoped node still connects with only ROCKETRIDE_DB_DSN set
+        (the org entry the engine also delivers on its own, for older nodes).
         """
-        import types as _types
-
-        async def poisoned(client_id):  # pragma: no cover — must not be reached
-            raise AssertionError('account must not be consulted when ROCKETRIDE_DB_DSN is injected')
-
-        monkeypatch.setitem(
-            sys.modules, 'ai.account', _types.SimpleNamespace(account=_types.SimpleNamespace(resolve_db_dsn=poisoned))
-        )
+        monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
         monkeypatch.setenv('ROCKETRIDE_DB_DSN', TEST_DSN)
         glb, inst = self._begin(monkeypatch, {'table': sql_table, 'allow_execute': True})
         try:

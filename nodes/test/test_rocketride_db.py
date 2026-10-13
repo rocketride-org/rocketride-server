@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import sys
 import types
 
@@ -124,49 +125,92 @@ class TestDsnHelpers:
         assert fields == {'host': '', 'port': None, 'user': '', 'password': '', 'database': ''}
 
 
-class TestClientId:
-    def test_missing_env_raises(self, monkeypatch):
-        monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
-        with pytest.raises(ValueError, match='no signed-in RocketRide identity is available'):
-            rrdb.current_client_id()
+class TestDbTarget:
+    """A node's (scope, target), read from its resolved config."""
 
-    def test_present_env_returned_stripped(self, monkeypatch):
-        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, '  tenant-42  ')
-        assert rrdb.current_client_id() == 'tenant-42'
+    def test_defaults_to_the_org_database(self):
+        assert rrdb.db_target({}) == ('org', '')
+        assert rrdb.db_target({'scope': None, 'target': None}) == ('org', '')
+
+    @pytest.mark.parametrize(
+        ('config', 'expected'),
+        [
+            ({'scope': 'team'}, ('team', '')),
+            ({'scope': ' team ', 'target': ' t-1 '}, ('team', 't-1')),
+            (
+                {'scope': 'user', 'target': '5f0c2a9e-1b2c-4d3e-8f90-123456789abc'},
+                ('user', '5f0c2a9e-1b2c-4d3e-8f90-123456789abc'),
+            ),
+        ],
+    )
+    def test_reads_scope_and_target(self, config, expected):
+        assert rrdb.db_target(config) == expected
+
+    @pytest.mark.parametrize(
+        ('config', 'message'),
+        [
+            ({'scope': 'tenant'}, 'scope must be one of org, team, user'),
+            ({'scope': 'org', 'target': 't-1'}, 'the org scope takes no target'),
+            ({'scope': 'team', 'target': 'team:other'}, 'not a valid team or user id'),
+            ({'scope': 'team', 'target': 'x' * 65}, 'not a valid team or user id'),
+            ({'scope': 'user', 'target': 42}, 'target must be a team or user id'),
+        ],
+    )
+    def test_rejects_bad_config(self, config, message):
+        with pytest.raises(ValueError, match=message):
+            rrdb.db_target(config)
+
+    def test_dsn_key(self):
+        assert rrdb.dsn_key('org') == 'org'
+        assert rrdb.dsn_key('team') == 'team'
+        assert rrdb.dsn_key('user', 'u-1') == 'user:u-1'
+
+    def test_public_endpoint_comes_from_the_source_providers(self):
+        assert rrdb.exposes_public_endpoint([{'provider': 'webhook'}, {'provider': 'rocketride_sql'}])
+        assert rrdb.exposes_public_endpoint([{'provider': 'discord'}])
+        assert not rrdb.exposes_public_endpoint([{'provider': 'tools'}, {'provider': 'rocketride_sql'}])
+        assert not rrdb.exposes_public_endpoint(None)
 
 
 class TestResolveRocketrideDsn:
-    """The full seam: injected env DSN first, else account singleton via async bridge."""
+    """Nodes only read what the task engine delivered; they never resolve."""
 
-    def _install_fake_account(self, monkeypatch, resolver):
-        monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
-        ai_pkg = types.ModuleType('ai')
-        ai_pkg.__path__ = []
-        account_mod = types.ModuleType('ai.account')
-        account_mod.account = types.SimpleNamespace(resolve_db_dsn=resolver)
-        monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
-        monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        for name in (rrdb.DB_DSNS_ENV, rrdb.DB_DSN_ENV, rrdb.DB_RESOLVE_ERROR_ENV):
+            monkeypatch.delenv(name, raising=False)
 
-    def test_injected_env_dsn_wins(self, monkeypatch):
-        """The task-engine-injected ROCKETRIDE_DB_DSN short-circuits everything."""
+    def _deliver(self, monkeypatch, dsns):
+        monkeypatch.setenv(rrdb.DB_DSNS_ENV, json.dumps(dsns))
 
-        async def fake(client_id):  # pragma: no cover — must not be reached
-            raise AssertionError('account must not be consulted when the env DSN is present')
+    def test_map_entry_for_each_scope(self, monkeypatch):
+        self._deliver(monkeypatch, {'org': 'postgresql://o', 'team': 'postgresql://t', 'user:u-2': 'postgresql://u2'})
+        assert rrdb.resolve_rocketride_dsn() == 'postgresql://o'
+        assert rrdb.resolve_rocketride_dsn('team') == 'postgresql://t'
+        assert rrdb.resolve_rocketride_dsn('user', 'u-2') == 'postgresql://u2'
 
-        self._install_fake_account(monkeypatch, fake)
+    def test_missing_map_key_raises_and_never_falls_back(self, monkeypatch):
+        """A key the engine did not authorize must raise, even with an org DSN at hand."""
+        self._deliver(monkeypatch, {'org': 'postgresql://o'})
+        monkeypatch.setenv(rrdb.DB_DSN_ENV, 'postgresql://o')
+        with pytest.raises(ValueError, match="was not given the team database 't-9'"):
+            rrdb.resolve_rocketride_dsn('team', 't-9')
+        with pytest.raises(ValueError, match="was not given the run's own user database"):
+            rrdb.resolve_rocketride_dsn('user')
+
+    def test_malformed_map_raises(self, monkeypatch):
+        monkeypatch.setenv(rrdb.DB_DSNS_ENV, '{not json')
+        with pytest.raises(ValueError, match='not valid JSON'):
+            rrdb.resolve_rocketride_dsn()
+
+    def test_legacy_env_dsn_serves_the_org_scope_only(self, monkeypatch):
         monkeypatch.setenv(rrdb.DB_DSN_ENV, f'  {TEST_DSN}  ')
-        # No client id needed on the injected path either.
-        monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
         assert rrdb.resolve_rocketride_dsn() == TEST_DSN
+        with pytest.raises(ValueError, match="was not given the run's own team database"):
+            rrdb.resolve_rocketride_dsn('team')
 
     def test_resolve_error_env_surfaces_broker_failure(self, monkeypatch):
         """A server-side resolution failure names the real cause, not sign-in."""
-
-        async def fake(client_id):  # pragma: no cover — must not be reached
-            raise AssertionError('account must not be consulted when a resolve error is present')
-
-        self._install_fake_account(monkeypatch, fake)
-        monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
         monkeypatch.setenv(rrdb.DB_RESOLVE_ERROR_ENV, 'DB broker request failed: HTTP 503')
         with pytest.raises(
             ValueError, match='cloud database is not available for this task: DB broker request failed: HTTP 503'
@@ -174,80 +218,35 @@ class TestResolveRocketrideDsn:
             rrdb.resolve_rocketride_dsn()
 
     def test_resolve_error_env_reports_missing_cloud_database(self, monkeypatch):
-        """An engine without a broker passes the reason down the same way (#2463):
-        the node names the missing cloud database, not the identity env var.
-        """
-
-        async def fake(client_id):  # pragma: no cover - must not be reached
-            raise AssertionError('account must not be consulted when a resolve error is present')
-
-        self._install_fake_account(monkeypatch, fake)
-        monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
-        monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
+        """An engine without a broker passes the reason down the same way (#2463)."""
         monkeypatch.setenv(
             rrdb.DB_RESOLVE_ERROR_ENV, 'this server has no RocketRide cloud database (no database broker is configured)'
         )
         with pytest.raises(ValueError) as excinfo:
             rrdb.resolve_rocketride_dsn()
         assert 'this server has no RocketRide cloud database' in str(excinfo.value)
-        assert rrdb.CLIENT_ID_ENV not in str(excinfo.value)
+        assert not isinstance(excinfo.value, rrdb.DsnNotDelivered)
 
-    def test_empty_env_dsn_falls_back_to_account(self, monkeypatch):
-        async def fake(client_id):
-            return TEST_DSN
+    def test_outside_a_task_nothing_is_resolved(self, monkeypatch):
+        """No DSN delivered (a save-time probe in the server process): raise
+        DsnNotDelivered and never call the account layer, which holds the
+        broker token and would mint any tenant's DSN with no authorization.
+        """
+        account_mod = types.ModuleType('ai.account')
 
-        self._install_fake_account(monkeypatch, fake)
-        monkeypatch.setenv(rrdb.DB_DSN_ENV, '   ')
-        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
-        assert rrdb.resolve_rocketride_dsn() == TEST_DSN
+        async def poisoned(*args, **kwargs):  # pragma: no cover - must not be reached
+            raise AssertionError('nodes must never resolve a DSN through the account layer')
 
-    def test_resolves_via_fake_account(self, monkeypatch):
-        seen = {}
-
-        async def fake(client_id):
-            seen['client_id'] = client_id
-            return TEST_DSN
-
-        self._install_fake_account(monkeypatch, fake)
-        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
-        assert rrdb.resolve_rocketride_dsn() == TEST_DSN
-        assert seen['client_id'] == 'tenant-42'
-
-    def test_empty_dsn_raises(self, monkeypatch):
-        async def fake(client_id):
-            return ''
-
-        self._install_fake_account(monkeypatch, fake)
-        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
-        with pytest.raises(ValueError, match='empty DSN'):
+        account_mod.account = types.SimpleNamespace(resolve_db_dsn=poisoned)
+        monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
+        monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', 'tenant-42')
+        with pytest.raises(rrdb.DsnNotDelivered, match='connectivity is checked when it runs'):
             rrdb.resolve_rocketride_dsn()
 
-    def test_rejects_running_event_loop_before_creating_coroutine(self, monkeypatch):
-        """Reject running-loop callers before creating the resolver coroutine."""
-        created = []
-
-        def fake(client_id):
-            async def resolve():
-                return TEST_DSN
-
-            coro = resolve()
-            created.append(coro)
-            return coro
-
-        self._install_fake_account(monkeypatch, fake)
-        monkeypatch.setenv(rrdb.CLIENT_ID_ENV, 'tenant-42')
-
-        async def call_from_loop():
-            return rrdb.resolve_rocketride_dsn()
-
-        try:
-            with pytest.raises(RuntimeError, match='running event loop'):
-                asyncio.run(call_from_loop())
-            assert created == []
-        finally:
-            # Close any coroutine created if the regression returns.
-            for coro in created:
-                coro.close()
+    def test_bad_scope_is_refused_before_any_lookup(self, monkeypatch):
+        self._deliver(monkeypatch, {'org': 'postgresql://o'})
+        with pytest.raises(ValueError, match='scope must be one of'):
+            rrdb.resolve_rocketride_dsn('everyone')
 
 
 # ---------------------------------------------------------------------------
@@ -334,20 +333,14 @@ def _sql_iglobal_cls(monkeypatch):
 
 
 class TestRocketrideSqlConnection:
-    def _with_fake_account(self, monkeypatch):
-        account_mod = types.ModuleType('ai.account')
-
-        async def fake(client_id):
-            return TEST_DSN
-
-        account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake)
-        monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
-        monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', 'tenant-42')
+    def _deliver_org_dsn(self, monkeypatch):
+        """Deliver the org DSN the way the task engine does."""
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
         monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     def test_connection_params_come_from_resolved_dsn(self, monkeypatch):
         cls, _ = _sql_iglobal_cls(monkeypatch)
-        self._with_fake_account(monkeypatch)
+        self._deliver_org_dsn(monkeypatch)
         glb = cls()
         params = glb._connection_params({'table': ' widgets '})
         assert params['host'] == 'localhost'
@@ -358,7 +351,7 @@ class TestRocketrideSqlConnection:
 
     def test_build_connection_url_uses_cached_dsn(self, monkeypatch):
         cls, _ = _sql_iglobal_cls(monkeypatch)
-        self._with_fake_account(monkeypatch)
+        self._deliver_org_dsn(monkeypatch)
         glb = cls()
         params = glb._connection_params({})
         url = glb._build_connection_url(params)
@@ -367,7 +360,7 @@ class TestRocketrideSqlConnection:
     def test_no_connection_fields_read_from_config(self, monkeypatch):
         """host/user/password in config must be ignored — the DSN wins."""
         cls, _ = _sql_iglobal_cls(monkeypatch)
-        self._with_fake_account(monkeypatch)
+        self._deliver_org_dsn(monkeypatch)
         glb = cls()
         params = glb._connection_params({'host': 'evil', 'user': 'evil', 'password': 'evil'})
         assert params['host'] == 'localhost'
@@ -479,14 +472,8 @@ def _vector_store_cls(monkeypatch):
     rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
 
-    account_mod = types.ModuleType('ai.account')
-
-    async def fake(client_id):
-        return TEST_DSN
-
-    account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake)
-    monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
-    monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', 'tenant-42')
+    # Deliver the org DSN the way the task engine does.
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
     monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py')
