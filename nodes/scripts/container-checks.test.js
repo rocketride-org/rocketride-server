@@ -1,5 +1,5 @@
 /**
- * What the container tasks say when Docker or WSL is missing (container-checks.js).
+ * What the container tasks say when Docker, WSL or a cluster is missing (container-checks.js).
  *
  * The facts are the ones tasks.js gathers; each case is the first missing piece
  * and the fix it names. Run:
@@ -17,6 +17,10 @@ const {
 	missingImage,
 	diagnoseTestTarget,
 	withDotenv,
+	isLocalContext,
+	isLocalServer,
+	k8sLabelValue,
+	diagnoseKubernetes,
 	unavailableReason,
 	formatDiagnosis,
 } = require('./container-checks');
@@ -291,6 +295,125 @@ test('Path and PATH are one name on Windows', { skip: process.platform !== 'win3
 	const paths = Object.keys(loaded).filter((key) => key.toUpperCase() === 'PATH');
 	assert.deepStrictEqual(paths, [name]);
 	assert.strictEqual(loaded[name], process.env[name]);
+});
+
+// What `kubectl config current-context` answers, and a namespace that is there
+const context = (name) => ({ code: 0, stdout: `${name}\n`, stderr: '' });
+const THERE = { code: 0, stdout: 'namespace/rocketride-tasks\n', stderr: '' };
+
+function cluster(overrides = {}) {
+	return diagnoseKubernetes({
+		current: context('docker-desktop'),
+		namespace: 'rocketride-tasks',
+		found: THERE,
+		...overrides,
+	});
+}
+
+test('a cluster on this machine is told by its context', () => {
+	const local = ['docker-desktop', 'kind-kind', 'kind-dev', 'k3d-rr', 'minikube', 'rancher-desktop', 'orbstack'];
+	const other = ['prod', 'gke_project_europe-west1_tasks', 'arn:aws:eks:eu-west-1:1:cluster/tasks', 'kind', ''];
+	for (const name of local) assert.strictEqual(isLocalContext(name), true, name);
+	for (const name of other) assert.strictEqual(isLocalContext(name), false, name);
+});
+
+test('a local context must point at a server on this machine', () => {
+	const here = [
+		['https://127.0.0.1:6443', 'kind-dev'],
+		['https://127.0.0.2:6443', 'kind-dev'],
+		['https://kubernetes.docker.internal:6443', 'docker-desktop'],
+		['https://localhost:8443', 'rancher-desktop'],
+		['https://0.0.0.0:6550', 'k3d-rr'],
+		['https://host.docker.internal:6550', 'k3d-rr'],
+		['https://[::1]:6443', 'orbstack'],
+		['https://192.168.49.2:8443', 'minikube'],
+	];
+	const elsewhere = [
+		['https://k8s.example.com:6443', 'kind-dev'],
+		['https://10.0.5.20:6443', 'kind-dev'],
+		['https://192.168.49.2:8443', 'docker-desktop'],
+		['https://203.0.113.7:8443', 'minikube'],
+		['https://127.example.com:6443', 'kind-dev'],
+		['https://192.168.example.com:8443', 'minikube'],
+		['', 'kind-dev'],
+		['not a url', 'kind-dev'],
+	];
+	for (const [server, name] of here) assert.strictEqual(isLocalServer(server, name), true, `${name} ${server}`);
+	for (const [server, name] of elsewhere) assert.strictEqual(isLocalServer(server, name), false, `${name} ${server}`);
+
+	const remote = cluster({ current: context('kind-dev'), server: 'https://10.0.5.20:6443', found: null });
+	assert.match(remote.problem, /kind-dev points at https:\/\/10\.0\.5\.20:6443, not a cluster on this machine/);
+	const unread = cluster({ current: context('kind-dev'), server: '', found: null });
+	assert.match(unread.problem, /kind-dev names no server kubectl could read/);
+	assert.strictEqual(cluster({ server: 'https://kubernetes.docker.internal:6443' }), null);
+});
+
+test('a local cluster with its namespace misses nothing', () => {
+	assert.strictEqual(cluster(), null);
+	// Before the cluster is asked anything, the context alone is judged
+	assert.strictEqual(cluster({ found: null }), null);
+});
+
+test('no kubectl names where to get one', () => {
+	const d = cluster({ current: { code: -1, stdout: '', stderr: 'Error: spawn kubectl ENOENT' } });
+	assert.match(d.problem, /kubectl is not installed/);
+	assert.match(d.fix.join('\n'), /kubernetes\.io\/docs\/tasks\/tools[\s\S]*Enable Kubernetes/);
+});
+
+test('no current context asks for one', () => {
+	const d = cluster({ current: { code: 1, stdout: '', stderr: 'error: current-context is not set\n' } });
+	assert.match(d.problem, /no current context/);
+	assert.match(d.fix.join('\n'), /use-context docker-desktop[\s\S]*RR_K8S_CONTEXT/);
+});
+
+test('a cluster that is not on this machine is refused before it is asked anything', () => {
+	for (const name of ['prod', 'gke_project_europe-west1_tasks', 'arn:aws:eks:eu-west-1:1:cluster/tasks']) {
+		const d = cluster({ current: context(name), found: null });
+		assert.match(d.problem, /is not a cluster on this machine/);
+		assert.ok(d.problem.includes(name));
+		assert.match(d.fix.join('\n'), /docker-desktop, kind-\*, k3d-\*, minikube, rancher-desktop or orbstack/);
+	}
+});
+
+test('RR_K8S_CONTEXT is the context judged, whatever the current one is', () => {
+	assert.strictEqual(cluster({ context: 'kind-dev', current: context('prod') }), null);
+	assert.match(cluster({ context: 'prod' }).problem, /context prod is not a cluster on this machine/);
+	// It also stands in for a current context that is not set
+	assert.strictEqual(cluster({ context: 'minikube', current: { code: 1, stderr: 'not set' } }), null);
+});
+
+test('a missing namespace names the command that creates it', () => {
+	const found = { code: 1, stdout: '', stderr: 'Error from server (NotFound): namespaces "rr" not found\n' };
+	const d = cluster({ context: 'kind-dev', namespace: 'rr', found });
+	assert.match(d.problem, /namespace rr does not exist in kind-dev/);
+	assert.strictEqual(d.fix[0], 'kubectl --context kind-dev create namespace rr');
+	assert.match(d.fix[1], /RR_K8S_NAMESPACE/);
+});
+
+test('a cluster that does not answer is not a missing namespace', () => {
+	const found = { code: 1, stdout: '', stderr: 'Unable to connect to the server: dial tcp 127.0.0.1:6443\nmore' };
+	const d = cluster({ found });
+	assert.match(d.problem, /cluster of the context docker-desktop does not answer/);
+	assert.match(d.fix[0], /Kubernetes running/);
+	assert.strictEqual(d.fix.at(-1), 'kubectl said: Unable to connect to the server: dial tcp 127.0.0.1:6443');
+	assert.strictEqual(cluster({ current: context('minikube'), found }).fix[0], 'Start the cluster');
+});
+
+test('an instance id as the runtime labels its Jobs with it', () => {
+	const id = 'nodes-test-0b9f7f0e-6d0c-4d1a-9d6e-5a0f3a2b1c4d';
+	assert.strictEqual(k8sLabelValue(id), id);
+	assert.strictEqual(k8sLabelValue('east_5565'), 'east_5565');
+	// Changed: the same values as label_value in test_launcher_k8s.py
+	assert.strictEqual(k8sLabelValue('host-a:5565'), 'host-a_5565-7fbe1a96');
+	assert.strictEqual(k8sLabelValue('east:5565'), 'east_5565-789c0f9c');
+	// A kept value never looks like a changed one
+	assert.strictEqual(k8sLabelValue('host-a_5565-7fbe1a96'), 'host-a_5565-7fbe1a96-d649d93d');
+	assert.strictEqual(k8sLabelValue('.hidden.'), 'hidden-348b7a80');
+	assert.strictEqual(k8sLabelValue('x'.repeat(70)), 'x'.repeat(54) + '-c71bd109');
+	assert.strictEqual(k8sLabelValue('x'.repeat(63) + 'y'.repeat(7)), 'x'.repeat(54) + '-6de36d0d');
+	assert.strictEqual(k8sLabelValue('x'.repeat(62) + '..'), 'x'.repeat(54) + '-75685c1d');
+	assert.strictEqual(k8sLabelValue('x'.repeat(53) + '.' + 'x'.repeat(20)), 'x'.repeat(53) + '.-3d862e46');
+	assert.strictEqual(k8sLabelValue('a\u{1f600}b'), 'a_b-6fba5b2e');
 });
 
 test('a task missing on this OS says why, and offers no other task in its place', () => {
