@@ -63,6 +63,8 @@ The manual profile passes host, port, optional username/password, and TLS to the
 
 `allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` truncates ordinary results and marks them truncated; `max_execute_rows` caps what `execute` returns. FalkorDB saves a statement before it returns and cannot roll it back, so the cap applies to the reply: a read over the cap fails, while a write over the cap returns the first rows with `truncated: true` and no error, because retrying a saved write would store it twice. `query_timeout_ms` bounds a single server query.
 
+Both caps are applied after the client has read the whole server reply, so neither limits what one query loads into worker memory. The bound for that is FalkorDB's own `RESULTSET_SIZE` setting, which the official Docker image sets to 10,000. The server cuts a larger result to that size without reporting it, so while `RESULTSET_SIZE` is below a node cap, a result can be incomplete with no `truncated` flag and no error.
+
 ## Authentication
 
 Manual connections can omit credentials or provide the configured username and password. URL connections may carry credentials, but the separate Password field takes precedence when present. The node probes the connection at startup, so malformed connection settings, an unavailable server, or (in read-only mode) a configured graph that does not exist all fail before a tool call, rather than surfacing as a Redis error on the first query.

@@ -488,6 +488,18 @@ def test_execute_tool_binds_params():
     assert graph.calls == [('query', 'CREATE (n:Person {name: $n})', {'n': 'Ada'}, 30000)]
 
 
+def test_execute_tool_passes_multiline_and_nested_params_unchanged():
+    # The client encodes values for the CYPHER header; the node must hand them over as they are.
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+    glb = _FakeGlobal(graph)
+    glb.allow_execute = True
+    params = {'rows': [{'id': 1, 'text': 'line1\nline2\r\n', 'tags': ['a\tb', 'say "hi"', 'C:\\temp']}]}
+    _instance(glb).execute(
+        {'query': 'UNWIND $rows AS row CREATE (n:Note {id: row.id, text: row.text})', 'params': params}
+    )
+    assert graph.calls[0][2] == params
+
+
 def test_execute_tool_refuses_params_the_driver_cannot_bind():
     # A driver whose _run_query_raw takes no params: refuse rather than drop them.
     graph = _FakeGraph()

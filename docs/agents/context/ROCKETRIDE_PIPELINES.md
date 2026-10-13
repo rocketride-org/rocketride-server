@@ -680,7 +680,8 @@ an agent can control a graph store as a tool instead.
 
 **Writing to a graph store** goes through its `execute` tool (node config
 `allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. A write whose result
-passes the node's row cap fails with nothing saved on `rocketride_graph` and `graph_neo4j`;
+passes the node's row cap fails with nothing saved on `rocketride_graph` and `graph_neo4j`
+(except Neo4j's batched `CALL { ... } IN TRANSACTIONS`, whose earlier batches stay saved);
 `graph_falkordb` cannot roll back, so it saves the write and returns the first rows with
 `truncated: true`. On `rocketride_graph`
 the rules follow the Apache AGE version the database reports (`pg_extension.extversion`):
