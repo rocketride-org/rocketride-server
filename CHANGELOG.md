@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **ai, builder**: `eaas.py --runtime` chooses how a task runs: `spawn`, the default, a child process as before, or `docker`, a container of its own from the image `rocketride/node:<version>` on the local docker daemon, which a task start never pulls. The builder gets `container:build`, `container:test` and `container:sync` for that image; on Windows, `container:build-on-wsl` builds it in a WSL checkout and `container:sync-from-wsl` copies it to Docker Desktop (#2595, #2596).
+- **ai**: `--runtime=k8s` runs each task as a Kubernetes Job of one pod, by default from the same `rocketride/node:<version>`, which the cluster's nodes must already hold; the `k8s.*` settings or `RR_K8S_*` variables choose the namespace, the image, the limits and the rest (#2663).
 - **nodes**: add experimental `tool_redis` with seven namespaced Redis/Valkey utilities, read-only defaults, bounded results and hosted TLS/public-host guards (#3049).
 - **builder**: `--cmake-config=Sanitize` (Linux only) builds the engine, its C++ test programs and the C++ nodes with ASan and UBSan in one build (#3338)
 - **ci**: an opt-in sanitizer job: a pull request that changes C++ code and has the `ci:sanitize` label, or a manual run, builds with `--cmake-config=Sanitize`, runs `server:test` and `nodes:test`, and shows the sanitizer reports grouped in the job summary. It is not part of `CI OK` (#3338)
