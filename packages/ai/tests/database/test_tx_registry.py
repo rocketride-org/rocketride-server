@@ -21,6 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
+import threading
 import time
 from unittest.mock import MagicMock
 from sqlalchemy import create_engine, text
@@ -562,6 +563,7 @@ def test_sweeper_reaps_an_abandoned_session_without_further_traffic():
 
 def test_close_all_waits_for_an_in_flight_sweep_to_finish_its_rollback():
     """A reaped session leaves _sessions before its rollback runs; close_all() must not return in that window."""
+    rollback_started = threading.Event()
     rolled_back = []
 
     class _SlowRollback:
@@ -569,6 +571,7 @@ def test_close_all_waits_for_an_in_flight_sweep_to_finish_its_rollback():
             self._trans = trans
 
         def rollback(self):
+            rollback_started.set()
             time.sleep(0.3)  # widen the window a loaded CI runner opens by chance
             self._trans.rollback()
             rolled_back.append(True)
@@ -577,18 +580,21 @@ def test_close_all_waits_for_an_in_flight_sweep_to_finish_its_rollback():
             return getattr(self._trans, name)
 
     reg = TransactionRegistry(_engine_shared(), idle_timeout=0.05, max_rows=1000)
-    sid = reg.begin()
-    reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['abandoned'])
-    held = reg._sessions[sid]
-    held.trans = _SlowRollback(held.trans)
+    try:
+        sid = reg.begin()
+        reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['abandoned'])
+        held = reg._sessions[sid]
+        held.trans = _SlowRollback(held.trans)
 
-    deadline = time.monotonic() + 5.0
-    while sid in reg._sessions and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert sid not in reg._sessions, 'sweeper did not reap the idle session'
+        # The sweeper has taken the session out of the registry and is inside
+        # its rollback: exactly the window close_all() must wait out.
+        assert rollback_started.wait(timeout=5.0), 'sweeper did not reap the idle session'
+        assert sid not in reg._sessions
 
-    reg.close_all()
-    assert rolled_back == [True]
+        reg.close_all()
+        assert rolled_back == [True]
+    finally:
+        reg.close_all()
 
 
 # ---------------------------------------------------------------------------
