@@ -1099,8 +1099,39 @@ class Task(DAPBase):
         through the protocol, so it cannot be treated as completed (issue #2416).
         """
         if not self._exit_event_seen and not self._stop_requested:
-            self._status.exitCode = exit_code if (exit_code is not None and exit_code != 0) else 1
+            self._status.exitCode = exit_code or 1
             self._status.exitMessage = 'Stopped'
+
+    def _set_final_state(self, exit_code: Optional[int]) -> None:
+        """Assign the terminal status and state after the process has exited.
+
+        Rules (checked in order):
+        1. A user stop (or restart) → CANCELLED (Restarting status if restarting).
+        2. Exit 0 **and** the >EXIT event was sent → COMPLETED.
+        3. Anything else (exit 0 without >EXIT, non-zero exit, unknown exit)
+           → CANCELLED.  A task that never reported finishing does not end
+           COMPLETED even if the process happened to exit 0.
+        """
+        if self._stop_requested:
+            if self._is_restarting:
+                self._status.status = 'Restarting'
+                self._status.state = TASK_STATE.CANCELLED.value
+                self.debug_task_message('restarted by user request')
+            else:
+                self._status.status = 'Stopped'
+                self._status.state = TASK_STATE.CANCELLED.value
+                self.debug_task_message('stopped', reason=self._stop_reason or 'user')
+        elif self._status.exitCode == 0 and self._exit_event_seen:
+            self._status.status = 'Completed'
+            self._status.state = TASK_STATE.COMPLETED.value
+            self.debug_task_message('completed successfully')
+        else:
+            self._status.status = 'Stopped'
+            self._status.state = TASK_STATE.CANCELLED.value
+            if exit_code == 0 and not self._exit_event_seen:
+                self.debug_task_message('terminated abnormally: no >EXIT event received')
+            else:
+                self.debug_task_message(f'terminated abnormally with exit code {self._status.exitCode}')
 
     async def _terminated(self) -> None:
         """
@@ -1237,23 +1268,7 @@ class Task(DAPBase):
             self.debug_message(f'Error cleaning up debugger termination: {e}')
 
         # Set final state
-        if self._stop_requested:
-            if self._is_restarting:
-                self._status.status = 'Restarting'
-                self._status.state = TASK_STATE.CANCELLED.value
-                self.debug_task_message('restarted by user request')
-            else:
-                self._status.status = 'Stopped'
-                self._status.state = TASK_STATE.CANCELLED.value
-                self.debug_task_message('stopped', reason=self._stop_reason or 'user')
-        elif self._status.exitCode == 0:
-            self._status.status = 'Completed'
-            self._status.state = TASK_STATE.COMPLETED.value
-            self.debug_task_message('completed successfully')
-        else:
-            self._status.status = 'Stopped'
-            self._status.state = TASK_STATE.CANCELLED.value
-            self.debug_task_message(f'terminated abnormally with exit code {exit_code}')
+        self._set_final_state(exit_code)
 
         # Send final status update — the stream's LAST status. For a real
         # termination the utilization gauges are explicitly zeroed: the

@@ -3,6 +3,7 @@ import sys
 import asyncio
 import threading
 import time
+import traceback
 from typing import Optional, Tuple, Any
 
 # Remove auto-added script directory to avoid import conflicts with the ai package
@@ -380,9 +381,10 @@ if __name__ == '__main__':
         sys.exit(1)
 
     except Exception as e:
-        # Exit non-zero so the engine records this as CANCELLED, not COMPLETED.
-        # A task that crashes before sending >EXIT must not appear to have
-        # succeeded (issue #2416).
+        # Write traceback to stderr so a startup crash reaches the task log
+        # before exiting non-zero (issue #2416).
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
         debug(e)
         sys.exit(1)
 

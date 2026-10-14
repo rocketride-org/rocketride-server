@@ -29,7 +29,7 @@ import hashlib
 import os
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -1616,6 +1616,98 @@ def test_exit_zero_without_exit_event_is_not_success():
     assert t._status.exitMessage == 'Stopped'
 
 
+# ---------------------------------------------------------------------------
+# _set_final_state — terminal status assignment after the process exits
+# ---------------------------------------------------------------------------
+
+
+def _final_state_task(*, exit_code=0, exit_event_seen=False, stop_requested=False, restarting=False):
+    """Build a Task seeded for _set_final_state testing."""
+    t = _exit_task(exit_event_seen=exit_event_seen)
+    t._stop_requested = stop_requested
+    t._is_restarting = restarting
+    t._stop_reason = None
+    t._status.exitCode = exit_code
+    t._status.exitMessage = ''
+    t.debug_task_message = MagicMock()
+    return t
+
+
+def test_final_state_exit_zero_with_exit_event_is_completed():
+    """Exit 0 + >EXIT seen → COMPLETED."""
+    from rocketride import TASK_STATE
+
+    t = _final_state_task(exit_code=0, exit_event_seen=True)
+    Task._set_final_state(t, 0)
+    assert t._status.status == 'Completed'
+    assert t._status.state == TASK_STATE.COMPLETED.value
+    t.debug_task_message.assert_called_once_with('completed successfully')
+
+
+def test_final_state_exit_zero_without_exit_event_is_cancelled():
+    """Exit 0 but no >EXIT → CANCELLED, not COMPLETED (issue #2416)."""
+    from rocketride import TASK_STATE
+
+    t = _final_state_task(exit_code=0, exit_event_seen=False)
+    Task._set_final_state(t, 0)
+    assert t._status.status == 'Stopped'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+    t.debug_task_message.assert_called_once_with('terminated abnormally: no >EXIT event received')
+
+
+def test_final_state_nonzero_exit_without_exit_event_is_cancelled():
+    """Non-zero exit, no >EXIT → CANCELLED."""
+    from rocketride import TASK_STATE
+
+    t = _final_state_task(exit_code=1, exit_event_seen=False)
+    Task._set_final_state(t, 1)
+    assert t._status.status == 'Stopped'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+    t.debug_task_message.assert_called_once_with('terminated abnormally with exit code 1')
+
+
+def test_final_state_unknown_exit_code_is_cancelled():
+    """Unknown process exit code (None) without >EXIT → CANCELLED."""
+    from rocketride import TASK_STATE
+
+    t = _final_state_task(exit_code=1, exit_event_seen=False)
+    Task._set_final_state(t, None)
+    assert t._status.status == 'Stopped'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+    t.debug_task_message.assert_called_once_with('terminated abnormally with exit code 1')
+
+
+def test_final_state_nonzero_exit_with_exit_event_is_cancelled():
+    """>EXIT seen but exit code non-zero → CANCELLED (engine reported a failure)."""
+    from rocketride import TASK_STATE
+
+    t = _final_state_task(exit_code=3, exit_event_seen=True)
+    Task._set_final_state(t, 3)
+    assert t._status.status == 'Stopped'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+    t.debug_task_message.assert_called_once_with('terminated abnormally with exit code 3')
+
+
+def test_final_state_stop_requested_is_cancelled():
+    """User stop overrides everything → CANCELLED."""
+    from rocketride import TASK_STATE
+
+    t = _final_state_task(exit_code=0, exit_event_seen=True, stop_requested=True)
+    Task._set_final_state(t, -9)
+    assert t._status.status == 'Stopped'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+
+
+def test_final_state_stop_requested_restarting_is_cancelled():
+    """User restart → CANCELLED with Restarting status."""
+    from rocketride import TASK_STATE
+
+    t = _final_state_task(exit_code=0, exit_event_seen=True, stop_requested=True, restarting=True)
+    Task._set_final_state(t, -9)
+    assert t._status.status == 'Restarting'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+
+
 @pytest.mark.asyncio
 async def test_exit_event_marks_the_run_as_reported():
     t = _exit_task()
@@ -1676,3 +1768,125 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+
+# ---------------------------------------------------------------------------
+# End-to-end integration tests with real subprocesses and DAP stdio transport
+# ---------------------------------------------------------------------------
+
+
+def _subprocess_test_task(*, status=None):
+    from rocketride import TASK_STATUS
+
+    t = _task(status=status or TASK_STATUS())
+    t.debug_task_message = MagicMock()
+    t.stamp_log_event = MagicMock()
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._server = MagicMock()
+    t._server.broadcast_server_event = AsyncMock()
+    t._exit_event_seen = False
+    t._stop_requested = False
+    t._stop_reason = None
+    t._is_restarting = False
+    t._terminated_called = False
+    t._data_client = None
+    t._task_metrics = None
+    t._tmpfile = None
+    t._data_port = None
+    t._status_update_task = None
+    t._final_events_sent = False
+    t._status_trace = []
+    return t
+
+
+@pytest.mark.asyncio
+async def test_subprocess_normal_exit_with_exit_event_completes():
+    """An end-to-end run where a pipeline finishes normally (emits >EXIT*0*COMPLETED and exits 0) ends COMPLETED."""
+    from rocketride import TASK_STATE
+
+    t = _subprocess_test_task()
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        '-c',
+        'import sys; sys.stdout.write(">EXIT*0*COMPLETED\\n"); sys.stdout.flush()',
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    t._engine_process = proc
+    t._debug_stdio = Task.TaskDbgStdio(parent_task=t, id=t.id, token=t.token, process=proc)
+    await t._debug_stdio.connect()
+    await proc.wait()
+    await asyncio.sleep(0.1)
+
+    assert t._exit_event_seen is True
+    assert t._status.exitCode == 0
+    assert t._status.status == 'Completed'
+    assert t._status.state == TASK_STATE.COMPLETED.value
+    t.debug_task_message.assert_called_once_with('completed successfully')
+
+
+@pytest.mark.asyncio
+async def test_subprocess_exit_zero_without_exit_event_cancels():
+    """An end-to-end run where a process exits 0 without emitting >EXIT ends CANCELLED (issue #2416)."""
+    from rocketride import TASK_STATE
+
+    t = _subprocess_test_task()
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        '-c',
+        'import sys; sys.exit(0)',
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    t._engine_process = proc
+    t._debug_stdio = Task.TaskDbgStdio(parent_task=t, id=t.id, token=t.token, process=proc)
+    await t._debug_stdio.connect()
+    await proc.wait()
+    await asyncio.sleep(0.1)
+
+    assert t._exit_event_seen is False
+    assert t._status.exitCode == 1
+    assert t._status.status == 'Stopped'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+    t.debug_task_message.assert_called_once_with('terminated abnormally: no >EXIT event received')
+
+
+@pytest.mark.asyncio
+async def test_subprocess_startup_crash_writes_stderr_and_cancels():
+    """A task startup crash prints traceback to stderr and exits 1, ending CANCELLED with visible log."""
+    from rocketride import TASK_STATE
+
+    t = _subprocess_test_task()
+    forwarded = []
+    t._forward_task_event = AsyncMock(side_effect=lambda kind, evt: forwarded.append(evt))
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        '-c',
+        'import sys, traceback\n'
+        'try:\n'
+        '    raise RuntimeError("simulated startup crash")\n'
+        'except Exception:\n'
+        '    traceback.print_exc(file=sys.stderr)\n'
+        '    sys.stderr.flush()\n'
+        '    sys.exit(1)\n',
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    t._engine_process = proc
+    t._debug_stdio = Task.TaskDbgStdio(parent_task=t, id=t.id, token=t.token, process=proc)
+    await t._debug_stdio.connect()
+    await proc.wait()
+    await asyncio.sleep(0.1)
+
+    assert t._exit_event_seen is False
+    assert t._status.exitCode == 1
+    assert t._status.status == 'Stopped'
+    assert t._status.state == TASK_STATE.CANCELLED.value
+    t.debug_task_message.assert_called_once_with('terminated abnormally with exit code 1')
+    assert any('simulated startup crash' in line for line in t._status_trace)
+    assert any('simulated startup crash' in evt.get('body', {}).get('output', '') for evt in forwarded)
