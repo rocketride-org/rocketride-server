@@ -238,6 +238,36 @@ class TestLifecycle:
             glb.beginGlobal()
 
 
+class TestSessionNeverIdleInTransaction:
+    """A transaction-mode pooler pins a server connection to a client inside
+    a transaction: between calls the node's session must be plain 'idle'.
+    """
+
+    @staticmethod
+    def _state(age_graph, glb) -> str:
+        with age_graph.cursor() as cur:  # autocommit: a fresh stats snapshot each call
+            cur.execute('SELECT state FROM pg_stat_activity WHERE pid = %s', (glb.client.get_backend_pid(),))
+            return cur.fetchone()[0]
+
+    def test_idle_after_begin_and_every_query_path(self, rr_env, age_graph):
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            assert self._state(age_graph, glb) == 'idle', 'after beginGlobal (connect + schema reflection)'
+            glb._run_query('MATCH (p:Person) RETURN p.name AS name')
+            assert self._state(age_graph, glb) == 'idle', 'after a read'
+            glb._validate_query('MATCH (p:Person) RETURN p.name AS name')
+            assert self._state(age_graph, glb) == 'idle', 'after validate'
+            inst.execute({'query': "CREATE (d:Person {name: 'erin'}) RETURN d.name AS name"})
+            assert self._state(age_graph, glb) == 'idle', 'after a write'
+            with pytest.raises(Exception, match='division by zero'):
+                inst.execute({'query': 'RETURN 10 / $z AS q', 'params': {'z': 0}})
+            assert self._state(age_graph, glb) == 'idle', 'after a failed query'
+        finally:
+            glb.endGlobal()
+
+
 class TestSafePath:
     def test_read_query_decodes_rows(self, rr_env, age_graph):
         glb = _begin(rr_env)

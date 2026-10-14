@@ -507,9 +507,8 @@ class TestRocketrideVectorE2E:
         store_cls = _load_vector_store(monkeypatch)
         store = store_cls('rocketride_vector', {'collection': VEC_TABLE, 'similarity': 'cosine'}, {})
         yield store
-        # Close the driver connection before dropping: the driver's SELECT
-        # paths (mirroring vectordb_postgres) leave the session idle in
-        # transaction, and its AccessShare lock would block the DROP.
+        # Close the driver connection before dropping, so a test that leaves
+        # it inside a transaction cannot block the DROP on its locks.
         if store.client is not None:
             store.client.close()
             store.client = None
@@ -612,6 +611,78 @@ class TestRocketrideVectorE2E:
         replacement = self._chunks(rr_env.schema, [('replaced', _unit_vec(rng))])
         vec_store.addChunks(replacement)
         assert vec_store.count_documents() == 1
+
+    # A transaction-mode pooler (PgBouncer) holds a server connection for as
+    # long as a client sits inside a transaction. A long-lived node left
+    # "idle in transaction" pins one of the database's few pooler slots for
+    # its whole lifetime, so between calls the session must be plain "idle".
+    @staticmethod
+    def _session_state(raw_conn, store) -> str:
+        """The node's backend state as the server sees it (pg_stat_activity)."""
+        with raw_conn.cursor() as cur:
+            cur.execute('SELECT state FROM pg_stat_activity WHERE pid = %s', (store.client.get_backend_pid(),))
+            state = cur.fetchone()[0]
+        # pg_stat_activity is snapshotted per transaction: end ours so the
+        # next probe sees fresh state.
+        raw_conn.rollback()
+        return state
+
+    def test_session_idle_after_connect(self, rr_env, vec_store, raw_conn):
+        assert self._session_state(raw_conn, vec_store) == 'idle'
+
+    def test_session_idle_after_each_read(self, rr_env, vec_store, raw_conn):
+        rng = np.random.default_rng(41)
+        vectors = [(f'doc {i}', _unit_vec(rng)) for i in range(5)]
+        vec_store.addChunks(self._chunks(rr_env.schema, vectors))
+        assert self._session_state(raw_conn, vec_store) == 'idle', 'after addChunks'
+
+        query = rr_env.schema.QuestionText('doc')
+        query.embedding = vectors[0][1]
+        reads = {
+            '_doesCollectionExist': lambda: vec_store._doesCollectionExist(),
+            'count_documents': lambda: vec_store.count_documents(),
+            'searchSemantic': lambda: vec_store.searchSemantic(query, rr_env.schema.DocFilter(limit=5)),
+            'searchKeyword': lambda: vec_store.searchKeyword(query, rr_env.schema.DocFilter(limit=5)),
+            'get': lambda: vec_store.get(rr_env.schema.DocFilter(limit=5)),
+            'getPaths': lambda: vec_store.getPaths(),
+            'render': lambda: vec_store.render('obj-0', lambda _text: None),
+        }
+        for name, read in reads.items():
+            read()
+            assert self._session_state(raw_conn, vec_store) == 'idle', f'after {name}'
+
+    def test_session_idle_after_each_single_statement_write(self, rr_env, vec_store, raw_conn):
+        rng = np.random.default_rng(43)
+        vec_store.addChunks(self._chunks(rr_env.schema, [('doc', _unit_vec(rng))]))
+        for name in ('markDeleted', 'markActive', 'remove'):
+            getattr(vec_store, name)(['obj-0'])
+            assert self._session_state(raw_conn, vec_store) == 'idle', f'after {name}'
+
+    def test_session_idle_after_failed_read(self, rr_env, vec_store, raw_conn):
+        rng = np.random.default_rng(47)
+        vec_store.addChunks(self._chunks(rr_env.schema, [('doc', _unit_vec(rng))]))
+        query = rr_env.schema.QuestionText('doc')
+        query.embedding = [1.0, 0.0]  # wrong width: the server rejects the comparison
+        with pytest.raises(Exception, match='dimensions'):
+            vec_store.searchSemantic(query, rr_env.schema.DocFilter(limit=5))
+        assert self._session_state(raw_conn, vec_store) == 'idle'
+        # ...and the connection is still usable (no aborted transaction).
+        assert vec_store.count_documents() == 1
+
+    def test_session_idle_after_failed_write(self, rr_env, vec_store, raw_conn):
+        rng = np.random.default_rng(53)
+        vec_store.addChunks(self._chunks(rr_env.schema, [('original', _unit_vec(rng))]))
+        bad = self._chunks(rr_env.schema, [('replacement', _unit_vec(rng))])
+        bad[0].embedding = [1.0, 0.0]  # wrong width: the INSERT fails after the DELETE ran
+        with pytest.raises(Exception):
+            vec_store.addChunks(bad, checkCollection=False)
+        assert self._session_state(raw_conn, vec_store) == 'idle'
+        # The replacement is still atomic: the failed batch left the original in place.
+        docs = vec_store.get(rr_env.schema.DocFilter(objectIds=['obj-0'], limit=5))
+        assert [d.page_content for d in docs] == ['original']
+        # ...and the connection is back in autocommit, so later reads open no transaction.
+        assert vec_store.client.autocommit is True
+        assert self._session_state(raw_conn, vec_store) == 'idle', 'after a read following the failed write'
 
     def test_wide_vectors_skip_index_with_warning(self, rr_env, monkeypatch, raw_conn):
         wide_table = 'rr_vec_wide_e2e'
