@@ -51,7 +51,6 @@ from rocketlib import getServiceDefinition, validatePipeline
 from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
-from ai.common.rocketride_db import DB_PROVIDERS, db_target, exposes_public_endpoint
 from ai.account.models import resolve_run_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
 from .. import services_catalog
@@ -296,70 +295,12 @@ class MiscCommands(DAPConn):
                 # rides INSIDE the wrapped config (see the FILE-form note above).
                 data = validatePipeline({'pipeline': inner})
 
-            # Advisory datacore access check (SDD 4.6). Node probes have no
-            # identity, so the check runs here, on the connection's account.
-            await self._advise_db_access(pipeline, data)
-
             # Return the results
             return self.build_response(request, body=data)
 
         except Exception as e:
             self.debug_message(f'Pipeline validation failed: {str(e)}')
             raise
-
-    async def _advise_db_access(self, pipeline: Dict[str, Any], data: Dict[str, Any]) -> None:
-        """Warn when this user could never reach a DB node's database.
-
-        Advisory only (SDD 4.6): the run kind isn't known at save time, so the
-        deploy and public-endpoint rules are enforced at task start, where the
-        DSN is issued. Evaluated as a dev run by this connection's user, on the
-        ``validate`` path (never audited). A denial becomes a warning on the
-        component; a failure of the check itself never fails validation.
-        """
-        info = getattr(self, '_account_info', None)
-        if not info or not isinstance(data, dict):
-            return
-        components = [pipeline['component']] if 'component' in pipeline else pipeline.get('components') or []
-        org = getattr(info, 'organization', None)
-        identity = {
-            'org_id': (org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')) or '',
-            'user_id': getattr(info, 'userId', '') or '',
-            'team_id': getattr(info, 'devTeam', '') or '',
-            'run_kind': 'dev',
-            'owner_kind': 'user',
-            'public_endpoint': exposes_public_endpoint(components),
-            'path': 'validate',
-            'task_id': '',
-        }
-        try:
-            from ai.account import account
-
-            checked = set()
-            for component in components:
-                if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
-                    continue
-                try:
-                    scope, target = db_target(
-                        Config.getNodeConfig(component['provider'], component.get('config') or {})
-                    )
-                except ValueError:
-                    continue  # the node's own validateConfig reports a bad scope
-                if (scope, target) in checked:
-                    continue
-                checked.add((scope, target))
-                request: Dict[str, Any] = {'scope': scope}
-                if target:
-                    request['team_id' if scope == 'team' else 'user_id'] = target
-                decision = await account.authorize_db_target(identity, request)
-                if not decision.allowed:
-                    data.setdefault('warnings', []).append(
-                        {
-                            'id': component.get('id', ''),
-                            'message': f'RocketRide cloud {scope} database: you would be refused it ({decision.reason})',
-                        }
-                    )
-        except Exception as e:
-            self.debug_message(f'Datacore access check skipped: {e}')
 
     async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
