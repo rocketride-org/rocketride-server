@@ -47,6 +47,10 @@ class IGlobal(DatabaseGlobalBase):
     path — is inherited unchanged from the base.
     """
 
+    # PgBouncer already pools, capping each tenant database at 3 server connections per pooler.
+    POOL_SIZE = 2
+    MAX_OVERFLOW = 2
+
     # Cache the resolved DSN between the paired _connection_params /
     # _build_connection_url calls the base makes in beginGlobal and
     # validateConfig, so both come from a single resolution.

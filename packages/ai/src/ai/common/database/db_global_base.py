@@ -201,6 +201,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     allow_execute: bool = False
     max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
+    # SQLAlchemy pool sizing for the runtime engine opened in `beginGlobal`.
+    POOL_SIZE: int = 10
+    MAX_OVERFLOW: int = 20
+
     # Serialises this node's schema re-reflection: `refresh_schema`'s full
     # table walk against `_insertData`'s lazy rebuild of `schema`, and either
     # of those against another copy of itself. Both writers rebind `schema` and
@@ -780,8 +784,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # any required URL-encoding.
         db_url = self._build_connection_url(params)
 
-        # pool_size + max_overflow allow up to 30 concurrent connections.
-        self.engine = create_engine(db_url, pool_size=10, max_overflow=20)
+        # POOL_SIZE + MAX_OVERFLOW cap the node's concurrent connections
+        # (30 by default; a subclass may override both).
+        self.engine = create_engine(db_url, pool_size=self.POOL_SIZE, max_overflow=self.MAX_OVERFLOW)
 
         from ai.common.database.tx_registry import TransactionRegistry
 

@@ -407,6 +407,51 @@ class TestRocketrideSqlConnection:
         assert len(warnings) == 1 and 'scope must be one of org, team, user' in warnings[0]
 
 
+def _engine_pool_kwargs(monkeypatch, cls, logical_type, conn_config):
+    """Run ``beginGlobal`` with ``create_engine`` patched; return its kwargs.
+
+    Nothing connects: the engine, the transaction registry and both schema
+    reflections are stand-ins, so only the pool sizing reaches the assertion.
+    """
+    db_global = sys.modules['ai.common.database.db_global_base']
+    calls = []
+    monkeypatch.setattr(db_global, 'create_engine', lambda url, **kw: calls.append(kw) or types.SimpleNamespace())
+    tx_registry = types.ModuleType('ai.common.database.tx_registry')
+    tx_registry.TransactionRegistry = lambda *a, **kw: None
+    monkeypatch.setitem(sys.modules, 'ai.common.database.tx_registry', tx_registry)
+    monkeypatch.setattr(sys.modules['ai.common.config'].Config, 'getNodeConfig', lambda provider, cfg: dict(cfg))
+    monkeypatch.setattr(cls, '_getDatabaseSchema', lambda self: {})
+    monkeypatch.setattr(cls, '_getTableSchema', lambda self, table: {})
+    glb = cls()
+    glb.glb = types.SimpleNamespace(logicalType=logical_type, connConfig=conn_config)
+    glb.beginGlobal()
+    assert len(calls) == 1
+    return calls[0]
+
+
+class TestSqlEnginePoolSize:
+    """PgBouncer pools the cloud node's connections, so its engine stays small;
+    every other SQL node keeps the base's larger pool.
+    """
+
+    def test_rocketride_sql_keeps_a_two_plus_two_pool(self, monkeypatch):
+        cls, _ = _sql_iglobal_cls(monkeypatch)
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
+        kwargs = _engine_pool_kwargs(monkeypatch, cls, 'rocketride_sql', {'table': 'widgets'})
+        assert kwargs['pool_size'] == 2
+        assert kwargs['max_overflow'] == 2
+
+    @pytest.mark.parametrize('node', ['db_postgres', 'db_mysql'])
+    def test_other_sql_nodes_keep_the_default_pool(self, monkeypatch, node):
+        _sql_iglobal_cls(monkeypatch)
+        node_dir = _REPO / 'nodes' / 'src' / 'nodes' / node
+        cls = _load_from_path(f'nodes.{node}.IGlobal', node_dir / 'IGlobal.py').IGlobal
+        config = {'host': 'h', 'user': 'u', 'password': 'p', 'database': 'd', 'table': 'widgets'}
+        kwargs = _engine_pool_kwargs(monkeypatch, cls, node, config)
+        assert kwargs['pool_size'] == 10
+        assert kwargs['max_overflow'] == 20
+
+
 # ---------------------------------------------------------------------------
 # rocketride_vector: HNSW default-index logic
 # ---------------------------------------------------------------------------
