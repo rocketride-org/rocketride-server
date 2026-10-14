@@ -132,7 +132,7 @@ chat -> RocketRide agent -> response
      (Claude)      (tools)
 ```
 
-- The agent lists the stored documents (`objdir`), reads one back (`get`), reports the store's statistics (`stats`) and searches by meaning (`search`, when the store node has an embedding provider configured)
+- The agent lists the stored documents (`objdir`, which returns one object id per distinct parent path, so give each document its own parent path for a complete listing), reads one back (`get`), reports the store's statistics (`stats`) and searches by meaning (`search`, when the store node has an embedding provider configured)
 - `upsert` and `delete` are offered to the agent only when the store node's "Allow writes through tools" setting is on; it is off in this template, so asked to delete, the agent reports that it has no delete tool
 - The store is the team's RocketRide cloud database, so the template runs on RocketRide Cloud or on a self-hosted engine with a database broker; on a local engine use `store_postgres` with your own PostgreSQL instead
 - Seed the store first through a pipeline that writes to the node's `documents` lane, then ask the agent about what is there

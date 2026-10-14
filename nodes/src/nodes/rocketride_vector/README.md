@@ -44,13 +44,14 @@ repository is a chat agent wired to this node's tools.
 | `get` | Returns up to `limit` chunks of one document by `object_id`, sorted by chunk ID; this store does not apply `offset`. |
 | `stats` | Returns the row (chunk) count of the whole table, including the store's one internal schema row and soft-deleted documents, the embedding model name, and the vector size. |
 | `upsert` | Adds or replaces a non-empty `documents` array (content, object ID, optional metadata, optional embedding and model). Offered only while writes are allowed. |
-| `delete` | Deletes the chunks of a non-empty `object_ids` array and returns the deleted count. Offered only while writes are allowed. |
+| `delete` | Deletes the chunks of a non-empty `object_ids` array. `deleted_count` is the number of IDs requested, not the number of documents found. Offered only while writes are allowed. |
 
 The functions return `{"success": false, "error": "..."}` for a missing or
 invalid input, a missing embedding provider, or a refused write. `upsert`
 reports database errors the same way. `search` falls back to a keyword search
 when the semantic search fails and reports a failure object only if that fails
-too; `delete`, `objdir`, `get`, and `stats` raise database errors.
+too; `delete`, `objdir`, `get`, and `stats` raise database errors, and `get`
+raises on a non-integer `offset` or `limit`.
 
 ## Configuration
 
