@@ -1818,7 +1818,10 @@ async def test_subprocess_normal_exit_with_exit_event_completes():
     t._debug_stdio = Task.TaskDbgStdio(parent_task=t, id=t.id, token=t.token, process=proc)
     await t._debug_stdio.connect()
     await proc.wait()
-    await asyncio.sleep(0.1)
+    for _ in range(100):
+        if t._status.state in (TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value):
+            break
+        await asyncio.sleep(0.05)
 
     assert t._exit_event_seen is True
     assert t._status.exitCode == 0
@@ -1845,7 +1848,10 @@ async def test_subprocess_exit_zero_without_exit_event_cancels():
     t._debug_stdio = Task.TaskDbgStdio(parent_task=t, id=t.id, token=t.token, process=proc)
     await t._debug_stdio.connect()
     await proc.wait()
-    await asyncio.sleep(0.1)
+    for _ in range(100):
+        if t._status.state in (TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value):
+            break
+        await asyncio.sleep(0.05)
 
     assert t._exit_event_seen is False
     assert t._status.exitCode == 1
@@ -1881,7 +1887,10 @@ async def test_subprocess_startup_crash_writes_stderr_and_cancels():
     t._debug_stdio = Task.TaskDbgStdio(parent_task=t, id=t.id, token=t.token, process=proc)
     await t._debug_stdio.connect()
     await proc.wait()
-    await asyncio.sleep(0.1)
+    for _ in range(100):
+        if t._status.state in (TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value):
+            break
+        await asyncio.sleep(0.05)
 
     assert t._exit_event_seen is False
     assert t._status.exitCode == 1
