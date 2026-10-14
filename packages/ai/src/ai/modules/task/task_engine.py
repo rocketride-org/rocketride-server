@@ -772,7 +772,8 @@ class Task(DAPBase):
 
         Returns:
             ``(scope, target, owner)`` per distinct node ``(scope, target)``,
-            where ``owner`` is the team or user id the target resolves to.
+            where ``owner`` is the team or user id the decision approved
+            (``decision.owner_id``), never re-derived here.
 
         Raises:
             ValueError: a DB node has a malformed scope or target.
@@ -780,9 +781,10 @@ class Task(DAPBase):
         """
         from ai.account import account
 
-        wanted = [(scope, target, self._db_owner(scope, target)) for scope, target in self._db_targets()]
+        requested = [(scope, target, self._db_owner(scope, target)) for scope, target in self._db_targets()]
         identity = self._db_identity()
-        for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in wanted):
+        approved: Dict[Tuple[str, str], str] = {}
+        for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in requested):
             request: Dict[str, Any] = {'scope': scope}
             if scope == 'team':
                 request['team_id'] = owner
@@ -794,7 +796,8 @@ class Task(DAPBase):
                 raise PermissionError(
                     f'this run may not use the RocketRide cloud {scope} database{named}: {decision.reason}'
                 )
-        return wanted
+            approved[(scope, owner)] = decision.owner_id
+        return [(scope, target, approved[(scope, owner)]) for scope, target, owner in requested]
 
     async def _resolve_db_dsns(self, wanted: List[Tuple[str, str, str]]) -> Dict[str, str]:
         """Resolve each authorized database once and key it for the nodes.

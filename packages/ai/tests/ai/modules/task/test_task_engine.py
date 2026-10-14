@@ -967,9 +967,11 @@ _SCOPED_PIPELINE = {
 }
 
 
-def _fake_db_account(monkeypatch, deny=None):
+def _fake_db_account(monkeypatch, deny=None, owner=None):
     """Swap the account's authorize/resolve for recorders. ``deny(target)``
-    returns a reason to refuse that target, or None to allow it.
+    returns a reason to refuse that target, or None to allow it. An allow
+    names the requested team or user id as its owner_id, as the SaaS
+    account does, unless ``owner(target)`` names another.
     """
     import ai.account
     from ai.account.base import DbDecision
@@ -979,7 +981,10 @@ def _fake_db_account(monkeypatch, deny=None):
     async def authorize(identity, target=None):
         calls['authorize'].append((identity, target))
         reason = deny(target) if deny else None
-        return DbDecision(False, reason, True) if reason else DbDecision(True, 'ok', False)
+        if reason:
+            return DbDecision(False, reason, True)
+        approved = owner(target) if owner else target.get('team_id') or target.get('user_id') or ''
+        return DbDecision(True, 'ok', False, approved)
 
     async def resolve(client_id, scope='org', owner_id=''):
         calls['resolve'].append((client_id, scope, owner_id))
@@ -1101,6 +1106,19 @@ async def test_own_team_named_twice_is_one_database(monkeypatch):
     assert len(calls['authorize']) == 1 and len(calls['resolve']) == 1
     # No org database in this pipeline, so no legacy single DSN either.
     assert 'ROCKETRIDE_DB_DSN' not in env
+
+
+@pytest.mark.asyncio
+async def test_the_engine_resolves_the_database_the_decision_named(monkeypatch):
+    """rocketride-saas #833 review: the engine provisions decision.owner_id,
+    the id that was checked, never its own re-derivation of the target.
+    """
+    calls = _fake_db_account(monkeypatch, owner=lambda target: 'team-checked' if target['scope'] == 'team' else '')
+    pipeline = {'components': [{'id': 'a', 'provider': 'rocketride_sql', 'config': {'scope': 'team'}}]}
+    env = await Task._build_subprocess_env(_env_task(pipeline=pipeline))
+    assert calls['authorize'][0][1] == {'scope': 'team', 'team_id': 'team-1'}
+    assert calls['resolve'] == [('org-1', 'team', 'team-checked')]
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {'team': 'postgresql://team-team-checked@pooler/db'}
 
 
 @pytest.mark.asyncio
