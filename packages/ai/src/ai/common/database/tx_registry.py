@@ -343,7 +343,10 @@ class TransactionRegistry:
         # the registry BEFORE rolling it back, so a reaped session is invisible to
         # the loop below; without the join, close_all() can return (and endGlobal
         # dispose the engine) while the sweeper is still mid-rollback on it.
-        sweeper = self._sweeper
+        # Read under the lock _ensure_sweeper() starts it under: an assigned but
+        # not-yet-started thread would make join() raise RuntimeError.
+        with self._sweeper_lock:
+            sweeper = self._sweeper
         if sweeper is not None and sweeper is not threading.current_thread():
             sweeper.join(timeout=_SWEEPER_JOIN_TIMEOUT)
         with self._registry_lock:
