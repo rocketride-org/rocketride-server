@@ -842,7 +842,7 @@ async def test_subprocess_env_injects_resolved_dsn(monkeypatch):
 
     _patch_resolve(monkeypatch, fake_resolve)
     env = await _build_env(_env_task(pipeline=_DB_PIPELINE))
-    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db?sslmode=require'
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {'org': 'postgresql://tenant@pooler/db?sslmode=require'}
     assert seen['tenant'] == 'org-1'
 
 
@@ -863,7 +863,7 @@ async def test_subprocess_env_dsn_tenant_is_the_org(monkeypatch):
     t = _env_task(pipeline=_DB_PIPELINE)
     t.client_id = ''
     env = await _build_env(t)
-    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db'
+    assert json.loads(env['ROCKETRIDE_DB_DSNS']) == {'org': 'postgresql://tenant@pooler/db'}
     assert seen['tenant'] == 'org-1'
 
 
@@ -1013,8 +1013,8 @@ async def test_db_dsn_map_has_one_entry_per_scope(monkeypatch):
         'team': 'postgresql://team-team-1@pooler/db',
         'user:user-2': 'postgresql://user-user-2@pooler/db',
     }
-    # The org entry on its own, for older nodes.
-    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://org-org-1@pooler/db'
+    # The map is the only delivery: no single-DSN variable.
+    assert 'ROCKETRIDE_DB_DSN' not in env
     assert [target for _, target in calls['authorize']] == [
         {'scope': 'org'},
         {'scope': 'team', 'team_id': 'team-1'},
@@ -1112,8 +1112,6 @@ async def test_own_team_named_twice_is_one_database(monkeypatch):
         'team:team-1': 'postgresql://team-team-1@pooler/db',
     }
     assert len(calls['authorize']) == 1 and len(calls['resolve']) == 1
-    # No org database in this pipeline, so no legacy single DSN either.
-    assert 'ROCKETRIDE_DB_DSN' not in env
 
 
 @pytest.mark.asyncio

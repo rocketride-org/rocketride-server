@@ -12,6 +12,7 @@ The Doc models and DocumentStoreBase are real, including their schema row.
 """
 
 import importlib.util
+import json
 import os
 import sys
 import types
@@ -52,7 +53,7 @@ def store_env(monkeypatch, request):
     try:
         for src in ('packages/ai/src', 'packages/client-python/src', 'nodes/src'):
             monkeypatch.syspath_prepend(str(_REPO / src))
-        monkeypatch.setenv('ROCKETRIDE_DB_DSN', dsn)
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': dsn}))
         node = request.param
         driver = 'rocketride_vector' if node == 'rocketride_vector' else 'postgres'
         node_dir = _REPO / 'nodes/src/nodes' / node

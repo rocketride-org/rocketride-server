@@ -29,8 +29,7 @@ connection config. Each node names a database by ``scope`` (``org``, ``team``
 or ``user``) and an optional ``target`` (a team id or user id; empty means the
 run's own). The task engine authorizes every ``(scope, target)`` a pipeline
 asks for, resolves each DSN server-side at task start, and delivers them as a
-JSON map in ``ROCKETRIDE_DB_DSNS`` (plus ``ROCKETRIDE_DB_DSN`` for the org
-entry, for older nodes). Nodes only look their key up. They never resolve a
+JSON map in ``ROCKETRIDE_DB_DSNS``. Nodes only look their key up. They never resolve a
 DSN themselves: a missing key raises, and outside a task (a save-time probe in
 the server process) nothing is delivered, so the probe does static checks only
 (datacore isolation SDD 4.6).
@@ -49,9 +48,6 @@ from collections.abc import Iterable, Mapping
 # map, keyed by dsn_key(scope, target), for pipelines with RocketRide cloud
 # DB nodes.
 DB_DSNS_ENV = 'ROCKETRIDE_DB_DSNS'
-
-# The org entry of that map, also delivered on its own for older nodes.
-DB_DSN_ENV = 'ROCKETRIDE_DB_DSN'
 
 # When server-side resolution fails (e.g. a broker outage), or the engine has
 # no database broker at all, the task engine passes the reason down here
@@ -154,10 +150,9 @@ def resolve_rocketride_dsn(scope: str = 'org', target: str = '') -> str:
 
     1. ``ROCKETRIDE_DB_DSNS``: the per-task map. A missing key raises; it
        never falls back to another database.
-    2. ``ROCKETRIDE_DB_DSN``: the org database only (older engines, tests).
-    3. ``ROCKETRIDE_DB_RESOLVE_ERROR``: server-side resolution failed, or the
+    2. ``ROCKETRIDE_DB_RESOLVE_ERROR``: server-side resolution failed, or the
        engine has no database broker. Raises with that reason.
-    4. Nothing delivered: this process is not a task. Raises DsnNotDelivered.
+    3. Nothing delivered: this process is not a task. Raises DsnNotDelivered.
 
     Returns the raw DSN (URL form, directly usable by ``psycopg2.connect``).
     Callers that need a SQLAlchemy engine URL should wrap the result in
@@ -184,17 +179,11 @@ def resolve_rocketride_dsn(scope: str = 'org', target: str = '') -> str:
             )
         return dsn.strip()
 
-    injected = os.environ.get(DB_DSN_ENV, '').strip()
-    if injected and key == 'org':
-        return injected
-
     # Server-side resolution was attempted and failed, or the engine has no
     # database broker: report that reason.
     resolve_error = os.environ.get(DB_RESOLVE_ERROR_ENV, '').strip()
     if resolve_error:
         raise ValueError(f'RocketRide cloud database is not available for this task: {resolve_error}')
-    if injected:
-        raise ValueError(f'this task was not given {_describe(scope, target)}; the engine authorizes it at task start')
 
     raise DsnNotDelivered(
         'no RocketRide cloud database is delivered outside a running pipeline; connectivity is checked when it runs'

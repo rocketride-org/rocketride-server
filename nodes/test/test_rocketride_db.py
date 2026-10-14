@@ -177,7 +177,7 @@ class TestResolveRocketrideDsn:
 
     @pytest.fixture(autouse=True)
     def _clean_env(self, monkeypatch):
-        for name in (rrdb.DB_DSNS_ENV, rrdb.DB_DSN_ENV, rrdb.DB_RESOLVE_ERROR_ENV):
+        for name in (rrdb.DB_DSNS_ENV, 'ROCKETRIDE_DB_DSN', rrdb.DB_RESOLVE_ERROR_ENV):
             monkeypatch.delenv(name, raising=False)
 
     def _deliver(self, monkeypatch, dsns):
@@ -192,7 +192,6 @@ class TestResolveRocketrideDsn:
     def test_missing_map_key_raises_and_never_falls_back(self, monkeypatch):
         """A key the engine did not authorize must raise, even with an org DSN at hand."""
         self._deliver(monkeypatch, {'org': 'postgresql://o'})
-        monkeypatch.setenv(rrdb.DB_DSN_ENV, 'postgresql://o')
         with pytest.raises(ValueError, match="was not given the team database 't-9'"):
             rrdb.resolve_rocketride_dsn('team', 't-9')
         with pytest.raises(ValueError, match="was not given the run's own user database"):
@@ -203,11 +202,11 @@ class TestResolveRocketrideDsn:
         with pytest.raises(ValueError, match='not valid JSON'):
             rrdb.resolve_rocketride_dsn()
 
-    def test_legacy_env_dsn_serves_the_org_scope_only(self, monkeypatch):
-        monkeypatch.setenv(rrdb.DB_DSN_ENV, f'  {TEST_DSN}  ')
-        assert rrdb.resolve_rocketride_dsn() == TEST_DSN
-        with pytest.raises(ValueError, match="was not given the run's own team database"):
-            rrdb.resolve_rocketride_dsn('team')
+    def test_a_lone_single_dsn_variable_is_not_a_delivery(self, monkeypatch):
+        """Only the map counts: a stray ROCKETRIDE_DB_DSN is never read."""
+        monkeypatch.setenv('ROCKETRIDE_DB_DSN', TEST_DSN)
+        with pytest.raises(rrdb.DsnNotDelivered):
+            rrdb.resolve_rocketride_dsn()
 
     def test_resolve_error_env_surfaces_broker_failure(self, monkeypatch):
         """A server-side resolution failure names the real cause, not sign-in."""
@@ -336,7 +335,6 @@ class TestRocketrideSqlConnection:
     def _deliver_org_dsn(self, monkeypatch):
         """Deliver the org DSN the way the task engine does."""
         monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
-        monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     def test_connection_params_come_from_resolved_dsn(self, monkeypatch):
         cls, _ = _sql_iglobal_cls(monkeypatch)
@@ -384,7 +382,6 @@ class TestRocketrideSqlConnection:
         """
         cls, rrdb_mod = _sql_iglobal_cls(monkeypatch)
         monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
-        monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
         monkeypatch.delenv('ROCKETRIDE_DB_RESOLVE_ERROR', raising=False)
         warnings = []
         iglobal_mod = sys.modules['nodes.rocketride_sql.IGlobal']
@@ -557,7 +554,6 @@ def _vector_store_cls(monkeypatch):
 
     # Deliver the org DSN the way the task engine does.
     monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
-    monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py')
     pkg = types.ModuleType('nodes.rocketride_vector')
@@ -786,7 +782,7 @@ def _graph_iglobal(monkeypatch):
 
     rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
-    for name in ('ROCKETRIDE_DB_DSNS', 'ROCKETRIDE_DB_DSN', 'ROCKETRIDE_DB_RESOLVE_ERROR'):
+    for name in ('ROCKETRIDE_DB_DSNS', 'ROCKETRIDE_DB_RESOLVE_ERROR'):
         monkeypatch.delenv(name, raising=False)
 
     iglobal = _load_from_path('nodes.rocketride_graph.IGlobal', _GRAPH_NODE_DIR / 'IGlobal.py')

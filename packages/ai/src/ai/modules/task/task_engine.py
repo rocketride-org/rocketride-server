@@ -901,9 +901,6 @@ class Task(DAPBase):
                 subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = reason
             else:
                 subprocess_env['ROCKETRIDE_DB_DSNS'] = json.dumps(dsns)
-                if 'org' in dsns:
-                    # The org entry on its own, for older nodes.
-                    subprocess_env['ROCKETRIDE_DB_DSN'] = dsns['org']
 
         return subprocess_env
 

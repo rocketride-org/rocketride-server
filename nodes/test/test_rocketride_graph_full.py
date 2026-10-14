@@ -166,7 +166,6 @@ def rr_env(monkeypatch):
 
     # Deliver the DSN the way the task engine does: nodes never resolve one.
     monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
-    monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     iglobal = _load_from_path('nodes.rocketride_graph.IGlobal', _NODE_DIR / 'IGlobal.py')
     pkg = types.ModuleType('nodes.rocketride_graph')

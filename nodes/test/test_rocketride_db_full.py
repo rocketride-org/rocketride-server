@@ -246,7 +246,6 @@ def _build_rr_env(monkeypatch):
 
     # Deliver the DSN the way the task engine does: nodes never resolve one.
     monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
-    monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
 
     return types.SimpleNamespace(schema=schema, warnings=warnings)
 
@@ -387,20 +386,6 @@ class TestRocketrideSqlE2E:
             assert written['affected_rows'] == 1
             back = inst.execute({'sql': f'SELECT count(*) AS n FROM {sql_table}'})
             assert back['rows'][0]['n'] == 3
-        finally:
-            glb.endGlobal()
-
-    def test_begin_global_via_legacy_env_dsn(self, rr_env, monkeypatch, sql_table):
-        """An org-scoped node still connects with only ROCKETRIDE_DB_DSN set
-        (the org entry the engine also delivers on its own, for older nodes).
-        """
-        monkeypatch.delenv('ROCKETRIDE_DB_DSNS', raising=False)
-        monkeypatch.setenv('ROCKETRIDE_DB_DSN', TEST_DSN)
-        glb, inst = self._begin(monkeypatch, {'table': sql_table, 'allow_execute': True})
-        try:
-            assert glb.database == TEST_DB_NAME
-            rows = inst.execute({'sql': f'SELECT count(*) AS n FROM {sql_table}'})
-            assert rows['rows'][0]['n'] == 2
         finally:
             glb.endGlobal()
 
