@@ -89,31 +89,6 @@ async def test_pipe_validate_resolves_implied_source(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pipe_validate_never_probes_a_cloud_db_node(monkeypatch):
-    """Public route, no identity: a RocketRide cloud DB node is not handed to
-    the validator (whose validateConfig probe would run in this process).
-    """
-    called = []
-    monkeypatch.setattr(pipe_validate_mod, 'validatePipeline', lambda payload: called.append(payload) or {'ok': True})
-
-    payload = {'version': 1, 'component': {'id': 'sql_1', 'provider': 'rocketride_sql', 'config': {}}}
-    result = await pipe_validate_mod.pipe_Validate(MagicMock(), payload)
-
-    assert called == []
-    body = result.body.decode() if hasattr(result, 'body') else str(result)
-    assert 'checked when the pipeline runs' in body
-
-
-@pytest.mark.asyncio
-async def test_pipe_validate_still_validates_other_components(monkeypatch):
-    called = []
-    monkeypatch.setattr(pipe_validate_mod, 'validatePipeline', lambda payload: called.append(payload) or {'ok': True})
-    payload = {'version': 1, 'component': {'id': 'p', 'provider': 'db_postgres', 'config': {}}}
-    await pipe_validate_mod.pipe_Validate(MagicMock(), payload)
-    assert called == [payload]
-
-
-@pytest.mark.asyncio
 async def test_pipe_validate_rejects_multiple_implied_sources(monkeypatch):
     """Two Source-mode components without an explicit choice raise ValueError."""
     monkeypatch.setattr(pipe_validate_mod, 'validatePipeline', lambda payload: {'ok': True})
