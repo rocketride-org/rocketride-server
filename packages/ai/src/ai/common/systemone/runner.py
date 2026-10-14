@@ -83,7 +83,8 @@ class DecisionRunner:
 
     def _tokens(self, state) -> int:
         text = state if isinstance(state, str) else encode_json(state).decode('utf-8')
-        return self._reserved_tokens + estimate_tokens(text, self._limits.chars_per_token)
+        reserved = 0 if self._limits.state_tokens_only else self._reserved_tokens
+        return reserved + estimate_tokens(text, self._limits.chars_per_token)
 
     def oversize(self, state) -> dict | None:
         """Return the measured size when ``state`` is over this backend's limits, else None."""

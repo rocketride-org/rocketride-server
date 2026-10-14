@@ -209,7 +209,7 @@ and config detail.
 
 ### System One nodes, Gates and `response.decisions`
 
-System One nodes (`decision_typesafe`, `decision_openrouter`, `decision_ollama`, `decision_systemone`)
+System One nodes (`decision_typesafe`, `decision_openrouter`, `decision_ollama`, `decision_routmy`, `decision_laya`, `decision_clm`, `decision_superagent`, `decision_systemone`)
 answer typed questions (yes/no, pick-one, rubric) about an item with a System One decision model.
 Use one for cheap classification before a costly step, for example "is this spam?" or "which team
 owns this?" ahead of an LLM or agent. They do not generate text, and they read text only (convert

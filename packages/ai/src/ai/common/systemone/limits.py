@@ -43,6 +43,8 @@ class DecisionLimits:
     chars_per_token: float = 6.0
     max_body_bytes: int | None = None
     object_criteria: bool = True
+    # True for backends that silently truncate the state itself (Laya Studio, clm-serve): the limit then caps the state alone.
+    state_tokens_only: bool = False
 
     @classmethod
     def from_config(cls, config: dict) -> DecisionLimits:
@@ -58,6 +60,7 @@ class DecisionLimits:
             chars_per_token=float(block.get('chars_per_token', 6.0)),
             max_body_bytes=int(block['max_body_bytes']) if block.get('max_body_bytes') else None,
             object_criteria=bool(block.get('object_criteria', True)),
+            state_tokens_only=bool(block.get('state_tokens_only', False)),
         )
 
 

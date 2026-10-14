@@ -75,3 +75,9 @@ def test_json_bytes_handles_lone_surrogate():
     # Should not raise UnicodeEncodeError.
     result = json_bytes('\ud800')
     assert result > 0
+
+
+def test_state_tokens_only_defaults_false_and_reads_from_config():
+    base = {'max_options': 2, 'max_levels': 2, 'max_questions': 1, 'max_state_tokens': 10}
+    assert DecisionLimits.from_config({'limits': base}).state_tokens_only is False
+    assert DecisionLimits.from_config({'limits': {**base, 'state_tokens_only': True}}).state_tokens_only is True

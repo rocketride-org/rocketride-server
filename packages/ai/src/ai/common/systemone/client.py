@@ -159,7 +159,10 @@ class SystemOneClient:
                 if attempt + 1 >= self._max_attempts:
                     raise SystemOneError('network', f'{self._endpoint}: {exc}') from exc
             else:
-                self.last_request_id = response.headers.get('x-typesafe-request-id')
+                request_id = response.headers.get('x-typesafe-request-id') or response.headers.get(
+                    'x-systemone-request-id'
+                )
+                self.last_request_id = request_id
                 if response.status_code < 400:
                     try:
                         return response.json()
@@ -174,7 +177,7 @@ class SystemOneClient:
                         _kind_for(response.status_code, text),
                         f'{response.status_code} from {self._endpoint}' + (f' ({code})' if code else ''),
                         status=response.status_code,
-                        request_id=response.headers.get('x-typesafe-request-id'),
+                        request_id=request_id,
                         body=text[:MAX_ERROR_BODY_CHARS],
                     )
             self._sleep(self._delay(response, attempt))

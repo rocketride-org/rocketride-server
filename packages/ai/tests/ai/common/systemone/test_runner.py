@@ -196,3 +196,20 @@ def test_too_large_body_goes_to_debug_only_and_returns_an_outcome():
     assert outcome.answers is None and outcome.size['rejected_by'] == 'backend'
     assert any('SECRET DOC TEXT' in line for line in debug)
     assert 'SECRET DOC TEXT' not in repr(outcome)
+
+
+def test_state_tokens_only_measures_the_state_alone():
+    # 450-token state budget at 4 chars/token: 1600 chars fits (400 tokens) only when overhead is not counted.
+    counted = DecisionLimits(max_options=26, max_levels=26, max_questions=8, max_state_tokens=450, chars_per_token=4.0)
+    state_only = DecisionLimits(
+        max_options=26,
+        max_levels=26,
+        max_questions=8,
+        max_state_tokens=450,
+        chars_per_token=4.0,
+        state_tokens_only=True,
+    )
+    text = 'x' * 1600
+    assert _runner(limits=counted).oversize(text) is not None
+    assert _runner(limits=state_only).oversize(text) is None
+    assert _runner(limits=state_only).oversize('x' * 1804)['tokens'] == 451

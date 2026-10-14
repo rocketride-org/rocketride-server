@@ -43,6 +43,20 @@
 					"object_criteria": true
 				}
 			},
+			"jev-preview": {
+				"title": "Jev (preview; follows TypeSafe's newest build)",
+				"model": "jev-preview",
+				"serverbase": "https://api.typesafe.ai",
+				"apikey": "",
+				"limits": {
+					"max_options": 255,
+					"max_levels": 10,
+					"max_questions": 64,
+					"max_state_tokens": 32000,
+					"chars_per_token": 6,
+					"object_criteria": true
+				}
+			},
 			"jev-1-13-0": {
 				"title": "Jev 1.13.0",
 				"model": "jev-1.13.0",
@@ -201,6 +215,10 @@
 			"object": "jev-latest",
 			"properties": []
 		},
+		"decision_typesafe.jev-preview": {
+			"object": "jev-preview",
+			"properties": []
+		},
 		"decision_typesafe.jev-1-13-0": {
 			"object": "jev-1-13-0",
 			"properties": []
@@ -223,6 +241,12 @@
 					"value": "jev-latest",
 					"properties": [
 						"decision_typesafe.jev-latest"
+					]
+				},
+				{
+					"value": "jev-preview",
+					"properties": [
+						"decision_typesafe.jev-preview"
 					]
 				},
 				{

@@ -59,6 +59,36 @@
 					"object_criteria": false
 				}
 			},
+			"clef": {
+				"title": "Clef",
+				"model": "clef",
+				"serverbase": "http://localhost:11434",
+				"timeout": 120,
+				"limits": {
+					"max_options": 26,
+					"max_levels": 26,
+					"max_questions": 64,
+					"max_state_tokens": 8192,
+					"chars_per_token": 4,
+					"max_body_bytes": 65536,
+					"object_criteria": false
+				}
+			},
+			"clef-flash": {
+				"title": "Clef Flash",
+				"model": "clef-flash",
+				"serverbase": "http://localhost:11434",
+				"timeout": 120,
+				"limits": {
+					"max_options": 26,
+					"max_levels": 26,
+					"max_questions": 64,
+					"max_state_tokens": 8192,
+					"chars_per_token": 4,
+					"max_body_bytes": 65536,
+					"object_criteria": false
+				}
+			},
 			"custom": {
 				"title": "Custom",
 				"model": "",
@@ -191,6 +221,18 @@
 			},
 			"description": "Metadata keys (one per line) sent alongside the content, e.g. parent"
 		},
+		"decision_ollama.clef": {
+			"object": "clef",
+			"properties": [
+				"decision.serverbase"
+			]
+		},
+		"decision_ollama.clef-flash": {
+			"object": "clef-flash",
+			"properties": [
+				"decision.serverbase"
+			]
+		},
 		"decision_ollama.custom": {
 			"object": "custom",
 			"properties": [
@@ -234,6 +276,18 @@
 					"value": "tev1",
 					"properties": [
 						"decision_ollama.tev1"
+					]
+				},
+				{
+					"value": "clef",
+					"properties": [
+						"decision_ollama.clef"
+					]
+				},
+				{
+					"value": "clef-flash",
+					"properties": [
+						"decision_ollama.clef-flash"
 					]
 				}
 			]

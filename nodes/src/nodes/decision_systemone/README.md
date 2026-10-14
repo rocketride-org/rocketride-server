@@ -37,23 +37,32 @@ question or answer fail the object with an error that names the node.
 
 ## Profiles
 
-System One (custom endpoint) default: **Custom** (`custom`). Ollama default: **Nimble** (`nimble`). TypeSafe Jev and OpenRouter default: **Jev (latest)** (`jev-latest`).
+System One (custom endpoint) default: **Custom** (`custom`). Ollama default: **Nimble** (`nimble`). TypeSafe Jev, OpenRouter and rout.my default: **Jev (latest)** (`jev-latest`). Laya Studio default: **English** (`english`). CLM default: **CLM (latest)** (`clm-latest`). Superagent Security-One has one profile, **Security-One** (`security-one`).
 
-The directory registers four canvas nodes that share one implementation. Each has its own
-`custom` profile; the table lists it once.
+The directory registers eight canvas nodes that share one implementation. The custom endpoint,
+Ollama, rout.my and CLM nodes each have a `custom` profile; the table lists it once.
 
 | Profile                       | Node                          | Model sent to the endpoint                  |
 | ----------------------------- | ----------------------------- | ------------------------------------------- |
-| `custom` **(default)**        | All four nodes                | _(user-specified)_                          |
-| `jev-latest` **(default)**    | TypeSafe Jev, OpenRouter      | `jev-latest` (TypeSafe), `~typesafe/jev-latest` (OpenRouter) |
+| `custom` **(default)**        | Custom endpoint, Ollama, rout.my, CLM | _(user-specified)_                  |
+| `jev-latest` **(default)**    | TypeSafe Jev, OpenRouter, rout.my | `jev-latest` (TypeSafe, rout.my), `~typesafe/jev-latest` (OpenRouter) |
+| `jev-preview`                 | TypeSafe Jev, rout.my         | `jev-preview` (follows the provider's newest build; today it is the same model as `jev-latest`) |
 | `jev-1-13-0`                  | TypeSafe Jev                  | `jev-1.13.0`                                |
 | `jev-1-13`                    | OpenRouter (System One)       | `typesafe/jev-1.13`                         |
 | `nimble` **(default)**        | Ollama (System One)           | `nimble`                                    |
 | `tev1`                        | Ollama (System One)           | `tev1`                                      |
+| `clef`                        | Ollama (System One)           | `clef`                                      |
+| `clef-flash`                  | Ollama (System One)           | `clef-flash`                                |
+| `english` **(default)**       | Laya Studio (System One)      | `english`                                   |
+| `multilingual`                | Laya Studio (System One)      | `multilingual`                              |
+| `typed-decisions`             | Laya Studio (System One)      | `typed-decisions`                           |
+| `clm-latest` **(default)**    | CLM (System One, self-hosted) | `clm-latest`                                |
+| `clm-raw`                     | CLM (System One, self-hosted) | `clm-raw`                                   |
+| `security-one` **(default)**  | Superagent Security-One       | `security-one` (fixed)                      |
 
 ## Configuration
 
-The four nodes differ only in their preset: the server URL, the model names and the
+The eight nodes differ only in their preset: the server URL, the model names and the
 backend limits are pinned by the profile. The questions are configured identically on all
 of them. Pick the profile first; on the custom endpoint node, also set the server URL
 (`/v1/systemone` is appended unless the URL already ends in `/v1`) and the model name as
@@ -149,8 +158,9 @@ counts against the backend's input limits.
 
 ## Authentication
 
-TypeSafe Jev and OpenRouter need an API key. The custom endpoint takes one only if the
-endpoint requires it. Ollama needs none. To keep the key out of the pipeline file, enter an
+TypeSafe Jev, OpenRouter, rout.my, Laya Studio and Superagent need an API key. The custom
+endpoint and CLM take one only if the endpoint requires it (clm-serve checks `CLM_API_KEY`).
+Ollama needs none. To keep the key out of the pipeline file, enter an
 environment reference in the **API Key** field and set the variable in the environment or
 `.env`:
 
@@ -158,6 +168,10 @@ environment reference in the **API Key** field and set the variable in the envir
 | -------------------------- | ---------------------------- |
 | TypeSafe Jev               | `ROCKETRIDE_TYPESAFE_KEY`    |
 | OpenRouter (System One)    | `ROCKETRIDE_OPENROUTER_KEY`  |
+| rout.my (System One)       | `ROCKETRIDE_ROUTMY_KEY`      |
+| Laya Studio (System One)   | `ROCKETRIDE_LAYA_KEY`        |
+| Superagent Security-One    | `ROCKETRIDE_SUPERAGENT_KEY`  |
+| CLM (System One, self-hosted) | `ROCKETRIDE_CLM_KEY` (optional) |
 | System One (custom endpoint) | `ROCKETRIDE_SYSTEMONE_KEY` (optional) |
 
 For example `${ROCKETRIDE_TYPESAFE_KEY}`. The key is sent as a bearer token and is
@@ -170,15 +184,27 @@ omitted when the field is empty.
 Limits belong to the model, so each profile carries its own. The node checks the question
 set against them at startup and checks each input against the input limit (see [Too long](#too-long)).
 
-| Limit                  | Custom endpoint | TypeSafe Jev, OpenRouter (all profiles) | Ollama `nimble` | Ollama `tev1` | Ollama `custom` |
-| ---------------------- | --------------- | --------------------------------------- | --------------- | ------------- | --------------- |
-| Options per question   | 26              | 255                                     | 26              | 24            | 26              |
-| Levels per rubric      | 26              | 10                                      | 26              | 26            | 26              |
-| Questions per node     | 64              | 64                                      | 64              | 64            | 64              |
-| Input, in tokens       | 8,000           | 32,000                                  | 8,192           | 2,048         | 8,000           |
-| Characters per token   | 4               | 6                                       | 4               | 4             | 4               |
-| Request body           | 65,536 bytes    | no cap applied                          | 65,536 bytes    | 65,536 bytes  | 65,536 bytes    |
-| Option descriptions    | strings only    | objects allowed                         | strings only    | strings only  | strings only    |
+| Limit                  | Custom endpoint | TypeSafe Jev, OpenRouter, rout.my (all profiles) | Ollama `nimble`, `clef`, `clef-flash` | Ollama `tev1` | Ollama `custom` | Laya Studio | CLM | Superagent |
+| ---------------------- | --------------- | ------------------------------------------------ | ------------------------------------- | ------------- | --------------- | ----------- | --- | ---------- |
+| Options per question   | 26              | 255                                              | 26                                    | 24            | 26              | 20          | 64  | 16         |
+| Levels per rubric      | 26              | 10                                               | 26                                    | 26            | 26              | 20          | 26  | 16         |
+| Questions per node     | 64              | 64                                               | 64                                    | 64            | 64              | 32          | 64  | 64         |
+| Input, in tokens       | 8,000           | 32,000                                           | 8,192                                 | 2,048         | 8,000           | 450 (`english`), 950 (others), state alone | 2,000, state alone | 60,000 |
+| Characters per token   | 4               | 6                                                | 4                                     | 4             | 4               | 4 (`english`), 3 (others) | 4   | 4          |
+| Request body           | 65,536 bytes    | no cap applied                                   | 65,536 bytes                          | 65,536 bytes  | 65,536 bytes    | 524,288 bytes | no cap applied | 1,048,576 bytes |
+| Option descriptions    | strings only    | objects allowed                                  | strings only                          | strings only  | strings only    | strings only | strings only | strings only |
+
+Laya Studio and clm-serve **truncate a long state silently** instead of rejecting it. The
+node never answers from part of an input, so for these profiles the input limit caps the
+state alone (`state_tokens_only`): it is measured before the call, without the request
+overhead or the question text that other backends count, and anything longer is recorded
+`too_long`. The Laya limits sit just under the model's context (512 tokens for `english`,
+1,024 for `multilingual` and `typed-decisions`). Those two profiles estimate 3 characters per
+token instead of 4, so non-Latin text, which packs fewer characters into a token, is far less
+likely to exceed Laya's read silently. The CLM limit sits at clm-serve's default
+`--max-tokens` of 2,048. Raise the CLM limit only if you started clm-serve with a larger one.
+Laya Studio degrades past about 20 options, so its option limit is 20. Superagent Security-One
+is a security triage model (prompt injection and similar); it is not a general classifier.
 
 The custom endpoint uses conservative, Ollama-level limits because the node cannot know
 what an arbitrary server accepts. Characters per token is the node's own estimate, used
@@ -243,9 +269,23 @@ documentation and a route probe that returned 401 without a key. No live call ha
 yet; it is pending an API key. Treat this node as unverified against the live service until
 that is done.
 
-### Clef is not offered
+### Clef and Clef Flash (Ollama)
 
-Ollama also serves `clef`, which is omitted here: Clef is the vision model and this node reads text only. It takes text on five lanes (text, documents, table, questions and answers); a non-text document fails the object with "System One reads text; convert this content to text first (e.g. OCR or caption)".
+Ollama serves `clef` and `clef-flash`, and both are offered as profiles. They can also judge
+images, but a text-only state works, and that is all this node sends: it takes text on five
+lanes (text, documents, table, questions and answers); a non-text document fails the object with
+"System One reads text; convert this content to text first (e.g. OCR or caption)". They need
+Ollama 0.35.1 or later (the other Ollama profiles need 0.35.0). The input limit is 8,192 tokens, the
+same as Nimble; Ollama never truncates, so raise `num_ctx` on the server before relying on more.
+
+### Not offered yet
+
+- **Ollama `laya`.** Every published `laya` tag is an MLX build, and nothing confirms it runs
+  off Apple Silicon. It is not offered until `ollama pull laya` succeeds on a Linux engine host.
+  Use the Laya Studio node, or the custom endpoint pointed at your own server, meanwhile.
+- **Cloudflare Workers AI Clef.** It is not a `/v1/systemone` endpoint: the URL contains the
+  account id, and the reply is wrapped in `result`, `success` and `errors`. The custom endpoint
+  cannot reach it.
 
 ### Testing
 
@@ -257,6 +297,10 @@ local Ollama and checks that the forwarded document carries a decision reference
 - [Introducing System One models and Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev)
 - [TypeSafe documentation](https://docs.typesafe.ai)
 - [Ollama: decision models](https://docs.ollama.com/capabilities/decision)
+- [rout.my System One API](https://docs.rout.my/api/systemone)
+- [Laya Studio documentation](https://laya.studio/docs)
+- [CLM (clm-serve)](https://github.com/Contrastive-LM/CLM)
+- [Superagent Security-One API](https://www.superagent.sh/docs/models/api)
 
 ---
 
@@ -264,6 +308,27 @@ local Ollama and checks that the forwarded document carries a decision reference
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
 
 ## Schema
+
+### CLM (System One, self-hosted) (`services.clm.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `decision.apikey` | `string` | **API Key (only if clm-serve sets CLM_API_KEY)** | `""` |
+| `decision.levels` | `string` | **Levels**<br/>One per line, level 0 first; describe the situation, not a degree |  |
+| `decision.min_confidence` | `number` | **Minimum confidence**<br/>Below this the answer is 'uncertain'. Confidence is not comparable across backends. | `0` |
+| `decision.model` | `string` | **Model**<br/>Model name as served by the backend |  |
+| `decision.name` | `string` | **Name**<br/>Question name; the Gate refers to it (lowercase, digits, _) |  |
+| `decision.no_means` | `string` | **No means** |  |
+| `decision.options` | `string` | **Options**<br/>One per line: value \| optional description |  |
+| `decision.pick_one` | `array` | **Pick-one questions** |  |
+| `decision.question` | `string` | **Question**<br/>Phrase it so a high value means yes |  |
+| `decision.rubric` | `array` | **Rubric questions** |  |
+| `decision.serverbase` | `string` | **Server URL**<br/>Base URL; /v1/systemone is appended |  |
+| `decision.state_metadata` | `string` | **Metadata to include**<br/>Metadata keys (one per line) sent alongside the content, e.g. parent |  |
+| `decision.threshold` | `number` | **Yes threshold** | `0.5` |
+| `decision.yes_means` | `string` | **Yes means** |  |
+| `decision.yes_no` | `array` | **Yes/No questions** |  |
+| `decision_clm.profile` | `string` | **Model** | `"clm-latest"` |
 
 ### System One (custom endpoint) (`services.json`)
 
@@ -285,6 +350,27 @@ local Ollama and checks that the forwarded document carries a decision reference
 | `decision.yes_means` | `string` | **Yes means** |  |
 | `decision.yes_no` | `array` | **Yes/No questions** |  |
 | `decision_systemone.profile` | `string` | **Model** | `"custom"` |
+
+### Laya Studio (System One) (`services.laya.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `decision.apikey` | `string` | **API Key** | `""` |
+| `decision.levels` | `string` | **Levels**<br/>One per line, level 0 first; describe the situation, not a degree |  |
+| `decision.min_confidence` | `number` | **Minimum confidence**<br/>Below this the answer is 'uncertain'. Confidence is not comparable across backends. | `0` |
+| `decision.model` | `string` | **Model**<br/>Model name as served by the backend |  |
+| `decision.name` | `string` | **Name**<br/>Question name; the Gate refers to it (lowercase, digits, _) |  |
+| `decision.no_means` | `string` | **No means** |  |
+| `decision.options` | `string` | **Options**<br/>One per line: value \| optional description |  |
+| `decision.pick_one` | `array` | **Pick-one questions** |  |
+| `decision.question` | `string` | **Question**<br/>Phrase it so a high value means yes |  |
+| `decision.rubric` | `array` | **Rubric questions** |  |
+| `decision.serverbase` | `string` | **Server URL**<br/>Base URL; /v1/systemone is appended |  |
+| `decision.state_metadata` | `string` | **Metadata to include**<br/>Metadata keys (one per line) sent alongside the content, e.g. parent |  |
+| `decision.threshold` | `number` | **Yes threshold** | `0.5` |
+| `decision.yes_means` | `string` | **Yes means** |  |
+| `decision.yes_no` | `array` | **Yes/No questions** |  |
+| `decision_laya.profile` | `string` | **Model** | `"english"` |
 
 ### Ollama (System One) (`services.ollama.json`)
 
@@ -326,6 +412,48 @@ local Ollama and checks that the forwarded document carries a decision reference
 | `decision.yes_means` | `string` | **Yes means** |  |
 | `decision.yes_no` | `array` | **Yes/No questions** |  |
 | `decision_openrouter.profile` | `string` | **Model** | `"jev-latest"` |
+
+### rout.my (System One) (`services.routmy.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `decision.apikey` | `string` | **API Key** | `""` |
+| `decision.levels` | `string` | **Levels**<br/>One per line, level 0 first; describe the situation, not a degree |  |
+| `decision.min_confidence` | `number` | **Minimum confidence**<br/>Below this the answer is 'uncertain'. Confidence is not comparable across backends. | `0` |
+| `decision.model` | `string` | **Model**<br/>Model name as served by the backend |  |
+| `decision.name` | `string` | **Name**<br/>Question name; the Gate refers to it (lowercase, digits, _) |  |
+| `decision.no_means` | `string` | **No means** |  |
+| `decision.options` | `string` | **Options**<br/>One per line: value \| optional description |  |
+| `decision.pick_one` | `array` | **Pick-one questions** |  |
+| `decision.question` | `string` | **Question**<br/>Phrase it so a high value means yes |  |
+| `decision.rubric` | `array` | **Rubric questions** |  |
+| `decision.serverbase` | `string` | **Server URL**<br/>Base URL; /v1/systemone is appended |  |
+| `decision.state_metadata` | `string` | **Metadata to include**<br/>Metadata keys (one per line) sent alongside the content, e.g. parent |  |
+| `decision.threshold` | `number` | **Yes threshold** | `0.5` |
+| `decision.yes_means` | `string` | **Yes means** |  |
+| `decision.yes_no` | `array` | **Yes/No questions** |  |
+| `decision_routmy.profile` | `string` | **Model** | `"jev-latest"` |
+
+### Superagent Security-One (System One) (`services.superagent.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `decision.apikey` | `string` | **API Key** | `""` |
+| `decision.levels` | `string` | **Levels**<br/>One per line, level 0 first; describe the situation, not a degree |  |
+| `decision.min_confidence` | `number` | **Minimum confidence**<br/>Below this the answer is 'uncertain'. Confidence is not comparable across backends. | `0` |
+| `decision.model` | `string` | **Model**<br/>Model name as served by the backend |  |
+| `decision.name` | `string` | **Name**<br/>Question name; the Gate refers to it (lowercase, digits, _) |  |
+| `decision.no_means` | `string` | **No means** |  |
+| `decision.options` | `string` | **Options**<br/>One per line: value \| optional description |  |
+| `decision.pick_one` | `array` | **Pick-one questions** |  |
+| `decision.question` | `string` | **Question**<br/>Phrase it so a high value means yes |  |
+| `decision.rubric` | `array` | **Rubric questions** |  |
+| `decision.serverbase` | `string` | **Server URL**<br/>Base URL; /v1/systemone is appended |  |
+| `decision.state_metadata` | `string` | **Metadata to include**<br/>Metadata keys (one per line) sent alongside the content, e.g. parent |  |
+| `decision.threshold` | `number` | **Yes threshold** | `0.5` |
+| `decision.yes_means` | `string` | **Yes means** |  |
+| `decision.yes_no` | `array` | **Yes/No questions** |  |
+| `decision_superagent.profile` | `string` | **Model** | `"security-one"` |
 
 ### TypeSafe Jev (`services.typesafe.json`)
 

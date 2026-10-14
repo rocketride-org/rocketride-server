@@ -317,3 +317,12 @@ def test_single_attempt_never_sleeps_or_retries():
 def test_backoff_is_capped_at_sixty_seconds():
     client = SystemOneClient('http://x', transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
     assert client._delay(None, 10) == 60.0
+
+
+def test_request_id_falls_back_to_the_systemone_header():
+    def handler(request):
+        return httpx.Response(200, json=OK, headers={'x-systemone-request-id': 'sa-123'})
+
+    client = _client(handler)
+    client.decide('m', 'hello', {})
+    assert client.last_request_id == 'sa-123'
