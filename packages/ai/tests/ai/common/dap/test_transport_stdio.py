@@ -353,6 +353,17 @@ async def test_dbg_message_parses_all_fields():
 
 
 @pytest.mark.asyncio
+async def test_dbg_leave_detail_survives_parsing():
+    """A node's detail inside a leave trace reaches the apaevt_trace body untouched."""
+    trace = {'lane': 'text', 'result': 'continue', 'detail': {'outcome': 'blocked', 'conditions': []}}
+    events, _ = await _drive('>DBG*LEAVE*1*3*gate_1*' + json.dumps(trace))
+    event = _single_event(events)
+    assert event['event'] == 'apaevt_trace'
+    assert event['body']['op'] == 'leave'
+    assert event['body']['trace'] == trace
+
+
+@pytest.mark.asyncio
 async def test_dbg_message_invalid_trace_json_is_dropped_silently():
     """If the trace blob is not valid JSON, trace is replaced with {}."""
     raw = '>DBG*STEP*A*B*pipe-1*not-json'

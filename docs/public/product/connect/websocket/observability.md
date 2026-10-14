@@ -178,7 +178,7 @@ component's entry and exit with its lane data and any error.
   op: "begin" | "enter" | "leave" | "end",
   pipes: string[],                         // current component stack for this pipe
   component?: string,                      // component this op refers to (on "leave", the leaving one) — pair enter/leave by identity, not stack position
-  trace: { lane?: string, data?: object, result?: string, error?: string },
+  trace: { lane?: string, data?: object, result?: string, error?: string, detail?: object },
   result?: PIPELINE_RESULT,                // on op === "end", level >= summary
   project_id: string,
   source: string
@@ -187,6 +187,12 @@ component's entry and exit with its lane data and any error.
 
 `trace` is free-form and varies by node and trace level, store it as JSON, don't
 flatten it.
+
+`detail` appears only on `leave` events, from trace level `metadata` up. The node
+defines it, e.g. a Gate records its outcome and each condition's answer and match.
+Python nodes always report `result: "continue"` when they don't fail, even when
+they hold an item back, so read a node's own `detail` (such as the Gate's
+`detail.outcome`) to learn what it decided.
 
 The lifecycle lanes (`open`, `closing`, `close`) are dispatched from the pipe head in
 dependency order — `closing`/`close` upstream-first, `open` downstream-first — so their

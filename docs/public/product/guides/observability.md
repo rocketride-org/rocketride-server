@@ -53,7 +53,7 @@ gets recorded (and emitted live as flow events):
 | Level | Records | Cost |
 | --- | --- | --- |
 | `none` | Lifecycle, status, console only — **no traces** | None |
-| `metadata` | Component enter/leave, object identities | Minimal |
+| `metadata` | Component enter/leave, object identities, plus any node-supplied `detail` on leave events | Minimal |
 | `summary` | Above, plus lane writes and final results | Modest — the debugging sweet spot |
 | `full` | Everything, entire payloads inlined (including images) | Can slow runs and swell the log |
 

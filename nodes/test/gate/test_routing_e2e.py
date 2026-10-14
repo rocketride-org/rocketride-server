@@ -233,10 +233,11 @@ def lane_entered(events: list[dict], component: str, lane: str) -> bool:
 
 
 async def test_text_gate_trace_shows_which_gates_forwarded():
-    """Each Gate sees every text item; only a passing Gate's sink is entered.
+    """Each Gate sees every text item; only a passing Gate's sink is entered, and its detail says why.
 
     The engine reports a blocked Python node's leave as ``continue`` (``call.hpp`` swallows the
-    ``PreventDefault``), so a block shows as the downstream sink never being entered.
+    ``PreventDefault``), so a block shows as the downstream sink never being entered and as the
+    Gate's ``detail.outcome``.
     """
     with FakeSystemOne() as fake:
         sends = [(name, text, 'text/plain') for name, (text, _) in EMAILS.items()]
@@ -252,6 +253,15 @@ async def test_text_gate_trace_shows_which_gates_forwarded():
             assert forwarded == (lane_name in expected), (
                 f'{name}/{gate_id}: forwarded={forwarded}, expected {lane_name in expected}'
             )
+            outcome = 'passed' if lane_name in expected else 'blocked'
+            for t in leaves:
+                assert t['detail']['outcome'] == outcome, f'{name}/{gate_id}: {t}'
+                for condition in t['detail']['conditions']:
+                    assert {'question', 'op', 'value', 'answer', 'from', 'matched'} <= condition.keys(), condition
+        # Detail rides only on a Gate's own leave events, never on enter events or other components.
+        for body in events:
+            if 'detail' in (body.get('trace') or {}):
+                assert body.get('op') == 'leave' and body.get('component') in LANE_GATES.values(), body
 
 
 def _docs(*texts: str) -> bytes:
@@ -295,6 +305,49 @@ async def test_documents_routing_forwards_only_passing_documents():
     assert _contents(results['partial'], 'spam_docs') == ['hello is_spam:yes', 'win cash is_spam:yes']
     assert _contents(results['all_pass'], 'spam_docs') == ['promo is_spam:yes', 'scam is_spam:yes']
     assert _contents(results['none_pass'], 'spam_docs') == []
+
+
+def _documents_leave(traces: dict[str, list[dict]], name: str) -> dict:
+    (leave,) = [t for t in gate_leaves(traces[_object_key(traces, name)], 'gate_spam') if t.get('lane') == 'documents']
+    return leave
+
+
+def _sink_entered_with(traces: dict[str, list[dict]], name: str) -> bool:
+    return lane_entered(traces[_object_key(traces, name)], 'sink_spam', 'documents')
+
+
+async def test_documents_gate_trace_detail_when_all_pass_and_when_partial():
+    with FakeSystemOne() as fake:
+        sends = [
+            ('partial', _docs('hello is_spam:yes', 'a normal note'), 'lane/documents'),
+            ('all_pass', _docs('promo is_spam:yes', 'scam is_spam:yes'), 'lane/documents'),
+        ]
+        results, traces, errors = await run_pipeline(documents_pipeline(fake.url), sends)
+    assert not errors, errors
+    all_pass = _documents_leave(traces, 'all_pass')
+    assert all_pass['detail']['outcome'] == 'passed'
+    assert all_pass['detail']['passed'] == 2 and all_pass['detail']['blocked'] == 0
+    assert _sink_entered_with(traces, 'all_pass')
+    assert _contents(results['all_pass'], 'spam_docs') == ['promo is_spam:yes', 'scam is_spam:yes']
+    partial = _documents_leave(traces, 'partial')
+    assert partial['detail']['outcome'] == 'partial'
+    assert [i['outcome'] for i in partial['detail']['items']] == ['passed', 'blocked']
+    assert _sink_entered_with(traces, 'partial')
+    assert _contents(results['partial'], 'spam_docs') == ['hello is_spam:yes']
+
+
+async def test_no_detail_without_tracing():
+    """At trace level ``none`` the Gate still routes; setTraceDetail is a no-op and no flow event carries detail.
+
+    The engine sends no flow events at this level, so the second assertion guards against detail leaking into them.
+    """
+    with FakeSystemOne() as fake:
+        results, traces, errors = await run_pipeline(
+            text_pipeline(fake.url), [('e01', EMAILS['e01'][0], 'text/plain')], trace_level='none'
+        )
+    assert not errors, errors
+    assert results['e01'].get('spam')  # routing is unaffected
+    assert not any('detail' in (body.get('trace') or {}) for events in traces.values() for body in events)
 
 
 def anomaly_pipeline() -> dict:

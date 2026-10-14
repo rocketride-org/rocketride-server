@@ -601,6 +601,10 @@ class IFilterInstance(IServiceFilterInstance, Protocol):
         """Send a real-time SSE event to the UI for this pipe."""
         ...
 
+    def setTraceDetail(self, detail: Dict[str, Any]) -> None:
+        """Attach ``detail`` to the current lane call's leave trace event (trace level ``metadata`` and up)."""
+        ...
+
 
 # =========================================================================
 # Media lane normalization
@@ -1047,6 +1051,14 @@ class IInstanceBase:
     def preventDefault(self) -> None:
         """Prevent the default action from occurring."""
         raise APERR(Ec.PreventDefault, 'No default to prevent')
+
+    def setTraceDetail(self, detail: Dict[str, Any]) -> None:
+        """Attach ``detail`` to this lane call's leave trace event (shown from trace level ``metadata`` up).
+
+        Call it during a lane method such as ``writeText``; the last call in a lane call wins, and
+        the engine clears it after the call's leave event. Keep it small and JSON-serializable.
+        """
+        self.instance.setTraceDetail(detail)
 
     def invoke(self, *args, **kwargs) -> Any:
         """Handle an incoming invoke call from the engine control-plane.

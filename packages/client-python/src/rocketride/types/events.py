@@ -278,7 +278,9 @@ class TASK_EVENT_FLOW(TypedDict, total=False):
     id: int  # REQUIRED - Pipe index within the pipeline
     op: str  # REQUIRED - Operation type: 'begin', 'enter', 'leave', 'end'
     pipes: List[str]  # REQUIRED - Component names in the current pipe's execution path
-    trace: dict  # REQUIRED - Trace data: lane, input/output data, result, error
+    # REQUIRED - Trace data: lane, input/output data, result, error, and detail
+    # (node-defined; leave events only; trace level metadata and up)
+    trace: dict
     result: PIPELINE_RESULT  # Present when op == 'end' and trace level >= summary
     project_id: str  # REQUIRED - Project identifier
     source: str  # REQUIRED - Source component identifier (e.g. "chat_1")

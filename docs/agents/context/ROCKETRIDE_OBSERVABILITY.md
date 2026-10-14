@@ -334,7 +334,8 @@ subscription time.
     lane?: string,
     data?: object,                             // input/intermediate data
     result?: string,                           // output data / serialized result
-    error?: string
+    error?: string,
+    detail?: object                            // node-defined; leave events only; level >= metadata
   },
   result?: PIPELINE_RESULT,                    // present when op==="end" and level >= summary
   project_id: string,
@@ -344,6 +345,11 @@ subscription time.
 
 This is the data that lets you reconstruct _why_ a pipeline produced what it
 produced: each component entry/exit with its lane data and any error.
+
+`detail` is set by the node itself, e.g. a Gate records `detail.outcome`
+(`passed`, `partial` or `blocked`) and each condition's answer and match. A
+Python node's `result` is `continue` whenever it doesn't fail, even when it
+held an item back, so read `detail` to learn what it decided.
 
 ### 5.4 `apaevt_sse`: node-to-UI passthrough (subscribe to `SSE`)
 

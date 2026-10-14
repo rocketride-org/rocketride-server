@@ -127,6 +127,10 @@ Error Binder::callMethods(
         pThis->m_pInstance->pipe->debugger.debugBreak(pThis->m_pInstance,
                                                       pInstance, methodName);
 
+        // A node may attach detail to this call (setTraceDetail); never let
+        // an earlier call's detail leak in
+        pInstance->traceDetail = json::Value();
+
         // Call the function
         if (ccode = callback(pInstance)) {
             // If we got an error allow the debugger to handle it
@@ -155,11 +159,16 @@ Error Binder::callMethods(
                     leaveTrace["result"] = "error";
                     leaveTrace["error"] = ccode.message();
                 }
+
+                // Add any detail the node attached to this call
+                if (!pInstance->traceDetail.isNull())
+                    leaveTrace["detail"] = pInstance->traceDetail;
             }
 
             // Signal to the debugger we are leaving a level
             pThis->m_pInstance->pipe->debugger.debugLeave(pInstance,
                                                           leaveTrace);
+            pInstance->traceDetail = json::Value();
 
             // Stop on the first error
             break;
@@ -170,11 +179,16 @@ Error Binder::callMethods(
                 leaveTrace["lane"] = methodName.c_str();
                 leaveTrace["result"] = "continue";
                 serializeTrace(traceLevel, leaveTrace["data"]);
+
+                // Add any detail the node attached to this call
+                if (!pInstance->traceDetail.isNull())
+                    leaveTrace["detail"] = pInstance->traceDetail;
             }
 
             // Signal to the debugger we are leaving a level
             pThis->m_pInstance->pipe->debugger.debugLeave(pInstance,
                                                           leaveTrace);
+            pInstance->traceDetail = json::Value();
         }
     }
     return ccode;
