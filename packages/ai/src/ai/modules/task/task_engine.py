@@ -690,10 +690,6 @@ class Task(DAPBase):
         """
         return resolve_pipeline_env(pipeline, self._env)
 
-    # Providers that connect to a RocketRide cloud database and therefore need
-    # their DSNs delivered to the task subprocess.
-    _ROCKETRIDE_DB_PROVIDERS = DB_PROVIDERS
-
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
     # The node prefixes it with 'RocketRide cloud database is not available
@@ -728,7 +724,7 @@ class Task(DAPBase):
         components = pipeline.get('components') or []
         targets: List[Tuple[str, str]] = []
         for component in components:
-            if not isinstance(component, dict) or component.get('provider') not in self._ROCKETRIDE_DB_PROVIDERS:
+            if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
                 continue
             try:
                 pair = db_target(Config.getNodeConfig(component['provider'], component.get('config') or {}))
