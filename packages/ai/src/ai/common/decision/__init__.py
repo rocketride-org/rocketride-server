@@ -29,6 +29,7 @@ from .contract import (
     UNCERTAIN,
     DecisionError,
     NotDecided,
+    check_questions,
     fingerprint,
     preview,
     record,
@@ -36,12 +37,14 @@ from .contract import (
     snapshot,
     stamp,
 )
+from .recorder import DecisionRecorder, component_id
 from .rules import OPS, Condition, Rule, RuleConfigError, check, evaluate, parse_rule
 
 __all__ = [
     'Condition',
     'DECISIONS_KEY',
     'DecisionError',
+    'DecisionRecorder',
     'NotDecided',
     'OK',
     'OPS',
@@ -50,6 +53,8 @@ __all__ = [
     'RuleConfigError',
     'UNCERTAIN',
     'check',
+    'check_questions',
+    'component_id',
     'evaluate',
     'fingerprint',
     'parse_rule',

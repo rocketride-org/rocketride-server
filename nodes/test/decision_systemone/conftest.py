@@ -118,9 +118,10 @@ def systemone(monkeypatch):
     config.Config = SimpleNamespace(getNodeConfig=lambda *_a, **_k: {})
     for name, module in {'rocketlib': rocketlib, 'ai.common.schema': schema, 'ai.common.config': config}.items():
         monkeypatch.setitem(sys.modules, name, module)
-    for name in ('ai.common.systemone.instance_base', 'ai.common.systemone.global_base'):
+    for name in ('ai.common.decision.writer', 'ai.common.systemone.instance_base', 'ai.common.systemone.global_base'):
         monkeypatch.delitem(sys.modules, name, raising=False)
     helpers = SimpleNamespace(
+        writer=importlib.import_module('ai.common.decision.writer'),
         instance_base=importlib.import_module('ai.common.systemone.instance_base'),
         global_base=importlib.import_module('ai.common.systemone.global_base'),
         warnings=warnings,
@@ -128,11 +129,15 @@ def systemone(monkeypatch):
     )
     yield helpers
     # The modules were imported against the stubs; don't let them outlive them on this worker.
-    package = sys.modules.get('ai.common.systemone')
-    for name in ('instance_base', 'global_base'):
-        sys.modules.pop(f'ai.common.systemone.{name}', None)
-        if package is not None and hasattr(package, name):
-            delattr(package, name)
+    for package_name, names in (
+        ('ai.common.decision', ('writer',)),
+        ('ai.common.systemone', ('instance_base', 'global_base')),
+    ):
+        package = sys.modules.get(package_name)
+        for name in names:
+            sys.modules.pop(f'{package_name}.{name}', None)
+            if package is not None and hasattr(package, name):
+                delattr(package, name)
 
 
 @pytest.fixture

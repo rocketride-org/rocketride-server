@@ -98,7 +98,7 @@ def record(response, group_id: str, *, writer: str, questions: dict, item: dict,
         raise DecisionError('group_id must be a non-empty string (the writer component id)')
     if not isinstance(writer, str) or not writer:
         raise DecisionError('writer must be a non-empty string (the writer node type)')
-    _check_questions(questions)
+    check_questions(questions)
     if not isinstance(item, dict):
         raise DecisionError('item must be a dict')
     item = _round(_plain(item))
@@ -225,7 +225,8 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _check_questions(questions) -> None:
+def check_questions(questions) -> None:
+    """Raise DecisionError unless ``questions`` is a non-empty ``{name: {'kind': ...}}`` header."""
     if not isinstance(questions, dict) or not questions:
         raise DecisionError('questions must be a non-empty dict')
     for name, definition in questions.items():
@@ -233,6 +234,9 @@ def _check_questions(questions) -> None:
             raise DecisionError(f'question name {name!r} must be a non-empty string')
         if not isinstance(definition, dict) or not isinstance(definition.get('kind'), str) or not definition['kind']:
             raise DecisionError(f'question {name!r} needs a "kind"')
+
+
+_check_questions = check_questions
 
 
 def _check_answer(name: str, answer) -> None:

@@ -295,3 +295,45 @@ async def test_documents_routing_forwards_only_passing_documents():
     assert _contents(results['partial'], 'spam_docs') == ['hello is_spam:yes', 'win cash is_spam:yes']
     assert _contents(results['all_pass'], 'spam_docs') == ['promo is_spam:yes', 'scam is_spam:yes']
     assert _contents(results['none_pass'], 'spam_docs') == []
+
+
+def anomaly_pipeline() -> dict:
+    """Webhook (documents) -> anomaly_detector -> Gate (is_anomalous equals yes) -> documents sink."""
+    return {
+        'project_id': str(uuid.uuid4()),
+        'source': 'webhook_1',
+        'components': [
+            WEBHOOK,
+            {
+                'id': 'anomaly_detector_1',
+                'provider': 'anomaly_detector',
+                'config': {'profile': 'z_score'},
+                'input': [{'lane': 'documents', 'from': 'webhook_1'}],
+            },
+            gate(
+                'gate_anomaly',
+                [{'question': 'is_anomalous', 'op': 'equals', 'value': 'yes'}],
+                source='anomaly_detector_1',
+                lane='documents',
+            ),
+            sink('sink_anomaly', 'response_documents', 'anomalies', source='gate_anomaly', lane='documents'),
+        ],
+    }
+
+
+def _metric_docs(values: list[float]) -> bytes:
+    return json.dumps(
+        [
+            {'page_content': f'reading {i}', 'metadata': {'objectId': 'obj', 'chunkId': i, 'value': v}}
+            for i, v in enumerate(values)
+        ]
+    ).encode('utf-8')
+
+
+async def test_anomaly_detector_routes_through_a_gate():
+    values = [10, 12, 10, 12, 10, 12, 10, 12, 10, 1000]
+    results, _, errors = await run_pipeline(anomaly_pipeline(), [('readings', _metric_docs(values), 'lane/documents')])
+    assert not errors, errors
+    assert _contents(results['readings'], 'anomalies') == ['reading 9']
+    group = results['readings']['decisions']['anomaly_detector_1']
+    assert group['writer'] == 'anomaly_detector' and len(group['items']) == 10

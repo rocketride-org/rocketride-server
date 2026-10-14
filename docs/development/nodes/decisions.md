@@ -15,7 +15,7 @@ The System One nodes are the first writers (see [System One as a worked example]
 
 ## The format
 
-This example has two System One groups (one on text, one on chunks) and one writer that isn't System One. Notes on the fields follow the block.
+This example has two System One groups (one on text, one on chunks) and one anomaly_detector group. Notes on the fields follow the block.
 
 ```jsonc
 {
@@ -62,18 +62,25 @@ This example has two System One groups (one on text, one on chunks) and one writ
   },
   "anomaly_detector_1": {
     "writer": "anomaly_detector",
-    "questions": { "anomaly_score": { "kind": "number" } },
+    "questions": {
+      "is_anomalous": { "kind": "yes_no", "values": ["yes", "no"] },
+      "severity":     { "kind": "rubric", "levels": ["normal", "warning", "critical"], "values": ["normal", "warning", "critical"] },
+      "score":        { "kind": "number" }
+    },
     "items": [
-      { "lane": "table", "status": "ok", "item": { "table_index": 0, "fingerprint": "sha256:9f2c…" },
-        "preview": "| Date | Amount | Status |…",
-        "answers": { "anomaly_score": { "answer": 0.93 } } }
+      { "lane": "documents", "status": "ok", "item": { "chunkId": 9 },
+        "preview": "reading 9",
+        "answers": {
+          "is_anomalous": { "answer": "yes" },
+          "severity":     { "answer": "critical", "index": 2 },
+          "score":        { "answer": 2.9938 } } }
     ]
   }
 }
 }
 ```
 
-The `anomaly_detector_1` group is an illustration of a writer that isn't System One. No such node exists yet. Notes on the fields:
+The `anomaly_detector_1` group shows a writer that isn't System One: it decides on the documents lane with no model. Notes on the fields:
 
 - `writer` is the node type. The key (`decision_ollama_1`) is the component id.
 - `usage` is free-form. Numbers in it are added up across writes.
@@ -98,11 +105,13 @@ Floats are rounded to 4 decimal places when recorded.
 
 | kind | `answer` | Notes |
 |---|---|---|
-| `yes_no` | `"yes"` or `"no"` | System One |
+| `yes_no` | `"yes"` or `"no"` | System One, anomaly_detector. Always the strings, never booleans |
 | `pick_one` | one of the question's `options` | System One |
-| `rubric` | one of the question's `levels`, plus `index` | System One |
-| `number` | a number | for example an anomaly score or a count |
+| `rubric` | one of the question's `levels`, plus `index` | System One, anomaly_detector |
+| `number` | a number | anomaly_detector's score; for example also a count |
 | `label` | a free string | for example a language code |
+
+Answers to a `yes_no` question are the strings `yes` and `no`, never booleans: a Gate's `equals yes` compares strings.
 
 If your answers have an order (low, medium, high), set `index` to the position. The Gate's `gt`, `gte`, `lt`, `lte` and `between` operators compare `index` when it exists, and the `answer` itself only when it is a number.
 
@@ -111,7 +120,7 @@ If your answers have an order (low, medium, high), set `index` to the position. 
 These mean the same thing for every writer.
 
 - **`answer: "uncertain"`.** The writer answered, but below its own confidence bar. It may add `best`, the answer it would have given. A Gate treats `uncertain` as an ordinary value: `equals yes` is false and `not_equals yes` is true.
-- **`status` other than `"ok"`.** It means "no decision for this item, and here is why". System One uses `"too_long"`. Another writer might use `"skipped"` or `"unsupported"`. **Every Gate blocks an item with a non-`ok` status**, whatever the rule (including `not_equals`), and logs the status as a warning. Don't put `answers` on such an item.
+- **`status` other than `"ok"`.** It means "no decision for this item, and here is why". System One uses `"too_long"`. anomaly_detector uses `"unsupported"` for a document it could not score: no metadata, or no usable metric (missing, not a number, or not finite). Another writer might use `"skipped"`. **Every Gate blocks an item with a non-`ok` status**, whatever the rule (including `not_equals`), and logs the status as a warning. Don't put `answers` on such an item.
 
 ## Linking an item to its decision
 
@@ -135,39 +144,82 @@ In v1 the only decision writer (System One) reads text-based lanes, so a Gate on
 
 ## How to write decisions
 
-Import from `ai.common.decision`. It has no dependency on System One or on `rocketlib`.
+Import from `ai.common.decision`. It has no dependency on System One or on `rocketlib`. There are two ways in.
+
+### An existing node: `DecisionRecorder`
+
+Use this when the node already makes a judgement and you want it to be routable without changing the node's shape. Build one recorder in `open()`, and call it where the node already judges. It owns the contract: group id, writer type, the questions header, stamping and fingerprints.
+
+| Method | Use it for |
+|---|---|
+| `record_document(doc, answers, usage=None)` | One document. Stamps `doc.metadata.decision_refs`. The doc needs metadata. |
+| `record_object(lane, answers, preview=None, usage=None, extra=None)` | One whole-object decision (text, questions, answers). |
+| `record_table(table, answers, usage=None)` | One table, keyed by its fingerprint with a running `table_index`. |
+| `record_status(lane, status, doc=None, table=None, preview=None, size=None, extra=None)` | "No decision, and why" (`too_long`, `unsupported`). Linked to `doc` or `table` when given. |
+
+Each returns the item's index in its group.
+
+The anomaly_detector node is the worked example. It declares its questions once, builds the recorder in `open()`, and records one decision per document next to the metadata it already wrote:
 
 ```python
-from ai.common.decision import fingerprint, preview, record
+QUESTIONS = {
+    'is_anomalous': {'kind': 'yes_no', 'values': ['yes', 'no']},
+    'severity': {'kind': 'rubric', 'levels': ['normal', 'warning', 'critical'], 'values': ['normal', 'warning', 'critical']},
+    'score': {'kind': 'number'},
+}
 
-QUESTIONS = {'anomaly_score': {'kind': 'number'}}
+
+def open(self, obj):
+    """Initialize instance for a new object: a fresh decision recorder."""
+    self.decisions = DecisionRecorder(self, QUESTIONS)
 
 
-def writeTable(self, table: str):
-    """Record one anomaly score for ``table``, then forward the table unchanged."""
-    # Look the path up fresh on every write. Don't keep the response between calls.
-    record(
-        self.instance.currentObject.response,
-        group_id,                          # your component id, e.g. 'anomaly_detector_1'
-        writer='anomaly_detector',         # your node type
-        questions=QUESTIONS,
-        item={
-            'lane': 'table',
-            'status': 'ok',
-            'item': {'table_index': table_index, 'fingerprint': fingerprint(table)},
-            'preview': preview(table),
-            'answers': {'anomaly_score': {'answer': score(table)}},
-        },
-    )
-    # Don't call self.instance.writeTable(). The engine forwards the table by default.
+# in writeDocuments, after the node's own metadata assignments:
+self.decisions.record_document(enriched_doc, _answers(result))
 ```
 
-For documents, record the item, then stamp the copy you forward (`from ai.common.decision import record, stamp`):
+A document with no metadata cannot carry a `decision_refs` stamp, so the node gives it fresh metadata and records it with `record_status('documents', 'unsupported', doc=...)`.
+A document with metadata but no usable numeric metric is recorded the same way, so it never passes a Gate as a confident `no`. A document with a numeric metric that is still warming up (insufficient data, zero variance) was scored, so it stays `ok`.
+
+### A node whose only job is to decide: `DecisionWriterBase`
+
+Use this when the node's whole purpose is to decide, as System One's is. The base owns the lane plumbing: it buffers text and decides once at `closing`, decides and stamps each document, records tables, questions and answers, records `too_long` instead of answering from part of an input, and forwards the data unchanged. You implement two methods:
 
 ```python
-index = record(self.instance.currentObject.response, group_id, writer=WRITER,
+from ai.common.decision.writer import Decided, DecisionWriterBase, TooLong
+
+
+class IInstance(DecisionWriterBase):
+    def questions(self) -> dict:
+        return {'is_long': {'kind': 'yes_no', 'values': ['yes', 'no']}}
+
+    def decide(self, state, lane):
+        if len(str(state)) > 100_000:
+            return TooLong({'bytes': len(str(state)), 'limit': 100_000})
+        return Decided({'is_long': {'answer': 'yes' if len(str(state)) > 500 else 'no'}})
+```
+
+`decide` returns `Decided(answers, usage=None)` or `TooLong(size)`. Raise for any other failure; it stops the object. Optional hooks, each with a sensible default:
+
+- `model()`: the model name recorded on the group.
+- `oversize(state)`: the measured size when `state` is over your limits, checked before `decide`.
+- `document_state(doc)`: the state to decide on for a document; raise `ValueError` to reject it.
+- `question_state(question)`: `(state, truncated_size_or_None)` for a question; raise `ValueError` to reject it.
+- `too_long_message(lane, size)`: the error for a whole-object input that is too long.
+- `size_text(size)`: how a size reads in messages.
+
+The recorder is available as `self.decisions` for anything the lanes don't cover. `ai.common.decision.writer` imports `rocketlib`, so import it only from node code.
+
+### Writing the contract directly
+
+Both of the above call `record`. You can call it yourself when neither fits:
+
+```python
+from ai.common.decision import fingerprint, preview, record, stamp
+
+index = record(self.instance.currentObject.response, group_id, writer='my_node',
                questions=QUESTIONS, item=item)
-stamp(doc_copy, group_id, index)
+stamp(doc_copy, group_id, index)   # documents only
 ```
 
 `record` returns the item's index in its group.
@@ -179,10 +231,16 @@ Rules:
 - **Look the path up fresh on every write.** `response['decisions']` is a live view onto the stored value. Never hold on to it, or to anything under it, across writes or across objects. `record` already does this. If you read decisions yourself, call `snapshot(response)` for a plain copy (it returns `None` when nothing is recorded).
 - **Don't remove or edit earlier items.** Item positions are ids that `decision_refs` points to.
 - **Let unchanged data forward by default.** Writing a decision doesn't change the data. For lanes you pass on as they came (text, table, questions, answers), don't call `self.instance.write*`; the engine forwards the original. For documents, forward your stamped copies with `self.instance.writeDocuments(stamped)` and then `return self.preventDefault()`, so the unstamped originals aren't forwarded as well.
-- **Use your own component id as the group id** (the `id` of `self.instance.pipeType`), so two nodes of the same type don't share a group.
+- **Use your own component id as the group id** (the `id` of `self.instance.pipeType`), so two nodes of the same type don't share a group. The recorder does this for you.
 
 ## System One as a worked example
 
-The [System One node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/decision_systemone/README.md) asks typed questions (yes/no, pick-one, rubric) with a System One model. It writes one group per node, one item per text, document, table, question or answer it decides, stamps the documents it forwards, and records `too_long` items instead of answering from part of an input. Its code is in `packages/ai/src/ai/common/systemone/`. Read it for a full writer, and read the [Gate node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/gate/README.md) for the reader.
+The [System One node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/decision_systemone/README.md) asks typed questions (yes/no, pick-one, rubric) with a System One model. It writes one group per node, one item per text, document, table, question or answer it decides, stamps the documents it forwards, and records `too_long` items instead of answering from part of an input. It subclasses `DecisionWriterBase` and overrides `questions`, `model`, `decide`, `oversize`, `document_state` (type and empty checks, the runner's state), `question_state` (fitting history and documents to the model) and `too_long_message`; the lanes themselves are the base's. Its code is in `packages/ai/src/ai/common/systemone/`. Read it for a full writer, and read the [Gate node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/gate/README.md) for the reader.
 
 For how users combine the two, see [Decisions and Gates](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/public/product/guides/decisions-and-gates.md).
+
+## Known v1 limitations
+
+- No design-time Gate dropdowns or typo checks in `validate()` or the canvas. A typo in a Gate's question name or value fails at run time (see `values` in a question header, which later work uses for this).
+- No whole-pipeline validation of Gate rules against the writers upstream.
+- anomaly_detector decides on the documents lane only. Its text lane still annotates the text and records nothing.
