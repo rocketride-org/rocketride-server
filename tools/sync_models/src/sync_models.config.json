@@ -697,6 +697,51 @@
 			"default_context_window": 131072
 		},
 		// ----------------------------------------------------------------------
+		// Atlas Cloud — the Atlas Cloud service of llm_openai_api
+		// (services.atlascloud.json). OpenAI-compatible, org-prefixed IDs. Like
+		// GMI Cloud it both runs open-weight models and resells vendor APIs, so
+		// it needs the same split treatment (see Model hosts in the README).
+		// ----------------------------------------------------------------------
+		"llm_atlascloud": {
+			"handler": "cloud",
+			"env_var": "ROCKETRIDE_ATLASCLOUD_KEY",
+			"module": "atlascloud",
+			"models_endpoint": "https://api.atlascloud.ai/v1/models",
+			"auth_header": "Authorization",
+			"auth_prefix": "Bearer",
+			"smoke_test": "chat",
+			"require_api_key": true,
+			// Same reasoning as llm_gmi_cloud: LiteLLM files these org-prefixed IDs
+			// under other hosts, so it is left out; OpenRouter stays for the proxied
+			// vendor models below.
+			"allowed_sources": ["provider", "openrouter"],
+			// Models Atlas Cloud resells rather than runs. Spelled out per family
+			// instead of a bare "openai/" so an open-weight model published under a
+			// vendor's org name (the gpt-oss case) is not mistaken for the API one.
+			"vendor_proxy_prefixes": ["openai/gpt-4", "openai/gpt-5", "openai/gpt-6", "anthropic/claude-", "google/gemini-", "xai/grok-"],
+			// The service pins its base URL, so every new profile carries it along
+			// with the same env-var key reference as the seeded ones.
+			"extra_profile_fields": {
+				"base_url": "https://api.atlascloud.ai/v1/",
+				"apikey": "${ROCKETRIDE_ATLASCLOUD_KEY}"
+			},
+			// The catalog reports output_modalities ["text"] even for the image
+			// models (openai/gpt-image-2, google/gemini-*-image), so this text-only
+			// node has to filter them out by name.
+			"model_filter": {
+				"include_prefixes": ["anthropic/", "bytedance/", "deepseek-ai/", "google/", "kwaipilot/", "meituan-longcat/", "minimaxai/", "moonshotai/", "openai/", "qwen/", "Qwen/", "tencent/", "xai/", "xiaomi/", "zai-org/"],
+				"exclude_prefixes": [],
+				"exclude_patterns": ["embed", "rerank", "guard", "tts", "whisper", "audio", "image", "video", "flux", "diffusion", "ocr"]
+			},
+			// See llm_gmi_cloud: protected until the first run's list has been reviewed.
+			"protected_profiles": [
+				["custom", "2126-04-09"],
+				["deepseek-v4-flash", "2027-04-06"],
+				["glm-5-3-flash", "2027-04-06"]
+			],
+			"default_context_window": 131072
+		},
+		// ----------------------------------------------------------------------
 		// Vision nodes — same APIs and keys as their text siblings, but a new
 		// model is added only when a source reports it accepts images
 		// (model_filter.require_capabilities), and it is checked with an image.
