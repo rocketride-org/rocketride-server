@@ -135,7 +135,7 @@
 			"title": "Database",
 			"default": "org",
 			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
-			"description": "Which RocketRide cloud database this node uses: the organization's, a team's, or your own"
+			"description": "Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty."
 		},
 		"rrvector.target": {
 			"hidden": true,
@@ -196,7 +196,12 @@
 		{
 			"section": "Pipe",
 			"title": "RocketRide Vector Store",
-			"properties": ["rrvector.profile"]
+			"properties": ["rrvector.profile"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
 		},
 		{
 			"section": "Transform",
