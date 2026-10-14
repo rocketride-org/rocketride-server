@@ -796,8 +796,8 @@ Point a team at a published version. Promotion (Staging → Production) and roll
 
 **State & runs:**
 
-- `run(projectId, sourceId, teamId): Promise<{ token?: string; version?: number }>` — start one deployed source NOW. Same trusted team dispatch the scheduler uses: the run executes as the team, carries no human identity, and who fired it lands in the audit history. The deployment must be enabled
-- `disable(projectId, teamId)` / `enable(projectId, teamId): Promise<Deployment>` — the kill switch: while disabled NOTHING runs (schedules stop firing, manual runs are refused)
+- `run(projectId, sourceId, teamId): Promise<{ token?: string; version?: number }>` — start one deployed source NOW. Same trusted team dispatch the scheduler uses: the run executes as the team, carries no human identity, and who fired it lands in the audit history. The deployment must be enabled. A manual run has no run window: it executes until the pipeline finishes or the returned `token` is terminated (the schedule's `ttl` applies to scheduled fires only), so a long-lived pipeline can keep running and billing until it finishes or is terminated; disabling the deployment refuses new runs but does not stop one already going
+- `disable(projectId, teamId)` / `enable(projectId, teamId): Promise<Deployment>` — the kill switch: while disabled nothing new runs (schedules stop firing, manual runs are refused); a run already in progress is not stopped, terminate it by token
 - `remove(projectId, teamId): Promise<Deployment>` — soft-remove one team's deployment: listings hide it, audit history and registry artifacts survive, re-deploying any version revives it
 
 **Schedules:**

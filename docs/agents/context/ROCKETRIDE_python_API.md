@@ -810,8 +810,8 @@ Point a team at a published version. Promotion (Staging to Production) and rollb
 
 #### State & Runs
 
-- `async deploy.run(project_id: str, source_id: str, team_id: str) -> dict` — start one deployed source NOW (manual trigger). The run executes as the team and carries no human identity; billing attributes to the org and team, and who fired it is recorded in the audit history. The deployment must be enabled. Returns `{'token', 'version'}`.
-- `async deploy.disable(project_id: str, team_id: str) -> Deployment` — the kill switch: NOTHING runs (schedules stop firing, manual runs are refused) until enabled again.
+- `async deploy.run(project_id: str, source_id: str, team_id: str) -> dict` — start one deployed source NOW (manual trigger). The run executes as the team and carries no human identity; billing attributes to the org and team, and who fired it is recorded in the audit history. The deployment must be enabled. Returns `{'token', 'version'}`. A manual run has no run window: it executes until the pipeline finishes or the returned token is terminated (the schedule's `ttl` applies to scheduled fires only), so a long-lived pipeline can keep running and billing until it finishes or is terminated; disabling the deployment refuses new runs but does not stop one already going.
+- `async deploy.disable(project_id: str, team_id: str) -> Deployment` — the kill switch: nothing new runs (schedules stop firing, manual runs are refused) until enabled again. A run already in progress is not stopped; terminate it by token.
 - `async deploy.enable(project_id: str, team_id: str) -> Deployment` — enable a disabled deployment.
 - `async deploy.remove(project_id: str, team_id: str) -> Deployment` — soft-remove one team's deployment. Listings hide it; the audit history and every registry artifact survive. Re-deploying any version revives it.
 

@@ -165,8 +165,14 @@ Every signed-in user gets their own instance. Start it once per session and
 keep the token; `useExisting: true` re-attaches after a reload instead of
 failing because the pipeline is already running. To run two instances for the
 same user at once, give each `use()` its own unguessable `token` (keep the
-`tk_` prefix). The pipeline ships with the app on deploy. Use this for work
-that happens when the user asks for it.
+`tk_` prefix). The instance stops by itself after about `ttl` seconds with
+no pipeline data request and no pipeline activity event (`apaevt_*`).
+The default is 15 minutes; `ttl: 0` disables the timeout. Status polling
+and raw stdout/debugger events do not reset the timer. The check runs once
+a minute, so the stop can come up to a minute early. The pipeline ships
+with the app on deploy. Use this for work that happens when the user
+asks for it; it is the default, and the right choice unless the pipeline is
+a service shared by a whole team.
 
 ### Outside the app: shared, on a schedule
 
@@ -186,16 +192,29 @@ import nightly from '../../../pipelines/nightly-report.pipe'; // identity only
 const projectId = String(nightly.project_id);
 ```
 
-Outside its schedule window there is no running instance and no token.
-That is the normal state, not an error; show the feature as offline and
-check again later. Deploying the app does not carry this pipeline, so
-deploy it on its own whenever it changes.
+When no run is active, there is no token. That is a normal state, not an
+error; show the feature as offline and check again later. A cron start and
+`ttl` do not define fixed opening hours: pipeline data requests extend a
+scheduled run's timeout, and a manual run has no timeout. Deploying the
+app does not carry this pipeline, so deploy it on its own whenever it
+changes.
+
+Deployed runs do not inherit the default development idle timeout. To
+limit a scheduled run, configure `--ttl`: it stops after approximately
+that many seconds without a pipeline data request. Emitted events do not
+reset this timer, so a long processing step can still be interrupted.
+An omitted or zero `ttl` disables the timeout. `rocketride deploy run`
+starts a manual run without a timeout, even when a schedule is set. A
+long-lived pipeline started this way can keep running and billing until
+it finishes or someone terminates it. Use a schedule with `ttl` when you
+need the automatic timeout.
 
 | | Inside the app | Outside the app |
 | --- | --- | --- |
 | Where the `.pipe` lives | in the app folder | its own project |
 | Who runs it | one instance per signed-in user | one instance for the team |
 | When it runs | when the app asks | on its schedule |
+| When it stops | finishes, is terminated, or reaches its activity timeout (`ttl`) | finishes, is terminated, or reaches a scheduled run's configured timeout; manual runs have no timeout |
 | How it deploys | with the app | separately, `rocketride deploy` |
 
 ## Next steps
