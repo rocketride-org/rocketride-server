@@ -125,7 +125,6 @@
 			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
 		},
 		"rocketridesql.scope": {
-			"hidden": true,
 			"type": "string",
 			"title": "Database",
 			"default": "org",

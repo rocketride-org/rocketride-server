@@ -131,7 +131,6 @@
 			"maximum": 1000
 		},
 		"rrvector.scope": {
-			"hidden": true,
 			"type": "string",
 			"title": "Database",
 			"default": "org",

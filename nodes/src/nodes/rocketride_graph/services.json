@@ -142,7 +142,6 @@
 			"description": "Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or read-only safety checks. Resource limits still apply. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
 		},
 		"rocketridegraph.scope": {
-			"hidden": true,
 			"type": "string",
 			"title": "Database",
 			"default": "org",
