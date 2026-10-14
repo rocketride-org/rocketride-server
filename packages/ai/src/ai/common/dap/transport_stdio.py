@@ -348,11 +348,17 @@ class TransportStdio(TransportBase):
 
             # Cancel monitoring tasks
             if self._stderr_task and not self._stderr_task.done():
-                self._stderr_task.cancel()
-                try:
-                    await self._stderr_task
-                except asyncio.CancelledError:
-                    pass
+                if self._process and self._process.returncode is not None:
+                    try:
+                        await asyncio.wait_for(self._stderr_task, timeout=CONST_TRANSPORT_PROCESS_WAIT_TIMEOUT)
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        pass
+                else:
+                    self._stderr_task.cancel()
+                    try:
+                        await self._stderr_task
+                    except asyncio.CancelledError:
+                        pass
                 self._debug_message('Cancelled stderr monitoring task')
 
             if self._stdout_task and not self._stdout_task.done():
