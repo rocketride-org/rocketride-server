@@ -132,7 +132,9 @@ database, not their own.
 Access is checked when the run starts. If the run may not use the chosen
 database, it does not start, and the error says which database and why. A
 self-hosted engine supports only Organization; Team and Personal fail at start
-because they need RocketRide cloud.
+because they need RocketRide cloud. Access is approved for the whole run, not
+each node: every node in a run can reach every database the run was approved
+for.
 
 ## Limitations
 
