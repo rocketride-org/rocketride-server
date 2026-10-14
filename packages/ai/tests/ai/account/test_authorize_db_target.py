@@ -50,3 +50,19 @@ def test_team_and_user_scopes_are_refused_by_default():
     for scope in ('team', 'user'):
         decision = asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': scope}))
         assert (decision.allowed, decision.reason) == (False, 'scope_needs_rocketride_cloud')
+
+
+def test_a_denial_is_falsy():
+    # Same as the SaaS DbDecision: a plain NamedTuple is always truthy, so
+    # `if decision:` would issue a DSN on every denial.
+    denied = asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'user'}))
+    assert not denied
+    assert asyncio.run(_Minimal().authorize_db_target(IDENTITY))
+    assert not DbDecision(False, 'any_reason', True)
+
+
+def test_an_allow_names_the_database_it_approved():
+    # Callers provision decision.owner_id: '' is the org database.
+    decision = asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'org'}))
+    assert (decision.allowed, decision.owner_id) == (True, '')
+    assert asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'team', 'team_id': 't1'})).owner_id == ''

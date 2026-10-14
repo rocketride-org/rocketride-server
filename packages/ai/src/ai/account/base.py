@@ -39,12 +39,24 @@ class DbDecision(NamedTuple):
     """Answer of ``AccountBase.authorize_db_target``.
 
     Same shape as the SaaS ``extension.saas.datacore_access.DbDecision``:
-    callers read ``.allowed`` and ``.reason`` and never import either class.
+    callers read ``.allowed``, ``.reason`` and ``.owner_id`` and never import
+    either class.
+
+    ``owner_id`` names the database an allow approved: the team or user id
+    for the team and user scopes, '' for the org database and on every
+    denial. Provision exactly that id; never re-derive the target.
+
+    Truthiness follows ``allowed``. A plain NamedTuple is always truthy, so
+    ``if decision:`` would issue a DSN on every denial; here it cannot.
     """
 
     allowed: bool
     reason: str
     audit: bool = False
+    owner_id: str = ''
+
+    def __bool__(self) -> bool:
+        return self.allowed
 
 
 class AccountBase(ABC):
@@ -364,7 +376,9 @@ class AccountBase(ABC):
                 database.
 
         Returns:
-            DbDecision(allowed, reason, audit).
+            DbDecision(allowed, reason, audit, owner_id). A denial is falsy;
+            an allow's owner_id is the id to provision ('' for the org
+            database, the only one this default allows).
         """
         scope = (target or {}).get('scope', 'org')
         if scope == 'org':
