@@ -761,7 +761,9 @@ async def test_forward_task_event_debugger_swallows_send_failure():
 
 
 def test_db_access_detects_each_provider():
-    """Any of the three RocketRide cloud DB providers triggers DSN injection."""
+    """Each of the three RocketRide cloud DB providers asks for its database
+    (the org one by default); the chat source makes the pipeline public.
+    """
     for provider in ('rocketride_sql', 'rocketride_vector', 'rocketride_graph'):
         pipeline = {'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]}
         assert Task._db_access(_task(), pipeline) == ([('org', '')], True), provider
@@ -1179,23 +1181,43 @@ async def test_failed_resolve_names_the_database_that_failed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_start_authorizes_the_resolved_pipeline(monkeypatch):
-    """A provider that only becomes a public source after ${...} expansion is
-    flagged public: start_task authorizes the pipeline it runs, not the raw
-    one (PR #2626 review).
+@pytest.mark.parametrize(
+    ('components', 'env', 'target', 'public'),
+    [
+        # A provider that only becomes a public source after expansion.
+        (
+            [{'id': 'src', 'provider': '${ROCKETRIDE_SOURCE}'}, {'id': 'db', 'provider': 'rocketride_sql'}],
+            {'ROCKETRIDE_SOURCE': 'webhook'},
+            {'scope': 'org'},
+            True,
+        ),
+        # A DB node and its target that only appear after expansion.
+        (
+            [
+                {'id': 'src', 'provider': 'tools'},
+                {
+                    'id': 'db',
+                    'provider': '${ROCKETRIDE_DB_NODE}',
+                    'config': {'scope': 'team', 'target': '${ROCKETRIDE_TEAM}'},
+                },
+            ],
+            {'ROCKETRIDE_DB_NODE': 'rocketride_graph', 'ROCKETRIDE_TEAM': 'team-9'},
+            {'scope': 'team', 'team_id': 'team-9'},
+            False,
+        ),
+    ],
+)
+async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, env, target, public):
+    """start_task authorizes the pipeline it runs, not the raw one: ${...}
+    expansion can turn a provider into a public source or a DB node, and a
+    target into an id (PR #2626 review).
     """
     import ai.modules.task.task_engine as engine
 
     calls = _fake_db_account(monkeypatch)
-    pipeline = {
-        'components': [
-            {'id': 'src', 'provider': '${ROCKETRIDE_SOURCE}', 'config': {}},
-            {'id': 'db', 'provider': 'rocketride_sql', 'config': {}},
-        ]
-    }
-    t = _env_task(pipeline=pipeline)
+    t = _env_task(pipeline={'components': components})
     t.source = 'src'
-    t._env = {'ROCKETRIDE_SOURCE': 'webhook'}
+    t._env = env
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
     t._is_restarting = False
     t._launch_args = {}
@@ -1212,11 +1234,11 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch):
     with pytest.raises(Launched):
         await Task.start_task(t)
 
-    identity, target = calls['authorize'][0]
-    assert target == {'scope': 'org'}
-    assert identity['public_endpoint'] is True
+    assert [request for _, request in calls['authorize']] == [target]
+    assert calls['authorize'][0][0]['public_endpoint'] is public
     # The task file is the resolved pipeline too: what was checked is what runs.
-    assert t._write_task_file.call_args.args[0]['components'][0]['provider'] == 'webhook'
+    written = t._write_task_file.call_args.args[0]['components']
+    assert '${' not in json.dumps(written)
 
 
 # ---------------------------------------------------------------------------
