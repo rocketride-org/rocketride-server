@@ -110,6 +110,40 @@ def evaluate(rule: Rule, answers: dict) -> bool:
     return all(results) if rule.match == 'all' else any(results)
 
 
+def check_values(condition: Condition, header: dict, *, group: str) -> str | None:
+    """Return an error message when ``condition`` asks for a value the question can never have, else None.
+
+    ``header`` is the answering group's definition of the question. Only its optional
+    ``values`` list matters. Without it there is nothing to check. ``uncertain`` is always allowed.
+    """
+    allowed = header.get('values') if isinstance(header, dict) else None
+    if not allowed or condition.op in _NO_VALUE:
+        return None
+    if condition.op in _NUMERIC or condition.op == 'between':
+        if not all(isinstance(value, str) for value in allowed):
+            return None  # numeric answers: any bound is meaningful
+        top = len(allowed) - 1
+        bounds = condition.value if condition.op == 'between' else (condition.value,)
+        for bound in bounds:
+            if not 0 <= bound <= top:
+                levels = ', '.join(f'{i}={value}' for i, value in enumerate(allowed))
+                return (
+                    f'Gate: {condition.op} {bound:g} is out of range for "{condition.question}": '
+                    f'its answers are levels 0-{top} ({group}: {levels}).'
+                )
+        return None
+    candidates = condition.value if condition.op in _LISTS else (condition.value,)
+    for value in candidates:
+        if str(value) == UNCERTAIN or any(_equals(option, value) for option in allowed):
+            continue
+        listed = ', '.join(str(option) for option in allowed)
+        return (
+            f'Gate: "{value}" is not an answer "{condition.question}" can have '
+            f'({group} answers: {listed}). Values are case-sensitive.'
+        )
+    return None
+
+
 def _parse_condition(number: int, item) -> Condition:
     where = f'condition {number}'
     if not isinstance(item, dict):

@@ -24,7 +24,7 @@
 
 import pytest
 
-from ai.common.decision.rules import Condition, Rule, RuleConfigError, check, evaluate, parse_rule
+from ai.common.decision.rules import Condition, Rule, RuleConfigError, check, check_values, evaluate, parse_rule
 
 YES = {'answer': 'yes', 'confidence': 0.9}
 UNSURE = {'answer': 'uncertain', 'best': 'yes', 'confidence': 0.1}
@@ -130,3 +130,45 @@ def test_bad_configs(config, message):
 
 def test_condition_is_hashable_and_immutable():
     assert _c('in', 'a, b') == Condition('q', 'in', ('a', 'b'))
+
+
+YES_NO = {'kind': 'yes_no', 'values': ['yes', 'no']}
+LEVELS = {'kind': 'rubric', 'levels': ['low', 'medium', 'high'], 'values': ['low', 'medium', 'high']}
+
+
+def test_check_values_accepts_listed_and_uncertain():
+    assert check_values(Condition('is_spam', 'equals', 'yes'), YES_NO, group='so_1') is None
+    assert check_values(Condition('is_spam', 'not_equals', 'uncertain'), YES_NO, group='so_1') is None
+    assert check_values(Condition('is_spam', 'in', ('yes', 'no')), YES_NO, group='so_1') is None
+
+
+def test_check_values_rejects_wrong_case_and_accepts_trimmed():
+    rule = parse_rule({'conditions': [{'question': 'is_spam', 'op': 'equals', 'value': ' yes'}]})
+    assert check_values(rule.conditions[0], YES_NO, group='so_1') is None
+    message = check_values(Condition('is_spam', 'equals', 'Yes'), YES_NO, group='so_1')
+    assert (
+        message == 'Gate: "Yes" is not an answer "is_spam" can have (so_1 answers: yes, no). Values are case-sensitive.'
+    )
+
+
+def test_check_values_checks_every_list_member():
+    header = {'kind': 'pick_one', 'values': ['billing', 'sales']}
+    message = check_values(Condition('department', 'in', ('billing', 'biling')), header, group='so_1')
+    assert message is not None and '"biling"' in message
+
+
+def test_check_values_numeric_bound_out_of_range():
+    assert check_values(Condition('urgency', 'gte', 2.0), LEVELS, group='so_1') is None
+    message = check_values(Condition('urgency', 'gte', 5.0), LEVELS, group='so_1')
+    assert (
+        message
+        == 'Gate: gte 5 is out of range for "urgency": its answers are levels 0-2 (so_1: 0=low, 1=medium, 2=high).'
+    )
+    message = check_values(Condition('urgency', 'between', (1.0, 3.0)), LEVELS, group='so_1')
+    assert message is not None and 'between 3' in message
+
+
+def test_check_values_skips_without_values_or_for_numbers_or_exists():
+    assert check_values(Condition('score', 'gt', 99.0), {'kind': 'number'}, group='a_1') is None
+    assert check_values(Condition('n', 'gt', 99.0), {'kind': 'number', 'values': [1, 2, 3]}, group='a_1') is None
+    assert check_values(Condition('is_spam', 'exists'), YES_NO, group='so_1') is None

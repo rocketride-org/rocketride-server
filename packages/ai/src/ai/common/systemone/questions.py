@@ -171,10 +171,13 @@ def describe_questions(specs: list[QuestionSpec]) -> dict:
         entry: dict = {'kind': spec.kind, 'question': spec.question}
         if spec.kind == YES_NO:
             entry['threshold'] = spec.threshold
+            entry['values'] = ['yes', 'no']
         elif spec.kind == PICK_ONE:
             entry['options'] = [value for value, _ in spec.options]
+            entry['values'] = list(entry['options'])
         else:
             entry['levels'] = list(spec.levels)
+            entry['values'] = list(spec.levels)
         if spec.min_confidence:
             entry['min_confidence'] = spec.min_confidence
         described[spec.name] = entry

@@ -34,11 +34,12 @@ from .contract import (
     preview,
     record,
     resolve,
+    resolve_hit,
     snapshot,
     stamp,
 )
 from .recorder import DecisionRecorder, component_id
-from .rules import OPS, Condition, Rule, RuleConfigError, check, evaluate, parse_rule
+from .rules import OPS, Condition, Rule, RuleConfigError, check, check_values, evaluate, parse_rule
 
 __all__ = [
     'Condition',
@@ -54,6 +55,7 @@ __all__ = [
     'UNCERTAIN',
     'check',
     'check_questions',
+    'check_values',
     'component_id',
     'evaluate',
     'fingerprint',
@@ -61,6 +63,7 @@ __all__ = [
     'preview',
     'record',
     'resolve',
+    'resolve_hit',
     'snapshot',
     'stamp',
 ]

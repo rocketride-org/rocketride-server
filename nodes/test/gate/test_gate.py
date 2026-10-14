@@ -255,3 +255,63 @@ def test_lifecycle_calls_always_continue():
     inst.open(None)
     inst.closing()
     inst.close()
+
+
+SPAM_WITH_VALUES = {'is_spam': {'kind': 'yes_no', 'values': ['yes', 'no']}}
+
+
+def _spam_with_values(inst, answer=None, status='ok'):
+    item = {'lane': 'text', 'status': status}
+    if status == 'ok':
+        item['answers'] = {'is_spam': {'answer': answer}}
+    record(
+        inst.instance.currentObject.response,
+        'so_1',
+        writer='decision_ollama',
+        questions=SPAM_WITH_VALUES,
+        item=item,
+    )
+
+
+def test_value_typo_is_a_loud_error():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}])
+    _spam_with_values(inst, 'yes')
+    with pytest.raises(DecisionError) as caught:
+        inst.writeText('hello')
+    assert 'is not an answer "is_spam" can have (so_1 answers: yes, no)' in str(caught.value)
+
+
+def test_value_typo_errors_even_when_the_item_was_not_decided():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}])
+    _spam_with_values(inst, status='too_long')
+    with pytest.raises(DecisionError, match='is not an answer'):
+        inst.writeText('hello')
+
+
+def test_valid_values_still_route():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'no'}])
+    _spam_with_values(inst, 'no')
+    assert inst.writeText('hello') is None
+
+
+def test_writer_without_values_is_not_checked():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}])
+    _spam(inst, 'yes')  # header has no values
+    with pytest.raises(Blocked):
+        inst.writeText('hello')
+
+
+def test_value_typo_raises_on_every_item_not_just_the_first():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}])
+    _spam_with_values(inst, 'yes')
+    for _ in range(2):
+        with pytest.raises(DecisionError, match='is not an answer'):
+            inst.writeText('hello')
+
+
+def test_a_passed_value_check_is_remembered_per_instance_only():
+    first, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'no'}])
+    _spam_with_values(first, 'no')
+    first.writeText('a')
+    assert first._values_checked == {(0, 'so_1')}
+    assert gate_instance.IInstance._values_checked == frozenset()

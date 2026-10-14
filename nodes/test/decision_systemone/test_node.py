@@ -44,7 +44,9 @@ def test_documents_record_one_item_each_and_forward_stamped_copies_once(node):
     assert all(not hasattr(d.metadata, 'decision_refs') for d in originals)
     g = group(node)
     assert g['writer'] == 'decision_ollama' and g['model'] == 'nimble'
-    assert g['questions'] == {'urgent': {'kind': 'yes_no', 'question': 'Is it urgent?', 'threshold': 0.5}}
+    assert g['questions'] == {
+        'urgent': {'kind': 'yes_no', 'question': 'Is it urgent?', 'threshold': 0.5, 'values': ['yes', 'no']}
+    }
     assert [i['item'] for i in g['items']] == [{'chunkId': 0}, {'chunkId': 1}]
     assert [i['answers']['urgent']['answer'] for i in g['items']] == ['yes', 'yes']
     assert g['usage'] == {'calls': 2, 'input_tokens': 14}

@@ -27,7 +27,16 @@ from __future__ import annotations
 
 from rocketlib import IInstanceBase, warning
 
-from ai.common.decision import DecisionError, NotDecided, evaluate, fingerprint, preview, resolve, snapshot
+from ai.common.decision import (
+    DecisionError,
+    NotDecided,
+    check_values,
+    evaluate,
+    fingerprint,
+    preview,
+    resolve_hit,
+    snapshot,
+)
 
 from .IGlobal import IGlobal
 
@@ -55,15 +64,19 @@ class IInstance(IInstanceBase):
     """Filters data writes; open, closing and close always continue."""
 
     IGlobal: IGlobal
+    # (condition number, group) pairs whose values already passed; replaced, never mutated, so the class default is safe.
+    _values_checked: frozenset = frozenset()
 
     def _passes(self, decisions, lane: str, text, *, refs=None, table_key=None) -> bool:
-        """Resolve every question the rule reads, then evaluate it; a non-ok item always blocks (spec 7.2)."""
+        """Resolve every question the rule reads, check its values, then evaluate; a non-ok item always blocks."""
         rule = self.IGlobal.rule
         answers = {}
         for question in rule.questions:
-            found = resolve(decisions, lane, question, refs=refs, table_key=table_key)
-            if found is None:
+            hit = resolve_hit(decisions, lane, question, refs=refs, table_key=table_key)
+            if hit is None:
                 raise DecisionError(_missing_message(question, lane, text))
+            group, found = hit
+            self._check_values(decisions, group, question)
             answers[question] = found
         # A missing decision is a wiring error and must surface even when another question blocks the item first.
         undecided = [
@@ -73,6 +86,20 @@ class IInstance(IInstanceBase):
             warning(f'Gate: blocked a {lane} item ("{preview(text)}"): {"; ".join(undecided)} for it')
             return False
         return evaluate(rule, answers)
+
+    def _check_values(self, decisions, group: str, question: str) -> None:
+        """Raise when a condition value is not an answer the group can record; remember only the pairs that passed.
+
+        A failed check is never remembered, so every later item on this (pooled) instance raises again.
+        """
+        header = ((decisions or {}).get(group) or {}).get('questions', {}).get(question, {})
+        for number, condition in enumerate(self.IGlobal.rule.conditions):
+            if condition.question != question or (number, group) in self._values_checked:
+                continue
+            message = check_values(condition, header, group=group)
+            if message:
+                raise DecisionError(message)
+            self._values_checked = self._values_checked | {(number, group)}
 
     def _gate(self, lane: str, text, **keys):
         if not self._passes(snapshot(self.instance.currentObject.response), lane, text, **keys):

@@ -337,3 +337,13 @@ async def test_anomaly_detector_routes_through_a_gate():
     assert _contents(results['readings'], 'anomalies') == ['reading 9']
     group = results['readings']['decisions']['anomaly_detector_1']
     assert group['writer'] == 'anomaly_detector' and len(group['items']) == 10
+
+
+async def test_a_gate_value_typo_fails_the_run_loudly():
+    with FakeSystemOne() as fake:
+        pipeline = text_pipeline(fake.url)
+        for component in pipeline['components']:
+            if component['id'] == 'gate_spam':
+                component['config']['conditions'] = [{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}]
+        _, _, errors = await run_pipeline(pipeline, [('e01', EMAILS['e01'][0], 'text/plain')])
+    assert 'is not an answer "is_spam" can have' in errors.get('e01', ''), errors

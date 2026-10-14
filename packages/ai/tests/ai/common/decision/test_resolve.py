@@ -24,7 +24,7 @@
 
 import pytest
 
-from ai.common.decision.contract import DecisionError, NotDecided, fingerprint, record, resolve
+from ai.common.decision.contract import DecisionError, NotDecided, fingerprint, record, resolve, resolve_hit, snapshot
 
 SPAM = {'is_spam': {'kind': 'yes_no'}}
 TOPIC = {'topic': {'kind': 'pick_one', 'options': ['billing', 'legal']}}
@@ -155,3 +155,18 @@ def test_item_level_hit_wins_over_object_level():
     decisions = _build()
     decisions['g5'] = {'writer': 'w', 'questions': TOPIC, 'items': [_ok('text', {'topic': {'answer': 'legal'}})]}
     assert resolve(decisions, 'documents', 'topic', refs={'g2': 0}) == {'answer': 'billing'}
+
+
+def test_resolve_hit_returns_the_answering_group():
+    response = {}
+    record(response, 'so_1', writer='w', questions=SPAM, item=_ok('text', {'is_spam': {'answer': 'yes'}}))
+    gid, answer = resolve_hit(snapshot(response), 'text', 'is_spam')
+    assert gid == 'so_1' and answer == {'answer': 'yes'}
+    assert resolve_hit(snapshot(response), 'text', 'missing') is None
+
+
+def test_resolve_hit_names_the_group_of_an_undecided_item():
+    response = {}
+    record(response, 'so_1', writer='w', questions=SPAM, item={'lane': 'text', 'status': 'too_long'})
+    gid, answer = resolve_hit(snapshot(response), 'text', 'is_spam')
+    assert gid == 'so_1' and answer == NotDecided(status='too_long', group='so_1')

@@ -136,8 +136,8 @@ def record(response, group_id: str, *, writer: str, questions: dict, item: dict,
     return len(response[DECISIONS_KEY][group_id]['items']) - 1
 
 
-def resolve(decisions, lane: str, question: str, *, refs=None, table_key=None):
-    """Find the answer to ``question`` for one incoming item (spec §3.4).
+def resolve_hit(decisions, lane: str, question: str, *, refs=None, table_key=None):
+    """Find the answer to ``question`` for one incoming item (spec §3.4) and the group that gave it.
 
     Args:
         decisions: A ``snapshot()`` of ``response['decisions']`` (or None).
@@ -147,8 +147,8 @@ def resolve(decisions, lane: str, question: str, *, refs=None, table_key=None):
         table_key: ``fingerprint(table)`` (table lane).
 
     Returns:
-        The answer dict, ``NotDecided`` when the matching item has a non-ok status, or None when
-        nothing answers ``question`` for this item.
+        ``(group_id, answer_or_NotDecided)``: the answer dict, or ``NotDecided`` when the matching item
+        has a non-ok status. None when nothing answers ``question`` for this item.
 
     Raises:
         DecisionError: two writers answer the same question for the item, or the match is ambiguous.
@@ -162,8 +162,14 @@ def resolve(decisions, lane: str, question: str, *, refs=None, table_key=None):
         raise DecisionError(f'"{question}" is answered by both {names}; rename one')
     gid, item = hits[0]
     if item.get('status') != OK:
-        return NotDecided(status=str(item.get('status')), group=gid)
-    return item['answers'][question]
+        return gid, NotDecided(status=str(item.get('status')), group=gid)
+    return gid, item['answers'][question]
+
+
+def resolve(decisions, lane: str, question: str, *, refs=None, table_key=None):
+    """Find the answer to ``question`` for one incoming item (spec §3.4); see ``resolve_hit``."""
+    hit = resolve_hit(decisions, lane, question, refs=refs, table_key=table_key)
+    return None if hit is None else hit[1]
 
 
 def _item_hits(groups: dict, refs, table_key) -> list:
@@ -234,6 +240,13 @@ def check_questions(questions) -> None:
             raise DecisionError(f'question name {name!r} must be a non-empty string')
         if not isinstance(definition, dict) or not isinstance(definition.get('kind'), str) or not definition['kind']:
             raise DecisionError(f'question {name!r} needs a "kind"')
+        values = definition.get('values')
+        if values is not None and (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(v, (str, int, float, bool)) for v in values)
+        ):
+            raise DecisionError(f'question {name!r}: "values" must be a non-empty list of strings, numbers or booleans')
 
 
 _check_questions = check_questions

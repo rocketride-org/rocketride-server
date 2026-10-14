@@ -374,7 +374,18 @@ def test_describe_questions_for_the_group_header():
         _RUBRIC,
     ]
     assert describe_questions(specs) == {
-        'is_spam': {'kind': 'yes_no', 'question': 'Spam?', 'threshold': 0.6},
-        'topic': {'kind': 'pick_one', 'question': 'Topic?', 'options': ['billing', 'legal'], 'min_confidence': 0.3},
-        'severity': {'kind': 'rubric', 'question': 'How urgent?', 'levels': ['low', 'medium', 'high']},
+        'is_spam': {'kind': 'yes_no', 'question': 'Spam?', 'threshold': 0.6, 'values': ['yes', 'no']},
+        'topic': {
+            'kind': 'pick_one',
+            'question': 'Topic?',
+            'options': ['billing', 'legal'],
+            'values': ['billing', 'legal'],
+            'min_confidence': 0.3,
+        },
+        'severity': {
+            'kind': 'rubric',
+            'question': 'How urgent?',
+            'levels': ['low', 'medium', 'high'],
+            'values': ['low', 'medium', 'high'],
+        },
     }

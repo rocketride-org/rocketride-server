@@ -68,7 +68,9 @@ def test_decide_returns_contract_answers_and_usage():
 def test_runner_exposes_model_specs_and_question_header():
     runner = _runner()
     assert runner.model == 'nimble' and runner.specs == SPECS
-    assert runner.questions == {'urgent': {'kind': 'yes_no', 'question': 'Is it urgent?', 'threshold': 0.5}}
+    assert runner.questions == {
+        'urgent': {'kind': 'yes_no', 'question': 'Is it urgent?', 'threshold': 0.5, 'values': ['yes', 'no']}
+    }
 
 
 def test_oversize_is_none_when_it_fits_and_a_size_when_not():

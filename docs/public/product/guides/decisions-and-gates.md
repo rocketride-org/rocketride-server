@@ -41,6 +41,10 @@ A rubric question (for example "How urgent is it?" with levels low, medium, high
 
 There is no "otherwise" output. To handle the other side of a rule, add a second Gate with the opposite rule, usually with `does not equal`.
 
+### Typos in a condition value
+
+Values are case-sensitive: `Yes` is not `yes`. If a condition asks for a value the question can never have, the Gate stops the run with a message that lists the valid answers, for example `Gate: "Yes" is not an answer "is_spam" can have (so_1 answers: yes, no). Values are case-sensitive.` A numeric condition on a rubric that is out of range (for example `≥ 5` on three levels) is reported the same way. `uncertain` is always a valid value. This check needs the node that answers the question to declare its answers, which System One and anomaly_detector do.
+
 ## Whole document vs. each chunk
 
 Where you put a System One node decides what it looks at.
@@ -87,7 +91,7 @@ If two nodes on the same path answer a question with the same name at the same l
 
 A Gate can sit on any lane. It forwards each item on the lane it arrived on, so it works on text, documents, tables, questions, answers, JSON, images, audio and video. For images, audio and video it uses the decision for the whole object, so the whole stream passes or is blocked together.
 
-In this version the only node that writes decisions is System One, and it reads text lanes only. A Gate on an image, audio, video or JSON lane therefore finds no decision to read and fails the object with a missing-decision error. Gates on those lanes are for future decision writers.
+In this version the nodes that write decisions (System One on text lanes, anomaly_detector on documents) record nothing for images, audio, video or JSON. A Gate on one of those lanes therefore finds no decision to read and fails the object with a missing-decision error. Gates on those lanes are for future decision writers.
 
 ## Seeing the decisions
 
@@ -99,7 +103,7 @@ Everything a System One node decided appears in the result under `decisions`, gr
     "decision_ollama_1": {
       "writer": "decision_ollama",
       "model": "nimble",
-      "questions": { "is_spam": { "kind": "yes_no", "question": "Is this email spam?" } },
+      "questions": { "is_spam": { "kind": "yes_no", "question": "Is this email spam?", "values": ["yes", "no"] } },
       "items": [
         { "lane": "text", "status": "ok",
           "preview": "Hi Dylan, following up on the invoice we sent…",
@@ -115,3 +119,9 @@ The `preview` is the start of the item, so you can tell which one the answer bel
 Don't name a response lane `decisions`. The name is reserved.
 
 If you are writing a node that records decisions, see [Making a node's output routable](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/development/nodes/decisions.md).
+
+## Known limitations (v1)
+
+- The Gate's Question field is free text. There are no dropdowns of the questions asked upstream.
+- A typo in a condition value is caught when the pipe runs, not in the canvas or by `validate()`.
+- There are no whole-pipeline checks that a Gate's questions are answered by a node upstream of it.

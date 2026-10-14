@@ -213,3 +213,13 @@ def test_snapshot_is_a_plain_copy():
     copy = snapshot(response)
     copy['decision_ollama_1']['items'].clear()
     assert len(response['decisions']['decision_ollama_1']['items']) == 1
+
+
+@pytest.mark.parametrize('values', [[], 'yes,no', [None], [{'a': 1}]])
+def test_values_must_be_a_non_empty_list_of_scalars(values):
+    with pytest.raises(DecisionError, match='values'):
+        _record({}, questions={'is_spam': {'kind': 'yes_no', 'values': values}})
+
+
+def test_values_of_scalars_are_accepted():
+    assert _record({}, questions={'is_spam': {'kind': 'yes_no', 'values': ['yes', 'no']}}) == 0

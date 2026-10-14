@@ -24,7 +24,7 @@ This example has two System One groups (one on text, one on chunks) and one anom
     "writer": "decision_ollama",
     "model": "nimble",
     "questions": {
-      "is_spam": { "kind": "yes_no", "question": "Is this email spam?", "threshold": 0.5 }
+      "is_spam": { "kind": "yes_no", "question": "Is this email spam?", "threshold": 0.5, "values": ["yes", "no"] }
     },
     "usage": { "calls": 1, "input_tokens": 412 },
     "items": [
@@ -37,8 +37,10 @@ This example has two System One groups (one on text, one on chunks) and one anom
     "writer": "decision_ollama",
     "model": "nimble",
     "questions": {
-      "topic":    { "kind": "pick_one", "question": "What is this about?", "options": ["billing", "legal", "other"] },
-      "severity": { "kind": "rubric",   "question": "How urgent is it?",  "levels":  ["low", "medium", "high"] }
+      "topic":    { "kind": "pick_one", "question": "What is this about?", "options": ["billing", "legal", "other"],
+                  "values": ["billing", "legal", "other"] },
+      "severity": { "kind": "rubric",   "question": "How urgent is it?",  "levels":  ["low", "medium", "high"],
+                  "values": ["low", "medium", "high"] }
     },
     "usage": { "calls": 2, "input_tokens": 1630 },
     "items": [
@@ -91,7 +93,7 @@ The `anomaly_detector_1` group shows a writer that isn't System One: it decides 
 
 | Level | Required | Optional |
 |---|---|---|
-| group | `writer` (the node type); `questions` (each with a `kind`); `items` | `model`; `usage` (any object); any question metadata (`question` text, `threshold`, `options`, `levels`, …) |
+| group | `writer` (the node type); `questions` (each with a `kind`); `items` | `model`; `usage` (any object); per question, `values`, the complete list of answers the writer can record (strings, numbers or booleans; enables the Gate's value check); any other question metadata (`question` text, `threshold`, `options`, `levels`, …) |
 | item | `lane`; `status`; `answers` when `status` is `ok` | `preview` (strongly recommended for text content); `item` (`chunkId`, `table_index`, `fingerprint`); `size`; `truncated` |
 | answer | `answer`: a string, a finite number or a boolean | `confidence` (0 to 1); `index` (an integer position, used by the numeric operators); `best` (only with `answer: "uncertain"`); anything else, such as System One's `probability`, `probabilities` and `score` |
 
@@ -114,6 +116,17 @@ Floats are rounded to 4 decimal places when recorded.
 Answers to a `yes_no` question are the strings `yes` and `no`, never booleans: a Gate's `equals yes` compares strings.
 
 If your answers have an order (low, medium, high), set `index` to the position. The Gate's `gt`, `gte`, `lt`, `lte` and `between` operators compare `index` when it exists, and the `answer` itself only when it is a number.
+
+## The Gate's value check
+
+When a question header carries `values`, the Gate checks each condition on that question against it the first time it resolves the question, and raises a pipe error if the condition can never match. The check covers `equals`, `not_equals`, `in` and `not_in` (every member of a list), and the numeric operators and `between` for questions whose `values` are all strings (the bound must be a level position from 0 to the last level). `uncertain` is always allowed, and `exists` and `not_exists` are never checked. A writer that declares no `values` is not checked. The check runs even when the item itself was not decided (for example `too_long`). Messages look like:
+
+```
+Gate: "Yes" is not an answer "is_spam" can have (so_1 answers: yes, no). Values are case-sensitive.
+Gate: gte 5 is out of range for "urgency": its answers are levels 0-2 (so_1: 0=low, 1=medium, 2=high).
+```
+
+Values are case-sensitive. Surrounding spaces in a condition value are trimmed first. Declare `values` for any question whose answers come from a closed set.
 
 ## Reserved values
 
@@ -140,7 +153,7 @@ Separately, if two different writers answer the same question name for the same 
 
 Per-item links for image, audio and video streams don't exist yet. Those lanes use the object-level decision.
 
-In v1 the only decision writer (System One) reads text-based lanes, so a Gate on an image, audio, video or json lane has no decision to read and fails the object. Those lanes are for future writers that record an object-level decision before the item arrives.
+In v1 the decision writers (System One on text-based lanes, anomaly_detector on the documents lane) record nothing for image, audio, video or json items, so a Gate on one of those lanes has no decision to read and fails the object. Those lanes are for future writers that record an object-level decision before the item arrives.
 
 ## How to write decisions
 
@@ -241,6 +254,6 @@ For how users combine the two, see [Decisions and Gates](https://github.com/rock
 
 ## Known v1 limitations
 
-- No design-time Gate dropdowns or typo checks in `validate()` or the canvas. A typo in a Gate's question name or value fails at run time (see `values` in a question header, which later work uses for this).
+- No design-time Gate dropdowns or typo checks in `validate()` or the canvas. A typo in a Gate's question name or value fails at run time. A value is checked only when the writer declares `values` in its question header.
 - No whole-pipeline validation of Gate rules against the writers upstream.
 - anomaly_detector decides on the documents lane only. Its text lane still annotates the text and records nothing.
