@@ -34,6 +34,7 @@ import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
 import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, EMPTY_FILE_SETTLE_MS } from '../shared/util/pipeFileDecision';
 import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
+import { SerialQueue } from '../shared/util/serialQueue';
 import { getProjectProvider } from '../extension';
 import { scanWorkspaceApps, appIconDataUri } from '../appdev/appScan';
 import type { ScannedApp } from '../appdev/appScan';
@@ -86,6 +87,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
+	/**
+	 * Created files are handled one at a time, behind the initial load. Each
+	 * handler judges its file against parsedFiles and refreshes parsedFiles
+	 * afterwards, so two running side by side would each see a cache without
+	 * the other's file, and a project_id the two share would go unreported.
+	 */
+	private createdFileQueue = new SerialQueue();
 
 	// ── App Builder state ────────────────────────────────────────────────────
 	// Cached workspace scan (re-run on .rrapp / package.json events) and the
@@ -118,7 +126,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	constructor(private readonly extensionUri: vscode.Uri) {
 		this.setupFileWatching();
 		this.setupEventListeners();
-		this.loadPipelineFiles();
+		// First on the created-file queue: no created file is judged against a
+		// cache the initial load is still filling.
+		void this.createdFileQueue
+			.enqueue(() => this.loadPipelineFiles())
+			.catch((error) => {
+				this.logger.error(`Initial pipeline file load failed (${error instanceof Error ? error.message : String(error)}).`);
+			});
 		void this.rescanApps();
 	}
 
@@ -221,11 +235,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 		this.disposables.push(
 			watcherPipe,
-			watcherPipe.onDidCreate((uri) => this.handleFileCreated(uri)),
+			watcherPipe.onDidCreate((uri) => this.enqueueCreatedFile(uri)),
 			watcherPipe.onDidDelete((uri) => this.handleFileDeleted(uri)),
 			watcherPipe.onDidChange((uri) => this.handleFileChanged(uri)),
 			watcherPipeJson,
-			watcherPipeJson.onDidCreate((uri) => this.handleFileCreated(uri)),
+			watcherPipeJson.onDidCreate((uri) => this.enqueueCreatedFile(uri)),
 			watcherPipeJson.onDidDelete((uri) => this.handleFileDeleted(uri)),
 			watcherPipeJson.onDidChange((uri) => this.handleFileChanged(uri))
 		);
@@ -305,12 +319,32 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
+	 * Queues a created .pipe file for handleFileCreated. Files created together
+	 * (a checkout, a copied folder) arrive as a burst of events; handled side by
+	 * side, each would be judged against a cache that holds none of the others.
+	 * A handler that fails is logged and does not hold up the next one.
+	 */
+	private enqueueCreatedFile(uri: vscode.Uri): void {
+		void this.createdFileQueue
+			.enqueue(() => this.handleFileCreated(uri))
+			.catch((error) => {
+				this.logger.error(`Pipeline ${vscode.workspace.asRelativePath(uri)}: create handling failed (${error instanceof Error ? error.message : String(error)}).`);
+			});
+	}
+
+	/**
 	 * Handles a newly created .pipe file. A genuinely new, empty file gets the
 	 * starter skeleton and a pipeline without a project_id gets one; see
-	 * reconcileProjectId for what the watcher may and may not write.
+	 * reconcileProjectId for what the watcher may and may not write. Runs on
+	 * createdFileQueue, one file at a time and after the initial load.
 	 */
 	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
+		// The queue can hold a file past dispose(), and dispose() can land during
+		// the settle wait inside reconcileProjectId; a disposed provider has
+		// nothing to refresh.
+		if (this.disposed) return;
 		await this.reconcileProjectId(uri, 'created');
+		if (this.disposed) return;
 		await this.loadPipelineFiles();
 	}
 
@@ -632,17 +666,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// PIPELINE FILE LOADING
 	// =========================================================================
 
-	/** Scans the workspace for .pipe / .pipe.json files, parses them, and updates the webview. */
+	/**
+	 * Scans the workspace for .pipe / .pipe.json files, parses them, and updates
+	 * the webview. The cache is replaced in one assignment once every file is
+	 * parsed: the refresh button and a services update reload outside the
+	 * created-file queue, and a handler deciding during such a reload must see
+	 * the previous cache whole, not one being refilled.
+	 */
 	private async loadPipelineFiles(): Promise<void> {
 		const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
 		const files = [...pipeFiles, ...pipeJsonFiles];
 
-		this.parsedFiles.clear();
-
+		const parsed = new Map<string, ParsedPipelineFile>();
 		for (const uri of files) {
-			const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
-			this.parsedFiles.set(uri.fsPath, parsedFile);
+			parsed.set(uri.fsPath, await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap()));
 		}
+		this.parsedFiles = parsed;
 
 		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', files.length === 0);
 		this.sendEntriesUpdate();
