@@ -230,8 +230,9 @@ jobs:
             org.opencontainers.image.revision=${{ steps.revision.outputs.sha }}
 
       # Before signing, as for the engine image: a node image whose engine is
-      # dumpable, whose shipped constraints a container rejects, or whose cache
-      # cannot install a node offline should not acquire a signature.
+      # dumpable, whose shipped constraints a container rejects, whose cache
+      # cannot install a node offline, or whose crash leaves no minidump to
+      # copy out should not acquire a signature.
       - name: Check the node image
         env:
           DIGEST: ${{ steps.node.outputs.digest }}
@@ -240,6 +241,7 @@ jobs:
           set -euo pipefail
           docker pull "${IMAGE}@${DIGEST}"
           sh docker/test-node-image.sh "${IMAGE}@${DIGEST}"
+          sh docker/test-node-crash-dump.sh "${IMAGE}@${DIGEST}"
 
       - name: Sign node image with cosign
         env:

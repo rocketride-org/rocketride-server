@@ -28,18 +28,21 @@ The ``DockerLauncher`` runs against a fake CLI that records the argv of every
 command and returns canned output and exit codes; no daemon is needed. Pinned
 here: the five-command lifecycle, ``create -i`` and never ``-t``, the task file
 as a tar stream, the address in both modes, the environment as names only, the
-exit code from ``docker wait``, ``rm -f`` on a failure at any step, the startup
-sweep once per process, the store mount and its refusals, and the sampler.
+exit code from ``docker wait``, ``rm -f`` on a failure at any step, a crashed
+task's dumps copied out before every ``rm -f``, the startup sweep once per
+process, the store mount and its refusals, and the sampler.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import os
 import sys
 import tarfile
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -125,6 +128,8 @@ class FakeCli:
         # What `inspect --format {{.State.Status}}` answers, in turn; the last one sticks
         self.states = ['running']
         self.networks = json.dumps({'bridge': {'IPAddress': '172.17.0.5'}})
+        # What `cp <container>:<path> -` streams, by path: a tar archive, or a failed CliResult
+        self.archives = {}
 
     def _inspect(self, args):
         """Answer the two inspect queries the launcher makes."""
@@ -142,6 +147,23 @@ class FakeCli:
         if check and result.returncode != 0:
             raise DockerError(f'docker {args[0]} failed (exit {result.returncode}): {result.stderr}')
         return result
+
+    async def save(self, args, path, timeout=None, max_bytes=None):
+        """Write the archive ``archives`` holds for the path, or answer as the daemon does for a missing one."""
+        self.calls.append(SimpleNamespace(args=list(args), stdin=None, env=None))
+        source = args[1].split(':', 1)[1]
+        archive = self.archives.get(source)
+        if archive is None:
+            return CliResult(1, '', f'Error response from daemon: Could not find the file {source} in container')
+        if isinstance(archive, CliResult):
+            return archive
+        with open(path, 'wb') as f:
+            # As DockerCli.save does: a stream past max_bytes is cut off and fails
+            if max_bytes is not None and len(archive) > max_bytes:
+                f.write(archive[:max_bytes])
+                return CliResult(-1, '', f'stopped past {max_bytes} bytes')
+            f.write(archive)
+        return CliResult(0, '', '')
 
     async def attach(self, args):
         """Record ``start -a -i``; fail with ``attach_error`` when it is set."""
@@ -276,6 +298,16 @@ def test_config_refuses_an_unknown_publish_value(monkeypatch):
         docker_config({}, {'RR_DOCKER_PUBLISH': 'sometimes'})
 
 
+def test_config_crash_dumps_is_on_unless_turned_off(monkeypatch):
+    """Dumps are copied out unless RR_DOCKER_CRASH_DUMPS or the config says false; other values are errors."""
+    monkeypatch.setattr(dk, 'engine_version', lambda: '3.4.0')
+    assert docker_config({}, {})['crash_dumps'] == 'true'
+    assert docker_config({}, {'RR_DOCKER_CRASH_DUMPS': 'FALSE'})['crash_dumps'] == 'false'
+    assert docker_config({'docker': {'crash_dumps': False}}, {})['crash_dumps'] == 'false'
+    with pytest.raises(ValueError, match='crash_dumps'):
+        docker_config({}, {'RR_DOCKER_CRASH_DUMPS': 'sometimes'})
+
+
 # ---------------------------------------------------------------------------
 # Address mode, from what the daemon is
 # ---------------------------------------------------------------------------
@@ -329,10 +361,11 @@ def test_remote_daemon_is_a_tcp_or_ssh_endpoint_on_another_host(endpoint, remote
 
 
 async def test_prepare_sweeps_this_instances_leftovers():
+    """The startup sweep removes this instance's containers, after checking them for a crash."""
     cli = FakeCli(ps=CliResult(0, 'old1\nold2\n', ''))
     launcher = _launcher(cli)
     await launcher.prepare()
-    assert cli.commands() == ['info', 'context', 'ps', 'rm']
+    assert cli.commands() == ['info', 'context', 'ps', 'inspect', 'rm']
     assert cli.call('ps').args == ['ps', '-aq', '--filter', 'label=rocketride.eas=host-a:5565']
     assert cli.call('rm').args == ['rm', '-f', 'old1', 'old2']
     assert launcher.published is False
@@ -409,15 +442,15 @@ async def test_create_is_interactive_never_a_tty_and_never_pulls():
     assert args[args.index('--pull') + 1] == 'never'
 
 
-async def test_create_removes_itself_when_it_exits():
-    """--rm: an engine that dies leaves no stopped container behind (its tasks end by --autoterm)."""
+async def test_create_never_removes_itself_when_it_exits():
+    """No --rm: the daemon would remove a crashed task's container with its dump still inside."""
     cli = FakeCli()
     await _launcher(cli).start(_spec())
-    assert '--rm' in cli.call('create').args
+    assert '--rm' not in cli.call('create').args
 
 
 async def test_a_container_already_run_and_removed_counts_as_started(monkeypatch):
-    """It exited and --rm removed it before the poll: the CLI's own code is the container's."""
+    """It exited and someone removed it before the poll: the CLI's own code is the container's."""
     monkeypatch.setattr(dk.asyncio, 'sleep', lambda _s, real=asyncio.sleep: real(0))
     cli = FakeCli(wait=CliResult(1, '', 'Error: No such container: c0ffee'))
     original = cli._inspect
@@ -955,6 +988,432 @@ async def test_a_failure_after_create_removes_the_container(failing, monkeypatch
     with pytest.raises((DockerError, OSError)):
         await _launcher(cli).start(_spec())
     assert cli.calls[-1].args == ['rm', '-f', 'c0ffee']
+
+
+# ---------------------------------------------------------------------------
+# Crash dumps: copied out of the container before it is removed
+# ---------------------------------------------------------------------------
+
+DUMP = b'MDMP\x93\xa7' + b'\0' * 64
+DUMP_FILE = 'engine.3.4.0.9999.b29865ce4884.20261009T170043Z.22.tk_1.dmp'
+DATABASE_DUMP = 'pending/74a2fcba-20ab-4e35-bd98-47999f037c5a.dmp'
+LOGS = '/opt/data/logs'
+CRASHDB = '/opt/data/crashdb'
+# Where the dumps of _spec()'s task land under the dump root
+TASK_DIR = dk.dump_dir_name('proj.src')
+
+
+def _archive(*members):
+    """What ``docker cp <container>:<path> -`` streams: (name, bytes) is a file, (name, None) a symlink."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as tar:
+        for name, data in members:
+            info = tarfile.TarInfo(name)
+            if data is None:
+                info.type = tarfile.SYMTYPE
+                info.linkname = '/etc/shadow'
+                tar.addfile(info)
+            else:
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def _crashing(tmp_path, cli=None, exit_code=134, **config):
+    """A launcher whose dumps land under tmp_path, over a CLI whose container exits with exit_code."""
+    cli = cli or FakeCli()
+    cli.responses['wait'] = CliResult(0, f'{exit_code}\n', '')
+    launcher = _launcher(cli, **config)
+    launcher.dump_root = str(tmp_path / 'logs')
+    return launcher, cli
+
+
+def _copies(cli):
+    """The paths copied out of containers, in order."""
+    return [call.args[1] for call in cli.calls if call.args[0] == 'cp' and call.args[-1] == '-']
+
+
+async def test_an_announced_dump_is_copied_out_before_the_container_goes(tmp_path):
+    """The task names its dump (>DUMP): that file, then the Crashpad database, then rm -f."""
+    launcher, cli = _crashing(tmp_path)
+    cli.archives[f'{LOGS}/{DUMP_FILE}'] = _archive((DUMP_FILE, DUMP))
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    launch.crash_dump_announced(DUMP_FILE)
+    await launch.cleanup()
+    assert [call.args for call in cli.calls[-3:]] == [
+        ['cp', f'c0ffee:{LOGS}/{DUMP_FILE}', '-'],
+        ['cp', f'c0ffee:{CRASHDB}/.', '-'],
+        ['rm', '-f', 'c0ffee'],
+    ]
+    task_dir = tmp_path / 'logs' / TASK_DIR
+    assert (task_dir / DUMP_FILE).read_bytes() == DUMP
+    # The archive it came in is gone
+    assert os.listdir(task_dir) == [DUMP_FILE]
+
+
+async def test_a_cleanup_tried_again_copies_the_dumps_once(tmp_path):
+    """After a refused rm -f the next cleanup only removes: the dumps are already out."""
+    launcher, cli = _crashing(tmp_path)
+    cli.archives[f'{LOGS}/{DUMP_FILE}'] = _archive((DUMP_FILE, DUMP))
+    cli.responses['rm'] = CliResult(1, '', 'Error response from daemon: removal of container c0ffee is in progress')
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    launch.crash_dump_announced(DUMP_FILE)
+    with pytest.raises(DockerError, match='docker rm failed'):
+        await launch.cleanup()
+    cli.responses['rm'] = CliResult(0, 'c0ffee\n', '')
+    await launch.cleanup()
+    copies = [call.args for call in cli.calls if call.args[0] == 'cp' and call.args[1] != '-']
+    assert copies == [['cp', f'c0ffee:{LOGS}/{DUMP_FILE}', '-'], ['cp', f'c0ffee:{CRASHDB}/.', '-']]
+    assert cli.commands().count('rm') == 2
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='no POSIX modes on Windows')
+async def test_a_dump_is_readable_by_the_engines_user_alone(tmp_path):
+    """A dump holds the task's memory: 0600 in a 0700 directory."""
+    launcher, cli = _crashing(tmp_path)
+    cli.archives[f'{LOGS}/{DUMP_FILE}'] = _archive((DUMP_FILE, DUMP))
+    launch = await launcher.start(_spec())
+    launch.crash_dump_announced(DUMP_FILE)
+    await launch.cleanup()
+    task_dir = tmp_path / 'logs' / TASK_DIR
+    assert os.stat(task_dir / DUMP_FILE).st_mode & 0o777 == 0o600
+    assert os.stat(task_dir).st_mode & 0o777 == 0o700
+
+
+async def test_exit_134_without_an_announcement_takes_what_the_task_left(tmp_path):
+    """The engine aborted and announced nothing: its log directory and the Crashpad database are searched."""
+    launcher, cli = _crashing(tmp_path)
+    cli.archives[f'{LOGS}/.'] = _archive((DUMP_FILE, DUMP), ('engine.log', b'a log'))
+    cli.archives[f'{CRASHDB}/.'] = _archive((DATABASE_DUMP, DUMP), ('settings.dat', b'x'), ('pending/a.meta', b'm'))
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    await launch.cleanup()
+    assert _copies(cli) == [f'c0ffee:{LOGS}/.', f'c0ffee:{CRASHDB}/.']
+    assert sorted(os.listdir(tmp_path / 'logs' / TASK_DIR)) == sorted([DUMP_FILE, os.path.basename(DATABASE_DUMP)])
+    assert cli.calls[-1].args == ['rm', '-f', 'c0ffee']
+
+
+@pytest.mark.parametrize('exit_code', [0, 1, 137, 143])
+async def test_a_task_that_did_not_crash_is_not_looked_into(tmp_path, exit_code):
+    """A clean end, a failure, a kill and a requested stop leave no dump: no cp, only rm -f."""
+    launcher, cli = _crashing(tmp_path, exit_code=exit_code)
+    cli.archives[f'{LOGS}/.'] = _archive((DUMP_FILE, DUMP))
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    await launch.cleanup()
+    assert _copies(cli) == []
+    assert not (tmp_path / 'logs').exists()
+    assert cli.calls[-1].args == ['rm', '-f', 'c0ffee']
+
+
+async def test_only_minidumps_leave_the_container(tmp_path):
+    """The task's code wrote that directory: links, other names, other content and paths out of it are refused."""
+    launcher, cli = _crashing(tmp_path)
+    cli.archives[f'{LOGS}/.'] = _archive(
+        (DUMP_FILE, DUMP),
+        ('link.dmp', None),
+        ('../../escaped.dmp', DUMP),
+        ('notes.txt', DUMP),
+        ('not-a-dump.dmp', b'#!/bin/sh\n'),
+        ('.hidden.dmp', DUMP),
+    )
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    await launch.cleanup()
+    # A member named with a path lands by its base name, inside the task's directory
+    assert sorted(os.listdir(tmp_path / 'logs' / TASK_DIR)) == sorted([DUMP_FILE, 'escaped.dmp'])
+    assert os.listdir(tmp_path) == ['logs']
+    assert os.listdir(tmp_path / 'logs') == [TASK_DIR]
+
+
+async def test_an_announced_name_that_is_no_dump_name_is_never_asked_for(tmp_path):
+    """The announcement comes from the task's own output: a path in it reaches no docker command."""
+    launcher, cli = _crashing(tmp_path)
+    launch = await launcher.start(_spec())
+    launch.crash_dump_announced('../../etc/shadow')
+    launch.crash_dump_announced('task.json')
+    await launch.cleanup()
+    assert _copies(cli) == [f'c0ffee:{LOGS}/.', f'c0ffee:{CRASHDB}/.']
+
+
+async def test_a_dump_already_there_is_never_overwritten(tmp_path):
+    """A dump of an earlier crash with the same name stays as it was."""
+    launcher, cli = _crashing(tmp_path)
+    cli.archives[f'{LOGS}/{DUMP_FILE}'] = _archive((DUMP_FILE, DUMP))
+    task_dir = tmp_path / 'logs' / TASK_DIR
+    task_dir.mkdir(parents=True)
+    (task_dir / DUMP_FILE).write_bytes(b'MDMP an earlier crash')
+    launch = await launcher.start(_spec())
+    launch.crash_dump_announced(DUMP_FILE)
+    await launch.cleanup()
+    assert (task_dir / DUMP_FILE).read_bytes() == b'MDMP an earlier crash'
+
+
+async def test_a_cut_archive_keeps_what_came_whole(tmp_path):
+    """The copy died half way: the dump that arrived whole stays, the half of the next one does not."""
+    launcher, cli = _crashing(tmp_path)
+    whole = _archive((DUMP_FILE, DUMP), ('second.dmp', b'MDMP' + b'\1' * 8192))
+    cli.archives[f'{LOGS}/.'] = whole[: 512 * 3 + 1000]
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    await launch.cleanup()
+    assert os.listdir(tmp_path / 'logs' / TASK_DIR) == [DUMP_FILE]
+    assert cli.calls[-1].args == ['rm', '-f', 'c0ffee']
+
+
+async def test_the_sweep_removes_leftovers_when_inspect_times_out():
+    """A daemon slow to answer inspect costs the leftovers' dumps, not the start: they are removed all the same."""
+
+    def no_answer(args):
+        """The CLI's timeout, as DockerCli.run raises it."""
+        raise DockerError('docker inspect timed out after 60 s')
+
+    cli = FakeCli(ps=CliResult(0, 'old1\n', ''), inspect=no_answer)
+    await _launcher(cli).prepare()
+    assert cli.call('rm').args == ['rm', '-f', 'old1']
+
+
+async def test_a_task_gets_one_dump_budget_whatever_it_names(tmp_path, monkeypatch):
+    """A name comes once, and all the copies share one budget: what is past it stays in the container."""
+    monkeypatch.setattr(dk, 'CONST_DUMP_COPY_MAX_BYTES', len(_archive(('a.dmp', DUMP))) + 10)
+    launcher, cli = _crashing(tmp_path)
+    for name in ('a.dmp', 'b.dmp'):
+        cli.archives[f'{LOGS}/{name}'] = _archive((name, DUMP))
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    for name in ('a.dmp', 'a.dmp', 'b.dmp'):
+        launch.crash_dump_announced(name)
+    await launch.cleanup()
+    copies = [call.args[1] for call in cli.calls if call.args[0] == 'cp' and call.args[1] != '-']
+    assert copies == [f'c0ffee:{LOGS}/a.dmp', f'c0ffee:{LOGS}/b.dmp', f'c0ffee:{CRASHDB}/.']
+    assert os.listdir(tmp_path / 'logs' / TASK_DIR) == ['a.dmp']
+
+
+async def test_a_copy_that_was_cut_off_costs_the_budget_nothing(tmp_path, monkeypatch):
+    """An oversized announced file keeps nothing, so the Crashpad database after it still comes out."""
+    monkeypatch.setattr(dk, 'CONST_DUMP_COPY_MAX_BYTES', len(_archive(('a.dmp', DUMP))) + 100)
+    launcher, cli = _crashing(tmp_path)
+    cli.archives[f'{LOGS}/big.dmp'] = _archive(('big.dmp', DUMP + b'\0' * 50000))
+    cli.archives[f'{CRASHDB}/.'] = _archive((DATABASE_DUMP, DUMP))
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    launch.crash_dump_announced('big.dmp')
+    await launch.cleanup()
+    assert os.listdir(tmp_path / 'logs' / TASK_DIR) == [os.path.basename(DATABASE_DUMP)]
+
+
+async def test_dumps_stop_being_kept_once_the_kept_ones_fill_their_room(tmp_path, monkeypatch):
+    """Every task and run share one room for kept dumps: a task cannot fill the disk one run at a time."""
+    earlier = tmp_path / 'logs' / 'earlier.task'
+    earlier.mkdir(parents=True)
+    (earlier / 'old.dmp').write_bytes(b'MDMP' + b'\0' * 96)
+    # The engine's own logs are no dumps: they do not count
+    (tmp_path / 'logs' / 'engine.log').write_bytes(b'x' * 10000)
+    monkeypatch.setattr(dk, 'CONST_DUMP_KEPT_MAX_BYTES', 100)
+    launcher, cli = _crashing(tmp_path)
+    cli.archives[f'{LOGS}/{DUMP_FILE}'] = _archive((DUMP_FILE, DUMP))
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    launch.crash_dump_announced(DUMP_FILE)
+    await launch.cleanup()
+    assert [call.args for call in cli.calls if call.args[0] == 'cp' and call.args[1] != '-'] == []
+    assert not (tmp_path / 'logs' / TASK_DIR).exists()
+
+
+def test_dumps_kept_counts_the_minidumps_of_task_directories_only(tmp_path):
+    """The *.dmp files one level down count; logs and loose files do not, and no root is no dumps."""
+    (tmp_path / 'a').mkdir()
+    (tmp_path / 'a' / 'x.dmp').write_bytes(b'1' * 10)
+    (tmp_path / 'a' / 'x.log').write_bytes(b'1' * 99)
+    (tmp_path / 'top.dmp').write_bytes(b'1' * 50)
+    assert dk.dumps_kept(str(tmp_path)) == 10
+    assert dk.dumps_kept(str(tmp_path / 'missing')) == 0
+
+
+async def test_a_task_announces_so_many_dumps_at_most(tmp_path):
+    """The task's own output names the dumps: an endless list is not a reason to copy more."""
+    launcher, cli = _crashing(tmp_path)
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    for i in range(dk.CONST_DUMP_ANNOUNCED_MAX * 3):
+        launch.crash_dump_announced(f'd{i}.dmp')
+    await launch.cleanup()
+    copies = [call.args[1] for call in cli.calls if call.args[0] == 'cp' and call.args[1].startswith(f'c0ffee:{LOGS}/')]
+    assert len(copies) == dk.CONST_DUMP_ANNOUNCED_MAX
+
+
+async def test_a_copy_writes_the_stream_to_its_file(tmp_path):
+    """What the command prints lands in the file, and its exit code comes back."""
+    path = str(tmp_path / 'archive.tar')
+    script = 'import sys; sys.stdout.buffer.write(b"x" * 100000)'
+    result = await dk.DockerCli(sys.executable).save(['-c', script], path)
+    assert result.returncode == 0
+    assert os.path.getsize(path) >= 100000
+
+
+async def test_a_copy_past_its_size_limit_is_stopped(tmp_path):
+    """The task's own code decides what is copied: a stream past max_bytes stops the command and is cut off."""
+    path = str(tmp_path / 'archive.tar')
+    script = 'import sys\nfor _ in range(64): sys.stdout.buffer.write(b"x" * 65536)'
+    result = await dk.DockerCli(sys.executable).save(['-c', script], path, max_bytes=1_000_000)
+    assert result.returncode == -1
+    assert 'stopped past 1000000 bytes' in result.stderr
+    assert os.path.getsize(path) <= 1_000_000
+
+
+async def test_a_copy_past_its_limit_from_a_command_already_reaped_stops_quietly(tmp_path, monkeypatch):
+    """The chunk that passes max_bytes can come after docker cp exited and was reaped: nothing is left to kill."""
+    real_exec = asyncio.create_subprocess_exec
+
+    async def reaped(*args, **kwargs):
+        """Hand the process over only once it has exited and its pipes have closed."""
+        process = await real_exec(*args, **kwargs)
+        await process.wait()
+        return process
+
+    monkeypatch.setattr(dk.asyncio, 'create_subprocess_exec', reaped)
+    path = str(tmp_path / 'archive.tar')
+    script = 'import sys; sys.stdout.buffer.write(b"x" * 5000)'
+    result = await dk.DockerCli(sys.executable).save(['-c', script], path, max_bytes=4000)
+    assert result.returncode == -1
+    assert 'stopped past 4000 bytes' in result.stderr
+
+
+async def test_a_copy_whose_write_fails_stops_the_command(tmp_path, monkeypatch):
+    """A full disk on the engine's side: the error comes up, and no docker cp is left writing."""
+    real_fdopen = os.fdopen
+
+    class FullDisk:
+        """A file whose writes fail as on a full disk."""
+
+        def __init__(self, f):
+            """Wrap the real file, which is still closed on the way out."""
+            self._f = f
+
+        def __enter__(self):
+            """Use as the file."""
+            return self
+
+        def __exit__(self, *exc):
+            """Close the real file."""
+            self._f.close()
+
+        def write(self, data):
+            """Fail as ENOSPC does."""
+            raise OSError(28, 'No space left on device')
+
+    def fdopen(fd, mode='r', *args, **kwargs):
+        """The archive save() writes is on the full disk; any other file is not."""
+        f = real_fdopen(fd, mode, *args, **kwargs)
+        return FullDisk(f) if mode == 'wb' else f
+
+    monkeypatch.setattr(dk.os, 'fdopen', fdopen)
+    script = 'import sys\nwhile True: sys.stdout.buffer.write(b"x" * 65536)'
+    started = time.monotonic()
+    with pytest.raises(OSError, match='No space left'):
+        await dk.DockerCli(sys.executable).save(['-c', script], str(tmp_path / 'archive.tar'), timeout=30)
+    # Killed at once, not left to the 30 s timeout or to the garbage collector
+    assert time.monotonic() - started < 20
+
+
+@pytest.mark.parametrize('failure', ['refused', 'no cli'])
+async def test_a_copy_that_fails_still_removes_the_container(tmp_path, failure):
+    """A copy the daemon refuses, or a CLI that is gone, still ends with rm -f."""
+    launcher, cli = _crashing(tmp_path)
+    if failure == 'refused':
+        cli.archives[f'{LOGS}/{DUMP_FILE}'] = CliResult(1, '', 'Error response from daemon: boom')
+    else:
+
+        async def no_cli(args, path, timeout=None, max_bytes=None):
+            """A docker binary that is gone."""
+            raise OSError('no docker binary')
+
+        cli.save = no_cli
+    launch = await launcher.start(_spec())
+    launch.crash_dump_announced(DUMP_FILE)
+    await launch.cleanup()
+    assert cli.calls[-1].args == ['rm', '-f', 'c0ffee']
+    # Nothing copied leaves no empty directory behind
+    assert not (tmp_path / 'logs' / TASK_DIR).exists()
+
+
+async def test_dumps_stay_in_the_container_when_turned_off(tmp_path):
+    """docker.crash_dumps=false: nothing is copied, announced or not, and the sweep asks nothing."""
+    cli = FakeCli(ps=CliResult(0, 'old1\n', ''))
+    launcher, cli = _crashing(tmp_path, cli, crash_dumps='false')
+    cli.archives[f'{LOGS}/{DUMP_FILE}'] = _archive((DUMP_FILE, DUMP))
+    launch = await launcher.start(_spec())
+    await launch.wait()
+    launch.crash_dump_announced(DUMP_FILE)
+    await launch.cleanup()
+    assert _copies(cli) == []
+    assert dk.INSPECT_EXIT_FORMAT not in [arg for call in cli.calls for arg in call.args]
+    assert not (tmp_path / 'logs').exists()
+
+
+async def test_the_sweep_copies_a_crashed_tasks_dumps_before_it_removes(tmp_path):
+    """A task that crashed after its engine died: the next start finds the dump by the exit code."""
+    cli = FakeCli(ps=CliResult(0, 'old1\nold2\nold3\n', ''))
+    cli.responses['inspect'] = lambda args: CliResult(
+        0,
+        'old1-full exited 134 u1.proj.src\nold2-full exited 0 u1.proj.other\nold3-full running 0 u1.proj.third\n',
+        '',
+    )
+    launcher, cli = _crashing(tmp_path, cli)
+    cli.archives[f'{LOGS}/.'] = _archive((DUMP_FILE, DUMP))
+    await launcher.prepare()
+    assert cli.call('inspect').args == ['inspect', '--format', dk.INSPECT_EXIT_FORMAT, 'old1', 'old2', 'old3']
+    assert _copies(cli) == [f'old1-full:{LOGS}/.', f'old1-full:{CRASHDB}/.']
+    assert cli.calls[-1].args == ['rm', '-f', 'old1', 'old2', 'old3']
+    assert (tmp_path / 'logs' / dk.dump_dir_name('u1.proj.src') / DUMP_FILE).read_bytes() == DUMP
+
+
+async def test_a_task_that_crashed_while_starting_keeps_its_dump(tmp_path, monkeypatch):
+    """It died before it had an address: the failed start copies its dump out before the container goes."""
+    monkeypatch.setattr(dk.asyncio, 'sleep', lambda _s, real=asyncio.sleep: real(0))
+    launcher, cli = _crashing(tmp_path)
+    cli.networks = json.dumps({'bridge': {'IPAddress': ''}})
+    cli.archives[f'{LOGS}/.'] = _archive((DUMP_FILE, DUMP))
+    original = cli._inspect
+    cli.responses['inspect'] = lambda args: (
+        CliResult(0, 'c0ffee exited 134 proj.src\n', '') if dk.INSPECT_EXIT_FORMAT in args else original(args)
+    )
+    with pytest.raises(DockerError, match='no IP address'):
+        await launcher.start(_spec())
+    assert (tmp_path / 'logs' / TASK_DIR / DUMP_FILE).read_bytes() == DUMP
+    assert cli.calls[-1].args == ['rm', '-f', 'c0ffee']
+
+
+async def test_the_crashpad_database_has_a_fixed_place_in_the_container():
+    """Where the launcher looks for a dump the engine did not move; the engine's own setting names a host path."""
+    cli = FakeCli()
+    spec = _spec()
+    spec.env['ROCKETRIDE_CRASHDB_DIR'] = '/var/lib/eas/crashdb'
+    await _launcher(cli).start(spec)
+    assert cli.call('create').env['ROCKETRIDE_CRASHDB_DIR'] == CRASHDB
+
+
+@pytest.mark.parametrize(
+    'task_id, prefix',
+    [
+        ('u1.proj.src', 'u1.proj.src'),
+        ('a/b\\c:d e', 'a_b_c_d_e'),
+        ('..', 'task'),
+        ('', 'task'),
+    ],
+)
+def test_dump_dir_name_is_one_safe_path_component(task_id, prefix):
+    """A task id becomes one directory name, with nothing that climbs out of the dump root."""
+    assert dk.dump_dir_name(task_id) == f'{prefix}~{hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:16]}'
+
+
+@pytest.mark.parametrize('ids', [('aaaaaaaa.a/b', 'aaaaaaaa.a\\b'), ('Proj.src', 'proj.src'), ('..', '')])
+def test_ids_that_clean_up_alike_keep_their_dumps_apart(ids):
+    """Two ids never share a dump directory, not even on a filesystem blind to case."""
+    first, second = (dk.dump_dir_name(task_id) for task_id in ids)
+    assert first.lower() != second.lower()
 
 
 # ---------------------------------------------------------------------------

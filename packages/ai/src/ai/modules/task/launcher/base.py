@@ -115,6 +115,13 @@ class Launch(abc.ABC):
     def metrics(self) -> Dict[str, Any]:
         """Keyword arguments telling ``TaskMetrics`` where CPU and memory come from."""
 
+    def crash_dump_announced(self, name: str) -> None:
+        """The task wrote a crash dump into its log directory; a runtime that has to fetch it remembers.
+
+        Args:
+            name: The dump's file name, as the task reported it.
+        """
+
     @abc.abstractmethod
     async def cleanup(self) -> None:
         """Release what the launch holds; safe to call more than once."""

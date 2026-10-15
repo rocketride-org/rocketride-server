@@ -32,6 +32,7 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const crypto = require('crypto');
 const { spawn: spawnProcess } = require('child_process');
 const {
 	exists,
@@ -171,6 +172,10 @@ function makeStartTestServerAction(options = {}) {
 			// Set ROCKETRIDE_MOCK to enable mock modules for testing
 			const mocksPath = path.join(PACKAGE_DIR, 'test', 'mocks');
 
+			// Under --runtime=docker this server labels its containers with an id of its own,
+			// so the teardown can remove the ones it leaves (see removeTaskContainers)
+			const dockerInstance = options.runtime === 'docker' ? `nodes-test-${crypto.randomUUID()}` : null;
+
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
@@ -181,11 +186,12 @@ function makeStartTestServerAction(options = {}) {
 					ROCKETRIDE_MOCK: mocksPath,
 					// Under --runtime=docker the mocks reach each task's container through a mount,
 					// next to whatever RR_DOCKER_MOUNTS already names
-					...(options.runtime === 'docker'
+					...(dockerInstance
 						? {
 								RR_DOCKER_MOUNTS: [process.env.RR_DOCKER_MOUNTS, 'ROCKETRIDE_MOCK']
 									.filter(Boolean)
 									.join(','),
+								RR_DOCKER_INSTANCE: dockerInstance,
 							}
 						: {}),
 				},
@@ -202,11 +208,12 @@ function makeStartTestServerAction(options = {}) {
 			const runtime = options.runtime ? `, runtime ${options.runtime}` : '';
 			task.output = `Server ready on port ${ctx.port} (mocks enabled${runtime})`;
 			taskComplete = true;
-			return { port: result.port, server: result.server };
+			return { port: result.port, server: result.server, dockerInstance };
 		},
 	};
 }
 
+// The teardown of the test server: stop it, then remove the task containers it left
 function makeStopTestServerAction() {
 	return {
 		run: async (ctx, task) => {
@@ -214,12 +221,38 @@ function makeStopTestServerAction() {
 			if (bracket?.server) {
 				task.output = 'Stopping server...';
 				await stopServer({ server: bracket.server });
-				task.output = 'Server stopped';
+				const removed = bracket.dockerInstance ? await removeTaskContainers(bracket.dockerInstance) : 0;
+				task.output = removed ? `Server stopped, ${removed} task container(s) removed` : 'Server stopped';
 			} else {
 				task.output = 'No server to stop';
 			}
 		},
 	};
+}
+
+// The containers a test server leaves behind. It is stopped without a cleanup, so the
+// tasks still running then end on their own and stay: no container is created with
+// --rm (a crashed one holds its dump), and the engine's startup sweep looks for the
+// label of its own port, which no later test server has. Returns how many were removed.
+async function removeTaskContainers(instance) {
+	const filter = `label=rocketride.eas=${instance}`;
+	const found = await capture('docker', ['ps', '-aq', '--filter', filter]);
+	if (found.code !== 0) {
+		const reason = (found.stderr || found.stdout).trim();
+		console.warn(`WARNING: could not list the task containers (${filter}): ${reason}`);
+		return 0;
+	}
+	const ids = found.stdout.split(/\s+/).filter(Boolean);
+	if (!ids.length) return 0;
+	const removed = await capture('docker', ['rm', '-f', ...ids]);
+	if (removed.code !== 0) {
+		console.warn(
+			`WARNING: task containers left behind (${filter}): ${(removed.stderr || removed.stdout).trim()}; ` +
+				`remove them with: docker rm -f $(docker ps -aq --filter ${filter})`
+		);
+	}
+	// docker rm prints the id of each container it removed
+	return removed.stdout.split(/\s+/).filter(Boolean).length;
 }
 
 // Modes: 'run' (the tests), 'warmup' (download the models of the selected heavy
@@ -544,8 +577,10 @@ function makeBuildImageAction(options = {}) {
 }
 
 // Stage 0 of the container tests: the node image as a run gets it, checked by
-// docker/test-node-image.sh (the release workflow runs the same script before
-// signing). container:test then runs nodes:test through the docker runtime.
+// docker/test-node-image.sh, and a crash in it, whose minidump must come out of
+// the stopped container (docker/test-node-crash-dump.sh). The release workflow
+// runs the same scripts before signing. container:test then runs nodes:test
+// through the docker runtime.
 function makeTestImageAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
@@ -554,11 +589,13 @@ function makeTestImageAction(options = {}) {
 
 			const { node } = await imageNames();
 			task.output = `Checking ${node}...`;
-			await execCommand('sh', [path.join(PROJECT_ROOT, 'docker', 'test-node-image.sh'), node], {
-				task,
-				verbose: options.verbose,
-			});
-			task.output = `${node}: engine probe and offline installs passed`;
+			for (const script of ['test-node-image.sh', 'test-node-crash-dump.sh']) {
+				await execCommand('sh', [path.join(PROJECT_ROOT, 'docker', script), node], {
+					task,
+					verbose: options.verbose,
+				});
+			}
+			task.output = `${node}: engine probe, offline installs and crash dump passed`;
 		},
 	};
 }
@@ -615,7 +652,6 @@ async function imageLabels(image) {
 
 // SHA-256 of dist/server/libengine.so: container:build records it, container:sync compares it
 function engineSha256() {
-	const crypto = require('crypto');
 	return new Promise((resolve, reject) => {
 		const hash = crypto.createHash('sha256');
 		fs.createReadStream(path.join(DIST_ROOT, 'server', 'libengine.so'))

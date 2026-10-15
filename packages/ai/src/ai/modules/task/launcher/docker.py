@@ -30,14 +30,21 @@ are the container's, so the stdio reader and ``--autoterm`` work as they do for
 a subprocess. A run is five commands — ``create -i``, ``cp -``, ``start -a -i``,
 ``wait``, ``rm -f`` — and the exit code always comes from ``docker wait``, never
 from the CLI, which can die before the container does.
+
+No container is created with ``--rm``: a task that crashes leaves its minidump
+inside, and the dump is copied out (``cp <container>:<path> -``) before
+``rm -f``. A container whose engine died first waits for the startup sweep,
+which copies the same way before it removes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import os
+import posixpath
 import re
 import shutil
 import socket
@@ -51,7 +58,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from rocketlib import debug
 
-from ai.constants import CONST_SUBPROCESS_BUFFER_LIMIT
+from ai.constants import CONST_SUBPROCESS_BUFFER_LIMIT, CONST_TASK_DATA_PATH
 
 from .base import Launch, Launcher, LaunchSpec
 
@@ -76,6 +83,33 @@ _ROOTS_IN_USE: Dict[str, str] = {}
 # The engine's data directory inside the image (engine-base: mkdir /opt/data)
 CONST_CONTAINER_DATA_PATH = '/opt/data'
 
+# Where the engine writes a task's logs, the minidump of a crash among them (paths.log)
+CONST_CONTAINER_LOG_PATH = f'{CONST_CONTAINER_DATA_PATH}/logs'
+
+# A task's Crashpad database: a fixed place, so a dump the engine did not move out of it can be fetched
+CONST_CONTAINER_CRASHDB_PATH = f'{CONST_CONTAINER_DATA_PATH}/crashdb'
+
+# The engine aborts after every fatal signal it handles: 128 + SIGABRT
+CONST_CRASH_EXIT_CODE = 134
+
+# How a minidump starts, and the only file names copied out of a container
+MINIDUMP_MAGIC = b'MDMP'
+DUMP_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\.dmp')
+
+# Seconds a copy out of a container may take before it is given up
+CONST_DUMP_COPY_TIMEOUT = 60.0
+
+# Bytes the copies out of a task's container may bring between them: the task's own
+# code decides what is there
+CONST_DUMP_COPY_MAX_BYTES = 1024**3
+
+# Dump names a task may announce; its own output names them
+CONST_DUMP_ANNOUNCED_MAX = 16
+
+# Bytes of minidumps kept under the dump root, every task and run alike: a task that leaves
+# a new dump on every run must not fill the engine host's disk
+CONST_DUMP_KEPT_MAX_BYTES = 4 * 1024**3
+
 # Where a run's store subtree is mounted inside its container
 CONST_CONTAINER_STORE_ROOT = '/opt/store'
 
@@ -93,6 +127,9 @@ CONST_CONTAINER_NODE_SCRIPT = 'ai/node.py'
 # Which task a container runs, and which engine instance owns it
 LABEL_TASK = 'rocketride.task'
 LABEL_EAS = 'rocketride.eas'
+
+# One line per container for `docker inspect`: how it ended and which task it ran
+INSPECT_EXIT_FORMAT = '{{.Id}} {{.State.Status}} {{.State.ExitCode}} {{index .Config.Labels "' + LABEL_TASK + '"}}'
 
 # Loopback inside a container is the container; these hosts move to the host gateway
 LOOPBACK_HOSTS = frozenset({'127.0.0.1', 'localhost', '::1'})
@@ -168,6 +205,7 @@ DEFAULT_CONFIG: Dict[str, str] = {
     'mounts': '',
     'log_driver': 'none',
     'instance': '',
+    'crash_dumps': 'true',
 }
 
 
@@ -203,7 +241,8 @@ def docker_config(config: Mapping[str, Any], environ: Mapping[str, str]) -> Dict
         Every key of ``DEFAULT_CONFIG``, filled in.
 
     Raises:
-        ValueError: If ``publish`` is not auto, true or false.
+        ValueError: If ``publish`` is not auto, true or false, ``crash_dumps`` not true or false, or
+            ``network`` gives a task no network of its own.
     """
     merged = dict(DEFAULT_CONFIG)
     for key in DEFAULT_CONFIG:
@@ -222,6 +261,9 @@ def docker_config(config: Mapping[str, Any], environ: Mapping[str, str]) -> Dict
     merged['publish'] = merged['publish'].strip().lower()
     if merged['publish'] not in ('auto', 'true', 'false'):
         raise ValueError(f'docker.publish must be auto, true or false, not {merged["publish"]!r}')
+    merged['crash_dumps'] = merged['crash_dumps'].strip().lower()
+    if merged['crash_dumps'] not in ('true', 'false'):
+        raise ValueError(f'docker.crash_dumps must be true or false, not {merged["crash_dumps"]!r}')
     if not merged['image']:
         merged['image'] = f'rocketride/node:{engine_version()}'
     # Stable across restarts, or the startup sweep finds nothing to remove
@@ -391,6 +433,100 @@ def task_tar(data: bytes, uid: int = CONST_IMAGE_UID, gid: int = CONST_IMAGE_GID
     return buffer.getvalue()
 
 
+def dump_dir_name(task_id: str) -> str:
+    """
+    A task id as the name of its dump directory on the engine's host.
+
+    The id cleaned to one safe path component, then a hash of the id itself:
+    two ids that clean up alike, or differ in case only, never share one.
+
+    Args:
+        task_id: The task's id.
+
+    Returns:
+        The id with everything but letters, digits, ``.``, ``_`` and ``-``
+        replaced, then ``~`` and 16 hex digits of its SHA-256.
+    """
+    name = re.sub(r'[^A-Za-z0-9._-]', '_', task_id).strip('.')[:200] or 'task'
+    return f'{name}~{hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:16]}'
+
+
+def dumps_kept(root: str) -> int:
+    """
+    Bytes of the minidumps kept under a dump root: the ``*.dmp`` files of its task directories.
+
+    Args:
+        root: The dump root.
+
+    Returns:
+        Their size; 0 when there is no root yet. The engine's other logs do not count.
+    """
+    total = 0
+    try:
+        tasks = os.scandir(root)
+    except OSError:
+        return 0
+    with tasks:
+        for task in tasks:
+            if not task.is_dir(follow_symlinks=False):
+                continue
+            try:
+                with os.scandir(task.path) as entries:
+                    for entry in entries:
+                        if entry.name.endswith('.dmp') and entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+            except OSError:
+                continue
+    return total
+
+
+def extract_dumps(archive: str, target: str) -> List[str]:
+    """
+    Take the minidumps out of a ``docker cp`` archive into a directory.
+
+    The archive holds what a task left in its container, and the task's code
+    could write anything there. So only regular files named ``*.dmp`` that
+    start as a minidump are taken, each under its base name, readable by the
+    owner alone and never over a file that is already there.
+
+    Args:
+        archive: The tar archive ``docker cp <container>:<path> -`` wrote.
+        target: The directory the dumps go into.
+
+    Returns:
+        The paths written.
+    """
+    written: List[str] = []
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        with tarfile.open(archive, mode='r:') as tar:
+            for member in tar:
+                name = posixpath.basename(member.name)
+                if not member.isfile() or not DUMP_NAME.fullmatch(name):
+                    continue
+                source = tar.extractfile(member)
+                if source is None or source.read(len(MINIDUMP_MAGIC)) != MINIDUMP_MAGIC:
+                    continue
+                path = os.path.join(target, name)
+                try:
+                    fd = os.open(path, flags, 0o600)
+                except FileExistsError:
+                    continue
+                try:
+                    with os.fdopen(fd, 'wb') as out:
+                        out.write(MINIDUMP_MAGIC)
+                        shutil.copyfileobj(source, out)
+                except BaseException:
+                    # Half a dump is not kept
+                    os.remove(path)
+                    raise
+                written.append(path)
+    except (tarfile.TarError, EOFError) as e:
+        # A cut archive: what came whole before the cut is kept
+        debug(f'[docker] crash dump archive {archive} is damaged: {e}')
+    return written
+
+
 _SIZE_UNITS = {
     '': 1,
     'b': 1,
@@ -512,6 +648,79 @@ class DockerCli:
             raise DockerError(f'docker {args[0]} failed (exit {result.returncode}): {detail}')
         return result
 
+    async def save(
+        self,
+        args: Sequence[str],
+        path: str,
+        timeout: float = CONST_DUMP_COPY_TIMEOUT,
+        max_bytes: int = CONST_DUMP_COPY_MAX_BYTES,
+    ) -> CliResult:
+        """
+        Run one command to completion with its stdout written to a new file (``cp <container>:<path> -``).
+
+        Args:
+            args: The arguments after ``docker``.
+            path: The file to create, readable by the owner alone.
+            timeout: Seconds before the command is stopped.
+            max_bytes: The most it may write; a longer stream stops the command.
+
+        Returns:
+            Its exit code and stderr; stdout is in the file. -1 when it was stopped.
+        """
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0), 0o600)
+        with os.fdopen(fd, 'wb') as out:
+            process = await asyncio.create_subprocess_exec(
+                self.executable,
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            async def copy() -> bool:
+                """Stream stdout into the file; False, with the command killed, once it passes max_bytes."""
+                written = 0
+                while chunk := await process.stdout.read(1 << 20):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        # The last chunk can come after the command exited and was reaped
+                        if process.returncode is None:
+                            try:
+                                process.kill()
+                            except ProcessLookupError:
+                                pass
+                        return False
+                    out.write(chunk)
+                return True
+
+            async def both() -> Tuple[bool, bytes]:
+                """The copy, and what the command says on stderr, read alongside it."""
+                errors = asyncio.ensure_future(process.stderr.read())
+                try:
+                    return await copy(), await errors
+                finally:
+                    errors.cancel()
+
+            try:
+                within, stderr = await asyncio.wait_for(both(), timeout)
+            except BaseException as e:
+                # A timeout, a write that failed, a cancel: no docker cp is left behind
+                if process.returncode is None:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
+                # Its pipes read to their end: until they close it never counts as reaped
+                await process.communicate()
+                if isinstance(e, asyncio.TimeoutError):
+                    return CliResult(-1, '', f'timed out after {timeout:g} s')
+                raise
+            # A copy stopped past max_bytes left the rest of stdout unread
+            await process.communicate()
+            if not within:
+                return CliResult(-1, '', f'stopped past {max_bytes} bytes')
+        return CliResult(process.returncode, '', stderr.decode(errors='replace'))
+
     async def attach(self, args: Sequence[str]) -> asyncio.subprocess.Process:
         """
         Start a long-running command whose stdio the caller reads (``start -a -i``).
@@ -584,6 +793,8 @@ class DockerLaunch(Launch):
         container_id: str,
         port: Optional[int],
         server: 'TaskServer',
+        launcher: 'DockerLauncher',
+        task_id: str,
     ) -> None:
         """
         Start watching for the container's exit.
@@ -595,15 +806,23 @@ class DockerLaunch(Launch):
             container_id: The container.
             port: The published port taken from the pool, or None.
             server: The server whose pool the port came from.
+            launcher: The launcher, which copies a crashed task's dumps out.
+            task_id: The task's id, naming its dump directory.
         """
         super().__init__(process, address)
         self.container_id = container_id
         self._cli = cli
         self._port = port
         self._server = server
+        self._launcher = launcher
+        self._task_id = task_id
         self._returncode: Optional[int] = None
         self._removed = False
         self._signals: set = set()
+        # The dumps the task announced (>DUMP), by file name
+        self._dumps: List[str] = []
+        # Copied out once: a cleanup tried again after a refused rm -f only removes
+        self._collected = False
         self._wait_task = asyncio.ensure_future(self._wait_for_exit())
 
     async def _wait_for_exit(self) -> int:
@@ -611,7 +830,7 @@ class DockerLaunch(Launch):
         ``docker wait``: the container's own exit code.
 
         Falls back to the CLI's code only when the daemon cannot say: the
-        container already exited and was removed (``--rm``), in which case
+        container already exited and someone removed it, in which case
         ``docker start -a`` returned the container's code itself.
 
         Returns:
@@ -670,9 +889,14 @@ class DockerLaunch(Launch):
         """CPU and memory from ``docker stats``; no local PID, so the GPU half reads zero."""
         return {'sampler': DockerStatsSampler(self._cli, self.container_id)}
 
+    def crash_dump_announced(self, name: str) -> None:
+        """Remember a dump the task announced: it is still inside the container. Each name once, so many at most."""
+        if name not in self._dumps and len(self._dumps) < CONST_DUMP_ANNOUNCED_MAX:
+            self._dumps.append(name)
+
     async def cleanup(self) -> None:
         """
-        Remove the container and give a published port back; safe to call twice.
+        Copy a crashed task's dumps out, remove the container and give a published port back; safe to call twice.
 
         A container the daemon did not remove keeps its port, and the next call
         tries again; the next engine start sweeps whatever is left.
@@ -681,7 +905,13 @@ class DockerLaunch(Launch):
             DockerError: If the container could not be removed.
         """
         if not self._removed:
-            await self._remove()
+            try:
+                # The exit code alone covers a dump the engine wrote and could not announce
+                if not self._collected and (self._dumps or self._returncode == CONST_CRASH_EXIT_CODE):
+                    self._collected = True
+                    await self._launcher.collect_dumps(self.container_id, self._task_id, self._dumps)
+            finally:
+                await self._remove()
         if self._port:
             self._server.release_port(self._port)
             self._port = None
@@ -720,6 +950,10 @@ class DockerLauncher(Launcher):
         self.user: Optional[Tuple[int, int]] = None
         # Why a task cannot use this engine's store through a mount ('' when it can), once there is a verdict
         self._store_problem: Optional[str] = None
+        # Where a crashed task's dumps go: a directory per task under the engine's own log path
+        self.dump_root = os.path.join(CONST_TASK_DATA_PATH, 'logs')
+        # One collection at a time: the room left for dumps is measured, then filled
+        self._dumps_lock = asyncio.Lock()
 
     @property
     def task_data_path(self) -> str:
@@ -882,12 +1116,120 @@ class DockerLauncher(Launcher):
         return not local_engine
 
     async def _sweep(self) -> None:
-        """Remove the containers an earlier life of this engine instance left behind."""
+        """Remove the containers an earlier life of this engine instance left behind, their dumps copied out first."""
         result = await self._cli.run(['ps', '-aq', '--filter', f'label={LABEL_EAS}={self.config["instance"]}'])
         ids = result.stdout.split()
         if ids:
+            try:
+                for container_id, task_id in await self._crashed(ids):
+                    await self.collect_dumps(container_id, task_id)
+            except Exception as e:
+                # A daemon slow to answer costs these dumps, not the tasks about to start
+                debug(f'[docker] could not look into the containers an earlier run left: {e}')
             await self._cli.run(['rm', '-f', *ids], check=False)
             debug(f'[docker] removed {len(ids)} container(s) left by an earlier run of {self.config["instance"]}')
+
+    async def _crashed(self, ids: Sequence[str]) -> List[Tuple[str, str]]:
+        """
+        Which of these containers ended in a crash, told by the exit code alone.
+
+        For a container nobody watched to its end: one an earlier engine left
+        behind, or one that died while it was being started.
+
+        Args:
+            ids: The containers to look at.
+
+        Returns:
+            ``(container id, task id)`` of each crashed one.
+        """
+        if self.config['crash_dumps'] != 'true':
+            return []
+        result = await self._cli.run(['inspect', '--format', INSPECT_EXIT_FORMAT, *ids], check=False)
+        crashed = []
+        for line in result.stdout.splitlines():
+            # The task id comes last: it is the one field that may hold a space
+            fields = line.split(' ', 3)
+            if len(fields) == 4 and fields[1] == 'exited' and fields[2] == str(CONST_CRASH_EXIT_CODE):
+                crashed.append((fields[0], fields[3]))
+        return crashed
+
+    async def collect_dumps(self, container_id: str, task_id: str, names: Sequence[str] = ()) -> List[str]:
+        """
+        Copy a crashed task's minidumps out of its container, which is about to be removed.
+
+        The dumps the task announced are asked for by name; without an
+        announcement, whatever its log directory holds. Its Crashpad database
+        follows, for a dump the engine wrote and did not move out. Everything
+        comes as a tar stream through the daemon, so the daemon does not have
+        to see this engine's files, and only minidumps are kept (see
+        ``extract_dumps``). A failure is logged and never raised: the
+        container goes either way.
+
+        Args:
+            container_id: The container, running or not.
+            task_id: The task's id, naming its directory under ``dump_root``.
+            names: The file names the task announced.
+
+        Returns:
+            The paths written.
+        """
+        if self.config['crash_dumps'] != 'true':
+            return []
+        async with self._dumps_lock:
+            return await self._collect_dumps(container_id, task_id, names)
+
+    async def _collect_dumps(self, container_id: str, task_id: str, names: Sequence[str]) -> List[str]:
+        """
+        What ``collect_dumps`` does, under its lock.
+
+        Args:
+            container_id: The container.
+            task_id: The task's id.
+            names: The file names the task announced.
+
+        Returns:
+            The paths written.
+        """
+        announced = [name for name in names if DUMP_NAME.fullmatch(name)]
+        sources = [f'{CONST_CONTAINER_LOG_PATH}/{name}' for name in announced] or [f'{CONST_CONTAINER_LOG_PATH}/.']
+        sources.append(f'{CONST_CONTAINER_CRASHDB_PATH}/.')
+
+        target = os.path.join(self.dump_root, dump_dir_name(task_id))
+        written: List[str] = []
+        # One budget for all the copies of a task, however many names it gave, within the room
+        # the dumps already kept leave
+        kept = await asyncio.to_thread(dumps_kept, self.dump_root)
+        budget = min(CONST_DUMP_COPY_MAX_BYTES, CONST_DUMP_KEPT_MAX_BYTES - kept)
+        try:
+            os.makedirs(target, mode=0o700, exist_ok=True)
+            for source in sources:
+                if budget <= 0:
+                    debug(f'[docker] task {task_id}: no room left for crash dumps, {source} stays behind')
+                    break
+                archive = os.path.join(target, f'.{uuid.uuid4().hex}.tar')
+                try:
+                    result = await self._cli.save(['cp', f'{container_id}:{source}', '-'], archive, max_bytes=budget)
+                    if result.returncode == 0:
+                        dumps = await asyncio.to_thread(extract_dumps, archive, target)
+                        written += dumps
+                        # What stays on disk counts: a copy that failed or was cut off left nothing
+                        budget -= sum(os.path.getsize(path) for path in dumps)
+                    elif not _is_missing_path(result.stderr):
+                        debug(f'[docker] could not copy {source} out of {container_id[:12]}: {result.stderr.strip()}')
+                finally:
+                    if os.path.exists(archive):
+                        os.remove(archive)
+        except OSError as e:
+            debug(f'[docker] could not keep the crash dumps of task {task_id}: {e}')
+        if written:
+            debug(f'[docker] task {task_id}: {len(written)} crash dump(s) copied to {target}')
+        else:
+            try:
+                os.rmdir(target)
+            except OSError:
+                # Not there, or it holds the dumps of an earlier crash of this task
+                pass
+        return written
 
     @staticmethod
     def task_args(spec: LaunchSpec) -> List[str]:
@@ -927,7 +1269,8 @@ class DockerLauncher(Launcher):
         The task's environment as the container gets it.
 
         Host-only variables stay out, a loopback DSN moves to the host gateway,
-        and the runtime's own values (the store, the model cache) go on top.
+        and the runtime's own values (the store, the model cache, the Crashpad
+        database) go on top.
 
         Args:
             spec: What to launch.
@@ -942,6 +1285,8 @@ class DockerLauncher(Launcher):
             env['ROCKETRIDE_DB_DSNS'] = rewrite_loopback_dsns(env['ROCKETRIDE_DB_DSNS'])
         if self.config['models']:
             env['HF_HOME'] = '/models'
+        # Where collect_dumps looks; the engine's own setting would name a path of its host
+        env['ROCKETRIDE_CRASHDB_DIR'] = CONST_CONTAINER_CRASHDB_PATH
         env.update(overrides)
         return env
 
@@ -971,7 +1316,8 @@ class DockerLauncher(Launcher):
 
         Values never go on argv: ``-e NAME`` takes each one from the CLI's own
         environment, so ``ps`` shows names only and nothing is written to the
-        host's disk.
+        host's disk. There is no ``--rm``: the daemon would remove a crashed
+        task's container with its dump still inside.
 
         Args:
             spec: What to launch.
@@ -986,8 +1332,6 @@ class DockerLauncher(Launcher):
         args = [
             'create',
             '-i',
-            # The daemon removes the container when it exits, even if this engine died first
-            '--rm',
             # Never a pull while a task starts: a missing image is an error naming container:build
             '--pull',
             'never',
@@ -1257,7 +1601,7 @@ class DockerLauncher(Launcher):
             status = result.stdout.strip()
             if result.returncode == 0 and status and status != 'created':
                 return
-            # Already run and removed (--rm): the CLI carries its exit code
+            # Already run and removed by someone else: the CLI carries its exit code
             if result.returncode != 0 and 'no such' in (result.stderr + result.stdout).lower():
                 return
             if process.returncode is not None:
@@ -1359,11 +1703,17 @@ class DockerLauncher(Launcher):
             _ROOTS_IN_USE.pop(spec.task_id, None)
             # The start's own failure is the one to report: what the rollback meets is logged
             if container_id:
+                try:
+                    # A task that crashed before it could be reached still has its dump
+                    for crashed_id, task_id in await self._crashed([container_id]):
+                        await self.collect_dumps(crashed_id, task_id)
+                except Exception as e:
+                    debug(f'[docker] could not look into {container_id[:12]} after a failed start: {e}')
                 await self._remove_quietly(container_id)
             if port:
                 self._server.release_port(port)
             raise
-        return DockerLaunch(process, address, self._cli, container_id, port, self._server)
+        return DockerLaunch(process, address, self._cli, container_id, port, self._server, self, spec.task_id)
 
     async def _remove_quietly(self, container_id: str) -> None:
         """
@@ -1381,6 +1731,20 @@ class DockerLauncher(Launcher):
                 _ROOTS_IN_USE.pop(container_id, None)
         except Exception as e:
             debug(f'[docker] could not remove {container_id[:12]} after a failed start: {e}')
+
+
+def _is_missing_path(stderr: str) -> bool:
+    """
+    Whether ``docker cp`` failed only because the container has no such path.
+
+    Args:
+        stderr: What the command wrote.
+
+    Returns:
+        True for a path that is not there, which is no error: nothing was written to it.
+    """
+    text = stderr.lower()
+    return 'could not find the file' in text or 'no such container:path' in text
 
 
 def _network_ip(networks_json: str, network: str) -> str:

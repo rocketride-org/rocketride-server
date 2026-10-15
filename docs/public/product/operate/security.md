@@ -44,31 +44,42 @@ inherit the engine's full environment, only an allowlist:
   Any other `ROCKETRIDE_DB_*` name passes through like the rest.
 - what nodes and the task itself use directly: `RR_STORE_URL`,
   `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
-  `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and
-  the API-key fallbacks individual node pages document (such as
-  `OPENAI_API_KEY`)
+  `RR_OAUTH_BROKER_URL`, `RR_ENABLE_DEBUGGER_CONNECTION`,
+  `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and the API-key fallbacks individual node
+  pages document (such as `OPENAI_API_KEY`)
 
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.
 
-| Variable            | Effect                                                                                                                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment; use that only on a single-user install. |
-| `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                           |
+On Linux the engine and every task also close themselves as they start: their
+`/proc/<pid>` entries then belong to root, and the sensitive ones (environment,
+memory, open files) open only to a process with `CAP_SYS_PTRACE` in their user
+namespace, which root has as a rule. So one task cannot read the engine or
+another task that runs as the same user without that capability.
 
-Set both in the engine's own environment or its `.env` file. Pipelines cannot
-change `RR_` variables.
+| Variable                        | Effect                                                                                                                                                                                                                                                              |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_SUBPROCESS_ENV`             | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment; use that only on a single-user install.                                                       |
+| `RR_ENABLE_DEBUGGER_CONNECTION` | `1`, `true`, `yes` or `on`, in any case, keeps the engine and its tasks open to debuggers of the same user instead of closing them; any other value leaves them closed. Linux only. Use it on a machine you debug on, never where pipelines of different users run. |
 
-Limits of `RR_PROC_PRIVATE`:
+Pipelines cannot change `RR_` variables. Set `RR_SUBPROCESS_ENV` in the
+engine's own environment or its `.env` file. `RR_ENABLE_DEBUGGER_CONNECTION`
+has to be in the environment the engine starts with: it is read before `.env`
+is loaded.
+
+What closing a process covers, and what it costs:
 
 - Entries such as `cmdline` and `status` stay readable to everyone.
-- A process is covered only after its startup code has run, and only that
-  process: other programs the engine or a task starts are not covered.
+- Only the engine's own processes are covered: other programs the engine or a
+  task starts are not.
 - While a crash dump is being written, the crashing process is readable again.
-- Same-user debuggers (`gdb`, `py-spy`) can no longer attach, and the kernel
-  writes no core dumps for these processes.
-- A task that cannot make itself private exits without running pipeline code.
-  If the engine itself cannot, it logs a warning and keeps serving.
+- Debuggers of the same user (`gdb`, `strace`, `py-spy`) cannot work on a
+  closed process, whether they attach to it or start it, and the kernel writes
+  no core dumps for it. Run the debugger as root, or set
+  `RR_ENABLE_DEBUGGER_CONNECTION=1`.
+- `RR_ENABLE_DEBUGGER_CONNECTION` opens nothing in the Docker images: their
+  engine binary is execute-only, and the kernel starts such a process closed.
+- An engine or a task that cannot close itself does not start.
 
 For strict separation between pipelines, run them under different OS users or
 in separate containers: `--runtime=docker` starts every task in a container of
