@@ -72,6 +72,13 @@ def _unit_vec(rng) -> list[float]:
     return [float(x) for x in v / np.linalg.norm(v)]
 
 
+def _service_definition(name, *_args, **_kwargs):
+    """Serve a node's services.json from the tree, the way the engine's catalog does."""
+    json5 = pytest.importorskip('json5')
+    path = _REPO / 'nodes' / 'src' / 'nodes' / name / 'services.json'
+    return json5.loads(path.read_text(encoding='utf-8')) if path.exists() else None
+
+
 def _stub_engine(monkeypatch):
     """Provide ``rocketlib`` and ``depends`` when the engine is not importable.
 
@@ -87,14 +94,9 @@ def _stub_engine(monkeypatch):
         rocketlib.debug = lambda *a, **kw: None
         rocketlib.error = lambda *a, **kw: None
         rocketlib.args = lambda: []
+
         # Config.getNodeConfig merges the node's services.json profile with the
         # pipeline config; the engine serves that file, here it is read from the tree.
-        json5 = pytest.importorskip('json5')
-
-        def _service_definition(name, *_args, **_kwargs):
-            path = _REPO / 'nodes' / 'src' / 'nodes' / name / 'services.json'
-            return json5.loads(path.read_text(encoding='utf-8')) if path.exists() else None
-
         class _IJson:
             @staticmethod
             def toDict(value):
@@ -361,7 +363,6 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
 
     import ai.common.config as config_module
 
-    json5 = pytest.importorskip('json5')
     iglobal_cls = sys.modules['nodes.rocketride_vector.IGlobal'].IGlobal
     spec = importlib.util.spec_from_file_location('nodes.rocketride_vector.IInstance', _VEC_NODE_DIR / 'IInstance.py')
     iinstance_module = importlib.util.module_from_spec(spec)
@@ -371,12 +372,8 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
 
     # Config.getNodeConfig merges the node's services.json into the pipeline
     # config; serve the tree's copy so the shipped defaults are what resolve.
-    def _service_definition(name, *_args, **_kwargs):
-        path = _REPO / 'nodes' / 'src' / 'nodes' / name / 'services.json'
-        return json5.loads(path.read_text(encoding='utf-8')) if path.exists() else None
-
-    # Config imports this function directly, so patch its lookup rather than
-    # rocketlib's export (which may already have been imported by the engine).
+    # Config binds the lookup at import (``from rocketlib import
+    # getServiceDefinition``), so patch its name, not rocketlib's export.
     service_definition = Mock(side_effect=_service_definition)
     monkeypatch.setattr(config_module, 'getServiceDefinition', service_definition)
     # The engine's collector reads the decorator's __tool_meta__; a stand-in rocketlib has neither.
