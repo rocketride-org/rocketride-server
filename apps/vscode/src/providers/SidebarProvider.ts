@@ -94,6 +94,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * the other's file, and a project_id the two share would go unreported.
 	 */
 	private createdFileQueue = new SerialQueue();
+	/**
+	 * Monotonic reload counter (the rescanSeq pattern): the refresh button and
+	 * a services update can start a reload while another is still parsing, and
+	 * only the newest run may install its cache.
+	 */
+	private loadSeq = 0;
+	/**
+	 * Cache writes the watcher handlers make while loadPipelineFiles is
+	 * parsing. They land in the cache the reload is about to replace, so the
+	 * reload re-applies them after the swap. Undefined while no reload runs.
+	 */
+	private writesDuringLoad?: Map<string, ParsedPipelineFile | null>;
 
 	// ── App Builder state ────────────────────────────────────────────────────
 	// Cached workspace scan (re-run on .rrapp / package.json events) and the
@@ -350,7 +362,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Removes the deleted file from the parsed-files cache and updates the webview. */
 	private async handleFileDeleted(uri: vscode.Uri): Promise<void> {
-		this.parsedFiles.delete(uri.fsPath);
+		this.cacheParsedFile(uri.fsPath, null);
 		this.sendEntriesUpdate();
 	}
 
@@ -360,12 +372,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 		// Re-parse the changed file
 		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
-		this.parsedFiles.set(uri.fsPath, parsedFile);
+		this.cacheParsedFile(uri.fsPath, parsedFile);
 
 		this.sendEntriesUpdate();
 
 		// Handle pipeline restart based on configuration
 		await this.handlePipelineRestart(uri, parsedFile);
+	}
+
+	/**
+	 * The one way a watcher handler writes to parsedFiles. A reload in
+	 * progress builds its own map and would drop the write on its swap, so the
+	 * write is also recorded for the reload to re-apply. `null` deletes.
+	 */
+	private cacheParsedFile(fsPath: string, parsed: ParsedPipelineFile | null): void {
+		if (parsed === null) this.parsedFiles.delete(fsPath);
+		else this.parsedFiles.set(fsPath, parsed);
+		this.writesDuringLoad?.set(fsPath, parsed);
 	}
 
 	// =========================================================================
@@ -410,8 +433,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// Deliberately not awaited: the warning stays open until the user
 				// acts, and the rest of the handler (sidebar refresh, re-parse,
 				// restart) must not wait for that. The prompt is marked as shown
-				// before it opens and the file is re-read before any write, so a
-				// detached, late answer is safe.
+				// before it opens and both files are re-read before any write, so
+				// a detached, late answer is safe.
 				void this.offerNewProjectId(uri, decision.projectId, decision.otherPath).catch((error) => {
 					this.logger.error(`Pipeline ${vscode.workspace.asRelativePath(uri)}: duplicate id prompt failed (${error instanceof Error ? error.message : String(error)}).`);
 				});
@@ -437,7 +460,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * A genuine duplicate: another file carries the same id. Nothing is written
 	 * unless the user asks for it. The clash is confirmed against the disk
 	 * first, because a rename delivers delete and create in no fixed order and
-	 * the cache can briefly still hold the file's previous path.
+	 * the cache can briefly still hold the file's previous path, and again
+	 * after the user answers, because the warning can stay open for a long
+	 * time and the clash may have been resolved meanwhile.
 	 */
 	private async offerNewProjectId(uri: vscode.Uri, projectId: string, otherPath: string): Promise<void> {
 		const other = await PipelineFileParser.parseFile(otherPath, this.getServiceClassInfoMap());
@@ -454,8 +479,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		this.duplicatePromptsShown.add(promptKey);
 
 		const assign = 'Assign new id';
-		const choice = await vscode.window.showWarningMessage(`${file} has the same project_id as ${otherFile}. Pipelines with the same id cannot be told apart when they run. The file was not changed.`, assign);
+		// Defence in depth: VS Code renders [label](target) in notification text
+		// as a link, and a file name in a cloned repository can contain that
+		// syntax. Break it so the warning carries no link the extension did not write.
+		const plain = (name: string): string => name.replace(/\]\(/g, '] (');
+		const choice = await vscode.window.showWarningMessage(`${plain(file)} has the same project_id as ${plain(otherFile)}. Pipelines with the same id cannot be told apart when they run. The file was not changed.`, assign);
 		if (choice !== assign) return;
+		// The warning can stay open for minutes: rewrite only while the clash still exists.
+		const stillOther = await PipelineFileParser.parseFile(otherPath, this.getServiceClassInfoMap());
+		if (stillOther.projectId !== projectId) return;
 		await this.assignProjectId(uri, projectId, `duplicate of ${otherFile}, new id assigned at the user's request`);
 	}
 
@@ -672,8 +704,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * parsed: the refresh button and a services update reload outside the
 	 * created-file queue, and a handler deciding during such a reload must see
 	 * the previous cache whole, not one being refilled.
+	 *
+	 * The delete and change handlers write to that previous cache meanwhile,
+	 * and the swap would drop their writes: a file deleted during the reload
+	 * would come back, a changed one would keep its old sources and id. Their
+	 * writes are recorded and re-applied after the swap. Of two overlapping
+	 * reloads only the newer installs its map; the older returns without
+	 * touching anything.
 	 */
 	private async loadPipelineFiles(): Promise<void> {
+		const mine = ++this.loadSeq;
+		const writes = new Map<string, ParsedPipelineFile | null>();
+		this.writesDuringLoad = writes;
+
 		const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
 		const files = [...pipeFiles, ...pipeJsonFiles];
 
@@ -681,9 +724,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		for (const uri of files) {
 			parsed.set(uri.fsPath, await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap()));
 		}
+
+		// A newer reload has started since: it saw everything this one saw.
+		if (mine !== this.loadSeq) return;
+		this.writesDuringLoad = undefined;
+		for (const [fsPath, file] of writes) {
+			if (file === null) parsed.delete(fsPath);
+			else parsed.set(fsPath, file);
+		}
 		this.parsedFiles = parsed;
 
-		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', files.length === 0);
+		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', this.parsedFiles.size === 0);
 		this.sendEntriesUpdate();
 	}
 
