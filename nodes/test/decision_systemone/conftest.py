@@ -132,10 +132,9 @@ def systemone(monkeypatch):
         'ai.common.config': config,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
-    for name in ('ai.common.decision.writer', 'ai.common.systemone.instance_base', 'ai.common.systemone.global_base'):
+    for name in ('ai.common.systemone.instance_base', 'ai.common.systemone.global_base'):
         monkeypatch.delitem(sys.modules, name, raising=False)
     helpers = SimpleNamespace(
-        writer=importlib.import_module('ai.common.decision.writer'),
         instance_base=importlib.import_module('ai.common.systemone.instance_base'),
         global_base=importlib.import_module('ai.common.systemone.global_base'),
         warnings=warnings,
@@ -143,10 +142,7 @@ def systemone(monkeypatch):
     )
     yield helpers
     # The modules were imported against the stubs; don't let them outlive them on this worker.
-    for package_name, names in (
-        ('ai.common.decision', ('writer',)),
-        ('ai.common.systemone', ('instance_base', 'global_base')),
-    ):
+    for package_name, names in (('ai.common.systemone', ('instance_base', 'global_base')),):
         package = sys.modules.get(package_name)
         for name in names:
             sys.modules.pop(f'{package_name}.{name}', None)
