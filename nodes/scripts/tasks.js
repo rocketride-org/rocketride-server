@@ -428,6 +428,10 @@ async function imageNames() {
 	return { base: `rocketride/engine-base:${version}`, node: `rocketride/node:${version}` };
 }
 
+// No provenance attestation on these local images: it records the build time, so a fully
+// cached rebuild still gets a new digest and every image built FROM it misses its cache
+const LOCAL_BUILD_FLAGS = ['--provenance=false'];
+
 // Builds engine-base from dist/server, then the node image FROM it.
 function makeBuildImageAction(options = {}) {
 	return {
@@ -443,7 +447,15 @@ function makeBuildImageAction(options = {}) {
 			task.output = `Building ${base}...`;
 			await execCommand(
 				'docker',
-				['build', '-f', path.join(dockerDir, 'Dockerfile.engine-base'), '-t', base, path.dirname(DIST_ROOT)],
+				[
+					'build',
+					...LOCAL_BUILD_FLAGS,
+					'-f',
+					path.join(dockerDir, 'Dockerfile.engine-base'),
+					'-t',
+					base,
+					path.dirname(DIST_ROOT),
+				],
 				{ task, env, verbose: options.verbose }
 			);
 
@@ -452,6 +464,7 @@ function makeBuildImageAction(options = {}) {
 				'docker',
 				[
 					'build',
+					...LOCAL_BUILD_FLAGS,
 					'-f',
 					path.join(dockerDir, 'Dockerfile.node'),
 					'--build-arg',
