@@ -61,6 +61,13 @@ class StoreGlobalBase(IGlobalTransform, ABC):
     # Resolved from the merged node config in beginGlobal, like serverName.
     allow_write: bool = True
 
+    # Whether the node offers its tool surface at all (read by
+    # VectorStoreToolMixin). True keeps every existing driver as it was; a
+    # driver whose store is shared or managed sets the class default to False
+    # and lets the node owner opt in through an ``expose_tools`` config field.
+    # Resolved from the merged node config in beginGlobal, like allow_write.
+    expose_tools: bool = True
+
     # The live store, opened in beginGlobal and read by StoreInstanceBase.
     store: Optional[DocumentStoreBase] = None
 
@@ -119,13 +126,15 @@ class StoreGlobalBase(IGlobalTransform, ABC):
         if isinstance(resolved_name, str) and resolved_name.strip():
             self.serverName = resolved_name.strip()
 
-        # Same source for the write switch: profile defaults and user overrides
-        # both count, strings such as 'false' / '0' stay off, and an absent or
-        # unrecognised value falls back to the driver's class default. Imported
-        # here: ai.common.utils pulls requests and tenacity at import time,
-        # which every store node would otherwise load.
+        # Same source for the two tool switches: profile defaults and user
+        # overrides both count, strings such as 'false' / '0' stay off, and an
+        # absent or unrecognised value falls back to the driver's class default.
+        # Imported here: ai.common.utils pulls requests and tenacity at import
+        # time, which every store node would otherwise load.
         from ai.common.utils import parse_bool
 
+        raw_expose_tools = cfg.get('expose_tools') if hasattr(cfg, 'get') else None
+        self.expose_tools = parse_bool(raw_expose_tools, default=type(self).expose_tools)
         raw_allow_write = cfg.get('allow_write') if hasattr(cfg, 'get') else None
         self.allow_write = parse_bool(raw_allow_write, default=type(self).allow_write)
 

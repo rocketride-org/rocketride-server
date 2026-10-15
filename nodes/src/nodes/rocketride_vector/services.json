@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A RocketRide-managed vector store backed by PostgreSQL + pgvector. Stores ", "and semantically searches high-dimensional embeddings in your own provisioned ", "RocketRide cloud database with zero setup — no host, user, or password to enter; ", "the connection is resolved automatically from your signed-in RocketRide identity. ", "An HNSW index is created on first write so semantic search is fast from the start. ", "Agents and apps can also use the store as tools: search, objdir, get and stats always, ", "upsert and delete when writes through tools are allowed."],
+	"description": ["A RocketRide-managed vector store backed by PostgreSQL + pgvector. Stores ", "and semantically searches high-dimensional embeddings in your own provisioned ", "RocketRide cloud database with zero setup — no host, user, or password to enter; ", "the connection is resolved automatically from your signed-in RocketRide identity. ", "An HNSW index is created on first write so semantic search is fast from the start. ", "When Expose as tools is on, agents and apps can also use the store as tools: search, objdir, get and stats, ", "plus upsert and delete when writes through tools are allowed."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -86,6 +86,7 @@
 				"hnsw_m": 16,
 				"hnsw_ef_construction": 64,
 				"serverName": "rrvector",
+				"expose_tools": false,
 				"allow_write": false
 			}
 		}
@@ -139,15 +140,21 @@
 			"default": "rrvector",
 			"minLength": 1
 		},
+		"rrvector.expose_tools": {
+			"type": "boolean",
+			"title": "Expose as tools",
+			"default": false,
+			"description": "Offer this table to agents and apps as tool functions: search, objdir, get and stats, plus upsert and delete when writes through tools are allowed. Leave OFF unless a trusted application or agent in this pipeline is meant to read the table through tools; objdir and get together return the whole table, not only the matches the questions lane returns. The documents and questions lanes are unaffected."
+		},
 		"rrvector.allow_write": {
 			"type": "boolean",
 			"title": "Allow writes through tools",
 			"default": false,
-			"description": "Permit the upsert and delete tool functions to change this table in your RocketRide cloud database. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, get, stats) are unaffected."
+			"description": "Permit the upsert and delete tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, get, stats) are unaffected."
 		},
 		"rrvector.cloud": {
 			"object": "cloud",
-			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.serverName", "rrvector.allow_write"]
+			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.serverName", "rrvector.expose_tools", "rrvector.allow_write"]
 		},
 		"rrvector.profile": {
 			"hidden": true,

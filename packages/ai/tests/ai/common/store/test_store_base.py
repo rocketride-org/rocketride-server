@@ -297,3 +297,50 @@ def test_managed_driver_can_be_opened_up_through_config(monkeypatch):
     managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
     managed.beginGlobal()
     assert managed.allow_write is True
+
+
+# ---------------------------------------------------------------------------
+# 6. expose_tools resolution from merged config (#2631 review)
+# ---------------------------------------------------------------------------
+
+
+class _ManagedToolsGlobal(_TestableGlobal):
+    """A driver whose store is shared or managed: the tool surface is off unless configured."""
+
+    expose_tools = False
+
+
+@pytest.mark.parametrize(
+    'value, expected', [(True, True), ('true', True), ('on', True), (False, False), ('false', False), ('0', False)]
+)
+def test_expose_tools_taken_from_config_when_present(monkeypatch, value, expected):
+    """A configured expose_tools wins over the class default, with config-style string parsing."""
+    _patch_config(monkeypatch, {'expose_tools': value})
+    g = _make()
+    g.beginGlobal()
+    assert g.expose_tools is expected
+
+
+@pytest.mark.parametrize('node_config', [{}, {'expose_tools': None}, {'expose_tools': 'maybe'}])
+def test_expose_tools_class_default_survives_when_absent_or_unrecognised(monkeypatch, node_config):
+    """An absent or garbage value falls back to the driver's class default: on for an ordinary store, off for a managed one."""
+    _patch_config(monkeypatch, node_config)
+    g = _make()
+    g.beginGlobal()
+    assert g.expose_tools is True
+
+    managed = _ManagedToolsGlobal(store=_FakeStore())
+    managed.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
+    managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
+    managed.beginGlobal()
+    assert managed.expose_tools is False
+
+
+def test_managed_driver_tools_can_be_exposed_through_config(monkeypatch):
+    """The node owner opts in with expose_tools=true on a driver that defaults to off."""
+    _patch_config(monkeypatch, {'expose_tools': 'true'})
+    managed = _ManagedToolsGlobal(store=_FakeStore())
+    managed.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
+    managed.glb = SimpleNamespace(logicalType='managedstore', connConfig={})
+    managed.beginGlobal()
+    assert managed.expose_tools is True

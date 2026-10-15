@@ -118,9 +118,9 @@ def _stub_engine(monkeypatch):
 def tools_env(monkeypatch):
     """Real ``ai`` package, real driver Store on the container, real tool mixin.
 
-    Returns ``(make_tools, raw_conn)``: ``make_tools(allow_write)`` builds a
-    mixin instance whose fake IGlobal carries the store and the switch, the way
-    StoreGlobalBase leaves them after beginGlobal.
+    Returns ``(make_tools, raw_conn)``: ``make_tools(allow_write, expose_tools=True)``
+    builds a mixin instance whose fake IGlobal carries the store and the two
+    switches, the way StoreGlobalBase leaves them after beginGlobal.
     """
     _stub_engine(monkeypatch)
     # The engine bundles both packages; a plain venv finds them in the tree.
@@ -151,11 +151,16 @@ def tools_env(monkeypatch):
     stores = []
 
     class _Tools(VectorStoreToolMixin):
-        def __init__(self, allow_write: bool):
+        def __init__(self, allow_write: bool, expose_tools: bool = True):
             store = store_cls('rocketride_vector', {'collection': TABLE, 'similarity': 'cosine'}, {})
             stores.append(store)
             self.IGlobal = SimpleNamespace(
-                serverName='rrvector', store=store, embed_query=None, embed_model_name=None, allow_write=allow_write
+                serverName='rrvector',
+                store=store,
+                embed_query=None,
+                embed_model_name=None,
+                expose_tools=expose_tools,
+                allow_write=allow_write,
             )
 
     yield _Tools, raw_conn
@@ -317,3 +322,91 @@ def test_objdir_collapses_documents_that_share_a_parent(tools_env):
     assert tools.upsert({'documents': docs})['count'] == 2
     assert tools.stats({})['count'] == 3
     assert list(tools.objdir({})['paths'].keys()) == ['/shared']
+
+
+def test_tools_are_refused_until_the_node_exposes_them(tools_env):
+    """With Expose as tools off nothing is listed and every direct call is refused (#2631 review)."""
+    make_tools, raw_conn = tools_env
+    rng = np.random.default_rng(6)
+    tools = make_tools(allow_write=True, expose_tools=False)
+
+    assert tools._collect_tool_methods() == {}
+    calls = [
+        ('stats', {}),
+        ('objdir', {}),
+        ('get', {'object_id': 'obj-a'}),
+        ('search', {'query': 'anything'}),
+        ('upsert', {'documents': _docs([('a', _unit_vec(rng))])}),
+        ('delete', {'object_ids': ['obj-a']}),
+    ]
+    for tool, args in calls:
+        result = getattr(tools, tool)(args)
+        assert result['success'] is False, tool
+        assert 'expose_tools=true' in result['error'], tool
+    assert not _table_exists(raw_conn)  # the refused upsert never reached the database
+
+
+def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypatch):
+    """services.json is the switch that ships: the real IGlobal must read it at start (#2631 review).
+
+    Builds the node's own IGlobal and IInstance (no stand-in base), runs the
+    real beginGlobal against the test database with the node's services.json
+    as the profile source, and checks what the engine would list. Flip the
+    cloud profile's ``expose_tools`` to true and the first assertion fails.
+    """
+    import rocketlib
+    from rocketlib import OPEN_MODE
+
+    json5 = pytest.importorskip('json5')
+    iglobal_cls = sys.modules['nodes.rocketride_vector.IGlobal'].IGlobal
+    spec = importlib.util.spec_from_file_location('nodes.rocketride_vector.IInstance', _VEC_NODE_DIR / 'IInstance.py')
+    iinstance_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, 'nodes.rocketride_vector.IInstance', iinstance_module)
+    spec.loader.exec_module(iinstance_module)
+    iinstance_cls = iinstance_module.IInstance
+
+    # Config.getNodeConfig merges the node's services.json into the pipeline
+    # config; serve the tree's copy so the shipped defaults are what resolve.
+    def _service_definition(name, *_args, **_kwargs):
+        path = _REPO / 'nodes' / 'src' / 'nodes' / name / 'services.json'
+        return json5.loads(path.read_text()) if path.exists() else None
+
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', _service_definition, raising=False)
+    # The engine's collector reads the decorator's __tool_meta__; a stand-in rocketlib has neither.
+    real_collector = hasattr(rocketlib.IInstanceBase, '_collect_tool_methods')
+    opened = []
+
+    def make(cloud_config):
+        glb = object.__new__(iglobal_cls)
+        glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
+        glb.glb = SimpleNamespace(
+            logicalType='rocketride_vector', connConfig={'profile': 'cloud', 'cloud': cloud_config}
+        )
+        glb.beginGlobal()
+        opened.append(glb)
+        inst = object.__new__(iinstance_cls)
+        inst.IGlobal = glb
+        return glb, inst
+
+    try:
+        glb, inst = make({'collection': TABLE})
+        assert glb.expose_tools is False  # the cloud profile's default ships the switch off
+        assert glb.allow_write is False
+        if real_collector:
+            assert set(inst._collect_tool_methods()) == set()
+
+        glb, inst = make({'collection': TABLE, 'expose_tools': True})
+        assert glb.expose_tools is True and glb.allow_write is False
+        if real_collector:
+            assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats'}
+
+        glb, inst = make({'collection': TABLE, 'expose_tools': True, 'allow_write': True})
+        assert glb.expose_tools is True and glb.allow_write is True
+        if real_collector:
+            assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats', 'upsert', 'delete'}
+    finally:
+        for glb in opened:
+            store = getattr(glb, 'store', None)
+            if store is not None and getattr(store, 'client', None) is not None:
+                store.client.close()
+                store.client = None

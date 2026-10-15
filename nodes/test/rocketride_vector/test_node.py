@@ -2,8 +2,9 @@
 
 The node keeps two things of its own on top of StoreGlobalBase: the tenant DSN
 (no connection fields, and a transform key scoped by the tenant database) and
-the write switch behind the upsert/delete tools. The lanes and the tools come
-from the base and are covered in packages/ai.
+the two tool switches, both off by default (expose_tools for the whole tool
+surface, allow_write for upsert/delete). The lanes and the tools come from the
+base and are covered in packages/ai.
 """
 
 from __future__ import annotations
@@ -19,6 +20,13 @@ def _iglobal(iglobal):
 def test_tool_namespace_defaults_to_rrvector(node_modules):
     iglobal, _, _ = node_modules
     assert iglobal.IGlobal.serverName == 'rrvector'
+
+
+def test_tools_are_off_unless_configured(node_modules):
+    # The managed store's table is the team's database: nothing is offered as
+    # a tool until the pipeline owner turns Expose as tools on.
+    iglobal, _, _ = node_modules
+    assert iglobal.IGlobal.expose_tools is False
 
 
 def test_writes_are_off_unless_configured(node_modules):
@@ -46,7 +54,7 @@ def test_iglobal_overrides_only_the_store_hooks(node_modules):
     iglobal, _, _ = node_modules
     own = {name for name in vars(iglobal.IGlobal) if not name.startswith('__')}
 
-    assert own == {'serverName', 'allow_write', '_open_store', '_sub_key', '_probe_connection'}
+    assert own == {'serverName', 'expose_tools', 'allow_write', '_open_store', '_sub_key', '_probe_connection'}
 
 
 def test_sub_key_is_scoped_by_the_tenant_database(node_modules):

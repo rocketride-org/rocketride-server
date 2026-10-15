@@ -679,12 +679,15 @@ class VectorStoreToolMixin:
     (``<node id>.search``, see ``ai.common.agent``); there ``serverName``
     only labels the tools' messages.
 
-    The write tools (``upsert`` and ``delete``) honour an optional
-    ``IGlobal.allow_write`` switch (``StoreGlobalBase`` resolves it from the
-    node config): a node that does not define it allows writes, a node whose
-    store is shared or managed (``rocketride_vector`` writes to the team's
-    tenant database) defaults it to off. While writes are off the two tools
-    are left out of ``_collect_tool_methods``, so the engine neither lists nor
+    Two optional ``IGlobal`` switches gate the surface (``StoreGlobalBase``
+    resolves both from the node config). ``expose_tools`` decides whether the
+    node offers any tool at all: a node that does not define it exposes them,
+    a node whose store is shared or managed (``rocketride_vector`` reads and
+    writes the team's tenant database) defaults it to off, because ``objdir``
+    and ``get`` together return the whole table to any caller of the
+    pipeline's tool path. ``allow_write`` then decides whether ``upsert`` and
+    ``delete`` are among them. While a switch is off the affected tools are
+    left out of ``_collect_tool_methods``, so the engine neither lists nor
     dispatches them (an invoke fails as a tool the node has no handler for);
     the check inside each tool is a second line of defence for direct calls
     and returns ``{"success": false, "error": ...}`` like the mixin's other
@@ -762,16 +765,41 @@ class VectorStoreToolMixin:
             ),
         }
 
+    def _vectordb_expose_tools(self) -> bool:
+        """Whether this node offers its tool functions at all.
+
+        Reads ``self.IGlobal.expose_tools``. A node that does not define the
+        attribute exposes its tools, which keeps every existing store node as
+        it was; a node that sets it (from its configuration) decides per node.
+        Parsed like ``allow_write``, so ``'false'`` and ``'0'`` are off.
+        """
+        from ai.common.utils import parse_bool
+
+        glb = getattr(self, 'IGlobal', None)
+        return parse_bool(getattr(glb, 'expose_tools', True), default=True)
+
+    def _vectordb_tools_refused(self, tool: str) -> Dict[str, Any]:
+        """The failure object any tool returns when the node does not expose its tools."""
+        return {
+            'success': False,
+            'error': (
+                f'{self._vectordb_server_name()}.{tool} is disabled for this node: tools are off '
+                '(set expose_tools=true in the node configuration to enable)'
+            ),
+        }
+
     _VECTORDB_WRITE_TOOLS = frozenset({'upsert', 'delete'})
 
     def _collect_tool_methods(self):
-        """Advertise the write tools only when the node allows writes.
+        """Advertise no tools while the node does not expose them, and the write tools only when it allows writes.
 
-        The engine's ``tool.query`` discovery walks this; leaving ``upsert`` and
-        ``delete`` out while writes are off means an agent never sees a tool it
-        cannot call (the pattern ``tool_filesystem`` uses for its allow flags).
-        A direct invocation is still refused by the tools themselves.
+        The engine's ``tool.query`` discovery walks this; leaving a tool out
+        means an agent never sees a tool it cannot call (the pattern
+        ``tool_filesystem`` uses for its allow flags). A direct invocation is
+        still refused by the tools themselves.
         """
+        if not self._vectordb_expose_tools():
+            return {}
         methods = super()._collect_tool_methods()
         if self._vectordb_allow_write():
             return methods
@@ -875,6 +903,8 @@ class VectorStoreToolMixin:
     def search(self, args):
         """Search for documents in the vector database."""
         args = _normalize_vectordb_tool_input(args)
+        if not self._vectordb_expose_tools():
+            return self._vectordb_tools_refused('search')
         store = self._vectordb_store()
 
         query_text = str(args.get('query', '')).strip()
@@ -1031,6 +1061,8 @@ class VectorStoreToolMixin:
     def upsert(self, args):
         """Add or update documents in the vector database."""
         args = _normalize_vectordb_tool_input(args)
+        if not self._vectordb_expose_tools():
+            return self._vectordb_tools_refused('upsert')
         if not self._vectordb_allow_write():
             return self._vectordb_write_refused('upsert')
         store = self._vectordb_store()
@@ -1118,6 +1150,8 @@ class VectorStoreToolMixin:
     def delete(self, args):
         """Delete documents from the vector database by object IDs."""
         args = _normalize_vectordb_tool_input(args)
+        if not self._vectordb_expose_tools():
+            return self._vectordb_tools_refused('delete')
         if not self._vectordb_allow_write():
             return self._vectordb_write_refused('delete')
         store = self._vectordb_store()
@@ -1166,6 +1200,8 @@ class VectorStoreToolMixin:
     def objdir(self, args):
         """List unique document paths in this vector store."""
         args = _normalize_vectordb_tool_input(args)
+        if not self._vectordb_expose_tools():
+            return self._vectordb_tools_refused('objdir')
         store = self._vectordb_store()
 
         parent = args.get('parent', None)
@@ -1220,6 +1256,8 @@ class VectorStoreToolMixin:
     def get(self, args):
         """Retrieve document chunks by objectId."""
         args = _normalize_vectordb_tool_input(args)
+        if not self._vectordb_expose_tools():
+            return self._vectordb_tools_refused('get')
         store = self._vectordb_store()
 
         object_id = (args.get('object_id') or '').strip()
@@ -1277,6 +1315,8 @@ class VectorStoreToolMixin:
     )
     def stats(self, args):
         """Return collection statistics for this vector store."""
+        if not self._vectordb_expose_tools():
+            return self._vectordb_tools_refused('stats')
         store = self._vectordb_store()
 
         return {

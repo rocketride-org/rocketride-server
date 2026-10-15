@@ -50,6 +50,13 @@ VALID_TABLE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
 class IGlobal(StoreGlobalBase):
     serverName: str = 'rrvector'
 
+    # Read by VectorStoreToolMixin when the engine lists or dispatches tools.
+    # The base resolves the rrvector.expose_tools setting at start; this class
+    # default keeps the tool surface off when nothing is configured, because
+    # objdir and get together return the whole table of the team's managed
+    # database to any caller of the pipeline's tool path.
+    expose_tools: bool = False
+
     # Read by VectorStoreToolMixin before upsert/delete run. The base resolves
     # the rrvector.allow_write setting at start; this class default keeps
     # writes off when nothing is configured.

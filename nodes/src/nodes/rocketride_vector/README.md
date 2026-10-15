@@ -30,12 +30,16 @@ An agent node in the same pipeline sees each function as
 (for example `rrvector_1.search`). An app calls `client.tool` with the bare
 function name and this node's id (`tool='search', node_id='rrvector_1'`); with
 no node id the call goes to the first node in the pipeline that owns a tool of
-that name. The read functions are always offered. `upsert` and `delete` are offered only while Allow writes through tools
-is on, because they change the team's managed database; while it is off they
-are left out of the tool list: an agent's call fails with "not found in tool
-catalog", and an app's `client.tool` call fails with the engine's "No handler
-found for tool" error. `examples/rocketride-vector-agent.pipe` in the
-repository is a chat agent wired to this node's tools.
+that name. The functions are offered only while Expose as tools is on, which
+is off by default because the table lives in the team's managed database and
+`objdir` and `get` together return all of it. `upsert` and `delete` are offered
+only while Allow writes through tools is also on, because they change that
+table. While a switch is off the affected functions are left out of the tool
+list: an agent's call fails with "not found in tool catalog", an app's
+`client.tool` call fails with the engine's "No handler found for tool" error,
+and a direct call returns a failure object naming the switch.
+`examples/rocketride-vector-agent.pipe` in the repository is a chat agent
+wired to this node's tools.
 
 | Function | Description |
 | --- | --- |
@@ -108,13 +112,24 @@ messages the tool functions return (for example a refused write names
 `rrvector.delete`); agents and apps address the functions by the node's
 pipeline id, which already keeps several vector stores apart.
 
+### Expose as tools
+
+Off by default. When off, the node offers no tool functions: an agent's call
+fails with "not found in tool catalog", an app's with the engine's "No handler
+found for tool" error, and a direct call returns a failure object. The
+documents and questions lanes are unaffected. Turn it on only for a pipeline
+whose agent or app is meant to read this table through tools; `objdir` and
+`get` return every document, not only the matches above the score threshold
+that the questions lane returns.
+
 ### Allow writes through tools
 
-Off by default. When off, `upsert` and `delete` are not offered: an agent's
-call fails with "not found in tool catalog", an app's with the engine's "No
-handler found for tool" error. `search`, `objdir`, `get`, and `stats` keep
-working, and the documents lane still writes. Turn it on only for a pipeline
-whose agent or app is meant to manage the documents in this table.
+Off by default, and read only while Expose as tools is on. When off, `upsert`
+and `delete` are not offered: an agent's call fails with "not found in tool
+catalog", an app's with the engine's "No handler found for tool" error.
+`search`, `objdir`, `get`, and `stats` keep working, and the documents lane
+still writes. Turn it on only for a pipeline whose agent or app is meant to
+manage the documents in this table.
 
 ## Notes
 
@@ -139,8 +154,9 @@ for a re-ingested object.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `rrvector.allow_write` | `boolean` | **Allow writes through tools**<br/>Permit the upsert and delete tool functions to change this table in your RocketRide cloud database. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, get, stats) are unaffected. | `false` |
+| `rrvector.allow_write` | `boolean` | **Allow writes through tools**<br/>Permit the upsert and delete tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, get, stats) are unaffected. | `false` |
 | `rrvector.collection` | `string` | **Table**<br/>Name of the table to store vectors in your RocketRide cloud database. | `"rocketride"` |
+| `rrvector.expose_tools` | `boolean` | **Expose as tools**<br/>Offer this table to agents and apps as tool functions: search, objdir, get and stats, plus upsert and delete when writes through tools are allowed. Leave OFF unless a trusted application or agent in this pipeline is meant to read the table through tools; objdir and get together return the whole table, not only the matches the questions lane returns. The documents and questions lanes are unaffected. | `false` |
 | `rrvector.hnsw_ef_construction` | `integer` | **HNSW ef_construction**<br/>HNSW build-time candidate list size used when the index is first created. | `64` |
 | `rrvector.hnsw_m` | `integer` | **HNSW m**<br/>HNSW graph degree (max connections per layer) used when the index is first created. | `16` |
 | `rrvector.profile` | `string` | **RocketRide cloud database**<br/>Connect to... | `"cloud"` |

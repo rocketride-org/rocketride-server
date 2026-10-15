@@ -1,7 +1,7 @@
 """
 Unit tests for the write switch on ai.common.store.document_store.VectorStoreToolMixin.
 
-Coverage for issue #2587: the upsert and delete tools honour ``IGlobal.allow_write``.
+Coverage for issue #2587: every tool honours ``IGlobal.expose_tools``, the upsert and delete tools also ``IGlobal.allow_write``.
 A node that never sets it keeps writing (every existing store node); a node that
 sets it off (rocketride_vector, whose table lives in the team's managed database)
 gets a readable refusal instead of a write, and the read tools are not affected
@@ -26,10 +26,12 @@ class _Discoverable:
 class _Tools(VectorStoreToolMixin, _Discoverable):
     """The mixin on a bare object, the way an IInstance carries it."""
 
-    def __init__(self, store, allow_write=None):
+    def __init__(self, store, allow_write=None, expose_tools=None):
         glb = SimpleNamespace(serverName='rrvector', store=store, embed_query=None, embed_model_name=None)
         if allow_write is not None:
             glb.allow_write = allow_write
+        if expose_tools is not None:
+            glb.expose_tools = expose_tools
         self.IGlobal = glb
 
 
@@ -166,9 +168,74 @@ def test_hiding_holds_on_the_real_instance_base():
 
     inst = StoreInstanceBase.__new__(StoreInstanceBase)  # no engine wiring, as in test_store_base
     inst.IGlobal = SimpleNamespace(
-        serverName='rrvector', store=_store(), embed_query=None, embed_model_name=None, allow_write=False
+        serverName='rrvector',
+        store=_store(),
+        embed_query=None,
+        embed_model_name=None,
+        expose_tools=False,
+        allow_write=False,
     )
 
+    assert set(inst._collect_tool_methods()) == set()
+    inst.IGlobal.expose_tools = True
     assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats'}
     inst.IGlobal.allow_write = True
     assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats', 'upsert', 'delete'}
+
+
+# ---------------------------------------------------------------------------
+# expose_tools: the whole tool surface is opt-in on a managed store (#2631 review)
+# ---------------------------------------------------------------------------
+
+
+_EVERY_TOOL = [
+    ('search', {'query': 'hello'}),
+    ('upsert', {'documents': _DOCS}),
+    ('delete', {'object_ids': ['obj-1']}),
+    ('objdir', {}),
+    ('get', {'object_id': 'obj-1'}),
+    ('stats', {}),
+]
+
+
+def test_tools_stay_exposed_when_the_node_sets_nothing():
+    """A store node that never defines expose_tools keeps every tool, as before."""
+    tools = _Tools(_store())
+    assert set(tools._collect_tool_methods()) == {'search', 'upsert', 'delete', 'objdir', 'get', 'stats'}
+
+
+def test_no_tool_is_advertised_while_tools_are_off():
+    """With expose_tools off nothing is listed, whatever allow_write says."""
+    tools = _Tools(_store(), allow_write=True, expose_tools=False)
+    assert tools._collect_tool_methods() == {}
+
+
+@pytest.mark.parametrize('tool, args', _EVERY_TOOL)
+def test_every_tool_refuses_when_the_node_does_not_expose_tools(tool, args):
+    """A direct call while tools are off returns the failure object and never reaches the store."""
+    store = _store()
+    tools = _Tools(store, allow_write=True, expose_tools=False)
+
+    result = getattr(tools, tool)(args)
+
+    assert result['success'] is False
+    assert 'expose_tools=true' in result['error']
+    assert f'rrvector.{tool}' in result['error']
+    for method in ('addChunks', 'remove', 'getPaths', 'get', 'count_documents', 'searchSemantic', 'searchKeyword'):
+        getattr(store, method).assert_not_called()
+
+
+def test_the_tools_switch_is_checked_before_the_write_switch():
+    """With both switches off a write names the tools switch, the one the owner has to flip first."""
+    tools = _Tools(_store(), allow_write=False, expose_tools=False)
+
+    result = tools.upsert({'documents': _DOCS})
+
+    assert 'expose_tools=true' in result['error']
+    assert 'allow_write' not in result['error']
+
+
+@pytest.mark.parametrize('value, exposed', [('false', False), ('0', False), ('true', True), ('yes', True)])
+def test_a_string_tools_switch_is_parsed_like_a_config_value(value, exposed):
+    tools = _Tools(_store(), expose_tools=value)
+    assert bool(tools._collect_tool_methods()) is exposed
