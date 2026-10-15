@@ -3,6 +3,13 @@
 # Direct imports only
 
 faster-whisper
+# ctranslate2 is faster-whisper's inference engine. 4.7.x with the CUDA 12.8 runtime
+# corrupts the heap in cuBLAS 12.8.4, so the loader's GPU probe refuses that pair and
+# Whisper silently runs on the CPU. The runtime installer compiles these files into the
+# engine cache and keeps whatever version that cache already holds, so a host that once
+# resolved 4.7.1 stayed on it although nodes/src/nodes/constraints.lock had moved on.
+# The floor forces the resolver past it; the ceiling keeps the next major out (#2498).
+ctranslate2>=4.8,<5
 numpy
 # onnxruntime is an indirect dep (via faster-whisper), not imported here.
 # One shared version across every onnxruntime consumer, so the ~200 MB runtime installs once.
