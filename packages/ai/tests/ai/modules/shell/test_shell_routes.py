@@ -317,13 +317,53 @@ def test_llms_lists_all_pages_with_absolute_urls(app_url):
 
 def test_sitemap_and_llms_list_the_legal_and_superfans_pages(app_url):
     # Named here rather than read from LISTED_ROUTES, so the test fails if one
-    # of these pages drops out of the advertised subset.
+    # of these pages drops out of the advertised subset. The expected titles and
+    # descriptions are pinned copies of the client's strings (routes.ts and the
+    # documents' front matter), not read back from PUBLIC_ROUTE_MANIFEST, so a
+    # wrong entry fails here too.
+    expected = {
+        '/legal': (
+            'Legal',
+            'The policies and terms that govern RocketRide Cloud - each document with its version, effective '
+            'date, and latest change.',
+        ),
+        '/legal/terms': (
+            'RocketRide Cloud Terms of Service',
+            'The agreement governing use of RocketRide Cloud, including accounts, payments, and acceptable '
+            'service use.',
+        ),
+        '/legal/privacy-policy': (
+            'Privacy Policy',
+            'How RocketRide collects, uses, and shares personal information across its websites and RocketRide Cloud.',
+        ),
+        '/legal/dpa': (
+            'Data Processing Agreement',
+            'The data processing terms that apply when RocketRide processes personal data on behalf of business '
+            'customers.',
+        ),
+        '/legal/acceptable-use': (
+            'Acceptable Use Policy',
+            'The rules for what may and may not be done with RocketRide Cloud and its services.',
+        ),
+        '/legal/subprocessors': (
+            'RocketRide Cloud Sub-processors',
+            'The third-party sub-processors RocketRide uses to provide RocketRide Cloud, and how the list changes.',
+        ),
+        '/legal/trademark-policy': (
+            'Trademark & Brand Usage Policy',
+            'How the RocketRide name, logo, and brand assets may and may not be used.',
+        ),
+        '/superfans': (
+            'Superfans',
+            'The developers who build with RocketRide and tell us the truth. Earn early builds, a hand on the '
+            'roadmap, and artifacts you can only be given.',
+        ),
+    }
+    assert sorted(expected) == sorted(LEGAL_PAGES + ('/superfans',))
     sitemap = _client().get('/sitemap.xml').text
     llms = _client().get('/llms.txt').text
-    manifest = {route: (title, description) for route, title, description in PUBLIC_ROUTE_MANIFEST}
-    for route in LEGAL_PAGES + ('/superfans',):
+    for route, (title, description) in expected.items():
         assert f'<loc>{BASE}{route}</loc>' in sitemap
-        title, description = manifest[route]
         assert f'- [{title}]({BASE}{route}): {description}' in llms
 
 
