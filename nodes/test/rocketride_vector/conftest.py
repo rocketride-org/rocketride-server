@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
+from .._store_base_stubs import store_base_stubs
+
 NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'rocketride_vector'
 
 
@@ -19,9 +21,9 @@ def node_modules(monkeypatch: pytest.MonkeyPatch):
 
     Returns ``(IGlobal module, IInstance module, stubs)``. ``stubs`` carries the
     mocks a test can inspect or program: ``warning``, ``resolve_dsn``, the
-    driver ``Store`` class, ``depends`` and the psycopg2 ``connect``. The shared store base is stood in for by the hook contract it
-    defines (``_open_store``, ``_sub_key``, ``_probe_connection``); the base
-    itself is covered in packages/ai.
+    driver ``Store`` class, ``depends`` and the psycopg2 ``connect``. The shared
+    store base is stood in for by ``_store_base_stubs`` (the hook contract and
+    the switch defaults); the base itself is covered in packages/ai.
     """
     package_name = f'_rocketride_vector_test_{id(monkeypatch)}'
     package = types.ModuleType(package_name)
@@ -37,25 +39,8 @@ def node_modules(monkeypatch: pytest.MonkeyPatch):
     rocketlib.tool_function = lambda **_kwargs: lambda function: function
     monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
 
-    class StoreGlobalBase:
-        serverName: str = ''
-        store = None
-
-        def _open_store(self, logical_type, conn_config, bag):
-            raise NotImplementedError
-
-        def _sub_key(self):
-            raise NotImplementedError
-
-        def _probe_connection(self, config):
-            raise NotImplementedError
-
-    class StoreInstanceBase:
-        pass
-
-    store_module = types.ModuleType('ai.common.store')
-    store_module.StoreGlobalBase = StoreGlobalBase
-    store_module.StoreInstanceBase = StoreInstanceBase
+    store_module = store_base_stubs()
+    StoreInstanceBase = store_module.StoreInstanceBase
     db_module = types.ModuleType('ai.common.rocketride_db')
     db_module.resolve_rocketride_dsn = Mock(return_value='postgresql://u:p@pool:5432/tenant_db')
     depends_module = types.ModuleType('depends')

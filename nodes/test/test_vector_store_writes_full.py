@@ -161,3 +161,19 @@ def test_empty_batch_does_not_create_a_collection(store_env):
     with raw.cursor() as cur:
         cur.execute('SELECT to_regclass(%s)', (table,))
         assert cur.fetchone()[0] is None
+
+
+def test_listing_skips_the_schema_row_and_deleted_documents(store_env):
+    """The listing holds documents only: not the store's schema row, not soft-deleted ones (#2587).
+
+    Both Postgres drivers carry their own copy of the filter, so the fixture's
+    parametrisation is what covers store_postgres as well as rocketride_vector.
+    """
+    store, _, _ = store_env
+    other = _doc('b')
+    other.metadata.parent = '/other'
+    store.addChunks([_doc(), other])
+    store.markDeleted(['b'])
+
+    # No None key for the schema row, and the soft-deleted document is gone.
+    assert store.getPaths() == {'/test': 'a'}
