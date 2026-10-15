@@ -24,7 +24,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DUPLICATE_ID_POLICY, decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId } from '../shared/util/pipeFileDecision';
+import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId } from '../shared/util/pipeFileDecision';
 import type { KnownPipeFile, PipeFileEvent } from '../shared/util/pipeFileDecision';
 
 const FILE = '/ws/pipelines/a.pipe';
@@ -80,17 +80,10 @@ test('the same file under an unnormalised path is still itself', () => {
 
 // --- genuine duplicate -------------------------------------------------------
 
-test('a genuine duplicate is not rewritten silently: the default policy asks', () => {
-	assert.equal(DUPLICATE_ID_POLICY, 'ask');
+test('a genuine duplicate is not rewritten silently: the user is asked', () => {
 	const known = [{ filePath: OTHER, projectId: ID_A }];
 	assert.deepEqual(decide(pipe(ID_A), known, 'created'), { kind: 'ask-duplicate', projectId: ID_A, otherPath: OTHER });
 	assert.deepEqual(decide(pipe(ID_A), known, 'changed'), { kind: 'ask-duplicate', projectId: ID_A, otherPath: OTHER });
-});
-
-test('the duplicate policy is the one switch: reassign writes, leave does not', () => {
-	const input = { event: 'created' as const, filePath: FILE, text: pipe(ID_A), known: [{ filePath: OTHER, projectId: ID_A }] };
-	assert.deepEqual(decidePipeFile(input, 'reassign'), { kind: 'assign-id' });
-	assert.deepEqual(decidePipeFile(input, 'leave'), { kind: 'leave', reason: 'duplicate-ignored' });
 });
 
 // --- missing id ----------------------------------------------------------------

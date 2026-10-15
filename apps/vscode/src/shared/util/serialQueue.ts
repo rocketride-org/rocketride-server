@@ -8,10 +8,10 @@
  *
  * The sidebar's `.pipe` watcher puts created files through one (issue
  * #2466): each created-file handler judges its file against the parsed-file
- * cache and refreshes the cache afterwards, so two handlers running side by
- * side both see a cache without the other's file, and a project_id the two
- * files share goes unreported. Queued, the second runs against the cache the
- * first left behind.
+ * cache and adds its file to the cache afterwards, so two handlers running
+ * side by side both see a cache without the other's file, and a project_id
+ * the two files share goes unreported. Queued, the second runs against the
+ * cache the first left behind.
  *
  * Kept free of `vscode` so it can be asserted directly (see serialQueue.test.ts).
  */

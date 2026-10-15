@@ -88,7 +88,7 @@ const ID = '11111111-1111-4111-8111-111111111111';
 
 test('queued, the second of two files created together is judged against the first', async () => {
 	// A model of handleFileCreated: judge the file against the cache, then
-	// refresh the cache from disk. Both files already carry the same id, as
+	// parse the file into the cache. Both files already carry the same id, as
 	// after a checkout or a copied folder.
 	const disk = new Map<string, string>([
 		[FILE, JSON.stringify({ components: [], project_id: ID })],
@@ -99,20 +99,19 @@ test('queued, the second of two files created together is judged against the fir
 	const handleCreated = async (filePath: string): Promise<void> => {
 		const text = disk.get(filePath) ?? '';
 		decisions.push(decidePipeFile({ event: 'created', filePath, text, known: [...cache.values()] }));
-		await tick(); // the read, the write, the findFiles of the real handler
-		cache.clear();
-		for (const [path, content] of disk) cache.set(path, { filePath: path, projectId: readPipeProjectId(content) ?? undefined });
+		await tick(); // the read and the write of the real handler
+		cache.set(filePath, { filePath, projectId: readPipeProjectId(text) ?? undefined });
 	};
 
 	// Side by side, each handler judges a cache that has neither file: the
-	// shared id passes twice and nothing re-judges after the refresh.
+	// shared id passes twice and nothing re-judges afterwards.
 	await Promise.all([handleCreated(FILE), handleCreated(OTHER)]);
 	assert.deepEqual(decisions, [
 		{ kind: 'leave', reason: 'id-ok' },
 		{ kind: 'leave', reason: 'id-ok' },
 	]);
 
-	// Queued, the second handler sees the cache the first refreshed.
+	// Queued, the second handler sees the file the first added.
 	decisions.length = 0;
 	cache.clear();
 	const queue = new SerialQueue();

@@ -47,23 +47,12 @@ export interface PipeFileDecisionInput {
 	settled?: boolean;
 }
 
-/** What to do about a file whose project_id another file already uses. */
-export type DuplicateIdPolicy = 'ask' | 'reassign' | 'leave';
-
-/**
- * The one place that decides what happens to a genuine duplicate.
- * 'ask' warns the user and changes nothing until they choose to assign a new
- * id. 'reassign' writes a new id without asking (the behaviour before #2466).
- * 'leave' only logs.
- */
-export const DUPLICATE_ID_POLICY: DuplicateIdPolicy = 'ask';
-
 /** How long a file that read as empty gets to finish being written. */
 export const EMPTY_FILE_SETTLE_MS = 500;
 
 export type PipeFileDecision =
 	/** Write nothing. `reason` is for the log line. */
-	| { kind: 'leave'; reason: 'empty' | 'invalid-json' | 'not-a-pipeline' | 'id-ok' | 'duplicate-ignored' }
+	| { kind: 'leave'; reason: 'empty' | 'invalid-json' | 'not-a-pipeline' | 'id-ok' }
 	/** Read as empty on create: wait, read again, decide again with `settled`. */
 	| { kind: 'confirm-empty' }
 	/** Still empty after settling: a genuinely new file, give it the skeleton. */
@@ -76,10 +65,9 @@ export type PipeFileDecision =
 /**
  * Decide what the watcher should do with one file.
  *
- * @param input  The event, the file, its text and the cached files.
- * @param policy What to do about a genuine duplicate; defaults to DUPLICATE_ID_POLICY.
+ * @param input The event, the file, its text and the cached files.
  */
-export function decidePipeFile(input: PipeFileDecisionInput, policy: DuplicateIdPolicy = DUPLICATE_ID_POLICY): PipeFileDecision {
+export function decidePipeFile(input: PipeFileDecisionInput): PipeFileDecision {
 	const { event, filePath, text, known, settled = false } = input;
 
 	// An empty read is the dangerous case: it is what a file looks like while
@@ -102,14 +90,9 @@ export function decidePipeFile(input: PipeFileDecisionInput, policy: DuplicateId
 	const other = known.find((f) => f.projectId === projectId && !samePath(f.filePath, filePath));
 	if (!other) return { kind: 'leave', reason: 'id-ok' };
 
-	switch (policy) {
-		case 'ask':
-			return { kind: 'ask-duplicate', projectId, otherPath: other.filePath };
-		case 'reassign':
-			return { kind: 'assign-id' };
-		case 'leave':
-			return { kind: 'leave', reason: 'duplicate-ignored' };
-	}
+	// A genuine duplicate is never rewritten unasked (that was the behaviour
+	// before #2466): the user is told and chooses.
+	return { kind: 'ask-duplicate', projectId, otherPath: other.filePath };
 }
 
 /**

@@ -89,9 +89,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
 	/**
 	 * Created files are handled one at a time, behind the initial load. Each
-	 * handler judges its file against parsedFiles and refreshes parsedFiles
-	 * afterwards, so two running side by side would each see a cache without
-	 * the other's file, and a project_id the two share would go unreported.
+	 * handler judges its file against parsedFiles and adds its file to
+	 * parsedFiles afterwards, so two running side by side would each see a
+	 * cache without the other's file, and a project_id the two share would go
+	 * unreported.
 	 */
 	private createdFileQueue = new SerialQueue();
 	/**
@@ -348,7 +349,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * Handles a newly created .pipe file. A genuinely new, empty file gets the
 	 * starter skeleton and a pipeline without a project_id gets one; see
 	 * reconcileProjectId for what the watcher may and may not write. Runs on
-	 * createdFileQueue, one file at a time and after the initial load.
+	 * createdFileQueue, one file at a time and after the initial load. Only
+	 * the created file is parsed into the cache, as handleFileChanged does: a
+	 * checkout that adds a hundred files must not run a hundred workspace
+	 * scans, and the next queued file needs no more than this one's entry.
 	 */
 	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
 		// The queue can hold a file past dispose(), and dispose() can land during
@@ -357,7 +361,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		if (this.disposed) return;
 		await this.reconcileProjectId(uri, 'created');
 		if (this.disposed) return;
-		await this.loadPipelineFiles();
+		// findFiles excludes node_modules; the watcher does not.
+		if (uri.fsPath.includes('node_modules')) return;
+		const text = await this.readPipeText(uri);
+		// Gone again already (a checkout, a temporary file): nothing to show.
+		if (text === undefined) return;
+		this.cacheParsedFile(uri.fsPath, PipelineFileParser.parseContent(text, uri.fsPath, this.getServiceClassInfoMap()));
+		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', false);
+		this.sendEntriesUpdate();
 	}
 
 	/** Removes the deleted file from the parsed-files cache and updates the webview. */
@@ -427,7 +438,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 			case 'assign-id':
-				await this.assignProjectId(uri, readPipeProjectId(text) ?? null, 'had no project_id, assigned one');
+				// Only a pipeline without a usable id gets here; assignProjectId
+				// re-reads the file and writes only while that is still so.
+				await this.assignProjectId(uri, null, 'had no project_id, assigned one');
 				return;
 			case 'ask-duplicate':
 				// Deliberately not awaited: the warning stays open until the user
