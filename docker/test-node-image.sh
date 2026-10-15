@@ -47,9 +47,11 @@ missed=0
 failed=''
 for req in $warmed; do
     total=$((total + 1))
-    if ! run --network none -e UV_OFFLINE=1 "$image" ./engine -c \
-            "from depends import depends; depends('$req')" > /dev/null 2>&1; then
+    if ! out=$(run --network none -e UV_OFFLINE=1 "$image" ./engine -c \
+            "from depends import depends; depends('$req')" 2>&1); then
         echo "  not from the cache: $req"
+        # Its last lines say why: as a rule, the package uv found no wheel for
+        printf '%s\n' "$out" | tail -n 15 | sed 's/^/    | /'
         missed=$((missed + 1))
         failed="$failed $req"
     fi
@@ -58,7 +60,7 @@ done
 if [ -n "$failed" ]; then
     echo "FATAL: $missed of $total requirement files did not install offline:"
     for req in $failed; do echo "  $req"; done
-    echo "Rerun one to see why: docker run --rm --network none -e UV_OFFLINE=1 $image ./engine -c \"from depends import depends; depends('<file>')\""
+    echo "Rerun one for its whole output: docker run --rm --network none -e UV_OFFLINE=1 $image ./engine -c \"from depends import depends; depends('<file>')\""
     exit 1
 fi
 echo "$image: engine probe passed, $total requirement files installed offline"
