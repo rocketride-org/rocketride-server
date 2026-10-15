@@ -1264,8 +1264,11 @@ class VectorStoreToolMixin:
         if not object_id:
             return {'success': False, 'error': 'object_id is required'}
 
-        offset = int(args.get('offset', 0))
-        limit = int(args.get('limit', 100))
+        try:
+            offset = int(args.get('offset', 0))
+            limit = int(args.get('limit', 100))
+        except (TypeError, ValueError):
+            return {'success': False, 'error': 'offset and limit must be valid integers'}
 
         doc_filter = DocFilter(
             objectIds=[object_id],

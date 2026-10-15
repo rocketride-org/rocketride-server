@@ -151,6 +151,38 @@ def test_read_tools_ignore_the_write_switch():
     assert tools.stats({}) == {'success': True, 'count': 3, 'model': 'test-model', 'vector_size': 2}
 
 
+@pytest.mark.parametrize('field', ['offset', 'limit'])
+@pytest.mark.parametrize('value', ['invalid', None, {}, []])
+def test_get_rejects_malformed_pagination_without_reading_store(field, value):
+    """Bad pagination returns a tool failure without querying the collection."""
+    store = _store()
+    tools = _Tools(store, allow_write=False, expose_tools=True)
+
+    result = tools.get({'object_id': 'obj-1', field: value})
+
+    assert result == {'success': False, 'error': 'offset and limit must be valid integers'}
+    store.get.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    'pagination, offset, limit',
+    [({}, 0, 100), ({'offset': 2, 'limit': 3}, 2, 3), ({'offset': '2', 'limit': '3'}, 2, 3)],
+)
+def test_get_preserves_valid_pagination(pagination, offset, limit):
+    """Defaults, integers and integer strings still reach the driver's filter."""
+    store = _store()
+    tools = _Tools(store, allow_write=False, expose_tools=True)
+
+    assert tools.get({'object_id': 'obj-1', **pagination}) == {'success': True, 'chunks': [], 'total': 0}
+
+    store.get.assert_called_once()
+    doc_filter = store.get.call_args.args[0]
+    assert doc_filter.objectIds == ['obj-1']
+    assert doc_filter.offset == offset
+    assert doc_filter.limit == limit
+    assert doc_filter.isDeleted is False
+
+
 def test_hiding_holds_on_the_real_instance_base():
     """The engine lists and dispatches tools through IInstanceBase._collect_tool_methods.
 

@@ -55,8 +55,9 @@ The functions return `{"success": false, "error": "..."}` for a missing or
 invalid input, a missing embedding provider, or a refused write. `upsert`
 reports database errors the same way. `search` falls back to a keyword search
 when the semantic search fails and reports a failure object only if that fails
-too; `delete`, `objdir`, `get`, and `stats` raise database errors, and `get`
-raises on a non-integer `offset` or `limit`.
+too; `delete`, `objdir`, `get`, and `stats` raise database errors. `get` and
+`objdir` return a failure object when `offset` or `limit` cannot be converted
+to an integer.
 
 ## Configuration
 
