@@ -67,7 +67,14 @@
         "profile": "cloud",
         "cloud": {
           "collection": "knowledge_base",
+          "expose_tools": true,
           "allow_write": false
+        },
+        "embedding": {
+          "provider": "embedding_transformer",
+          "embedding_transformer": {
+            "profile": "miniLM"
+          }
         },
         "parameters": {}
       },
