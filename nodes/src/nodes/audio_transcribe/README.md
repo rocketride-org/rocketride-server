@@ -170,7 +170,7 @@ unreachable from the UI.
 ## Dependencies
 
 - `faster-whisper`
-- `ctranslate2`
+- `ctranslate2` `>=4.8,<5`
 - `av`
 - `tokenizers`
 - `huggingface-hub`

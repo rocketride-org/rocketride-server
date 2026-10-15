@@ -3,8 +3,10 @@
 The probe is a child process; these tests run its real script against stub
 ``torch`` / ``ctranslate2`` / ``faster_whisper`` packages placed on the child's
 path, so every stage (version guard, storage view, inference, clean exit) is
-exercised with ordinary Python and no GPU. The loader's fallback is tested with
-the probe stubbed, the way the other loader tests stub the model stack.
+exercised with ordinary Python and no GPU. That includes the storage-view-only
+verdict the child gives when the probe weights are not in the local cache. The
+loader's fallback is tested with the probe stubbed, the way the other loader
+tests stub the model stack.
 
 Run from the project root with the built engine or a venv that has ``ai`` on
 the path, like test_whisper.py.
@@ -41,6 +43,7 @@ def fresh_probe(monkeypatch):
     """
     monkeypatch.setattr(WhisperLoader, '_gpu_compatible', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_reason', None)
+    monkeypatch.setattr(WhisperLoader, '_gpu_probe_inference_skipped', None)
     monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=lambda *a, **k: None))
 
 
@@ -79,8 +82,10 @@ import os
 __version__ = os.environ.get("PROBE_CT2", "4.8.2")
 
 
-def get_supported_compute_types(_device):
-    return os.environ.get("PROBE_COMPUTE_TYPES", "float16,int8").split(",")
+def get_supported_compute_types(_device, device_index=0):
+    # Like the real binding: a set (so indexing it would fail), per device.
+    print("stub compute types queried for device", device_index, flush=True)
+    return set(os.environ.get("PROBE_COMPUTE_TYPES", "float16,int8").split(","))
 
 
 class StorageView:
@@ -96,8 +101,18 @@ import os
 STAGE = os.environ.get("PROBE_FAIL_STAGE", "")
 
 
-def download_model(*_args, **_kwargs):
-    return "/stub"
+def download_model(name, *_args, **kwargs):
+    # The child may only read the local cache; downloading is the parent's job.
+    if not kwargs.get("local_files_only"):
+        raise AssertionError("the probe child must not download")
+    cached = os.environ.get("PROBE_TINY_CACHED", "1")
+    if cached == "0":
+        raise FileNotFoundError(f"{name} is not in the local cache")
+    if cached == "error":
+        raise PermissionError("cache directory is not readable")
+    if os.environ.get("PROBE_TINY_DIR"):
+        return os.environ["PROBE_TINY_DIR"]  # a real snapshot directory, complete or not
+    return os.path.join(kwargs.get("cache_dir") or "/cache", name)
 
 
 class WhisperModel:
@@ -157,16 +172,64 @@ def test_probe_script_passes_on_a_working_stack(stub_stack):
     assert lines[-1] == 'probe: ok'
     assert 'probe: storage view ok' in lines
     assert any(line.startswith('probe: inference ok') for line in lines)
-    # The inference stage loads the smallest model on the probed device in float16,
-    # and the echo proves the lazy segments were consumed.
-    assert 'probe model tiny cuda 0 float16 {}' in result.stdout
+    # The inference stage loads the smallest model, resolved from the local cache,
+    # on the probed device in float16; the echo proves the lazy segments were consumed.
+    assert 'probe model /cache/tiny cuda 0 float16 {}' in result.stdout
 
 
-def test_probe_script_forwards_device_index_and_download_root(stub_stack):
+def test_probe_script_forwards_device_index_and_looks_in_the_callers_cache(stub_stack):
     result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo'}, device_index=2, download_root='/models')
 
     assert result.returncode == 0, result.stderr
-    assert "probe model tiny cuda 2 float16 {'download_root': '/models'}" in result.stdout
+    assert 'probe model /models/tiny cuda 2 float16 {}' in result.stdout
+    assert 'stub compute types queried for device 2' in result.stdout  # not GPU 0 by default
+
+
+def test_probe_script_skips_inference_when_the_weights_are_not_local(stub_stack):
+    """No weights in the cache: the verdict stops at the storage view and nothing is downloaded."""
+    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_CACHED': '0'})
+
+    assert result.returncode == 0, result.stderr
+    lines = _probe_lines(result)
+    assert lines[-1] == 'probe: ok'
+    assert 'probe: storage view ok' in lines
+    assert any(line.startswith('probe: inference skipped: tiny weights are not cached locally') for line in lines)
+    assert 'probe model' not in result.stdout  # no model was loaded
+
+
+def test_probe_script_fails_when_the_cache_cannot_be_read(stub_stack):
+    """Only missing weights skip the stage; any other error resolving them is a probe failure."""
+    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_CACHED': 'error'})
+
+    assert result.returncode != 0
+    assert _probe_lines(result)[-1] == 'probe: storage view ok'
+    assert 'cache directory is not readable' in result.stderr
+
+
+def test_probe_script_treats_an_incomplete_snapshot_as_not_cached(stub_stack, tmp_path):
+    """The hub cache lists a snapshot before its files arrive; without model.bin there is nothing to load."""
+    snapshot = tmp_path / 'snapshots' / 'abc'
+    snapshot.mkdir(parents=True)
+    (snapshot / 'config.json').write_text('{}')
+
+    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_DIR': str(snapshot)})
+
+    assert result.returncode == 0, result.stderr
+    lines = _probe_lines(result)
+    assert lines[-1] == 'probe: ok'
+    assert any('model.bin is missing' in line or 'inference skipped' in line for line in lines)
+    assert 'probe model' not in result.stdout
+
+
+def test_probe_script_loads_a_local_model_directory_as_is(stub_stack, tmp_path):
+    local = tmp_path / 'my-whisper'
+    local.mkdir()
+    (local / 'model.bin').write_bytes(b'weights')
+
+    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo'}, model_name=str(local))
+
+    assert result.returncode == 0, result.stderr
+    assert f'probe model {local} cuda 0 float16 {{}}' in result.stdout
 
 
 def test_probe_script_uses_a_supported_precision(stub_stack):
@@ -175,7 +238,15 @@ def test_probe_script_uses_a_supported_precision(stub_stack):
     )
 
     assert result.returncode == 0, result.stderr
-    assert 'probe model tiny cuda 0 int8_float32 {}' in result.stdout
+    assert 'probe model /cache/tiny cuda 0 int8_float32 {}' in result.stdout
+
+
+def test_probe_script_falls_back_to_float32_on_a_gpu_without_float16(stub_stack):
+    """Older GPUs report only float32 (and maybe int8); the set has no order, so no indexing."""
+    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_COMPUTE_TYPES': 'float32'})
+
+    assert result.returncode == 0, result.stderr
+    assert 'probe model /cache/tiny cuda 0 float32 {}' in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -230,9 +301,11 @@ def test_check_gpu_compatible_runs_the_real_script_against_the_stub_stack(stub_s
     prefix = f'import sys\nsys.path.insert(0, {str(stub_stack)!r})\n'
     real = _gpu_probe_script
     monkeypatch.setattr(whispermod, '_gpu_probe_script', lambda **kw: prefix + real(**kw))
+    monkeypatch.setattr(WhisperLoader, '_gpu_probe_inference_skipped', 'stale')
 
     assert WhisperLoader._check_gpu_compatible() is True
     assert WhisperLoader._gpu_probe_reason is None
+    assert WhisperLoader._gpu_probe_inference_skipped is None  # the inference stage ran and reset it
 
 
 def test_check_gpu_compatible_names_the_stage_and_exit_code_on_failure(stub_stack, monkeypatch, fresh_probe):
@@ -280,8 +353,8 @@ def test_probe_ok_must_be_the_last_stage_line(monkeypatch, fresh_probe):
     assert WhisperLoader._check_gpu_compatible() is False
 
 
-def test_a_timeout_is_reported_but_not_cached(monkeypatch, fresh_probe):
-    """A slow probe sends this load to the CPU; the next load probes again."""
+def test_a_timeout_is_cached_like_any_other_failure(monkeypatch, fresh_probe):
+    """The child reads only local files, so a hang is a verdict: it costs once per process."""
     calls = []
 
     def _hang(*_a, **_k):
@@ -292,9 +365,86 @@ def test_a_timeout_is_reported_but_not_cached(monkeypatch, fresh_probe):
 
     assert WhisperLoader._check_gpu_compatible() is False
     assert f'within {whispermod._GPU_PROBE_TIMEOUT_S} s' in WhisperLoader._gpu_probe_reason
-    assert WhisperLoader._gpu_compatible is None
+    assert WhisperLoader._gpu_compatible is False
     assert WhisperLoader._check_gpu_compatible() is False
+    assert len(calls) == 1
+
+
+def test_an_out_of_memory_child_is_reported_but_not_a_verdict(monkeypatch, fresh_probe):
+    """A full GPU says nothing about the CUDA stack: the next load probes again."""
+    calls = []
+
+    def _run(*a, **k):
+        calls.append(1)
+        return _completed(1, stdout='probe: storage view ok\n', stderr='CUDA failed with error out of memory')
+
+    monkeypatch.setattr(subprocess, 'run', _run)
+
+    assert WhisperLoader._check_gpu_compatible(device_index=1) is False
+    assert 'out of memory' in WhisperLoader._gpu_probe_reason
+    assert 'not a verdict' in WhisperLoader._gpu_probe_reason
+    assert WhisperLoader._gpu_compatible is None
+    assert WhisperLoader._check_gpu_compatible(device_index=1) is False
     assert len(calls) == 2
+
+
+def test_local_files_only_skips_the_weight_fetch(monkeypatch, fresh_probe):
+    def _download(*_a, **_k):
+        raise AssertionError('no network when the caller asked for local files only')
+
+    monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=_download))
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: _completed(0, stdout='probe: ok\n'))
+
+    assert WhisperLoader._check_gpu_compatible(local_files_only=True) is True
+
+
+def test_a_guarded_host_does_not_fetch_the_probe_weights(monkeypatch, fresh_probe):
+    """ctranslate2 4.7.x with CUDA 12.8 stops the child at the guard; no point downloading first."""
+    import importlib.metadata
+
+    monkeypatch.setattr(importlib.metadata, 'version', lambda name: '4.7.1')
+    torch = types.SimpleNamespace(version=types.SimpleNamespace(cuda='12.8'))
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', types.SimpleNamespace(torch=torch))
+    attempts = []
+    monkeypatch.setitem(
+        sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=lambda *a, **k: attempts.append(a))
+    )
+    monkeypatch.setattr(
+        subprocess, 'run', lambda *a, **k: _completed(1, stdout='probe: guard excludes ctranslate2 4.7.x\n')
+    )
+
+    assert WhisperLoader._guard_refuses_installed_versions() == 'ctranslate2 4.7.1 with the CUDA 12.8 runtime'
+    assert WhisperLoader._check_gpu_compatible() is False
+    assert attempts == []
+    assert 'probe: guard excludes' in WhisperLoader._gpu_probe_reason
+
+
+def test_the_guard_shortcut_passes_other_versions(monkeypatch):
+    import importlib.metadata
+
+    torch = types.SimpleNamespace(version=types.SimpleNamespace(cuda='12.8'))
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', types.SimpleNamespace(torch=torch))
+    monkeypatch.setattr(importlib.metadata, 'version', lambda name: '4.8.3')
+    assert WhisperLoader._guard_refuses_installed_versions() is None
+    monkeypatch.setattr(importlib.metadata, 'version', lambda name: (_ for _ in ()).throw(ModuleNotFoundError()))
+    assert WhisperLoader._guard_refuses_installed_versions() is None  # cannot tell: fetch as usual
+
+
+def test_a_skipped_inference_stage_is_a_storage_view_verdict(monkeypatch, fresh_probe, caplog):
+    """Without local weights the child ends on the storage view: the GPU is used, with a warning."""
+    stdout = (
+        'probe: storage view ok\n'
+        'probe: inference skipped: tiny weights are not cached locally; LocalEntryNotFoundError\n'
+        'probe: ok\n'
+    )
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: _completed(0, stdout=stdout))
+
+    with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
+        assert WhisperLoader._check_gpu_compatible() is True
+
+    assert WhisperLoader._gpu_probe_reason is None
+    assert WhisperLoader._gpu_probe_inference_skipped.startswith('probe: inference skipped')
+    assert any('storage view only' in record.getMessage() for record in caplog.records)
 
 
 def test_a_verdict_is_cached_for_the_process(monkeypatch, fresh_probe):
@@ -311,8 +461,8 @@ def test_a_verdict_is_cached_for_the_process(monkeypatch, fresh_probe):
     assert len(calls) == 1
 
 
-def test_a_failed_weight_download_is_not_a_gpu_verdict(monkeypatch, fresh_probe):
-    """The parent fetches the probe weights; a hub problem never means "CPU forever"."""
+def test_a_failed_weight_download_does_not_decide_the_verdict(monkeypatch, fresh_probe, caplog):
+    """The parent fetches the probe weights best effort; a hub problem never means "CPU"."""
     attempts = []
 
     def _download(name, cache_dir=None):
@@ -323,15 +473,13 @@ def test_a_failed_weight_download_is_not_a_gpu_verdict(monkeypatch, fresh_probe)
     ran = []
     monkeypatch.setattr(subprocess, 'run', lambda *a, **k: ran.append(a) or _completed(0, stdout='probe: ok\n'))
 
-    assert WhisperLoader._check_gpu_compatible(download_root='/models') is False
-    assert 'hub unreachable' in WhisperLoader._gpu_probe_reason
-    assert WhisperLoader._gpu_compatible is None
-    assert ran == []  # the child never started
-    assert attempts == [(whispermod._GPU_PROBE_MODEL, '/models')]
+    with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
+        assert WhisperLoader._check_gpu_compatible(download_root='/models') is True
 
-    # The next load tries again.
-    assert WhisperLoader._check_gpu_compatible(download_root='/models') is False
-    assert len(attempts) == 2
+    assert attempts == [(whispermod._GPU_PROBE_MODEL, '/models')]
+    assert len(ran) == 1  # the probe still ran; the child decides from its local cache
+    assert WhisperLoader._gpu_probe_reason is None
+    assert any('hub unreachable' in record.getMessage() for record in caplog.records)
 
 
 def test_the_prefetched_weights_land_in_the_callers_cache(monkeypatch, fresh_probe):
@@ -351,14 +499,24 @@ def test_the_prefetched_weights_land_in_the_callers_cache(monkeypatch, fresh_pro
 
     assert WhisperLoader._check_gpu_compatible(download_root='/models') is True
     assert fetched == ['/models']
-    assert "'download_root': '/models'" in seen['script']
+    assert "name, root = 'tiny', '/models'" in seen['script']  # the child looks in the same cache
 
 
 def test_first_candidate_gpu_skips_excluded_devices():
-    torch = types.SimpleNamespace(cuda=types.SimpleNamespace(device_count=lambda: 3))
+    torch = types.SimpleNamespace(cuda=types.SimpleNamespace(device_count=lambda: 3))  # no memory query
 
     assert WhisperLoader._first_candidate_gpu([], torch) == 0
     assert WhisperLoader._first_candidate_gpu([0], torch) == 1
+
+
+def test_first_candidate_gpu_prefers_the_device_with_the_most_free_memory():
+    free = {0: 1 << 30, 1: 70 << 30, 2: 30 << 30}
+    torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(device_count=lambda: 3, mem_get_info=lambda i: (free[i], 80 << 30))
+    )
+
+    assert WhisperLoader._first_candidate_gpu([], torch) == 1
+    assert WhisperLoader._first_candidate_gpu([1], torch) == 2
     assert WhisperLoader._first_candidate_gpu([0, 1], torch) == 2
     assert WhisperLoader._first_candidate_gpu([0, 1, 2], torch) == 0  # nothing free: the allocator will say so
 
@@ -395,8 +553,11 @@ def _probe_says(monkeypatch, verdict, reason=None):
     calls = []
 
     @classmethod
-    def _fake(cls, device_index=0, download_root=None):
-        calls.append({'device_index': device_index, 'download_root': download_root})
+    def _fake(cls, device_index=0, download_root=None, local_files_only=False):
+        record = {'device_index': device_index, 'download_root': download_root}
+        if local_files_only:
+            record['local_files_only'] = True
+        calls.append(record)
         cls._gpu_compatible = verdict
         cls._gpu_probe_reason = reason
         return verdict
@@ -439,6 +600,36 @@ def test_server_mode_probes_a_gpu_the_allocator_may_hand_out(model_stack, monkey
     WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (1, 'cuda:1'), exclude_gpus=[0])
 
     assert calls[0]['device_index'] == 1
+
+
+def test_local_mode_without_a_device_falls_back_and_says_why(model_stack, monkeypatch, caplog):
+    """The path audio_transcribe takes without a model server: device=None with CUDA available."""
+    _probe_says(monkeypatch, False, 'exit 1 after "probe: storage view ok"')
+
+    with caplog.at_level(logging.ERROR, logger='rocketlib.models.whisper'):
+        _bundle, metadata, gpu_index = WhisperLoader.load('tiny')
+
+    assert (gpu_index, metadata['device']) == (-1, 'cpu')
+    assert metadata['device_fallback'] == 'exit 1 after "probe: storage view ok"'
+    assert len([r for r in caplog.records if r.levelno == logging.ERROR]) == 1
+
+
+def test_local_mode_without_a_device_uses_the_gpu_when_the_probe_passes(model_stack, monkeypatch):
+    calls = _probe_says(monkeypatch, True)
+
+    _bundle, metadata, gpu_index = WhisperLoader.load('tiny', download_root='/models')
+
+    assert (gpu_index, metadata['device']) == (0, 'cuda:0')
+    assert 'device_fallback' not in metadata
+    assert calls == [{'device_index': 0, 'download_root': '/models'}]
+
+
+def test_the_loader_forwards_local_files_only_to_the_probe(model_stack, monkeypatch):
+    calls = _probe_says(monkeypatch, True)
+
+    WhisperLoader.load('tiny', local_files_only=True)
+
+    assert calls == [{'device_index': 0, 'download_root': None, 'local_files_only': True}]
 
 
 def test_local_mode_with_an_explicit_gpu_probes_that_device(model_stack, monkeypatch, caplog):
