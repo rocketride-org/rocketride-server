@@ -33,6 +33,7 @@ import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -92,7 +93,7 @@ def _stub_engine(monkeypatch):
 
         def _service_definition(name, *_args, **_kwargs):
             path = _REPO / 'nodes' / 'src' / 'nodes' / name / 'services.json'
-            return json5.loads(path.read_text()) if path.exists() else None
+            return json5.loads(path.read_text(encoding='utf-8')) if path.exists() else None
 
         class _IJson:
             @staticmethod
@@ -352,10 +353,13 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
     Builds the node's own IGlobal and IInstance (no stand-in base), runs the
     real beginGlobal against the test database with the node's services.json
     as the profile source, and checks what the engine would list. Flip the
-    cloud profile's ``expose_tools`` to true and the first assertion fails.
+    cloud profile's ``expose_tools`` or ``allow_write`` to true and its default
+    assertion fails.
     """
     import rocketlib
     from rocketlib import OPEN_MODE
+
+    import ai.common.config as config_module
 
     json5 = pytest.importorskip('json5')
     iglobal_cls = sys.modules['nodes.rocketride_vector.IGlobal'].IGlobal
@@ -369,9 +373,12 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
     # config; serve the tree's copy so the shipped defaults are what resolve.
     def _service_definition(name, *_args, **_kwargs):
         path = _REPO / 'nodes' / 'src' / 'nodes' / name / 'services.json'
-        return json5.loads(path.read_text()) if path.exists() else None
+        return json5.loads(path.read_text(encoding='utf-8')) if path.exists() else None
 
-    monkeypatch.setattr(rocketlib, 'getServiceDefinition', _service_definition, raising=False)
+    # Config imports this function directly, so patch its lookup rather than
+    # rocketlib's export (which may already have been imported by the engine).
+    service_definition = Mock(side_effect=_service_definition)
+    monkeypatch.setattr(config_module, 'getServiceDefinition', service_definition)
     # The engine's collector reads the decorator's __tool_meta__; a stand-in rocketlib has neither.
     real_collector = hasattr(rocketlib.IInstanceBase, '_collect_tool_methods')
     opened = []
@@ -390,6 +397,7 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
 
     try:
         glb, inst = make({'collection': TABLE})
+        service_definition.assert_any_call('rocketride_vector')
         assert glb.expose_tools is False  # the cloud profile's default ships the switch off
         assert glb.allow_write is False
         if real_collector:
