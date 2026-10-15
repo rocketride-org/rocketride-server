@@ -25,8 +25,8 @@
 # This class controls the data shared between all threads for the task.
 #
 # Sits on the shared store base like store_postgres, differing only in how it
-# connects: there are no host/user/password fields; the per-tenant DSN is
-# resolved from the account layer. The base supplies the lifecycle (open the
+# connects: there are no host/user/password fields; the task engine delivers
+# the authorized DSN for this node's scope / target. The base supplies the lifecycle (open the
 # store outside CONFIG mode, wire the tool-path embedder, register the
 # transform key) and, through StoreInstanceBase, the agent tools.
 #
@@ -41,7 +41,7 @@ from typing import Any, Dict
 
 from rocketlib import warning
 
-from ai.common.rocketride_db import resolve_rocketride_dsn
+from ai.common.rocketride_db import DsnNotDelivered, db_target, resolve_rocketride_dsn
 from ai.common.store import StoreGlobalBase
 
 # Valid unquoted PostgreSQL identifier: letter/underscore start, alphanumeric/underscore body, max 63 chars
@@ -86,7 +86,9 @@ class IGlobal(StoreGlobalBase):
         Validate the RocketRide cloud vector store config with fast, read-only probes.
 
         - Enforce a safe unquoted identifier for the table (collection).
-        - Resolve the per-tenant DSN, connect with a short timeout, run SELECT 1.
+        - Check scope / target. Outside a task no DSN is delivered, so stop
+          there: connectivity is checked when the pipeline runs.
+        - Inside a task, connect with a short timeout, run SELECT 1.
         - Verify pgvector availability via ``SELECT NULL::vector``.
         - Surface raw provider errors without truncation.
         """
@@ -101,8 +103,11 @@ class IGlobal(StoreGlobalBase):
                 )
                 return
 
-            # No host/user/password fields — resolve the per-tenant DSN.
-            dsn = resolve_rocketride_dsn()
+            # No host/user/password fields: read the delivered DSN.
+            try:
+                dsn = resolve_rocketride_dsn(*db_target(config))
+            except DsnNotDelivered:
+                return
 
             # Load deps on demand: in CONFIG mode beginGlobal never imports
             # .rocketride_vector (where the node's other depends() lives), so

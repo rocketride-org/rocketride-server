@@ -35,12 +35,14 @@
 # Everything else (schema, upsert, keyword/semantic search, render) is identical.
 # ------------------------------------------------------------------------------
 import os
+import threading
+from contextlib import contextmanager
 from depends import depends
 
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Callable, Dict, Any, cast
+from typing import List, Callable, Dict, Any, Iterator, cast
 import numpy as np
 
 import psycopg2
@@ -50,7 +52,7 @@ from rocketlib import warning
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
-from ai.common.rocketride_db import parse_dsn_fields, resolve_rocketride_dsn
+from ai.common.rocketride_db import db_target, parse_dsn_fields, resolve_rocketride_dsn
 from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
@@ -171,12 +173,11 @@ class Store(DocumentStoreBase):
             self.hnsw_ef_construction = 64
         self.hnsw_ef_construction = max(self.hnsw_ef_construction, 2 * self.hnsw_m)
 
-        # RocketRide cloud: no host/user/password fields. Resolve the
-        # per-tenant DSN (task-engine injected, or via the account broker) and
-        # connect directly. host/port/database are parsed only for bookkeeping
-        # (the connection subKey keys on database); the DSN is the source of
-        # truth.
-        dsn = resolve_rocketride_dsn()
+        # RocketRide cloud: no host/user/password fields. Read the DSN the
+        # task engine delivered for this node's scope / target and connect
+        # directly. host/port/database are parsed only for bookkeeping (the
+        # connection subKey keys on database); the DSN is the source of truth.
+        dsn = resolve_rocketride_dsn(*db_target(config))
         fields = parse_dsn_fields(dsn)
         self.host = fields['host']
         self.port = fields['port'] or DEFAULT_POSTGRES_PORT
@@ -185,6 +186,19 @@ class Store(DocumentStoreBase):
         # Bounded connect so an unreachable pooler fails fast (matches the
         # 3s timeout IGlobal.validateConfig uses) instead of the OS TCP timeout.
         self.client = psycopg2.connect(dsn, connect_timeout=3)
+
+        # Autocommit, so reads (and register_vector's type lookup) never open a
+        # transaction. The cloud DSN points at a transaction-mode pooler, which
+        # pins a server connection to a client for as long as it is inside a
+        # transaction: a node left "idle in transaction" between calls holds
+        # one of the database's few pooler slots for its whole lifetime.
+        # Writes that must be atomic use _transaction().
+        self.client.autocommit = True
+
+        # Serialises use of the shared connection across the task's threads:
+        # _transaction() switches autocommit off for its duration, and another
+        # thread's statement must not slip into (or open) a transaction then.
+        self._lock = threading.RLock()
 
         register_vector(self.client)
 
@@ -206,13 +220,53 @@ class Store(DocumentStoreBase):
 
         self.vectorSize = 0
 
+    @contextmanager
+    def _cursor(self) -> Iterator[Any]:
+        """
+        Yield a cursor for autocommitted statements (one implicit transaction each).
+        """
+        with self._lock, self.client.cursor() as cur:
+            yield cur
+
+    @contextmanager
+    def _transaction(self) -> Iterator[Any]:
+        """
+        Yield a cursor whose statements commit together, or not at all.
+
+        Rolls back on any error, so the connection is never left inside a
+        transaction (open or aborted), then returns to autocommit.
+        """
+        with self._lock:
+            self.client.autocommit = False
+            try:
+                with self.client.cursor() as cur:
+                    yield cur
+                self.client.commit()
+            except BaseException:
+                # A rollback that fails itself (a broken connection) must not
+                # replace the write error.
+                try:
+                    self.client.rollback()
+                except Exception as rollback_error:  # noqa: BLE001
+                    warning(f'{self.collection}: rollback after a failed write also failed: {rollback_error}')
+                raise
+            finally:
+                # Fails only if the rollback failed too. Close rather than keep
+                # a connection that may still sit in a transaction (pinning a
+                # pooler slot); the next call surfaces the closed connection.
+                try:
+                    self.client.autocommit = True
+                except Exception as restore_error:  # noqa: BLE001
+                    warning(f'{self.collection}: closing the connection, autocommit restore failed: {restore_error}')
+                    self.client.close()
+
     def _doesCollectionExist(self) -> bool:
         """
         Check if the collection exists.
 
         @returns: True if the collection exists, False otherwise.
         """
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['check_collection_exists'], (self.collection,))
             return cur.fetchone()[0]
 
@@ -229,7 +283,8 @@ class Store(DocumentStoreBase):
 
         @param vectorSize: The size of the vector.
         """
-        with self.client.cursor() as cur:
+        # One transaction: the table never exists without its index.
+        with self._transaction() as cur:
             cur.execute(SQL_QUERIES['create_collection'].format(collection=self.collection, vector_size=vectorSize))
 
             if vectorSize > HNSW_MAX_DIMS:
@@ -251,8 +306,6 @@ class Store(DocumentStoreBase):
                         ef_construction=self.hnsw_ef_construction,
                     )
                 )
-
-            self.client.commit()
 
     def _convertFilter(self, docFilter: DocFilter) -> tuple[str, list]:
         """
@@ -411,7 +464,7 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return 0
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['count_documents'].format(collection=self.collection))
             return cur.fetchone()[0]
 
@@ -429,7 +482,7 @@ class Store(DocumentStoreBase):
         where_sql, params = self._convertFilter(docFilter)
         query_params = [f'%{query}%'] + params
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             where_clause = ('AND ' + where_sql.split('WHERE ')[1]) if where_sql else ''
             cur.execute(
                 SQL_QUERIES['search_keyword'].format(collection=self.collection, where_clause=where_clause),
@@ -454,7 +507,7 @@ class Store(DocumentStoreBase):
 
         where_sql, params = self._convertFilter(docFilter)
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['get_documents'].format(collection=self.collection, where_clause=where_sql),
                 params + [docFilter.limit],
@@ -487,7 +540,7 @@ class Store(DocumentStoreBase):
 
         where_sql = ' AND '.join(where_clauses)
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['get_paths'].format(collection=self.collection, where_clause=where_sql),
                 params + [offset, limit],
@@ -511,38 +564,27 @@ class Store(DocumentStoreBase):
             return
 
         objectIds = {chunk.metadata.objectId for chunk in chunks}
-        try:
-            with self.client.cursor() as cur:
-                # Replace in one transaction: an invalid new chunk must leave
-                # the previously stored document intact.
-                cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
-                for chunk in chunks:
-                    data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
-                    if 'vectorSize' not in data or data['vectorSize'] is None:
-                        data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
-                    if 'modelName' not in data or data['modelName'] is None:
-                        data['modelName'] = ''
-                    # Only the table's columns: DocMetadata.model_dump() also
-                    # yields signature and any extra keys, which have none.
-                    data = {key: value for key, value in data.items() if key in CHUNK_COLUMNS}
-                    columns = ', '.join(data.keys())
-                    placeholders = ', '.join(['%s'] * len(data))
-                    cur.execute(
-                        SQL_QUERIES['insert_chunk'].format(
-                            collection=self.collection, columns=columns, placeholders=placeholders
-                        ),
-                        list(data.values()),
-                    )
-            self.client.commit()
-        except Exception:
-            # Leave the connection usable: an aborted transaction would fail
-            # every later statement until it is rolled back. A rollback that
-            # fails itself (a broken connection) must not replace the write error.
-            try:
-                self.client.rollback()
-            except Exception as rollback_error:  # noqa: BLE001
-                warning(f'{self.collection}: rollback after a failed write also failed: {rollback_error}')
-            raise
+        # Replace in one transaction: an invalid new chunk must leave the
+        # previously stored document intact.
+        with self._transaction() as cur:
+            cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
+            for chunk in chunks:
+                data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
+                if 'vectorSize' not in data or data['vectorSize'] is None:
+                    data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
+                if 'modelName' not in data or data['modelName'] is None:
+                    data['modelName'] = ''
+                # Only the table's columns: DocMetadata.model_dump() also
+                # yields signature and any extra keys, which have none.
+                data = {key: value for key, value in data.items() if key in CHUNK_COLUMNS}
+                columns = ', '.join(data.keys())
+                placeholders = ', '.join(['%s'] * len(data))
+                cur.execute(
+                    SQL_QUERIES['insert_chunk'].format(
+                        collection=self.collection, columns=columns, placeholders=placeholders
+                    ),
+                    list(data.values()),
+                )
 
     def remove(self, objectIds: List[str]) -> None:
         """
@@ -553,9 +595,8 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
-            self.client.commit()
 
     def markDeleted(self, objectIds: List[str]) -> None:
         """
@@ -566,9 +607,8 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['mark_deleted'].format(collection=self.collection), (objectIds,))
-            self.client.commit()
 
     def markActive(self, objectIds: List[str]) -> None:
         """
@@ -579,9 +619,8 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['mark_active'].format(collection=self.collection), (objectIds,))
-            self.client.commit()
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
         """
@@ -595,7 +634,7 @@ class Store(DocumentStoreBase):
 
         offset = 0
         while True:
-            with self.client.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     SQL_QUERIES['render_document'].format(collection=self.collection),
                     (objectId, offset, offset + self.renderChunkSize),
@@ -641,7 +680,7 @@ class Store(DocumentStoreBase):
         where_sql, params = self._convertFilter(docFilter)
         embedding_arr = np.array(query.embedding)
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['semantic_search'].format(
                     collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql

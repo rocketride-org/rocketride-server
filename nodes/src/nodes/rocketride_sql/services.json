@@ -124,9 +124,23 @@
 			"default": false,
 			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
 		},
+		"rocketridesql.scope": {
+			"type": "string",
+			"title": "Database",
+			"default": "org",
+			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
+			"description": "Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty."
+		},
+		"rocketridesql.target": {
+			"hidden": true,
+			"type": "string",
+			"title": "Team or user",
+			"default": "",
+			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
+		},
 		"rocketridesql.default": {
 			"object": "default",
-			"properties": ["rocketridesql.db_description", "rocketridesql.table", "rocketridesql.max_attempts", "rocketridesql.allow_execute"]
+			"properties": ["rocketridesql.db_description", "rocketridesql.table", "rocketridesql.max_attempts", "rocketridesql.allow_execute", "rocketridesql.scope", "rocketridesql.target"]
 		},
 		"rocketridesql.profile": {
 			"hidden": true,
@@ -150,7 +164,12 @@
 		{
 			"section": "Pipe",
 			"title": "RocketRide SQL",
-			"properties": ["rocketridesql.profile"]
+			"properties": ["rocketridesql.profile"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
 		}
 	]
 }

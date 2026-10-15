@@ -141,9 +141,23 @@
 			"default": false,
 			"description": "Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or read-only safety checks. Resource limits still apply. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
 		},
+		"rocketridegraph.scope": {
+			"type": "string",
+			"title": "Database",
+			"default": "org",
+			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
+			"description": "Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty."
+		},
+		"rocketridegraph.target": {
+			"hidden": true,
+			"type": "string",
+			"title": "Team or user",
+			"default": "",
+			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
+		},
 		"rocketridegraph.default": {
 			"object": "default",
-			"properties": ["rocketridegraph.db_description", "rocketridegraph.graph", "rocketridegraph.max_attempts", "rocketridegraph.max_rows", "rocketridegraph.query_timeout_ms", "rocketridegraph.allow_execute"]
+			"properties": ["rocketridegraph.db_description", "rocketridegraph.graph", "rocketridegraph.max_attempts", "rocketridegraph.max_rows", "rocketridegraph.query_timeout_ms", "rocketridegraph.allow_execute", "rocketridegraph.scope", "rocketridegraph.target"]
 		},
 		"rocketridegraph.profile": {
 			"hidden": true,
@@ -167,7 +181,12 @@
 		{
 			"section": "Pipe",
 			"title": "RocketRide Graph",
-			"properties": ["rocketridegraph.profile"]
+			"properties": ["rocketridegraph.profile"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
 		}
 	]
 }

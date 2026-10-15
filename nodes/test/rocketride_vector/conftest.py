@@ -41,7 +41,11 @@ def node_modules(monkeypatch: pytest.MonkeyPatch):
 
     store_module = store_base_stubs()
     StoreInstanceBase = store_module.StoreInstanceBase
-    db_module = types.ModuleType('ai.common.rocketride_db')
+    db_spec = importlib.util.spec_from_file_location(
+        'ai.common.rocketride_db', NODE_DIR.parents[3] / 'packages/ai/src/ai/common/rocketride_db.py'
+    )
+    db_module = importlib.util.module_from_spec(db_spec)
+    db_spec.loader.exec_module(db_module)
     db_module.resolve_rocketride_dsn = Mock(return_value='postgresql://u:p@pool:5432/tenant_db')
     depends_module = types.ModuleType('depends')
     depends_module.depends = Mock()
@@ -80,6 +84,7 @@ def node_modules(monkeypatch: pytest.MonkeyPatch):
     stubs = types.SimpleNamespace(
         warning=rocketlib.warning,
         resolve_dsn=db_module.resolve_rocketride_dsn,
+        DsnNotDelivered=db_module.DsnNotDelivered,
         Store=store_cls,
         depends=depends_module.depends,
         connect=psycopg2.connect,

@@ -103,6 +103,39 @@ execute tool and QuestionType.EXECUTE; those calls skip LLM translation and the
 safe read-only gate. They still use the AGE translator and its resource
 controls. Enable it only for trusted callers that require writes or raw Cypher.
 
+### Database
+
+Database picks which RocketRide cloud database the node uses. It defaults to
+Organization, so existing pipelines keep using the database they already had.
+
+- **Organization**: the database shared by everyone in the organization the
+  pipeline runs in. Data from before this choice existed lives here.
+- **Team**: the database of the run's team. A run from the builder uses your
+  current dev team and needs run rights (task.control) on it; a deployed
+  pipeline uses the team it is billed to.
+- **Personal**: your own database in this organization. It works only when you
+  are the person running the pipeline: builder runs, store apps you run, and
+  pipelines you deploy for yourself (@me). A pipeline deployed for a team has
+  no person behind it, so it fails at start with an error that says so.
+  Organization admins can reach members' personal databases, and that access
+  is logged.
+
+Each choice is a separate database. Switching does not move or copy data, and
+a database you have not used yet is created empty on the first run that needs
+it. Every database, new ones included, comes with a graph named rocketride, so the
+default Graph name works in each.
+
+A pipeline exposed through a public link (a chat, dropper, webhook, Discord or
+Telegram source) runs as you, so visitors' requests use your team or personal
+database, not their own.
+
+Access is checked when the run starts. If the run may not use the chosen
+database, it does not start, and the error says which database and why. A
+self-hosted engine supports only Organization; Team and Personal fail at start
+because they need RocketRide cloud. Access is approved for the whole run, not
+each node: every node in a run can reach every database the run was approved
+for.
+
 ## Limitations
 
 This node runs on the RocketRide engine host and does not support remote

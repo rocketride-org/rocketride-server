@@ -12,6 +12,8 @@ from __future__ import annotations
 import types
 from unittest.mock import call
 
+import pytest
+
 
 def _iglobal(iglobal):
     return object.__new__(iglobal.IGlobal)
@@ -92,12 +94,59 @@ def test_probe_connects_with_the_tenant_dsn(node_modules):
     # Legacy key still accepted, as before the move to the store base.
     _iglobal(iglobal)._probe_connection({'collection': 'rocketride'})
 
-    stubs.resolve_dsn.assert_called_once_with()
+    stubs.resolve_dsn.assert_called_once_with('org', '')
     stubs.depends.assert_called_once()
     stubs.connect.assert_called_once_with('postgresql://u:p@pool:5432/tenant_db', connect_timeout=3)
     assert cursor.execute.call_args_list == [call('SELECT 1'), call('SELECT NULL::vector')]
     conn.close.assert_called_once()
     stubs.warning.assert_not_called()
+
+
+@pytest.mark.parametrize('scope, target', [('team', ''), ('team', 't-1'), ('user', 'u-1')])
+def test_probe_resolves_the_configured_database(node_modules, scope, target):
+    """The shared-base probe preserves the scoped DSN lookup from #2626."""
+    iglobal, _, stubs = node_modules
+
+    _iglobal(iglobal)._probe_connection({'collection': 'docs', 'scope': scope, 'target': target})
+
+    stubs.resolve_dsn.assert_called_once_with(scope, target)
+    stubs.connect.assert_called_once()
+    stubs.warning.assert_not_called()
+
+
+def test_probe_outside_a_task_skips_connectivity(node_modules):
+    """Save-time validation does not need a delivered database or driver dependencies."""
+    iglobal, _, stubs = node_modules
+    stubs.resolve_dsn.side_effect = stubs.DsnNotDelivered('outside a task')
+
+    _iglobal(iglobal)._probe_connection({'collection': 'docs', 'scope': 'team'})
+
+    stubs.resolve_dsn.assert_called_once_with('team', '')
+    stubs.depends.assert_not_called()
+    stubs.connect.assert_not_called()
+    stubs.warning.assert_not_called()
+
+
+def test_probe_rejects_invalid_database_target(node_modules):
+    """Static scope validation still runs before any database connection."""
+    iglobal, _, stubs = node_modules
+
+    _iglobal(iglobal)._probe_connection({'collection': 'docs', 'scope': 'org', 'target': 't-1'})
+
+    stubs.resolve_dsn.assert_not_called()
+    stubs.connect.assert_not_called()
+    assert 'org scope takes no target' in stubs.warning.call_args.args[0]
+
+
+def test_probe_reports_a_database_not_authorized_for_the_task(node_modules):
+    """Only DsnNotDelivered is silent; a missing authorized scope remains an error."""
+    iglobal, _, stubs = node_modules
+    stubs.resolve_dsn.side_effect = ValueError('this task was not given the team database')
+
+    _iglobal(iglobal)._probe_connection({'collection': 'docs', 'scope': 'team'})
+
+    stubs.connect.assert_not_called()
+    assert 'not given the team database' in stubs.warning.call_args.args[0]
 
 
 def test_probe_reports_failures_as_warnings_not_exceptions(node_modules):

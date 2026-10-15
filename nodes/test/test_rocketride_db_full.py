@@ -27,9 +27,8 @@
 
 Runs the ``rocketride_sql`` and ``rocketride_vector`` nodes end-to-end against
 a local PostgreSQL container standing in for the cloud data-core, connected
-through the real seam (env ``ROCKETRIDE_CLIENT_ID`` + a fake, injectable
-``Account.resolve_db_dsn`` — exactly how tests are meant to swap the resolver;
-node code is identical regardless of which resolver is active).
+through the real seam (the DSN delivered in ``ROCKETRIDE_DB_DSNS``, as the
+task engine does).
 
 Requires a container on the live pin (PG16 + pgvector), e.g.::
 
@@ -48,6 +47,7 @@ Skips cleanly when the database is unreachable.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import urllib.parse
@@ -71,7 +71,6 @@ TEST_DSN = os.environ.get('RR_TEST_PG_DSN', 'postgresql://rruser:rrpass@localhos
 # Derived, not hardcoded: the suite must also run against a provisioned tenant
 # DSN (e.g. t_<slug>_<hash> through a pooler), not just the default container.
 TEST_DB_NAME = urllib.parse.urlparse(TEST_DSN).path.lstrip('/')
-TEST_CLIENT_ID = 'tenant-integration-test'
 
 # RR_REQUIRE_DB_TESTS (set by CI once its DB containers are healthy) turns
 # every skip in this module into a hard failure: a broken container or missing
@@ -252,17 +251,8 @@ def _build_rr_env(monkeypatch):
     rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH, register=False)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
 
-    # The injectable fake resolver: same seam a SaaS build fills in.
-    account_mod = types.ModuleType('ai.account')
-
-    async def fake_resolve_db_dsn(client_id):
-        assert client_id == TEST_CLIENT_ID
-        return TEST_DSN
-
-    account_mod.account = types.SimpleNamespace(resolve_db_dsn=fake_resolve_db_dsn)
-    monkeypatch.setitem(sys.modules, 'ai.account', account_mod)
-    monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', TEST_CLIENT_ID)
-    monkeypatch.delenv('ROCKETRIDE_DB_DSN', raising=False)
+    # Deliver the DSN the way the task engine does: nodes never resolve one.
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
 
     return types.SimpleNamespace(schema=schema, warnings=warnings)
 
@@ -406,27 +396,6 @@ class TestRocketrideSqlE2E:
         finally:
             glb.endGlobal()
 
-    def test_begin_global_via_injected_env_dsn(self, rr_env, monkeypatch, sql_table):
-        """The production delivery path: the task engine resolves server-side and
-        injects ROCKETRIDE_DB_DSN; the node-side account is never consulted.
-        """
-        import types as _types
-
-        async def poisoned(client_id):  # pragma: no cover — must not be reached
-            raise AssertionError('account must not be consulted when ROCKETRIDE_DB_DSN is injected')
-
-        monkeypatch.setitem(
-            sys.modules, 'ai.account', _types.SimpleNamespace(account=_types.SimpleNamespace(resolve_db_dsn=poisoned))
-        )
-        monkeypatch.setenv('ROCKETRIDE_DB_DSN', TEST_DSN)
-        glb, inst = self._begin(monkeypatch, {'table': sql_table, 'allow_execute': True})
-        try:
-            assert glb.database == TEST_DB_NAME
-            rows = inst.execute({'sql': f'SELECT count(*) AS n FROM {sql_table}'})
-            assert rows['rows'][0]['n'] == 2
-        finally:
-            glb.endGlobal()
-
     def test_config_connection_fields_ignored(self, rr_env, monkeypatch, sql_table):
         """The defining property: config cannot redirect the connection."""
         glb, _ = self._begin(
@@ -530,9 +499,8 @@ class TestRocketrideVectorE2E:
         store_cls = _load_vector_store(monkeypatch)
         store = store_cls('rocketride_vector', {'collection': VEC_TABLE, 'similarity': 'cosine'}, {})
         yield store
-        # Close the driver connection before dropping: the driver's SELECT
-        # paths (mirroring vectordb_postgres) leave the session idle in
-        # transaction, and its AccessShare lock would block the DROP.
+        # Close the driver connection before dropping, so a test that leaves
+        # it inside a transaction cannot block the DROP on its locks.
         if store.client is not None:
             store.client.close()
             store.client = None
@@ -635,6 +603,78 @@ class TestRocketrideVectorE2E:
         replacement = self._chunks(rr_env.schema, [('replaced', _unit_vec(rng))])
         vec_store.addChunks(replacement)
         assert vec_store.count_documents() == 1
+
+    # A transaction-mode pooler (PgBouncer) holds a server connection for as
+    # long as a client sits inside a transaction. A long-lived node left
+    # "idle in transaction" pins one of the database's few pooler slots for
+    # its whole lifetime, so between calls the session must be plain "idle".
+    @staticmethod
+    def _session_state(raw_conn, store) -> str:
+        """The node's backend state as the server sees it (pg_stat_activity)."""
+        with raw_conn.cursor() as cur:
+            cur.execute('SELECT state FROM pg_stat_activity WHERE pid = %s', (store.client.get_backend_pid(),))
+            state = cur.fetchone()[0]
+        # pg_stat_activity is snapshotted per transaction: end ours so the
+        # next probe sees fresh state.
+        raw_conn.rollback()
+        return state
+
+    def test_session_idle_after_connect(self, rr_env, vec_store, raw_conn):
+        assert self._session_state(raw_conn, vec_store) == 'idle'
+
+    def test_session_idle_after_each_read(self, rr_env, vec_store, raw_conn):
+        rng = np.random.default_rng(41)
+        vectors = [(f'doc {i}', _unit_vec(rng)) for i in range(5)]
+        vec_store.addChunks(self._chunks(rr_env.schema, vectors))
+        assert self._session_state(raw_conn, vec_store) == 'idle', 'after addChunks'
+
+        query = rr_env.schema.QuestionText('doc')
+        query.embedding = vectors[0][1]
+        reads = {
+            '_doesCollectionExist': lambda: vec_store._doesCollectionExist(),
+            'count_documents': lambda: vec_store.count_documents(),
+            'searchSemantic': lambda: vec_store.searchSemantic(query, rr_env.schema.DocFilter(limit=5)),
+            'searchKeyword': lambda: vec_store.searchKeyword(query, rr_env.schema.DocFilter(limit=5)),
+            'get': lambda: vec_store.get(rr_env.schema.DocFilter(limit=5)),
+            'getPaths': lambda: vec_store.getPaths(),
+            'render': lambda: vec_store.render('obj-0', lambda _text: None),
+        }
+        for name, read in reads.items():
+            read()
+            assert self._session_state(raw_conn, vec_store) == 'idle', f'after {name}'
+
+    def test_session_idle_after_each_single_statement_write(self, rr_env, vec_store, raw_conn):
+        rng = np.random.default_rng(43)
+        vec_store.addChunks(self._chunks(rr_env.schema, [('doc', _unit_vec(rng))]))
+        for name in ('markDeleted', 'markActive', 'remove'):
+            getattr(vec_store, name)(['obj-0'])
+            assert self._session_state(raw_conn, vec_store) == 'idle', f'after {name}'
+
+    def test_session_idle_after_failed_read(self, rr_env, vec_store, raw_conn):
+        rng = np.random.default_rng(47)
+        vec_store.addChunks(self._chunks(rr_env.schema, [('doc', _unit_vec(rng))]))
+        query = rr_env.schema.QuestionText('doc')
+        query.embedding = [1.0, 0.0]  # wrong width: the server rejects the comparison
+        with pytest.raises(Exception, match='dimensions'):
+            vec_store.searchSemantic(query, rr_env.schema.DocFilter(limit=5))
+        assert self._session_state(raw_conn, vec_store) == 'idle'
+        # ...and the connection is still usable (no aborted transaction).
+        assert vec_store.count_documents() == 1
+
+    def test_session_idle_after_failed_write(self, rr_env, vec_store, raw_conn):
+        rng = np.random.default_rng(53)
+        vec_store.addChunks(self._chunks(rr_env.schema, [('original', _unit_vec(rng))]))
+        bad = self._chunks(rr_env.schema, [('replacement', _unit_vec(rng))])
+        bad[0].embedding = [1.0, 0.0]  # wrong width: the INSERT fails after the DELETE ran
+        with pytest.raises(Exception):
+            vec_store.addChunks(bad, checkCollection=False)
+        assert self._session_state(raw_conn, vec_store) == 'idle'
+        # The replacement is still atomic: the failed batch left the original in place.
+        docs = vec_store.get(rr_env.schema.DocFilter(objectIds=['obj-0'], limit=5))
+        assert [d.page_content for d in docs] == ['original']
+        # ...and the connection is back in autocommit, so later reads open no transaction.
+        assert vec_store.client.autocommit is True
+        assert self._session_state(raw_conn, vec_store) == 'idle', 'after a read following the failed write'
 
     def test_wide_vectors_skip_index_with_warning(self, rr_env, monkeypatch, raw_conn):
         wide_table = 'rr_vec_wide_e2e'

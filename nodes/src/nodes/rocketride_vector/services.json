@@ -152,9 +152,23 @@
 			"default": false,
 			"description": "Permit the upsert and delete tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, get, stats) are unaffected."
 		},
+		"rrvector.scope": {
+			"type": "string",
+			"title": "Database",
+			"default": "org",
+			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
+			"description": "Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty."
+		},
+		"rrvector.target": {
+			"hidden": true,
+			"type": "string",
+			"title": "Team or user",
+			"default": "",
+			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
+		},
 		"rrvector.cloud": {
 			"object": "cloud",
-			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.serverName", "rrvector.expose_tools", "rrvector.allow_write"]
+			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.scope", "rrvector.target", "rrvector.serverName", "rrvector.expose_tools", "rrvector.allow_write"]
 		},
 		"rrvector.profile": {
 			"hidden": true,
@@ -204,7 +218,12 @@
 		{
 			"section": "Pipe",
 			"title": "RocketRide Vector Store",
-			"properties": ["rrvector.profile"]
+			"properties": ["rrvector.profile"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
 		},
 		{
 			"section": "Transform",

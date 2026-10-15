@@ -28,6 +28,7 @@ Configuration via environment variables:
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import types
@@ -132,7 +133,7 @@ def tools_env(monkeypatch):
             monkeypatch.syspath_prepend(str(src))
     # The production injection path: the task engine hands the resolved
     # tenant DSN to the node process through this variable.
-    monkeypatch.setenv('ROCKETRIDE_DB_DSN', TEST_DSN)
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
 
     from ai.common.store.document_store import VectorStoreToolMixin
 
@@ -349,7 +350,8 @@ def test_tools_are_refused_until_the_node_exposes_them(tools_env):
     assert not _table_exists(raw_conn)  # the refused upsert never reached the database
 
 
-def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypatch):
+@pytest.mark.parametrize('scope, target', [('org', ''), ('team', 't-1'), ('user', 'u-1')])
+def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypatch, scope, target):
     """services.json is the switch that ships: the real IGlobal must read it at start (#2631 review).
 
     Builds the node's own IGlobal and IInstance (no stand-in base), runs the
@@ -362,6 +364,11 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
     from rocketlib import OPEN_MODE
 
     import ai.common.config as config_module
+    from ai.common.rocketride_db import dsn_key
+
+    # Deliver only the requested database: a fallback to org for another
+    # scope must fail, while the tool switches retain the same behavior.
+    monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({dsn_key(scope, target): TEST_DSN}))
 
     iglobal_cls = sys.modules['nodes.rocketride_vector.IGlobal'].IGlobal
     spec = importlib.util.spec_from_file_location('nodes.rocketride_vector.IInstance', _VEC_NODE_DIR / 'IInstance.py')
@@ -384,7 +391,8 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
         glb = object.__new__(iglobal_cls)
         glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
         glb.glb = SimpleNamespace(
-            logicalType='rocketride_vector', connConfig={'profile': 'cloud', 'cloud': cloud_config}
+            logicalType='rocketride_vector',
+            connConfig={'profile': 'cloud', 'cloud': {**cloud_config, 'scope': scope, 'target': target}},
         )
         glb.beginGlobal()
         opened.append(glb)
