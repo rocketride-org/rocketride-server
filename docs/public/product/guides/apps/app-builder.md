@@ -76,6 +76,19 @@ development work never reaches other users. **Components** is a live
 gallery of everything importable from `shell`, and **Console** shows your
 app's own console output as it runs.
 
+Your app's state does not disappear with the bundle: what the preview saves
+(`prefs`, `appState`) lives in the signed-in user's file store on the
+connected engine (with **Inherit Auth** on, the preview is signed in as you
+are), in a file named after the app id, and survives closing the panel.
+A copy of the app opened on another server, or a working copy under a
+different app id than the published app, has its own state, so edits in
+one do not show in the other. Deploying a new version keeps the state. On
+the same server, user and app id the two read one file but nothing syncs:
+the last save wins, so finish in one, close it, then reload the other
+before editing there. Files your app writes itself through the shell
+connection are stored per server and user only, so a development build
+and the published version on the same server share them.
+
 :::note If the preview keeps showing a sign-in screen
 With **Inherit Auth** off, an app that requires sign-in boots signed out on
 purpose; turn it on to reuse your session. If it still bounces, the host

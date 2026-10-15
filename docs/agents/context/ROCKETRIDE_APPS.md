@@ -289,7 +289,9 @@ reason telling you what to fix.
   tablet, phone), each with five common CSS viewports; the iframe gets those
   exact dimensions so responsive breakpoints fire exactly as on the device.
   Orientation, zoom, fit-to-window; all preview preferences persist per
-  workspace and app.
+  workspace and app. The app's own `prefs`/`appState` are not preview
+  preferences: they are saved in the connected server's file store under
+  the app id; see [State & Persistence](#state--persistence).
 - **Code** — file tree + editor (web App Builder only; in VS Code files are
   native and a strip links to them).
 - **Components** — the stock UI component gallery: live examples of
@@ -787,6 +789,40 @@ The shell persists your app's state per user in `.workspace/` on the server:
 | `.workspace/global.json` | Active app + globally-mirrored prefs (theme, sidebar open) |
 | `.workspace/<appId>.workspace.json` | Your app's `{ prefs, appState }` |
 | `.workspace/settings.json` | User setting overrides (deltas only — defaults live in your schema) |
+
+**"On the server" means the server the page is connected to**, in the
+signed-in user's file store, and the file is named after the app id, not
+the version. A page therefore sees the state another page saved only when
+both are on the same server, signed in as the same user, under the same
+app id:
+
+- **A new version** keeps the state: every deployed version of an app reads
+  and writes the same file.
+- **The App Builder preview** runs against the connected development
+  server (`ROCKETRIDE_URI`), so the `prefs` and `appState` it saves live in
+  that server's file store; the published `@me` app lives on the deployment
+  target. When those are different servers, each copy keeps its own file,
+  and edits in one never show up in the other: not data loss, two files.
+- **A working copy under a different app id** than the published app (one
+  scaffolded as `local.<slug>`, or renamed after the org registered its
+  developer id) keeps its own file even on the same server.
+- **Same server, user and app id** (the deployment target is the
+  development server): the preview and the published copy read one file
+  but nothing syncs. Each page keeps the copy it loaded and writes it back
+  whole, so the last save wins: finish in one, close it, then reload the
+  other before editing there.
+
+Which user the preview is signed in as is set by **Inherit Auth**: on (the
+default), the preview is signed in as the App Builder is; off, as whoever
+signs in inside the preview (signed out until then).
+
+Files your app writes itself through the shell connection's file calls (for
+example `client.fsWriteJson('reports/q3.json', data)`) follow a different
+rule: a plain path is stored under the signed-in user's own root in that
+server's file store, with no app id or version in it. A development build
+and the published version on the same server and user therefore read
+and write the same files, and a file both pages write follows the same
+last-save-wins rule.
 
 ### Prefs — small UI preferences
 
