@@ -24,8 +24,7 @@
 import math
 from typing import List
 
-from rocketlib import Entry, IInstanceBase
-from ai.common.decision import DecisionRecorder
+from rocketlib import IInstanceBase
 from ai.common.schema import Doc, DocMetadata
 from .IGlobal import IGlobal
 
@@ -64,10 +63,6 @@ class IInstance(IInstanceBase):
 
     IGlobal: IGlobal
 
-    def open(self, obj: Entry):
-        """Initialize instance for a new object: a fresh decision recorder."""
-        self.decisions = DecisionRecorder(self, QUESTIONS)
-
     def writeText(self, text: str):
         """
         Process text and check for anomalous numeric values.
@@ -102,7 +97,7 @@ class IInstance(IInstanceBase):
             enriched_doc = doc.model_copy(deep=True)
             if enriched_doc.metadata is None:
                 enriched_doc.metadata = DocMetadata(self, chunkId=0)
-                self.decisions.record_status('documents', 'unsupported', doc=enriched_doc)
+                self.recordDecision(QUESTIONS, status='unsupported', doc=enriched_doc)
                 enriched_docs.append(enriched_doc)
                 continue
 
@@ -115,10 +110,10 @@ class IInstance(IInstanceBase):
             if result.get('details'):
                 enriched_doc.metadata.anomaly_details = result['details']
             if _has_usable_metric(metadata_dict, self.IGlobal.detector.metric):
-                self.decisions.record_document(enriched_doc, _answers(result))
+                self.recordDecision(QUESTIONS, _answers(result), doc=enriched_doc)
             else:
                 # Not scored (no metric, or not a number): never a confident 'no'.
-                self.decisions.record_status('documents', 'unsupported', doc=enriched_doc)
+                self.recordDecision(QUESTIONS, status='unsupported', doc=enriched_doc)
 
             enriched_docs.append(enriched_doc)
 

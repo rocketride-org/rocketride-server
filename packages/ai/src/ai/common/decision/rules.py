@@ -28,7 +28,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from .contract import UNCERTAIN
+from rocketlib.decisions import UNCERTAIN
 
 OPS = ('equals', 'not_equals', 'in', 'not_in', 'gt', 'gte', 'lt', 'lte', 'between', 'exists', 'not_exists')
 _NUMERIC = frozenset({'gt', 'gte', 'lt', 'lte'})

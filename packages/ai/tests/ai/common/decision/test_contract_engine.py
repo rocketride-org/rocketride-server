@@ -26,7 +26,9 @@ import json
 
 from rocketlib import IJson
 
-from ai.common.decision.contract import record, snapshot
+from rocketlib.decisions import record
+
+from ai.common.decision.contract import snapshot
 
 QUESTIONS = {'is_spam': {'kind': 'yes_no'}}
 

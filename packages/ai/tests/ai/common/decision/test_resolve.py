@@ -24,7 +24,9 @@
 
 import pytest
 
-from ai.common.decision.contract import DecisionError, NotDecided, fingerprint, record, resolve, resolve_hit, snapshot
+from rocketlib.decisions import DecisionError, fingerprint, record
+
+from ai.common.decision.contract import NotDecided, resolve, resolve_hit, snapshot
 
 SPAM = {'is_spam': {'kind': 'yes_no'}}
 TOPIC = {'topic': {'kind': 'pick_one', 'options': ['billing', 'legal']}}
@@ -170,3 +172,24 @@ def test_resolve_hit_names_the_group_of_an_undecided_item():
     record(response, 'so_1', writer='w', questions=SPAM, item={'lane': 'text', 'status': 'too_long'})
     gid, answer = resolve_hit(snapshot(response), 'text', 'is_spam')
     assert gid == 'so_1' and answer == NotDecided(status='too_long', group='so_1')
+
+
+QUESTIONS = {'is_spam': {'kind': 'yes_no', 'question': 'Is this spam?', 'threshold': 0.5}}
+OK_ITEM = {'lane': 'text', 'status': 'ok', 'preview': 'hi', 'answers': {'is_spam': {'answer': 'no', 'confidence': 0.8}}}
+
+
+def _record(response, item=OK_ITEM, **kw):
+    args = {'writer': 'decision_ollama', 'questions': QUESTIONS, 'item': item, **kw}
+    return record(response, 'decision_ollama_1', **args)
+
+
+def test_snapshot_is_none_before_anything_is_recorded():
+    assert snapshot({'text': ['x']}) is None
+
+
+def test_snapshot_is_a_plain_copy():
+    response = {}
+    _record(response)
+    copy = snapshot(response)
+    copy['decision_ollama_1']['items'].clear()
+    assert len(response['decisions']['decision_ollama_1']['items']) == 1

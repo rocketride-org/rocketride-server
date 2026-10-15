@@ -20,32 +20,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Writer-neutral decisions on ``currentObject.response['decisions']`` and gate rules (any node may write them)."""
+"""Reading decisions and Gate rules. Nodes record their own decisions with ``self.recordDecision(...)``."""
 
-from .contract import (
-    DECISIONS_KEY,
-    OK,
-    PREVIEW_CHARS,
-    UNCERTAIN,
-    DecisionError,
-    NotDecided,
-    check_questions,
-    fingerprint,
-    preview,
-    record,
-    resolve,
-    resolve_hit,
-    snapshot,
-    stamp,
-)
-from .recorder import DecisionRecorder, component_id
+from rocketlib.decisions import DECISIONS_KEY, OK, PREVIEW_CHARS, UNCERTAIN, DecisionError, fingerprint, preview
+
+from .contract import NotDecided, resolve, resolve_hit, snapshot
 from .rules import OPS, Condition, Rule, RuleConfigError, check, check_values, evaluate, parse_rule
 
 __all__ = [
     'Condition',
     'DECISIONS_KEY',
     'DecisionError',
-    'DecisionRecorder',
     'NotDecided',
     'OK',
     'OPS',
@@ -54,16 +39,12 @@ __all__ = [
     'RuleConfigError',
     'UNCERTAIN',
     'check',
-    'check_questions',
     'check_values',
-    'component_id',
     'evaluate',
     'fingerprint',
     'parse_rule',
     'preview',
-    'record',
     'resolve',
     'resolve_hit',
     'snapshot',
-    'stamp',
 ]

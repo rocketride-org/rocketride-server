@@ -34,6 +34,7 @@ import sys
 import types
 
 import pytest
+import rocketlib.decisions as real_decisions
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _NODES_DIR = os.path.join(_HERE, '..', 'src', 'nodes')
@@ -184,6 +185,10 @@ class _FakeIInstanceBase:
     def preventDefault(self):
         """Raise, as the real implementation does."""
         raise _PreventDefaultRaised()
+
+    def recordDecision(self, questions, answers=None, **kwargs):
+        """Record through the real implementation; nothing engine-bound is involved."""
+        return real_decisions.record_decision(self, questions, answers, **kwargs)
 
 
 def _make_stubs():
@@ -350,12 +355,11 @@ class _StubDetector:
 
 
 def _anomaly(detector, listeners=None):
-    """Build an anomaly_detector instance with the given detector, opened on a fresh object."""
+    """Build an anomaly_detector instance with the given detector, on a fresh object."""
     inst, fake = _build('anomaly_detector', types.SimpleNamespace(detector=detector), listeners)
     # The node records decisions on the current object, so the fake needs one (and a component id).
     fake.currentObject = types.SimpleNamespace(response={})
     fake.pipeType = {'id': 'anomaly_detector_1'}
-    inst.open(None)
     return inst, fake
 
 

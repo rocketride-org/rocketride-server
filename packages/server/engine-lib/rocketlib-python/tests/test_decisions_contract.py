@@ -20,21 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Contract tests: record, stamp, fingerprint, preview, snapshot."""
+"""Contract tests: record, stamp, fingerprint, preview."""
 
 import hashlib
 from types import SimpleNamespace
 
 import pytest
 
-from ai.common.decision.contract import (
-    DecisionError,
-    fingerprint,
-    preview,
-    record,
-    snapshot,
-    stamp,
-)
+from rocketlib.decisions import DecisionError, fingerprint, preview, record, stamp
 
 QUESTIONS = {'is_spam': {'kind': 'yes_no', 'question': 'Is this spam?', 'threshold': 0.5}}
 OK_ITEM = {'lane': 'text', 'status': 'ok', 'preview': 'hi', 'answers': {'is_spam': {'answer': 'no', 'confidence': 0.8}}}
@@ -47,7 +40,6 @@ def _record(response, item=OK_ITEM, **kw):
 
 def test_key_appears_only_on_first_write():
     response = {'text': ['x']}
-    assert snapshot(response) is None
     assert 'decisions' not in response
     assert _record(response, model='nimble') == 0
     assert response['result_types'] == {'decisions': 'decisions'}
@@ -205,14 +197,6 @@ def test_preview_is_one_line_and_at_most_80_chars():
     long = preview('word ' * 40)
     assert len(long) == 80 and long.endswith('…')
     assert preview(None) == ''
-
-
-def test_snapshot_is_a_plain_copy():
-    response = {}
-    _record(response)
-    copy = snapshot(response)
-    copy['decision_ollama_1']['items'].clear()
-    assert len(response['decisions']['decision_ollama_1']['items']) == 1
 
 
 @pytest.mark.parametrize('values', [[], 'yes,no', [None], [{'a': 1}]])

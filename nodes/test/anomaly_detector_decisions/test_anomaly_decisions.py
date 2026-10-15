@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""anomaly_detector records a decision per document through DecisionRecorder (spec A2 §4.4)."""
+"""anomaly_detector records a decision per document through IInstanceBase.recordDecision (spec A2 §4.4)."""
 
 import importlib
 import sys
@@ -71,7 +71,6 @@ def _node(with_detector=True):
         raise Prevented()
 
     inst.preventDefault = prevent
-    inst.open(None)
     return inst, out
 
 

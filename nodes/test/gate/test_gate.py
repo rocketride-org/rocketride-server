@@ -31,8 +31,9 @@ from types import SimpleNamespace
 import pytest
 
 from rocketlib import AVI_ACTION
+from rocketlib.decisions import record
 
-from ai.common.decision import DecisionError, fingerprint, parse_rule, record
+from ai.common.decision import DecisionError, fingerprint, parse_rule
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 # sys.path can hold a package with the same name as the node (see #1687).

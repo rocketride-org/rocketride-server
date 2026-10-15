@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from rocketlib import warning
 
-from ai.common.decision.recorder import component_id
+from rocketlib.decisions import component_id
 from ai.common.decision.writer import Decided, DecisionWriterBase, TooLong
 
 TEXT_DOC_TYPES = frozenset({'Document', 'Text'})

@@ -169,8 +169,8 @@ A Gate has to find the record that belongs to the item in front of it.
 | Lane | How the item finds its decision |
 |---|---|
 | text, questions, answers, json, image, audio, video | **Object level.** Write an item with no `item` key. It applies to everything on these lanes. |
-| documents | **Stamp the document.** `stamp(doc, group_id, index)` sets `doc.metadata.decision_refs = {"<component id>": <item index>}`. Several writers each add their own key. |
-| table | **Fingerprint.** Put `fingerprint(table)` in `item` as `fingerprint`, and a running `table_index`. The fingerprint is `"sha256:"` plus the SHA-256 of the table string as UTF-8. When no fingerprint matches the table, the Gate falls back to the object-level decision. |
+| documents | **Pass `doc=`.** `recordDecision` sets `doc.metadata.decision_refs[<component id>] = <item index>`. Several writers each add their own key. |
+| table | **Pass `table=`.** `recordDecision` records `item.fingerprint`, the `"sha256:"` plus the SHA-256 of the exact table text as UTF-8, and a per-object `item.table_index`. When no fingerprint matches the table, the Gate falls back to the object-level decision. |
 
 Chunks made from a stamped document inherit `decision_refs` through the usual metadata copy. They resolve to their parent's item. That is intended: a whole-document decision applies to its chunks.
 
@@ -184,22 +184,25 @@ In v1 the decision writers (System One on text-based lanes, anomaly_detector on 
 
 ## How to write decisions
 
-Import from `ai.common.decision`. It has no dependency on System One or on `rocketlib`. There are two ways in.
+Every node can record decisions. There's nothing to import and no base class to change. When the node has done its own work, it calls one method it already inherits from `IInstanceBase`, passing the questions it decides and the answers it reached:
 
-### An existing node: `DecisionRecorder`
+```python
+self.recordDecision(questions, answers, doc=..., table=..., lane=..., status='ok')
+```
 
-Use this when the node already makes a judgement and you want it to be routable without changing the node's shape. Build one recorder in `open()`, and call it where the node already judges. It owns the contract: group id, writer type, the questions header, stamping and fingerprints.
+- **`questions`** is the node's fixed declaration, the same dict on every call: `{name: {'kind': ..., 'values': [...]}}`. `kind` is `yes_no`, `pick_one`, `rubric`, `number` or your own. Declare `values` (the answers it can give) so a Gate can reject a condition that can never match.
+- **`answers`** is `{name: {'answer': ...}}`, with optional `confidence` (0-1) and `index`. An `ok` decision answers exactly the declared questions.
+- **What it's about.** Pass exactly one of:
+  - `doc=` for one document. Stamps `doc.metadata.decision_refs`, so the doc needs metadata.
+  - `table=` for one table. Keyed by its fingerprint.
+  - `lane=` for the whole object (`text`, `questions`, `answers`, `json`, ...), optionally with a `preview=`.
+- **One whole-object decision per lane per object.** A `lane=` decision is recorded once per lane for each object. `writeText` and similar can be called many times for one object, so a node deciding on text should buffer it and record once from `closing()`. A second whole-object item on the same lane makes a Gate fail with "holds N whole-object decisions".
+- **`status`** defaults to `'ok'`. To record "no decision, and why" (`'unsupported'`, `'too_long'`), pass a status and no answers. A Gate blocks an item without an `ok` decision.
+- **`model=` and `usage=`** are optional, for model-backed writers. `size=` and `truncated=True` describe a too-long or trimmed input.
 
-| Method | Use it for |
-|---|---|
-| `record_document(doc, answers, usage=None)` | One document. Stamps `doc.metadata.decision_refs`. The doc needs metadata. |
-| `record_object(lane, answers, preview=None, usage=None, extra=None)` | One whole-object decision (text, questions, answers). |
-| `record_table(table, answers, usage=None)` | One table, keyed by its fingerprint with a running `table_index`. |
-| `record_status(lane, status, doc=None, table=None, preview=None, size=None, extra=None)` | "No decision, and why" (`too_long`, `unsupported`). Linked to `doc` or `table` when given. |
+It returns the item's index in the node's group. Most nodes don't need it.
 
-Each returns the item's index in its group.
-
-The anomaly_detector node is the worked example. It declares its questions once, builds the recorder in `open()`, and records one decision per document next to the metadata it already wrote:
+The anomaly_detector node is the worked example. It declares its questions once and records one decision per document, next to the metadata it already wrote:
 
 ```python
 QUESTIONS = {
@@ -208,70 +211,20 @@ QUESTIONS = {
     'score': {'kind': 'number'},
 }
 
-
-def open(self, obj):
-    """Initialize instance for a new object: a fresh decision recorder."""
-    self.decisions = DecisionRecorder(self, QUESTIONS)
-
-
 # in writeDocuments, after the node's own metadata assignments:
-self.decisions.record_document(enriched_doc, _answers(result))
+self.recordDecision(QUESTIONS, _answers(result), doc=enriched_doc)
 ```
 
-A document with no metadata cannot carry a `decision_refs` stamp, so the node gives it fresh metadata and records it with `record_status('documents', 'unsupported', doc=...)`.
-A document with metadata but no usable numeric metric is recorded the same way, so it never passes a Gate as a confident `no`. A document with a numeric metric that is still warming up (insufficient data, zero variance) was scored, so it stays `ok`.
-
-### A node whose only job is to decide: `DecisionWriterBase`
-
-Use this when the node's whole purpose is to decide, as System One's is. The base owns the lane plumbing: it buffers text and decides once at `closing`, decides and stamps each document, records tables, questions and answers, records `too_long` instead of answering from part of an input, and forwards the data unchanged. You implement two methods:
-
-```python
-from ai.common.decision.writer import Decided, DecisionWriterBase, TooLong
-
-
-class IInstance(DecisionWriterBase):
-    def questions(self) -> dict:
-        return {'is_long': {'kind': 'yes_no', 'values': ['yes', 'no']}}
-
-    def decide(self, state, lane):
-        if len(str(state)) > 100_000:
-            return TooLong({'bytes': len(str(state)), 'limit': 100_000})
-        return Decided({'is_long': {'answer': 'yes' if len(str(state)) > 500 else 'no'}})
-```
-
-`decide` returns `Decided(answers, usage=None)` or `TooLong(size)`. Raise for any other failure; it stops the object. Optional hooks, each with a sensible default:
-
-- `model()`: the model name recorded on the group.
-- `oversize(state)`: the measured size when `state` is over your limits, checked before `decide`.
-- `document_state(doc)`: the state to decide on for a document; raise `ValueError` to reject it.
-- `question_state(question)`: `(state, truncated_size_or_None)` for a question; raise `ValueError` to reject it.
-- `too_long_message(lane, size)`: the error for a whole-object input that is too long.
-- `size_text(size)`: how a size reads in messages.
-
-The recorder is available as `self.decisions` for anything the lanes don't cover. `ai.common.decision.writer` imports `rocketlib`, so import it only from node code.
-
-### Writing the contract directly
-
-Both of the above call `record`. You can call it yourself when neither fits:
-
-```python
-from ai.common.decision import fingerprint, preview, record, stamp
-
-index = record(self.instance.currentObject.response, group_id, writer='my_node',
-               questions=QUESTIONS, item=item)
-stamp(doc_copy, group_id, index)   # documents only
-```
-
-`record` returns the item's index in its group.
+A document with no metadata can't carry a `decision_refs` stamp, so the node gives it fresh metadata and records `self.recordDecision(QUESTIONS, status='unsupported', doc=enriched_doc)`. A document with metadata but no usable numeric metric is recorded the same way, so it never passes a Gate as a confident `no`. A document with a numeric metric that is still warming up (insufficient data, zero variance) was scored, so it stays `ok`.
 
 Rules:
 
-- **`record` validates and raises.** A bad item raises `DecisionError` in your node, so you find the bug there and not in a Gate later. Let it propagate. The engine fails the object.
-- **A group's questions are fixed by its first write.** Writing again with different questions, or a different `writer`, to the same group id raises.
-- **Look the path up fresh on every write.** `response['decisions']` is a live view onto the stored value. Never hold on to it, or to anything under it, across writes or across objects. `record` already does this. If you read decisions yourself, call `snapshot(response)` for a plain copy (it returns `None` when nothing is recorded).
-- **Don't remove or edit earlier items.** Item positions are ids that `decision_refs` points to.
-- **Let unchanged data forward by default.** Writing a decision doesn't change the data. For lanes you pass on as they came (text, table, questions, answers), don't call `self.instance.write*`; the engine forwards the original. For documents, forward your stamped copies with `self.instance.writeDocuments(stamped)` and then `return self.preventDefault()`, so the unstamped originals aren't forwarded as well.
-- **Use your own component id as the group id** (the `id` of `self.instance.pipeType`), so two nodes of the same type don't share a group. The recorder does this for you.
+- **Bad decisions raise in your node.** A malformed call raises `DecisionError` there, not in a Gate later. Let it propagate, and the engine fails the object.
+- **A group's questions are fixed by its first write.** Recording again on the same object with different questions raises. The group is your node's component id, so two nodes of the same type never share one.
+- **Record during the object.** Record from a lane method, or from `closing()`, which runs before `close()` while `currentObject` is still set. `recordDecision` keeps nothing on the instance, so it works whether or not your node defines `open()`.
+- **Don't remove or edit earlier items.** Item positions are the ids that `decision_refs` point to.
+- **Let unchanged data forward by default.** Recording a decision doesn't change the data. For lanes you pass on as they came (text, table, questions, answers), don't call `self.instance.write*`; the engine forwards the original. For documents, forward your stamped copies with `self.instance.writeDocuments(stamped)` and then `return self.preventDefault()`, so the unstamped originals aren't forwarded as well.
+- **Reading decisions** is the Gate's job. If a node must read them, use `ai.common.decision.snapshot(response)` for a plain copy. Never hold on to the live `response['decisions']` view.
 
 ## System One as a worked example
 

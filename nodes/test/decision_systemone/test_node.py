@@ -124,9 +124,9 @@ def test_table_gets_a_fingerprint_item_and_is_forwarded_by_default(node):
 
 def test_table_index_resets_per_object(node):
     node.inst.writeTable('| a |')
-    node.inst.open(None)
+    node.inst.instance.currentObject.response = {}
     node.inst.writeTable('| b |')
-    assert group(node)['items'][1]['item']['table_index'] == 0
+    assert group(node)['items'][0]['item']['table_index'] == 0
 
 
 def test_too_long_table_is_recorded_and_forwarded(node):

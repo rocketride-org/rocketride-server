@@ -29,6 +29,7 @@ import types
 from types import SimpleNamespace
 
 import pytest
+import rocketlib.decisions as real_decisions
 
 from ai.common.systemone.limits import DecisionLimits
 from ai.common.systemone.questions import YES_NO, QuestionSpec
@@ -102,13 +103,21 @@ class FakeClient:
         return {'model': model, 'answers': {'urgent': {'type': 'noul', 'noul': 0.9}}, 'usage': {'input_tokens': 7}}
 
 
+class _InstanceBase:
+    """Stands in for rocketlib.IInstanceBase: only the real recordDecision, nothing engine-bound."""
+
+    def recordDecision(self, questions, answers=None, **kwargs):
+        return real_decisions.record_decision(self, questions, answers, **kwargs)
+
+
 @pytest.fixture
 def systemone(monkeypatch):
     """Import the node bases against stubbed rocketlib/schema/config; yield helpers."""
     warnings = []
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IGlobalBase = object
-    rocketlib.IInstanceBase = object
+    rocketlib.IInstanceBase = _InstanceBase
+    rocketlib.decisions = real_decisions
     rocketlib.OPEN_MODE = SimpleNamespace(CONFIG='config')
     rocketlib.warning = lambda message, *_a, **_k: warnings.append(message)
     rocketlib.debug = lambda *_a, **_k: None
@@ -116,7 +125,12 @@ def systemone(monkeypatch):
     schema.Doc, schema.DocMetadata, schema.Answer, schema.Question = Doc, Meta, Answer, SimpleNamespace
     config = types.ModuleType('ai.common.config')
     config.Config = SimpleNamespace(getNodeConfig=lambda *_a, **_k: {})
-    for name, module in {'rocketlib': rocketlib, 'ai.common.schema': schema, 'ai.common.config': config}.items():
+    for name, module in {
+        'rocketlib': rocketlib,
+        'rocketlib.decisions': real_decisions,
+        'ai.common.schema': schema,
+        'ai.common.config': config,
+    }.items():
         monkeypatch.setitem(sys.modules, name, module)
     for name in ('ai.common.decision.writer', 'ai.common.systemone.instance_base', 'ai.common.systemone.global_base'):
         monkeypatch.delitem(sys.modules, name, raising=False)

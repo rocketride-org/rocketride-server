@@ -35,8 +35,7 @@ from rocketlib import IInstanceBase, warning
 
 from ai.common.schema import Answer, Doc, DocMetadata, Question
 
-from .contract import preview
-from .recorder import DecisionRecorder, component_id
+from rocketlib.decisions import component_id, preview
 
 
 @dataclass
@@ -67,7 +66,6 @@ def _size_text(size: dict) -> str:
 class DecisionWriterBase(IInstanceBase):
     """Records a decision per item on every text-based lane; subclasses only decide."""
 
-    decisions: DecisionRecorder | None = None
     _text: list | None = None
     _text_failed: bool = False
 
@@ -110,10 +108,12 @@ class DecisionWriterBase(IInstanceBase):
 
     # ---- lanes ----------------------------------------------------------------------------
     def open(self, obj):
-        """Start a new object: a fresh recorder and an empty text buffer."""
-        self.decisions = DecisionRecorder(self, self.questions(), model=self.model())
+        """Start a new object with an empty text buffer."""
         self._text = None
         self._text_failed = False
+
+    def _record(self, answers=None, **kwargs) -> int:
+        return self.recordDecision(self.questions(), answers, model=self.model(), **kwargs)
 
     def _too_long(self, lane: str, preview_text: str, size: dict) -> None:
         warning(
@@ -135,9 +135,9 @@ class DecisionWriterBase(IInstanceBase):
             outcome = TooLong(size) if size is not None else self.decide(state, 'documents')
             if isinstance(outcome, TooLong):
                 self._too_long('documents', preview(doc.page_content), outcome.size)
-                self.decisions.record_status('documents', 'too_long', doc=copy, size=outcome.size)
+                self._record(status='too_long', doc=copy, size=outcome.size)
             else:
-                self.decisions.record_document(copy, outcome.answers, usage=outcome.usage)
+                self._record(outcome.answers, doc=copy, usage=outcome.usage)
             forwarded.append(copy)
         self.instance.writeDocuments(forwarded)
         # Without this the engine also forwards the original, unstamped documents.
@@ -150,15 +150,22 @@ class DecisionWriterBase(IInstanceBase):
         outcome = self.decide(table, 'table')
         if isinstance(outcome, TooLong):
             self._too_long('table', preview(table), outcome.size)
-            self.decisions.record_status('table', 'too_long', table=table, size=outcome.size)
+            self._record(status='too_long', table=table, size=outcome.size)
         else:
-            self.decisions.record_table(table, outcome.answers, usage=outcome.usage)
+            self._record(outcome.answers, table=table, usage=outcome.usage)
 
-    def _decide_whole(self, lane: str, preview_text: str, state, extra: dict | None = None) -> None:
+    def _decide_whole(self, lane: str, preview_text: str, state, truncated_size: dict | None = None) -> None:
         outcome = self.decide(state, lane)
         if isinstance(outcome, TooLong):
             raise ValueError(self.too_long_message(lane, outcome.size))
-        self.decisions.record_object(lane, outcome.answers, preview=preview_text, usage=outcome.usage, extra=extra)
+        self._record(
+            outcome.answers,
+            lane=lane,
+            preview=preview_text,
+            usage=outcome.usage,
+            size=truncated_size,
+            truncated=truncated_size is not None,
+        )
 
     def writeText(self, text: str):
         """Buffer the object's text; nothing goes downstream until ``closing`` has decided."""
@@ -195,8 +202,7 @@ class DecisionWriterBase(IInstanceBase):
         """Decide on the question; forward it unchanged."""
         text = '\n'.join(q.text for q in question.questions or [] if q.text)
         state, size = self.question_state(question)
-        extra = {'truncated': True, 'size': size} if size is not None else None
-        self._decide_whole('questions', preview(text), state, extra)
+        self._decide_whole('questions', preview(text), state, size)
 
     def writeAnswers(self, answer: Answer):
         """Decide on one answer (JSON when it is JSON, else its text); forward it unchanged."""
