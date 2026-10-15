@@ -28,6 +28,7 @@ import json
 from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
 from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
+from .decisions import record_decision
 
 if TYPE_CHECKING:
     from ai.common.schema import Doc, Question, Answer
@@ -811,8 +812,9 @@ class IInstanceBase:
     A displaced stream that carried no bytes, fell short of what it declared, or
     declared nothing at all gets no END; the handler learns of it from the next BEGIN
     on that lane, or from ``open()``, and must release whatever it holds there. A
-    handler owning an external resource (a write handle, a decoder) should also sweep
-    in its own ``closing()``.
+    handler owning an external resource (a write handle, a decoder) should release it in
+    ``close()``, which runs after the base has settled the object's streams; ``closing()``
+    is for end-of-object work while ``currentObject`` is still set.
     """
 
     IEndpoint: IEndpointBase = None  #: Endpoint instance for communication.
@@ -1003,9 +1005,10 @@ class IInstanceBase:
         Settle whatever is still open as the object closes.
 
         ``close()`` is the last point at which ``currentObject`` is still the
-        stream's own object: ``open()`` has already advanced it and ``closing()``
-        runs after it is cleared, so this is the only per-object place a synthesized
-        END can be attributed correctly. A failed object settles nothing — it must
+        stream's own object: ``open()`` has already advanced it by the time the next
+        object starts, and ``closing()`` (which runs just before ``close()``) belongs
+        to the node's own end-of-object work, so ``close()`` is where a synthesized
+        END is attributed. A failed object settles nothing — it must
         not publish output it would never otherwise have produced — and its pending
         streams are reported with that as the stated reason.
 
@@ -1059,6 +1062,43 @@ class IInstanceBase:
         the engine clears it after the call's leave event. Keep it small and JSON-serializable.
         """
         self.instance.setTraceDetail(detail)
+
+    def recordDecision(
+        self,
+        questions: Dict[str, Any],
+        answers: Optional[Dict[str, Any]] = None,
+        *,
+        lane: Optional[str] = None,
+        doc: Any = None,
+        table: Optional[str] = None,
+        status: str = 'ok',
+        preview: Optional[str] = None,
+        size: Optional[Dict[str, Any]] = None,
+        truncated: bool = False,
+        model: Optional[str] = None,
+        usage: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Record a decision this node made about the current object, so a Gate downstream can route on it.
+
+        ``questions`` is the node's fixed declaration (``{name: {'kind': ..., 'values': [...]}}``) and
+        ``answers`` its answers (``{name: {'answer': ...}}``). Link it with ``doc=`` (one document),
+        ``table=`` (one table) or ``lane=`` (the whole object). A non-ok ``status`` such as
+        ``'unsupported'`` records "no decision, and why" and carries no answers. Returns the item's index.
+        """
+        return record_decision(
+            self,
+            questions,
+            answers,
+            lane=lane,
+            doc=doc,
+            table=table,
+            status=status,
+            preview=preview,
+            size=size,
+            truncated=truncated,
+            model=model,
+            usage=usage,
+        )
 
     def invoke(self, *args, **kwargs) -> Any:
         """Handle an incoming invoke call from the engine control-plane.
@@ -1443,12 +1483,12 @@ class IInstanceBase:
         pass
 
     def closing(self) -> None:
-        """Perform any actions required before closing.
+        """Perform any end-of-object work before ``close()``.
 
-        Nothing is settled here: this runs after the final ``close()``, when the
-        engine has already cleared the current object, so a stream committed from
-        here would have no object to belong to. A node holding an external resource
-        still sweeps it here — releasing a handle needs no object.
+        The engine calls this once per object, just before ``close()``, while ``currentObject``
+        is still set: a node that buffered the object's data (and called ``preventDefault()``)
+        can decide, record and replay it here. Release per-object resources (open file handles, decoders)
+        in ``close()``, which runs after the base has settled the object's streams.
         """
         pass
 

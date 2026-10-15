@@ -701,6 +701,21 @@ class IInstanceBase:
 
     def preventDefault(self) -> None: ...
     def setTraceDetail(self, detail: Dict[str, Any]) -> None: ...
+    def recordDecision(
+        self,
+        questions: Dict[str, Any],
+        answers: Optional[Dict[str, Any]] = ...,
+        *,
+        lane: Optional[str] = ...,
+        doc: Any = ...,
+        table: Optional[str] = ...,
+        status: str = ...,
+        preview: Optional[str] = ...,
+        size: Optional[Dict[str, Any]] = ...,
+        truncated: bool = ...,
+        model: Optional[str] = ...,
+        usage: Optional[Dict[str, Any]] = ...,
+    ) -> int: ...
     def invoke(self, *args: Any, **kwargs: Any) -> Any: ...
     def control(self, control: IControl) -> None: ...
     def beginInstance(self) -> None: ...

@@ -95,8 +95,7 @@ So a consumer keeps one buffer (or one write handle) per lane, fills it on
 `BEGIN` or an `open()` arrives. It never needs to work out which stream is which
 — the base delivers the `END` a producer failed to send before the next `BEGIN`
 reaches you. A node that holds an operating-system resource, such as an open file
-handle or a decoder, should also release it in `closing()`, which is the last call
-before the instance goes away.
+handle or a decoder, should release it in `close()`, which runs after the base has settled the object's streams, so no `END` can reach a freed resource. The engine calls `closing()` for each object just before `close()`, while `currentObject` is still set; it is where a node decides and replays buffered data.
 
 Producers are the other half of the contract: **declare the stream's byte count
 on `BEGIN`**, because that is the only signal telling a complete stream from a
