@@ -156,11 +156,21 @@ for _name in list(sys.modules):
 # ---------------------------------------------------------------------------
 
 
+def _ai_message_class():
+    """Return the AIMessage the parser builds.
+
+    That is the stub only when langchain_core was not loaded first. A test module
+    collected earlier that imports a real LangChain package (the Anthropic and
+    Bedrock driver tests) leaves the real class in place, and the stub is skipped.
+    """
+    return sys.modules['langchain_core.messages'].AIMessage
+
+
 def test_clean_tool_call():
     raw = '{"type":"tool_call","name":"srv.do_thing","args":{"x":1}}'
     msg = _parse(raw)
     assert msg is not None
-    assert isinstance(msg, _FakeAIMessage)
+    assert isinstance(msg, _ai_message_class())
     assert len(msg.tool_calls) == 1
     tc = msg.tool_calls[0]
     assert tc['name'] == 'srv.do_thing'
@@ -171,7 +181,7 @@ def test_clean_final():
     raw = '{"type":"final","content":"All done."}'
     msg = _parse(raw)
     assert msg is not None
-    assert isinstance(msg, _FakeAIMessage)
+    assert isinstance(msg, _ai_message_class())
     assert msg.content == 'All done.'
     assert msg.tool_calls == []
 

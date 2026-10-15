@@ -722,7 +722,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	return (
 		<div style={styles.container}>
 			{/* Header */}
-			<h2 style={styles.sectionTitle}>Profiler — {name}</h2>
+			<h2 style={styles.sectionTitle}>Profiler: {name}</h2>
 
 			{/* Controls row */}
 			<div style={styles.controls}>
@@ -786,7 +786,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 						? `Profiling "${status.session}" (owned by ${status.owner}, ${status.runtime?.toFixed(1)}s)`
 						: 'Idle'
 					}
-					{!isActive && status.has_report && ' — report available'}
+					{!isActive && status.has_report && ' (report available)'}
 				</div>
 			)}
 

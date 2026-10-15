@@ -112,7 +112,10 @@ function getenv() {
 function requireKeys(env, keys, caller) {
 	const missing = keys.filter((k) => !env[k]);
 	if (missing.length > 0) {
-		throw new Error(`[${caller}] Missing required environment variable(s): ${missing.join(', ')}\n` + `Check your .env (or .config) file.`);
+		throw new Error(
+			`[${caller}] Missing required environment variable(s): ${missing.join(', ')}\n` +
+				`Check your .env (or .config) file.`
+		);
 	}
 }
 

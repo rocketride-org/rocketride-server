@@ -46,7 +46,7 @@ export const rocketRideMarkEntry: IGalleryEntry = {
 	name: 'RocketRideMark',
 	group: 'content',
 	blurb: 'The RocketRide rocket brand mark (icon only, no logotype): body fill follows the text colour, exhaust swoosh stays the fixed RocketRide red.',
-	doc: `Use it wherever the product identifies itself — empty states, about panes, anonymous user cards. The body inherits \`currentColor\` (override with \`color\` / \`bodyColor\`); the swoosh is always brand red, so the mark reads correctly on any theme.`,
+	doc: `Use it wherever the product identifies itself: empty states, about panes, anonymous user cards. The body inherits \`currentColor\` (override with \`color\` / \`bodyColor\`); the swoosh is always brand red, so the mark reads correctly on any theme.`,
 	knobs: [
 		{ id: 'size', label: 'Size', kind: 'number', defaultValue: 48 },
 	],

@@ -14,14 +14,37 @@ platform, so one symbolication workflow covers all of them.
 
 ## Where dumps go
 
-Because Crashpad writes the dump *after* the crashing process is gone, the dump
-first lands in a private Crashpad database under the system temp dir, named
-`rocketride-crashdb-<uid>-<exe-hash>`. It is moved into the configured crash-dump
-location, and the monitor notified, on the **next task run** -- not at process
-start. Recovery has to wait for the monitor to install its callback and for the
-crash-dump location to be pointed at the task's log directory; both happen well
-after the crash handler itself starts. So crash notification for Linux/macOS is
-delivered one run later, not at crash time.
+Crashpad first writes the dump into a private Crashpad database under the system
+temp dir, named `rocketride-crashdb-<uid>-<exe-hash>`. Engines running at the
+same time share it, so each dump is matched to its process by the process ID and
+process start time it records. The start time keeps a recycled process ID from
+being mistaken for the process that crashed.
+
+In both cases below, the crashing process then moves the dump into the configured
+crash-dump location and notifies the monitor before it exits, so the caller
+learns of the crash at crash time, as on Windows.
+
+- **Linux:** Crashpad catches the fatal signal and writes the dump before the
+  process continues.
+- **macOS:** Crashpad normally dumps on `EXC_CRASH`, which the kernel raises only
+  once the process is already dying. So the engine catches the fatal signal
+  itself, asks Crashpad to write the dump right away, and then stops Crashpad
+  from writing a second one on `EXC_CRASH`. The dump records Crashpad's
+  simulated exception rather than `EXC_BAD_ACCESS`, but the crashing thread's
+  real registers, so it symbolizes to the faulting frame. Crashes that raise no
+  signal (for example `EXC_GUARD`, or the process being killed for exceeding a
+  resource limit) are still dumped on `EXC_CRASH` and reported on the **next
+  task run**.
+
+A process forked from the engine without `exec` (for example a Python
+multiprocessing worker) is still dumped by Crashpad, but only the engine process
+itself reports at crash time. The forked process's dump is reported on the next
+task run.
+
+Each task run also sweeps the database for dumps nobody reported (for example,
+the process was killed while reporting). It waits until the monitor has
+installed its callback and the crash-dump location points at the task's log
+directory, and it skips dumps whose process is still running.
 
 The database directory is created `0700` and re-checked on every start. If it
 already exists but is a symlink, is owned by another user, or grants group or

@@ -61,7 +61,7 @@ export async function checkMissingEnvVars(client: RocketRideClient, pipeline: Re
 			`envVarCheck: could not read environment keys (${decision.reason}); running without the pre-flight check`
 		);
 		vscode.window.showWarningMessage(
-			`Could not verify environment variables (${decision.reason}). Running without the pre-flight check — an undefined variable will reach the pipeline as a literal \${ROCKETRIDE_*} placeholder.`
+			`Could not verify environment variables (${decision.reason}). Running without the pre-flight check, so an undefined variable will reach the pipeline as a literal \${ROCKETRIDE_*} placeholder.`
 		);
 		return [];
 	}

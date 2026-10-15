@@ -50,7 +50,11 @@ jobs:
           WITHOUT_KEY=""
 
           # Provider name → env var name holding the API key.
-          # embedding_openai shares ROCKETRIDE_OPENAI_KEY with llm_openai.
+          # embedding_openai and the vision nodes share the key of their text sibling.
+          # Providers with require_api_key are skipped (with a PR-body note) when their key is
+          # missing, rather than falling back to OpenRouter: their model IDs are not in any other
+          # catalogue, so a keyless run would deprecate working profiles and add IDs the runtime
+          # cannot call. See tools/sync_models/README.md, "Why some providers need their own key".
           declare -A PROVIDER_KEY=(
             [llm_openai]=ROCKETRIDE_OPENAI_KEY
             [embedding_openai]=ROCKETRIDE_OPENAI_KEY
@@ -63,7 +67,14 @@ jobs:
             [llm_qwen]=ROCKETRIDE_QWEN_KEY
             [llm_minimax]=ROCKETRIDE_MINIMAX_KEY
             [llm_kimi]=ROCKETRIDE_KIMI_KEY
+            [llm_baidu_qianfan]=ROCKETRIDE_BAIDU_QIANFAN_KEY
             [llm_glm]=ROCKETRIDE_GLM_KEY
+            [llm_gmi_cloud]=ROCKETRIDE_GMI_CLOUD_KEY
+            [llm_nebius]=ROCKETRIDE_NEBIUS_KEY
+            [llm_vision_openai]=ROCKETRIDE_OPENAI_KEY
+            [llm_vision_gemini]=ROCKETRIDE_GEMINI_KEY
+            [llm_vision_mistral]=ROCKETRIDE_MISTRAL_KEY
+            [accessibility_describe]=ROCKETRIDE_GEMINI_KEY
           )
 
           for PROVIDER in "${!PROVIDER_KEY[@]}"; do
@@ -91,7 +102,10 @@ jobs:
           ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
           ROCKETRIDE_MINIMAX_KEY: ${{ secrets.ROCKETRIDE_MINIMAX_KEY }}
           ROCKETRIDE_KIMI_KEY: ${{ secrets.ROCKETRIDE_KIMI_KEY }}
+          ROCKETRIDE_BAIDU_QIANFAN_KEY: ${{ secrets.ROCKETRIDE_BAIDU_QIANFAN_KEY }}
           ROCKETRIDE_GLM_KEY: ${{ secrets.ROCKETRIDE_GLM_KEY }}
+          ROCKETRIDE_GMI_CLOUD_KEY: ${{ secrets.ROCKETRIDE_GMI_CLOUD_KEY }}
+          ROCKETRIDE_NEBIUS_KEY: ${{ secrets.ROCKETRIDE_NEBIUS_KEY }}
 
       # Strict sync: only providers whose API key is configured. Native API
       # discovers and smoke-tests new models. No OpenRouter pollution.
@@ -116,7 +130,10 @@ jobs:
           ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
           ROCKETRIDE_MINIMAX_KEY: ${{ secrets.ROCKETRIDE_MINIMAX_KEY }}
           ROCKETRIDE_KIMI_KEY: ${{ secrets.ROCKETRIDE_KIMI_KEY }}
+          ROCKETRIDE_BAIDU_QIANFAN_KEY: ${{ secrets.ROCKETRIDE_BAIDU_QIANFAN_KEY }}
           ROCKETRIDE_GLM_KEY: ${{ secrets.ROCKETRIDE_GLM_KEY }}
+          ROCKETRIDE_GMI_CLOUD_KEY: ${{ secrets.ROCKETRIDE_GMI_CLOUD_KEY }}
+          ROCKETRIDE_NEBIUS_KEY: ${{ secrets.ROCKETRIDE_NEBIUS_KEY }}
 
       # Fallback sync: providers without an API key. OpenRouter / LiteLLM
       # are permitted as discovery sources for these. Smoke tests are skipped

@@ -215,7 +215,10 @@ export async function installDevHooks(): Promise<void> {
 	window.addEventListener('message', (e: MessageEvent) => {
 		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string } | undefined;
 		if (data?.type === 'rrdev:registerRemote') {
-			if (!data.appId || !data.moduleId || !data.entry) return;
+			if (!data.appId || !data.moduleId || !data.entry) {
+				console.warn(`[devMode] ignoring rrdev:registerRemote without appId/moduleId/entry: ${JSON.stringify({ appId: data.appId, moduleId: data.moduleId, entry: data.entry })}`);
+				return;
+			}
 			registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry);
 		} else if (data?.type === 'rrdev:auth' && typeof data.token === 'string') {
 			const cm = ConnectionManager.getInstance();

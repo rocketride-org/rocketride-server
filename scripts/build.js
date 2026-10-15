@@ -37,6 +37,9 @@ async function handleTermination(signal) {
 	process.exit(130); // Standard exit code for SIGINT
 }
 
+// Release is the default, Debug is not supported
+const CMAKE_CONFIGS = ['Release', 'RelWithDebInfo'];
+
 function parseArgs(args) {
 	const requests = [];
 	const options = {
@@ -52,6 +55,7 @@ function parseArgs(args) {
 		listModules: false,
 		logFile: null, // Log file for test output
 		overlayRoot: null, // Root directory for overlay
+		cmakeConfig: CMAKE_CONFIGS[0],
 		buildVersion: null,
 		buildHash: null,
 		buildStamp: null,
@@ -77,6 +81,20 @@ function parseArgs(args) {
 			options.listDeps = true;
 		} else if (arg === '--list-modules') {
 			options.listModules = true;
+		} else if (arg === '--list-skipped' || arg.startsWith('--list-skipped=')) {
+			const category = arg.includes('=') ? arg.substring('--list-skipped='.length) : 'all';
+			if (!category) {
+				console.error("Error: --list-skipped= needs a category, or drop the '=' for all of them");
+				process.exit(1);
+			}
+			options.listSkipped = category;
+		} else if (arg.startsWith('--warmup=')) {
+			const warmup = arg.substring('--warmup='.length);
+			if (!warmup) {
+				console.error("Error: --warmup= needs a value: 'plan' or 'off'");
+				process.exit(1);
+			}
+			options.warmup = warmup;
 		} else if (arg.startsWith('--models=')) {
 			options.models = options.models || [];
 			options.models.push(arg.substring('--models='.length));
@@ -104,6 +122,13 @@ function parseArgs(args) {
 		} else if (arg.startsWith('--trace=')) {
 			options.trace = options.trace || [];
 			options.trace.push(arg.substring('--trace='.length));
+		} else if (arg.startsWith('--cmake-config=')) {
+			const value = arg.substring('--cmake-config='.length);
+			if (!CMAKE_CONFIGS.includes(value)) {
+				console.error(`Unknown --cmake-config=${value}, expected one of: ${CMAKE_CONFIGS.join(', ')}`);
+				process.exit(1);
+			}
+			options.cmakeConfig = value;
 		} else if (arg.startsWith('--taskserver=')) {
 			options.taskserver = arg.substring('--taskserver='.length);
 		} else if (arg.startsWith('--log=')) {
@@ -122,12 +147,9 @@ function parseArgs(args) {
 			// client:update); beats ROCKETRIDE_URI from .config/.env.
 			options.shell = arg.substring('--shell='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
-			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
-			const paths = require('./lib/paths');
-			paths.BUILD_ROOT = path.join(options.overlayRoot, 'build');
-			paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
-			process.env.ROCKETRIDE_BUILD_ROOT = paths.BUILD_ROOT;
-			process.env.ROCKETRIDE_DIST_ROOT = paths.DIST_ROOT;
+			const overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
+			options.overlayRoot = overlayRoot === path.resolve(ROOT) ? null : overlayRoot;
+			require('./lib/paths').setOverlayRoot(options.overlayRoot);
 		} else if (arg.startsWith('--simulate-gpus=') || arg.startsWith('--simulate_gpus=')) {
 			options.simulateGpus = parseInt(arg.split('=')[1], 10);
 		} else if (arg === '--nodownload') {
@@ -259,6 +281,8 @@ Options:
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
   --list-modules      List all registered modules
+  --list-skipped[=CAT] Node test tasks: list the tests that will be skipped
+                      (CAT: hardware|remote|env|libs|marker) and run nothing
   --log=FILE          Write output to FILE (grouped by module)
   --models="args"     Pass arguments to sync_models (can be repeated)
   --modelserver[=ADDR] Enable model server mode; bare = start local, =port or =host:port = use existing
@@ -270,7 +294,8 @@ Options:
   --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
   --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated)
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
-  --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt, requirements.hash and the satisfied/ verdicts)
+  --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt,
+                      requirements.hash and the satisfied/ verdicts)
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
@@ -280,6 +305,7 @@ Options:
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
   --verbose, -v       Show detailed output
   --version=VERSION   Set full build version x.x.x.x
+  --warmup=plan|off   Full node tests: only list the models to download (plan), or skip the download pass (off)
 
 Examples:
   builder server:build             # Build server
@@ -337,9 +363,9 @@ async function main() {
 	// =========================================================================
 	// Install node deps so module tasks.js can be loaded
 	// =========================================================================
-	let Listr;
+	// listr2 stands in for every dependency: if it loads, the install is done
 	try {
-		Listr = require('listr2').Listr;
+		require('listr2');
 	} catch {
 		console.log('Installing dependencies (fresh clone)...\n');
 		try {
@@ -348,7 +374,7 @@ async function main() {
 		} catch {
 			process.exit(1);
 		}
-		Listr = require('listr2').Listr;
+		require('listr2');
 	}
 
 	// Run deps check silently (only outputs if install needed)
@@ -362,8 +388,9 @@ async function main() {
 	const { clearLog, writeLog, hasLogEntries } = require('./lib/log');
 
 	logModule = { writeLog, hasLogEntries };
-	process.on('SIGINT', () => handleTermination('SIGINT'));
-	process.on('SIGTERM', () => handleTermination('SIGTERM'));
+	// handleTermination ends in process.exit, so nothing waits on it
+	process.on('SIGINT', () => void handleTermination('SIGINT'));
+	process.on('SIGTERM', () => void handleTermination('SIGTERM'));
 
 	// C++/VS setup (Windows) and C++ toolchain (Linux/Mac) run only when compiling the engine
 	// (server:setup-tools in the server build path). Not needed if using a prebuilt engine.
@@ -504,4 +531,4 @@ async function main() {
 	}
 }
 
-main();
+void main();

@@ -98,10 +98,48 @@ TEST_CASE("crashpad") {
         int status = runCrashChild("crash");
         REQUIRE(WIFSIGNALED(status));
 
-        // The parent's sweep relocates the child's dump into crashDumpLocation().
-        plat::minidumpSweep();
-
+        // The child relocates its own dump at crash time; no parent sweep.
         REQUIRE(dumpsIn(crashDir).size() > before.size());
+    }
+
+    // On macOS the child dumps via SimulateCrash() and must then stop Crashpad
+    // dumping again on EXC_CRASH; on Linux Crashpad dumps once by design.
+    SECTION("a crash is reported exactly once") {
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-once";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        auto before = dumpsIn(crashDir);
+
+        int status = runCrashChild("crash", dir.c_str());
+        REQUIRE(WIFSIGNALED(status));
+
+        // Give a stray second dump from the out-of-process handler time to land.
+        ::usleep(1000 * 1000);
+
+        REQUIRE(dumpsIn(crashDir).size() == before.size() + 1);
+        REQUIRE(dumpsIn(dir / "pending").empty());
+        REQUIRE(dumpsIn(dir / "completed").empty());
+
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    // A fork without exec inherits the reporter's pipes and handlers but not
+    // its thread: the forked copy's crash must not consume this process's
+    // crash-time report, nor be reported as this process's dump.
+    SECTION("a forked child's crash does not take the parent's report") {
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-fork";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        auto before = dumpsIn(crashDir);
+
+        int status = runCrashChild("forkcrash", dir.c_str());
+        REQUIRE(WIFSIGNALED(status));
+
+        ::usleep(1000 * 1000);  // as above: let any stray dump land
+
+        REQUIRE(dumpsIn(crashDir).size() == before.size() + 1);
+
+        std::filesystem::remove_all(dir, ec);
     }
 
     SECTION("clean exit writes no dump") {
@@ -158,6 +196,7 @@ TEST_CASE("crashpad") {
         auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-ok";
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
+        auto before = dumpsIn(crashDir);
 
         int status = runCrashChild("crash", dir.c_str());
         REQUIRE(WIFSIGNALED(status));
@@ -166,12 +205,14 @@ TEST_CASE("crashpad") {
         REQUIRE(::stat(dir.c_str(), &st) == 0);
         REQUIRE((st.st_mode & 0777) == 0700);
 
-        // Uploads are disabled, so a finished report stays in pending. The
-        // handler is out-of-process and can outlive the child, so poll for it.
+        // Uploads are disabled, so a finished report stays in pending, unless
+        // the child already relocated it at crash time. The handler is
+        // out-of-process and can outlive the child, so poll for it.
         bool landed = false;
         for (int i = 0; i < 50 && !landed; ++i) {
             landed = !(dumpsIn(dir / "pending").empty()
-                       && dumpsIn(dir / "completed").empty());
+                       && dumpsIn(dir / "completed").empty())
+                     || dumpsIn(crashDir).size() > before.size();
             if (!landed) ::usleep(100 * 1000);  // 100ms * 50 = 5s cap
         }
         REQUIRE(landed);

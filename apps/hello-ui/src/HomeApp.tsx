@@ -120,7 +120,7 @@ const QUOTES: { text: string; source: string }[] = [
 	{ text: 'Here\'s Johnny!', source: 'The Shining (1980)' },
 	{ text: 'My precious.', source: 'The Lord of the Rings: The Two Towers (2002)' },
 	{ text: 'Life is like a box of chocolates. You never know what you\'re gonna get.', source: 'Forrest Gump (1994)' },
-	{ text: 'I feel the need — the need for speed!', source: 'Top Gun (1986)' },
+	{ text: 'I feel the need, the need for speed!', source: 'Top Gun (1986)' },
 	{ text: 'Nobody puts Baby in a corner.', source: 'Dirty Dancing (1987)' },
 	{ text: 'You\'re gonna need a bigger boat.', source: 'Jaws (1975)' },
 	{ text: 'Say hello to my little friend!', source: 'Scarface (1983)' },
@@ -170,7 +170,7 @@ const getTimeBucket = (hour: number): TimeBucket => {
 const GREETINGS: Record<TimeBucket | 'any', readonly string[]> = {
 	morning: [
 		'Good morning.',
-		'Morning — fresh start.',
+		'Morning. Fresh start.',
 		'Rise and shine.',
 		'A perfect morning for a launch.',
 	],
@@ -900,7 +900,7 @@ const AppCard: React.FC<{ app: AppManifestEntry; onLaunch: (app: AppManifestEntr
 						</button>
 					)}
 					{versionRows !== null && versionRows.length > 0 && (
-						<div style={styles.versionHint}>Session only — clears when this tab closes</div>
+						<div style={styles.versionHint}>Session only: clears when this tab closes</div>
 					)}
 				</div>
 			)}
@@ -1026,7 +1026,7 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 							<>
 								{/* Quote slightly bolder; attribution italic underneath */}
 								<p style={styles.quoteText}>{'“'}{quote.text}{'”'}</p>
-								<p style={styles.quoteSource}>— {quote.source}</p>
+								<p style={styles.quoteSource}>{quote.source}</p>
 							</>
 						)}
 					</div>

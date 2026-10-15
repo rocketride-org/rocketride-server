@@ -1,10 +1,18 @@
 colors: false # disabled to fix terminal corruption on Windows
+# doublestar: `**/` also matches zero directories, as in ESLint and Prettier
+# (the default gobwas matcher needs at least one, so **/scripts/** skipped
+# root scripts/ and files directly in any scripts/ folder)
+glob_matcher: doublestar
 pre-commit:
   parallel: false # sequential to avoid ruff cache write conflicts
   commands:
     gitleaks:
       tags: security
       run: gitleaks protect --verbose --redact --staged --config .gitleaks.toml
+    # Build scripts only; mirrored by the eslint-scripts job in ci.yml
+    eslint-scripts:
+      glob: '**/scripts/**/*.{js,cjs,mjs}'
+      run: npx eslint {staged_files}
     # Note: ESLint and Prettier are temporarily disabled in lefthook in order
     #       to enable them later in both lefthook and CI workflow.
     # eslint:
@@ -14,8 +22,8 @@ pre-commit:
     #   glob: '*.{js,ts,jsx,tsx,mjs,cjs,json,css,scss,html,md,yaml,yml}'
     #   run: npx prettier --check {staged_files}
     ruff-check:
-      glob: '*.py'
+      glob: '**/*.py'
       run: ruff check {staged_files}
     ruff-format:
-      glob: '*.py'
+      glob: '**/*.py'
       run: ruff format --check {staged_files}

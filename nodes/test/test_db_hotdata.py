@@ -782,7 +782,7 @@ def _llm_instance(glb, answers):
         return SimpleNamespace(answer=reply)
 
     inst = _instance(glb)
-    inst.instance = SimpleNamespace(invoke=_invoke)
+    inst.instance = SimpleNamespace(invoke=_invoke, getControllerNodeIds=lambda _kind: ['llm_1'])
     inst.asked = asked
     return inst
 
@@ -905,7 +905,9 @@ def test_missing_llm_answer_raises():
     g = _loaded_global()
     g.client = SimpleNamespace(information_schema=lambda **_kw: {'tables': []})
     inst = _instance(g)
-    inst.instance = SimpleNamespace(invoke=lambda _ask: SimpleNamespace(answer=''))
+    inst.instance = SimpleNamespace(
+        invoke=lambda _ask: SimpleNamespace(answer=''), getControllerNodeIds=lambda _kind: ['llm_1']
+    )
     with pytest.raises(RuntimeError, match='did not return a query'):
         inst.get_sql({'question': 'x'})
 
@@ -1232,8 +1234,9 @@ def test_get_schema_falls_back_to_sql_without_connection_id():
 class _FakeLaneInstance:
     """Captures what the node writes downstream."""
 
-    def __init__(self, lanes, invoke=None):
+    def __init__(self, lanes, invoke=None, llm_ids=('llm_1',)):
         self._lanes = lanes
+        self._llm_ids = list(llm_ids)
         self.texts = []
         self.tables = []
         self.answers = []
@@ -1241,6 +1244,9 @@ class _FakeLaneInstance:
 
     def getListeners(self):
         return self._lanes
+
+    def getControllerNodeIds(self, class_type):
+        return list(self._llm_ids) if class_type == 'llm' else []
 
     def writeText(self, text):
         self.texts.append(text)
@@ -1295,6 +1301,47 @@ def test_questions_lane_emits_structured_error_on_failure():
     assert inst.instance.answers, 'a failure must still reach the answers lane'
     payload = json.loads(inst.instance.answers[0].answer)
     assert 'error' in payload, 'errors must be structurally distinguishable from prose'
+
+
+def test_question_without_llm_names_the_cause_and_the_raw_sql_path():
+    """With no llm connected, a question fails with a clear message, not an engine error.
+
+    The connection is optional because execute (raw SQL) never uses it, so the
+    message also tells the caller what still works.
+    """
+    g = _loaded_global()
+    g.client = SimpleNamespace(information_schema=lambda **_kw: {'tables': []})
+    inst = _instance(g)
+    asked = []
+    inst.instance = SimpleNamespace(invoke=asked.append, getControllerNodeIds=lambda _kind: [])
+
+    with pytest.raises(iinstance_mod.MissingLlmError, match='No LLM is connected to this Hotdata node') as excinfo:
+        inst.get_sql({'question': 'x'})
+
+    assert 'execute' in str(excinfo.value)
+    assert asked == []
+
+
+def test_questions_lane_without_llm_reports_the_cause():
+    inst = _instance(_loaded_global())
+    inst.instance = _FakeLaneInstance(['text', 'answers'], llm_ids=())
+
+    inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+    assert inst.instance.texts[0].startswith('No LLM is connected to this Hotdata node')
+    assert json.loads(inst.instance.answers[0].answer)['error'] == inst.instance.texts[0]
+
+
+@pytest.mark.parametrize('lanes', [['table'], []])
+def test_questions_lane_without_llm_raises_when_no_lane_carries_the_error(lanes):
+    """A table-only pipeline has no lane for an error message: the engine reports it instead."""
+    inst = _instance(_loaded_global())
+    inst.instance = _FakeLaneInstance(lanes, llm_ids=())
+
+    with pytest.raises(iinstance_mod.MissingLlmError, match='No LLM is connected'):
+        inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+    assert inst.instance.tables == []
 
 
 def test_questions_lane_ignores_an_empty_question():

@@ -61,6 +61,7 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      container: ${{ steps.filter.outputs.container }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
@@ -76,6 +77,18 @@ jobs:
               - 'builder.cmd'
               - '.github/workflows/**'
               - 'package.json'
+              - 'docker/**'
+            # What the node image is made of beyond the engine itself
+            container:
+              - 'docker/**'
+              - 'nodes/scripts/tasks.js'
+              - 'nodes/**/requirement*.txt'
+              - 'nodes/**/overrides.txt'
+              - 'packages/ai/**/requirement*.txt'
+              - 'packages/ai/**/overrides.txt'
+              - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
+              - 'packages/server/scripts/tasks.js'
+              - '.github/workflows/_build.yaml'
 
   # ---------------------------------------------------------------------------
   #  Helm lint + schema validation (only on PRs touching deploy/helm/**)
@@ -141,6 +154,13 @@ jobs:
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
+      # Build only for a pull request into another feature branch (the middle of
+      # a stack). CI OK then fails on purpose: see `Verify results` below.
+      test: ${{ github.event_name != 'pull_request'
+                || contains(fromJSON('["develop", "stage", "main"]'), github.event.pull_request.base.ref)
+                || startsWith(github.event.pull_request.base.ref, 'release/')
+                || contains(github.event.pull_request.labels.*.name, 'ci:test') }}
+      container_test: ${{ github.event_name != 'pull_request' || needs.changes.outputs.container == 'true' }}
     secrets: inherit
 
   # ---------------------------------------------------------------------------
@@ -189,7 +209,9 @@ jobs:
       fail-fast: false
       matrix:
         dockerfile:
+          - Dockerfile.engine-base
           - Dockerfile.engine
+          - Dockerfile.node
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -236,6 +258,29 @@ jobs:
           version: "0.16.5"
       - run: ruff check
       - run: ruff format --check
+
+  # ---------------------------------------------------------------------------
+  #  ESLint — build scripts (scripts/ and every module's scripts/ tree).
+  #  Mirrors the local lefthook hook, like ruff-check above. The eslint
+  #  version is pinned by pnpm-lock.yaml.
+  # ---------------------------------------------------------------------------
+  eslint-scripts:
+    name: ESLint (build scripts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint:scripts
 
   # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream
@@ -357,19 +402,31 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks, shell-contract]
+    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, eslint-scripts, gitleaks, shell-contract]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verify results
+        env:
+          # Must match the `test:` input passed to the build job above.
+          TESTS_RAN: ${{ github.event_name != 'pull_request'
+                     || contains(fromJSON('["develop", "stage", "main"]'), github.event.pull_request.base.ref)
+                     || startsWith(github.event.pull_request.base.ref, 'release/')
+                     || contains(github.event.pull_request.labels.*.name, 'ci:test') }}
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+            exit 1
+          fi
+          # A stacked pull request builds without tests, so CI OK stays red and it
+          # cannot merge until a push with develop as its base runs the suite.
+          if [[ "${{ needs.build.result }}" == "success" && "$TESTS_RAN" != "true" ]]; then
+            echo "❌ Built without tests (pull request into a feature branch). Push to this branch after it targets develop, or add the ci:test label and push, to run the suite."
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.

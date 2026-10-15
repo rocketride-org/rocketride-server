@@ -99,13 +99,16 @@ function copyDir(from, to) {
 // ── Load both flavors' html ──────────────────────────────────────────────
 const prodHtmlPath = path.join(PROD_DIR, 'index.html');
 const devHtmlPath = path.join(DEV_DIR, 'index.html');
-if (!fs.existsSync(prodHtmlPath)) throw new Error(`stitch-flavors: missing ${prodHtmlPath} — run the production build first`);
-if (!fs.existsSync(devHtmlPath)) throw new Error(`stitch-flavors: missing ${devHtmlPath} — run the RR_SHELL_FLAVOR=dev build first`);
+if (!fs.existsSync(prodHtmlPath))
+	throw new Error(`stitch-flavors: missing ${prodHtmlPath} — run the production build first`);
+if (!fs.existsSync(devHtmlPath))
+	throw new Error(`stitch-flavors: missing ${devHtmlPath} — run the RR_SHELL_FLAVOR=dev build first`);
 const prodHtml = fs.readFileSync(prodHtmlPath, 'utf8');
 const devHtml = fs.readFileSync(devHtmlPath, 'utf8');
 // Stitching is destructive (tags are stripped) — a second pass over an
 // already-stitched html would emit an empty manifest. Rebuild instead.
-if (prodHtml.includes('RR_FLAVORS')) throw new Error('stitch-flavors: index.html is already stitched — rerun the production build first');
+if (prodHtml.includes('RR_FLAVORS'))
+	throw new Error('stitch-flavors: index.html is already stitched — rerun the production build first');
 
 // ── Merge the dev flavor's hashed assets into the production tree ────────
 const devStatic = path.join(DEV_DIR, 'static');
@@ -117,7 +120,10 @@ if (manifest.prod.js.length === 0) throw new Error('stitch-flavors: no entry scr
 if (manifest.dev.js.length === 0) throw new Error('stitch-flavors: no entry scripts found in the dev html');
 // The shell always has entry CSS — zero means the extractor regressed
 // against rsbuild's emitted tag shape (an unstyled shell, found the hard way).
-if (manifest.prod.css.length === 0) throw new Error('stitch-flavors: no stylesheets found in the production html — extractor vs rsbuild tag-shape mismatch');
+if (manifest.prod.css.length === 0)
+	throw new Error(
+		'stitch-flavors: no stylesheets found in the production html — extractor vs rsbuild tag-shape mismatch'
+	);
 
 // The picker runs inline at the END of body (#root exists by then). Dynamic
 // scripts are async by default — async=false preserves execution order.
@@ -138,8 +144,12 @@ try{
 	if(!dev){try{dev=sessionStorage.getItem('rr:dev')==='1';}catch(e){}}
 }catch(e){}
 var f=RR_FLAVORS[dev?'dev':'prod'];
-f.css.forEach(function(href){var l=document.createElement('link');l.rel='stylesheet';l.href=href;document.head.appendChild(l);});
-f.js.forEach(function(src){var s=document.createElement('script');s.src=src;s.async=false;document.body.appendChild(s);});
+f.css.forEach(function(href){
+	var l=document.createElement('link');l.rel='stylesheet';l.href=href;document.head.appendChild(l);
+});
+f.js.forEach(function(src){
+	var s=document.createElement('script');s.src=src;s.async=false;document.body.appendChild(s);
+});
 })();</script>`;
 
 const stripped = stripAssetTags(prodHtml);
@@ -147,4 +157,7 @@ if (!stripped.includes('</body>')) throw new Error('stitch-flavors: production h
 const combined = stripped.replace('</body>', `${picker}\n</body>`);
 fs.writeFileSync(prodHtmlPath, combined, 'utf8');
 
-console.log(`stitch-flavors: merged dev flavor (${manifest.dev.js.length} js, ${manifest.dev.css.length} css) behind the picker in ${prodHtmlPath}`);
+console.log(
+	`stitch-flavors: merged dev flavor (${manifest.dev.js.length} js, ${manifest.dev.css.length} css) ` +
+		`behind the picker in ${prodHtmlPath}`
+);

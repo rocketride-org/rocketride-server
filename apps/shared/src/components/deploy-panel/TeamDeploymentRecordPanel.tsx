@@ -326,7 +326,7 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 	// opening gesture is never a dead click and never a double slide-in.
 	if (!data) {
 		return (
-			<DetailPanel open onClose={onClose} title={fallbackTitle} subtitle="Team deployment — every source this team runs" width={width} persistKey="panelTeamDeploymentWidth">
+			<DetailPanel open onClose={onClose} title={fallbackTitle} subtitle="Team deployment: every source this team runs" width={width} persistKey="panelTeamDeploymentWidth">
 				<div style={S.stateMessage}>{loadError ? `Failed to load deployment: ${loadError}` : 'Loading deployment…'}</div>
 			</DetailPanel>
 		);
@@ -368,13 +368,13 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 
 	return (
 		<>
-			<DetailPanel open={open} onClose={onClose} title={`${teamName} / ${deployment.pipelineName}`} subtitle="Team deployment — every source this team runs" width={width} persistKey="panelTeamDeploymentWidth" busy={busy} {...(footer ? { footer } : {})}>
+			<DetailPanel open={open} onClose={onClose} title={`${teamName} / ${deployment.pipelineName}`} subtitle="Team deployment: every source this team runs" width={width} persistKey="panelTeamDeploymentWidth" busy={busy} {...(footer ? { footer } : {})}>
 				{/* ── Deployment header (with the newer-version hint) ───────── */}
 				<div style={S.header}>
 					<h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{deployment.pipelineName}</h3>
 					<span style={{ ...S.chip, ...S.chipVersion }}>v{deployment.version}</span>
 					{versions.length > 0 && versions[0].version > deployment.version && (
-						<span style={{ ...S.chip, ...S.chipUpdate }} title="A newer version is published — use Deploy version…">
+						<span style={{ ...S.chip, ...S.chipUpdate }} title="A newer version is published. Use Deploy version…">
 							v{versions[0].version} available
 						</span>
 					)}
@@ -439,13 +439,13 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 			</DetailPanel>
 
 			{/* ── Disable confirmation ────────────────────────────────────── */}
-			{disableOpen && <ConfirmDialog title={`Disable ${deployment.pipelineName} on ${teamName}?`} message="Nothing runs — schedules stop firing and manual runs are refused — until you enable it again. Nothing is removed." confirmLabel="Disable" cancelLabel="Cancel" onConfirm={() => void run(() => onSetDisabled(true))} onCancel={() => setDisableOpen(false)} />}
+			{disableOpen && <ConfirmDialog title={`Disable ${deployment.pipelineName} on ${teamName}?`} message="Nothing runs (schedules stop firing and manual runs are refused) until you enable it again. Nothing is removed." confirmLabel="Disable" cancelLabel="Cancel" onConfirm={() => void run(() => onSetDisabled(true))} onCancel={() => setDisableOpen(false)} />}
 
 			{/* ── Remove (soft) confirmation ──────────────────────────────── */}
 			{removeOpen && onRemove && (
 				<ConfirmDialog
 					title={`Remove from ${teamName}?`}
-					message={`Takes ${deployment.pipelineName} off ${teamName}: schedules stop firing and the deployment leaves all listings. This is a SOFT remove — the audit history and every published version survive, and deploying any version to ${teamName} revives it.`}
+					message={`Takes ${deployment.pipelineName} off ${teamName}: schedules stop firing and the deployment leaves all listings. This is a SOFT remove: the audit history and every published version survive, and deploying any version to ${teamName} revives it.`}
 					confirmLabel="Remove"
 					cancelLabel="Cancel"
 					onConfirm={() => {
@@ -457,7 +457,7 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 			)}
 
 			{/* ── Pointer-move confirmation (deploy and rollback alike) ───── */}
-			{pendingVersion !== null && <ConfirmDialog title={pendingVersion < deployment.version ? `Roll ${teamName} back to v${pendingVersion}?` : `Deploy v${pendingVersion} to ${teamName}?`} message={`${teamName} currently runs v${deployment.version}. Its next runs will execute v${pendingVersion} — schedules and history carry over.`} confirmLabel={pendingVersion < deployment.version ? 'Rollback' : 'Deploy'} cancelLabel="Cancel" onConfirm={() => void run(() => onDeployVersion(pendingVersion))} onCancel={() => setPendingVersion(null)} />}
+			{pendingVersion !== null && <ConfirmDialog title={pendingVersion < deployment.version ? `Roll ${teamName} back to v${pendingVersion}?` : `Deploy v${pendingVersion} to ${teamName}?`} message={`${teamName} currently runs v${deployment.version}. Its next runs will execute v${pendingVersion}. Schedules and history carry over.`} confirmLabel={pendingVersion < deployment.version ? 'Rollback' : 'Deploy'} cancelLabel="Cancel" onConfirm={() => void run(() => onDeployVersion(pendingVersion))} onCancel={() => setPendingVersion(null)} />}
 
 			{/* ── Deploy version… picker (stages a confirmation) ──────────── */}
 			{pickerOpen && (
@@ -470,7 +470,7 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 						</Button>
 					}
 				>
-					<div style={{ fontSize: 12.5, color: 'var(--rr-text-secondary)', marginBottom: 10 }}>Points {teamName} at the chosen registry version. An older version is a rollback &mdash; same gesture.</div>
+					<div style={{ fontSize: 12.5, color: 'var(--rr-text-secondary)', marginBottom: 10 }}>Points {teamName} at the chosen registry version. An older version is a rollback: same gesture.</div>
 					{versions.map((v) => {
 						const isCurrent = v.version === deployment.version;
 						return (

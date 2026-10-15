@@ -263,20 +263,44 @@ async function startServer(options) {
 				// The server says it's listening; confirm it before handing the port
 				// to tests. "Ready but unreachable" otherwise shows up only as every
 				// client connection being refused, far from the cause.
-				probeReachability(actualPort).then((reach) => {
-					diagnostics.reachability = reach;
+				probeReachability(actualPort)
+					.then((reach) => {
+						diagnostics.reachability = reach;
 
-					if (!reach.reachable) {
-						console.error(['', '='.repeat(78), `SERVER READY BUT UNREACHABLE on port ${actualPort} (${script})`, `  IPv4 127.0.0.1:${actualPort} -> ${reach.ipv4}`, `  IPv6      [::1]:${actualPort} -> ${reach.ipv6}`, '  The process is alive and reported startup, but nothing accepts', '  connections. Every client dial will fail with ECONNREFUSED.', `  Last ${Math.min(diagnostics.outputTail.length, 40)} line(s) of server output:`, ...diagnostics.outputTail.slice(-40).map((l) => `    ${l}`), '='.repeat(78), ''].join('\n'));
-					} else if (reach.ipv4 !== 'connected') {
-						// Reachable over IPv6 but NOT IPv4. Clients here dial 127.0.0.1,
-						// so this is the asymmetry that actually bites. IPv4-only is the
-						// normal healthy case and is deliberately silent.
-						console.error(`[server] WARNING: port ${actualPort} is reachable over IPv6 but NOT IPv4 (IPv4=${reach.ipv4}). Clients dialing 127.0.0.1 will get ECONNREFUSED.`);
-					}
+						if (!reach.reachable) {
+							console.error(
+								[
+									'',
+									'='.repeat(78),
+									`SERVER READY BUT UNREACHABLE on port ${actualPort} (${script})`,
+									`  IPv4 127.0.0.1:${actualPort} -> ${reach.ipv4}`,
+									`  IPv6      [::1]:${actualPort} -> ${reach.ipv6}`,
+									'  The process is alive and reported startup, but nothing accepts',
+									'  connections. Every client dial will fail with ECONNREFUSED.',
+									`  Last ${Math.min(diagnostics.outputTail.length, 40)} line(s) of server output:`,
+									...diagnostics.outputTail.slice(-40).map((l) => `    ${l}`),
+									'='.repeat(78),
+									'',
+								].join('\n')
+							);
+						} else if (reach.ipv4 !== 'connected') {
+							// Reachable over IPv6 but NOT IPv4. Clients here dial 127.0.0.1,
+							// so this is the asymmetry that actually bites. IPv4-only is the
+							// normal healthy case and is deliberately silent.
+							console.error(
+								`[server] WARNING: port ${actualPort} is reachable over IPv6 but NOT IPv4 ` +
+									`(IPv4=${reach.ipv4}). Clients dialing 127.0.0.1 will get ECONNREFUSED.`
+							);
+						}
 
-					resolve({ server: serverProcess, port: actualPort, diagnostics });
-				});
+						resolve({ server: serverProcess, port: actualPort, diagnostics });
+					})
+					.catch((err) => {
+						// The probe is diagnostics only: if it fails, report the server
+						// ready rather than leave startup waiting forever
+						diagnostics.reachability = { error: err.message };
+						resolve({ server: serverProcess, port: actualPort, diagnostics });
+					});
 			}
 		};
 
@@ -308,7 +332,14 @@ async function startServer(options) {
 			// the cause is adjacent to the effect in the log.
 			if (diagnostics.stopRequested) return;
 
-			const detail = ['', '='.repeat(78), `SERVER DIED UNEXPECTEDLY after reporting ready (${script})`, `  ${describeExit(code, signal)}`, `  port=${diagnostics.port ?? 'unknown'} pid=${serverProcess.pid}`, '  All subsequent client connections will fail with ECONNREFUSED.'];
+			const detail = [
+				'',
+				'='.repeat(78),
+				`SERVER DIED UNEXPECTEDLY after reporting ready (${script})`,
+				`  ${describeExit(code, signal)}`,
+				`  port=${diagnostics.port ?? 'unknown'} pid=${serverProcess.pid}`,
+				'  All subsequent client connections will fail with ECONNREFUSED.',
+			];
 
 			const pressure = readResourcePressure();
 			if (pressure.length) {
@@ -358,7 +389,10 @@ async function stopServer(serverObj, timeout = 5000) {
 	// so here too: teardown is where a caller that missed the live report looks.
 	if (serverProcess.killed || serverProcess.exitCode !== null) {
 		if (diagnostics && diagnostics.exited && diagnostics.code !== 0) {
-			console.error(`[server] NOTE: server was already gone at teardown - ${describeExit(diagnostics.code, diagnostics.signal)}`);
+			console.error(
+				`[server] NOTE: server was already gone at teardown - ` +
+					`${describeExit(diagnostics.code, diagnostics.signal)}`
+			);
 		}
 		return;
 	}

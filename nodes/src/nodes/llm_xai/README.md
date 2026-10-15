@@ -58,11 +58,11 @@ IDs and expose the API key field for that source.
 
 ## Configuration
 
-Choose a profile to set the model, context limit, and output limit. Built-in profiles keep those values fixed, while `custom` exposes the model ID and context limit for another xAI model.
+Choose a profile to set the model, context limit, and output limit. Built-in profiles keep those values fixed, while `custom` exposes the model ID, context limit and output limit for another xAI model.
 
 ### Custom models
 
-For `custom`, enter an xAI model ID and a positive context limit. The initial context value is 131,072 tokens; the output limit is not preset.
+For `custom`, enter an xAI model ID and a positive context limit. The initial context value is 131,072 tokens, and the output limit, left empty, is the default model's; set it to your model's limit, keeping in mind that reasoning models count their thinking against it.
 
 ## Authentication
 
@@ -86,6 +86,7 @@ The key is also checked at save time with a minimal probe request, so invalid ke
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `model` | `string` | **Model**<br/>xAI model |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `xai.profile` | `string` | **Model**<br/>LLM model | `"grok-3"` |
 

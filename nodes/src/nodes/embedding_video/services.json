@@ -173,6 +173,7 @@
 	//
 	"test": {
 		"profiles": ["openai-patch16"],
+		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 		"outputs": ["documents"],
 		"timeout": 180,
 		"cases": [

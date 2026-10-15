@@ -397,7 +397,7 @@ export class WatchManager {
 					return;
 				}
 				this.console(app.id, 'error', `dev server exited ${strikes} times in a row — giving up. Reload retries with a fresh install.`);
-				this.notify(app.id, { state: 'error', target: 'dev server', reason: 'The dev server keeps exiting — the Console pane carries its last output. Reload retries.' });
+				this.notify(app.id, { state: 'error', target: 'dev server', reason: 'The dev server keeps exiting. The Console pane carries its last output. Reload retries.' });
 				return;
 			}
 			this.notify(app.id, { state: 'idle' });
@@ -867,8 +867,8 @@ export class WatchManager {
 			this.scheduleReload(session);
 		} else if (/build failed|error {3}/i.test(compilerText)) {
 			session.buildStart = undefined;
-			this.appScreen.notifyError(session.app.id, 'rsbuild build failed — see the Console pane for compiler output', 'rsbuild');
-			this.notify(session.app.id, { state: 'error', target: session.devOrigin?.replace(/^https?:\/\//, ''), reason: 'The app failed to compile — the Console pane carries the compiler output.' });
+			this.appScreen.notifyError(session.app.id, 'rsbuild build failed; see the Console pane for compiler output', 'rsbuild');
+			this.notify(session.app.id, { state: 'error', target: session.devOrigin?.replace(/^https?:\/\//, ''), reason: 'The app failed to compile. The Console pane carries the compiler output.' });
 		} else if (/building|compiling/i.test(compilerText) && session.buildStart === undefined) {
 			session.buildStart = Date.now();
 			this.notify(session.app.id, { state: 'building', target: session.devOrigin?.replace(/^https?:\/\//, '') });

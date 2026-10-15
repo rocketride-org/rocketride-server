@@ -43,7 +43,7 @@ void minidumpRegister() noexcept {
 }
 
 void minidumpSweep() noexcept {
-    internal::sweepPreviousDumps(internal::crashDbDir());
+    internal::sweepDumps(internal::crashDbDir());
 }
 
 void minidumpDeregister() noexcept { internal::minidumpLifetime().reset(); }

@@ -29,7 +29,10 @@ describe('action pin verification', () => {
 	});
 
 	it('validates single- and double-quoted uses values', async () => {
-		const pins = parseWorkflow(`uses: "actions/checkout@${SHA}" # v4\n- uses: 'actions/setup-node@${OTHER_SHA}' # v4`, 'quoted.yml');
+		const pins = parseWorkflow(
+			`uses: "actions/checkout@${SHA}" # v4\n- uses: 'actions/setup-node@${OTHER_SHA}' # v4`,
+			'quoted.yml'
+		);
 		assert.deepEqual(
 			pins.map(({ action, sha, version }) => ({ action, sha, version })),
 			[

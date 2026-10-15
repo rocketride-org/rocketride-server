@@ -36,6 +36,7 @@
  *   store dir/type/write/...   File store operations
  *   app create/deploy/verify   App lifecycle
  *   deploy add/list/publish/.. Deploy lifecycle (deployment target)
+ *   profile run/start/tree/..  Profile the server process or a pipeline
  *
  * All output is plain, line-oriented text; every command also accepts
  * `--json` / `--json=<file>` for a machine-readable result. Continuous
@@ -58,7 +59,8 @@ import { registerStoreCommands } from './commands/store';
 import { registerValidateCommands } from './commands/validate';
 import { registerAppCommands } from './commands/app';
 import { registerDeployCommands } from './commands/deploy';
-import { disconnectAll } from './common';
+import { registerProfileCommands } from './commands/profile';
+import { disconnectAll, takeInterrupt } from './common';
 
 // The workspace .env must be in process.env before the command groups
 // REGISTER (their option defaults read it) — registration happens inside
@@ -78,6 +80,10 @@ function setupSignalHandlers(): void {
 		const exitCode = 128 + (signal === 'SIGINT' ? 2 : 15);
 		if (shuttingDown) {
 			process.exit(exitCode);
+		}
+		// A command that ends on Ctrl+C (profile run) finishes on its own
+		if (takeInterrupt()) {
+			return;
 		}
 		shuttingDown = true;
 		const forceExitTimer = setTimeout(() => process.exit(exitCode), FORCE_EXIT_TIMEOUT_MS);
@@ -107,6 +113,7 @@ function createProgram(): Command {
 	registerStoreCommands(program);
 	registerAppCommands(program);
 	registerDeployCommands(program);
+	registerProfileCommands(program);
 	return program;
 }
 

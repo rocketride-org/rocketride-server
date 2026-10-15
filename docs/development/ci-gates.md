@@ -181,6 +181,11 @@ The validator's own unit tests (`tests/test_validate_node_readme.py`) run inside
 suite; that invocation stays in place, but `docs:validate` is what gates it on
 every doc-path PR.
 
+`docs:validate` runs under the engine's Python when `dist/server/engine` is
+built, and otherwise under the first working Python 3.10+ on `PATH` (`python3`,
+then `python`). Without the engine, the unit tests need `pytest` installed for
+that Python; the task skips them when it is missing.
+
 ---
 
 ## The local pre-commit hook

@@ -133,9 +133,11 @@
 			"description": "Maximum context length in tokens"
 		},
 		"modelOutputTokens": {
-			"type": "number",
+			"type": "integer",
 			"title": "Output Tokens",
-			"description": "Maximum generated tokens"
+			"description": "Maximum generated tokens",
+			"minimum": 1024,
+			"optional": true
 		},
 		"baidu_qianfan.serverbase": {
 			"type": "string",

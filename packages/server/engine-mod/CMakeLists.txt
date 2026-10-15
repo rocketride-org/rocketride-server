@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 add_library(engineMod SHARED
     include/engine.h
     src/engine.cpp
+    src/engine.test.cpp
 )
 
 set_target_properties(engineMod PROPERTIES
@@ -53,9 +54,14 @@ add_custom_command(TARGET engineMod POST_BUILD
     COMMENT "Copying $<TARGET_FILE_NAME:engineMod> next to $<TARGET_FILE_NAME:engine>")
 
 # Mirror the exe -> dist/server copy that rocketride_add_executable performs
-if(ROCKETRIDE_CMAKE_KIST)
+if(ROCKETRIDE_CMAKE_KITS)
     add_custom_command(TARGET engineMod POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${ROCKETRIDE_PROJECT_ROOT}/dist/server"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:engineMod> "${ROCKETRIDE_PROJECT_ROOT}/dist/server/"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ROCKETRIDE_DIST_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:engineMod> "${ROCKETRIDE_DIST_DIR}/"
         COMMENT "Copying $<TARGET_FILE_NAME:engineMod> to dist/server")
+endif()
+
+# And the node test binary, which hosts this module the way engine does
+if(NOT DEFINED ENV{CMAKE_DEVMODE})
+    add_subdirectory(test)
 endif()

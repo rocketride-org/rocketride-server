@@ -207,13 +207,13 @@ export const ConnectionDetailPanel: React.FC<IConnectionDetailPanelProps> = (pro
 					{endpoints.length === 0 && <option value="">No database nodes found</option>}
 					{endpoints.map((e) => (
 						<option key={e.key} value={e.key}>
-							{e.pipelineName} — {e.nodeName} ({e.provider})
+							{e.pipelineName}: {e.nodeName} ({e.provider})
 						</option>
 					))}
 				</select>
 				<div style={styles.hint}>
 					Only database nodes inside running pipelines are listed. The pipeline
-					node owns the database credentials — nothing is entered here.
+					node owns the database credentials. Nothing is entered here.
 				</div>
 			</Section>
 

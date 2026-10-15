@@ -163,7 +163,7 @@ const ApiCoveragePanel: React.FC<Props> = ({ results }) => {
 	return (
 		<div style={{ ...styles.card, ...styles.cardFullWidth }}>
 			<div style={styles.cardHeader}>
-				<span>API Coverage — {totalMethods} methods</span>
+				<span>API Coverage: {totalMethods} methods</span>
 				<div style={{ display: 'flex', gap: 12, fontSize: 10 }}>
 					<span style={{ color: 'var(--rr-color-success)' }}>passed ({passed})</span>
 					<span style={{ color: 'var(--rr-color-error)' }}>failed ({failed})</span>

@@ -74,6 +74,17 @@ _STRIP_LITERALS = re.compile(
 )
 
 
+def strip_cypher_literals(cypher: str) -> str:
+    """Return ``cypher`` with comments, string literals and back-quoted identifiers removed.
+
+    Keyword scans run on the result, so a keyword that is only data (a
+    commented-out DELETE, or ``n.op = "CREATE"``) is not seen as a clause.
+    Each removed span becomes a space: a comment separates tokens in Cypher, so
+    ``n/**/DELETE`` must still read as two words.
+    """
+    return _STRIP_LITERALS.sub(' ', cypher)
+
+
 def is_cypher_safe(cypher: str) -> bool:
     """Return True when the Cypher statement is read-only (MATCH/RETURN/schema CALLs).
 
@@ -83,8 +94,6 @@ def is_cypher_safe(cypher: str) -> bool:
     Returns:
         bool: ``True`` if the statement contains no write or admin clauses.
     """
-    # Remove comments and literals first so a keyword that is only data (a
-    # commented-out DELETE, or ``n.op = "CREATE"``) can neither trip the gate
-    # nor smuggle a live write past it.
-    stripped = _STRIP_LITERALS.sub('', cypher)
-    return not bool(_UNSAFE_CYPHER.search(stripped))
+    # Literals are removed first, so data can neither trip the gate nor
+    # smuggle a live write past it.
+    return not bool(_UNSAFE_CYPHER.search(strip_cypher_literals(cypher)))

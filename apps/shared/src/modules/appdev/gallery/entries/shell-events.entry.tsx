@@ -34,9 +34,9 @@ export const shellEventsEntry: IGalleryEntry = {
 	name: 'Shell events',
 	group: 'hooks',
 	blurb: 'The typed platform event bus: every shell:* event in ShellEventMap, subscribed via useShellEvent and emitted on the ConnectionManager.',
-	doc: `\`ShellEventMap\` is the closed catalog of SHARED platform events — app-private messages never enter it. Subscribe with \`useShellEvent(name, handler)\` (auto-cleanup, handler ref stays current without resubscribing); emit with \`ConnectionManager.getInstance().emit(name, payload)\`.
+	doc: `\`ShellEventMap\` is the closed catalog of SHARED platform events; app-private messages never enter it. Subscribe with \`useShellEvent(name, handler)\` (auto-cleanup, handler ref stays current without resubscribing); emit with \`ConnectionManager.getInstance().emit(name, payload)\`.
 
-Server pushes arrive as \`shell:event\` carrying the raw DAP message — that is the one firehose for live data. \`useSubscriptions()\` is the convenience view over the account's desktop apps from \`ConnectResult.apps\`.
+Server pushes arrive as \`shell:event\` carrying the raw DAP message. That is the one firehose for live data. \`useSubscriptions()\` is the convenience view over the account's desktop apps from \`ConnectResult.apps\`.
 
 Press **ALT+D** to watch the bus live in the Debug panel.`,
 	docNote: 'ShellEventMap is for shared platform events ONLY - never add app-private messages to it. Apps talk to themselves through their own channels.',

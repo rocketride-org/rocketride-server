@@ -177,6 +177,15 @@ class _GPUImportBlocker:
 _installed = False
 
 
+def is_installed() -> bool:
+    """True when the import hook is in place, so a GPU import would be refused.
+
+    Narrower than "model server mode": what this process does, not what the
+    flags say. ai/common/torch reads it to skip an install the hook refuses.
+    """
+    return _installed
+
+
 def install_gpu_guard():
     """
     Install the GPU import guard if running in model server mode.

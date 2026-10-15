@@ -33,7 +33,7 @@ import pytest
 
 from ai.common.chat import ChatBase
 from ai.common.schema import Question
-from ai.common.util import ThinkTruncatedError
+from ai.common.util import EmptyResponseError, ThinkTruncatedError
 
 # A reasoning model that hit its output budget before emitting any JSON.
 TRUNCATED = '<think>The user wants a JSON summary. Let me work through the fields one at a'
@@ -135,6 +135,15 @@ class TestOrdinaryBadJson:
         assert len(prompts) == 3
         assert REPAIR_MARKER in prompts[1]
 
+    def test_the_final_error_counts_the_calls_it_made(self):
+        """Three calls (the first and two repairs); the message used to say four."""
+        chat, prompts = _chat_returning('not json at all')
+
+        with pytest.raises(ValueError) as excinfo:
+            chat.chat(_question())
+
+        assert f'after {len(prompts)} attempts' in str(excinfo.value)
+
     def test_the_final_error_carries_the_parse_failure(self):
         """The exhausted-retries message used to drop what was wrong with the response."""
         chat, _ = _chat_returning('not json at all')
@@ -160,3 +169,46 @@ class TestValidJson:
         chat, _ = _chat_returning('<think>reasoning</think>\n```json\n{"x": "y"}\n```')
 
         assert chat.chat(_question()).getJson() == {'x': 'y'}
+
+
+class TestEmptyReply:
+    """No text at all is not a formatting mistake either.
+
+    A reasoning model that spends its whole output budget before writing returns
+    nothing. The repair loop resent the same prompt with the same budget twice more
+    (three calls in all); one live run paid 30 to 45 seconds per call for three empty
+    replies, each cut off at the output limit.
+    """
+
+    def _chat(self, *responses):
+        chat, prompts = _chat_returning(*responses)
+        chat._modelOutputTokens = 4096
+        return chat, prompts
+
+    @pytest.mark.parametrize('empty', ['', '   \n  '], ids=['empty', 'whitespace'])
+    def test_fails_fast_without_spending_a_retry(self, empty):
+        chat, prompts = self._chat(empty)
+
+        with pytest.raises(EmptyResponseError):
+            chat.chat(_question())
+
+        assert len(prompts) == 1
+
+    def test_the_cause_names_the_setting_to_change(self):
+        chat, _ = self._chat('')
+
+        with pytest.raises(EmptyResponseError, match=r'modelOutputTokens \(now 4096\)'):
+            chat.chat(_question())
+
+    def test_an_empty_repair_reply_stops_the_retries(self):
+        """Bad JSON earns a repair round; an empty answer to the repair ends it."""
+        chat, prompts = self._chat('{"a": ', '')
+
+        with pytest.raises(EmptyResponseError):
+            chat.chat(_question())
+
+        assert len(prompts) == 2
+        assert REPAIR_MARKER in prompts[1]
+
+    def test_is_still_a_value_error(self):
+        assert issubclass(EmptyResponseError, ValueError)

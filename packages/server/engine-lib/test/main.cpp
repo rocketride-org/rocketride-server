@@ -60,6 +60,9 @@ Error setPaths() {
 ///		TestMain to actually execute the tests
 //-------------------------------------------------------------------------
 ErrorCode Main() {
+    // This binary links engLib statically - a node would load a 2nd engine
+    ap::Factory::nodeModulesSupported() = false;
+
     // Set the new efault to the test console
 
     ::engine::monitor::MonitorType.setValue("TestConsole");

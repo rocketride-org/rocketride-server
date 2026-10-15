@@ -352,7 +352,7 @@ export const OverviewGrid: React.FC<IOverviewGridProps> = ({ data, onRefresh }) 
 				field: 'name',
 				rrType: 'string',
 				rrDefault: true,
-				rrDescription: 'Client or task display name; the second line carries the identity detail — connection number with message in/out counters for clients, provider · project · source for tasks.',
+				rrDescription: 'Client or task display name; the second line carries the identity detail: connection number with message in/out counters for clients, provider · project · source for tasks.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => nameCellEl(cell.getRow().getData() as ConnTaskRow),
 			},

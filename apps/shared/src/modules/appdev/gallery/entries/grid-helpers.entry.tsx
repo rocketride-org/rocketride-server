@@ -59,7 +59,7 @@ export const gridHelpersEntry: IGalleryEntry = {
 	name: 'DataGrid helpers',
 	group: 'content',
 	blurb: 'The DataGrid toolkit around the grid itself: DOM cell factories for custom formatters, the actions-column builder, the local-search predicate, and layout persistence.',
-	doc: `Tabulator formatters build DOM **outside React**, so custom cells are assembled from these factories instead of JSX — each returns a token-styled \`HTMLElement\` ready to return from a \`formatter\`. \`autoFormatter\` is the default when a column declares none: it renders by value type (booleans as yes/no badges, ISO dates as muted local datetimes, arrays as badge lists, objects as truncated JSON).
+	doc: `Tabulator formatters build DOM **outside React**, so custom cells are assembled from these factories instead of JSX; each returns a token-styled \`HTMLElement\` ready to return from a \`formatter\`. \`autoFormatter\` is the default when a column declares none: it renders by value type (booleans as yes/no badges, ISO dates as muted local datetimes, arrays as badge lists, objects as truncated JSON).
 
 Layout persistence is host-agnostic: \`createMessageGridPersistence()\` speaks the \`rr:grid-config:*\` CustomEvent channel and whatever host is present (web shell, VS Code webview, or none) answers it. Wire it to \`DataGrid\` via \`tableId\` + the persistence adapter and per-user layouts come for free.`,
 	demo: GridHelpersDemo,

@@ -60,26 +60,25 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const changelogPath = resolve(repoRoot, 'CHANGELOG.md');
 
 function fail(code, message) {
-  console.error(message);
-  process.exit(code);
+	console.error(message);
+	process.exit(code);
 }
 
 const argv = process.argv.slice(2);
 if (argv.includes('-h') || argv.includes('--help')) {
-  // Print the leading JSDoc usage block and exit cleanly.
-  console.log(
-    'Usage: node scripts/release/cut-changelog.mjs [version] [date]\n' +
-      '  Archive [Unreleased] as a dated, versioned CHANGELOG section and open a fresh [Unreleased].\n' +
-      '  version  semver label (default: root package.json .version)\n' +
-      '  date     ISO YYYY-MM-DD (default: today, UTC)',
-  );
-  process.exit(0);
+	// Print the leading JSDoc usage block and exit cleanly.
+	console.log(
+		'Usage: node scripts/release/cut-changelog.mjs [version] [date]\n' +
+			'  Archive [Unreleased] as a dated, versioned CHANGELOG section and open a fresh [Unreleased].\n' +
+			'  version  semver label (default: root package.json .version)\n' +
+			'  date     ISO YYYY-MM-DD (default: today, UTC)'
+	);
+	process.exit(0);
 }
 
-const version =
-  argv[0] ?? JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8')).version;
+const version = argv[0] ?? JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8')).version;
 if (typeof version !== 'string' || !/^\d+\.\d+\.\d+([-+].+)?$/.test(version)) {
-  fail(1, `Refusing to cut: "${version}" is not a semver version.`);
+	fail(1, `Refusing to cut: "${version}" is not a semver version.`);
 }
 
 const date = argv[1] ?? new Date().toISOString().slice(0, 10);
@@ -89,11 +88,11 @@ const date = argv[1] ?? new Date().toISOString().slice(0, 10);
 // so toISOString() never runs on a NaN date.
 const parsedDate = new Date(`${date}T00:00:00Z`);
 if (
-  !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-  Number.isNaN(parsedDate.getTime()) ||
-  parsedDate.toISOString().slice(0, 10) !== date
+	!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+	Number.isNaN(parsedDate.getTime()) ||
+	parsedDate.toISOString().slice(0, 10) !== date
 ) {
-  fail(2, `Invalid date "${date}" — expected a real ISO date (YYYY-MM-DD).`);
+	fail(2, `Invalid date "${date}" — expected a real ISO date (YYYY-MM-DD).`);
 }
 
 const original = readFileSync(changelogPath, 'utf8');
@@ -101,25 +100,19 @@ const lines = original.split('\n');
 
 const unreleasedIdx = lines.findIndex((line) => /^## \[Unreleased\b/.test(line));
 if (unreleasedIdx === -1) {
-  fail(1, 'No "## [Unreleased]" section found in CHANGELOG.md — nothing to cut.');
+	fail(1, 'No "## [Unreleased]" section found in CHANGELOG.md — nothing to cut.');
 }
 
 const versionHeader = new RegExp(`^## \\[${version.replace(/[.+]/g, '\\$&')}\\]`);
 if (lines.some((line) => versionHeader.test(line))) {
-  fail(1, `CHANGELOG.md already has a "## [${version}]" section — already cut for this version?`);
+	fail(1, `CHANGELOG.md already has a "## [${version}]" section — already cut for this version?`);
 }
 
 // Replace the single "## [Unreleased] ..." header line with a fresh empty
 // Unreleased header, a blank line, then the dated version header. Everything
 // that followed the old Unreleased header stays put — it becomes the body of
 // the newly-dated version section.
-lines.splice(
-  unreleasedIdx,
-  1,
-  `## [Unreleased] — since ${date}`,
-  '',
-  `## [${version}] - ${date}`,
-);
+lines.splice(unreleasedIdx, 1, `## [Unreleased] — since ${date}`, '', `## [${version}] - ${date}`);
 
 writeFileSync(changelogPath, lines.join('\n'));
 console.log(`Cut [Unreleased] -> [${version}] - ${date}; opened a fresh [Unreleased].`);

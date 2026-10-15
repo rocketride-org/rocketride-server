@@ -40,8 +40,8 @@ public:
     //-----------------------------------------------------------------
     // Constructor/destructor
     //-----------------------------------------------------------------
-    explicit VirtualBuffer(const file::Path &overflowDir) noexcept;
-    ~VirtualBuffer() noexcept;
+    ROCKETRIDE_CORE_API explicit VirtualBuffer(const file::Path &overflowDir) noexcept;
+    ROCKETRIDE_CORE_API ~VirtualBuffer() noexcept;
 
     //-----------------------------------------------------------------
     // Public API

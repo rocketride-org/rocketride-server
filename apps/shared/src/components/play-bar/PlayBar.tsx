@@ -866,7 +866,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 					const begin = new Date(chapter.beginTime * 1000);
 					const title = `${fmtDate(begin)} ${fmtClock(begin, true)} · ${
 						liveChapter ? 'live' : fmtDuration((chapter.endTime ?? nowSec) - chapter.beginTime)
-					}${chapter.outcome ? ` · ${chapter.outcome}` : ''} — double-click to play this track`;
+					}${chapter.outcome ? ` · ${chapter.outcome}` : ''}. Double-click to play this track`;
 					return (
 						<div
 							key={chapter.beginSeq}

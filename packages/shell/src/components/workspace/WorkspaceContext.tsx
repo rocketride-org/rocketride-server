@@ -36,7 +36,7 @@ import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail
 import type { DataGridLayout } from '../data-grid/persistence';
 import { ConnectionManager } from '../../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../../constants';
-import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote, fallbackSkippedRemote } from '../../util/appLoader';
+import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote, fallbackSkippedRemote, devPreviewHoldRemainingMs, DEV_REMOTE_TIMEOUT_MS } from '../../util/appLoader';
 import { getAppVersionOverride, clearAppVersionOverride } from '../../util/versionOverride';
 import { SHELL_API_VERSION } from '../../apiver';
 
@@ -387,18 +387,18 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			// embedder AFTER boot (its dev server may still be installing —
 			// seconds of pnpm + rsbuild startup against a millisecond shell
 			// boot). Hold this load until the registration arrives; attempting
-			// earlier can only fail with RUNTIME-004 noise. BOUNDED, and inside
-			// the try, so a never-registering dev server fails into the normal
-			// error path (which clears loadingMapRef) instead of holding the
-			// loading flag forever.
+			// earlier can only fail with RUNTIME-004 noise. BOUNDED by the
+			// page's shared hold deadline (the same one the layout's splash
+			// honours), and inside the try, so a never-registering dev server
+			// fails into the normal error path (which clears loadingMapRef)
+			// instead of holding the loading flag forever.
 			if (isDevPreviewPage() && previewLockedAppId() === appId) {
 				console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
-				const DEV_REMOTE_TIMEOUT = 300000;
 				try {
 					await Promise.race([
 						waitForDevRemote(appId),
 						new Promise<never>((_, reject) =>
-							setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT / 1000}s — is the app's dev server running?`)), DEV_REMOTE_TIMEOUT),
+							setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT_MS / 1000}s. Is the app's dev server running?`)), devPreviewHoldRemainingMs()),
 						),
 					]);
 				} catch (waitErr) {
@@ -423,7 +423,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			if (!descriptor || !descriptor.app) {
 				console.error(`[WorkspaceContext] Invalid AppDescriptor for "${appId}": missing app`);
 				failedSetRef.current.add(appId);
-				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (app entry point) — the bundle may be stale or only partially deployed.` }));
+				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (app entry point). The bundle may be stale or only partially deployed.` }));
 				return false;
 			}
 
@@ -535,7 +535,13 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			const mySeq = ++switchSeqRef.current;
 			// Resolve $HOME to the platform default, and unknown appIds to the default
 			const target = appId === '$HOME' ? defaultAppId : appId;
-			const resolved = apps.find((a) => a.id === target) ? target : defaultAppId;
+			const known = apps.some((a) => a.id === target);
+			// Never redirect silently: a mistyped or stale id would just look
+			// like a switch that landed on home.
+			if (!known && target !== defaultAppId) {
+				console.warn(`[WorkspaceContext] cannot switch to app "${target}": this server has no app with that id — showing "${defaultAppId}" instead`);
+			}
+			const resolved = known ? target : defaultAppId;
 			const entry = apps.find((a) => a.id === resolved);
 
 			// Already loaded → instant switch, exactly as before.

@@ -294,7 +294,7 @@ export default function Canvas({ cloudPromptDismissed, onDismissCloudPrompt, onD
 		(...args: Parameters<typeof rawInstantiateTemplate>) => {
 			const unconfigured = rawInstantiateTemplate(...args);
 			if (unconfigured > 0) {
-				setConfigSnackbar(unconfigured === 1 ? '1 node needs configuration — look for the red gear' : `${unconfigured} nodes need configuration — look for the red gear`);
+				setConfigSnackbar(unconfigured === 1 ? '1 node needs configuration. Look for the red gear' : `${unconfigured} nodes need configuration. Look for the red gear`);
 			}
 			return unconfigured;
 		},
@@ -306,7 +306,7 @@ export default function Canvas({ cloudPromptDismissed, onDismissCloudPrompt, onD
 		(nodeId: string, formDataValid: boolean) => {
 			requestFitView([nodeId]);
 			if (!formDataValid) {
-				setConfigSnackbar('1 node needs configuration — look for the red gear');
+				setConfigSnackbar('1 node needs configuration. Look for the red gear');
 			}
 		},
 		[requestFitView, setConfigSnackbar]

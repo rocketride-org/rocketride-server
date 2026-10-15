@@ -302,3 +302,14 @@ async def test_list_integrations_unknown_name_is_bad_request(monkeypatch):
     assert result['error_type'] == 'BadRequest'
     assert 'nope' in result['message']
     assert result['hint']
+
+
+def test_shipped_tool_github_still_asks_for_a_token_without_env():
+    # tool_github has two auth methods, but the PAT stays the wired default: with every
+    # credential optional the surface would report 'configured' with an empty wiring.
+    spec = credentials_mod.load_catalog()['tool_github']
+
+    result = credentials_mod.evaluate(spec, [])
+
+    assert result['status'] != 'configured'
+    assert result['missing'] == ['ROCKETRIDE_GITHUB_TOKEN']

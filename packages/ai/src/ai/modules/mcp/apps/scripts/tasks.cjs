@@ -14,7 +14,15 @@
  * server dist.
  */
 const path = require('path');
-const { execCommand, removeDir, hasBuildInputChanged, saveSourceHash, setState, exists, move } = require('../../../../../../../../scripts/lib');
+const {
+	execCommand,
+	removeDir,
+	hasBuildInputChanged,
+	saveSourceHash,
+	setState,
+	exists,
+	move,
+} = require('../../../../../../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
@@ -43,7 +51,11 @@ function makeBundleAction() {
 	return {
 		run: async (ctx, task) => {
 			// Fingerprint inputs before building so concurrent edits are detected on the next run.
-			const { changed, hash } = await hasBuildInputChanged(BUILD_HASH_KEY, [SRC_DIR], [PKG_JSON, VITE_CONFIG, TS_CONFIG]);
+			const { changed, hash } = await hasBuildInputChanged(
+				BUILD_HASH_KEY,
+				[SRC_DIR],
+				[PKG_JSON, VITE_CONFIG, TS_CONFIG]
+			);
 			// Check every expected bundle, not just the dist dir: a deleted or
 			// never-emitted widget HTML would otherwise ride a matching hash and
 			// silently vanish from the served UI surface.

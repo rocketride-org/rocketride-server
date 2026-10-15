@@ -43,17 +43,9 @@
 
 const COLOR_ATTRS = ['fill', 'stroke', 'stop-color', 'flood-color', 'lighting-color'];
 
-const COLOR_DECL_RE =
-	/\b(fill|stroke|stop-color|flood-color|lighting-color)\s*:\s*([^;}\s][^;}]*?)\s*(?=[;}]|$)/gi;
+const COLOR_DECL_RE = /\b(fill|stroke|stop-color|flood-color|lighting-color)\s*:\s*([^;}\s][^;}]*?)\s*(?=[;}]|$)/gi;
 
-const SKIP_VALUES = new Set([
-	'none',
-	'transparent',
-	'currentcolor',
-	'inherit',
-	'initial',
-	'unset',
-]);
+const SKIP_VALUES = new Set(['none', 'transparent', 'currentcolor', 'inherit', 'initial', 'unset']);
 
 const isUrlRef = (value) => /^url\s*\(/i.test(value);
 
@@ -106,8 +98,7 @@ const replaceColorsInCss = (cssText) => {
 };
 
 export const name = 'autoCurrentColor';
-export const description =
-	'Auto-detect monochrome SVGs and rewrite color attributes to currentColor';
+export const description = 'Auto-detect monochrome SVGs and rewrite color attributes to currentColor';
 
 export const fn = () => {
 	const colors = new Set();
@@ -128,11 +119,7 @@ export const fn = () => {
 		},
 		element: {
 			enter: (node) => {
-				if (
-					node.name === 'linearGradient' ||
-					node.name === 'radialGradient' ||
-					node.name === 'pattern'
-				) {
+				if (node.name === 'linearGradient' || node.name === 'radialGradient' || node.name === 'pattern') {
 					hasMulticolorMarker = true;
 				}
 

@@ -39,17 +39,17 @@ public:
     //-----------------------------------------------------------------
     // Public API
     //-----------------------------------------------------------------
-    Error writeData(InputData &data) noexcept override;
-    ErrorOr<size_t> readData(uint64_t offset,
-                             OutputData &data) noexcept override;
-    Error clear() noexcept override;
+    ROCKETRIDE_CORE_API Error writeData(InputData &data) noexcept override;
+    ROCKETRIDE_CORE_API ErrorOr<size_t> readData(
+        uint64_t offset, OutputData &data) noexcept override;
+    ROCKETRIDE_CORE_API Error clear() noexcept override;
     TextView name() const noexcept { return m_name; }
     size_t size() const noexcept override { return m_size; }
     void setup(TextView name, size_t sz) noexcept {
         m_name = name;
         m_size = sz;
     }
-    Error setComplete() noexcept;
+    ROCKETRIDE_CORE_API Error setComplete() noexcept;
 
     template <typename Buffer>
     void __toString(Buffer &buff) const noexcept;

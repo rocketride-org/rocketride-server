@@ -233,6 +233,7 @@ Besides `rrext_monitor`, sent the same way over the socket:
 | `rrext_get_task_status` | `token`                               | `TASK_STATUS` | Fetch current status synchronously               |
 | `rrext_get_token`       | `projectId` + `source` (+ `teamId`)   | `{ token }`   | Resolve a running task's token — `teamId` addresses the team's deployed run, omitted = your dev run |
 | `execute`               | `{ pipeline, pipelineTraceLevel?, … }`| `{ token }`   | Start a pipeline; sets the trace level that gates `FLOW` |
+| `rrext_log`             | `subcommand: "streams"` + `projectId` + `source` | `{ streams }` | Every run-log continuum of that source you may read, each tagged with `teamId`, `teamName`, `runKind`, `ownerKind` and carrying its `chapters` body — the one subcommand that spans the scopes above |
 
 ## Notes
 

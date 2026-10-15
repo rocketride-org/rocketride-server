@@ -37,9 +37,11 @@ clock: the resolver call count IS the contract.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import ai.account.app_deploy as app_deploy_mod
 import ai.modules.shell.shell as shell_mod
+from ai.modules.task import deploy_events
 
 
 # =============================================================================
@@ -210,3 +212,101 @@ def test_no_want_keeps_the_plain_hard_expiry(monkeypatch):
     assert _dirs() == {2: 'b'}
 
     assert calls == ['app.x', 'app.x']
+
+
+# =============================================================================
+# INVALIDATION — deploy changes drop the app's cached verdicts (#2461)
+# =============================================================================
+
+
+def test_invalidation_ends_a_poisoned_floor_at_once(monkeypatch):
+    """#2461 repro: a session that asked for v2 while it was still building
+    escalated its floor, so after the build landed and v2 was published it
+    kept 404ing until the floor drained (8 s observed, up to the TTL). The
+    deploy-change invalidation drops the verdict: the first ask after the
+    change re-resolves and serves.
+    """
+    clock, calls = _setup(monkeypatch, [{1: 'a'}, {1: 'a'}, {1: 'a'}, {1: 'a', 2: 'b'}])
+
+    assert _dirs(want=1) == {1: 'a'}
+    clock.now += shell_mod._VERSION_MISS_REFRACTORY + 1
+    assert 2 not in _dirs(want=2)  # v2 still building — fruitless, floor 2x
+    clock.now += 2 * shell_mod._VERSION_MISS_REFRACTORY + 1
+    assert 2 not in _dirs(want=2)  # still building — fruitless, floor 4x
+
+    shell_mod.invalidate_app_serving('app.x')  # the build stamp / publish event
+
+    assert _dirs(want=2)[2] == 'b'  # no clock advance: served on the first ask
+    assert len(calls) == 4
+
+
+def test_invalidation_is_scoped_to_one_app(monkeypatch):
+    """Dropping one app's verdicts leaves every other app's warm entries —
+    in both the versioned-serving and the static-asset caches.
+    """
+    clock, _ = _setup(monkeypatch, [{1: 'a'}])
+    monkeypatch.setattr(shell_mod, '_app_auth_cache', {})
+    asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=1))
+    asyncio.run(shell_mod._version_dirs_for('tok', 'app.y', want=1))
+    shell_mod._app_auth_cache['k-x'] = {'auth': False, 'expiry': clock.now + 300, 'appId': 'app.x'}
+    shell_mod._app_auth_cache['k-y'] = {'auth': False, 'expiry': clock.now + 300, 'appId': 'app.y'}
+
+    shell_mod.invalidate_app_serving('app.x')
+
+    assert {entry['appId'] for entry in shell_mod._version_dir_cache.values()} == {'app.y'}
+    assert set(shell_mod._app_auth_cache) == {'k-y'}
+
+
+def test_static_asset_verdicts_record_their_app(monkeypatch):
+    """The static-asset permission cache stamps the app id it decided, so
+    the deploy-change invalidation can find its entries.
+    """
+    monkeypatch.setattr(shell_mod, '_app_auth_cache', {})
+
+    async def allow(token, app_id):
+        return True
+
+    monkeypatch.setattr(shell_mod, '_resolve_app_access', allow)
+    assert asyncio.run(shell_mod._authorize_app('tok', 'app.x')) is True
+
+    assert [entry['appId'] for entry in shell_mod._app_auth_cache.values()] == ['app.x']
+
+
+def test_broadcast_app_changed_invalidates_and_survives_failure(monkeypatch):
+    """Every APP deployment change flows through broadcast_app_changed, so it
+    drops the app's serving verdicts — best-effort: a failing invalidation
+    never stops the org's rail broadcast.
+    """
+    seen, sent = [], []
+
+    def failing_invalidate(app_id):
+        seen.append(app_id)
+        raise RuntimeError('cache gone')
+
+    async def broadcast_server_event(event_type, message, org_id=None):
+        sent.append((message['body']['projectId'], message['body']['action']))
+
+    monkeypatch.setattr(shell_mod, 'invalidate_app_serving', failing_invalidate)
+    server = SimpleNamespace(broadcast_server_event=broadcast_server_event)
+
+    asyncio.run(deploy_events.broadcast_app_changed(server, 'org1', 'app.x', 'publish'))
+
+    assert seen == ['app.x']
+    assert sent == [('app.x', 'publish')]
+
+
+def test_pipeline_deploy_change_leaves_app_caches_alone(monkeypatch):
+    """A PIPELINE's project id is user-chosen: any org could name a scheduled
+    pipe after another tenant's app id. Pipeline deploy events must never
+    drop an app's shared serving verdicts — only app producers do.
+    """
+    seen = []
+    monkeypatch.setattr(shell_mod, 'invalidate_app_serving', seen.append)
+
+    async def broadcast_server_event(event_type, message, org_id=None):
+        pass
+
+    server = SimpleNamespace(broadcast_server_event=broadcast_server_event)
+    asyncio.run(deploy_events.broadcast_deploy_changed(server, 'org9', 'team9', 'rocketride.chat', 'run'))
+
+    assert seen == []

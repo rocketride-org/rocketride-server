@@ -35,7 +35,7 @@ public:
     Executor(Text name) noexcept;
     ~Executor() noexcept;
 
-    ErrorOr<Item> submit(Location location, Text name, Callback &&cb) noexcept;
+    ROCKETRIDE_CORE_API ErrorOr<Item> submit(Location location, Text name, Callback &&cb) noexcept;
     void deinit() noexcept;
     Error init(uint32_t threadCount = 10,
                size_t maxTasks = MaxValue<size_t>) noexcept;

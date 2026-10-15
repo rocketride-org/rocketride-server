@@ -894,14 +894,58 @@ async def test_subprocess_env_stale_dsn_does_not_survive_broker_failure(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_subprocess_env_unconfigured_account_is_nonfatal(monkeypatch):
+async def test_subprocess_env_unconfigured_account_reports_missing_cloud_db(monkeypatch):
+    """No broker on this engine (#2463): still non-fatal, but the node gets a
+    reason that names the missing cloud database, so it does not fall back to
+    the ROCKETRIDE_CLIENT_ID message nothing documents.
+    """
+
     async def fake_resolve(client_id):
-        raise NotImplementedError('sign in')
+        raise NotImplementedError('no RocketRide cloud database is configured on this server')
 
     _patch_resolve(monkeypatch, fake_resolve)
-    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
+    monkeypatch.setattr('ai.modules.task.task_engine._is_saas_engine', lambda: False)
+    warn = MagicMock()
+    monkeypatch.setattr('ai.modules.task.task_engine.warning', warn)
+    t = _env_task(pipeline=_DB_PIPELINE)
+    env = await Task._build_subprocess_env(t)
     assert 'ROCKETRIDE_DB_DSN' not in env
-    assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == Task._NO_CLOUD_DB_REASON
+    assert 'this server has no RocketRide cloud database' in env['ROCKETRIDE_DB_RESOLVE_ERROR']
+    assert 'ROCKETRIDE_CLIENT_ID' not in env['ROCKETRIDE_DB_RESOLVE_ERROR']
+    # Missing broker config is normal on a local engine: debug only.
+    t.debug_message.assert_called_once()
+    assert 'no database broker' in t.debug_message.call_args.args[0]
+    warn.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('hosted_signal', ['flag', 'capability'])
+async def test_subprocess_env_hosted_missing_broker_warns_and_directs_to_operator(monkeypatch, hosted_signal):
+    import ai.account
+    import ai.modules.task.task_engine as engine
+
+    async def fake_resolve(client_id):
+        raise NotImplementedError('broker not configured')
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    monkeypatch.setattr(engine, 'startup_args', lambda: ['--saas'] if hosted_signal == 'flag' else [])
+    monkeypatch.setattr(ai.account.account, 'capabilities', ['saas'] if hosted_signal == 'capability' else [])
+    warn = MagicMock()
+    monkeypatch.setattr(engine, 'warning', warn)
+    monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/other-tenant')
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'https://broker.example/provision')
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'secret-test-token')
+    t = _env_task(pipeline=_DB_PIPELINE)
+    env = await Task._build_subprocess_env(t)
+    reason = env['ROCKETRIDE_DB_RESOLVE_ERROR']
+    assert reason == Task._CLOUD_DB_CONFIG_ERROR_REASON
+    assert 'Contact the server operator' in reason
+    assert 'db_postgres' not in reason
+    for name in ('ROCKETRIDE_DB_DSN', 'ROCKETRIDE_DB_BROKER_URL', 'ROCKETRIDE_DB_BROKER_TOKEN'):
+        assert name not in env
+    warn.assert_called_once_with(f'RocketRide DB DSN not resolved: {reason}')
+    t.debug_message.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1899,3 +1943,62 @@ async def test_subprocess_startup_crash_writes_stderr_and_cancels():
     t.debug_task_message.assert_called_once_with('terminated abnormally with exit code 1')
     assert any('simulated startup crash' in line for line in t._status_trace)
     assert any('simulated startup crash' in evt.get('body', {}).get('output', '') for evt in forwarded)
+    
+    
+# ---------------------------------------------------------------------------
+# TaskData — the engine's data channel to the task
+# ---------------------------------------------------------------------------
+
+
+class _SilentTransport:
+    """A connected transport that accepts every message and never answers."""
+
+    def bind(self, **callbacks):
+        """Accept the client's callbacks; the test drives them directly.
+
+        Args:
+            **callbacks: Handlers a real transport would call.
+        """
+
+    def is_connected(self):
+        """Report the transport as open so requests are sent.
+
+        Returns:
+            bool: Always True.
+        """
+        return True
+
+    async def send(self, message):
+        """Swallow the message.
+
+        Args:
+            message: The DAP message that will never be answered.
+        """
+
+    def disconnect(self):
+        """Nothing to close."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'reason, expected',
+    [
+        ('task exited', 'task exited'),
+        (None, 'Task data connection closed'),
+    ],
+)
+async def test_data_channel_disconnect_fails_pending_requests(reason, expected):
+    """A request waiting on the data channel fails when the channel closes, instead of waiting forever."""
+    parent = SimpleNamespace(_data_client=None)
+    client = Task.TaskData(parent_task=parent, module='DATA-test', transport=_SilentTransport())
+    parent._data_client = client
+
+    pending = asyncio.ensure_future(client.dap_request(command='rrext_process', arguments={'subcommand': 'open'}))
+    await asyncio.sleep(0)
+    assert client._pending_requests
+
+    await client.on_disconnected(reason, has_error=True)
+
+    with pytest.raises(ConnectionError, match=expected):
+        await asyncio.wait_for(pending, timeout=1)
+    assert parent._data_client is None

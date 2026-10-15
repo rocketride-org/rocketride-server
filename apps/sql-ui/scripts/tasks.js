@@ -60,7 +60,9 @@ mod.actions.push({
 			// action in CI, where returning cleanly would report the whole
 			// suite green while nothing at all had run.
 			if (!existsSync(TESTS_DIR)) {
-				throw new Error(`No tests/ directory at ${TESTS_DIR} — sql-ui's suite is tracked source and must be present`);
+				throw new Error(
+					`No tests/ directory at ${TESTS_DIR} — sql-ui's suite is tracked source and must be present`
+				);
 			}
 			// `recursive` is IGNORED on Node 20.0.0 exactly (it landed in 20.1.0)
 			// while the root package.json still declares `node: ">=20.0.0"`, so a
@@ -90,7 +92,19 @@ mod.actions.push({
 			await execCommand('npx', ['tsc', '-p', 'tsconfig.test.json', '--noEmit'], { task, cwd: APP_ROOT });
 			// './' prefix required: a bare relative path in --require resolves as
 			// a package name, not a file.
-			await execCommand('node', ['--require', './scripts/stub-shell.cjs', '--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
+			await execCommand(
+				'node',
+				[
+					'--require',
+					'./scripts/stub-shell.cjs',
+					'--import',
+					'tsx',
+					'--test',
+					'--test-reporter=spec',
+					...testFiles,
+				],
+				{ task, cwd: APP_ROOT }
+			);
 		},
 	}),
 });

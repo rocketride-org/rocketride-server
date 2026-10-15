@@ -86,6 +86,7 @@
 	],
 	"test": {
 		"profiles": ["rfdetr"],
+		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 		"outputs": ["text"],
 		"timeout": 180,
 		"cases": [
@@ -101,6 +102,7 @@
 	"fulltest": [
 		{
 			"profiles": ["rfdetr"],
+			"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 			"outputs": ["text"],
 			"timeout": 180,
 			"cases": [
@@ -115,6 +117,7 @@
 		},
 		{
 			"profiles": ["mmgdino"],
+			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 			"config": { "detect.prompt": "person . face" },
 			"outputs": ["text"],
 			"timeout": 180,

@@ -110,17 +110,27 @@ def _resolve(client_id: str) -> str:
     return asyncio.run(_Minimal().resolve_db_dsn(client_id))
 
 
-def test_unconfigured_env_raises_signin_error(monkeypatch):
+def test_unconfigured_env_raises_no_cloud_db_error(monkeypatch):
     monkeypatch.delenv('ROCKETRIDE_DB_BROKER_URL', raising=False)
     monkeypatch.delenv('ROCKETRIDE_DB_BROKER_TOKEN', raising=False)
-    with pytest.raises(NotImplementedError, match='require signing into RocketRide cloud'):
+    with pytest.raises(NotImplementedError, match='no RocketRide cloud database is configured on this server'):
         _resolve('tenant-1')
 
 
-def test_partial_env_still_raises(monkeypatch, broker):
-    monkeypatch.delenv('ROCKETRIDE_DB_BROKER_TOKEN', raising=False)
-    with pytest.raises(NotImplementedError):
+@pytest.mark.parametrize(
+    ('url', 'token', 'missing'),
+    [
+        ('', TEST_TOKEN, 'ROCKETRIDE_DB_BROKER_URL'),
+        ('https://broker.example/provision', '   ', 'ROCKETRIDE_DB_BROKER_TOKEN'),
+        (' ', '', 'ROCKETRIDE_DB_BROKER_URL, ROCKETRIDE_DB_BROKER_TOKEN'),
+    ],
+)
+def test_missing_broker_variables_named_without_values(monkeypatch, url, token, missing):
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', url)
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', token)
+    with pytest.raises(NotImplementedError) as excinfo:
         _resolve('tenant-1')
+    assert str(excinfo.value) == f'no RocketRide cloud database is configured on this server (missing: {missing})'
 
 
 def test_resolves_dsn_via_broker(broker):

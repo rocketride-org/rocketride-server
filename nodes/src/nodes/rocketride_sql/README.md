@@ -18,7 +18,7 @@ the sibling for Cypher graph queries.
 
 | Connection | Required | Description |
 | --- | --- | --- |
-| llm | yes | Produces SQL from a natural-language question. |
+| llm | no | Produces SQL from a natural-language question. Not needed for execute (raw SQL). |
 
 ## Lanes
 
@@ -160,7 +160,12 @@ LLM-generated, safety-checked SELECT statements.
 This node is marked noremote and depends on a signed-in RocketRide identity to
 resolve the per-tenant DSN. It cannot start where that cloud identity is not
 available; DSN resolution is deliberately not replaced by host or credential
-fields. LLM-generated queries are limited to the safe SQL path, while raw SQL
+fields. On a server without a RocketRide cloud database (for example, a local
+or self-hosted engine with no database broker) the task fails at start with a
+message that says so; use a connection-configured node such as db_postgres
+there. On RocketRide Cloud, missing broker configuration is a server
+configuration error: contact the server operator to restore it and retry.
+LLM-generated queries are limited to the safe SQL path, while raw SQL
 is unavailable until direct execution is explicitly enabled.
 
 ## Notes

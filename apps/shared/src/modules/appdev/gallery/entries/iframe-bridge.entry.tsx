@@ -36,7 +36,7 @@ export const iframeBridgeEntry: IGalleryEntry = {
 	blurb: 'The typed shell-to-iframe postMessage protocol for iframe-hosted app views: one hook on the shell side, a small message vocabulary inside the frame.',
 	doc: `An iframe-hosted view attaches \`useIframeBridge(iframeRef)\` to its frame and gets the whole protocol: the shell waits for the frame's \`view:ready\`, answers with \`shell:init\` (theme tokens, user, connection state, API config), then forwards theme changes, connection changes, login/logout, server events, and view activation as they happen. Inbound, the frame can request \`shell:logout\` and \`shell:openTab\`.
 
-Keep the frame hidden (\`visibility: hidden\`) until \`view:ready\` has been answered — that is the flash-free pattern; theme CSS for the initial paint belongs in the srcdoc itself.`,
+Keep the frame hidden (\`visibility: hidden\`) until \`view:ready\` has been answered. That is the flash-free pattern; theme CSS for the initial paint belongs in the srcdoc itself.`,
 	docNote: 'The bridge forwards shell events only AFTER the frame signals view:ready - an iframe that skips the handshake receives nothing.',
 	code: `// Shell side - the hosting view wires the bridge to its frame:
 import { useRef } from 'react';

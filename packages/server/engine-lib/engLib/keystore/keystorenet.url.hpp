@@ -39,6 +39,7 @@ _const auto Type = "kvsnet"_itv;
 // Register the protocol config with the Url system. This
 // allows call Url::toPath(...), Url::toUrl(...), etc
 //-------------------------------------------------------------------------
+#ifndef ROCKETRIDE_CORE_IMPORT
 static url::UrlConfig urlConfig{
     {//------------------------------------------------------------
      /// @details
@@ -95,5 +96,6 @@ static url::UrlConfig urlConfig{
 
          return {};
      }}};
+#endif
 
 }  // namespace engine::stream::keystorenet

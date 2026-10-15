@@ -58,6 +58,27 @@ describe('DatabaseApi transactions', () => {
 		});
 	});
 
+	it('query forwards named params for graph nodes', async () => {
+		const c = fakeClient();
+		const db = new DatabaseApi(c);
+		const rows = [{ id: 1, name: 'a "b"' }];
+		await db.query({ token: 't', sql: 'UNWIND $rows AS r CREATE (:Item {id: r.id})', params: { rows }, nodeId: 'g1' });
+		expect(c.tool).toHaveBeenCalledWith({
+			token: 't',
+			tool: 'execute',
+			nodeId: 'g1',
+			input: { sql: 'UNWIND $rows AS r CREATE (:Item {id: r.id})', params: { rows } },
+		});
+	});
+
+	it('named params do not type-check with rowMode array', async () => {
+		const c = fakeClient();
+		const db = new DatabaseApi(c);
+		// Graph nodes return row objects, so named params never yield positional rows.
+		// @ts-expect-error named (graph) params pair with rowMode 'object' only
+		await db.query({ token: 't', sql: 'MATCH (n) RETURN n', params: { a: 1 }, rowMode: 'array' });
+	});
+
 	it('commit invokes the commit tool', async () => {
 		const c = fakeClient();
 		const db = new DatabaseApi(c);

@@ -20,9 +20,10 @@ API version `2022-11-28`) with Bearer-token auth and a 30-second request timeout
 responses are stripped of noisy fields (`node_id`, `_links`, gravatar data, etc.) so the
 agent gets compact, useful output.
 
-A personal access token is **required**: the pipeline fails to start without one. Write
-operations are **allowed by default**; enable **read-only mode** to block every mutating
-tool when the agent should only inspect.
+Authentication is **required**: the pipeline fails to start without either a personal
+access token or a complete GitHub App configuration. Write operations are **allowed by
+default**; enable **read-only mode** to block every mutating tool when the agent should
+only inspect.
 
 ## Example pipelines
 
@@ -140,7 +141,7 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 | Tool             | Description                                                            |
 |------------------|------------------------------------------------------------------------|
 | `org_list_repos` | List repos in an organization (filter by type)                         |
-| `user_get_repos` | List repos for a user, omit `username` for the authenticated user     |
+| `user_get_repos` | List repos for a user; omit `username` for the token's own repos      |
 | `user_invite`    | Invite a user to an organization by email (role: `admin` · `direct_member` · `billing_manager`) |
 
 ### Search & commits
@@ -154,8 +155,8 @@ GitHub's issues endpoint includes pull requests; `issue_list` filters them out, 
 
 ## Configuration
 
-Three fields: the token (see Authentication), a default repository, and a
-read-only switch. The two behavioral ones are detailed below.
+An authentication method with its credentials (see Authentication), a default
+repository, and a read-only switch. The two behavioral ones are detailed below.
 
 ### Default Repository
 
@@ -185,10 +186,42 @@ explicitly for inspect-only agents.
 
 ## Authentication
 
+Two methods, selected with `authType`. Either way the credential is sent as an
+`Authorization: Bearer` header on every request; there is no unauthenticated mode.
+
+### Personal Access Token (`authType: pat`, default)
+
 Set `token` to a GitHub Personal Access Token. Classic tokens need the `repo`, `issues`,
 `pull_requests`, and `workflows` scopes; a fine-grained token scoped to only the
-repositories the agent needs is the safer choice. The token is sent as a
-`Authorization: Bearer` header on every request; there is no unauthenticated mode.
+repositories the agent needs is the safer choice. A PAT is the simplest option for
+individual or development use, but it is tied to one person's account and must be
+rotated by hand.
+
+### GitHub App installation token (`authType: app`)
+
+The option for unattended pipelines against an organization's repositories. Configure:
+
+- `appId`: the numeric App ID from the GitHub App's settings page.
+- `privateKey`: the PEM private key generated for the App (RSA; uploaded as a file).
+- `installationId`: the installation ID for the org or account where the App is
+  installed (the number at the end of the installation's settings URL).
+
+Give the App the repository permissions that match the PAT scopes above: Contents,
+Issues, Pull requests and Actions (read, or read and write for the write tools). Two
+cases need one more: `user_invite` needs the organization permission Members (write),
+and the file tools need Workflows (write) to change a file under `.github/workflows/`.
+An App with fewer permissions gets `403 Resource not accessible by integration` on the
+first tool that needs them. An installation token has no user behind it:
+`user_get_repos` without a `username` lists the repositories the installation can
+access instead of a user's repositories. The MCP credentials catalog auto-wires the PAT
+only; App auth is configured on the node.
+
+The node signs a short-lived JWT with the private key, exchanges it for an installation
+access token (`POST /app/installations/{id}/access_tokens`), and caches the result.
+Installation tokens live about an hour and are refreshed automatically shortly before
+they expire, so there is nothing long-lived to rotate and the credential belongs to the
+organization, not to a person. The private key is never sent to GitHub. A malformed or
+non-RSA key fails at pipeline start, not on the first tool call.
 
 API errors are surfaced to the agent as readable messages including the HTTP status and
 GitHub's error details.
@@ -202,11 +235,19 @@ GitHub's error details.
 export GITHUB_TOKEN=<your token>
 export GITHUB_TEST_REPO=owner/repo
 pytest nodes/test/tool_github/test_tools.py -v
+
+# GitHub App installation-token auth (skipped unless all four vars are set)
+export GITHUB_APP_ID=<app id>
+export GITHUB_APP_PRIVATE_KEY=<PEM contents, or a path to the .pem file>
+export GITHUB_APP_INSTALLATION_ID=<installation id>
+export GITHUB_TEST_REPO=owner/repo
+pytest nodes/test/tool_github/test_app_auth_live.py -v
 ```
 
 ## Upstream docs
 
 - [GitHub REST API documentation](https://docs.github.com/en/rest)
+- [Authenticating as a GitHub App installation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)
 
 ---
 
@@ -217,7 +258,11 @@ pytest nodes/test/tool_github/test_tools.py -v
 
 | Field | Type | Description | Default |
 |---|---|---|---|
+| `github.appId` | `string` | **App ID**<br/>The numeric App ID from your GitHub App's settings page. | `""` |
+| `github.authType` | `string` | **Authentication method**<br/>Personal Access Token is simplest for individual/dev use. GitHub App auth mints short-lived, auto-rotating installation tokens — recommended for unattended pipelines against an org's repos. | `"pat"` |
 | `github.defaultRepo` | `string` | **Default Repository**<br/>Default repo in owner/repo format (e.g. acme/myapp). Tool calls that omit the repo parameter will use this value. | `""` |
+| `github.installationId` | `string` | **Installation ID**<br/>The installation ID for the org/account where the App is installed (found in the installation's settings URL). | `""` |
+| `github.privateKey` | `string` | **App Private Key (.pem)**<br/>Upload the PEM private key generated for your GitHub App. Used to sign short-lived JWTs; never sent to GitHub directly. | `""` |
 | `github.readOnly` | `boolean` | **Read-only mode**<br/>When enabled, all write operations (file create/edit/delete, issue create, PR create, etc.) are blocked. Safe for agents that should only read. | `false` |
 | `github.token` | `string` | **Personal Access Token**<br/>GitHub PAT with repo, issues, pull_requests, and workflows scopes. Use a fine-grained token scoped to only the repos you need. | `""` |
 
@@ -225,6 +270,8 @@ pytest nodes/test/tool_github/test_tools.py -v
 
 - `requests` `>=2.34.2`
 - `tenacity`
+- `cryptography`
+- `pyjwt`
 
 ## Source
 

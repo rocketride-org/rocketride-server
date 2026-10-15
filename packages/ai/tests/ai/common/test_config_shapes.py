@@ -352,3 +352,53 @@ class TestEngineSuppliedConfig:
         conn = _EngineIJson({'profile': 'default', 'default': _EngineIJson(['not', 'an', 'object'])})
         cfg = Config.getNodeConfig('agent_x', conn)
         assert cfg['role'] == 'Assistant'
+
+
+class TestLimitSetTwice:
+    """A token limit written both at the top level and in the selected profile's block.
+
+    The top-level value wins (as for every field), but a form edits the nested one,
+    so getNodeConfig warns, naming both values. Only the token limits, whose values
+    are numbers and safe to log.
+    """
+
+    _SERVICE = {
+        'preconfig': {
+            'default': 'default',
+            'profiles': {'default': {'model': 'm'}, 'custom': {'model': ''}},
+        }
+    }
+
+    def _resolve(self, monkeypatch, conn):
+        warnings = []
+        scope = Config.getNodeConfig.__globals__
+        monkeypatch.setitem(scope, 'getServiceDefinition', lambda logical_type: self._SERVICE)
+        monkeypatch.setitem(scope, 'warning', warnings.append)
+        return Config.getNodeConfig('llm_x', conn), warnings
+
+    def test_a_different_top_level_limit_is_used_and_reported(self, monkeypatch):
+        cfg, warnings = self._resolve(
+            monkeypatch, {'profile': 'custom', 'modelOutputTokens': 32000, 'custom': {'modelOutputTokens': 8192}}
+        )
+
+        assert cfg['modelOutputTokens'] == 32000
+        assert len(warnings) == 1 and '32000 at the top level' in warnings[0] and '8192 in the "custom"' in warnings[0]
+
+    def test_the_same_limit_in_both_places_is_not_reported(self, monkeypatch):
+        _, warnings = self._resolve(
+            monkeypatch, {'profile': 'custom', 'modelOutputTokens': 8192, 'custom': {'modelOutputTokens': 8192}}
+        )
+
+        assert warnings == []
+
+    def test_another_profiles_block_is_not_reported(self, monkeypatch):
+        _, warnings = self._resolve(
+            monkeypatch, {'profile': 'default', 'modelOutputTokens': 32000, 'custom': {'modelOutputTokens': 8192}}
+        )
+
+        assert warnings == []
+
+    def test_other_fields_set_twice_are_not_reported(self, monkeypatch):
+        _, warnings = self._resolve(monkeypatch, {'profile': 'custom', 'model': 'a', 'custom': {'model': 'b'}})
+
+        assert warnings == []

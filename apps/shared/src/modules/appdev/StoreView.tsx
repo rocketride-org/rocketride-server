@@ -381,7 +381,7 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 				<div style={styles.scroll}>
 					<div style={styles.head}>
 						<div style={styles.h1}>{app.name}</div>
-						<div style={styles.sub}>Store — the commerce posture and the public rung: pricing mode, plans, and the requirements every public version must pass. Only needed to distribute on the App Store; @me and @team deploys skip all of this.</div>
+						<div style={styles.sub}>Store: the commerce posture and the public rung (pricing mode, plans, and the requirements every public version must pass). Only needed to distribute on the App Store; @me and @team deploys skip all of this.</div>
 					</div>
 					<div style={styles.emptyWrap}>
 						<EmptyState title="Store publishing is not wired up yet" description="Once the marketplace flows land, the listing form, pre-flight checks, and the per-version review timeline appear here." />
@@ -409,7 +409,7 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 				{/* View header — title + one-line purpose */}
 				<div style={styles.head}>
 					<div style={styles.h1}>{app.name}</div>
-					<div style={styles.sub}>Store — the commerce posture and the public rung: pricing mode, plans, and the requirements every public version must pass. Only needed to distribute on the App Store; @me and @team deploys skip all of this. Every public version is reviewed — submission happens on the Deploy tab.</div>
+					<div style={styles.sub}>Store: the commerce posture and the public rung (pricing mode, plans, and the requirements every public version must pass). Only needed to distribute on the App Store; @me and @team deploys skip all of this. Every public version is reviewed; submission happens on the Deploy tab.</div>
 				</div>
 
 				{/* Save failure — the footer stays dirty, so the reason has to
@@ -441,7 +441,7 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 						    PACKAGE tab — this card is the commerce posture only. */}
 						{(draft?.mode ?? 'free') !== 'free' && (
 							<div style={styles.formRow}>
-								<div style={styles.formLabel}>Pricing (proposal — live on approval)</div>
+								<div style={styles.formLabel}>Pricing (proposal, live on approval)</div>
 								{(() => {
 									// Bucket plans by interval, keeping their draft index
 									// for the record panel; unknown intervals get their
@@ -509,13 +509,13 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 												)}
 												<span style={styles.actionNote}>
 													{host.submitForReview
-														? 'everything the store requires is in place — deploy a version and submit it for review on the Deploy tab.'
-														: 'everything the store requires is in place — deploy a version and publish it to the store on the Deploy tab.'}
+														? 'everything the store requires is in place; deploy a version and submit it for review on the Deploy tab.'
+														: 'everything the store requires is in place; deploy a version and publish it to the store on the Deploy tab.'}
 												</span>
 											</div>
 										) : packageFails > 0 ? (
 											<div style={styles.submitMsg}>
-												<Banner variant="warning">{`The Package tab has ${packageFails} failing item${packageFails === 1 ? '' : 's'} — fix ${packageFails === 1 ? 'it' : 'them'} there before deploying.`}</Banner>
+												<Banner variant="warning">{`The Package tab has ${packageFails} failing item${packageFails === 1 ? '' : 's'}. Fix ${packageFails === 1 ? 'it' : 'them'} there before deploying.`}</Banner>
 											</div>
 										) : null)}
 								</>
@@ -531,7 +531,7 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 			      the discard confirm. ───────────────────────────────────────── */}
 			{dirty && host.saveListing && !readOnly && (
 				<div style={styles.footer}>
-					<span style={styles.footerNote}>Saved to the app&rsquo;s package.json — the manifest is the listing truth.</span>
+					<span style={styles.footerNote}>Saved to the app&rsquo;s package.json. The manifest is the listing truth.</span>
 					<Button variant="primary" small onClick={() => void onSave()} disabled={saving}>
 						{saving ? 'Saving…' : 'Save Listing'}
 					</Button>

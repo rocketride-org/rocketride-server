@@ -40,6 +40,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, ConfirmDialog, EmptyState, InputField, Modal, StatusBadge } from 'shell';
 import type { AppSummary, AppVersionInfo, BuildStatusTick, IAppBuilderHost, RungPin } from './types';
+import { pinStatusOf, versionBadgeOf } from './servingStatus';
+import type { ServingTone } from './servingStatus';
 
 // =============================================================================
 // TYPES
@@ -98,15 +100,6 @@ const styles: Record<string, React.CSSProperties> = {
 		letterSpacing: 0,
 		color: 'var(--rr-text-disabled)',
 		marginLeft: 8,
-	},
-	// The server build ticker beside the state badge: one small live word
-	// ('uploaded' → 'installing' → … ), cleared by the server on success.
-	buildTick: {
-		fontSize: 11,
-		fontStyle: 'italic',
-		color: 'var(--rr-text-secondary)',
-		marginLeft: 6,
-		whiteSpace: 'nowrap',
 	},
 	// The failed badge is a DOOR (click opens the build log) — cursor and
 	// title carry the affordance; the badge itself stays the stock chip.
@@ -304,6 +297,18 @@ const styles: Record<string, React.CSSProperties> = {
 		color: 'var(--rr-color-warning)',
 		whiteSpace: 'nowrap',
 	},
+	liveStateError: {
+		fontSize: 11.5,
+		fontWeight: 600,
+		color: 'var(--rr-color-error)',
+		whiteSpace: 'nowrap',
+	},
+	liveStateMuted: {
+		fontSize: 11.5,
+		fontWeight: 600,
+		color: 'var(--rr-text-disabled)',
+		whiteSpace: 'nowrap',
+	},
 	liveWhen: {
 		fontSize: 11.5,
 		color: 'var(--rr-text-disabled)',
@@ -438,13 +443,19 @@ function chipLabelOf(pin: RungPin): string {
 	return name.toUpperCase();
 }
 
-/** Per-version review-state badge (the deployment's review lifecycle). */
-const STATE_BADGE: Record<NonNullable<AppVersionInfo['state']>, { variant: 'muted' | 'info' | 'success' | 'warning' | 'error'; label: string }> = {
-	private: { variant: 'muted', label: 'draft' },
-	submit: { variant: 'warning', label: 'in review' },
-	ready: { variant: 'success', label: 'ready' },
-	rejected: { variant: 'error', label: 'rejected' },
-	failed: { variant: 'error', label: 'failed' },
+/** Where-live row text style by serving tone. */
+const LIVE_STATE_STYLE: Record<ServingTone, 'liveStateOk' | 'liveStateWarn' | 'liveStateError' | 'liveStateMuted'> = {
+	ok: 'liveStateOk',
+	warn: 'liveStateWarn',
+	error: 'liveStateError',
+	muted: 'liveStateMuted',
+};
+
+/** A where-live row's state: what a browser in this audience actually gets
+ * (#2461) — serving, or why not, from the server's own serving gate. */
+const LiveState: React.FC<{ pin: RungPin }> = ({ pin }) => {
+	const status = pinStatusOf(pin);
+	return <span style={styles[LIVE_STATE_STYLE[status.tone]]}>&#9679; {status.word}</span>;
 };
 
 /**
@@ -588,6 +599,11 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			if (tick.status === '' || tick.status === 'failed' || tick.status === 'uploaded') void refresh();
 		});
 	}, [host, refresh]);
+
+	// Deployment changes of this app from ANY session in the org (a build
+	// landed, a binding was published/disabled/removed): re-fetch so the rail
+	// and the where-live serving states never go stale (#2461).
+	useEffect(() => host.subscribeDeployChanged?.(() => void refresh()), [host, refresh]);
 
 	// Load the org's developer id (null when the host can't report it — no banner).
 	useEffect(() => {
@@ -779,7 +795,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			{/* View header — title + one-line purpose (the pipeline pattern) */}
 			<div style={styles.head}>
 				<div style={styles.h1}>{app.name}</div>
-				<div style={styles.sub}>Deploy immutable versions, then publish each to an audience — @me, a team, or the public store. Internal audiences serve instantly; the store gates every version on review.</div>
+				<div style={styles.sub}>Deploy immutable versions, then publish each to an audience: @me, a team, or the public store. Internal audiences serve instantly; the store gates every version on review.</div>
 				{/* Failures from the dialog-less actions (publish/submit) land
 				    here — otherwise they are invisible. */}
 				{actionError ? <div style={styles.devError}>{actionError}</div> : null}
@@ -794,7 +810,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					{host.registerDeveloper && !readOnly && developerId === '' && (
 						<div style={styles.devBanner}>
 							<div style={styles.devBannerText}>
-								<strong>Register as a developer to deploy apps.</strong> Every app id is <code>&lt;developerId&gt;.&lt;name&gt;</code> — claim your organization&rsquo;s developer id (letters and underscores only) to publish under your own namespace.
+								<strong>Register as a developer to deploy apps.</strong> Every app id is <code>&lt;developerId&gt;.&lt;name&gt;</code>. Claim your organization&rsquo;s developer id (letters and underscores only) to publish under your own namespace.
 							</div>
 							<div style={styles.devBannerRow}>
 								<input style={styles.devInput} placeholder="developer id (e.g. acme_labs)" value={regSlug} onChange={(e) => setRegSlug(e.target.value)} />
@@ -826,8 +842,8 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 							// state: a 'private' draft whose server build failed can
 							// never serve, must say so, and gets no action buttons.
 							const buildWord = buildWordOf(v, buildTicks);
-							const buildFailed = buildWord === 'failed';
 							const servable = buildWord === '';
+							const badge = versionBadgeOf(v.state, buildWord);
 							return (
 								<div key={v.registryVersion} style={styles.card}>
 									{/* Registry int IS the version identity; the package.json
@@ -844,10 +860,12 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 									</div>
 									{v.message ? <div style={styles.cardMsg}>&ldquo;{v.message}&rdquo;</div> : null}
 									<div style={styles.chips}>
-										{buildFailed ? (
-											// The failure outranks the review state on the badge:
-											// "draft" on an unservable version reads as healthy.
-											// Clicking the badge opens the build log — the why.
+										{/* The build axis outranks the review state on the badge
+										    while the version cannot serve: a running build shows its
+										    live word ('uploaded' → 'installing' → …), never a green
+										    "ready" (#2461); a failed build is a DOOR to the build log
+										    — the why. Otherwise the review state. */}
+										{badge?.opensBuildLog ? (
 											<span
 												style={styles.failedBadgeWrap}
 												role="button"
@@ -861,27 +879,19 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 													}
 												}}
 											>
-												<StatusBadge variant="error">failed</StatusBadge>
+												<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>
 											</span>
-										) : v.state && v.state in STATE_BADGE ? (
-											<StatusBadge variant={STATE_BADGE[v.state].variant}>{STATE_BADGE[v.state].label}</StatusBadge>
-										) : v.state ? (
-											// STATE_BADGE is total over the typed union, but a state the
-											// server adds later would be absent at runtime — render its raw
-											// name as a muted chip rather than crash the row on undefined.
-											<StatusBadge variant="muted">{v.state}</StatusBadge>
+										) : badge ? (
+											<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>
 										) : null}
-										{/* The server build lifecycle word beside the badge
-										    ('uploaded' → 'installing' → …) — live ticks win, the
-										    rail's persisted word covers reopened panels, and ''
-										    (servable) renders nothing. Failure is the badge above. */}
-										{!servable && !buildFailed ? <span style={styles.buildTick}>{buildWord}</span> : null}
 										{/* Audience chips NAME who serves this version (the pipe
-										    card's pattern) — derived from the where-live pins. */}
+										    card's pattern) — derived from the where-live pins. An
+										    audience pinned here but NOT served (disabled, still in
+										    review, …) is a muted chip, not a live one. */}
 										{(pins ?? [])
 											.filter((p) => p.registryVersion === v.registryVersion)
 											.map((p) => (
-												<StatusBadge key={p.rung + p.handle} variant={p.rung === 'public' ? 'info' : 'success'}>
+												<StatusBadge key={p.rung + p.handle} variant={p.serving === false ? 'muted' : p.rung === 'public' ? 'info' : 'success'}>
 													{chipLabelOf(p)}
 												</StatusBadge>
 											))}
@@ -920,7 +930,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					<div style={styles.livePanel}>
 						<div style={styles.liveHead}>Where this app is live</div>
 						{(pins ?? []).length === 0 ? (
-							<div style={styles.liveFoot}>Nothing is deployed yet — publish a version and deploy it to your personal rung to see it here.</div>
+							<div style={styles.liveFoot}>Nothing is deployed yet. Publish a version and deploy it to your personal rung to see it here.</div>
 						) : (
 							<>
 								{(pins ?? []).map((p) => (
@@ -933,7 +943,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 											v{p.registryVersion}
 											{p.version ? <span style={styles.versionPill}>{p.version}</span> : null}
 										</span>
-										<span style={p.state === 'pending' ? styles.liveStateWarn : styles.liveStateOk}>&#9679; {p.state === 'pending' ? 'in review' : p.state}</span>
+										<LiveState pin={p} />
 										<span style={styles.liveAudience}>
 											{p.audience}
 											{p.pendingVersion ? ` · v${p.pendingVersion} in review` : ''}
@@ -948,8 +958,8 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 								))}
 								<div style={styles.liveFoot}>
 									{host.submitForReview
-										? 'Deploy pins a rung to an immutable version — first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.'
-										: 'Deploy pins a rung to an immutable version — first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server — the store publishes directly.'}
+										? 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.'
+										: 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server; the store publishes directly.'}
 								</div>
 							</>
 						)}
@@ -974,7 +984,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 						</>
 					}
 				>
-					<div style={styles.dialogHint}>Packs the app source and ships it to the server as the next immutable version. Binds nothing — publish it to an audience afterwards.</div>
+					<div style={styles.dialogHint}>Packs the app source and ships it to the server as the next immutable version. Binds nothing. Publish it to an audience afterwards.</div>
 					<InputField placeholder="What changed? (optional comment)" value={deployMessage} onChange={(e) => setDeployMessage(e.target.value)} disabled={deployBusy} />
 					{deployError ? <div style={styles.devError}>{deployError}</div> : null}
 				</Modal>
@@ -994,7 +1004,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 						</Button>
 					}
 				>
-					<div style={styles.dialogHint}>The server&rsquo;s full build output for this version, phase by phase — the failure reason is at the end.</div>
+					<div style={styles.dialogHint}>The server&rsquo;s full build output for this version, phase by phase. The failure reason is at the end.</div>
 					<pre style={styles.logPre}>{logText === null ? 'Loading build log…' : logText}</pre>
 				</Modal>
 			)}
@@ -1014,8 +1024,8 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 				>
 					<div style={styles.dialogHint}>
 						{host.submitForReview
-							? 'Points the chosen audience at this version — first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
-							: 'Points the chosen audience at this version — first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
+							? 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
+							: 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
 					</div>
 					<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@me')}>
 						Me<span style={styles.pubRowState}>{pinStateOf('@me', publishFor)}</span>
@@ -1031,11 +1041,11 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					    the internal rows; with one, only 'ready' unlocks it. */}
 					{(host.submitForReview ? publishFor.state === 'ready' : publishFor.state !== 'failed') ? (
 						<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@public')}>
-							Public — the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
+							Public: the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
 						</button>
 					) : (
-						<button style={styles.pubRowOff} disabled title="The store needs an approved ('ready') version — submit it for review first">
-							Public — the app store<span style={styles.pubRowState}>needs review approval</span>
+						<button style={styles.pubRowOff} disabled title="The store needs an approved ('ready') version; submit it for review first">
+							Public: the app store<span style={styles.pubRowState}>needs review approval</span>
 						</button>
 					)}
 				</Modal>
@@ -1045,7 +1055,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			{removePin && (
 				<ConfirmDialog
 					title={`Remove ${app.name} from ${removePin.label}?`}
-					message={`Takes the app off ${removePin.handle}: it stops serving to that audience. This is a SOFT remove — every published version and the audit history survive, and publishing to ${removePin.handle} again revives it.`}
+					message={`Takes the app off ${removePin.handle}: it stops serving to that audience. This is a SOFT remove: every published version and the audit history survive, and publishing to ${removePin.handle} again revives it.`}
 					confirmLabel="Remove"
 					cancelLabel="Cancel"
 					onConfirm={() => {

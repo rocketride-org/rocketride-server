@@ -34,9 +34,9 @@ export const dataPollingEntry: IGalleryEntry = {
 	name: 'Polling & dashboard data',
 	group: 'hooks',
 	blurb: 'Connection-gated interval polling (usePolling) and the ONE shared dashboard feed every overview view reads (useDashboardData).',
-	doc: `\`usePolling(fetcher, interval)\` fires immediately, then every \`interval\` ms — and by default only while the shell is connected (\`gate: 'shell'\`), so views never poll into a dead socket. Pass \`{ gate: 'none' }\` for unconditional polling.
+	doc: `\`usePolling(fetcher, interval)\` fires immediately, then every \`interval\` ms, and by default only while the shell is connected (\`gate: 'shell'\`), so views never poll into a dead socket. Pass \`{ gate: 'none' }\` for unconditional polling.
 
-\`useDashboardData()\` is the shared feed: a module singleton where the FIRST consumer starts the 3s poll plus the \`shell:event\` subscription and the LAST unmount stops it. Every dashboard-ish view reads this one hook instead of rolling its own poll — data survives view switches, and there is exactly one request in flight regardless of how many views listen.`,
+\`useDashboardData()\` is the shared feed: a module singleton where the FIRST consumer starts the 3s poll plus the \`shell:event\` subscription and the LAST unmount stops it. Every dashboard-ish view reads this one hook instead of rolling its own poll. Data survives view switches, and there is exactly one request in flight regardless of how many views listen.`,
 	docNote: 'Do not hand-roll a poll-every-N-seconds effect for dashboard data - the shared feed exists so N views cost one poll.',
 	code: `import { usePolling, useDashboardData } from 'shell';
 

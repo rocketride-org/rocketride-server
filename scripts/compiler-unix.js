@@ -19,16 +19,16 @@ const PROJECT_ROOT = path.join(__dirname, '..');
  * @returns {Promise<void>} Resolves when script succeeds; throws on failure.
  */
 async function runCompilerUnixSetup(options = {}) {
-    const { autoinstall = false, systemCompiler = false, onOutput = null, task = null } = options;
-    const script = path.join(__dirname, 'compiler-unix.sh');
-    const args = [];
-    if (autoinstall) args.push('--autoinstall');
-    if (systemCompiler) args.push('--system-compiler');
-    await execCommand(script, args, {
-        cwd: PROJECT_ROOT,
-        ...(task && { task }),
-        ...(onOutput && { onOutput })
-    });
+	const { autoinstall = false, systemCompiler = false, onOutput = null, task = null } = options;
+	const script = path.join(__dirname, 'compiler-unix.sh');
+	const args = [];
+	if (autoinstall) args.push('--autoinstall');
+	if (systemCompiler) args.push('--system-compiler');
+	await execCommand(script, args, {
+		cwd: PROJECT_ROOT,
+		...(task && { task }),
+		...(onOutput && { onOutput }),
+	});
 }
 
 module.exports = { runCompilerUnixSetup };

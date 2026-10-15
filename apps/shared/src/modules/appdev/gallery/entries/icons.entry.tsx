@@ -105,7 +105,7 @@ export const iconsEntry: IGalleryEntry = {
 	name: 'Icons',
 	group: 'utils',
 	blurb: 'The full Bx* icon set on the shell surface - every glyph browsable here; click a tile to copy its import name.',
-	doc: `All icons share one prop contract (\`IconProps\`) and inherit \`currentColor\`, so they recolor with the surrounding text and theme automatically. The whole set flows through the surface star-export — import any glyph by name from \`'shell'\`.`,
+	doc: `All icons share one prop contract (\`IconProps\`) and inherit \`currentColor\`, so they recolor with the surrounding text and theme automatically. The whole set flows through the surface star-export. Import any glyph by name from \`'shell'\`.`,
 	knobs: [
 		{ id: 'filter', label: 'Filter', kind: 'text', defaultValue: '' },
 		{ id: 'size', label: 'Size', kind: 'number', defaultValue: 24 },

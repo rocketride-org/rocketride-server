@@ -27,7 +27,7 @@ read with a strict JSON parser.
 | `classType`     |    ✓     | What the node is, e.g. `["llm"]`, `["tool"]`, `["store"]`. Drives catalog grouping and behavior. |
 | `capabilities`  |    ✓     | Engine behavior flags, e.g. `["invoke"]`.                               |
 | `register`      |          | `filter`, `endpoint`, or omitted. Registers a factory of that type.      |
-| `node` / `path` |          | Runtime (`python`) and module path (`nodes.llm_openai`).                |
+| `node` / `path` |          | Runtime (`python`, `cpp`) and what to load — a module path or a library name. |
 | `prefix`        |    ✓     | Prefix added/removed when converting URLs ⇄ paths.                       |
 | `description`   |          | Array of strings (joined) describing the node.                          |
 | `icon`          |          | SVG filename next to the definition (auto-discovered, auto-themed).     |

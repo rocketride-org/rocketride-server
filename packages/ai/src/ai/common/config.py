@@ -5,6 +5,10 @@ import difflib
 from typing import Dict, Any
 from rocketlib import getServiceDefinition, IJson, warning
 
+# Token limits. Several pipeline shapes can hold them (see getNodeConfig), and a
+# value written in two places with two values is worth a warning.
+_LIMIT_FIELDS = ('modelTotalTokens', 'modelOutputTokens')
+
 
 # Fields the catalogue keeps about a profile, which a pipeline never sets. Kept out
 # of the known-key set so a near-miss cannot be answered with one of them.
@@ -92,9 +96,9 @@ class Config:
         Collect every config key this node legitimately accepts.
 
         Two sources, unioned: the keys declared across all of the node's profiles
-        (so a key present on any profile counts, e.g. modelOutputTokens, which the
-        "custom" placeholder omits), and the names in the node's "fields" block,
-        with any "<prefix>." stripped.
+        (so a key present on any profile counts, even one the "custom" placeholder
+        omits), and the names in the node's "fields" block, with any "<prefix>."
+        stripped.
         """
         keys: set = set()
         preconfig = service.get('preconfig') or {}
@@ -243,6 +247,15 @@ class Config:
                 if key in (nested_key, 'profile'):
                     continue
                 if value is not None:
+                    if key in _LIMIT_FIELDS and combined.get(key) is not None and combined[key] != value:
+                        # The form edits the nested value, so an edit there would
+                        # change nothing. Typically a limit written into the
+                        # pipeline by hand before the form offered the field.
+                        warning(
+                            f'{logicalType}: {key} is set twice: {value} at the top level of the node config, '
+                            f'which is used, and {combined[key]} in the "{nested_key}" settings the form edits. '
+                            "Remove the top-level value to use the form's."
+                        )
                     combined[key] = value
 
             return combined

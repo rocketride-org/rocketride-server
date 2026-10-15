@@ -4,7 +4,7 @@
  * only when compiling from source (server:setup-tools → compiler-windows.js).
  */
 async function setupSystem(_options) {
-    // Reserved for future Windows-wide setup; for now just return.
+	// Reserved for future Windows-wide setup; for now just return.
 }
 
 module.exports = { setupSystem };

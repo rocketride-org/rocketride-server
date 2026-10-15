@@ -5,7 +5,7 @@ from fnmatch import fnmatch
 import json
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from ...store import IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
+from ...store import IStore, StorageError, StorageNotFoundError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
 
 # botocore raises its OWN exception types for transport failures, and none of
 # them inherit from the builtin `ConnectionError` or `TimeoutError`:
@@ -158,7 +158,7 @@ class S3Store(IStore):
         except Exception as e:
             # Check for NoSuchKey exception (can be ClientError with 'NoSuchKey' in message or class name)
             if self._is_no_such_key_error(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to read file {filename} from S3: {e}') from e
 
     @retry(
@@ -217,7 +217,7 @@ class S3Store(IStore):
             raise
         except Exception as e:
             if self._is_no_such_key_error(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to read file {filename} from S3: {e}') from e
 
     @retry(
@@ -249,7 +249,7 @@ class S3Store(IStore):
         except Exception as e:
             # Check for NoSuchKey exception (can be ClientError with 'NoSuchKey' in message or class name)
             if self._is_no_such_key_error(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to read file {filename} from S3: {e}') from e
 
     @retry(
@@ -362,7 +362,7 @@ class S3Store(IStore):
             except Exception as e:
                 # Check for NotFound/NoSuchKey (can be ClientError with error code in message)
                 if self._is_no_such_key_error(e):
-                    raise StorageError(f'File not found: {filename}')
+                    raise StorageNotFoundError(f'File not found: {filename}')
                 raise
 
             # Delete the file
@@ -407,7 +407,7 @@ class S3Store(IStore):
                 )
             except Exception as e:
                 if self._is_no_such_key_error(e):
-                    raise StorageError(f'File not found: {src}')
+                    raise StorageNotFoundError(f'File not found: {src}')
                 raise
             await asyncio.to_thread(client.delete_object, Bucket=self._bucket, Key=src_key)
         except TRANSIENT_ERRORS:
@@ -632,7 +632,7 @@ class S3Store(IStore):
             return {'context': {'key': key}, 'size': size}
         except Exception as e:
             if self._is_no_such_key_error(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to open {filename} for reading: {e}') from e
 
     async def read_chunk(self, filename: str, context, offset: int, length: int = 4_194_304) -> bytes:
@@ -669,7 +669,7 @@ class S3Store(IStore):
             }
         except Exception as e:
             if self._is_no_such_key_error(e):
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             raise StorageError(f'Failed to get file info for {filename}: {e}') from e
 
     async def _upload_part(self, context: dict, data: bytes) -> None:

@@ -160,7 +160,6 @@ The engine uses a factory-based task system. Tasks are defined in JSON and dispa
 | --------------- | ---------------------------- |
 | `Sysinfo`       | System information gathering |
 | `GenerateKey`   | Cryptographic key generation |
-| `ValidateRegex` | Regex pattern validation     |
 | `MonitorTest`   | Monitor health testing       |
 
 ---

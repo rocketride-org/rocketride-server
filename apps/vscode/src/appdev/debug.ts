@@ -71,6 +71,6 @@ export async function debugApp(appId: string): Promise<void> {
 	// — a silent F5 no-op unless it is reported here.
 	const started = await vscode.debug.startDebugging(folder, config);
 	if (!started) {
-		vscode.window.showErrorMessage(`Debug session for ${app.name} did not start — the ${browser.type} (js-debug) launch was rejected; check that the browser is installed and the js-debug extension is enabled.`);
+		vscode.window.showErrorMessage(`Debug session for ${app.name} did not start. The ${browser.type} (js-debug) launch was rejected; check that the browser is installed and the js-debug extension is enabled.`);
 	}
 }

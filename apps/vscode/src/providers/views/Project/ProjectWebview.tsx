@@ -979,7 +979,7 @@ const ProjectWebview: React.FC = () => {
 						: {})}
 				/>
 			)}
-			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
 			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setShowCheckout(false)} />}
 		</>
 	);

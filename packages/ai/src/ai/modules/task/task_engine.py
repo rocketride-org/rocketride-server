@@ -41,7 +41,7 @@ import shutil
 from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from rocketlib import debug, args as startup_args
+from rocketlib import debug, warning, args as startup_args
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
@@ -52,6 +52,7 @@ from ai.constants import (
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
     CONST_STATUS_HISTORY_LIMIT,
     CONST_ANALYTICS_SLOWEST_DOCS,
+    CONST_TASK_DATA_PATH,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
@@ -476,9 +477,19 @@ class Task(DAPBase):
         async def on_disconnected(self, reason=None, has_error=False):
             """
             Handle unusual disconnection on the data channel.
+
+            Forgets the channel so the next data request reconnects, and fails
+            the requests still waiting on it so their callers get an error
+            instead of waiting forever.
+
+            Args:
+                reason: Why the channel closed, if the transport knows.
+                has_error: True when the channel closed because of an error.
             """
             # Clear it so the next time we come through, we try again
             self._parent_task._data_client = None
+            # Nothing can answer the requests still waiting on this channel
+            await super().on_disconnected(reason or 'Task data connection closed', has_error)
 
     def __init__(
         self,
@@ -692,6 +703,23 @@ class Task(DAPBase):
     # therefore need ROCKETRIDE_DB_DSN injected into the task subprocess.
     _ROCKETRIDE_DB_PROVIDERS = frozenset({'rocketride_sql', 'rocketride_vector', 'rocketride_graph'})
 
+    # Reason handed to the node subprocess when this engine has no database
+    # broker (a local engine, or a self-hosted one without the broker env).
+    # The node prefixes it with 'RocketRide cloud database is not available
+    # for this task:' so it must read as the continuation of that sentence.
+    _NO_CLOUD_DB_REASON = (
+        'this server has no RocketRide cloud database (no database broker is configured). '
+        'The rocketride_sql, rocketride_vector and rocketride_graph nodes need a server with a '
+        'RocketRide cloud database (RocketRide Cloud, or a self-hosted engine with a database '
+        'broker); on this server use a node with its own connection settings instead '
+        '(db_postgres for SQL, PostgreSQL (pgvector) with provider postgres for vectors, '
+        'graph_neo4j for graphs)'
+    )
+    _CLOUD_DB_CONFIG_ERROR_REASON = (
+        'this RocketRide Cloud server is missing required database broker configuration. '
+        'Contact the server operator to restore the database broker configuration and retry the pipeline'
+    )
+
     def _pipeline_uses_rocketride_db(self) -> bool:
         """True when any pipeline component is a RocketRide cloud DB node."""
         components = self._pipeline.get('components') or []
@@ -736,11 +764,11 @@ class Task(DAPBase):
 
         # Resolve the per-tenant DSN server-side (the SaaS account context
         # exists only in this process) and hand it to the node subprocess via
-        # env — the same delivery mechanism as ROCKETRIDE_CLIENT_ID. Scoped to
-        # pipelines that actually contain one of the DB nodes so unrelated
-        # tasks never trigger provisioning. Resolution failure is non-fatal
-        # here: the node surfaces its own clear error, with the failure reason
-        # passed down so it isn't misreported as a sign-in problem.
+        # env. Scoped to pipelines that actually contain one of the DB nodes
+        # so unrelated tasks never trigger provisioning. Resolution failure is
+        # non-fatal here: the node surfaces its own clear error, with the
+        # failure reason passed down so it isn't misreported as a missing
+        # identity.
         if self._pipeline_uses_rocketride_db():
             try:
                 from ai.account import account
@@ -754,9 +782,14 @@ class Task(DAPBase):
                 dsn = await account.resolve_db_dsn(self.org_id or self.client_id)
                 subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
             except NotImplementedError:
-                # Broker env not configured (open-source default) — the
-                # node raises the sign-in message itself.
-                pass
+                # Missing broker config is normal on a local engine, but on
+                # Cloud it is an operator problem, not a reason to swap nodes.
+                if _is_saas_engine():
+                    warning(f'RocketRide DB DSN not resolved: {self._CLOUD_DB_CONFIG_ERROR_REASON}')
+                    subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = self._CLOUD_DB_CONFIG_ERROR_REASON
+                else:
+                    self.debug_message('RocketRide DB DSN not resolved: no database broker configured on this engine')
+                    subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = self._NO_CLOUD_DB_REASON
             except Exception as e:
                 self.debug_message(f'RocketRide DB DSN resolution failed: {e}')
                 reason = (str(e).strip().splitlines() or [repr(e)])[0]
@@ -819,9 +852,7 @@ class Task(DAPBase):
         Returns:
             Complete subprocess task configuration
         """
-        executable_path = sys.executable
-        exec_dir = os.path.dirname(executable_path)
-        data_path = os.path.abspath(os.path.join(exec_dir, '../data'))
+        data_path = CONST_TASK_DATA_PATH
 
         os.makedirs(data_path, exist_ok=True)
 

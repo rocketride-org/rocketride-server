@@ -403,8 +403,21 @@ def _split_input_cache(um: dict) -> tuple[int, int, int, int]:
     det = um.get('input_token_details')
     det = det if isinstance(det, dict) else {}
     cr = int(det.get('cache_read') or 0)
-    cc = int(det.get('cache_creation') or 0)
+    cc = _cache_creation_tokens(det)
     return max(0, total_in - cr - cc), out, cr, cc
+
+
+def _cache_creation_tokens(details: dict) -> int:
+    """Return the cache-write tokens in a LangChain ``input_token_details`` dict.
+
+    When Anthropic's response breaks cache writes down by lifetime, langchain-anthropic
+    reports ``cache_creation`` as 0 and the counts under ``ephemeral_5m_input_tokens``
+    and ``ephemeral_1h_input_tokens``. Read either form.
+    """
+    total = int(details.get('cache_creation') or 0)
+    if total:
+        return total
+    return int(details.get('ephemeral_5m_input_tokens') or 0) + int(details.get('ephemeral_1h_input_tokens') or 0)
 
 
 def report_usage_metadata(usage: Any, llm: Any) -> None:
@@ -525,7 +538,7 @@ class LangChainAdapter:
                     det = um.get('input_token_details')
                     if isinstance(det, dict):
                         cache_read = max(cache_read, int(det.get('cache_read') or 0))
-                        cache_creation = max(cache_creation, int(det.get('cache_creation') or 0))
+                        cache_creation = max(cache_creation, _cache_creation_tokens(det))
                 text, thinking = parse(piece.content)
                 if thinking:
                     yield Event('thinking', thinking)

@@ -34,11 +34,11 @@ export const authIdentityEntry: IGalleryEntry = {
 	name: 'Auth & identity',
 	group: 'hooks',
 	blurb: 'Who is signed in: useAuthUser for the server-driven identity, useLogout for sign-out, and the host-side auth providers behind them.',
-	doc: `Identity is server-driven: \`useAuthUser()\` returns the \`ConnectResult\` the server produced at connect (aliased as \`AuthUser\`) — name, email, subscription, apps, credits — or \`null\` when not authenticated. Apps read it; they never write it.
+	doc: `Identity is server-driven: \`useAuthUser()\` returns the \`ConnectResult\` the server produced at connect (aliased as \`AuthUser\`, with name, email, subscription, apps, and credits) or \`null\` when not authenticated. Apps read it; they never write it.
 
 The auth providers are HOST bootstrap machinery: \`CloudAuthProvider\` (OAuth2 PKCE against the SaaS identity provider) and \`ApiKeyAuthProvider\` (OSS/local API-key mode). A standalone host picks one and hands it to \`ConnectionManager.initialize\`; hosted apps never touch them.
 
-To trigger auth flows from UI, emit the intent events instead: \`shell:loginRequest\` / \`shell:logoutRequest\`. \`useLogout()\` currently always returns \`null\` (sign-out is a shell page-reload flow) — it exists as the forward-compatible seam.`,
+To trigger auth flows from UI, emit the intent events instead: \`shell:loginRequest\` / \`shell:logoutRequest\`. \`useLogout()\` currently always returns \`null\` (sign-out is a shell page-reload flow). It exists as the forward-compatible seam.`,
 	docNote: 'The shell owns auth end to end. Apps read identity via useAuthUser and emit shell:loginRequest / shell:logoutRequest - never instantiate providers or handle tokens.',
 	code: `import { useAuthUser, ConnectionManager, Button } from 'shell';
 

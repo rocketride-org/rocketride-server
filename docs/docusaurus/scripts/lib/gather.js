@@ -15,7 +15,7 @@
 
 const path = require('path');
 const { glob } = require('glob');
-const { exists, mkdir, rm, copyFile, copyFileEnsure, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
+const { exists, mkdir, rm, copyFile, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
 const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('./spine');
 
 // A node's co-located doc is README.md when it carries the generated
@@ -47,7 +47,8 @@ const DOCS_ROOT_MOUNTS = [
 // unmounted.
 const IGNORE = ['**/node_modules/**', '**/build/**', '**/dist/**', 'nodes/src/nodes/**', 'nodes/test/**'];
 
-const PLACEHOLDER_NOTE = '> **Placeholder.** Generated stub for the documentation spine. Real content lands in a later phase.';
+const PLACEHOLDER_NOTE =
+	'> **Placeholder.** Generated stub for the documentation spine. Real content lands in a later phase.';
 
 // Doc ids allowed to publish as a placeholder ("coming soon") page.
 //
@@ -115,7 +116,20 @@ const NODE_LABEL_OVERRIDES = {
 	llm_ibm_watson: 'IBM Watson',
 };
 
-const LABEL_ACRONYMS = { llm: 'LLM', ai: 'AI', api: 'API', db: 'DB', ocr: 'OCR', ner: 'NER', mcp: 'MCP', http: 'HTTP', tts: 'TTS', ibm: 'IBM', url: 'URL', id: 'ID' };
+const LABEL_ACRONYMS = {
+	llm: 'LLM',
+	ai: 'AI',
+	api: 'API',
+	db: 'DB',
+	ocr: 'OCR',
+	ner: 'NER',
+	mcp: 'MCP',
+	http: 'HTTP',
+	tts: 'TTS',
+	ibm: 'IBM',
+	url: 'URL',
+	id: 'ID',
+};
 
 /** Last-resort label from a node directory name: `tool_http_request` -> `Tool HTTP Request`. */
 function prettifyName(name) {
@@ -125,7 +139,10 @@ function prettifyName(name) {
 		.join(' ');
 }
 
-/** classType + display title + first-sentence description for a node, from its first services*.json (static regex, no JSON parse). */
+/**
+ * classType + display title + first-sentence description for a node, from its
+ * first services*.json (static regex, no JSON parse).
+ */
 async function readNodeMeta(nodeDir) {
 	const svc = (await glob('services*.json', { cwd: nodeDir, nodir: true })).sort()[0];
 	if (!svc) return { classType: '', title: '', description: '' };
@@ -198,7 +215,9 @@ function variantDescription(variant, serviceDescriptions) {
 		}
 		return best;
 	};
-	return longestMatch((slug) => variant.endsWith('_' + slug)) ?? longestMatch((slug) => variant.startsWith(slug)) ?? '';
+	return (
+		longestMatch((slug) => variant.endsWith('_' + slug)) ?? longestMatch((slug) => variant.startsWith(slug)) ?? ''
+	);
 }
 
 /** Canvas-style sidebar/page label for a node (override > service title > prettified name). */
@@ -234,7 +253,11 @@ function rewriteExampleRefs(body, nodeRel) {
 	// Matches both the markdown target form — ](example.png) — and the HTML
 	// attribute form used for centred/sized embeds: src="example.png",
 	// href="example.pipe". The closing delimiter is kept via lookahead.
-	const rewrite = (name, base) => (s) => s.replace(new RegExp(String.raw`(\]\(|src=["']|href=["'])(?:\./)?${name}(?=[)"'])`, 'g'), (_, prefix) => `${prefix}${base}/${nodeRel}/${name}`);
+	const rewrite = (name, base) => (s) =>
+		s.replace(
+			new RegExp(String.raw`(\]\(|src=["']|href=["'])(?:\./)?${name}(?=[)"'])`, 'g'),
+			(_, prefix) => `${prefix}${base}/${nodeRel}/${name}`
+		);
 	return [rewrite('example.png', REPO_RAW), rewrite('example.pipe', REPO_BLOB)].reduce((s, f) => f(s), body);
 }
 
@@ -257,7 +280,10 @@ function stageNodeMarkdown(content, { slug, title, nodeRel }) {
 	});
 	// Tidy: a node with no dependencies leaves an empty generated block behind —
 	// drop the bare markers and any divider that introduced them.
-	body = body.replace(/(?:^---\s*\r?\n+)?<!-- ROCKETRIDE:GENERATED:PARAMS START -->\s*(?:<!--(?:[^-]|-(?!->))*-->\s*)*<!-- ROCKETRIDE:GENERATED:PARAMS END -->\s*$/m, '');
+	body = body.replace(
+		/(?:^---\s*\r?\n+)?<!-- ROCKETRIDE:GENERATED:PARAMS START -->\s*(?:<!--(?:[^-]|-(?!->))*-->\s*)*<!-- ROCKETRIDE:GENERATED:PARAMS END -->\s*$/m,
+		''
+	);
 	const has = (k) => fmLines.some((l) => new RegExp(`^${k}\\s*:`).test(l));
 	const inject = [];
 	if (!has('slug')) inject.push(`slug: ${yamlStr(slug)}`);
@@ -387,7 +413,11 @@ function discoverContributors() {
 			if (!entry || !entry.mount) continue;
 			const mount = String(entry.mount).replace(/^\/+|\/+$/g, '');
 			if (!isValidMount(mount)) {
-				throw new Error(`docs:gather: module "${name}" declares mount "${entry.mount}" which does not resolve to a spine slot.\n  Valid slots: ${mountSlots().join(', ')}`);
+				throw new Error(
+					`docs:gather: module "${name}" declares mount "${entry.mount}" ` +
+						'which does not resolve to a spine slot.' +
+						`\n  Valid slots: ${mountSlots().join(', ')}`
+				);
 			}
 			contributors.push({ module: name, mount, sourceDir: path.join(pkgRoot, entry.source || 'docs') });
 		}
@@ -509,7 +539,9 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 
 	function claim(docId, source) {
 		if (routes.has(docId)) {
-			throw new Error(`docs:gather: route collision at "/${docId}"\n  between ${routes.get(docId)}\n  and     ${source}`);
+			throw new Error(
+				`docs:gather: route collision at "/${docId}"\n  between ${routes.get(docId)}\n  and     ${source}`
+			);
 		}
 		routes.set(docId, source);
 	}
@@ -526,7 +558,14 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 			const destAbs = path.join(contentDir, `${docId || 'index'}${ext}`);
 			const siblingAbs = path.join(staticDir, `${docId || 'index'}.md`);
 			await stageFile({ srcAbs, destAbs, siblingAbs, content, mode });
-			manifest.push({ id: docId || 'index', route: docId ? `/${docId}` : '/', title: frontMatterTitle(content) || headingTitle(content) || docId || 'Home', mdSibling: `/${docId || 'index'}.md`, source: srcAbs, description: pageDescription(content) });
+			manifest.push({
+				id: docId || 'index',
+				route: docId ? `/${docId}` : '/',
+				title: frontMatterTitle(content) || headingTitle(content) || docId || 'Home',
+				mdSibling: `/${docId || 'index'}.md`,
+				source: srcAbs,
+				description: pageDescription(content),
+			});
 		}
 	}
 
@@ -575,7 +614,10 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		// Emit the per-category sidebar heading (label + order) once.
 		if (!stagedCategories.has(cat.slug)) {
 			stagedCategories.add(cat.slug);
-			await writeFileEnsure(path.join(contentDir, NODES_DIR, cat.slug, '_category_.json'), JSON.stringify({ label: cat.label, position: cat.position, collapsed: true }, null, 2));
+			await writeFileEnsure(
+				path.join(contentDir, NODES_DIR, cat.slug, '_category_.json'),
+				JSON.stringify({ label: cat.label, position: cat.position, collapsed: true }, null, 2)
+			);
 		}
 		const variants = variantsByNode.get(name) || [];
 		if (variants.length) {
@@ -584,10 +626,33 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 			// and each backend variant is a nested page. The category links to the
 			// index so the parent label is clickable.
 			const folderRel = toPosix(path.join(NODES_DIR, cat.slug, name));
-			await writeFileEnsure(path.join(contentDir, folderRel, '_category_.json'), JSON.stringify({ label, collapsed: true, link: { type: 'doc', id: `${folderRel}/index` } }, null, 2));
-			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label, nodeRel: toPosix(path.relative(projectRoot, nodeDir)) }), gitLastUpdate(srcAbs)));
+			await writeFileEnsure(
+				path.join(contentDir, folderRel, '_category_.json'),
+				JSON.stringify({ label, collapsed: true, link: { type: 'doc', id: `${folderRel}/index` } }, null, 2)
+			);
+			await writeFileEnsure(
+				path.join(contentDir, folderRel, 'index.md'),
+				stampLastUpdate(
+					stageNodeMarkdown(content, {
+						slug: `/${route}`,
+						title: existingTitle ? null : label,
+						nodeRel: toPosix(path.relative(projectRoot, nodeDir)),
+					}),
+					gitLastUpdate(srcAbs)
+				)
+			);
 			await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
-			manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
+			manifest.push({
+				id: route,
+				route: `/${route}`,
+				title: label,
+				mdSibling: `/${route}.md`,
+				source: srcAbs,
+				node: name,
+				category: cat.label,
+				categoryOrder: cat.position,
+				description,
+			});
 			const serviceDescriptions = await readServiceDescriptions(nodeDir);
 			for (const { variant, rel: vrel } of variants) {
 				const vsrcAbs = path.join(projectRoot, vrel);
@@ -598,9 +663,30 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 				const vExistingTitle = frontMatterTitle(vcontent);
 				const vlabel = vExistingTitle || nodeLabel(variant, '');
 				const vdescription = variantDescription(variant, serviceDescriptions);
-				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stampLastUpdate(stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel, nodeRel: toPosix(path.relative(projectRoot, path.dirname(vsrcAbs))) }), gitLastUpdate(vsrcAbs)));
+				await writeFileEnsure(
+					path.join(contentDir, folderRel, `${variant}.md`),
+					stampLastUpdate(
+						stageNodeMarkdown(vcontent, {
+							slug: `/${vroute}`,
+							title: vExistingTitle ? null : vlabel,
+							nodeRel: toPosix(path.relative(projectRoot, path.dirname(vsrcAbs))),
+						}),
+						gitLastUpdate(vsrcAbs)
+					)
+				);
 				await writeFileEnsure(path.join(staticDir, `${vroute}.md`), vcontent);
-				manifest.push({ id: vroute, route: `/${vroute}`, title: vlabel, mdSibling: `/${vroute}.md`, source: vsrcAbs, node: name, variant, category: cat.label, categoryOrder: cat.position, description: vdescription });
+				manifest.push({
+					id: vroute,
+					route: `/${vroute}`,
+					title: vlabel,
+					mdSibling: `/${vroute}.md`,
+					source: vsrcAbs,
+					node: name,
+					variant,
+					category: cat.label,
+					categoryOrder: cat.position,
+					description: vdescription,
+				});
 			}
 			continue;
 		}
@@ -608,9 +694,29 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		// fills in when missing, and the body H1 is dropped to avoid a duplicate
 		// heading. Always a real write — a symlink can't carry the edits.
 		const destAbs = path.join(contentDir, NODES_DIR, cat.slug, `${name}.md`);
-		await writeFileEnsure(destAbs, stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label, nodeRel: toPosix(path.relative(projectRoot, nodeDir)) }), gitLastUpdate(srcAbs)));
+		await writeFileEnsure(
+			destAbs,
+			stampLastUpdate(
+				stageNodeMarkdown(content, {
+					slug: `/${route}`,
+					title: existingTitle ? null : label,
+					nodeRel: toPosix(path.relative(projectRoot, nodeDir)),
+				}),
+				gitLastUpdate(srcAbs)
+			)
+		);
 		await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
-		manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
+		manifest.push({
+			id: route,
+			route: `/${route}`,
+			title: label,
+			mdSibling: `/${route}.md`,
+			source: srcAbs,
+			node: name,
+			category: cat.label,
+			categoryOrder: cat.position,
+			description,
+		});
 	}
 
 	// 3. Declared per-package mounts, plus the central top-level docs/ tree mounts
@@ -627,14 +733,24 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 	//    docs/public/n8n/ holds only the exported README. Non-markdown files
 	//    (per-client assets/, docs/public/assets/) are never swept — the globs
 	//    match .md/.mdx only, so images need no mount coverage.
-	const contributors = discoverContributors().concat(DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' })));
+	const contributors = discoverContributors().concat(
+		DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' }))
+	);
 	const packageDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
-	const rootDocsFiles = await glob(['docs/public/**/*.{md,mdx}', 'docs/docusaurus/apps/**/*.{md,mdx}'], { cwd: projectRoot, nodir: true, ignore: ['**/README.md', 'docs/public/product/**'] });
+	const rootDocsFiles = await glob(['docs/public/**/*.{md,mdx}', 'docs/docusaurus/apps/**/*.{md,mdx}'], {
+		cwd: projectRoot,
+		nodir: true,
+		ignore: ['**/README.md', 'docs/public/product/**'],
+	});
 	// The mount-root README exception described above: gather <source>/README.md
 	// as the mount's page when the mount root carries no index.md/mdx.
 	for (const m of DOCS_ROOT_MOUNTS) {
 		const readmeRel = `${m.source}/README.md`;
-		if ((await exists(path.join(projectRoot, readmeRel))) && !(await exists(path.join(projectRoot, m.source, 'index.md'))) && !(await exists(path.join(projectRoot, m.source, 'index.mdx')))) {
+		if (
+			(await exists(path.join(projectRoot, readmeRel))) &&
+			!(await exists(path.join(projectRoot, m.source, 'index.md'))) &&
+			!(await exists(path.join(projectRoot, m.source, 'index.mdx')))
+		) {
 			rootDocsFiles.push(readmeRel);
 		}
 	}
@@ -643,7 +759,10 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		const abs = path.join(projectRoot, rel);
 		const owner = contributors.find((c) => `${abs}${path.sep}`.startsWith(`${c.sourceDir}${path.sep}`));
 		if (!owner) {
-			throw new Error(`docs:gather: ${rel} lives under a docs/ tree but no package declares a mount covering it. Add a docs mount in the owning package's scripts/tasks.js.`);
+			throw new Error(
+				`docs:gather: ${rel} lives under a docs/ tree but no package declares a mount covering it. ` +
+					"Add a docs mount in the owning package's scripts/tasks.js."
+			);
 		}
 		const relUnder = toPosix(path.relative(owner.sourceDir, abs));
 		const content = await readFile(abs);
@@ -653,7 +772,15 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		const destAbs = path.join(contentDir, `${docId}${ext}`);
 		const siblingAbs = path.join(staticDir, `${docId}.md`);
 		await stageFile({ srcAbs: abs, destAbs, siblingAbs, content, mode });
-		manifest.push({ id: docId, route: `/${docId}`, title: frontMatterTitle(content) || headingTitle(content) || docId, mdSibling: `/${docId}.md`, source: abs, module: owner.module, description: pageDescription(content) });
+		manifest.push({
+			id: docId,
+			route: `/${docId}`,
+			title: frontMatterTitle(content) || headingTitle(content) || docId,
+			mdSibling: `/${docId}.md`,
+			source: abs,
+			module: owner.module,
+			description: pageDescription(content),
+		});
 	}
 
 	// 4. Placeholders for spine slots still lacking content (keeps the build green).
@@ -674,7 +801,12 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
  * @return {Promise<boolean>}
  */
 async function docExists(contentDir, id) {
-	return (await exists(path.join(contentDir, `${id}.md`))) || (await exists(path.join(contentDir, `${id}.mdx`))) || (await exists(path.join(contentDir, id, 'index.md'))) || (await exists(path.join(contentDir, id, 'index.mdx')));
+	return (
+		(await exists(path.join(contentDir, `${id}.md`))) ||
+		(await exists(path.join(contentDir, `${id}.mdx`))) ||
+		(await exists(path.join(contentDir, id, 'index.md'))) ||
+		(await exists(path.join(contentDir, id, 'index.mdx')))
+	);
 }
 
 /**
@@ -705,7 +837,10 @@ async function ensurePlaceholders({ contentDir, staticDir, routes, manifest }) {
 	// placeholder entry only if no real node pages exist.
 	const nodesDir = path.join(contentDir, NODES_DIR);
 	if (!(await exists(path.join(nodesDir, 'index.md')))) {
-		await writeFileEnsure(path.join(nodesDir, 'index.md'), `---\ntitle: Nodes\nslug: /${NODES_DIR}\nsidebar_position: 0\n---\n\n# Nodes\n\n${PLACEHOLDER_NOTE}\n`);
+		await writeFileEnsure(
+			path.join(nodesDir, 'index.md'),
+			`---\ntitle: Nodes\nslug: /${NODES_DIR}\nsidebar_position: 0\n---\n\n# Nodes\n\n${PLACEHOLDER_NOTE}\n`
+		);
 	}
 	const hasNodePages = (await glob('**/*.md', { cwd: nodesDir, nodir: true })).some((f) => f !== 'index.md');
 	if (!hasNodePages) {
@@ -713,7 +848,15 @@ async function ensurePlaceholders({ contentDir, staticDir, routes, manifest }) {
 		const contentFile = path.join(nodesDir, 'example.md');
 		await writeFileEnsure(contentFile, content);
 		await writeFileEnsure(path.join(staticDir, `${NODES_DIR}/example.md`), content);
-		manifest.push({ id: `${NODES_DIR}/example`, route: `/${NODES_DIR}/example`, title: 'Example node', mdSibling: `/${NODES_DIR}/example.md`, source: contentFile, node: 'example', placeholder: true });
+		manifest.push({
+			id: `${NODES_DIR}/example`,
+			route: `/${NODES_DIR}/example`,
+			title: 'Example node',
+			mdSibling: `/${NODES_DIR}/example.md`,
+			source: contentFile,
+			node: 'example',
+			placeholder: true,
+		});
 	}
 }
 
@@ -731,7 +874,24 @@ function assertNoUnexpectedPlaceholders(manifest, allowed = EXPECTED_PLACEHOLDER
 	const permitted = new Set([...allowed, ...STRUCTURAL_PLACEHOLDERS]);
 	const offenders = (manifest || []).filter((e) => e && e.placeholder && !permitted.has(e.id)).map((e) => e.id);
 	if (!offenders.length) return;
-	throw new Error([`docs:gather: ${offenders.length} page(s) would publish as an empty "coming soon" placeholder:`, ...offenders.map((id) => `  /${id}`), 'A doc id IS the public URL, so this almost always means a spine id and a file path are out of sync:', 'a page was moved or renamed without updating its id in docs/docusaurus/scripts/lib/spine.js, or a spine', 'id was changed without moving the file under docs/. Fix whichever is wrong so the two match.', 'If a stub page really is intended, add its id to EXPECTED_PLACEHOLDERS in docs/docusaurus/scripts/lib/gather.js.'].join('\n'));
+	throw new Error(
+		[
+			`docs:gather: ${offenders.length} page(s) would publish as an empty "coming soon" placeholder:`,
+			...offenders.map((id) => `  /${id}`),
+			'A doc id IS the public URL, so this almost always means a spine id and a file path are out of sync:',
+			'a page was moved or renamed without updating its id in docs/docusaurus/scripts/lib/spine.js, or a spine',
+			'id was changed without moving the file under docs/. Fix whichever is wrong so the two match.',
+			'If a stub page really is intended, add its id to EXPECTED_PLACEHOLDERS in ' +
+				'docs/docusaurus/scripts/lib/gather.js.',
+		].join('\n')
+	);
 }
 
-module.exports = { gather, docIdFor, pageDescription, stampLastUpdate, assertNoUnexpectedPlaceholders, EXPECTED_PLACEHOLDERS };
+module.exports = {
+	gather,
+	docIdFor,
+	pageDescription,
+	stampLastUpdate,
+	assertNoUnexpectedPlaceholders,
+	EXPECTED_PLACEHOLDERS,
+};

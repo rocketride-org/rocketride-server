@@ -691,7 +691,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 				title={createMode ? (createName.trim() || 'New table') : table}
 				subtitle={
 					pendingCount > 0
-						? `${pendingCount} pending change${pendingCount === 1 ? '' : 's'} — review on the DDL page, then Apply`
+						? `${pendingCount} pending change${pendingCount === 1 ? '' : 's'}: review on the DDL page, then Apply`
 						: 'No pending changes'
 				}
 				actions={
@@ -810,7 +810,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 													</tr>
 												))}
 												{columns.length === 0 && (
-													<tr><td style={styles.td} colSpan={5}>No columns yet — add the first one on the right.</td></tr>
+													<tr><td style={styles.td} colSpan={5}>No columns yet. Add the first one on the right.</td></tr>
 												)}
 											</tbody>
 										</table>
@@ -1007,7 +1007,7 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 											<span style={commonStyles.textMuted}>
 												{createMode
 													? 'Name the table and add at least one column to generate its CREATE TABLE.'
-													: 'No pending changes — stage edits on the Columns or Foreign Keys pages.'}
+													: 'No pending changes. Stage edits on the Columns or Foreign Keys pages.'}
 											</span>
 										)}
 									</Card>

@@ -25,6 +25,6 @@
 
 namespace ap::async::work {
 
-Executor &globalExecutor() noexcept;
+ROCKETRIDE_CORE_API Executor &globalExecutor() noexcept;
 
 }  // namespace ap::async::work

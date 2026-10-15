@@ -1415,7 +1415,7 @@ export function createTestEngine(): TestEngine {
 					makeEvent(
 						'chaos',
 						label,
-						`Server-side kill (${cfg.killProbability}% roll) — terminating pipeline`,
+						`Server-side kill (${cfg.killProbability}% roll), terminating pipeline`,
 					),
 				);
 				// Real server-side terminate

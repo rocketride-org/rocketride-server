@@ -41,11 +41,11 @@ export const sidebarFrameEntry: IGalleryEntry = {
 	name: 'Sidebar frame',
 	group: 'chrome',
 	blurb: 'The shell-owned sidebar container: fixed Header and Footer around one scrolling app-content slot, filled via the AppLayout sidebar prop.',
-	doc: `The frame is three vertical zones. **Header** (brand + app label) and **Footer** (user card + menu) belong to the shell; the **slot** between them is the one app-fillable region — the \`sidebar\` prop of the app's root \`<AppLayout>\`, filled with stock components (\`SidebarMenu\`, \`Explorer\`) plus custom sections.
+	doc: `The frame is three vertical zones. **Header** (brand + app label) and **Footer** (user card + menu) belong to the shell; the **slot** between them is the one app-fillable region: the \`sidebar\` prop of the app's root \`<AppLayout>\`, filled with stock components (\`SidebarMenu\`, \`Explorer\`) plus custom sections.
 
-Sizing: 260px expanded, 56px icon rail, drag-resizable. No \`sidebar\` prop = a one-column app with no sidebar at all — the client area spans full width.
+Sizing: 260px expanded, 56px icon rail, drag-resizable. No \`sidebar\` prop = a one-column app with no sidebar at all; the client area spans full width.
 
-**Collapsed is still mounted** — on the icon rail the slot keeps rendering and components read \`useSidebarCollapsed()\` to choose their icon form.`,
+**Collapsed is still mounted**: on the icon rail the slot keeps rendering and components read \`useSidebarCollapsed()\` to choose their icon form.`,
 	docNote: 'Apps never mount, fill, or restyle the Header and Footer. Memoize the sidebar node - an inline node re-registers every render.',
 	demo: SidebarFrameDemo,
 	code: `import { useMemo, useState } from 'react';

@@ -25,12 +25,50 @@
 
 namespace ap::async {
 
-// Single definition to avoid duplicate thread-local init symbols when linking
-// (e.g. classify wrapper dylib on macOS).
-thread_local Variant<std::monostate, ThreadCtx *, ThreadCtx>
-    ThreadApi::m_thisCtx = {};
+// The context thread holds the thread name, and its cancellation flag.
+namespace {
+thread_local Variant<std::monostate, ThreadCtx *, ThreadCtx> g_thisCtx = {};
+}  // namespace
+
+ThreadCtx *ThreadApi::thisCtx(TextView name, bool markReady) noexcept {
+    return _visit(
+        overloaded{// Caller of the thread supplied a context ptr on start
+                   [](ThreadCtx *ctx) noexcept { return ctx; },
+                   // We already implicitly instantiated a thread context
+                   [](ThreadCtx &ctx) noexcept { return &ctx; },
+                   // No context was set by a spawning thread, implicitly
+                   // instantiate one
+                   // using the variant to hold it
+                   [&](std::monostate) noexcept {
+                       return &g_thisCtx.emplace<ThreadCtx>(_location, name,
+                                                            markReady);
+                   }},
+        g_thisCtx);
+}
+
+bool ThreadApi::hasCtx() noexcept {
+    return _visit(
+        overloaded{[](ThreadCtx *ctx) noexcept { return ctx->isReady(); },
+                   [](ThreadCtx &ctx) noexcept { return ctx.isReady(); },
+                   [&](std::monostate) noexcept { return false; }},
+        g_thisCtx);
+}
+
+void ThreadApi::setThisCtx(Variant<std::monostate, ThreadCtx *> ctx) noexcept {
+    _visit([&](auto &ctx) noexcept { g_thisCtx = ctx; }, ctx);
+}
 
 Opt<async::Thread> g_failsafe;
+
+Atomic<bool> &globalCancelFlag() noexcept {
+    static Atomic<bool> flag;
+    return flag;
+}
+
+Atomic<time::Duration> &globalCancelFailsafe() noexcept {
+    static Atomic<time::Duration> duration{10s};
+    return duration;
+}
 
 void globalCancel() noexcept {
     // See if we're first

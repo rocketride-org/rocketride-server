@@ -73,9 +73,9 @@ export const sidebarFooterEntry: IGalleryEntry = {
 	name: 'SidebarFooter',
 	group: 'sidebar',
 	blurb: 'The unified sidebar footer: announcements ticker, optional Documentation link, the user card (or rocket branding when anonymous), and a popup menu with flyout submenus.',
-	doc: `One footer for every host — the cloud shell and the VS Code sidebar render the same component with host-specific \`menuItems\`. The trigger row shows avatar + name/email when signed in and rocket branding when not; clicking it opens a portalled popup with click-to-open flyout submenus, checkmarks for radio-style choices, status rows with connection dots, and section headers.
+	doc: `One footer for every host: the cloud shell and the VS Code sidebar render the same component with host-specific \`menuItems\`. The trigger row shows avatar + name/email when signed in and rocket branding when not; clicking it opens a portalled popup with click-to-open flyout submenus, checkmarks for radio-style choices, status rows with connection dots, and section headers.
 
-In the hosted cloud the SHELL renders it inside the sidebar frame — apps only meet it directly when building a standalone host's sidebar.`,
+In the hosted cloud the SHELL renders it inside the sidebar frame; apps only meet it directly when building a standalone host's sidebar.`,
 	knobs: [
 		{ id: 'collapsed', label: 'Collapsed', kind: 'boolean', defaultValue: false },
 		{ id: 'userName', label: 'User name', kind: 'text', defaultValue: 'Rod Christensen' },

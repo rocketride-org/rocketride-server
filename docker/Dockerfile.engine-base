@@ -1,0 +1,142 @@
+# ---------------------------------------------------------------------------
+# Dockerfile.engine-base — the engine, verified, with its Python baseline
+#
+# MIT License
+# Copyright (c) 2026 RocketRide
+#
+# The shared base of the server image (Dockerfile.engine) and the node image
+# (Dockerfile.node). Runtime stage only: the engine arrives prebuilt in
+# dist/server, from a release archive or a local Linux build. No ENTRYPOINT;
+# the images built from it choose their own.
+#
+#   docker build -f docker/Dockerfile.engine-base -t rocketride/engine-base:<version> .
+# ---------------------------------------------------------------------------
+
+# The tree gets its final ownership here and lands in one layer below. Changing
+# ownership in a later layer copies every file it touches: libengine.so alone is
+# 230 MB. Execute-only layout (rocketride-saas#741): top-level files go to root,
+# so uid 1000 cannot replace the engine; the rest stays uid 1000's, for the
+# installs a run makes. First-run wheel installs write headers into include/.
+FROM ubuntu:jammy-20240808@sha256:adbb90115a21969d2fe6fa7f9af4253e16d45f8d4c1e930182610c4731962658 AS tree
+COPY dist/server/ /opt/rocketride/
+# The engine starts crashpad_handler on every run, the build's own runs included;
+# once root owns it, uid 1000 needs the execute bit, which the source may lack.
+RUN chown -R 1000:1000 /opt/rocketride \
+ && find /opt/rocketride -maxdepth 1 -type f -exec chown 0:0 {} + \
+ && chmod 0711 /opt/rocketride/crashpad_handler \
+ && chmod -R a+rwX /opt/rocketride/include
+# depends() keys the shipped constraints.txt on the requirement files' path, size
+# and mtime in nanoseconds. Image layers keep whole seconds, so a hash taken
+# during the build never matches in a container and every run recompiles. Drop
+# the fraction here, where the build still sees it.
+RUN find /opt/rocketride \( -name 'requirement*.txt' -o -name 'overrides.txt' \) -type f \
+    | while read -r f; do touch -d "@$(stat -c %Y "$f")" "$f"; done
+
+FROM ubuntu:jammy-20240808@sha256:adbb90115a21969d2fe6fa7f9af4253e16d45f8d4c1e930182610c4731962658
+
+# tini: PID 1 for a process that spawns uv and the engine's own children.
+# libgomp/libgles2/libegl1: engine and node runtime. The libGL/libxcb set is
+# what opencv (cv2, OCR) loads; without it OCR dies at 0/N with
+# "libxcb.so.1: cannot open shared object file".
+# No libc++ from apt: the engine is built against clang 18's and finds it in
+# ./lib through its RUNPATH. jammy's is 14, and would hide a missing one.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       tini \
+       ca-certificates \
+       curl \
+       libgomp1 \
+       libgles2 \
+       libegl1 \
+       libgl1 \
+       libglib2.0-0 \
+       libsm6 \
+       libxext6 \
+       libxrender1 \
+       libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# uid 1000 matches the k8s securityContext.
+RUN useradd --create-home --uid 1000 rocketride
+
+COPY --from=tree /opt/rocketride /opt/rocketride
+# The sticky, group-writable root: uid 1000 can create what installs need there
+# (uv writes <prefix>/share) but cannot rename or replace root's files.
+RUN chown root:rocketride /opt/rocketride && chmod 1775 /opt/rocketride
+# Every task's paths.base (CONST_TASK_DATA_PATH, <engine>/../data). root owns
+# /opt, so without this no task can start in an image built from the base.
+RUN mkdir /opt/data && chown rocketride:rocketride /opt/data
+
+# Fail closed: find's result goes into a plain assignment, so an error from find
+# itself aborts the build instead of passing an unscanned tree.
+RUN leaks=$(find /opt/rocketride -name '.env' -print) \
+    && if [ -n "$leaks" ]; then \
+         echo "FATAL: .env leaked into the image:"; \
+         echo "$leaks"; exit 1; \
+       fi
+
+WORKDIR /opt/rocketride
+USER rocketride
+
+# Tripwire: the engine must LOAD. libc++.so.1, libc++abi.so.1 and libunwind.so.1
+# are not in the binary; the builder's `server:setup-runtime-libs` stages them
+# into dist/server/lib, and only on the compile path. A tree without them builds
+# and pushes green and exits 127 in the pod:
+#
+#   ./engine: error while loading shared libraries: libc++.so.1: cannot open ...
+#
+# After USER on purpose: root bypasses permission checks, so a tree only root
+# can read would pass here and fail in the pod. No LD_LIBRARY_PATH for the same
+# reason: the check passes on the terms the runtime gives it (RUNPATH) or not at
+# all.
+#
+# `ldd` goes into a plain assignment, not a pipe: /bin/sh has no pipefail, so
+# a failing ldd in a pipeline would leave the result empty and pass. C++ nodes
+# are libraries that resolve libengine.so and libc++ through the engine's
+# directory, so they are checked too. ldd reports names, not whether the loader
+# brings the process up, so the engine is also run.
+RUN set -eu; \
+    for elf in ./engine ./libengine.so $(find nodes -name '*.so' -type f); do \
+      deps=$(ldd "$elf"); \
+      missing=$(echo "$deps" | grep 'not found' || true); \
+      if [ -n "$missing" ]; then \
+        echo "FATAL: $elf has unresolved shared libraries:"; \
+        echo "$missing"; \
+        echo "The prebuilt engine shipped without its runtime libs."; \
+        exit 1; \
+      fi; \
+    done; \
+    ./engine -c 'print("engine loads")'
+
+# The backend baseline, installed rather than cached: nodes/requirements.txt
+# ("common to all python modules") plus what the run's own startup imports.
+# Identical for every run, so an install per container would buy nothing.
+#
+# depends() compiles every requirement file into cache/constraints.txt first.
+# That resolution ships: it was made here, from this image's own tree, so it is
+# this image's lock, and a run whose files are unchanged reuses it (the hash is
+# path, size and mtime) instead of recompiling against whatever PyPI holds that
+# day. A host-compiled one never ships (.dockerignore). The verdicts and the
+# lock file describe one installed set and one process, so they go.
+RUN ./engine -c "from depends import depends; depends('nodes/requirements.txt'); import ai.web" \
+    && rm -rf /opt/rocketride/cache/satisfied /opt/rocketride/cache/install.lock /home/rocketride/.cache \
+    && test -s /opt/rocketride/cache/constraints.txt
+
+# Execute-only engine binaries (rocketride-saas#741). A process started from a
+# binary its user cannot read is non-dumpable from exec, so its /proc/<pid>/*
+# (environ included) is root-only for its whole life. Not covered: a program a
+# task execs from a readable binary (uv, ffmpeg...) is dumpable again after
+# execve. Here and not in the tree stage because the tripwire above reads the
+# engine. tini gets the same: it is PID 1 and holds the full container env.
+# REQUIRES the container to drop capabilities (capabilities.drop [ALL]): with
+# DAC_OVERRIDE/DAC_READ_SEARCH at exec the binary counts as readable. Measured
+# 2026-09-24: PID-1 environ readable under Docker's default caps, root-only with
+# --cap-drop ALL. No Crashpad or core dumps from these processes.
+USER root
+RUN chmod 0711 /opt/rocketride/engine /opt/rocketride/crashpad_handler /usr/bin/tini
+USER rocketride
+RUN test ! -r /opt/rocketride/engine \
+ && test ! -r /usr/bin/tini \
+ && ! mv /opt/rocketride/engine /opt/rocketride/engine.swap 2>/dev/null \
+ && mkdir /opt/rocketride/.install-probe && rmdir /opt/rocketride/.install-probe \
+ && ./engine -c 'import os; assert os.stat("/proc/self/environ").st_uid == 0, "engine is dumpable"; print("engine runs non-dumpable")'

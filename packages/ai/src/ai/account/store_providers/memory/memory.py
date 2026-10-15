@@ -26,7 +26,7 @@ import re
 from typing import Optional
 import posixpath
 
-from ...store import IStore, StorageError, VersionMismatchError
+from ...store import IStore, StorageError, StorageNotFoundError, VersionMismatchError
 
 
 class MemoryStore(IStore):
@@ -51,13 +51,13 @@ class MemoryStore(IStore):
     async def read_file(self, filename: str) -> str:
         filename = _check_path(filename)
         if filename not in self._files:
-            raise StorageError(f'File not found: {filename}')
+            raise StorageNotFoundError(f'File not found: {filename}')
         return self._files[filename]
 
     async def read_file_with_metadata(self, filename: str) -> tuple:
         filename = _check_path(filename)
         if filename not in self._files:
-            raise StorageError(f'File not found: {filename}')
+            raise StorageNotFoundError(f'File not found: {filename}')
         return self._files[filename], str(self._versions[filename])
 
     async def write_file_atomic(self, filename: str, data: str, expected_version: Optional[str] = None) -> str:
@@ -77,7 +77,7 @@ class MemoryStore(IStore):
     async def delete_file(self, filename: str, expected_version: Optional[str] = None) -> None:
         filename = _check_path(filename)
         if filename not in self._files:
-            raise StorageError(f'File not found: {filename}')
+            raise StorageNotFoundError(f'File not found: {filename}')
         if expected_version is not None:
             current = str(self._versions[filename])
             if current != expected_version:

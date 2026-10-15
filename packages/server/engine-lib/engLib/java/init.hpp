@@ -47,6 +47,14 @@ inline auto jreDirectory() noexcept { return rootDir() / "jre/bin/server"; }
 typedef std::function<void(Jni &)> DeinitCallback;
 
 //-------------------------------------------------------------------------
+/// @details
+///		Add a callback that will be called when the JVM is deinitialized
+///	@param[in]	callback
+///		The callback to call
+///------------------------------------------------------------------------
+ROCKETRIDE_CORE_API void addDeinitCallback(DeinitCallback callback) noexcept;
+
+//-------------------------------------------------------------------------
 // Everyone here uses Jvm
 //------------------------------------------------------------------------
 typedef JavaVM Jvm;
@@ -104,16 +112,16 @@ void registerNativeCallback(jclass clazz,
                             const JNINativeMethod &method) noexcept(false);
 void registerNativeCallback(const char *className,
                             const JNINativeMethod &method) noexcept(false);
-void registerNativeCallbacks(const char *className,
-                             const JNINativeMethod *functionTable,
-                             size_t functionCount) noexcept(false);
+ROCKETRIDE_CORE_API void registerNativeCallbacks(
+    const char *className, const JNINativeMethod *functionTable,
+    size_t functionCount) noexcept(false);
 ErrorOr<Jvm *> getJvm() noexcept;
-ErrorOr<Jni *> getJni(bool detachable = false) noexcept;
+ROCKETRIDE_CORE_API ErrorOr<Jni *> getJni(bool detachable = false) noexcept;
 ErrorOr<JNIEnv *> getEnv(bool detachable = false) noexcept;
 bool isJava() noexcept;
 Error execJava() noexcept;
 
-Error init() noexcept;
+ROCKETRIDE_CORE_API Error init() noexcept;
 bool initialized() noexcept;
 void deinit() noexcept;
 }  // namespace engine::java

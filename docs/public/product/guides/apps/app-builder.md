@@ -31,6 +31,9 @@ the same loop runs from a terminal or CI.
   only apps inside that namespace. Until the prefix of your app's id
   matches, the Deploy tab is read-only with a banner; the fix is to rename
   the id in `package.json`. Design and Package always work.
+- Catalog nodes only, if the app is headed for the store. Pipelines in a
+  store app use the nodes that ship with the engine and nothing else; see
+  [Adding a pipeline to your app](#adding-a-pipeline-to-your-app).
 
 ## The loop
 
@@ -106,6 +109,16 @@ Two verbs, and they are not the same:
   the same move: repoint, never rebuild. There is no org-wide rung; an
   org-wide audience is a team your admin maintains.
 
+A deploy returns as soon as the server accepts the upload; the version
+can be published, and served, only once its server build finishes. The
+version card shows the build's progress (`queued`, `building`, …) until
+then. Once you publish, **Where this app is live** on the Deploy tab shows
+what a browser in each audience actually gets: `serving`, or why not
+(`not serving: still building`, `not serving: build failed`, `disabled`,
+`in review`). The dashboard says which version you would get right now.
+Every open App Builder updates when a build lands or anyone in your
+organization publishes or disables a version.
+
 A deploy packs the app folder plus any folders listed under
 `appManifest.include`, and nothing else. Every `include` entry must exist.
 
@@ -125,6 +138,16 @@ There are two ways, and they are different features. See
 [Apps and pipelines](/concepts/apps#apps-and-pipelines) for the idea; this
 is the how-to.
 
+Either way, a pipeline in an app you intend to publish to the store may use
+catalog nodes only: the nodes that ship with the engine, listed in the
+[node catalog](/nodes). A custom node exists only on the engine that loads
+it; RocketRide Cloud loads none, and a few catalog nodes are marked
+unavailable there. Store reviewers reject a pipeline that references
+anything else, and no preflight warns you first. If a step has no catalog
+node, keep that logic in the app, or give an agent step bounded Python
+through the `tool_python` node; ask for a catalog node only for a step
+that must run inside the engine, rather than building one for the app.
+
 ### Inside the app: runs per user, on demand
 
 Put the `.pipe` file in the app folder and import it. The scaffold's build
@@ -140,8 +163,16 @@ const { token } = await client.use({ pipeline: summarizer, useExisting: true });
 
 Every signed-in user gets their own instance. Start it once per session and
 keep the token; `useExisting: true` re-attaches after a reload instead of
-failing because the pipeline is already running. The pipeline ships with the
-app on deploy. Use this for work that happens when the user asks for it.
+failing because the pipeline is already running. To run two instances for the
+same user at once, give each `use()` its own unguessable `token` (keep the
+`tk_` prefix). The instance stops by itself after about `ttl` seconds with
+no pipeline data request and no pipeline activity event (`apaevt_*`).
+The default is 15 minutes; `ttl: 0` disables the timeout. Status polling
+and raw stdout/debugger events do not reset the timer. The check runs once
+a minute, so the stop can come up to a minute early. The pipeline ships
+with the app on deploy. Use this for work that happens when the user
+asks for it; it is the default, and the right choice unless the pipeline is
+a service shared by a whole team.
 
 ### Outside the app: shared, on a schedule
 
@@ -161,16 +192,29 @@ import nightly from '../../../pipelines/nightly-report.pipe'; // identity only
 const projectId = String(nightly.project_id);
 ```
 
-Outside its schedule window there is no running instance and no token.
-That is the normal state, not an error; show the feature as offline and
-check again later. Deploying the app does not carry this pipeline, so
-deploy it on its own whenever it changes.
+When no run is active, there is no token. That is a normal state, not an
+error; show the feature as offline and check again later. A cron start and
+`ttl` do not define fixed opening hours: pipeline data requests extend a
+scheduled run's timeout, and a manual run has no timeout. Deploying the
+app does not carry this pipeline, so deploy it on its own whenever it
+changes.
+
+Deployed runs do not inherit the default development idle timeout. To
+limit a scheduled run, configure `--ttl`: it stops after approximately
+that many seconds without a pipeline data request. Emitted events do not
+reset this timer, so a long processing step can still be interrupted.
+An omitted or zero `ttl` disables the timeout. `rocketride deploy run`
+starts a manual run without a timeout, even when a schedule is set. A
+long-lived pipeline started this way can keep running and billing until
+it finishes or someone terminates it. Use a schedule with `ttl` when you
+need the automatic timeout.
 
 | | Inside the app | Outside the app |
 | --- | --- | --- |
 | Where the `.pipe` lives | in the app folder | its own project |
 | Who runs it | one instance per signed-in user | one instance for the team |
 | When it runs | when the app asks | on its schedule |
+| When it stops | finishes, is terminated, or reaches its activity timeout (`ttl`) | finishes, is terminated, or reaches a scheduled run's configured timeout; manual runs have no timeout |
 | How it deploys | with the app | separately, `rocketride deploy` |
 
 ## Next steps

@@ -420,7 +420,7 @@ export class ConfigManager {
 				try {
 					new URL(RocketRideClient.normalizeUri(gc.hostUrl));
 					if (!isSecureCloudTarget(gc.hostUrl)) {
-						errors.push(`${label}: Cloud URL must use https — http is allowed only for localhost development targets`);
+						errors.push(`${label}: Cloud URL must use https; http is allowed only for localhost development targets`);
 					}
 				} catch {
 					errors.push(`${label}: Cloud URL must be a valid URL (e.g., https://api.rocketride.ai)`);

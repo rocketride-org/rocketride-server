@@ -30,65 +30,34 @@ namespace engine::store {
 ///		factories
 //-------------------------------------------------------------------------
 void deinit() noexcept {
-    filter::s3::deinit();
-
     // Register our command factories
     Factory::deregisterFactory(
         // Instances
         filter::bottom::IFilterInstance::Factory,
-        filter::classify::IFilterInstance::Factory,
-        filter::indexer::IFilterInstance::Factory,
-        filter::hash::IFilterInstance::Factory,
-        filter::parse::IFilterInstance::Factory,
         filter::pipe::IFilterInstance::Factory,
 
         filter::null::IFilterInstance::Factory,
         filter::filesys::filesys::IFilterInstance::Factory,
         filter::filesys::smb::IFilterInstance::Factory,
-        filter::objstore::IFilterInstance::Factory,
-        filter::s3::IFilterInstance::Factory,
-        filter::azure::IFilterInstance::Factory,
         filter::zip::IFilterInstance::Factory,
         filter::python::IFilterInstance::Factory,
-        filter::sharepoint::IFilterInstance::Factory,
-        // Outlook - enterprise and personal variants
-        filter::outlook::IFilterInstance::FactoryEnterprise,
-        filter::outlook::IFilterInstance::FactoryPersonal,
 
         // Global data
         filter::bottom::IFilterGlobal::Factory,
-        filter::classify::IFilterGlobal::Factory,
-        filter::indexer::IFilterGlobal::Factory,
-        filter::hash::IFilterGlobal::Factory,
-        filter::parse::IFilterGlobal::Factory,
         filter::pipe::IFilterGlobal::Factory,
 
         filter::null::IFilterGlobal::Factory,
         filter::filesys::filesys::IFilterGlobal::Factory,
         filter::filesys::smb::IFilterGlobal::Factory,
-        filter::objstore::IFilterGlobal::Factory,
-        filter::s3::IFilterGlobal::Factory,
-        filter::azure::IFilterGlobal::Factory,
         filter::zip::IFilterGlobal::Factory,
         filter::python::IFilterGlobal::Factory,
-        filter::sharepoint::IFilterGlobal::Factory,
-        // Outlook - enterprise and personal variants
-        filter::outlook::IFilterGlobal::FactoryEnterprise,
-        filter::outlook::IFilterGlobal::FactoryPersonal,
 
         // Endpoints
         filter::null::IFilterEndpoint::Factory,
         filter::filesys::filesys::IFilterEndpoint::Factory,
         filter::filesys::smb::IFilterEndpoint::Factory,
-        filter::objstore::IFilterEndpoint::Factory,
-        filter::s3::IFilterEndpoint::Factory,
-        filter::azure::IFilterEndpoint::Factory,
         filter::zip::IFilterEndpoint::Factory,
-        filter::python::IFilterEndpoint::Factory,
-        filter::sharepoint::IFilterEndpoint::Factory,
-        // Outlook - enterprise and personal variants
-        filter::outlook::IFilterEndpoint::FactoryEnterprise,
-        filter::outlook::IFilterEndpoint::FactoryPersonal);
+        filter::python::IFilterEndpoint::Factory);
 
     // Deinit the services controllers
     IServices::deinit();
@@ -100,8 +69,6 @@ void deinit() noexcept {
 ///		factories
 //-------------------------------------------------------------------------
 Error init() noexcept {
-    filter::s3::init();
-
     // Init the service controllers
     if (auto ccode = IServices::init()) return ccode;
 
@@ -109,59 +76,30 @@ Error init() noexcept {
     if (auto ccode = Factory::registerFactory(
             // Instances
             filter::bottom::IFilterInstance::Factory,
-            filter::classify::IFilterInstance::Factory,
-            filter::indexer::IFilterInstance::Factory,
-            filter::hash::IFilterInstance::Factory,
-            filter::parse::IFilterInstance::Factory,
             filter::pipe::IFilterInstance::Factory,
 
             filter::null::IFilterInstance::Factory,
             filter::filesys::filesys::IFilterInstance::Factory,
             filter::filesys::smb::IFilterInstance::Factory,
-            filter::objstore::IFilterInstance::Factory,
-            filter::s3::IFilterInstance::Factory,
-            filter::azure::IFilterInstance::Factory,
             filter::zip::IFilterInstance::Factory,
             filter::python::IFilterInstance::Factory,
-            filter::sharepoint::IFilterInstance::Factory,
-            // Outlook - enterprise and personal variants
-            filter::outlook::IFilterInstance::FactoryEnterprise,
-            filter::outlook::IFilterInstance::FactoryPersonal,
 
             // Global data
             filter::bottom::IFilterGlobal::Factory,
-            filter::classify::IFilterGlobal::Factory,
-            filter::indexer::IFilterGlobal::Factory,
-            filter::hash::IFilterGlobal::Factory,
-            filter::parse::IFilterGlobal::Factory,
             filter::pipe::IFilterGlobal::Factory,
 
             filter::null::IFilterGlobal::Factory,
             filter::filesys::filesys::IFilterGlobal::Factory,
             filter::filesys::smb::IFilterGlobal::Factory,
-            filter::objstore::IFilterGlobal::Factory,
-            filter::s3::IFilterGlobal::Factory,
-            filter::azure::IFilterGlobal::Factory,
             filter::zip::IFilterGlobal::Factory,
             filter::python::IFilterGlobal::Factory,
-            filter::sharepoint::IFilterGlobal::Factory,
-            // Outlook - enterprise and personal variants
-            filter::outlook::IFilterGlobal::FactoryEnterprise,
-            filter::outlook::IFilterGlobal::FactoryPersonal,
 
             // Endpoints
             filter::null::IFilterEndpoint::Factory,
             filter::filesys::filesys::IFilterEndpoint::Factory,
             filter::filesys::smb::IFilterEndpoint::Factory,
-            filter::objstore::IFilterEndpoint::Factory,
-            filter::s3::IFilterEndpoint::Factory,
-            filter::azure::IFilterEndpoint::Factory,
             filter::zip::IFilterEndpoint::Factory,
-            filter::python::IFilterEndpoint::Factory,
-            filter::sharepoint::IFilterEndpoint::Factory,
-            // Outlook - enterprise and personal variants
-            filter::outlook::IFilterEndpoint::FactoryEnterprise,
-            filter::outlook::IFilterEndpoint::FactoryPersonal)) {
+            filter::python::IFilterEndpoint::Factory)) {
         store::deinit();
         return ccode;
     }

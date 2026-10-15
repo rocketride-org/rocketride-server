@@ -51,25 +51,47 @@
  * entry (`nodes:build` calls the writing form; CI/local review calls
  * `--check`).
  *
- * Discovery and parsing intentionally mirror gen-node-tables.mjs (services
- * file glob, comment-tolerant JSON), extended with trailing-comma tolerance
- * since some services*.json authors leave them in.
+ * Discovery intentionally mirrors gen-node-tables.mjs (services file glob).
  */
 
-import { readFileSync, readdirSync, existsSync, writeFileSync } from 'fs';
+import { readdirSync, existsSync, writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readJsonSync } from '../../scripts/lib/fs.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.join(HERE, '..', 'src', 'nodes');
-const DEFAULT_CATALOG = path.join(HERE, '..', '..', 'packages', 'ai', 'src', 'ai', 'modules', 'mcp', 'credentials.json');
+const DEFAULT_CATALOG = path.join(
+	HERE,
+	'..',
+	'..',
+	'packages',
+	'ai',
+	'src',
+	'ai',
+	'modules',
+	'mcp',
+	'credentials.json'
+);
 
 // Same token list as packages/ai/src/ai/modules/mcp/credentials.py:_GENERIC_TOKENS.
 // JS can't import the Python constant, so this is a deliberate duplicate —
 // keep the two lists in sync by hand.
 const GENERIC_TOKENS = new Set([
-	'store', 'tool', 'db', 'graph', 'llm', 'embedding', 'memory', 'search',
-	'rerank', 'vision', 'cloud', 'api', 'agent', 'eval',
+	'store',
+	'tool',
+	'db',
+	'graph',
+	'llm',
+	'embedding',
+	'memory',
+	'search',
+	'rerank',
+	'vision',
+	'cloud',
+	'api',
+	'agent',
+	'eval',
 ]);
 
 // A key is credential-shaped iff it looks like a secret AND is not one of
@@ -81,32 +103,9 @@ function isCredentialKey(key) {
 	return CREDENTIAL_RE.test(key) && !TOKEN_COUNT_RE.test(key);
 }
 
-/** Comment- and trailing-comma-tolerant JSON read (services*.json is JSON5-ish). */
-function readJsonTolerant(filepath) {
-	let text;
-	try {
-		text = readFileSync(filepath, 'utf8');
-	} catch (e) {
-		console.error(`Error reading ${filepath}:`, e.message);
-		return null;
-	}
-	// Strip comments (same approach as gen-node-tables.mjs's readJsonSilently).
-	text = text.replace(/^[ \t]*\/\/.*$/gm, '');
-	text = text.replace(/(?<!:)\/\/.*$/gm, '');
-	text = text.replace(/\/\*[\s\S]*?\*\//g, '');
-	// Strip trailing commas before a closing bracket/brace.
-	text = text.replace(/,(\s*[}\]])/g, '$1');
-	try {
-		return JSON.parse(text);
-	} catch (e) {
-		console.error(`Error parsing JSON at ${filepath}:`, e.message);
-		return null;
-	}
-}
-
 /** The protocol-derived service name for a parsed services*.json, or null if it doesn't declare one. */
 function serviceNameOf(data) {
-	if (!data || typeof data.protocol !== 'string' || !data.protocol.endsWith('://')) return null;
+	if (typeof data.protocol !== 'string' || !data.protocol.endsWith('://')) return null;
 	const name = data.protocol.slice(0, -3);
 	return name || null;
 }
@@ -159,8 +158,7 @@ function scan(root) {
 		if (!files.length) continue;
 
 		for (const filename of files) {
-			const data = readJsonTolerant(path.join(dir, filename));
-			if (!data || typeof data !== 'object') continue;
+			const data = readJsonSync(path.join(dir, filename));
 			const serviceName = serviceNameOf(data);
 			if (!serviceName) continue; // no protocol -> not a registrable service (e.g. shared field fragments)
 			knownServices.add(serviceName);
@@ -229,7 +227,8 @@ function reconcile(existing, scanned, knownServices) {
 
 	const serviceNames = new Set([...Object.keys(existing), ...scanned.keys()]);
 	for (const serviceName of serviceNames) {
-		const existingNode = existing[serviceName] && typeof existing[serviceName] === 'object' ? existing[serviceName] : null;
+		const existingNode =
+			existing[serviceName] && typeof existing[serviceName] === 'object' ? existing[serviceName] : null;
 		const existingFields = existingNode && Array.isArray(existingNode.fields) ? existingNode.fields : [];
 		const existingPaths = new Set(existingFields.map((f) => f && f.path));
 		const detected = scanned.get(serviceName); // Map<path, rawKey> | undefined
@@ -262,7 +261,9 @@ function reconcile(existing, scanned, knownServices) {
 		}
 
 		if (fields.length) {
-			next[serviceName] = existingNode ? { ...existingNode, title: existingNode.title || serviceName, fields } : { title: serviceName, fields };
+			next[serviceName] = existingNode
+				? { ...existingNode, title: existingNode.title || serviceName, fields }
+				: { title: serviceName, fields };
 		} else if (existingNode) {
 			next[serviceName] = existingNode; // preserve verbatim even if it has no fields
 		}
@@ -291,7 +292,7 @@ function collectWrongKeys(existing, root, knownServices) {
 		const files = readdirSync(dir).filter((f) => /^services.*\.json$/.test(f));
 		const protocols = [];
 		for (const filename of files) {
-			const data = readJsonTolerant(path.join(dir, filename));
+			const data = readJsonSync(path.join(dir, filename));
 			const serviceName = serviceNameOf(data);
 			if (serviceName) protocols.push(serviceName);
 		}
@@ -312,8 +313,7 @@ function collectReviewPending(catalog) {
 
 function readCatalog(catalogPath) {
 	if (!existsSync(catalogPath)) return {};
-	const data = readJsonTolerant(catalogPath);
-	return data && typeof data === 'object' ? data : {};
+	return readJsonSync(catalogPath);
 }
 
 function parseArgs(argv) {
@@ -339,7 +339,9 @@ function main() {
 			if (wrongKeys.length) {
 				console.log('Catalog key(s) match a node DIRECTORY name, not a protocol-derived service name:');
 				for (const { key, suggestions } of wrongKeys) {
-					const suggestion = suggestions.length ? suggestions.join(', ') : '(no protocol-bearing services*.json in that directory)';
+					const suggestion = suggestions.length
+						? suggestions.join(', ')
+						: '(no protocol-bearing services*.json in that directory)';
 					console.log(`  ${key}: use '${suggestion}' instead`);
 				}
 			}
@@ -348,7 +350,9 @@ function main() {
 				for (const { node, path: p } of added) console.log(`  ${node}: ${p}`);
 			}
 			if (stale.length) {
-				console.log(`Stale catalog entr${stale.length === 1 ? 'y' : 'ies'} (no matching detection; not auto-removed):`);
+				console.log(
+					`Stale catalog entr${stale.length === 1 ? 'y' : 'ies'} (no matching detection; not auto-removed):`
+				);
 				for (const { node, path: p } of stale) console.log(`  ${node}: ${p}`);
 			}
 			process.exitCode = 1;
@@ -356,7 +360,10 @@ function main() {
 		}
 		const pending = collectReviewPending(next);
 		if (pending.length) {
-			console.log(`Warning: ${pending.length} catalog field(s) still carry review:true (auto-generated, needs a curated name):`);
+			console.log(
+				`Warning: ${pending.length} catalog field(s) still carry review:true ` +
+					'(auto-generated, needs a curated name):'
+			);
 			for (const { node, path: p } of pending) console.log(`  ${node}: ${p}`);
 		}
 		console.log('nodes:credentials-check: catalog matches detected credential-shaped fields.');
@@ -366,7 +373,8 @@ function main() {
 	writeFileSync(args.catalog, JSON.stringify(next, null, 2) + '\n');
 	console.log(
 		`nodes:credentials-generate wrote ${Object.keys(next).length} node(s): ` +
-		`${added.length} new field(s) appended, ${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'} kept (not removed).`,
+			`${added.length} new field(s) appended, ` +
+			`${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'} kept (not removed).`
 	);
 }
 

@@ -65,7 +65,15 @@ account: Account = Account()
 # Re-export supporting subsystems so callers only need one import.
 from .keystore import KeyStore
 from .report import Reporter
-from .store import Store, IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS, LOG_PAGE_SIZE
+from .store import (
+    Store,
+    IStore,
+    StorageError,
+    StorageNotFoundError,
+    VersionMismatchError,
+    STORE_MAX_RETRY_ATTEMPTS,
+    LOG_PAGE_SIZE,
+)
 from .models import AccountInfo, RequestContext, resolve_team_permissions
 
 __all__ = [
@@ -79,6 +87,7 @@ __all__ = [
     'RequestContext',
     'IStore',
     'StorageError',
+    'StorageNotFoundError',
     'VersionMismatchError',
     'STORE_MAX_RETRY_ATTEMPTS',
     'LOG_PAGE_SIZE',

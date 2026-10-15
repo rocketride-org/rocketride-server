@@ -36,10 +36,10 @@ export const workspacePrefsEntry: IGalleryEntry = {
 	blurb: 'Per-app persisted state: useWorkspace for the full workspace context (prefs, appState, settings, app switching) and usePrefs for the minimal get/set accessor.',
 	doc: `Two layers, one file behind them:
 
-- **\`usePrefs()\`** — the small surface most components want: \`getPref(key)\` / \`setPref(key, value)\` against the active app's prefs bag. It is the ONE prefs API every app and shared surface reads and writes through; with no provider mounted it degrades to a no-op accessor.
-- **\`useWorkspace()\`** — the full context: \`prefs\`/\`updatePrefs\`, the opaque \`appState\` + \`updateAppState\` pair (what \`Documents\` persists through), effective \`settings\` with \`updateSetting\` (delta-only against declared defaults), the app manifest with lazy descriptor loading, theme switching, and the workspace event bus. Throws outside its provider.
+- **\`usePrefs()\`** is the small surface most components want: \`getPref(key)\` / \`setPref(key, value)\` against the active app's prefs bag. It is the ONE prefs API every app and shared surface reads and writes through; with no provider mounted it degrades to a no-op accessor.
+- **\`useWorkspace()\`** is the full context: \`prefs\`/\`updatePrefs\`, the opaque \`appState\` + \`updateAppState\` pair (what \`Documents\` persists through), effective \`settings\` with \`updateSetting\` (delta-only against declared defaults), the app manifest with lazy descriptor loading, theme switching, and the workspace event bus. Throws outside its provider.
 
-\`WorkspaceProvider\` / \`PrefsProvider\` are host bootstrap — hosted apps already live inside them.`,
+\`WorkspaceProvider\` / \`PrefsProvider\` are host bootstrap; hosted apps already live inside them.`,
 	docNote: 'Prefs are per-app and workspace-persisted - store view state (selected tab, collapsed sections), not data. Data lives on the server.',
 	code: `import { usePrefs, useWorkspace } from 'shell';
 

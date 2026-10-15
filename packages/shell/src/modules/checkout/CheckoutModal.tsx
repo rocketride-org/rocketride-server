@@ -425,7 +425,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 			<form onSubmit={handleSubmit}>
 				<PaymentElement options={{ wallets: walletsOption }} />
 				<button type="submit" disabled={!stripe || submitting} style={S.submitBtn(!stripe || submitting)}>
-					{submitting ? 'Processing\u2026' : `Subscribe \u2014 ${payLabel}`}
+					{submitting ? 'Processing\u2026' : `Subscribe: ${payLabel}`}
 				</button>
 			</form>
 
@@ -659,7 +659,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							<div style={S.successMark}>{'✓'}</div>
 							<h3 style={S.successTitle}>
 								{grantResult.mode === 'subscribed'
-									? 'No payment required — your plan is active.'
+									? 'No payment required. Your plan is active.'
 									: 'Code redeemed.'}
 							</h3>
 							<p style={S.successText}>
@@ -709,7 +709,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 												{appliedPromo.description}
 												{selectedPlan && (
 													<>
-														{' — '}
+														{' · '}
 														<b style={{ color: 'var(--rr-text-primary)' }}>
 															{formatCents(discountedCents(selectedPlan, appliedPromo), selectedPlan.currency)}{intervalSuffix(selectedPlan)}
 														</b>

@@ -126,8 +126,66 @@ def test_public_routes_contains_home_ui_pages():
         '/about',
         '/careers',
         '/contact',
+        '/superfans',
     ):
         assert route in PUBLIC_ROUTES
+
+
+LEGAL_PAGES = (
+    '/legal',
+    '/legal/terms',
+    '/legal/privacy-policy',
+    '/legal/dpa',
+    '/legal/acceptable-use',
+    '/legal/subprocessors',
+    '/legal/trademark-policy',
+)
+
+
+def test_legal_pages_are_public_routes_and_listed():
+    # The legal index and the six published documents serve the SPA on a hard
+    # reload and are advertised like the other pages.
+    for route in LEGAL_PAGES:
+        assert route in PUBLIC_ROUTES
+        assert route in LISTED_ROUTES
+
+
+def test_legal_routes_are_exact_paths():
+    # Only the published documents are public: no pattern, so a slug that is not
+    # a document (a typo, an unpublished slug) stays behind the auth middleware
+    # like any other unregistered path.
+    legal = [route for route in PUBLIC_ROUTES if route == '/legal' or route.startswith('/legal/')]
+    assert sorted(legal) == sorted(LEGAL_PAGES)
+    for route in legal:
+        assert '{' not in route
+    assert '/legal/not-a-document' not in PUBLIC_ROUTES
+
+
+def test_legal_index_description_mirrors_the_client_manifest():
+    # The description is the client's string (routes.ts), character for character.
+    description = dict((route, desc) for route, _, desc in PUBLIC_ROUTE_MANIFEST)['/legal']
+    assert description == (
+        'The policies and terms that govern RocketRide Cloud - each document with its version, '
+        'effective date, and latest change.'
+    )
+
+
+def test_superfans_page_is_an_exact_public_listed_route():
+    # The superfans page (routes.ts) serves the SPA on a hard reload and is
+    # advertised. One exact path: nothing below it is public.
+    assert '/superfans' in PUBLIC_ROUTES
+    assert '/superfans' in LISTED_ROUTES
+    assert [route for route in PUBLIC_ROUTES if route.startswith('/superfans')] == ['/superfans']
+
+
+def test_superfans_entry_mirrors_the_client_manifest():
+    # routes.ts title minus the ' | RocketRide' suffix; the description verbatim.
+    title, description = {route: (t, d) for route, t, d in PUBLIC_ROUTE_MANIFEST}['/superfans']
+    assert title == 'Superfans'
+    assert description == (
+        'The developers who build with RocketRide and tell us the truth. Earn early builds, '
+        'a hand on the roadmap, and artifacts you can only be given.'
+    )
 
 
 def test_mcp_api_paths_are_not_shell_pages():
@@ -257,6 +315,58 @@ def test_llms_lists_all_pages_with_absolute_urls(app_url):
     assert f'- [Docs]({DOCS_URL}): Product and API documentation.' in resp.text
 
 
+def test_sitemap_and_llms_list_the_legal_and_superfans_pages(app_url):
+    # Named here rather than read from LISTED_ROUTES, so the test fails if one
+    # of these pages drops out of the advertised subset. The expected titles and
+    # descriptions are pinned copies of the client's strings (routes.ts and the
+    # documents' front matter), not read back from PUBLIC_ROUTE_MANIFEST, so a
+    # wrong entry fails here too.
+    expected = {
+        '/legal': (
+            'Legal',
+            'The policies and terms that govern RocketRide Cloud - each document with its version, effective '
+            'date, and latest change.',
+        ),
+        '/legal/terms': (
+            'RocketRide Cloud Terms of Service',
+            'The agreement governing use of RocketRide Cloud, including accounts, payments, and acceptable '
+            'service use.',
+        ),
+        '/legal/privacy-policy': (
+            'Privacy Policy',
+            'How RocketRide collects, uses, and shares personal information across its websites and RocketRide Cloud.',
+        ),
+        '/legal/dpa': (
+            'Data Processing Agreement',
+            'The data processing terms that apply when RocketRide processes personal data on behalf of business '
+            'customers.',
+        ),
+        '/legal/acceptable-use': (
+            'Acceptable Use Policy',
+            'The rules for what may and may not be done with RocketRide Cloud and its services.',
+        ),
+        '/legal/subprocessors': (
+            'RocketRide Cloud Sub-processors',
+            'The third-party sub-processors RocketRide uses to provide RocketRide Cloud, and how the list changes.',
+        ),
+        '/legal/trademark-policy': (
+            'Trademark & Brand Usage Policy',
+            'How the RocketRide name, logo, and brand assets may and may not be used.',
+        ),
+        '/superfans': (
+            'Superfans',
+            'The developers who build with RocketRide and tell us the truth. Earn early builds, a hand on the '
+            'roadmap, and artifacts you can only be given.',
+        ),
+    }
+    assert sorted(expected) == sorted(LEGAL_PAGES + ('/superfans',))
+    sitemap = _client().get('/sitemap.xml').text
+    llms = _client().get('/llms.txt').text
+    for route, (title, description) in expected.items():
+        assert f'<loc>{BASE}{route}</loc>' in sitemap
+        assert f'- [{title}]({BASE}{route}): {description}' in llms
+
+
 def test_llms_sets_cache_control(app_url):
     resp = _client().get('/llms.txt')
     assert resp.headers['cache-control'] == 'public, max-age=3600'
@@ -323,6 +433,29 @@ def test_add_route_registry_unchanged_when_router_rejects(web_server, monkeypatc
 
     monkeypatch.undo()
     web_server.add_route('/rejected', _handler, ['GET'])
+
+
+def test_page_routes_answer_401_off_their_exact_paths(web_server, shell_root):
+    # The routes as initModule registers them, behind the server's own auth
+    # middleware: each page serves the SPA without credentials, while a
+    # sub-path, a trailing slash or a slug that is not a document answers 401.
+    from ai.modules.shell import initModule
+
+    initModule(web_server, {})
+    client = TestClient(web_server.app)
+    for route in LEGAL_PAGES + ('/superfans',):
+        resp = client.get(route)
+        assert resp.status_code == 200, route
+        assert '<title>shell</title>' in resp.text
+    for path in (
+        '/legal/not-a-document',
+        '/legal/',
+        '/legal/terms/',
+        '/legal/terms/extra',
+        '/superfans/',
+        '/superfans/extra',
+    ):
+        assert client.get(path).status_code == 401, path
 
 
 # ---------------------------------------------------------------------------

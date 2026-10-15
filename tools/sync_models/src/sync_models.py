@@ -73,6 +73,12 @@ _PROVIDER_REGISTRY: Dict[str, str] = {
     'llm_kimi': 'providers.kimi:KimiProvider',
     'llm_baidu_qianfan': 'providers.baidu_qianfan:BaiduQianfanProvider',
     'llm_glm': 'providers.glm:GlmProvider',
+    'llm_gmi_cloud': 'providers.gmi_cloud:GmiCloudProvider',
+    'llm_nebius': 'providers.nebius:NebiusProvider',
+    'llm_vision_openai': 'providers.vision_openai:VisionOpenAIProvider',
+    'llm_vision_gemini': 'providers.vision_gemini:VisionGeminiProvider',
+    'llm_vision_mistral': 'providers.vision_mistral:VisionMistralProvider',
+    'accessibility_describe': 'providers.vision_gemini:AccessibilityDescribeProvider',
 }
 
 # Maps provider name → relative path to its services.json from the repo root
@@ -90,9 +96,16 @@ _SERVICES_JSON_PATHS: Dict[str, str] = {
     'llm_kimi': 'nodes/src/nodes/llm_kimi/services.json',
     'llm_baidu_qianfan': 'nodes/src/nodes/llm_baidu_qianfan/services.json',
     'llm_glm': 'nodes/src/nodes/llm_glm/services.json',
+    'llm_gmi_cloud': 'nodes/src/nodes/llm_gmi_cloud/services.json',
+    'llm_nebius': 'nodes/src/nodes/llm_openai_api/services.nebius.json',
+    'llm_vision_openai': 'nodes/src/nodes/llm_vision_openai/services.json',
+    'llm_vision_gemini': 'nodes/src/nodes/llm_vision_gemini/services.json',
+    'llm_vision_mistral': 'nodes/src/nodes/llm_vision_mistral/services.json',
+    'accessibility_describe': 'nodes/src/nodes/accessibility_describe/services.json',
 }
 
-# Default extra fields added to every new profile (placeholder for API key)
+# Default extra fields added to every new profile (placeholder for API key).
+# A provider's "extra_profile_fields" config entry adds to or replaces these.
 _DEFAULT_EXTRA_FIELDS: Dict[str, Any] = {'apikey': ''}
 
 
@@ -237,7 +250,7 @@ def sync_provider(
         title_mappings=title_mappings,
         output_token_overrides=output_token_overrides,
         default_output_tokens=default_output_tokens,
-        extra_profile_fields=_DEFAULT_EXTRA_FIELDS,
+        extra_profile_fields={**_DEFAULT_EXTRA_FIELDS, **provider_config.get('extra_profile_fields', {})},
         apply=apply,
         services_json_path=str(services_path),
         model_sources=model_sources,

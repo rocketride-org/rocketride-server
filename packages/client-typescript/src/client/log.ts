@@ -35,7 +35,7 @@
 
 import type { RocketRideClient } from './client.js';
 import { LogEventStream } from './log-stream.js';
-import type { LogChaptersResult, LogDeleteResult, LogReadParams, LogReadResult, LogSegmentParams, LogSegmentResult, LogStreamRef } from './types/log.js';
+import type { LogChaptersResult, LogDeleteResult, LogReadParams, LogReadResult, LogSegmentParams, LogSegmentResult, LogStreamIdentity, LogStreamRef, LogStreamsResult } from './types/log.js';
 
 // =============================================================================
 // LOG API CLASS
@@ -85,6 +85,23 @@ export class LogApi {
 		return this.client.call<LogChaptersResult>('rrext_log', {
 			subcommand: 'chapters',
 			...stream,
+		});
+	}
+
+	/**
+	 * Lists every continuum of one source that you may read, each with its chapters.
+	 *
+	 * Covers your own dev stream, your own @me deploy stream, and the deploy
+	 * stream of each team you can monitor. Never-logged scopes are absent.
+	 *
+	 * @param identity - Source identity (projectId + source); the scopes come from your permissions.
+	 * @returns One entry per readable stream: the `chapters()` body tagged with `teamId`, `teamName`, `runKind` and `ownerKind`.
+	 */
+	async streams(identity: LogStreamIdentity): Promise<LogStreamsResult> {
+		return this.client.call<LogStreamsResult>('rrext_log', {
+			subcommand: 'streams',
+			projectId: identity.projectId,
+			source: identity.source,
 		});
 	}
 

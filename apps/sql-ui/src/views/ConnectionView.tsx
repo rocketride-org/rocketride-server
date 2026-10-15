@@ -140,8 +140,8 @@ export const ConnectionView: React.FC<IConnectionViewProps> = ({ endpoint }) => 
 	const stampTime = snapshot.refreshedAt ? new Date(snapshot.refreshedAt).toLocaleTimeString() : '';
 	const refreshed = snapshot.refreshedAt
 		? (snapshot.stale
-			? ` — task-start snapshot, read ${stampTime}`
-			: ` — snapshot re-read ${stampTime}`)
+			? ` (task-start snapshot, read ${stampTime})`
+			: ` (snapshot re-read ${stampTime})`)
 		: '';
 
 	return (

@@ -53,7 +53,7 @@ from ai.modules.task.run_log import (
     truncate_event,
 )
 from ai.account.file_store import FileStore
-from ai.account.store import Store
+from ai.account.store import Store, StorageError
 from ai.account.models import RequestContext
 from ai.account.store_providers.filesystem import FilesystemStore
 
@@ -838,3 +838,19 @@ class TestLeasesAndSweep:
             assert not os.path.exists(os.path.join(root, 'rocketride-runlog-spool'))
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+
+class TestWriterControlLoad:
+    @pytest.mark.asyncio
+    async def test_a_failed_control_read_does_not_start_fresh(self, istore, spool_root, monkeypatch):
+        # Only a missing control is a first run. A failed read must surface: starting
+        # fresh would write an empty control over the stored chapters.
+        writer = await open_writer(istore, spool_root)
+        await writer.end_run('ok')
+
+        async def failing_read(self, path, max_size=0):
+            raise StorageError('boom')
+
+        monkeypatch.setattr(FileStore, 'read', failing_read)
+        with pytest.raises(StorageError, match='boom'):
+            await open_writer(istore, spool_root)

@@ -79,7 +79,9 @@ public:
     ///	@details
     ///		Bind to our parent container instance
     //-----------------------------------------------------------------
-    Binder(IServiceFilterInstance *pThis);
+    // Exported for node modules: IServiceFilterInstance's constructor is inline
+    // and builds its binder, so a node's filter reaches this
+    ROCKETRIDE_CORE_API Binder(IServiceFilterInstance *pThis);
 
     //-----------------------------------------------------------------
     ///	@details

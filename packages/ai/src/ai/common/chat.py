@@ -13,20 +13,33 @@ communication with their respective APIs.
 import time
 import json
 import importlib
+import contextvars
 from typing import Dict, Any, Callable, Optional
 from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
-from ai.common.util import ThinkTruncatedError, parseJson
+from ai.common.util import EmptyResponseError, ThinkTruncatedError, parseJson
 from ai.common.validation import (
     validate_model_name,
     validate_max_tokens,
+    sanitize_prompt,
     validate_prompt,
     check_output_token_config,
     hand_supplied_token_fields,
 )
-from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
+from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
+
+
+# Finish reasons that mean the model ran out of output budget, as the Responses API
+# (max_output_tokens) and Chat Completions (length) report them.
+_OUTPUT_LIMIT_REASONS = ('length', 'max_output_tokens')
+
+# True while ChatBase.chat runs a JSON-expecting question. A per-call context
+# variable rather than an attribute, because one chat instance serves concurrent
+# calls: only JSON calls skip the Responses fallback when the output limit is hit,
+# since chat() then fails fast with EmptyResponseError; plain-text calls keep it.
+_EXPECT_JSON_VAR: contextvars.ContextVar[bool] = contextvars.ContextVar('rocketride_chat_expect_json', default=False)
 
 
 def _stop_kwargs() -> dict:
@@ -71,6 +84,10 @@ class ChatBase:
     # OpenAI Responses API for reasoning-summary streaming.
     SUPPORTS_REASONING_STREAMING: bool = False
     _raw_client = None
+
+    # Opt-in: a driver sets True when its request builder reads PROMPT_CACHE_PREFIX_VAR
+    # and marks that prefix for the provider's prompt cache (Anthropic).
+    SUPPORTS_PROMPT_CACHE_PREFIX: bool = False
 
     # Native stream handler key, set by non-OpenAI drivers (e.g. Anthropic);
     # left empty for OpenAI-compatible drivers, which ChatBase auto-wires.
@@ -422,6 +439,14 @@ class ChatBase:
         try:
             adapter = NativeOpenAIResponsesAdapter(self)
             text, _items = drive_adapter(adapter, prompt, on_chunk, on_reasoning_chunk)
+            if not text and adapter.finish_reason in _OUTPUT_LIMIT_REASONS and _EXPECT_JSON_VAR.get():
+                # The model spent its whole output budget (usually on reasoning) before
+                # writing anything. The fallback below would send the same request with
+                # the same budget and fail the same way, at the price of a second call.
+                # For a JSON call, chat() turns this empty reply into EmptyResponseError.
+                if on_finish is not None:
+                    on_finish(adapter.finish_reason)
+                return ''
             if not text:
                 # No text (e.g. response.failed) → route to the fallback below, like the Anthropic path.
                 raise RuntimeError('OpenAI Responses stream produced no text')
@@ -563,6 +588,20 @@ class ChatBase:
         # Return the model's response
         return result
 
+    def _prompt_cache_prefix(self, question: Question) -> Optional[str]:
+        """Return the start of *question*'s prompt that stays the same between calls.
+
+        That is the prompt rendered without its context, documents, goals and
+        questions: role, instructions, examples and history come first in getPrompt,
+        so this rendering is always a prefix of the full prompt. Only for drivers that
+        support it and questions that ask for it (Question.cachePrefix).
+        """
+        if not (self.SUPPORTS_PROMPT_CACHE_PREFIX and getattr(question, 'cachePrefix', False)):
+            return None
+        stable = question.model_copy(update={'context': [], 'documents': [], 'goals': [], 'questions': []})
+        # chat_string sanitizes the full prompt; sanitize this the same way so it stays a prefix.
+        return sanitize_prompt(stable.getPrompt()) or None
+
     def chat(
         self,
         question: Question,
@@ -576,13 +615,22 @@ class ChatBase:
         # No streaming for expectJson: repair retries would paint a bad first attempt.
         stream_cbs = (None, None, None) if question.expectJson else (on_chunk, on_finish, on_reasoning_chunk)
 
-        # Use chat_string which already handles network retries and token management
-        response = self.chat_string(
-            question.getPrompt(),
-            on_chunk=stream_cbs[0],
-            on_finish=stream_cbs[1],
-            on_reasoning_chunk=stream_cbs[2],
-        )
+        # Use chat_string which already handles network retries and token management.
+        # Only this first call may mark a cacheable prefix: a JSON repair prompt below
+        # inserts an instruction near the top, so its start differs and a cache write
+        # there would never be read back.
+        json_token = _EXPECT_JSON_VAR.set(bool(question.expectJson))
+        token = PROMPT_CACHE_PREFIX_VAR.set(self._prompt_cache_prefix(question))
+        try:
+            response = self.chat_string(
+                question.getPrompt(),
+                on_chunk=stream_cbs[0],
+                on_finish=stream_cbs[1],
+                on_reasoning_chunk=stream_cbs[2],
+            )
+        finally:
+            PROMPT_CACHE_PREFIX_VAR.reset(token)
+            _EXPECT_JSON_VAR.reset(json_token)
 
         # If JSON output is expected, validate the response and retry if needed.
         # Store the parsed result so setAnswer receives a dict/list directly —
@@ -592,6 +640,15 @@ class ChatBase:
             max_retries = 3
 
             for retry_count in range(max_retries):
+                if not response.strip():
+                    # Nothing to repair: the model wrote no text at all. A reasoning
+                    # model does this when its output budget runs out mid-thought, and
+                    # resending the same prompt cannot fit a budget that overflowed.
+                    raise EmptyResponseError(
+                        'model returned no text; it most likely used its whole output budget before '
+                        f'replying. Raise modelOutputTokens (now {self._modelOutputTokens}), or disable '
+                        'reasoning for this call'
+                    )
                 try:
                     # Parse (and strip any markdown fences) — reuse the result below
                     parsed_response = parseJson(response)
@@ -620,13 +677,17 @@ class ChatBase:
 
                         # Retry the chat with the additional instruction
                         # This will again use chat_string with full network retry logic
-                        response = self.chat_string(question.getPrompt(has_previous_json_failed=True))
+                        json_token = _EXPECT_JSON_VAR.set(True)
+                        try:
+                            response = self.chat_string(question.getPrompt(has_previous_json_failed=True))
+                        finally:
+                            _EXPECT_JSON_VAR.reset(json_token)
                     else:
                         # Max retries reached, raise ValueError. Carry the last parse error:
                         # without it the caller sees only a truncated response and has to
                         # guess what was wrong with it.
                         error_msg = (
-                            f'Failed to get valid JSON response after {max_retries + 1} attempts. '
+                            f'Failed to get valid JSON response after {max_retries} attempts. '
                             f'Cause: {e}. Last response: {response[:200]}...'
                         )
                         debug(f'Error: {error_msg}')

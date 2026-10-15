@@ -105,7 +105,7 @@ export const VersionRecordPanel: React.FC<IVersionRecordPanelProps> = ({ open, o
 	if (!open) return null;
 
 	// Provenance line: who published it, when, and the locked hash.
-	const subtitle = `Immutable published snapshot — read-only · ${card.publishedBy}${card.publishedAt ? ` · ${formatTime(card.publishedAt)}` : ''}`;
+	const subtitle = `Immutable published snapshot, read-only · ${card.publishedBy}${card.publishedAt ? ` · ${formatTime(card.publishedAt)}` : ''}`;
 
 	return (
 		<DetailPanel open onClose={onClose} title={`${pipelineName || 'Pipeline'} v${card.version}`} subtitle={subtitle} width={width} persistKey="panelVersionRecordWidth" flushBody>

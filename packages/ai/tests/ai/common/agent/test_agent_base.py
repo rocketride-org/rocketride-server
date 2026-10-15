@@ -382,3 +382,65 @@ def test_error_path_still_reports_tool_calls():
 
     assert payload['stack'][0]['kind'] == 'RocketRide.agent.error.v1'
     assert payload['meta']['tool_calls'] == 1
+
+
+# ---------------------------------------------------------------------------
+# Answer metadata
+# ---------------------------------------------------------------------------
+
+
+class _FakeEndpointIInstance(_FakeIInstance):
+    """An IInstance whose job config carries the task's control token, as the engine's does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.IEndpoint = type('E', (), {'endpoint': type('J', (), {'jobConfig': {'taskId': 'tk_secret_token'}})()})()
+
+
+def test_task_token_never_reaches_the_answer():
+    """The job config's taskId is the task's control token; a parent agent shows this payload to its model."""
+    driver = _make_driver(lambda self, ctx, q: ('ok', {}), require_tool_call=False)
+
+    payload = driver.run_agent(_FakeEndpointIInstance(), _FakeQuestion())
+
+    assert 'tk_secret_token' not in repr(payload)
+    assert 'task_id' not in payload['meta']
+
+
+def test_task_token_is_absent_from_the_error_answer_too():
+    def boom(self, ctx, q):
+        raise RuntimeError('planner failed')
+
+    payload = _make_driver(boom, require_tool_call=False).run_agent(_FakeEndpointIInstance(), _FakeQuestion())
+
+    assert 'tk_secret_token' not in repr(payload)
+    assert payload['meta']['stop_reason'] == 'error'
+
+
+def test_guard_answer_has_no_token_and_stops_with_error():
+    """An answer refused by require_tool_call reports stop_reason "error", whatever the run said."""
+    driver = _make_driver(lambda self, ctx, q: ('OK', {'stop_reason': 'done'}), require_tool_call=True)
+
+    payload = driver.run_agent(_FakeEndpointIInstance(), _FakeQuestion())
+
+    assert payload['stack'][0]['kind'] == 'RocketRide.agent.guard.v1'
+    assert payload['meta']['stop_reason'] == 'error'
+    assert 'tk_secret_token' not in repr(payload)
+
+
+def test_stop_reason_from_the_trace_reaches_the_meta():
+    """A parent agent can tell a forced answer (max_waves) from a finished one."""
+    driver = _make_driver(lambda self, ctx, q: ('best effort', {'stop_reason': 'max_waves'}), require_tool_call=False)
+
+    payload = driver.run_agent(_FakeIInstance(), _FakeQuestion())
+
+    assert payload['meta']['stop_reason'] == 'max_waves'
+
+
+@pytest.mark.parametrize('raw', [None, 'text trace', {'waves': []}, {'stop_reason': 3}])
+def test_no_stop_reason_when_the_trace_has_none(raw):
+    driver = _make_driver(lambda self, ctx, q: ('ok', raw), require_tool_call=False)
+
+    payload = driver.run_agent(_FakeIInstance(), _FakeQuestion())
+
+    assert 'stop_reason' not in payload['meta']

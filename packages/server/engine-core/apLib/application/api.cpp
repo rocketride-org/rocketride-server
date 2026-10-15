@@ -26,6 +26,18 @@
 
 namespace ap::application {
 
+//-------------------------------------------------------------------------
+/// @details
+///		The option registry, defined here so the process has exactly one
+///	@returns
+///		The registry
+//-------------------------------------------------------------------------
+Options &Options::get() noexcept {
+    static Options options;
+    return options;
+}
+
+
 // Exit quickly without deconstructing globals
 void quickExit(int code) noexcept {
 #if ROCKETRIDE_PLAT_MAC

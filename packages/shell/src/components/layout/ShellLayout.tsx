@@ -40,7 +40,7 @@ import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import { PrefsProvider } from '../contexts/PrefsContext';
 import { ConnectionManager } from '../../connection/connection';
-import { isDevPreviewPending } from '../../util/appLoader';
+import { isDevPreviewPending, isDevPreviewPage, previewLockedAppId, devPreviewHoldRemainingMs, isDevRemote, DEV_REMOTE_TIMEOUT_MS } from '../../util/appLoader';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
 import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
@@ -64,15 +64,6 @@ import { commonStyles } from '../../themes/styles';
 // =============================================================================
 
 /**
- * Translate a raw app-load error into a user-facing explanation. The raw
- * text (module-federation / webpack internals) remains available behind the
- * error view's "Show Details" button for debugging.
- *
- * @param raw - The raw error message recorded by WorkspaceContext.
- * @param name - Display name of the app that failed.
- * @returns Plain-language explanation of the failure.
- */
-/**
  * True for the stale-platform failure class: shared-module negotiation
  * breakage (and the TDZ artifact a failed first attempt leaves behind).
  * Usually the PAGE outlived a platform rebuild — the live MF runtime
@@ -86,19 +77,39 @@ function isStalePlatformError(raw: string): boolean {
 	return /RUNTIME-012|shared module|shareKey|before initialization/i.test(raw);
 }
 
-function friendlyLoadError(raw: string, name: string): string {
+/**
+ * Translate a raw app-load error into a user-facing explanation. The raw
+ * text (module-federation / webpack internals) remains available behind the
+ * error view's "Show Details" button for debugging. Every app reaching this
+ * HAS a manifest entry (unknown ids get the not-found surface instead), so a
+ * failure here is a build or delivery problem, never "no such app".
+ *
+ * @param raw - The raw error message recorded by WorkspaceContext.
+ * @param name - Display name of the app that failed.
+ * @param dev - True when the app loads from an App Builder dev build.
+ * @returns Plain-language explanation of the failure.
+ */
+function friendlyLoadError(raw: string, name: string, dev: boolean): string {
 	// Shared-module negotiation failures — and the TDZ artifact a failed first
 	// attempt leaves behind — mean the bundle was built against a different
 	// platform build than the one now serving it.
 	if (isStalePlatformError(raw)) {
 		return `${name} was built for a different version of the platform and needs to be rebuilt or redeployed.`;
 	}
-	// Network-shaped failures: missing bundle, unreachable server, timeout.
-	if (/failed to load within|failed to fetch|load(ing)? script|ChunkLoadError|404/i.test(raw)) {
-		return `${name} isn't installed on this server, or its files are unreachable.`;
+	// The dev-preview hold expired with no registration from App Builder.
+	if (/did not register within/i.test(raw)) {
+		return `No dev build of ${name} arrived from App Builder. Check App Builder's Console pane for build errors.`;
 	}
 	// WorkspaceContext's own validation messages are already human-readable.
 	if (/missing its UI|requires shell API/i.test(raw)) return raw;
+	// A dev build that registered but would not load: the build is the suspect.
+	if (dev) {
+		return `The dev build of ${name} failed to load. Check App Builder's Console pane for build errors.`;
+	}
+	// Network-shaped failures: the listed app's bundle could not be fetched.
+	if (/failed to load within|failed to fetch|load(ing)? script|ChunkLoadError|404/i.test(raw)) {
+		return `${name} is listed on this server, but its files could not be loaded. Its build may have failed or not finished deploying, or the server may be unreachable.`;
+	}
 	return `${name} failed to start.`;
 }
 
@@ -566,6 +577,48 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		return () => clearTimeout(timer);
 	}, [loaded, seeded, activeAppId, hasAppUi, bootStalled]);
 
+	// --- Dev-preview hold ----------------------------------------------------
+	// A pending dev preview counts as still-loading: its registration
+	// self-corrects when the embedder's injection lands (see the client-area
+	// branch below). The hold ends on a CLOCK, not an event — a registration
+	// that never comes fires nothing — so re-render when it expires and let
+	// the real outcome (the not-found surface, the load error) replace the
+	// splash. The tick re-arms the timer should it fire a hair early.
+	const devPending = isDevPreviewPending(activeAppId);
+	const [devHoldTick, setDevHoldTick] = useState(0);
+	useEffect(() => {
+		if (!devPending) return;
+		const timer = setTimeout(() => setDevHoldTick((n) => n + 1), devPreviewHoldRemainingMs());
+		return () => clearTimeout(timer);
+	}, [devPending, devHoldTick]);
+
+	// --- Unresolvable app ----------------------------------------------------
+	// The active app id resolves to nothing on this server. Gated on a SETTLED
+	// signal so it never fires during the brief empty-while-loading window:
+	//   • appManifest.length > 0 — the manifest loaded and has no such id
+	//     (a stale per-tab session id, or a renamed/removed app), OR
+	//   • loaded — the workspace finished hydrating with an empty manifest, OR
+	//   • bootStalled — the watchdog gave up waiting (a manifest that never
+	//     arrived, e.g. the SaaS home app on a server built without it).
+	// loadDescriptor returns false silently for unknown ids, so without this
+	// the user is stranded on the boot rocket forever.
+	const activeAppUnresolvable = !devPending && !activeManifest
+		&& (appManifest.length > 0 || loaded || bootStalled);
+	// An App Builder preview's locked app that is unresolvable once the hold
+	// is over never received its dev build either — say that, not just
+	// "unknown id", so a broken dev session and a wrong id read differently.
+	const devLockedApp = isDevPreviewPage() && previewLockedAppId() === activeAppId;
+	// Name the failure in the console too: App Builder mirrors it into its
+	// Console pane, and it is the only trace a headless failure leaves.
+	const warnedUnresolvableRef = useRef(new Set<string>());
+	useEffect(() => {
+		if (!activeAppUnresolvable || warnedUnresolvableRef.current.has(activeAppId)) return;
+		warnedUnresolvableRef.current.add(activeAppId);
+		console.warn(devLockedApp
+			? `[shell] cannot resolve app "${activeAppId}": no dev build arrived from App Builder within ${DEV_REMOTE_TIMEOUT_MS / 1000}s, and this server has no published app with that id`
+			: `[shell] cannot resolve app "${activeAppId}": this server has no app with that id`);
+	}, [activeAppUnresolvable, activeAppId, devLockedApp]);
+
 	// --- Loading guard -------------------------------------------------------
 	// Workspace still hydrating: hold the SAME phase-anchored rocket as the
 	// boot LoadingScreen — returning null here put a blank frame between two
@@ -587,20 +640,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// First boot: stay full-screen on the rocket until the first activation
 	// resolves to real content — the mounted app, or a terminal error surface
 	// (load failure, unknown app id) that the user must see. A pending dev
-	// preview counts as still-loading: its registration self-corrects when
-	// the embedder's injection lands (see the client-area branch below).
-	const devPending = isDevPreviewPending(activeAppId);
-	// The active app id resolves to nothing on this server. Gated on a SETTLED
-	// signal so it never fires during the brief empty-while-loading window:
-	//   • appManifest.length > 0 — the manifest loaded and has no such id
-	//     (a stale per-tab session id, or a renamed/removed app), OR
-	//   • loaded — the workspace finished hydrating with an empty manifest, OR
-	//   • bootStalled — the watchdog gave up waiting (a manifest that never
-	//     arrived, e.g. the SaaS home app on a server built without it).
-	// loadDescriptor returns false silently for unknown ids, so without this
-	// the user is stranded on the boot rocket forever.
-	const activeAppUnresolvable = !devPending && !activeManifest
-		&& (appManifest.length > 0 || loaded || bootStalled);
+	// preview counts as still-loading (see the dev-preview hold above).
 	const hasFirstContent =
 		hasAppUi ||
 		(!devPending && !!appLoadErrors[activeAppId]) ||
@@ -631,6 +671,13 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// actually renders is the app's declaration (AppLayout showStatus/status), read by
 	// StatusBarWithChrome from the chrome slot.
 	const considerStatusBar = hasAppUi;
+	// Whether an app loads from an App Builder dev build (a dev-overlay entry
+	// or an injected dev remote): its load failures point at the build, not
+	// at the server's copy.
+	const isDevBuild = (appId: string): boolean => {
+		const manifest = appManifest.find((m) => m.id === appId);
+		return !!manifest && (manifest.dev === true || isDevRemote(manifest.moduleId));
+	};
 
 	// --- Render --------------------------------------------------------------
 	return (
@@ -668,19 +715,19 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 									identity={identity}
 								/>
 							</AppErrorBoundary>
-					) : isDevPreviewPending(activeAppId) ? (
+					) : devPending ? (
 							// DEV PREVIEW, registration not yet injected: the dev
 							// server may still be starting — showing an error here
 							// is a lie that flashes and self-corrects (the injection
 							// invalidates + retries the load when it lands). Hold
-							// the loading animation instead.
+							// the loading animation instead, until the hold expires.
 							<LoadingScreen />
 						) : appLoadErrors[activeAppId] && !autoReloading ? (
 							<div style={styles.appLoadError}>
 								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
 								{/* Plain-language explanation; raw error lives behind Show Details */}
 								<div style={styles.appLoadErrorMessage} role="alert">
-									{friendlyLoadError(appLoadErrors[activeAppId], activeManifest?.name ?? activeAppId)}
+									{friendlyLoadError(appLoadErrors[activeAppId], activeManifest?.name ?? activeAppId, isDevBuild(activeAppId))}
 								</div>
 								<div style={styles.appLoadErrorActions}>
 									{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
@@ -715,7 +762,9 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 								<div style={styles.appLoadErrorMessage} role="alert">
 									{activeAppId === defaultAppId
 										? `This server has no home app (“${activeAppId}”) installed. It may not have been built and registered on this deployment.`
-										: `This server has no app with the id “${activeAppId}”. It may have been renamed, removed, or belong to a different RocketRide deployment.`}
+										: devLockedApp
+											? `No dev build of “${activeAppId}” arrived from App Builder, and this server has no published app with that id. Check that the id matches appManifest.id in the app's package.json, and look for build errors in App Builder's Console pane.`
+											: `This server has no app with the id “${activeAppId}”. It may have been renamed, removed, or belong to a different RocketRide deployment.`}
 								</div>
 								<div style={styles.appLoadErrorActions}>
 									{activeAppId === defaultAppId ? (
@@ -761,7 +810,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							<div style={styles.appLoadErrorTitle}>Could not load {loadFailure.name}</div>
 							{/* Plain-language explanation; raw error behind Show Details */}
 							<div style={styles.appLoadErrorMessage} role="alert">
-								{friendlyLoadError(appLoadErrors[loadFailure.appId] ?? '', loadFailure.name)}
+								{friendlyLoadError(appLoadErrors[loadFailure.appId] ?? '', loadFailure.name, isDevBuild(loadFailure.appId))}
 							</div>
 							<div style={styles.appLoadErrorActions}>
 								<button type="button" style={styles.appLoadErrorButton} onClick={dismissLoadFailure}>

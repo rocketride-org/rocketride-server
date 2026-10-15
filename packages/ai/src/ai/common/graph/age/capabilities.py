@@ -28,7 +28,7 @@ cell records how a given AGE version handles one feature:
 
 - ``SUPPORTED``: passes through untouched.
 - ``EMULATE``: a rewrite hook transforms the query into something AGE runs
-  (framework only in v1 — no emulations are implemented yet).
+  with the same meaning; the rewritten text is re-analyzed before later stages.
 - ``REJECT``: raise :class:`~.errors.AgeUnsupportedFeature` before touching
   the database, with an actionable message.
 - ``TBD``: not yet verified against the live version. TBD cells pass through
@@ -67,12 +67,28 @@ class Capability:
     detect: Callable[[CypherFacts], bool]
     # Message detail for REJECT; verification note otherwise.
     detail: str = ''
-    # EMULATE hook: CypherFacts -> rewritten Cypher text. v1: none implemented.
+    # EMULATE hook: CypherFacts -> rewritten Cypher text.
     rewrite: Optional[Callable[[CypherFacts], str]] = None
 
 
 def _uses_function(name: str) -> Callable[[CypherFacts], bool]:
     return lambda facts: name in facts.function_names
+
+
+def _rewrite_empty_in(facts: CypherFacts) -> str:
+    """Replace every ``<expr> IN []`` with ``false``.
+
+    openCypher defines ``x IN []`` as false for every ``x``, null included, so
+    the substitution keeps the query's meaning. A span inside another one
+    (``(x IN []) IN []``) disappears with the outer replacement, so only
+    outermost spans are spliced — last-first, so earlier offsets stay valid.
+    """
+    spans = facts.empty_in_spans
+    outermost = [s for s in spans if not any(o != s and o[0] <= s[0] and s[1] <= o[1] for o in spans)]
+    text = facts.query
+    for start, stop in sorted(outermost, reverse=True):
+        text = text[:start] + 'false' + text[stop + 1 :]
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +159,39 @@ AGE_1_5_0: Dict[str, Capability] = {
                 'or an edge to a category node'
             ),
         ),
+        # --- verified 2026-10-02 / 2026-10-05 / 2026-10-06 against the
+        # datacore image (PG 16.15 + AGE 1.5.0): both shapes report success
+        # while storing or returning the wrong data. SET/REMOVE/DELETE reach
+        # only the first entity a MERGE creates in a statement: later UNWIND /
+        # MATCH rows, a second MERGE, the far node and the edge of a path MERGE,
+        # and repeated SETs on a created node all lose the change; entities a
+        # MERGE matched and variables bound before it keep it. ---
+        Capability(
+            feature='merge_write',
+            status=CellStatus.REJECT,
+            detect=lambda facts: facts.has_unsafe_write_after_merge,
+            detail=(
+                'AGE 1.5.0 applies SET/REMOVE/DELETE only to the first entity a MERGE creates '
+                'in a statement; changes to anything else it creates (later rows, a second '
+                'MERGE, a path MERGE) are dropped while the RETURN shows them. After a MERGE, '
+                'change only variables bound before it, or the node of a single-node MERGE '
+                'that starts the query. Run the MERGE, then the SET/REMOVE/DELETE as a separate '
+                'execute call (UNWIND $rows AS row MATCH (n:L {key: row.key}) SET n.prop = row.prop). '
+                'Properties inside the MERGE pattern are stored, but MERGE matches on them, so '
+                'with other values it creates a second node or edge'
+            ),
+        ),
+        Capability(
+            feature='empty_list_in',
+            status=CellStatus.EMULATE,
+            detect=lambda facts: bool(facts.empty_in_spans),
+            detail=(
+                "AGE 1.5.0 evaluates 'x IN []' as true for every row, and fails with 'cache lookup "
+                "failed for type 0' under NOT / AND / RETURN; rewritten to 'false', its openCypher "
+                'value. An empty list passed as a $parameter is evaluated correctly.'
+            ),
+            rewrite=_rewrite_empty_in,
+        ),
         Capability(
             feature='shortest_path',
             status=CellStatus.REJECT,
@@ -179,9 +228,20 @@ def apply_capabilities(facts: CypherFacts, age_version: str = DEFAULT_AGE_VERSIO
         if cap.status is CellStatus.REJECT:
             raise AgeUnsupportedFeature(cap.feature, cap.detail)
         if cap.status is CellStatus.EMULATE and cap.rewrite is not None:
-            # v1 ships the framework only; when emulations land they re-analyze
-            # the rewritten text so later stages see consistent facts.
+            # Re-analyze the rewritten text so later stages see consistent
+            # facts, but keep the caller-visible column names of the query
+            # as written (a rewrite must not rename result keys).
             from .analysis import analyze
 
-            facts = analyze(cap.rewrite(facts))
+            rewritten = analyze(cap.rewrite(facts))
+            # A rewrite may drop the only reference to a $parameter (e.g.
+            # '$who IN []' -> 'false'); the caller still supplies it.
+            rewritten.param_names = facts.param_names
+            if (
+                facts.return_columns is not None
+                and rewritten.return_columns is not None
+                and len(facts.return_columns) == len(rewritten.return_columns)
+            ):
+                rewritten.return_columns = facts.return_columns
+            facts = rewritten
     return facts

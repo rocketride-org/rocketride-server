@@ -14,5 +14,7 @@
 
 // step: register a no-op loader for every stylesheet extension node may hit
 for (const ext of ['.css', '.scss', '.sass', '.less']) {
+	// Deprecated, but the only hook that works under --require with no loader
+	// eslint-disable-next-line n/no-deprecated-api
 	require.extensions[ext] = () => {};
 }

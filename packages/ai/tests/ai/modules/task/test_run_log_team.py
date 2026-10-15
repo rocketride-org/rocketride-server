@@ -50,7 +50,7 @@ from ai.modules.task.run_log import (
     writer_key,
 )
 from ai.account.file_store import FileStore
-from ai.account.store import Store
+from ai.account.store import Store, StorageError
 from ai.account.models import RequestContext
 from ai.account.store_providers.filesystem import FilesystemStore
 
@@ -333,3 +333,17 @@ class TestTeamScopedReader:
         )
         assert reader._scope_prefix == ''
         assert reader._scope_id == CLIENT
+
+    @pytest.mark.asyncio
+    async def test_a_failed_read_is_not_never_logged(self, istore, spool_root, monkeypatch):
+        # Only a missing control means the stream was never logged; any other
+        # store failure must surface, or a logged stream silently disappears.
+        writer = await open_deploy_writer(istore, spool_root)
+        await writer.end_run('ok')
+
+        async def failing_read(self, path, max_size=0):
+            raise StorageError('boom')
+
+        monkeypatch.setattr(FileStore, 'read', failing_read)
+        with pytest.raises(StorageError, match='boom'):
+            await team_reader(istore, spool_root).chapters()

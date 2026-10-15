@@ -41,23 +41,17 @@
  * Run:  node scripts/audit-icons.mjs
  */
 
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { existsSync, statSync } from 'node:fs';
+import { readFile, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readJson } from './lib/fs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const NODES_DIR = path.join(REPO_ROOT, 'nodes', 'src', 'nodes');
-const LEGACY_ICONS_DIR = path.join(
-	REPO_ROOT,
-	'apps',
-	'shared',
-	'src',
-	'assets',
-	'nodes',
-);
+const LEGACY_ICONS_DIR = path.join(REPO_ROOT, 'apps', 'shared', 'src', 'assets', 'nodes');
 const FALLBACK_ICON_REL = path.join('core', 'unknown.svg');
 
 const errors = [];
@@ -101,15 +95,6 @@ function rel(p) {
 	return path.relative(REPO_ROOT, p).split(path.sep).join('/');
 }
 
-/** Strip JSONC-style comments and trailing commas; matches what nodes/ uses. */
-function parseJsonc(text) {
-	const stripped = text
-		.replace(/\/\*[\s\S]*?\*\//g, '')
-		.replace(/(^|[^:"'])\/\/[^\n]*/g, '$1')
-		.replace(/,(\s*[}\]])/g, '$1');
-	return JSON.parse(stripped);
-}
-
 function collectIcons(node, into) {
 	if (!node || typeof node !== 'object') return;
 	if (typeof node.icon === 'string') into.push(node.icon);
@@ -124,18 +109,15 @@ function collectIcons(node, into) {
 // Check 1: every service JSON's icon field resolves to a sibling SVG file
 // ---------------------------------------------------------------------------
 
-const serviceJsonFiles = await findFiles(
-	NODES_DIR,
-	(f) => /[\\/]services[^\\/]*\.json$/i.test(f),
-);
+const serviceJsonFiles = await findFiles(NODES_DIR, (f) => /[\\/]services[^\\/]*\.json$/i.test(f));
 
 /** Map<absolute icon file path, count of services referencing it> */
 const referencedIcons = new Map();
 
 for (const jsonFile of serviceJsonFiles) {
-	let parsed;
+	let data;
 	try {
-		parsed = parseJsonc(await readFile(jsonFile, 'utf8'));
+		data = await readJson(jsonFile);
 	} catch (e) {
 		errors.push(`invalid JSON in ${rel(jsonFile)}: ${e.message}`);
 		continue;
@@ -143,7 +125,7 @@ for (const jsonFile of serviceJsonFiles) {
 
 	const dir = path.dirname(jsonFile);
 	const icons = [];
-	collectIcons(parsed, icons);
+	collectIcons(data, icons);
 
 	for (const iconValue of icons) {
 		// Skip remote URLs — those are resolved at runtime, not by the build.
@@ -154,7 +136,8 @@ for (const jsonFile of serviceJsonFiles) {
 		// outside the owning node directory and falsely pass the audit.
 		if (iconValue !== path.basename(iconValue)) {
 			warnings.push(
-				`invalid icon path: ${rel(jsonFile)} uses non-local icon "${iconValue}" (must be a basename, no separators or "..")`,
+				`invalid icon path: ${rel(jsonFile)} uses non-local icon "${iconValue}" ` +
+					'(must be a basename, no separators or "..")'
 			);
 			continue;
 		}
@@ -165,7 +148,8 @@ for (const jsonFile of serviceJsonFiles) {
 			// the `unknown` icon at runtime when a name doesn't resolve.
 			// The build still succeeds; this just flags it for follow-up.
 			warnings.push(
-				`missing icon: ${rel(jsonFile)} references "${iconValue}" but ${rel(iconPath)} does not exist — will render the fallback icon`,
+				`missing icon: ${rel(jsonFile)} references "${iconValue}" but ${rel(iconPath)} does not exist — ` +
+					'will render the fallback icon'
 			);
 			continue;
 		}
@@ -190,9 +174,7 @@ for (const svg of allNodeSvgs) {
 	const relPath = path.relative(NODES_DIR, svg).split(path.sep).join('/');
 	if (relPath === FALLBACK_ICON_REL.split(path.sep).join('/')) continue;
 	if (path.dirname(svg) === CORE_DIR) continue;
-	errors.push(
-		`orphaned icon: ${rel(svg)} is not referenced by any service JSON in its directory`,
-	);
+	errors.push(`orphaned icon: ${rel(svg)} is not referenced by any service JSON in its directory`);
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +187,8 @@ if (existsSync(LEGACY_ICONS_DIR)) {
 	const legacy = await findFiles(LEGACY_ICONS_DIR, (f) => /\.svg$/i.test(f));
 	if (legacy.length > 0) {
 		errors.push(
-			`legacy icon dir still has ${legacy.length} SVG(s) at ${rel(LEGACY_ICONS_DIR)} — they should be moved to nodes/src/nodes/<node>/`,
+			`legacy icon dir still has ${legacy.length} SVG(s) at ${rel(LEGACY_ICONS_DIR)} — ` +
+				'they should be moved to nodes/src/nodes/<node>/'
 		);
 	}
 }
@@ -229,7 +212,7 @@ for (const [base, hashMap] of byBasename) {
 	if (hashMap.size > 1) {
 		const copies = [...hashMap.values()].flat().map(rel);
 		warnings.push(
-			`divergent duplicates: "${base}" has ${hashMap.size} different versions:\n    ${copies.join('\n    ')}`,
+			`divergent duplicates: "${base}" has ${hashMap.size} different versions:\n    ${copies.join('\n    ')}`
 		);
 	}
 }

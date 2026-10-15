@@ -69,7 +69,10 @@ class IInstance(IInstanceBase):
             f'to return structured data (dict, list, etc.). '
             f'Timeout: {self.IGlobal.timeout if self.IGlobal.timeout is not None else _TIMEOUT}s. '
             f'Allowed imports: {", ".join(sorted(_DEFAULT_ALLOWED_MODULES | (self.IGlobal.allowed_modules or set())))}. '
-            f'All other imports will raise ImportError.'
+            f'All other imports will raise ImportError. '
+            f'The sandbox has no network, filesystem or subprocess access beyond what the allowed imports provide. '
+            f'For web requests use the HTTP request tool (tool_http_request node) if it is connected. '
+            f'For code that needs network access or extra packages use the Daytona tool (tool_daytona node) if it is connected.'
         ),
     )
     def execute(self, args):

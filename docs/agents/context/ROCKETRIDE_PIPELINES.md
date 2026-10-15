@@ -18,6 +18,9 @@ pipeline components this document does not mention. Always confirm a provider na
 and its `invoke` requirements in `.rocketride/services-catalog.json` before wiring it. For
 client SDK usage (`client.use()`, `client.chat()`, `client.send()`), read
 ROCKETRIDE_python_API.md or ROCKETRIDE_typescript_API.md.
+On RocketRide Cloud there are no custom nodes (its engine starts without `--node_path`),
+and a pipeline bundled in a store app may use catalog nodes only: see 'Catalog nodes only'
+in `ROCKETRIDE_APPS.md`.
 
 ---
 
@@ -387,9 +390,14 @@ LLM/tool/memory node declares which component invokes it — `from` points at th
 - Tool components (classType `tool`) have empty `lanes` (`{}`): never wired via data lanes,
   only via `control`.
 - Invoke is not agent-only: `summarization`, `extract_data`, `extract_facts`, `dictionary`,
-  `preprocessor_llm`, `tool_chartjs`, the SQL nodes (`db_postgres`, `db_mysql`,
-  `db_clickhouse`, `db_supabase`, `db_arango`, `db_hotdata`, `rocketride_sql`, `aparavi_aql`)
-  and the graph stores all REQUIRE an `llm` control connection.
+  `preprocessor_llm`, `tool_chartjs`, `aparavi_aql` and the graph stores all REQUIRE an
+  `llm` control connection.
+- The SQL nodes (`db_postgres`, `db_supabase`, `db_mysql`, `db_clickhouse`, `db_hotdata`,
+  `rocketride_sql`) use an `llm` connection only to turn natural-language questions into
+  SQL. Raw SQL through their `execute` tool (`client.database.query`) needs no LLM, so a
+  pipeline that only stores or reads data with SQL should wire no LLM and no agent. Storing
+  through an agent ties every save to that agent's LLM provider and key: a missing key stops
+  the save.
 
 ### Invoke requirements by agent type
 
@@ -665,8 +673,28 @@ All three share the shape: `questions` in; `table`, `text`, `answers` out; an `l
 connection is REQUIRED (it crafts Cypher from the question). Config is profile-based —
 `graph_falkordb` profile `default` takes `host`, `port`, `graph`, and a `db_description`
 (describe the schema so the LLM writes good Cypher); `graph_neo4j` defaults
-`database: "neo4j"`; `rocketride_graph` (built-in) needs no external server. Their classType
-also includes `tool`, so an agent can control a graph store as a tool instead.
+`database: "neo4j"`; `rocketride_graph` requires a configured RocketRide database broker,
+available on RocketRide Cloud or a self-hosted engine configured with that broker. It takes
+no database connection settings in the pipeline. Their classType also includes `tool`, so
+an agent can control a graph store as a tool instead.
+
+**Writing to a graph store** goes through its `execute` tool (node config
+`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. On `rocketride_graph`
+(Apache AGE 1.5.0):
+
+- Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
+  Cypher text: no escaping, and bound values do not count toward the 10,000-character query
+  limit. `graph_neo4j` accepts `params` too; `graph_falkordb` rejects them.
+- A bulk upsert is TWO calls. AGE applies SET / REMOVE / DELETE only to the first node or edge a
+  MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is rejected:
+
+  ```text
+  call 1:  UNWIND $rows AS row MERGE (:Item {id: row.id})
+  call 2:  UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name
+  ```
+
+- Remove repeated keys from `$rows` before the MERGE call: `UNWIND ... MERGE` creates one node
+  per row even when keys repeat.
 
 ### Pattern 15: Memory options
 
@@ -993,7 +1021,7 @@ Two Postgres providers, two different jobs; mixing them up fails validation:
 | --- | --- | --- |
 | Role | Vector store INSIDE your Postgres (pgvector extension) | Text-to-SQL over existing tables |
 | Lanes | `documents` in (terminal); `questions` in → `documents`/`answers`/`questions` | `questions` in → `table`/`text`/`answers` |
-| LLM | No `llm` port — never wire `control` to it | REQUIRES an `llm` control connection (writes the SQL; `max_attempts` retries via EXPLAIN; `allow_execute` off by default) |
+| LLM | No `llm` port — never wire `control` to it | `llm` control connection only for natural-language questions (writes the SQL; `max_attempts` retries via EXPLAIN); raw SQL through `execute` needs none (`allow_execute` off by default) |
 | Config | profile `local`: `host`, `port`, `user`, `password`, `database`, `collection` (table name), `similarity` (`cosine`/`l2`/`inner_product`); needs `embedding_transformer` in front of BOTH lanes | profile `default`: `host`, `user`, `password`, `database`, `table`, `db_description` (describe the schema — better SQL) |
 
 Wiring is identical to `qdrant` (Starter 2 / Pattern 3) — only the config block changes:
@@ -1004,15 +1032,16 @@ Wiring is identical to `qdrant` (Starter 2 / Pattern 3) — only the config bloc
 you already operate Postgres.
 
 > **Pitfall 15 — vector store wired like a SQL node (or vice versa).** `db_postgres` without
-> an `llm` control connection fails validation; `postgres` without an embedding node in front
-> stores nothing searchable (and search must use the SAME embedding model as ingestion).
+> an `llm` control connection cannot answer natural-language questions (raw SQL through
+> `execute` still works); `postgres` without an embedding node in front stores nothing
+> searchable (and search must use the SAME embedding model as ingestion).
 
 ### Pattern 29: Choosing a store — relational vs vector vs graph
 
 | You need | Family | Providers | Wiring shape |
 | --- | --- | --- | --- |
 | 'Find content like this' — semantic similarity over chunks | Vector | `qdrant`, `postgres` (pgvector), `pinecone`, `milvus`, `chroma`, `weaviate`, `rocketride_vector` (built-in) | `documents` in via embedding (ingest); `questions` in via embedding (search). No LLM port |
-| Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase`, `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED (crafts SQL). No ingestion lanes — data already lives in the DB |
+| Exact answers over structured tables — filters, joins, aggregates | Relational | `db_postgres`, `db_mysql`, `db_clickhouse`, `db_supabase`, `rocketride_sql` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control for natural-language questions (crafts SQL), not needed for raw SQL via `execute`. No ingestion lanes — data already lives in the DB |
 | 'How is A connected to B' — relationship traversal | Graph | `graph_neo4j`, `graph_falkordb`, `rocketride_graph` (built-in) | `questions` → `table`/`text`/`answers`; `llm` control REQUIRED (crafts Cypher). Queries an EXISTING graph (Pattern 14) |
 
 Rules of thumb: unstructured documents you must search → vector (Patterns 1/3). Numbers,
@@ -1020,8 +1049,12 @@ inventories, transactions → relational (give the LLM a good `db_description`).
 relationships → graph — noting the graph nodes only QUERY a graph; to build one from text,
 use `tool_cognee` (Pattern 22). The families compose: an agent can control any of these as
 tools, so RAG plus a `db_postgres` tool on one agent is a common shape. The built-in
-`rocketride_*` variants need no external server — the fastest prototypes before pointing the
-same wiring at production infrastructure.
+`rocketride_sql`, `rocketride_vector` and `rocketride_graph` variants require a configured
+RocketRide database broker, on RocketRide Cloud or a self-hosted engine configured with
+that broker. They take no database connection settings in the pipeline; being built in
+does not make a database available on an unconfigured local engine. For your own database,
+use `db_postgres` for SQL, PostgreSQL (pgvector), provider `postgres`, for vectors, or
+`graph_neo4j` / `graph_falkordb` for graphs.
 
 ---
 
@@ -1102,7 +1135,9 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
 ### Driving pipelines from code (pointers)
 
 - Start once with `client.use(filepath='...')` and reuse the returned token; pass
-  `use_existing=True` in long-running services to avoid `Pipeline already running`.
+  `use_existing=True` in long-running services to avoid `Pipeline already running`. A task
+  is keyed by owner + `project_id` + source, so to run the same pipe more than once at a
+  time give each `use()` its own unguessable `tk_` token.
 - **Never block the async event loop** (`input()`, `readFileSync()`, `time.sleep()`): a
   blocked loop starves the websocket keepalive and the connection dies after ~60s idle with
   `Connection closed` / `Connection timeout`. Use the async I/O patterns in
@@ -1163,7 +1198,7 @@ Runtime errors:
 | --- | --- |
 | `Connection closed` / `Connection timeout` | **Blocked async event loop** — async I/O only; see the SDK docs |
 | `KeyError: 'answers'` | Custom `laneName` changed the response key — read keys via `result_types` |
-| `Pipeline already running` | `use()` while running — `use_existing=True`, or `terminate()` first |
+| `Pipeline already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
 | `Component not found` / `Lane not supported` | Provider or lane not in the catalog — check spelling and `lanes` |
 | `Connection refused` / `Invalid API key` | External service down, or wrong `.env` values — check hosts, ports, `${ROCKETRIDE_*}` names |
 

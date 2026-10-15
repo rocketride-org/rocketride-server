@@ -48,8 +48,12 @@ using LvlStateArray = std::array<State, MaxLvls>;
 #define IsAtty isatty
 #endif
 
-// This function holds a static instantiation of the levels array
-LvlStateArray& LvlState() noexcept;
+// This function holds a static instantiation of the levels array. Shared so a
+// node module reads the same enabled levels the engine was started with, rather
+// than a private copy where every level reads as off and all of the node's trace
+// output silently vanishes. The definition in api.hpp is withheld from
+// consumers for exactly that reason.
+ROCKETRIDE_CORE_SHARED LvlStateArray& LvlState() noexcept;
 
 // Log level control apis
 template <bool Sticky = true, typename... Levels>
@@ -74,6 +78,6 @@ void disableAllStrackTraces() noexcept;
 void init() noexcept;
 void deinit() noexcept;
 
-Atomic<bool>& initialized() noexcept;
+ROCKETRIDE_CORE_API Atomic<bool>& initialized() noexcept;
 
 }  // namespace ap::log

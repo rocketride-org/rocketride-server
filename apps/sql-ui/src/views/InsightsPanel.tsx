@@ -250,7 +250,7 @@ export const InsightsPanel: React.FC<IInsightsPanelProps> = ({ endpoint, snapsho
 					key={name}
 					variant="ghost"
 					small
-					title={badge ? `${name} — ${badge(name)}` : name}
+					title={badge ? `${name}: ${badge(name)}` : name}
 					onClick={() => requestTableRecord(endpoint.key, name)}
 				>
 					{badge ? `${name} · ${badge(name)}` : name}
@@ -309,7 +309,7 @@ export const InsightsPanel: React.FC<IInsightsPanelProps> = ({ endpoint, snapsho
 			{/* The scope of every claim above. */}
 			<div style={styles.staticRow}>
 				<Banner variant="info">
-					{`Based on the schema snapshot read ${readAt}. Rules inspect columns, primary keys and declared foreign keys only — indexes, other constraints and data are not inspected. Type comparison is textual after normalisation. Nothing is changed by this page.`}
+					{`Based on the schema snapshot read ${readAt}. Rules inspect columns, primary keys and declared foreign keys only. Indexes, other constraints and data are not inspected. Type comparison is textual after normalisation. Nothing is changed by this page.`}
 				</Banner>
 			</div>
 		</div>

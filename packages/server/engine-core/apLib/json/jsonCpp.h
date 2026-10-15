@@ -555,7 +555,7 @@ private:
 };
 
 // Expose this method for us in our ext.ipp
-char* duplicateAndPrefixStringValue(const char* value, unsigned int length);
+ROCKETRIDE_CORE_API char* duplicateAndPrefixStringValue(const char* value, unsigned int length);
 
 /** \brief Represents a <a HREF="http://www.json.org">JSON</a> value.
  *
@@ -1005,7 +1005,7 @@ private:
     Value& resolveReference(const char* key);
     Value& resolveReference(const char* key, const char* end);
 
-    struct CommentInfo {
+    struct JSON_API CommentInfo {
         CommentInfo();
         ~CommentInfo();
 

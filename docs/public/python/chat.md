@@ -26,7 +26,13 @@ question.addExample('Summarize X', {'summary': '...', 'keywords': ['a', 'b']})
 question.addQuestion('Summarize the main points and list keywords.')
 ```
 
-`Question(type=QuestionType.QUESTION, filter=DocFilter(), expectJson=False, role='')` —
+If you send the same question again and again with only its context, documents,
+goals or questions changing (an agent loop does), set `question.cachePrefix = True`.
+A provider that supports prompt caching (the Anthropic node, and Claude models on
+the Bedrock node) may then cache the unchanging start of the prompt; other
+providers ignore the flag.
+
+`Question(type=QuestionType.QUESTION, filter=DocFilter(), expectJson=False, cachePrefix=False, role='')` —
 `QuestionType` is one of `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT`. Steer
 the model with `addInstruction`, `addExample`, `addContext`, `addHistory` (for
 multi-turn), `addDocuments`, `addGoal`, and `addQuestion`.

@@ -83,9 +83,10 @@ authlib==1.7.2
     # via
     #   -r nodes/src/nodes/store_weaviate/requirements.txt
     #   weaviate-client
-av==17.1.0
+av==18.1.0
     # via
     #   -r nodes/src/nodes/audio_transcribe/requirements.txt
+    #   -r nodes/src/nodes/media_inspect/requirements.txt
     #   faster-whisper
 babel==2.18.0
     # via csvw
@@ -264,7 +265,6 @@ deprecation==2.1.0
     # via
     #   astrapy
     #   lancedb
-    #   weaviate-client
 dirtyjson==1.0.8
     # via llama-index-core
 distro==1.9.0
@@ -444,7 +444,7 @@ griffelib==2.1.0
     #   griffecli
 grpc-google-iam-v1==0.14.5
     # via google-cloud-resource-manager
-grpcio==1.81.1
+grpcio==1.78.0
     # via
     #   -r nodes/src/nodes/store_milvus/requirements.txt
     #   -r nodes/src/nodes/store_qdrant/requirements.txt
@@ -464,13 +464,11 @@ grpcio==1.81.1
     #   pymilvus
     #   qdrant-client
     #   weaviate-client
-grpcio-health-checking==1.81.1
-    # via
-    #   -r nodes/src/nodes/store_weaviate/requirements.txt
-    #   weaviate-client
-grpcio-status==1.81.1
+grpcio-health-checking==1.78.0
+    # via -r nodes/src/nodes/store_weaviate/requirements.txt
+grpcio-status==1.78.0
     # via google-api-core
-grpcio-tools==1.81.1
+grpcio-tools==1.78.0
     # via
     #   -r nodes/src/nodes/store_qdrant/requirements.txt
     #   -r nodes/src/nodes/store_weaviate/requirements.txt
@@ -552,7 +550,9 @@ idna==3.18
     #   requests
     #   yarl
 imageio-ffmpeg==0.6.0
-    # via -r nodes/src/nodes/audio_player/requirements.txt
+    # via
+    #   -r nodes/src/nodes/audio_player/requirements.txt
+    #   -r nodes/src/nodes/media_inspect/requirements.txt
 img2table==2.0.0
     # via -r nodes/src/nodes/ocr/requirements.txt
 impit==0.13.1
@@ -635,6 +635,7 @@ langchain==1.3.11
     #   -r nodes/src/nodes/llm_baidu_qianfan/requirements.txt
     #   -r nodes/src/nodes/llm_bedrock/requirements.txt
     #   -r nodes/src/nodes/llm_deepseek/requirements.txt
+    #   -r nodes/src/nodes/llm_glm/requirements.txt
     #   -r nodes/src/nodes/llm_gmi_cloud/requirements.txt
     #   -r nodes/src/nodes/llm_kimi/requirements.txt
     #   -r nodes/src/nodes/llm_minimax/requirements.txt
@@ -663,6 +664,7 @@ langchain-core==1.4.8
     #   -r nodes/src/nodes/llm_baidu_qianfan/requirements.txt
     #   -r nodes/src/nodes/llm_bedrock/requirements.txt
     #   -r nodes/src/nodes/llm_deepseek/requirements.txt
+    #   -r nodes/src/nodes/llm_glm/requirements.txt
     #   -r nodes/src/nodes/llm_gmi_cloud/requirements.txt
     #   -r nodes/src/nodes/llm_kimi/requirements.txt
     #   -r nodes/src/nodes/llm_minimax/requirements.txt
@@ -694,6 +696,7 @@ langchain-openai==1.3.3
     #   -r nodes/src/nodes/embedding_openai/requirements.txt
     #   -r nodes/src/nodes/llm_baidu_qianfan/requirements.txt
     #   -r nodes/src/nodes/llm_deepseek/requirements.txt
+    #   -r nodes/src/nodes/llm_glm/requirements.txt
     #   -r nodes/src/nodes/llm_gmi_cloud/requirements.txt
     #   -r nodes/src/nodes/llm_kimi/requirements.txt
     #   -r nodes/src/nodes/llm_minimax/requirements.txt
@@ -835,6 +838,7 @@ numpy==2.3.5 ; python_full_version < '3.13'
     #   -r nodes/src/nodes/audio_tts/requirements.txt
     #   -r nodes/src/nodes/embedding_transformer/requirements.txt
     #   -r nodes/src/nodes/face_detection/requirements.txt
+    #   -r nodes/src/nodes/media_inspect/requirements.txt
     #   -r nodes/src/nodes/ocr/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
     #   -r nodes/src/nodes/store_elasticsearch/requirements.txt
@@ -874,6 +878,7 @@ numpy==2.5.0 ; python_full_version >= '3.13'
     #   -r nodes/src/nodes/audio_tts/requirements.txt
     #   -r nodes/src/nodes/embedding_transformer/requirements.txt
     #   -r nodes/src/nodes/face_detection/requirements.txt
+    #   -r nodes/src/nodes/media_inspect/requirements.txt
     #   -r nodes/src/nodes/ocr/requirements.txt
     #   -r nodes/src/nodes/requirements.txt
     #   -r nodes/src/nodes/store_elasticsearch/requirements.txt
@@ -967,6 +972,7 @@ openai==2.44.0
     #   -r nodes/src/nodes/embedding_openai/requirements.txt
     #   -r nodes/src/nodes/llm_baidu_qianfan/requirements.txt
     #   -r nodes/src/nodes/llm_deepseek/requirements.txt
+    #   -r nodes/src/nodes/llm_glm/requirements.txt
     #   -r nodes/src/nodes/llm_gmi_cloud/requirements.txt
     #   -r nodes/src/nodes/llm_kimi/requirements.txt
     #   -r nodes/src/nodes/llm_minimax/requirements.txt
@@ -1064,6 +1070,7 @@ packaging==26.2
     #   thinc
     #   transformers
     #   weasel
+    #   weaviate-client
 pandas==3.0.3
     # via
     #   -r nodes/src/nodes/store_milvus/requirements.txt
@@ -1151,6 +1158,7 @@ protobuf==6.33.6
     #   proto-plus
     #   pymilvus
     #   qdrant-client
+    #   weaviate-client
 psutil==7.2.2
     # via
     #   accelerate
@@ -1566,6 +1574,7 @@ thinc==8.3.13
 tiktoken==0.13.0
     # via
     #   -r nodes/src/nodes/chunker/requirements.txt
+    #   -r nodes/src/nodes/context_optimizer/requirements.txt
     #   langchain-openai
     #   llama-index-core
     #   mistral-common
@@ -1786,7 +1795,7 @@ wcwidth==0.8.2
     # via prompt-toolkit
 weasel==1.0.0
     # via spacy
-weaviate-client==4.16.2
+weaviate-client==4.23.1
     # via -r nodes/src/nodes/store_weaviate/requirements.txt
 websocket-client==1.9.0
     # via kubernetes

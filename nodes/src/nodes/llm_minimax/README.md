@@ -53,7 +53,7 @@ The `-highspeed` variants are MiniMax's faster tier of the same generation. Mini
 
 ## Configuration
 
-Choose a profile to set the model and token limits. Cloud profiles target MiniMax's API; local profiles prefill the Hugging Face model path and a local OpenAI-compatible server, while `custom` exposes the model, context budget, and server URL for manual configuration.
+Choose a profile to set the model and token limits. Cloud profiles target MiniMax's API; local profiles prefill the Hugging Face model path and a local OpenAI-compatible server, while `custom` exposes the model, context budget, output limit (8,192 tokens by default), and server URL for manual configuration.
 
 ### Server base URL
 
@@ -95,6 +95,7 @@ These models do not fit on a typical laptop without aggressive quantization. M2.
 | `minimax.profile` | `string` | **Model**<br/>MiniMax LLM model | `"minimax-m2"` |
 | `minimax.serverbase` | `string` | **Server base URL**<br/>OpenAI-compatible base URL for the MiniMax endpoint (e.g. https://api.minimax.io/v1 for international, https://api.minimaxi.com/v1 for China). | `"https://api.minimax.io/v1"` |
 | `model` | `string` | **Model**<br/>MiniMax model |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
 ## Dependencies

@@ -261,7 +261,10 @@ function ensureShellStub(root) {
 	fs.renameSync(path.join(shellDir, packed), tgzPath);
 	// step: mark it as the stub so the shell build never cache-skips past it
 	fs.writeFileSync(`${tgzPath}.stub`, '');
-	console.log('Vendored shell missing — packed the placeholder shell.tgz (the first shell:build replaces it with the real package)');
+	console.log(
+		'Vendored shell missing — packed the placeholder shell.tgz ' +
+			'(the first shell:build replaces it with the real package)'
+	);
 	return true;
 }
 

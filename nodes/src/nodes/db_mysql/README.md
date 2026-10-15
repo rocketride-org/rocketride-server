@@ -24,7 +24,7 @@ must decide what to retrieve or needs gated raw SQL.
 
 | Connection | Required | Description |
 | --- | --- | --- |
-| `llm` | yes | LLM used to craft SQL queries from questions |
+| `llm` | no | LLM used to craft SQL queries from questions; not needed for execute (raw SQL) |
 
 ## Lanes
 

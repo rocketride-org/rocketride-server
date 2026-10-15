@@ -9,7 +9,7 @@
 	"prefix": "python",
 	"icon": "python.svg",
 	"documentation": "https://docs.rocketride.org/nodes/tool_python",
-	"description": ["Executes Python code in a restricted in-process sandbox via exec().", "Only whitelisted modules can be imported. Dangerous builtins are removed."],
+	"description": ["Executes Python code in a restricted in-process sandbox via exec().", "Only whitelisted modules can be imported. Dangerous builtins are removed.", "By default the code has no network, filesystem or subprocess access.", "For web calls use the HTTP Request node (tool_http_request). For code that needs network access or extra packages use the Daytona node (tool_daytona)."],
 	"tile": ["Tool: python.execute"],
 	"lanes": {},
 	"preconfig": {
@@ -37,7 +37,7 @@
 		"tool_python.timeout": {
 			"type": "integer",
 			"title": "Execution timeout (seconds)",
-			"description": "Maximum seconds a script may run before it is killed. Useful for long-running operations like network scans. Default is 20s, max is 1200s.",
+			"description": "Maximum seconds a script may run before it is killed. Default is 20s, max is 1200s.",
 			"default": 20,
 			"minimum": 1,
 			"maximum": 1200,
@@ -45,7 +45,7 @@
 		},
 		"tool_python.allowedModules": {
 			"title": "Additional Allowed Modules",
-			"description": "Modules the agent is allowed to import, in addition to the built-in defaults (math, json, re, collections, datetime, etc.).",
+			"description": "Modules the agent is allowed to import, in addition to the built-in defaults (math, json, re, collections, datetime, etc.). This setting has no effect on RocketRide Cloud, where only the built-in defaults can be imported.",
 			"type": "array",
 			"minItems": 0,
 			"items": {

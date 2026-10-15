@@ -179,6 +179,54 @@ PUBLIC_ROUTE_MANIFEST = [
         'Contact',
         'Get in touch with the RocketRide team — sales, support, and partnership inquiries.',
     ),
+    (
+        '/superfans',
+        'Superfans',
+        'The developers who build with RocketRide and tell us the truth. Earn early builds, a hand on the '
+        'roadmap, and artifacts you can only be given.',
+    ),
+    # The legal pages: the index (routes.ts) and one entry per published
+    # document, mirroring the title and description in the document's front
+    # matter (apps/home-ui/content/legal/<slug>.md). Exact paths only, like every
+    # entry here: a /legal/{path} pattern would make every legal sub-path public
+    # to the auth middleware, including slugs that are not documents. A new
+    # document adds its path here.
+    (
+        '/legal',
+        'Legal',
+        'The policies and terms that govern RocketRide Cloud - each document with its version, '
+        'effective date, and latest change.',
+    ),
+    (
+        '/legal/terms',
+        'RocketRide Cloud Terms of Service',
+        'The agreement governing use of RocketRide Cloud, including accounts, payments, and acceptable service use.',
+    ),
+    (
+        '/legal/privacy-policy',
+        'Privacy Policy',
+        'How RocketRide collects, uses, and shares personal information across its websites and RocketRide Cloud.',
+    ),
+    (
+        '/legal/dpa',
+        'Data Processing Agreement',
+        'The data processing terms that apply when RocketRide processes personal data on behalf of business customers.',
+    ),
+    (
+        '/legal/acceptable-use',
+        'Acceptable Use Policy',
+        'The rules for what may and may not be done with RocketRide Cloud and its services.',
+    ),
+    (
+        '/legal/subprocessors',
+        'RocketRide Cloud Sub-processors',
+        'The third-party sub-processors RocketRide uses to provide RocketRide Cloud, and how the list changes.',
+    ),
+    (
+        '/legal/trademark-policy',
+        'Trademark & Brand Usage Policy',
+        'How the RocketRide name, logo, and brand assets may and may not be used.',
+    ),
 ]
 
 # Bare route list — kept as the module's public surface for route
@@ -344,7 +392,8 @@ async def shell_static(request: Request):
 # The cookie the browser attaches to every /apps/* fetch (set by apps_session).
 _APP_COOKIE = 'rr_apps_token'
 
-# Sliding permission cache: sha256('<token>.<app_id>') -> {auth: bool, expiry}.
+# Sliding permission cache: sha256('<token>.<app_id>') -> {auth: bool, expiry,
+# appId} (appId lets invalidate_app_serving drop one app's verdicts).
 # DENIALS are cached too — an unauthorized caller hammering denied apps is then
 # served from cache instead of a DB walk per file (a cheap-DoS guard). Every
 # reference slides the entry 5 min forward. Only the permission DECISION is
@@ -459,7 +508,7 @@ async def _authorize_app(token: str, app_id: str) -> bool:
         hit['expiry'] = now + _APP_AUTH_TTL  # slide on reference
         return hit['auth']
     auth = await _resolve_app_access(token, app_id)
-    _app_auth_cache[key] = {'auth': auth, 'expiry': now + _APP_AUTH_TTL}
+    _app_auth_cache[key] = {'auth': auth, 'expiry': now + _APP_AUTH_TTL, 'appId': app_id}
     # Bounded for real: expired entries go first, and if a flood of DISTINCT
     # random tokens fills the map inside one TTL window (nothing expired to
     # drop), evict the soonest-to-expire entries down to the cap — with the
@@ -492,8 +541,9 @@ _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _BUNDLE_CACHE = 'private, max-age=3600'
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
-# 'resolvedAt', 'floor'} — HARD expiry (contrast _app_auth_cache's sliding
-# window).
+# 'resolvedAt', 'floor', 'appId'} — HARD expiry (contrast _app_auth_cache's
+# sliding window); every deploy change also drops the app's entries
+# (invalidate_app_serving).
 _version_dir_cache: dict = {}
 # BASE floor between miss-forced re-resolutions of one caller's map: a map
 # younger than its key's CURRENT floor answers as-is even when it lacks the
@@ -555,7 +605,13 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
     # converges on the first ask.
     fruitless = hit is not None and hit['expiry'] > now and want is not None and want not in dirs
     floor = min(hit['floor'] * 2, _APP_AUTH_TTL) if fruitless else _VERSION_MISS_REFRACTORY
-    _version_dir_cache[key] = {'dirs': dirs, 'expiry': now + _APP_AUTH_TTL, 'resolvedAt': now, 'floor': floor}
+    _version_dir_cache[key] = {
+        'dirs': dirs,
+        'expiry': now + _APP_AUTH_TTL,
+        'resolvedAt': now,
+        'floor': floor,
+        'appId': app_id,
+    }
     # Bounded like _app_auth_cache: expired first, then soonest-to-expire.
     if len(_version_dir_cache) > 4096:
         for k in [k for k, v in _version_dir_cache.items() if v['expiry'] <= now]:
@@ -565,6 +621,24 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
             for k in sorted(_version_dir_cache, key=lambda k: _version_dir_cache[k]['expiry'])[:overflow]:
                 _version_dir_cache.pop(k, None)
     return dirs
+
+
+def invalidate_app_serving(app_id: str) -> None:
+    """Drop every cached serving verdict for one app, across all callers.
+
+    Called on every APP deployment change (``broadcast_app_changed`` — build
+    stamps, publish/disable/remove, review transitions): the next request
+    for the app re-resolves instead of answering from a verdict the change
+    made stale. Without it a caller that asked for a version while it was
+    still building kept its escalated miss floor after the version became
+    servable, 404ing for up to the TTL (#2461); and a disable or revocation
+    waited out the hard expiry. In-process only, like the deploy events
+    that trigger it. The miss floor itself is untouched: nonexistent-
+    version probers still decay between changes.
+    """
+    for cache in (_version_dir_cache, _app_auth_cache):
+        for key in [k for k, entry in cache.items() if entry.get('appId') == app_id]:
+            cache.pop(key, None)
 
 
 async def _serve_versioned(request: Request, app_id: str, version: int, rest: list) -> Response:

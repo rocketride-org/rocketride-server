@@ -26,17 +26,19 @@
 # ONE read path over the per-task run-log continuum: EaaS serves every log
 # read (live and completed alike) by composing store segments + local spool
 # via the stream's control file — clients never touch storage directly.
-# Dispatches on ``arguments.subcommand`` (chapters / read / segment / delete),
-# the same shape as rrext_store and rrext_deploy. Streams are addressed by the plain
+# Dispatches on ``arguments.subcommand`` (streams / chapters / read / segment /
+# delete), the same shape as rrext_store and rrext_deploy. Streams are addressed by the plain
 # identity pair (projectId + source) — NEVER by token: tokens are
 # credentials and appear nowhere in the log system. The SCOPE IS THE KIND:
 # ``teamId`` present addresses that team's DEPLOY continuum, absent addresses
 # the caller's own DEV stream — run kind is derived, not an argument.
 # =============================================================================
 
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+import asyncio
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from ai.account import Store
+from ai.account.models import resolve_task_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.modules.task.run_log import RunLogReader
 
@@ -74,6 +76,7 @@ class LogCommands(DAPConn):
         # (account info, server, transport) lives on TaskConn via the other
         # mixins, so nothing else is set up here.
         self._log_subcommand_handlers = {
+            'streams': self._log_streams,
             'chapters': self._log_chapters,
             'read': self._log_read,
             'segment': self._log_segment,
@@ -222,6 +225,51 @@ class LogCommands(DAPConn):
     # =========================================================================
     # SUBCOMMAND HANDLERS
     # =========================================================================
+
+    @staticmethod
+    def _scope(run_kind: str, team: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """One place a stream can live: a team's tree, or the caller's own when ``team`` is None."""
+        return {
+            'teamId': team['id'] if team else '',
+            'teamName': team.get('name', '') if team else '',
+            'runKind': run_kind,
+            'ownerKind': 'team' if team else 'user',
+        }
+
+    # ── streams ──────────────────────────────────────────────────────────────
+
+    async def _log_streams(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Every continuum of one source the caller may read, with its chapters: own dev, own @me
+        deploy, then each team deploy the caller can monitor. Never-logged scopes are left out.
+        """
+        self.verify_permission('task.monitor')
+
+        # Own tree first (dev run, @me deploy), then the deploy stream of each team the caller can monitor.
+        org = self._account_info.organization or {}
+        scopes = [self._scope(kind) for kind in ('dev', 'deploy')]
+        scopes += [
+            self._scope('deploy', team)
+            for team in org.get('teams', [])
+            # Same resolver as verify_team_permission: nothing listed here could be denied on a direct read.
+            if 'task.monitor' in resolve_task_permissions(self._account_info, team['id'])
+        ]
+
+        identity = {'projectId': args.get('projectId'), 'source': args.get('source')}
+        # One control-file read per scope, a few at a time: an org admin can monitor every team.
+        limit = asyncio.Semaphore(8)
+
+        async def chapters_of(scope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            async with limit:
+                try:
+                    return await self._reader_for(
+                        {**identity, 'teamId': scope['teamId'], 'runKind': scope['runKind']}
+                    ).chapters()
+                except FileNotFoundError:
+                    return None
+
+        bodies = await asyncio.gather(*(chapters_of(scope) for scope in scopes))
+        streams = [{**scope, **body} for scope, body in zip(scopes, bodies) if body is not None]
+        return self.build_response(request, body={'streams': streams})
 
     # ── chapters ─────────────────────────────────────────────────────────────
 

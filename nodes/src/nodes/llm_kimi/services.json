@@ -137,6 +137,7 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 100352, // openrouter
+				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
 			"kimi-k2-0905": {
@@ -145,6 +146,7 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 262144, // openrouter
 				"modelOutputTokens": 100352, // openrouter
+				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
 			"kimi-k2-7-code": {
@@ -156,6 +158,7 @@
 				"capabilities": {
 					"reasoning": true
 				},
+				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
 			"kimi-k2-thinking": {
@@ -167,6 +170,7 @@
 				"capabilities": {
 					"reasoning": true
 				},
+				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
 			"kimi-latest": {
@@ -178,6 +182,7 @@
 				"capabilities": {
 					"reasoning": true
 				},
+				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
 			"kimi-k3": {
@@ -189,6 +194,7 @@
 				"capabilities": {
 					"reasoning": true
 				},
+				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
 			"kimi-k3-batch": {
@@ -197,9 +203,12 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 943718, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch alias, not a Moonshot model ID. Please use 'kimi-k3' instead.",
 				"capabilities": {
 					"reasoning": true
 				},
+				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			}
 		}

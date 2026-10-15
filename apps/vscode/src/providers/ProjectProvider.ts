@@ -1020,7 +1020,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						// so the registry still holds exactly what is on disk.
 						if (document.isDirty) {
 							const saved = await document.save();
-							if (!saved) throw new Error('Save failed — publish cancelled');
+							if (!saved) throw new Error('Save failed; publish cancelled');
 						}
 						const parsed = JSON.parse(document.getText()) as PipelineConfig;
 						// The registry renders pipelineName on every deploy surface;

@@ -62,6 +62,7 @@
 	],
 	"test": {
 		"profiles": ["florence-base"],
+		"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 		"outputs": ["text"],
 		"timeout": 120,
 		"cases": [
@@ -76,6 +77,7 @@
 	},
 	"fulltest": {
 		"profiles": ["florence-base"],
+		"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 		"outputs": ["text"],
 		"timeout": 120,
 		"cases": [

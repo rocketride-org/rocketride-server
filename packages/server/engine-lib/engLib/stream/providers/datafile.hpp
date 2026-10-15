@@ -40,7 +40,9 @@ _const auto Type = "datafile"_itv;
 // Register the protocol config with the Url system. This
 // allows call Url::toPath(...), Url::toUrl(...), etc
 //-------------------------------------------------------------------------
+#ifndef ROCKETRIDE_CORE_IMPORT
 static genericfile::GenericFileUrlConfig urlConfig{Type, Level};
+#endif
 
 //-------------------------------------------------------------------------
 /// @details

@@ -317,7 +317,7 @@ Start a RocketRide pipeline for processing data.
 
 - `pipeline` (dict, optional): Flat pipeline configuration dict (`components`, `source`, `project_id` at top level). A dict wrapped as `{'pipeline': {...}}` is automatically unwrapped.
 - `filepath` (str, optional): Path to a `.pipe` or JSON/JSON5 file containing pipeline configuration. Files with a top-level `pipeline` key are automatically unwrapped.
-- `token` (str, optional): Custom token for the pipeline (auto-generated if not provided)
+- `token` (str, optional): Custom token for the pipeline (auto-generated if not provided). Pass a distinct token per instance to run the same pipeline more than once at a time; tokens share one namespace across users, so use an unguessable value that keeps the `tk_` prefix
 - `source` (str, optional): Override the pipeline source (which source component this task runs from)
 - `threads` (int, optional): Number of threads for execution (default: None, the server decides)
 - `use_existing` (bool, optional): Reuse an existing pipeline instance with the same identity
@@ -673,6 +673,7 @@ Simple JSON log documents stored under `.logs/<project_id>/`:
 
 Every dev or deploy run of a pipeline source writes into a durable per-source event stream (the "continuum"). The `client.log` namespace reads it. On every method: pass `team_id` to address that TEAM's deploy continuum (deploy runs execute as the team; any teammate with monitor rights can watch/replay); omit it for your OWN stream, where `run_kind` selects the continuum: `''`/`'dev'` = your dev stream, `'deploy'` = your personal (@me) deploy stream. `run_kind` is ignored when `team_id` is set.
 
+- `async log.streams(project_id: str, source: str) -> LogStreamsResult` — every continuum of that source you may read (own dev, own `@me` deploy, each team deploy you can monitor), each tagged with `teamId`, `teamName`, `runKind`, `ownerKind` and carrying the chapters body.
 - `async log.chapters(project_id: str, source: str, *, team_id: str = '', run_kind: str = '') -> LogChaptersResult` — a stream's chapters (one per run: begin/end times, starting seq, outcome), segment activity spans, the retained window, and the retention horizon: everything a timeline needs in one small read.
 - `async log.read(project_id: str, source: str, *, team_id: str = '', run_kind: str = '', from_seq=None, to_seq=None, from_time=None, to_time=None, to_segment=None, cursor=None, max_events=None, max_bytes=None, types=None) -> LogReadResult` — read a seq/time range of events, paged. Range forms: seq bounds, time bounds (omit the upper bound for "to now"), or from-time to to-segment. When the response carries `nextSeq`, pass it back as `cursor` to continue; a `truncatedAtSeq` flag means the request reached below the retention horizon. `types` is a server-side event-type filter (e.g. `['output']`).
 - `async log.segment(project_id: str, source: str, segment: int, *, team_id: str = '', run_kind: str = '', offset: int = 0, max_bytes=None) -> LogSegmentResult` — fetch one segment's raw JSONL bytes, chunked by byte offset (whole-line-aligned chunks — each parses standalone). Repeat with the returned `nextOffset` until `final`. The segment table comes from `chapters()`. This is the bulk replay path.
@@ -809,8 +810,8 @@ Point a team at a published version. Promotion (Staging to Production) and rollb
 
 #### State & Runs
 
-- `async deploy.run(project_id: str, source_id: str, team_id: str) -> dict` — start one deployed source NOW (manual trigger). The run executes as the team and carries no human identity; billing attributes to the org and team, and who fired it is recorded in the audit history. The deployment must be enabled. Returns `{'token', 'version'}`.
-- `async deploy.disable(project_id: str, team_id: str) -> Deployment` — the kill switch: NOTHING runs (schedules stop firing, manual runs are refused) until enabled again.
+- `async deploy.run(project_id: str, source_id: str, team_id: str) -> dict` — start one deployed source NOW (manual trigger). The run executes as the team and carries no human identity; billing attributes to the org and team, and who fired it is recorded in the audit history. The deployment must be enabled. Returns `{'token', 'version'}`. A manual run has no run window: it executes until the pipeline finishes or the returned token is terminated (the schedule's `ttl` applies to scheduled fires only), so a long-lived pipeline can keep running and billing until it finishes or is terminated; disabling the deployment refuses new runs but does not stop one already going.
+- `async deploy.disable(project_id: str, team_id: str) -> Deployment` — the kill switch: nothing new runs (schedules stop firing, manual runs are refused) until enabled again. A run already in progress is not stopped; terminate it by token.
 - `async deploy.enable(project_id: str, team_id: str) -> Deployment` — enable a disabled deployment.
 - `async deploy.remove(project_id: str, team_id: str) -> Deployment` — soft-remove one team's deployment. Listings hide it; the audit history and every registry artifact survive. Re-deploying any version revives it.
 
@@ -906,10 +907,11 @@ with open('my-app-source.zip', 'rb') as f:
 
 The zip contains the app's SOURCE (the server owns the build and never trusts client-produced binaries): either `package.json` + `src` at the zip root, or workspace-relative with `metadata={'appRoot': '<app folder>'}`. A new app deployment is born state `'private'` — an `@me`/`@team` binding may serve it immediately; reaching the public store requires review. Audience targets are `'@me'`, `'@team/<name-or-id>'`, or `'@public'` (`'@user'` is a legacy alias for `'@me'`).
 
-- `async list_deployments(app_id: str) -> List[Dict[str, Any]]` — the app's deployed versions, newest first (the rail). Answered by role: the developer org sees its FULL rail (published or not); other callers see only versions serving on rows visible to them. Each entry carries its deployment `state`, its `buildStatus` (`'ok'` = servable bytes exist), and a `rungs` list naming the audiences currently serving that version.
+- `async list_deployments(app_id: str) -> List[Dict[str, Any]]` — the app's deployed versions, newest first (the rail). Answered by role: the developer org sees its FULL rail (published or not); other callers see only versions serving on rows visible to them. Each entry carries its deployment `state`, its `buildStatus` (`'ok'` = servable bytes exist), the `buildPhase` the build reached and `buildEndedAt` (always present: epoch seconds, or `None` until the build ends), and a `rungs` list naming the audiences currently serving that version.
 - `async build_log(app_id: str, registry_version: int) -> Dict[str, Any]` — one version's durable server build log: the full phase-by-phase output of the build worker (error detail never rides the rail rows). Long logs serve their tail; an empty `log` means no log exists for the version. Developer-org gated. Returns `{'appId', 'version', 'log'}`.
 - `async publish_app(app_id: str, registry_version: int, target: str) -> Dict[str, Any]` — bind a deployment to an audience; one verb covers first publish, promote, and rollback (the binding is a pure pointer). `'@public'` requires the deployment be `'ready'` (approved); `'@me'`/`'@team'` accept any non-`'failed'` deployment. Returns the `publish` binding row.
 - `async remove_app_publish(app_id: str, target: str) -> Dict[str, Any]` — remove an audience binding; the app stops serving to that audience. SOFT: registry versions and audit history survive; publishing again revives it.
+- `async disable_app_publish(app_id: str, target: str) -> Dict[str, Any]` — disable an audience binding: serving stops, but the row STAYS in the where-live listing marked `'disabled'` (a visible off switch), unlike remove which hides it. Publishing any version to that audience re-enables it. Returns the `publish` binding row.
 - `async where_app(app_id: str) -> List[Dict[str, Any]]` — the reverse index: which audiences serve which version. Returns pin rows (`{'rung', 'handle', 'version', 'appVersion', 'state', 'deployedAt'}`).
 - `async submit_app(app_id: str, registry_version: int) -> Dict[str, Any]` — submit a deployed version for store review: flips the deployment `'private'` to `'submit'` (it enters the review queue). Developer-org and developer-namespace gated. Returns the refreshed `artifact` rail entry.
 - `async withdraw_app(app_id: str, registry_version: int) -> Dict[str, Any]` — withdraw a pending review (the developer's own cancel): flips `'submit'` back to `'private'`; history records the withdrawal. Only a version in `'submit'` withdraws.
@@ -1029,7 +1031,7 @@ print(f'{page["total"]} tasks, showing {len(page["rows"])}')
 
 `client.database` issues raw SQL or Cypher directly against a database pipeline node (via the node's tool functions), **bypassing the LLM translation layer** the default `chat()` flow uses — and its safety checks: you are responsible for the statements you pass. On every method, `node_id=''` broadcasts to all tool-lane nodes and the first database node handles it. Empty token/sql/session_id raise `ValueError`; server failures raise `RuntimeError`.
 
-- `async database.query(*, token: str, sql: str, node_id: str = '', session_id: str = '', params: list | None = None) -> Dict[str, Any]` — execute a raw SQL/Cypher statement. `params` binds positional placeholders (e.g. `[1, 'foo']` for `$1`, `$2`); pass a `session_id` from `begin_transaction` to run inside that transaction. Returns `{'rows': [...], 'affected_rows': int}`.
+- `async database.query(*, token: str, sql: str, node_id: str = '', session_id: str = '', params: list | dict | None = None) -> Dict[str, Any]` — execute a raw SQL/Cypher statement. `params` binds positional placeholders for SQL nodes (e.g. `[1, 'foo']` for `$1`, `$2`), or named placeholders as a dict for the built-in `rocketride_graph` node and `graph_neo4j` (e.g. `{'rows': [...]}` for `UNWIND $rows`; `graph_falkordb` rejects params; bound values need no escaping and do not count toward `rocketride_graph`'s query-length limit); pass a `session_id` from `begin_transaction` to run inside that transaction. Returns `{'rows': [...], 'affected_rows': int}`.
 - `async database.begin_transaction(*, token: str, node_id: str = '') -> Dict[str, Any]` — begin a transaction; returns a dict containing the `session_id` to thread through subsequent `query`/`commit`/`rollback` calls.
 - `async database.commit(*, token: str, session_id: str, node_id: str = '') -> Dict[str, Any]` — commit an open transaction. Returns `{'ok': True}` on success.
 - `async database.rollback(*, token: str, session_id: str, node_id: str = '') -> Dict[str, Any]` — roll back an open transaction, discarding its changes.
@@ -1044,6 +1046,18 @@ try:
 except Exception:
     await client.database.rollback(token=token, session_id=session)
     raise
+```
+
+**Graph bulk upsert** (`rocketride_graph`, see Pattern 14 in ROCKETRIDE_PIPELINES.md) — named
+params, and MERGE then a separate `MATCH ... SET`:
+
+```python
+rows = [{'id': 1, 'name': 'a'}, {'id': 2, 'name': 'b'}]
+graph = {'token': token, 'node_id': 'rocketride_graph_1'}
+await client.database.query(**graph, sql='UNWIND $rows AS row MERGE (:Item {id: row.id})', params={'rows': rows})
+await client.database.query(
+    **graph, sql='UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name', params={'rows': rows}
+)
 ```
 
 ## 14. CLI

@@ -12,10 +12,21 @@
 
 services:
   # ── RocketRide Engine ────────────────────────────────────────────────────
+  engine-base:
+    image: rocketride/engine-base:local
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.engine-base
+    profiles: [build]
+
   engine:
     build:
       context: ..
       dockerfile: docker/Dockerfile.engine
+      args:
+        ENGINE_BASE: engine-base
+      additional_contexts:
+        engine-base: service:engine-base
     ports:
       - '${ENGINE_PORT:-5565}:5565'
     environment:

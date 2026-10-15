@@ -473,7 +473,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 					return memberBadgeEl(statusBadgeVariant(status), status);
 				},
 			},
-			{ title: 'Created', field: 'createdAt', rrType: 'date', rrDescription: 'UTC time the org membership was created — for invited members, when the invitation was sent.', headerSort: true, formatter: autoFormatter },
+			{ title: 'Created', field: 'createdAt', rrType: 'date', rrDescription: 'UTC time the org membership was created; for invited members, when the invitation was sent.', headerSort: true, formatter: autoFormatter },
 			{
 				title: 'Teams',
 				field: 'teams',

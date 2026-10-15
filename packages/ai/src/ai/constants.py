@@ -26,6 +26,16 @@ RocketRide AI Configuration Constants.
 Global configuration values for metrics, billing, and system tuning.
 """
 
+import os
+import sys
+
+# =============================================================================
+# Task data
+# =============================================================================
+
+# Every task's paths.base: <engine dir>/../data, which is /opt/data in the image.
+CONST_TASK_DATA_PATH = os.path.abspath(os.path.join(os.path.dirname(sys.executable), '..', 'data'))
+
 # =============================================================================
 # Metrics Sampling and Reporting Intervals
 # =============================================================================

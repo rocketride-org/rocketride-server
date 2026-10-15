@@ -78,7 +78,9 @@ async function copyScripts(targetRoot, opts = {}) {
 	// realpathSync: a symlinked or case-variant target must not slip past;
 	// existence is checked just above, so resolution cannot throw for the target.
 	if (fs.realpathSync(targetRoot) === fs.realpathSync(path.join(SOURCE_SCRIPTS, '..'))) {
-		throw new Error('target is this repository — builder:inject copies the local scripts/ to ANOTHER repo (--path=<repo root>)');
+		throw new Error(
+			'target is this repository — builder:inject copies the local scripts/ to ANOTHER repo (--path=<repo root>)'
+		);
 	}
 
 	const scriptsDir = path.join(targetRoot, 'scripts');

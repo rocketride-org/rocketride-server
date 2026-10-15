@@ -120,6 +120,17 @@ messages are translated to user-facing error text; other failures retain the
 Google AI error message. A missing image or malformed image data URL raises a
 value error before the model request.
 
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`accessibility_describe`
+provider, `ROCKETRIDE_GEMINI_KEY`). Only models a source reports as
+vision-capable are added, and each new one is verified with a real image, since
+this node's whole job is describing what a camera sees. Profiles here store bare
+model IDs (`gemini-2.5-flash`), not the `models/` form the Gemini API returns.
+
+The sync runs **only** with that key, and is skipped without it, leaving this
+file untouched — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
 ## Upstream docs
 
 - [Google Gemini API documentation](https://ai.google.dev/gemini-api/docs)

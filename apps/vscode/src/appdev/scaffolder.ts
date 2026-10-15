@@ -172,7 +172,7 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 
 	// ── 1. Validate identity (submit-time — the form state may be stale) ─
 	if (!APP_ID_RE.test(appId)) {
-		throw new Error(`Invalid app id "${appId}" — use <publisher>.<name>; the name starts with a lowercase letter, then letters, digits, underscores, and hyphens.`);
+		throw new Error(`Invalid app id "${appId}". Use <publisher>.<name>; the name starts with a lowercase letter, then letters, digits, underscores, and hyphens.`);
 	}
 	if (!appName.trim()) {
 		throw new Error('Display name is required.');
@@ -181,7 +181,7 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	// ── 2. Target folder ─────────────────────────────────────────────────
 	const root = vscode.workspace.workspaceFolders?.[0];
 	if (!root) {
-		throw new Error('Open a workspace folder first — the app is scaffolded into it.');
+		throw new Error('Open a workspace folder first. The app is scaffolded into it.');
 	}
 	// Apps live under ./apps by convention — symmetric with ./pipelines
 	// (pipeline files) and the node designer's ./nodes, and it makes an

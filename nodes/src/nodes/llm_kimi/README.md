@@ -45,6 +45,12 @@ Default: **Kimi K2.6** (`kimi-k2-6`).
 
 </details>
 
+The last collapsed profile is **deprecated**: `kimi-k3:batch` is an OpenRouter routing
+alias, not a Moonshot model ID, so the Moonshot API has nothing to answer with. It stays
+selectable so saved pipelines keep loading; use `kimi-k3` instead. It arrived through
+OpenRouter fallback discovery in the model sync, the same way the deprecated profiles in
+`llm_qwen` did.
+
 ## Configuration
 
 Choose a model profile. The profile supplies the model identifier, context window,
@@ -57,6 +63,14 @@ Cloud Moonshot endpoints require an API key starting with `sk-`. Any other forma
 If no API key is configured (typical for self-hosted OpenAI-compatible endpoints), a placeholder key (`sk-local-dummy-key`) is sent instead because the OpenAI client requires a non-empty value.
 
 ## Notes
+
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_kimi` provider,
+`ROCKETRIDE_KIMI_KEY`). Every profile must carry `serverbase`: `kimi.py` refuses to
+start without it, and this node defines no field for it, so there is no default to fall
+back on. The provider's `extra_profile_fields` writes the Moonshot endpoint into each
+new profile for that reason.
 
 ### Text-only models
 

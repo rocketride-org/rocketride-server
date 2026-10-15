@@ -28,14 +28,22 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { extractCommonStyleRefs, extractTokens, parseStyleBlocks, renderModule, resolveStyleTokens } from './generate-gallery-tokens.mjs';
+import {
+	extractCommonStyleRefs,
+	extractTokens,
+	parseStyleBlocks,
+	renderModule,
+	resolveStyleTokens,
+} from './generate-gallery-tokens.mjs';
 
 // =============================================================================
 // TOKEN EXTRACTION
 // =============================================================================
 
 test('extractTokens dedupes and sorts --rr tokens', () => {
-	const text = "color: 'var(--rr-text-primary)', background: 'var(--rr-bg-default)', border: '1px solid var(--rr-text-primary)'";
+	const text =
+		"color: 'var(--rr-text-primary)', background: 'var(--rr-bg-default)', " +
+		"border: '1px solid var(--rr-text-primary)'";
 	assert.deepEqual(extractTokens(text), ['--rr-bg-default', '--rr-text-primary']);
 });
 
@@ -48,7 +56,8 @@ test('extractTokens returns empty array for token-free text', () => {
 // =============================================================================
 
 test('extractCommonStyleRefs finds spread and call references', () => {
-	const text = 'const a = { ...commonStyles.buttonPrimary }; const b = commonStyles.listRow(true); commonStyles.fontMono;';
+	const text =
+		'const a = { ...commonStyles.buttonPrimary }; const b = commonStyles.listRow(true); commonStyles.fontMono;';
 	assert.deepEqual(extractCommonStyleRefs(text), ['buttonPrimary', 'fontMono', 'listRow']);
 });
 
@@ -85,7 +94,9 @@ test('resolveStyleTokens follows spreads transitively', () => {
 });
 
 test('resolveStyleTokens tolerates unknown names and cycles', () => {
-	const blocks = parseStyleBlocks('const a: CSSProperties = {\n\t...b,\n};\nconst b: CSSProperties = {\n\t...a,\n};\n');
+	const blocks = parseStyleBlocks(
+		'const a: CSSProperties = {\n\t...b,\n};\nconst b: CSSProperties = {\n\t...a,\n};\n'
+	);
 	assert.deepEqual(resolveStyleTokens('missing', blocks, new Map()), []);
 	assert.deepEqual(resolveStyleTokens('a', blocks, new Map()), []);
 });

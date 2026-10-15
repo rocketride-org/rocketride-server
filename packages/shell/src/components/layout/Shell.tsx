@@ -764,7 +764,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					<div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--rr-text-secondary)' }}>
 						Your account is all set. We&apos;re rolling out access in waves and
 						you&apos;re in the queue. We&apos;ll send you an email as soon as
-						your account is activated &mdash; it shouldn&apos;t be long!
+						your account is activated. It shouldn&apos;t be long!
 					</div>
 					<button
 						onClick={handleBackToHome}

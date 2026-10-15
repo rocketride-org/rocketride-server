@@ -39,7 +39,7 @@ export const debugPanelEntry: IGalleryEntry = {
 	name: 'Debug panel',
 	group: 'chrome',
 	blurb: 'The right-docked (360px) ALT+D event trace: a live scrolling log of every shell event and iframe postMessage, with a name filter and a Clear button.',
-	doc: `Press **ALT+D** anywhere in the shell to toggle it. The panel passively listens to the \`ConnectionManager\` wildcard handler and to window \`message\` traffic, so every \`shell:*\` event an app emits or consumes shows up here with its payload — the first tool to reach for when an event does not arrive.
+	doc: `Press **ALT+D** anywhere in the shell to toggle it. The panel passively listens to the \`ConnectionManager\` wildcard handler and to window \`message\` traffic, so every \`shell:*\` event an app emits or consumes shows up here with its payload. The first tool to reach for when an event does not arrive.
 
 Auto-scroll locks to the bottom until you scroll up; the text filter narrows by event name.`,
 	docNote: 'Apps never mount DebugPanel - the shell owns the ALT+D toggle. Use it to VERIFY your app\'s shell:* event traffic during development.',

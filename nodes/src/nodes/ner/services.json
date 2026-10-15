@@ -69,6 +69,7 @@
 	//
 	"test": {
 		"profiles": ["distilbert"],
+		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 		"cases": [
 			{
 				"text": "Barack Obama was the 44th President of the United States.",
@@ -88,6 +89,7 @@
 	"fulltest": [
 		{
 			"profiles": ["bertLarge", "bertBase", "distilbert", "xlmRoberta", "deberta", "biomedical"],
+			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 			"cases": [
 				{
 					"text": "Barack Obama was the 44th President of the United States.",

@@ -84,8 +84,8 @@ other hosts are rejected. The shared endpoint defaults to
 
 ### Custom models
 
-Select `custom` to provide a GMI Cloud model identifier, its context limit, and an
-endpoint URL directly. Open-weight identifiers use `org/model-name`, such as
+Select `custom` to provide a GMI Cloud model identifier, its context limit, its
+output limit (4,096 by default), and an endpoint URL directly. Open-weight identifiers use `org/model-name`, such as
 `deepseek-ai/DeepSeek-R1`; proxied identifiers use `provider/model-name`, such as
 `openai/gpt-4o`.
 
@@ -109,8 +109,10 @@ token limit, and endpoint URL directly.
 
 When the node configuration is saved, it is validated against the live API:
 
-- Validation is skipped when the model or API key is not set yet, or (for
-  deploy-on-demand profiles) when the endpoint URL has not been entered yet.
+- Validation is skipped when the model or API key is not set yet.
+- A deploy-on-demand profile whose endpoint URL is still empty is reported right
+  there: the pipeline could not start without it, and the message belongs next to
+  the field, not at run time.
 - The endpoint URL is checked for HTTPS and the `gmi-serving.com` domain.
 - If the model name looks like a vision/multimodal model (contains `vl`, `vision`,
   `visual`, or `multimodal`), a warning is raised suggesting a vision node instead, and
@@ -119,6 +121,28 @@ When the node configuration is saved, it is validated against the live API:
   model's existence. An HTTP 429 (rate limit) during the probe means the key was accepted
   and is treated as valid. Other API errors surface as warnings with the HTTP status,
   provider error type, and message.
+
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_gmi_cloud` provider,
+`ROCKETRIDE_GMI_CLOUD_KEY`), which reads GMI Cloud's own model list.
+
+A profile the sync adds carries the shared endpoint
+(`https://api.gmi-serving.com/v1`), since that is where discovery verified the
+model answers. Selecting it needs only an API key. A deploy-on-demand model
+still requires the endpoint URL from the GMI Cloud console.
+
+Token limits come from GMI Cloud itself, with one exception: for the models GMI
+resells rather than hosts (`openai/…`, `anthropic/…`, `google/…`), the vendor's
+published limits apply, so those profiles track `llm_openai`, `llm_anthropic` and
+`llm_gemini`. For a model GMI runs on its own hardware, the context window is
+GMI's choice, and no third-party database can state it: OpenRouter and LiteLLM
+list the same open-weight model with different windows per host.
+
+For the same reason the sync runs **only** with that key. GMI's IDs
+(`Qwen/Qwen3-32B-FP8`) appear in no other catalogue, so a keyless run would mark
+every profile here deprecated. Without the key the provider is skipped and
+nothing changes — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
 
 ## Upstream docs
 
@@ -137,6 +161,7 @@ When the node configuration is saved, it is validated against the live API:
 | `gmi_cloud.profile` | `string` | **Model**<br/>GMI Cloud LLM model | `"deepseek-v3"` |
 | `gmi_cloud.serverbase` | `string` | **Endpoint URL**<br/>Your GMI Cloud deployment endpoint URL. Deploy the model at console.gmicloud.ai, then paste the provided endpoint URL here. |  |
 | `model` | `string` | **Model**<br/>GMI Cloud model identifier. Use org/model-name for open-weight models (e.g. deepseek-ai/DeepSeek-R1, Qwen/Qwen3-32B-FP8) or provider/model-name for proxied models (e.g. openai/gpt-4o, anthropic/claude-sonnet-4.5, google/gemini-3-flash-preview). Full list: https://www.gmicloud.ai/models |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
 ## Dependencies

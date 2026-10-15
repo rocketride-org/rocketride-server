@@ -1,0 +1,69 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Word indexer",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "indexer://",
+	//
+	// Required:
+	//		The physical type - "cpp" makes this a C++ node. The engine loads
+	//		the shared library named by "path" and calls its initializeNode
+	//		entry point, which registers the factories this protocol resolves
+	//		to.
+	//
+	"node": "cpp",
+	//
+	// Required (for "node": "cpp"):
+	//		Base name of the node's shared library, without the platform
+	//		prefix or extension. Must match the target name passed to
+	//		rocketride_add_node in CMakeLists.txt.
+	//
+	"path": "indexer",
+	//
+	// Required:
+	//		Class type of the node - what it does -
+	//		we don't want this selectable so leave it out
+	//
+	"classType": [],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["internal"],
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["An internal component that builds an inverted word index from processed text, enabling full-text keyword search over ingested content."],
+	"documentation": "https://docs.rocketride.org/nodes/core",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Indexer",
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": []
+}

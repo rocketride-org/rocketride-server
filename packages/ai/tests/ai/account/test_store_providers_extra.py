@@ -25,7 +25,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from ai.account.store import StorageError
+from ai.account.store import StorageError, StorageNotFoundError
 from ai.account.store_providers.s3 import S3Store
 from ai.account.store_providers.azure import AzureBlobStore
 
@@ -110,7 +110,7 @@ async def test_s3_read_file_with_metadata_not_found(s3_store, s3_mock):
         """Stand-in for boto3's NoSuchKey exception type."""
 
     s3_mock.get_object.side_effect = NoSuchKey('missing')
-    with pytest.raises(StorageError, match='File not found'):
+    with pytest.raises(StorageNotFoundError, match='File not found'):
         await s3_store.read_file_with_metadata('missing.txt')
 
 
@@ -208,7 +208,7 @@ async def test_s3_open_read_raises_not_found(s3_store, s3_mock):
         """Stand-in for an S3 not-found error."""
 
     s3_mock.head_object.side_effect = NotFound('404')
-    with pytest.raises(StorageError, match='File not found'):
+    with pytest.raises(StorageNotFoundError, match='File not found'):
         await s3_store.open_read('missing.txt')
 
 

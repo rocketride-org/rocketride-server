@@ -477,7 +477,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 		}
 		if (cursor.selectionText.trim()) {
 			const selected = splitStatementsIn(sql, cursor.selectionStart, cursor.selectionEnd, dialect);
-			if (selected.length === 0) return { text: 'Will run: nothing — no statement found', decorations: [] };
+			if (selected.length === 0) return { text: 'Will run: nothing (no statement found)', decorations: [] };
 			const span = lineRange(selected[0].startLine, selected[selected.length - 1].endLine);
 			// Say how many, so a multi-statement selection is never mistaken for
 			// a single statement before it runs.
@@ -489,9 +489,9 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 		}
 		// An empty buffer and a buffer holding only comments are different
 		// things, and the second one is the confusing one.
-		if (!sql.trim()) return { text: 'Will run: nothing — editor is empty', decorations: [] };
+		if (!sql.trim()) return { text: 'Will run: nothing (editor is empty)', decorations: [] };
 		const statement = statements.length > 0 ? statementAtOffset(sql, cursor.offset, dialect) : null;
-		if (!statement) return { text: 'Will run: nothing — no statement found', decorations: [] };
+		if (!statement) return { text: 'Will run: nothing (no statement found)', decorations: [] };
 		const decorations: IDecorationRange[] = [{ start: statement.start, end: statement.end, className: 'sql-ui-stmt-active' }];
 		if (lastRun?.start !== undefined && lastRun.end !== undefined && lastRun.start !== statement.start) {
 			decorations.push({ start: lastRun.start, end: lastRun.end, className: 'sql-ui-stmt-last' });
@@ -875,7 +875,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 				field: key,
 				rrType: info?.rrType ?? 'string',
 				rrDefault: true,
-				rrDescription: info ? `${key} — ${info.description}` : `Result column ${key}.`,
+				rrDescription: info ? `${key}: ${info.description}` : `Result column ${key}.`,
 				headerSort: true,
 				hozAlign: info?.rrType === 'number' ? 'right' : undefined,
 				formatter: (cell: GridCellComponent) => resultCellEl(cell.getValue()),
@@ -986,7 +986,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 				{allowExecuteOff && <Banner variant="warning">{ALLOW_EXECUTE_OFF_TEXT}</Banner>}
 
 				{/* SQL the app wrote, shown before it runs. */}
-				{untouchedGenerated && <Banner variant="info">Generated preview — review, then Run</Banner>}
+				{untouchedGenerated && <Banner variant="info">Generated preview: review, then Run</Banner>}
 
 				{/* Editor. */}
 				<div style={styles.editorRegion}>
@@ -1066,7 +1066,7 @@ export const QueryView: React.FC<IQueryViewProps> = ({ endpoint, label, initialS
 								actions={
 									<span style={styles.meta}>
 										{meta.text}
-										{meta.limitReached && <StatusBadge variant="warning">Limit reached — more rows may exist</StatusBadge>}
+										{meta.limitReached && <StatusBadge variant="warning">Limit reached, more rows may exist</StatusBadge>}
 										<span title="The grid's gear menu exports the rows this run returned.">Export: grid menu (gear)</span>
 									</span>
 								}

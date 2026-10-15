@@ -2546,6 +2546,15 @@ static inline void releaseStringValue(char *value, unsigned) { free(value); }
 
 namespace ap::json {
 
+// Never thrown - throwRuntimeError/throwLogicError below route through
+// APERR_THROW instead - but the class is part of the exported ABI, which
+// requires these to be defined even though nothing calls them.
+Exception::Exception(JSONCPP_STRING const &msg) : msg_(msg) {}
+Exception::~Exception() throw() {}
+char const *Exception::what() const throw() { return msg_.c_str(); }
+RuntimeError::RuntimeError(JSONCPP_STRING const &msg) : Exception(msg) {}
+LogicError::LogicError(JSONCPP_STRING const &msg) : Exception(msg) {}
+
 JSONCPP_NORETURN void throwJsonError(JSONCPP_STRING const &msg) {
     // Log that we're throwing an exception from JSON, which is usually
     // unexpected.  If this exception isn't caught immediately, it'll almost

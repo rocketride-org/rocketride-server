@@ -10,7 +10,7 @@ let _verbose = false;
  * @param {boolean} enabled
  */
 function setTaskDebugVerbose(enabled) {
-    _verbose = !!enabled;
+	_verbose = !!enabled;
 }
 
 /**
@@ -19,12 +19,12 @@ function setTaskDebugVerbose(enabled) {
  * @param {...*} args - Same as console.log (message and optional values)
  */
 function taskDebug(...args) {
-    if (_verbose) {
-        console.log('[TASK]', ...args);
-    }
+	if (_verbose) {
+		console.log('[TASK]', ...args);
+	}
 }
 
 module.exports = {
-    setTaskDebugVerbose,
-    taskDebug
+	setTaskDebugVerbose,
+	taskDebug,
 };

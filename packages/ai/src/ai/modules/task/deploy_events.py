@@ -93,6 +93,33 @@ async def broadcast_deploy_changed(server: Any, org_id: str, team_id: str, proje
         error(f'[DEPLOY] {team_id}/{project_id}: deploy-change broadcast failed: {e}')
 
 
+async def broadcast_app_changed(server: Any, org_id: str, app_id: str, action: str) -> None:
+    """Announce a change to an APP's deployments (build, binding, review).
+
+    Drops the server's own cached serving verdicts for the app (shell.py —
+    a session that asked for a version while it was still building would
+    otherwise keep its 404 after the version became servable, #2461), then
+    pushes the org-scoped ``apaevt_deploy`` invalidation. App producers
+    only: a PIPELINE's project id is user-chosen, so pipeline events must
+    never reach another tenant's app cache. Best-effort like every deploy
+    event, and a failed drop never costs the org its broadcast.
+
+    Args:
+        server: The DAP server (``broadcast_server_event`` provider).
+        org_id: The org OWNING the app (the event's audience).
+        app_id: The app whose deployments changed.
+        action: What changed ('build', 'publish', 'disable', 'remove', a
+            review state, ...) — advisory; receivers re-fetch either way.
+    """
+    try:
+        from ai.modules.shell.shell import invalidate_app_serving
+
+        invalidate_app_serving(app_id)
+    except Exception as e:
+        error(f'[DEPLOY] {app_id}: serving-cache invalidation failed: {e}')
+    await broadcast_deploy_changed(server, org_id, '', app_id, action)
+
+
 async def broadcast_review_state(
     server: Any, org_id: str, app_id: str, version: Optional[int], state: str, notes: str = ''
 ) -> None:
@@ -131,7 +158,7 @@ async def broadcast_review_state(
         notes: Reviewer notes riding a rejection ('' = none).
     """
     # ── Rail invalidation: the owning org's deploy surfaces re-fetch ──────
-    await broadcast_deploy_changed(server, org_id, '', app_id, state)
+    await broadcast_app_changed(server, org_id, app_id, state)
 
     # ── Typed status push: owning org + cross-org reviewers ──────────────
     body: Dict[str, Any] = {'appId': app_id, 'status': state}

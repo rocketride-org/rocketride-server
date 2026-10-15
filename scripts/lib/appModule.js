@@ -96,11 +96,17 @@ function readAppId(appRoot, fallback) {
 		const id = pkg.appManifest && pkg.appManifest.id;
 		if (id) return id;
 		// No appManifest.id — serve under the folder name and warn loudly.
-		console.warn(`  Warning: ${appRoot} has no appManifest.id — serving under "${fallback}"; apps_static will 403 at runtime (no matching catalog entry)`);
+		console.warn(
+			`  Warning: ${appRoot} has no appManifest.id — serving under "${fallback}"; ` +
+				'apps_static will 403 at runtime (no matching catalog entry)'
+		);
 		return fallback;
 	} catch {
 		// package.json missing / unreadable / invalid JSON — same runtime-403 hazard.
-		console.warn(`  Warning: could not read appManifest.id from ${appRoot} package.json — serving under "${fallback}"; apps_static will 403 at runtime (no matching catalog entry)`);
+		console.warn(
+			`  Warning: could not read appManifest.id from ${appRoot} package.json — serving under "${fallback}"; ` +
+				'apps_static will 403 at runtime (no matching catalog entry)'
+		);
 		return fallback;
 	}
 }
@@ -127,16 +133,16 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 	// MUST be a filesystem-safe slug — the same guard registerApp enforces, so
 	// a manifest id with a path separator or ".." can't escape build/apps/.
 	assertSafeAppId(appId);
-	const buildDir        = path.join(BUILD_ROOT, 'apps', appId);
+	const buildDir = path.join(BUILD_ROOT, 'apps', appId);
 	const serverStaticDir = path.join(DIST_ROOT, 'server', 'static', 'apps', appId);
 
 	// Build input tracking
-	const srcDir       = path.join(appRoot, 'src');
-	const pkgJson      = path.join(appRoot, 'package.json');
+	const srcDir = path.join(appRoot, 'src');
+	const pkgJson = path.join(appRoot, 'package.json');
 	const buildHashKey = `${name}.buildHash`;
 
 	// Source directories that affect this app's build output
-	const inputDirs  = [srcDir, SHELL_UI_SRC, SHARED_UI_SRC];
+	const inputDirs = [srcDir, SHELL_UI_SRC, SHARED_UI_SRC];
 	const inputFiles = [pkgJson];
 
 	// =========================================================================
@@ -185,9 +191,9 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 
 	const actions = [
 		// Internal actions (no description — not shown in builder --help)
-		{ name: `${name}:bundle`,   action: makeBundleAction },
+		{ name: `${name}:bundle`, action: makeBundleAction },
 		{ name: `${name}:register`, action: () => registerApp(appRoot) },
-		{ name: `${name}:copy`,     action: makeCopyAction },
+		{ name: `${name}:copy`, action: makeCopyAction },
 
 		// Full build: bundle → register → copy. Every app depends on the
 		// shell, so in repos that CARRY the shell module its build runs

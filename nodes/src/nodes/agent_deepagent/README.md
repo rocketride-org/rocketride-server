@@ -85,7 +85,7 @@ orchestrator, not by direct questions.
 The Deep Agent (not the Subagent) exposes itself as an invokable tool, `<nodeId>.run_agent`, so parent agents can delegate to it in nested pipelines.
 
 - **Input:** `{query: string, context?: object}`. `query` must be a non-empty string; `context`, when provided, is attached to the question as a `RocketRide.agent.tool_context.v1` JSON payload.
-- **Output:** `{content, meta, stack}`.
+- **Output:** `{content, meta, stack}`. `meta` holds the framework, agent and run ids, timings and the tool-call count; it carries `stop_reason` when the run reports why it stopped (`error` when it raised, or when the `require_tool_call` guard refused its answer), and no `stop_reason` means none was reported, not that the run finished. The task's control token is never included.
 
 When `agent_description` is non-empty it is included in the tool's description so parent agents can select this agent correctly.
 
