@@ -97,6 +97,7 @@ class StorageView:
 _STUB_FASTER_WHISPER = """
 import atexit
 import os
+import posixpath
 
 STAGE = os.environ.get("PROBE_FAIL_STAGE", "")
 
@@ -112,7 +113,9 @@ def download_model(name, *_args, **kwargs):
         raise PermissionError("cache directory is not readable")
     if os.environ.get("PROBE_TINY_DIR"):
         return os.environ["PROBE_TINY_DIR"]  # a real snapshot directory, complete or not
-    return os.path.join(kwargs.get("cache_dir") or "/cache", name)
+    # The fake cache root is a marker the tests assert literally; it is never touched
+    # on disk, so join it POSIX-style on every platform (os.path.join gives /cache\\tiny on Windows).
+    return posixpath.join(kwargs.get("cache_dir") or "/cache", name)
 
 
 class WhisperModel:
