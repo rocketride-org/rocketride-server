@@ -79,6 +79,9 @@ CONST_CONTAINER_DATA_PATH = '/opt/data'
 # Where a run's store subtree is mounted inside its container
 CONST_CONTAINER_STORE_ROOT = '/opt/store'
 
+# Where the host directories named in docker.mounts are mounted inside a container
+CONST_CONTAINER_MOUNT_ROOT = '/opt/mounts'
+
 # The image's own user and group (rocketride); the group can write what a run installs
 CONST_IMAGE_UID = 1000
 CONST_IMAGE_GID = 1000
@@ -162,6 +165,7 @@ DEFAULT_CONFIG: Dict[str, str] = {
     'pids_limit': '4096',
     'network': 'bridge',
     'models': '',
+    'mounts': '',
     'log_driver': 'none',
     'instance': '',
 }
@@ -1113,8 +1117,10 @@ class DockerLauncher(Launcher):
         run's ``storage.root`` subtree, and its store points there. Where that
         cannot work the pipeline is refused before anything starts, rather than
         left writing into the container's own tree and losing it with ``rm -f``.
-        The node test mocks (``ROCKETRIDE_MOCK``) are mounted read-only at the
-        path the variable names.
+        Each variable named in ``docker.mounts`` has the host directory it names
+        mounted read-only at ``/opt/mounts/<NAME>``, and points there; one that
+        names no directory stops the task, since the host path would reach it
+        unchanged and mean nothing in the container.
 
         Args:
             spec: What to launch.
@@ -1124,13 +1130,36 @@ class DockerLauncher(Launcher):
 
         Raises:
             StoreUnavailableError: If the pipeline needs a store this container cannot have.
+            DockerError: If a variable named in ``docker.mounts`` names no directory on this host.
         """
         mounts: List[Tuple[str, str, str]] = []
         overrides: Dict[str, str] = {}
 
-        mock = spec.env.get('ROCKETRIDE_MOCK')
-        if mock and os.path.isdir(mock):
-            mounts.append((mock, mock, 'ro'))
+        # Host directories a task is told about through a variable: mounted read-only,
+        # and the variable follows them into the container
+        for name in filter(None, (n.strip() for n in self.config['mounts'].split(','))):
+            # docker create takes the CLI's own value of these, and the task would get it
+            if name in CLI_ENV_NAMES or is_host_only(name):
+                raise DockerError(
+                    f'{name} cannot be mounted into task containers (docker.mounts): it describes the engine host'
+                )
+            path = spec.env.get(name)
+            if not path:
+                continue
+            # docker -v reads a bare name as a named volume, not a directory
+            if not os.path.isabs(path):
+                path = os.path.abspath(path)
+            if not os.path.isdir(path):
+                raise DockerError(f'{name} is mounted into task containers (docker.mounts), but {path} is no directory')
+            # docker -v splits its argument on ':', a Windows drive letter aside
+            if os.name != 'nt' and ':' in path:
+                raise DockerError(
+                    f'{name} is mounted into task containers (docker.mounts), but {path} has a ":", '
+                    'which a docker mount cannot take'
+                )
+            target = f'{CONST_CONTAINER_MOUNT_ROOT}/{name}'
+            mounts.append((path, target, 'ro'))
+            overrides[name] = target
 
         if not (spec.uses_store and spec.storage_root):
             return mounts, overrides

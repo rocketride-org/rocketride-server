@@ -1281,16 +1281,85 @@ async def test_no_store_mount_without_tool_filesystem(tmp_path):
     assert 'run' not in cli.commands()
 
 
-async def test_node_test_mocks_are_mounted_read_only(tmp_path):
-    mocks = tmp_path / 'mocks'
-    mocks.mkdir()
+@pytest.mark.parametrize(
+    'path',
+    [
+        '/home/me/rr/nodes/test/mocks',
+        # A Windows engine's path; elsewhere its ':' is refused (test_a_mount_whose_path_has_a_colon_stops_the_task)
+        pytest.param('E:\\rr\\nodes\\test\\mocks', marks=pytest.mark.skipif(os.name != 'nt', reason='Windows path')),
+    ],
+)
+async def test_a_variable_named_in_mounts_is_mounted_and_points_at_the_mount(monkeypatch, path):
+    """The same on Linux and Windows: a Windows path is no path in a Linux container."""
+    # As store_mounts reads it: from Python 3.13 a POSIX path is not absolute on Windows
+    expected = path if os.path.isabs(path) else os.path.abspath(path)
+    monkeypatch.setattr(dk.os.path, 'isdir', lambda p: p == expected)
     spec = _spec()
-    spec.env['ROCKETRIDE_MOCK'] = str(mocks)
+    spec.env['ROCKETRIDE_MOCK'] = path
+    cli = FakeCli()
+    await _launcher(cli, mounts='ROCKETRIDE_MOCK').start(spec)
+    create = cli.call('create')
+    assert create.args[create.args.index('-v') + 1] == f'{expected}:/opt/mounts/ROCKETRIDE_MOCK:ro'
+    assert create.env['ROCKETRIDE_MOCK'] == '/opt/mounts/ROCKETRIDE_MOCK'
+
+
+async def test_a_variable_not_named_in_mounts_is_not_mounted(tmp_path):
+    """A variable outside docker.mounts is not mounted, whatever directory it names."""
+    spec = _spec()
+    spec.env['ROCKETRIDE_MOCK'] = str(tmp_path)
     cli = FakeCli()
     await _launcher(cli).start(spec)
+    assert '-v' not in cli.call('create').args
+
+
+async def test_a_mount_whose_directory_is_missing_stops_the_task(tmp_path):
+    """The host path would reach the task unchanged: the start fails before create, naming the variable."""
+    spec = _spec()
+    spec.env['ROCKETRIDE_MOCK'] = str(tmp_path / 'missing')
+    cli = FakeCli()
+    with pytest.raises(DockerError, match='ROCKETRIDE_MOCK is mounted'):
+        await _launcher(cli, mounts='ROCKETRIDE_MOCK').start(spec)
+    assert 'create' not in cli.commands()
+
+
+@pytest.mark.parametrize('name', ['HOME', 'PATH', 'DOCKER_CONFIG', 'USERPROFILE'])
+async def test_a_mount_cannot_name_a_variable_of_the_engine_host(name):
+    """The docker CLI keeps its own value of these, which the task would get instead of the mount."""
+    cli = FakeCli()
+    with pytest.raises(DockerError, match=f'{name} cannot be mounted'):
+        await _launcher(cli, mounts=f'ROCKETRIDE_MOCK,{name}').start(_spec())
+    assert 'create' not in cli.commands()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='no ":" in a Windows file name')
+async def test_a_mount_whose_path_has_a_colon_stops_the_task(monkeypatch):
+    """Docker -v would split the path: the start fails before create, naming the variable."""
+    monkeypatch.setattr(dk.os.path, 'isdir', lambda p: True)
+    spec = _spec()
+    spec.env['ROCKETRIDE_MOCK'] = '/srv/mo:cks'
+    cli = FakeCli()
+    with pytest.raises(DockerError, match='ROCKETRIDE_MOCK is mounted.*has a ":"'):
+        await _launcher(cli, mounts='ROCKETRIDE_MOCK').start(spec)
+    assert 'create' not in cli.commands()
+
+
+async def test_a_relative_mount_path_goes_in_absolute(monkeypatch, tmp_path):
+    """Docker -v reads a bare name as a named volume: a path relative to the engine's directory goes in absolute."""
+    (tmp_path / 'mocks').mkdir()
+    monkeypatch.chdir(tmp_path)
+    spec = _spec()
+    spec.env['ROCKETRIDE_MOCK'] = 'mocks'
+    cli = FakeCli()
+    await _launcher(cli, mounts='ROCKETRIDE_MOCK').start(spec)
     create = cli.call('create')
-    assert create.args[create.args.index('-v') + 1] == f'{mocks}:{mocks}:ro'
-    assert create.env['ROCKETRIDE_MOCK'] == str(mocks)
+    assert create.args[create.args.index('-v') + 1] == f'{os.path.abspath("mocks")}:/opt/mounts/ROCKETRIDE_MOCK:ro'
+
+
+async def test_a_mount_whose_variable_is_unset_is_skipped():
+    """Nothing to mount, nothing to point at: the task starts without it."""
+    cli = FakeCli()
+    await _launcher(cli, mounts='ROCKETRIDE_MOCK').start(_spec())
+    assert '-v' not in cli.call('create').args
 
 
 def test_pipeline_opens_store_finds_tool_filesystem_by_node_path():
