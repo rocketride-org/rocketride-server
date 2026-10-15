@@ -410,7 +410,7 @@ module.exports = {
 		},
 		{
 			name: 'client-typescript:test',
-			action: () => ({
+			action: (options) => ({
 				description: 'Testing client-typescript',
 				steps: [
 					'server:build',
@@ -420,7 +420,7 @@ module.exports = {
 					),
 					bracket({
 						name: 'ts-test-server',
-						setup: makeStartTestServerAction(),
+						setup: makeStartTestServerAction(options),
 						teardown: makeStopTestServerAction(),
 						steps: ['client-typescript:run-jest'],
 					}),

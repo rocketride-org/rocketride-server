@@ -31,6 +31,9 @@ const READY_MESSAGE = 'Application startup complete.';
 // never reach a release archive.
 const TEST_LOG_DIR = path.join(SERVER_DIR, 'test-logs');
 
+// The level a server writing a log file traces at when no --trace is given.
+const LOG_FILE_TRACE = ['debugOut'];
+
 // How many trailing output lines to retain from the server process. The server's
 // output is otherwise only forwarded to the optional onOutput callback, which
 // callers typically stop consuming once startup completes - so when the process
@@ -195,7 +198,8 @@ function openServerLog(logName, diagnostics) {
  * @param {string} options.script - Python script to run (relative to dist/server), e.g. 'ai/eaas.py'
  * @param {number} [options.port] - Use existing server on this port (skip starting)
  * @param {Function} [options.onOutput] - Callback for server output (for logging)
- * @param {string[]} [options.trace] - Trace categories to enable (passed as --trace=a,b,c)
+ * @param {string[]} [options.trace] - Trace categories to enable (passed as --trace=a,b,c);
+ *   debugOut when omitted and the server log is written (see options.logName)
  * @param {number} [options.basePort] - Base port for task allocation
  * @param {string[]} [options.args] - Additional arguments to pass to the script
  * @param {string} [options.logName] - Suite name. With options.verbose or in CI (process.env.CI),
@@ -220,6 +224,9 @@ async function startServer(options) {
 		return { server: null, port: existingPort };
 	}
 
+	// The builder's convention for detailed output: --verbose, or always in CI.
+	const writeLog = Boolean(logName && (verbose || process.env.CI));
+
 	const serverExe = path.join(SERVER_DIR, process.platform === 'win32' ? 'engine.exe' : 'engine');
 
 	if (!(await exists(serverExe))) {
@@ -243,8 +250,11 @@ async function startServer(options) {
 	if (basePort) {
 		serverArgs.push(`--base_port=${basePort}`);
 	}
-	if (trace?.length) {
-		serverArgs.push(`--trace=${trace.join(',')}`);
+	// A server writing a log traces debugOut unless told otherwise: the output
+	// goes only to that file, and debugOut shows task and data-channel events.
+	const traceLevels = trace?.length ? trace : writeLog ? LOG_FILE_TRACE : [];
+	if (traceLevels.length) {
+		serverArgs.push(`--trace=${traceLevels.join(',')}`);
 	}
 
 	return new Promise((resolve, reject) => {
@@ -273,8 +283,7 @@ async function startServer(options) {
 		};
 		serverProcess.rocketrideDiagnostics = diagnostics;
 
-		// The builder's convention for detailed output: --verbose, or always in CI.
-		const logStream = logName && (verbose || process.env.CI) ? openServerLog(logName, diagnostics) : null;
+		const logStream = writeLog ? openServerLog(logName, diagnostics) : null;
 
 		const recordOutput = (text) => {
 			for (const line of text.split('\n')) {

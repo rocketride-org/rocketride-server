@@ -261,7 +261,7 @@ module.exports = {
 		{ name: 'client-mcp:build-wheel', action: makeBuildWheelAction },
 		{
 			name: 'client-mcp:test',
-			action: () => ({
+			action: (options) => ({
 				description: 'Testing client-mcp',
 				steps: [
 					'server:build',
@@ -271,7 +271,7 @@ module.exports = {
 					),
 					bracket({
 						name: 'mcp-test-server',
-						setup: makeStartTestServerAction(),
+						setup: makeStartTestServerAction(options),
 						teardown: makeStopTestServerAction(),
 						steps: ['client-mcp:run-pytest'],
 					}),

@@ -348,7 +348,7 @@ module.exports = {
 		},
 		{
 			name: 'client-python:test',
-			action: () => ({
+			action: (options) => ({
 				description: 'Testing client-python',
 				steps: [
 					'server:build',
@@ -360,7 +360,7 @@ module.exports = {
 					'client-python:setup-test-deps',
 					bracket({
 						name: 'py-test-server',
-						setup: makeStartTestServerAction(),
+						setup: makeStartTestServerAction(options),
 						teardown: makeStopTestServerAction(),
 						steps: ['client-python:run-pytest'],
 					}),
