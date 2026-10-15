@@ -1943,8 +1943,8 @@ async def test_subprocess_startup_crash_writes_stderr_and_cancels():
     t.debug_task_message.assert_called_once_with('terminated abnormally with exit code 1')
     assert any('simulated startup crash' in line for line in t._status_trace)
     assert any('simulated startup crash' in evt.get('body', {}).get('output', '') for evt in forwarded)
-    
-    
+
+
 # ---------------------------------------------------------------------------
 # TaskData — the engine's data channel to the task
 # ---------------------------------------------------------------------------
