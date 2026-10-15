@@ -30,9 +30,10 @@
 # store outside CONFIG mode, wire the tool-path embedder, register the
 # transform key) and, through StoreInstanceBase, the agent tools.
 #
-# The upsert and delete tools change the team's managed database, so they are
-# opt-in through the allow_write setting (off by default). The data lanes and
-# the read tools (search, objdir, get, stats) are always available.
+# The table is the team's managed database, so the whole tool surface is
+# opt-in through the expose_tools setting (off by default), and the upsert and
+# delete tools also need the allow_write setting (off by default). The data
+# lanes are always available.
 # ------------------------------------------------------------------------------
 import os
 import re

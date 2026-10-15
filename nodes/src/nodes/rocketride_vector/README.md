@@ -10,9 +10,10 @@ The node writes documents from the documents lane into a pgvector-backed table,
 replacing existing chunks for the same object IDs. Questions can produce
 matching documents, answers, or enriched questions through the three configured
 question outputs. Use it when retrieval should flow through a pipeline. The
-same store is available to an agent or app as tools: the read tools are always
-on, and the write tools are opt-in because the table lives in the team's
-managed database. There is no raw-SQL execution surface.
+same store can be offered to an agent or app as tools once Expose as tools is
+on; the write tools also need Allow writes through tools. Both are off by
+default because the table lives in the team's managed database. There is no
+raw-SQL execution surface.
 
 ## Lanes
 
@@ -118,9 +119,9 @@ Off by default. When off, the node offers no tool functions: an agent's call
 fails with "not found in tool catalog", an app's with the engine's "No handler
 found for tool" error, and a direct call returns a failure object. The
 documents and questions lanes are unaffected. Turn it on only for a pipeline
-whose agent or app is meant to read this table through tools; `objdir` and
-`get` return every document, not only the matches above the score threshold
-that the questions lane returns.
+whose agent or app is meant to read this table through tools. These reads are
+not restricted to the matches above the questions lane's score threshold;
+`objdir` still lists only one object ID per distinct parent path.
 
 ### Allow writes through tools
 
