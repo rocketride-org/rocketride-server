@@ -599,6 +599,11 @@ _VECTORDB_TOOL_MAX_TOP_K = 100
 _VECTORDB_TOOL_DEFAULT_TOP_K = 10
 _VECTORDB_TOOL_MAX_OBJDIR_LIMIT = 1000
 _VECTORDB_TOOL_MAX_GET_LIMIT = 100
+# `get` pages a document itself: whether a driver's `get` honours `offset` varies
+# (Astra, Weaviate and Pinecone ignore it), so the tool fetches the document's
+# chunks once, orders them by chunkId here and slices. This is also the most
+# chunks one document can have and still be fully readable through the tool.
+_VECTORDB_TOOL_GET_FETCH_LIMIT = 10_000
 _VECTORDB_DEFAULT_SERVER_NAME = 'vectordb'
 
 
@@ -1233,7 +1238,7 @@ class VectorStoreToolMixin:
                 'offset': {
                     'type': 'integer',
                     'minimum': 0,
-                    'description': 'Number of chunks to skip (default 0).',
+                    'description': 'Number of chunks to skip (default 0); pages are ordered by chunk ID on every store.',
                 },
                 'limit': {
                     'type': 'integer',
@@ -1256,11 +1261,22 @@ class VectorStoreToolMixin:
                         },
                     },
                 },
-                'total': {'type': 'integer'},
+                'total': {'type': 'integer', 'description': 'Chunks the document has (up to 10000).'},
+                'offset': {'type': 'integer'},
+                'has_more': {'type': 'boolean', 'description': 'Whether a page follows this one.'},
+                'truncated': {
+                    'type': 'boolean',
+                    'description': 'True when the document hit the 10000-chunk read ceiling: total and the last page may be incomplete.',
+                },
                 'success': {'type': 'boolean'},
             },
         },
-        description='Retrieve document chunks by objectId from the vector database.',
+        description=(
+            'Retrieve document chunks by objectId from the vector database, in pages of up to 100 '
+            "ordered by chunk ID; `total` is the document's chunk count and `has_more` says whether "
+            'another page follows. A document is read up to 10000 chunks; `truncated` is true when that '
+            'ceiling was hit.'
+        ),
     )
     def get(self, args):
         """Retrieve document chunks by objectId."""
@@ -1281,10 +1297,13 @@ class VectorStoreToolMixin:
         except ValueError as exc:
             return {'success': False, 'error': str(exc)}
 
+        limit = min(limit, _VECTORDB_TOOL_MAX_GET_LIMIT)
+        # The driver is asked for the whole document (see _VECTORDB_TOOL_GET_FETCH_LIMIT);
+        # the page is cut here, so `offset` means the same on every backend.
         doc_filter = DocFilter(
             objectIds=[object_id],
-            offset=offset,
-            limit=min(limit, _VECTORDB_TOOL_MAX_GET_LIMIT),
+            offset=0,
+            limit=_VECTORDB_TOOL_GET_FETCH_LIMIT,
             isDeleted=False,
         )
         docs = store.get(doc_filter)
@@ -1306,10 +1325,29 @@ class VectorStoreToolMixin:
             for doc in docs
         ]
 
-        # Sort by chunkId for deterministic pagination order
-        chunks.sort(key=lambda c: c.get('chunkId', 0))
+        # Deterministic page order on every store: by chunkId, then by content and
+        # metadata, so repeated chunk IDs returned in a different order on the next
+        # call cannot shift a page boundary and drop or repeat a chunk.
+        def _page_key(chunk):
+            return (
+                int(chunk.get('chunkId') or 0),
+                str(chunk.get('content') or ''),
+                json.dumps(chunk.get('metadata') or {}, sort_keys=True, default=str),
+            )
 
-        return {'success': True, 'chunks': chunks, 'total': len(chunks)}
+        chunks.sort(key=_page_key)
+        total = len(chunks)
+        page = chunks[offset : offset + limit]
+
+        return {
+            'success': True,
+            'chunks': page,
+            'total': total,
+            'offset': offset,
+            'has_more': offset + limit < total,
+            # The read ceiling was reached: the document may have more than `total` chunks.
+            'truncated': len(docs) >= _VECTORDB_TOOL_GET_FETCH_LIMIT,
+        }
 
     @tool_function(
         input_schema={

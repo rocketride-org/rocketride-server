@@ -195,13 +195,18 @@ def test_get_tool_pages_past_one_hundred_chunks(store_env, repeated_chunk_id):
     for offset, expected_size in [(0, 100), (100, 100), (200, 5), (205, 0)]:
         result = tool.get({'object_id': 'a', 'offset': offset, 'limit': 1000000})
         assert result['success'] is True
-        assert result['total'] == expected_size
+        assert len(result['chunks']) == expected_size
+        assert (result['total'], result['offset'], result['has_more']) == (205, offset, offset + 100 < 205)
         chunks.extend(result['chunks'])
 
     expected_ids = [0] * 205 if repeated_chunk_id else list(range(205))
-    expected_order = reversed(range(205)) if repeated_chunk_id else range(205)
+    # Ties on chunkId are ordered by content by the tool, independently of the SQL order.
+    if repeated_chunk_id:
+        expected_contents = sorted(f'chunk {i}' for i in range(205))
+    else:
+        expected_contents = [f'chunk {i}' for i in range(205)]
     assert [chunk['chunkId'] for chunk in chunks] == expected_ids
-    assert [chunk['content'] for chunk in chunks] == [f'chunk {i}' for i in expected_order]
+    assert [chunk['content'] for chunk in chunks] == expected_contents
 
 
 def test_objdir_tool_pages_past_one_thousand_paths(store_env):

@@ -177,6 +177,14 @@ def test_read_tools_reject_zero_limit_without_reading_store(tool_name, backend):
     getattr(store, backend).assert_not_called()
 
 
+def _chunks(n, shuffled=False):
+    """Fake driver output: n chunks of one document, optionally out of order."""
+    ids = list(range(n))
+    if shuffled:
+        ids = ids[1::2] + ids[::2]
+    return [SimpleNamespace(page_content=f'chunk {i}', metadata={'chunkId': i, 'objectId': 'obj-1'}) for i in ids]
+
+
 @pytest.mark.parametrize(
     'pagination, offset, limit',
     [
@@ -191,18 +199,80 @@ def test_read_tools_reject_zero_limit_without_reading_store(tool_name, backend):
     ],
 )
 def test_get_validates_and_caps_pagination(pagination, offset, limit):
-    """Defaults, valid values and capped limits reach the driver's filter."""
+    """Defaults, valid values and capped limits select the page; the driver is asked for the document."""
     store = _store()
+    store.get.return_value = _chunks(205, shuffled=True)
     tools = _Tools(store, allow_write=False, expose_tools=True)
 
-    assert tools.get({'object_id': 'obj-1', **pagination}) == {'success': True, 'chunks': [], 'total': 0}
+    result = tools.get({'object_id': 'obj-1', **pagination})
 
+    assert result['success'] is True
+    assert [c['chunkId'] for c in result['chunks']] == list(range(205))[offset : offset + limit]
+    assert (result['total'], result['offset'], result['has_more']) == (205, offset, offset + limit < 205)
+    assert result['truncated'] is False
     store.get.assert_called_once()
     doc_filter = store.get.call_args.args[0]
     assert doc_filter.objectIds == ['obj-1']
-    assert doc_filter.offset == offset
-    assert doc_filter.limit == limit
+    # Paging happens in the tool, so every driver sees the same filter.
+    assert (doc_filter.offset, doc_filter.limit) == (0, 10_000)
     assert doc_filter.isDeleted is False
+
+
+def test_get_pages_the_whole_document_regardless_of_the_driver():
+    """A driver that ignores offset (Astra, Weaviate, Pinecone) still yields distinct, complete pages."""
+    store = _store()
+    store.get.return_value = _chunks(205, shuffled=True)  # the driver's order does not matter
+    tools = _Tools(store, allow_write=False, expose_tools=True)
+
+    pages = [tools.get({'object_id': 'obj-1', 'offset': o, 'limit': 1_000_000}) for o in (0, 100, 200, 205)]
+
+    assert [len(p['chunks']) for p in pages] == [100, 100, 5, 0]
+    assert [p['has_more'] for p in pages] == [True, True, False, False]
+    assert {p['total'] for p in pages} == {205}
+    seen = [c['chunkId'] for p in pages for c in p['chunks']]
+    assert seen == list(range(205))
+    assert [c['content'] for c in pages[2]['chunks']] == [f'chunk {i}' for i in range(200, 205)]
+
+
+def test_get_on_an_empty_document_has_no_pages():
+    store = _store()
+    tools = _Tools(store, allow_write=False, expose_tools=True)
+
+    assert tools.get({'object_id': 'obj-1', 'offset': 7}) == {
+        'success': True,
+        'chunks': [],
+        'total': 0,
+        'offset': 7,
+        'has_more': False,
+        'truncated': False,
+    }
+
+
+def test_get_pages_are_stable_when_chunk_ids_repeat_and_the_store_reorders():
+    """Ties on chunkId are broken by content and metadata, so a store that returns the
+    same chunks in a different order per call cannot drop or repeat a chunk across pages.
+    """
+    chunks = [SimpleNamespace(page_content=c, metadata={'chunkId': 1, 'objectId': 'obj-1'}) for c in 'abcd']
+    orders = iter([[0, 1, 2, 3], [1, 0, 3, 2], [3, 2, 1, 0]])
+    store = _store()
+    store.get.side_effect = lambda _f: [chunks[i] for i in next(orders)]
+    tools = _Tools(store, allow_write=False, expose_tools=True)
+
+    pages = [tools.get({'object_id': 'obj-1', 'offset': o, 'limit': 2}) for o in (0, 2, 4)]
+
+    assert [[c['content'] for c in p['chunks']] for p in pages] == [['a', 'b'], ['c', 'd'], []]
+    assert [p['has_more'] for p in pages] == [True, False, False]
+
+
+def test_get_reports_when_the_read_ceiling_was_hit():
+    store = _store()
+    store.get.return_value = _chunks(10_000)
+    tools = _Tools(store, allow_write=False, expose_tools=True)
+
+    last = tools.get({'object_id': 'obj-1', 'offset': 9_900})
+
+    assert (len(last['chunks']), last['total'], last['has_more']) == (100, 10_000, False)
+    assert last['truncated'] is True  # the document may go on past what the tool can read
 
 
 @pytest.mark.parametrize(

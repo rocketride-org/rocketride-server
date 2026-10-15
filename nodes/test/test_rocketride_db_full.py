@@ -183,6 +183,8 @@ def _build_rr_env(monkeypatch):
                 'maxChunkId',
             ):
                 setattr(self, name, kw.get(name))
+            # The drivers page with these since #2631; the stand-in must carry them too.
+            self.offset = kw.get('offset', 0)
             self.limit = kw.get('limit', 10)
 
     class _QuestionText(str):
