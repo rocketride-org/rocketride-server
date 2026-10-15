@@ -34,9 +34,14 @@ _NODE_REQUIREMENTS = _REPO / 'nodes' / 'src' / 'nodes' / 'audio_transcribe' / 'r
 
 @pytest.fixture
 def fresh_probe(monkeypatch):
-    """Every test starts with the probe un-run and leaves it that way."""
+    """Every test starts with the probe un-run and leaves it that way.
+
+    A fake ``faster_whisper`` keeps the parent's weight prefetch off the network
+    on hosts that have the real package; tests of the prefetch install their own.
+    """
     monkeypatch.setattr(WhisperLoader, '_gpu_compatible', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_reason', None)
+    monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=lambda *a, **k: None))
 
 
 # ---------------------------------------------------------------------------
