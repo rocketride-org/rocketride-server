@@ -597,6 +597,8 @@ def getStore(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> 
 
 _VECTORDB_TOOL_MAX_TOP_K = 100
 _VECTORDB_TOOL_DEFAULT_TOP_K = 10
+_VECTORDB_TOOL_MAX_OBJDIR_LIMIT = 1000
+_VECTORDB_TOOL_MAX_GET_LIMIT = 100
 _VECTORDB_DEFAULT_SERVER_NAME = 'vectordb'
 
 
@@ -1177,11 +1179,13 @@ class VectorStoreToolMixin:
                 },
                 'offset': {
                     'type': 'integer',
+                    'minimum': 0,
                     'description': 'Number of results to skip (default 0).',
                 },
                 'limit': {
                     'type': 'integer',
-                    'description': 'Maximum number of results to return (default 1000).',
+                    'minimum': 1,
+                    'description': 'Maximum number of results to return (default and cap 1000).',
                 },
             },
         },
@@ -1205,12 +1209,15 @@ class VectorStoreToolMixin:
         store = self._vectordb_store()
 
         parent = args.get('parent', None)
-        try:
-            offset = int(args.get('offset', 0))
-            limit = int(args.get('limit', 1000))
-        except (TypeError, ValueError):
-            return {'success': False, 'error': 'offset and limit must be valid integers'}
+        from ai.common.utils import optional_int
 
+        try:
+            offset = optional_int(args, 'offset', default=0, lo=0, tool_name='objdir')
+            limit = optional_int(args, 'limit', default=_VECTORDB_TOOL_MAX_OBJDIR_LIMIT, lo=1, tool_name='objdir')
+        except ValueError as exc:
+            return {'success': False, 'error': str(exc)}
+
+        limit = min(limit, _VECTORDB_TOOL_MAX_OBJDIR_LIMIT)
         paths = store.getPaths(parent=parent, offset=offset, limit=limit)
         return {'success': True, 'paths': paths}
 
@@ -1225,11 +1232,13 @@ class VectorStoreToolMixin:
                 },
                 'offset': {
                     'type': 'integer',
+                    'minimum': 0,
                     'description': 'Number of chunks to skip (default 0).',
                 },
                 'limit': {
                     'type': 'integer',
-                    'description': 'Maximum number of chunks to return (default 100).',
+                    'minimum': 1,
+                    'description': 'Maximum number of chunks to return (default and cap 100).',
                 },
             },
         },
@@ -1268,14 +1277,14 @@ class VectorStoreToolMixin:
 
         try:
             offset = optional_int(args, 'offset', default=0, lo=0, tool_name='get')
-            limit = optional_int(args, 'limit', default=100, lo=1, tool_name='get')
+            limit = optional_int(args, 'limit', default=_VECTORDB_TOOL_MAX_GET_LIMIT, lo=1, tool_name='get')
         except ValueError as exc:
             return {'success': False, 'error': str(exc)}
 
         doc_filter = DocFilter(
             objectIds=[object_id],
             offset=offset,
-            limit=limit,
+            limit=min(limit, _VECTORDB_TOOL_MAX_GET_LIMIT),
             isDeleted=False,
         )
         docs = store.get(doc_filter)

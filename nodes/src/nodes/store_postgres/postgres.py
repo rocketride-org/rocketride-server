@@ -58,8 +58,8 @@ SQL_QUERIES = {
     # fmt: on
     'count_documents': 'SELECT COUNT(*) FROM {collection}',
     'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
-    'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
-    'get_paths': 'SELECT parent, objectId FROM {collection} WHERE {where_clause} OFFSET %s LIMIT %s',
+    'get_documents': 'SELECT * FROM {collection} {where_clause} ORDER BY objectId, chunkId, id LIMIT %s OFFSET %s',
+    'get_paths': 'SELECT parent, objectId FROM {collection} WHERE {where_clause} ORDER BY parent, objectId, id OFFSET %s LIMIT %s',
     'insert_chunk': 'INSERT INTO {collection} ({columns}) VALUES ({placeholders})',
     'delete_by_object_ids': 'DELETE FROM {collection} WHERE objectId = ANY(%s)',
     'mark_deleted': 'UPDATE {collection} SET isDeleted = TRUE WHERE objectId = ANY(%s)',
@@ -387,7 +387,7 @@ class Store(DocumentStoreBase):
         with self.client.cursor() as cur:
             cur.execute(
                 SQL_QUERIES['get_documents'].format(collection=self.collection, where_clause=where_sql),
-                params + [docFilter.limit],
+                params + [docFilter.limit, docFilter.offset],
             )
             results = cur.fetchall()
 

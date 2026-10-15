@@ -151,25 +151,47 @@ def test_read_tools_ignore_the_write_switch():
     assert tools.stats({}) == {'success': True, 'count': 3, 'model': 'test-model', 'vector_size': 2}
 
 
+@pytest.mark.parametrize('tool_name, backend', [('get', 'get'), ('objdir', 'getPaths')])
 @pytest.mark.parametrize('field', ['offset', 'limit'])
-@pytest.mark.parametrize('value', ['invalid', None, {}, []])
-def test_get_rejects_malformed_pagination_without_reading_store(field, value):
-    """Bad pagination returns a tool failure without querying the collection."""
+@pytest.mark.parametrize('value', ['invalid', {}, [], True, False, 2.7, 2.0, -1])
+def test_read_tools_reject_malformed_pagination_without_reading_store(tool_name, backend, field, value):
+    """Reject malformed types and negative bounds before querying the collection."""
     store = _store()
     tools = _Tools(store, allow_write=False, expose_tools=True)
 
-    result = tools.get({'object_id': 'obj-1', field: value})
+    result = getattr(tools, tool_name)({'object_id': 'obj-1', field: value})
 
-    assert result == {'success': False, 'error': 'offset and limit must be valid integers'}
-    store.get.assert_not_called()
+    lower_bound = 0 if field == 'offset' else 1
+    assert result == {'success': False, 'error': f'{tool_name}: "{field}" must be an integer >= {lower_bound}'}
+    getattr(store, backend).assert_not_called()
+
+
+@pytest.mark.parametrize('tool_name, backend', [('get', 'get'), ('objdir', 'getPaths')])
+def test_read_tools_reject_zero_limit_without_reading_store(tool_name, backend):
+    store = _store()
+    tools = _Tools(store, allow_write=False, expose_tools=True)
+
+    result = getattr(tools, tool_name)({'object_id': 'obj-1', 'limit': 0})
+
+    assert result == {'success': False, 'error': f'{tool_name}: "limit" must be an integer >= 1'}
+    getattr(store, backend).assert_not_called()
 
 
 @pytest.mark.parametrize(
     'pagination, offset, limit',
-    [({}, 0, 100), ({'offset': 2, 'limit': 3}, 2, 3), ({'offset': '2', 'limit': '3'}, 2, 3)],
+    [
+        ({}, 0, 100),
+        ({'offset': None, 'limit': None}, 0, 100),
+        ({'offset': 2, 'limit': 3}, 2, 3),
+        ({'offset': '2', 'limit': '3'}, 2, 3),
+        ({'offset': 0, 'limit': 1}, 0, 1),
+        ({'limit': 100}, 0, 100),
+        ({'limit': 101}, 0, 100),
+        ({'limit': '1000000000'}, 0, 100),
+    ],
 )
-def test_get_preserves_valid_pagination(pagination, offset, limit):
-    """Defaults, integers and integer strings still reach the driver's filter."""
+def test_get_validates_and_caps_pagination(pagination, offset, limit):
+    """Defaults, valid values and capped limits reach the driver's filter."""
     store = _store()
     tools = _Tools(store, allow_write=False, expose_tools=True)
 
@@ -181,6 +203,28 @@ def test_get_preserves_valid_pagination(pagination, offset, limit):
     assert doc_filter.offset == offset
     assert doc_filter.limit == limit
     assert doc_filter.isDeleted is False
+
+
+@pytest.mark.parametrize(
+    'pagination, offset, limit',
+    [
+        ({}, 0, 1000),
+        ({'offset': None, 'limit': None}, 0, 1000),
+        ({'offset': 2, 'limit': 3}, 2, 3),
+        ({'offset': '2', 'limit': '3'}, 2, 3),
+        ({'offset': 0, 'limit': 1}, 0, 1),
+        ({'limit': 1000}, 0, 1000),
+        ({'limit': 1001}, 0, 1000),
+        ({'limit': '1000000000'}, 0, 1000),
+    ],
+)
+def test_objdir_validates_and_caps_pagination(pagination, offset, limit):
+    store = _store()
+    tools = _Tools(store, allow_write=False, expose_tools=True)
+
+    assert tools.objdir({'parent': '/docs', **pagination}) == {'success': True, 'paths': {'/docs': ['obj-1']}}
+
+    store.getPaths.assert_called_once_with(parent='/docs', offset=offset, limit=limit)
 
 
 def test_hiding_holds_on_the_real_instance_base():

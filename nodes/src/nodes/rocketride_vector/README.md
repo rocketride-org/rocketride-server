@@ -46,7 +46,7 @@ wired to this node's tools.
 | --- | --- |
 | `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and a metadata `filter` (`objectId`, `nodeId`, `parent`) and returns matching content, metadata, and scores. Needs the node's Embedding setting (the embedding sub-block under Parameters) configured; without it the tool returns a failure object naming the node. |
 | `objdir` | Lists the distinct parent paths in the table as a map of parent path to one object ID each; accepts optional `parent`, `offset`, and `limit`. Documents that share a parent path appear as one entry, so give each document its own parent to list them all. Deleted documents are not listed. |
-| `get` | Returns up to `limit` chunks of one document by `object_id`, sorted by chunk ID; this store does not apply `offset`. |
+| `get` | Returns up to `limit` chunks of one document by `object_id`, sorted by chunk ID; use `offset` to retrieve subsequent pages. |
 | `stats` | Returns the row (chunk) count of the whole table, including the store's one internal schema row and soft-deleted documents, the embedding model name, and the vector size. |
 | `upsert` | Adds or replaces a non-empty `documents` array (content, object ID, optional metadata, optional embedding and model). Offered only while writes are allowed. |
 | `delete` | Deletes the chunks of a non-empty `object_ids` array. `deleted_count` is the number of IDs requested, not the number of documents found. Offered only while writes are allowed. |
@@ -56,8 +56,12 @@ invalid input, a missing embedding provider, or a refused write. `upsert`
 reports database errors the same way. `search` falls back to a keyword search
 when the semantic search fails and reports a failure object only if that fails
 too; `delete`, `objdir`, `get`, and `stats` raise database errors. `get` and
-`objdir` return a failure object when `offset` or `limit` cannot be converted
-to an integer.
+`objdir` require integer pagination values (integer strings are accepted;
+booleans and floats are rejected), with `offset` at least 0 and `limit` at
+least 1. Invalid values return a failure object without querying the store.
+Missing or null values use the defaults: offset 0, limit 100 for `get`, and
+limit 1000 for `objdir`. Larger limits are capped at 100 chunks for `get`
+and 1000 paths for `objdir`.
 
 ## Configuration
 

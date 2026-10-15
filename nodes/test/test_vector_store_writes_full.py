@@ -178,3 +178,51 @@ def test_listing_skips_the_schema_row_and_deleted_documents(store_env):
 
     # No None key for the schema row, and the soft-deleted document is gone.
     assert store.getPaths() == {'/test': 'a'}
+
+
+@pytest.mark.parametrize('repeated_chunk_id', [False, True])
+def test_get_tool_pages_past_one_hundred_chunks(store_env, repeated_chunk_id):
+    """The tool cap must leave later chunks accessible on both Postgres drivers."""
+    from ai.common.store.document_store import VectorStoreToolMixin
+
+    store, _, _ = store_env
+    # Reverse insertion order to ensure SQL orders before applying pagination.
+    store.addChunks([_doc(chunk_id=0 if repeated_chunk_id else i, content=f'chunk {i}') for i in reversed(range(205))])
+    tool = VectorStoreToolMixin()
+    tool.IGlobal = types.SimpleNamespace(store=store, expose_tools=True, allow_write=False)
+
+    chunks = []
+    for offset, expected_size in [(0, 100), (100, 100), (200, 5), (205, 0)]:
+        result = tool.get({'object_id': 'a', 'offset': offset, 'limit': 1000000})
+        assert result['success'] is True
+        assert result['total'] == expected_size
+        chunks.extend(result['chunks'])
+
+    expected_ids = [0] * 205 if repeated_chunk_id else list(range(205))
+    expected_order = reversed(range(205)) if repeated_chunk_id else range(205)
+    assert [chunk['chunkId'] for chunk in chunks] == expected_ids
+    assert [chunk['content'] for chunk in chunks] == [f'chunk {i}' for i in expected_order]
+
+
+def test_objdir_tool_pages_past_one_thousand_paths(store_env):
+    """Capped path listings have stable pages independent of insertion order."""
+    from ai.common.store.document_store import VectorStoreToolMixin
+
+    store, _, _ = store_env
+    docs = []
+    for i in reversed(range(1005)):
+        doc = _doc(object_id=f'obj-{i:04d}')
+        doc.metadata.parent = f'/path-{i:04d}'
+        docs.append(doc)
+    store.addChunks(docs)
+    tool = VectorStoreToolMixin()
+    tool.IGlobal = types.SimpleNamespace(store=store, expose_tools=True, allow_write=False)
+
+    paths = []
+    for offset, expected_size in [(0, 1000), (1000, 5), (1005, 0)]:
+        result = tool.objdir({'offset': offset, 'limit': 1000000})
+        assert result['success'] is True
+        assert len(result['paths']) == expected_size
+        paths.extend(result['paths'].items())
+
+    assert paths == [(f'/path-{i:04d}', f'obj-{i:04d}') for i in range(1005)]
