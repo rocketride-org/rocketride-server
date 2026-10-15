@@ -25,11 +25,13 @@
 Bedrock binding for the ChatLLM.
 """
 
-from typing import Any, Dict
+from importlib.metadata import PackageNotFoundError, version
+from typing import Any, Dict, Optional
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, apply_prompt_cache_breakpoint
 from langchain_aws import ChatBedrock
+from packaging.version import InvalidVersion, Version
 
 # Claude 3 models on Bedrock that accept a cache marker. Every Claude from 4 on does.
 # The other Claude 3 models and Claude 2 reject the request with a ValidationException,
@@ -51,24 +53,59 @@ def _accepts_cache_marker(model_id: str) -> bool:
     return 'claude-v' not in model_id and 'claude-instant' not in model_id
 
 
-def _count_cache_as_input(usage: Any) -> None:
-    """Add the cached tokens to ``input_tokens`` in a ChatBedrock ``usage_metadata``.
+def _langchain_adds_cache(installed: Optional[str] = None) -> bool:
+    """Return True when langchain-aws already counts the cached tokens in ChatBedrock's input_tokens.
+
+    From 1.9.0 on it adds them on the InvokeModel paths, invoke and stream alike
+    (langchain-aws PR #1373); before, it passed Bedrock's count on as is. A version
+    that cannot be read is taken to be a current release.
+
+    Args:
+        installed (Optional[str]): The langchain-aws version to check; the installed
+            one when omitted.
+
+    Returns:
+        bool: True when that version includes the cached tokens itself.
+    """
+    try:
+        return Version(installed or version('langchain-aws')) >= Version('1.9.0')
+    except (PackageNotFoundError, InvalidVersion):
+        return True
+
+
+_LANGCHAIN_ADDS_CACHE = _langchain_adds_cache()
+
+
+def _count_cache_as_input(usage: Any, fresh: Any = None) -> None:
+    """Make ``input_tokens`` in a ChatBedrock ``usage_metadata`` count the cached tokens once.
 
     Bedrock's input count leaves out tokens read from or written to the cache (AWS:
     total input = inputTokens + cacheReadInputTokens + cacheWriteInputTokens).
     LangChain counts the whole prompt as input_tokens, and the token meter subtracts
-    the cache detail from it, so a prompt read from the cache was metered as almost
-    no input. langchain-aws adds them for the Converse API (Nova) but not for
-    InvokeModel, which ChatBedrock uses for every other model.
+    the cache detail from it, so the cached tokens must be in input_tokens exactly once.
+
+    An invoke reply keeps Bedrock's own count as ``llm_output['usage']['prompt_tokens']``,
+    so input_tokens is rebuilt from it, whatever langchain-aws put there. A streamed
+    reply keeps only the converted usage, so the cache is added only when the installed
+    langchain-aws leaves it out.
+
+    Args:
+        usage (Any): The message's ``usage_metadata``, changed in place; anything but a
+            dict is left alone.
+        fresh (Any): Bedrock's own input count, or None when the reply does not keep it.
     """
     if not isinstance(usage, dict):
         return
     details = usage.get('input_token_details') or {}
     try:
         cached = int(details.get('cache_read') or 0) + int(details.get('cache_creation') or 0)
-        if cached:
+        if fresh is not None:
+            usage['input_tokens'] = int(fresh) + cached
+        elif cached and not _LANGCHAIN_ADDS_CACHE:
             usage['input_tokens'] = int(usage.get('input_tokens') or 0) + cached
-            usage['total_tokens'] = usage['input_tokens'] + int(usage.get('output_tokens') or 0)
+        else:
+            return
+        usage['total_tokens'] = usage['input_tokens'] + int(usage.get('output_tokens') or 0)
     except (TypeError, ValueError):
         pass  # metering is best effort; never fail a reply that was already paid for
 
@@ -94,9 +131,12 @@ class _ChatBedrock(ChatBedrock):
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         result = super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
-        if not self.beta_use_converse_api:  # the Converse path already counts them
+        # A Claude reply built from the stream (streaming=True) has no llm_output;
+        # _stream already counted its chunks.
+        fresh = ((result.llm_output or {}).get('usage') or {}).get('prompt_tokens')
+        if not self.beta_use_converse_api and fresh is not None:  # the Converse path already counts them
             for generation in result.generations:
-                _count_cache_as_input(getattr(generation.message, 'usage_metadata', None))
+                _count_cache_as_input(getattr(generation.message, 'usage_metadata', None), fresh)
         return result
 
     def _stream(self, messages, stop=None, run_manager=None, **kwargs):
