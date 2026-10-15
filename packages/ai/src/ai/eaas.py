@@ -43,9 +43,22 @@ from typing import Any, Dict
 from rocketlib import warning
 
 from ai.constants import CONST_TASK_DATA_PATH
-from ai.modules.task.launcher import RUNTIMES
+from ai.modules.task.launcher import RUNTIMES, default_runtime
 from ai.proc_privacy import make_process_private, should_make_private
 from ai.web import WebServer
+
+
+def runtime_of(args: argparse.Namespace) -> str:
+    """
+    The task runtime: ``--runtime`` as given, else docker with ``--saas`` and spawn without.
+
+    Args:
+        args: The parsed command line.
+
+    Returns:
+        The runtime's name.
+    """
+    return args.runtime or default_runtime(args.saas)
 
 
 def _make_engine_private() -> None:
@@ -140,8 +153,9 @@ Examples:
     parser.add_argument(
         '--runtime',
         choices=RUNTIMES,
-        default=RUNTIMES[0],
-        help='How tasks run: spawn, a child process of this engine (default: spawn)',
+        default=None,
+        help='How tasks run: spawn (a child process of this engine) or docker (a container per task). '
+        'Default: docker with --saas, spawn otherwise',
     )
 
     # Logging
@@ -184,7 +198,7 @@ async def run(config: Dict[str, Any] = None) -> None:
         config['port'] = args.port
         config['modelserver'] = args.modelserver
         config['base_port'] = args.base_port
-        config['runtime'] = args.runtime
+        config['runtime'] = runtime_of(args)
         config['verbose'] = args.verbose
 
     if config.get('modelserver'):

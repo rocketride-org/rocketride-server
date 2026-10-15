@@ -23,8 +23,8 @@
 """
 How a task is started: the ``Launcher`` seam and its runtimes.
 
-``--runtime`` on ``eaas.py`` picks one; spawn, a child process of the engine,
-is the only one so far and the default. ``TaskServer`` keeps a single
+``--runtime`` on ``eaas.py`` picks one; without it a hosted (``--saas``)
+engine runs docker and any other spawn. ``TaskServer`` keeps a single
 launcher per runtime and every ``Task`` of the process uses it.
 """
 
@@ -38,8 +38,8 @@ from .subprocess import CONST_HOSTED_CHILD_FLAG, SubprocessLauncher
 if TYPE_CHECKING:
     from ..task_server import TaskServer
 
-# The runtimes --runtime accepts; the first is the default
-RUNTIMES = ('spawn',)
+# The runtimes --runtime accepts
+RUNTIMES = ('spawn', 'docker')
 
 __all__ = [
     'CONST_HOSTED_CHILD_FLAG',
@@ -49,7 +49,24 @@ __all__ = [
     'Launcher',
     'SubprocessLauncher',
     'create_launcher',
+    'default_runtime',
 ]
+
+
+def default_runtime(hosted: bool) -> str:
+    """
+    The runtime when ``--runtime`` is not given.
+
+    A hosted (``--saas``) engine runs every task in a container; any other
+    engine keeps spawn (decided by Alexandru, 2026-10-07).
+
+    Args:
+        hosted: The engine runs with ``--saas``.
+
+    Returns:
+        ``'docker'`` or ``'spawn'``.
+    """
+    return 'docker' if hosted else 'spawn'
 
 
 def create_launcher(runtime: str, server: 'TaskServer') -> Launcher:
@@ -68,4 +85,8 @@ def create_launcher(runtime: str, server: 'TaskServer') -> Launcher:
     """
     if not runtime or runtime == 'spawn':
         return SubprocessLauncher(server)
+    if runtime == 'docker':
+        from .docker import DockerLauncher
+
+        return DockerLauncher(server)
     raise ValueError(f'Unknown runtime {runtime!r}; expected one of {", ".join(RUNTIMES)}')
