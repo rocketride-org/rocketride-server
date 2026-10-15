@@ -36,6 +36,21 @@ def test_writes_are_off_unless_configured(node_modules):
     assert iglobal.IGlobal.allow_write is False
 
 
+def test_the_shipped_services_json_keeps_both_switches_off():
+    # services.json is what ships; the real-node check is in a *_full suite, which CI skips.
+    from pathlib import Path
+
+    json5 = pytest.importorskip('json5')
+    path = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'rocketride_vector' / 'services.json'
+    services = json5.loads(path.read_text(encoding='utf-8'))
+
+    cloud = services['preconfig']['profiles']['cloud']
+    assert cloud['expose_tools'] is False
+    assert cloud['allow_write'] is False
+    assert services['fields']['rrvector.expose_tools']['default'] is False
+    assert services['fields']['rrvector.allow_write']['default'] is False
+
+
 def test_open_store_builds_the_driver_store_from_the_raw_config(node_modules):
     # The base passes the raw connConfig; the driver re-resolves the profile
     # merge itself, so the node must not pre-process it here.
