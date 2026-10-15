@@ -133,6 +133,7 @@ chat -> RocketRide agent -> response
 ```
 
 - The store node's "Expose as tools" setting is on, which is what offers its functions to the agent; it is off by default on the managed store
+- With tools exposed, `objdir` and `get` can enumerate and read the whole `knowledge_base` collection through the pipeline, so give the pipeline's chat key only to callers who may read every document in it; otherwise leave the setting off
 - The agent lists the stored documents (`objdir`, which returns one object id per distinct parent path, so give each document its own parent path for a complete listing), reads one back (`get`), reports the store's statistics (`stats`) and searches by meaning (`search`; the template wires the `embedding_transformer` miniLM profile as the node's Embedding setting so the tool can embed the query)
 - `upsert` and `delete` are offered to the agent only when the store node's "Allow writes through tools" setting is on; it is off in this template, so asked to delete, the agent reports that it has no delete tool
 - The store is the team's RocketRide cloud database, so the template runs on RocketRide Cloud or on a self-hosted engine with a database broker; on a local engine use `store_postgres` with your own PostgreSQL instead
