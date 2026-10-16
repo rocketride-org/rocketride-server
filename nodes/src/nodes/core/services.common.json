@@ -1,16 +1,25 @@
 //
-// Common field definitions - these will be merged into the service definition
+// Common property definitions - these will be merged into the service definition
 // as required by the service
 //
 {
-	"fields": {
+	"propertyDefinitions": {
 		//
 		// Basic fields
 		//
 		"storePath": {
 			"type": "string",
 			"title": "Store path",
-			"description": "This path defines the exact specific folder in the filesystem.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername\n\nFormat for AWS/S3 : bucketname/foldername\nFormat for Azure blob : containername/foldername\nFormat for SharePoint: sitename/drivename/foldername\nFormat for onedrive: account/foldername"
+			"description": [
+				"This path defines the exact specific folder in the filesystem.\n\n",
+				"Format for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)",
+				"\n\n",
+				"Format for Linux : /file.core.net/foldername\n\n",
+				"Format for AWS/S3 : bucketname/foldername\n",
+				"Format for Azure blob : containername/foldername\n",
+				"Format for SharePoint: sitename/drivename/foldername\n",
+				"Format for onedrive: account/foldername"
+			]
 		},
 		"url": {
 			"type": "string",
@@ -21,8 +30,7 @@
 			"readonly": true
 		},
 		"sync": {
-			"hidden": true,
-			"type": "boolean",
+			"type": "constant",
 			"default": true
 		},
 		"actions": {
@@ -30,18 +38,15 @@
 			"type": "object"
 		},
 		"source.mode": {
-			"hidden": true,
-			"type": "string",
+			"type": "constant",
 			"default": "Source"
 		},
 		"target.mode": {
-			"hidden": true,
-			"type": "string",
+			"type": "constant",
 			"default": "Target"
 		},
 		"hideForm": {
-			"hidden": true,
-			"type": "boolean",
+			"type": "constant",
 			"default": true
 		},
 		//
@@ -57,7 +62,10 @@
 		},
 		"estimation.accessDelay": {
 			"title": "Access delay",
-			"description": "Elapsed time before access to a file starts. (For example: S3 could be 0 second delay, while Glacier could be hours.",
+			"description": [
+				"Elapsed time before access to a file starts. ",
+				"For example: S3 could be 0 second delay, while Glacier could be hours."
+			],
 			"type": "number",
 			"default": 0,
 			"minimum": 0,
@@ -93,7 +101,11 @@
 		},
 		"include.classify": {
 			"title": "Enable Classification",
-			"description": "Classification will assign each file to one or more classification policies. Once enabled, all supported files will be classified into one or more of the activated classification policies.",
+			"description": [
+				"Classification will assign each file to one or more classification policies. ",
+				"Once enabled, all supported files will be classified into one or more of ",
+				"the activated classification policies."
+			],
 			"type": "boolean",
 			"default": false,
 			"ui": {
@@ -102,7 +114,11 @@
 		},
 		"include.ocr": {
 			"title": "Enable OCR",
-			"description": "Optical Character Recognition (OCR) will convert typed or handwritten text found in images into text.Once enabled, all image files such as jpgs will have text extracted for use in classification and search.",
+			"description": [
+				"Optical Character Recognition (OCR) will convert typed or handwritten text ",
+				"found in images into text.Once enabled, all image files such as jpgs ",
+				"will have text extracted for use in classification and search."
+			],
 			"type": "boolean",
 			"default": false,
 			"ui": {
@@ -111,7 +127,11 @@
 		},
 		"include.signing": {
 			"title": "Content Signature",
-			"description": "Content Signature executes a hash algorithm on the content of every object to generate a \"signature\". Identical signatures indicate identical content and are an effective method to detect duplicate objects.",
+			"description": [
+				"Content Signature executes a hash algorithm on the content of every object ",
+				"to generate a \"signature\". Identical signatures indicate identical content ",
+				"and are an effective method to detect duplicate objects."
+			],
 			"type": "boolean",
 			"default": true,
 			"ui": {
@@ -131,7 +151,13 @@
 		"include.index": {
 			"title": "Enable Indexing",
 			"type": "boolean",
-			"description": "Indexing will allow for full-text search of all processed files. Once enabled, all supported files will be scanned and indexed as they are processed.\nOnce Index is enabled, other parameters like OCR and classify could be enabled too.",
+			"description": [
+				"Indexing will allow for full-text search of all processed files. ",
+				"Once enabled, all supported files will be scanned and indexed ",
+				"as they are processed.\n",
+				"Once Index is enabled, other parameters like OCR and classify ",
+				"could be enabled too."
+			],
 			"default": false,
 			"ui": {
 				"chip": "Index"
@@ -149,7 +175,10 @@
 		},
 		"include.permissions": {
 			"title": "Enable Permissions",
-			"description": "Permissions allow gathering of file ownerships and permissions from all connected and scanned sources.",
+			"description": [
+				"Permissions allow gathering of file ownerships and permissions ",
+				"from all connected and scanned sources."
+			],
 			"type": "boolean",
 			"default": false,
 			"ui": {
@@ -158,7 +187,12 @@
 		},
 		"include.vectorize": {
 			"title": "Enable AI Embeddings",
-			"description": "AI embeddings make text content accessible to AI technologies like semantic relevancy and generative AP chants.\nOnce AI embeddings are enabled, other parameters like OCR and classify could be enabled too.",
+			"description": [
+				"AI embeddings make text content accessible to AI technologies ",
+				"like semantic relevancy and generative AP chants.\n",
+				"Once AI embeddings are enabled, other parameters like OCR and ",
+				"classify could be enabled too."
+			],
 			"type": "boolean",
 			"default": false,
 			"ui": {
@@ -205,18 +239,30 @@
 		//
 		"DTC.features": {
 			"title": "What features do you want?",
-			"description": "Please be advised that selecting additional features will increase the time it takes to scan your data.",
+			"description": [
+				"Please be advised that selecting additional features will increase ",
+				"the time it takes to scan your data."
+			],
 			"type": "object",
 			"properties": {
 				"ocr": {
 					"type": "boolean",
 					"title": "Optical Character Recognition",
-					"description": "Optical Character Recognition (OCR) will convert typed or handwritten text found in images into text.Once enabled, all image files such as jpgs will have text extracted for use in classification and search."
+					"description": [
+						"Optical Character Recognition (OCR) will convert typed or ",
+						"handwritten text found in images into text. Once enabled, ",
+						"all image files such as jpgs will have text extracted for ",
+						"use in classification and search."
+					]
 				},
 				"permissions": {
 					"type": "boolean",
 					"title": "Permissions",
-					"description": "Permissions feature gathers all associated relationships between users and files. This provides deeper ability to control data accessability."
+					"description": [
+						"Permissions feature gathers all associated relationships ",
+						"between users and files. This provides deeper ability ",
+						"to control data accessability."
+					]
 				}
 			}
 		},
@@ -257,18 +303,30 @@
 		//
 		"Pipe.features": {
 			"title": "What features do you want?",
-			"description": "Please be advised that selecting additional features will increase the time it takes to scan your data.",
+			"description": [
+				"Please be advised that selecting additional features will increase ",
+				"the time it takes to scan your data."
+			],
 			"type": "object",
 			"properties": {
 				"ocr": {
 					"type": "boolean",
 					"title": "Optical Character Recognition",
-					"description": "Optical Character Recognition (OCR) will convert typed or handwritten text found in images into text.Once enabled, all image files such as jpgs will have text extracted for use in classification and search."
+					"description": [
+						"Optical Character Recognition (OCR) will convert typed or ",
+						"handwritten text found in images into text.Once enabled, ",
+						"all image files such as jpgs will have text extracted ",
+						"for use in classification and search."
+					]
 				},
 				"permissions": {
 					"type": "boolean",
 					"title": "Permissions",
-					"description": "Permissions feature gathers all associated relationships between users and files. This provides deeper ability to control data accessability."
+					"description": [
+						"Permissions feature gathers all associated relationships ",
+						"between users and files. This provides deeper ability ",
+						"to control data accessability."
+					]
 				}
 			}
 		},

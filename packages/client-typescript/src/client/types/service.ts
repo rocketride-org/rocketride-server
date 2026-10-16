@@ -80,10 +80,10 @@ export interface ServiceSummary {
 	title: string;
 	/** Protocol URI scheme (e.g. "filesys://", "agent_rocketride://"). */
 	protocol: string;
-	/** URL prefix used for default URL mapping. */
-	prefix: string;
-	/** Account plans this driver is available for (null = all plans). */
-	plans: string[] | null;
+	/** URL prefix used for default URL mapping; absent unless the node declares one. */
+	prefix?: string;
+	/** Account plans this driver is available for (absent = all plans). */
+	plans?: string[];
 	/** Bitmask of {@link PROTOCOL_CAPS} flags. */
 	capabilities: number;
 	/** Categorisation tags (e.g. ["source"], ["agent", "tool"]). */
