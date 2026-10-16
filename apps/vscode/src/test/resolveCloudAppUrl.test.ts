@@ -35,6 +35,16 @@ const cases: Array<{ name: string; input: string; expected: string }> = [
 		expected: 'https://cloud.rocketride.ai/',
 	},
 	{
+		name: 'maps a wss api host with a port to https without the port',
+		input: 'wss://api.rocketride.ai:5565',
+		expected: 'https://cloud.rocketride.ai/',
+	},
+	{
+		name: 'maps a bare (schemeless) api host with a port to https without the port',
+		input: 'api.staging.example.com:5565',
+		expected: 'https://cloud.staging.example.com/',
+	},
+	{
 		name: 'falls back for a non-api host',
 		input: 'https://engine.example.com',
 		expected: FALLBACK,
