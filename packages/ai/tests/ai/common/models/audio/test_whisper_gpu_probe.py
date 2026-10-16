@@ -44,6 +44,7 @@ def fresh_probe(monkeypatch):
     monkeypatch.setattr(WhisperLoader, '_gpu_compatible', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_reason', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_inference_skipped', None)
+    monkeypatch.setattr(WhisperLoader, '_gpu_probe_fetch_timeouts', 0)
     monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=lambda *a, **k: None))
     # The guard shortcut imports ai.common.torch, whose load_depends installs torch on a bare host.
     no_cuda = types.SimpleNamespace(torch=types.SimpleNamespace(version=types.SimpleNamespace(cuda=None)))
@@ -359,6 +360,18 @@ def test_probe_ok_must_be_the_last_stage_line(monkeypatch, fresh_probe):
     assert WhisperLoader._check_gpu_compatible() is False
 
 
+def test_a_timeout_names_the_stage_the_child_reached(monkeypatch, fresh_probe):
+    """TimeoutExpired carries the child's output so far; the last probe line says where it hung."""
+
+    def _hang(*_a, **_k):
+        raise subprocess.TimeoutExpired(cmd='probe', timeout=1, output=b'probe: versions ...\nprobe: storage view ok\n')
+
+    monkeypatch.setattr(subprocess, 'run', _hang)
+
+    assert WhisperLoader._check_gpu_compatible() is False
+    assert WhisperLoader._gpu_probe_reason.endswith('after "probe: storage view ok"')
+
+
 def test_a_timeout_is_cached_like_any_other_failure(monkeypatch, fresh_probe):
     """The child reads only local files, so a hang is a verdict: it costs once per process."""
     calls = []
@@ -467,34 +480,168 @@ def test_a_verdict_is_cached_for_the_process(monkeypatch, fresh_probe):
     assert len(calls) == 1
 
 
-def test_a_failed_weight_download_does_not_decide_the_verdict(monkeypatch, fresh_probe, caplog):
-    """The parent fetches the probe weights best effort; a hub problem never means "CPU"."""
-    attempts = []
+class _FakeFetch:
+    """Stands in for the weight-fetch child: each entry of ``plan`` is 'timeout', 'fail' or 'ok'."""
 
-    def _download(name, cache_dir=None):
-        attempts.append((name, cache_dir))
-        raise OSError('hub unreachable')
+    starts: list = []
+    killed: int = 0
+    plan: list = []
+    on_ok = staticmethod(lambda: None)
+
+    def __init__(self, args, **_kwargs):
+        _FakeFetch.starts.append(args)
+        self._outcome = _FakeFetch.plan.pop(0) if _FakeFetch.plan else 'ok'
+        self.returncode = None
+
+    def communicate(self, timeout=None):
+        if self._outcome == 'timeout' and timeout is not None:
+            raise subprocess.TimeoutExpired(cmd='fetch', timeout=timeout)
+        if self._outcome == 'fail':
+            self.returncode = 1
+            return '', 'ConnectionError: hub unreachable'
+        self.returncode = 0 if self._outcome == 'ok' else -9
+        if self._outcome == 'ok':
+            _FakeFetch.on_ok()
+        return '', ''
+
+    def kill(self):
+        _FakeFetch.killed += 1
+
+
+def _fetch_child(monkeypatch, plan, on_ok=lambda: None):
+    """Install the stub fetch child with a plan of outcomes; returns the class for its records."""
+    _FakeFetch.starts = []
+    _FakeFetch.killed = 0
+    _FakeFetch.plan = list(plan)
+    _FakeFetch.on_ok = staticmethod(on_ok)
+    monkeypatch.setattr(subprocess, 'Popen', _FakeFetch)
+    return _FakeFetch
+
+
+def _weights(tmp_path, complete=True):
+    """A fake cache snapshot directory, with or without model.bin."""
+    snapshot = tmp_path / 'snapshots' / 'abc'
+    snapshot.mkdir(parents=True, exist_ok=True)
+    (snapshot / 'config.json').write_text('{}')
+    if complete:
+        (snapshot / 'model.bin').write_bytes(b'weights')
+    return snapshot
+
+
+def _local_lookup(monkeypatch, snapshot):
+    """A faster_whisper whose local-only lookup returns ``snapshot`` (or raises when None); downloading is not its job."""
+    calls = []
+
+    def _download(name, cache_dir=None, local_files_only=False):
+        calls.append((name, cache_dir, local_files_only))
+        if not local_files_only:
+            raise AssertionError('the parent must not download in-process')
+        if snapshot is None:
+            raise FileNotFoundError('not cached')
+        return str(snapshot)
 
     monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=_download))
+    return calls
+
+
+def test_a_failed_weight_download_does_not_decide_the_verdict(monkeypatch, fresh_probe, caplog):
+    """The parent fetches the probe weights best effort; a hub problem never means "CPU"."""
+    calls = _local_lookup(monkeypatch, None)
+    fetch = _fetch_child(monkeypatch, ['fail'])
     ran = []
     monkeypatch.setattr(subprocess, 'run', lambda *a, **k: ran.append(a) or _completed(0, stdout='probe: ok\n'))
 
     with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
         assert WhisperLoader._check_gpu_compatible(download_root='/models') is True
 
-    assert attempts == [(whispermod._GPU_PROBE_MODEL, '/models')]
+    # The local cache is asked first; only then is the hub tried, once, in a child.
+    assert calls == [(whispermod._GPU_PROBE_MODEL, '/models', True)]
+    assert len(fetch.starts) == 1 and fetch.starts[0][-2:] == [whispermod._GPU_PROBE_MODEL, '/models']
     assert len(ran) == 1  # the probe still ran; the child decides from its local cache
     assert WhisperLoader._gpu_probe_reason is None
+    assert WhisperLoader._gpu_compatible is True  # a failed fetch is final, not provisional
     assert any('hub unreachable' in record.getMessage() for record in caplog.records)
 
 
+def test_a_cached_tiny_makes_no_network_call(monkeypatch, fresh_probe, tmp_path):
+    """With the weights in the cache the parent never touches the hub, so a firewalled host is not delayed."""
+    calls = _local_lookup(monkeypatch, _weights(tmp_path, complete=True))
+    fetch = _fetch_child(monkeypatch, [])
+
+    assert WhisperLoader._prefetch_probe_weights('/models') is True
+    assert calls == [(whispermod._GPU_PROBE_MODEL, '/models', True)]
+    assert fetch.starts == []  # no fetch child, no network
+
+
+def test_a_partial_snapshot_counts_as_not_cached_and_is_fetched_again(monkeypatch, fresh_probe, tmp_path):
+    """An interrupted download leaves a snapshot without model.bin; the parent must not take it for a complete copy."""
+    snapshot = _weights(tmp_path, complete=False)
+    _local_lookup(monkeypatch, snapshot)
+    fetch = _fetch_child(monkeypatch, ['ok'], on_ok=lambda: (snapshot / 'model.bin').write_bytes(b'weights'))
+
+    assert WhisperLoader._prefetch_probe_weights(str(tmp_path)) is True
+    assert len(fetch.starts) == 1  # the fetch resumed and completed the snapshot
+
+
+_SKIPPED_STDOUT = 'probe: storage view ok\nprobe: inference skipped: tiny weights are not cached locally; LocalEntryNotFoundError\nprobe: ok\n'
+_FULL_STDOUT = 'probe: storage view ok\nprobe: inference ok 1\nprobe: ok\n'
+
+
+def test_a_slow_weight_fetch_is_stopped_and_the_verdict_stays_provisional_once(
+    monkeypatch, fresh_probe, caplog, tmp_path
+):
+    """A hub that never answers costs the bound, the fetch child is killed, the probe still runs on what is local,
+    and the storage-view verdict is not cached, so the next load fetches again and can run the inference stage.
+    """
+    snapshot = _weights(tmp_path, complete=False)  # a stopped fetch leaves a partial snapshot behind
+    _local_lookup(monkeypatch, snapshot)
+    fetch = _fetch_child(monkeypatch, ['timeout', 'ok'], on_ok=lambda: (snapshot / 'model.bin').write_bytes(b'weights'))
+    children = []
+
+    def _run(*a, **k):
+        children.append(a)
+        complete = (snapshot / 'model.bin').is_file()
+        return _completed(0, stdout=_FULL_STDOUT if complete else _SKIPPED_STDOUT)
+
+    monkeypatch.setattr(subprocess, 'run', _run)
+
+    with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
+        assert WhisperLoader._check_gpu_compatible(download_root=str(tmp_path)) is True  # first load: GPU kept
+    assert fetch.killed == 1
+    assert WhisperLoader._gpu_compatible is None  # provisional: not cached
+    assert WhisperLoader._gpu_probe_inference_skipped is not None
+    assert any('did not finish within' in r.getMessage() for r in caplog.records)
+    assert any('the next load probes again' in r.getMessage() for r in caplog.records)
+
+    assert WhisperLoader._check_gpu_compatible(download_root=str(tmp_path)) is True  # second load: fetch completes
+    assert len(fetch.starts) == 2 and len(children) == 2
+    assert WhisperLoader._gpu_compatible is True and WhisperLoader._gpu_probe_inference_skipped is None
+
+    assert WhisperLoader._check_gpu_compatible(download_root=str(tmp_path)) is True  # cached from here on
+    assert len(fetch.starts) == 2 and len(children) == 2
+
+
+def test_a_hub_that_never_answers_costs_the_bound_twice_then_the_verdict_is_cached(monkeypatch, fresh_probe, caplog):
+    """Provisional once only: an unreachable hub must not cost every Whisper load the fetch bound."""
+    _local_lookup(monkeypatch, None)
+    fetch = _fetch_child(monkeypatch, ['timeout', 'timeout'])
+    children = []
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: children.append(a) or _completed(0, stdout=_SKIPPED_STDOUT))
+
+    with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
+        assert WhisperLoader._check_gpu_compatible() is True
+        assert WhisperLoader._gpu_compatible is None  # first timeout: provisional
+        assert WhisperLoader._check_gpu_compatible() is True
+        assert WhisperLoader._gpu_compatible is True  # second timeout: the storage-view verdict is kept
+        assert WhisperLoader._check_gpu_compatible() is True
+
+    assert fetch.killed == 2 and len(fetch.starts) == 2 and len(children) == 2
+    assert WhisperLoader._gpu_probe_fetch_timeouts == 2
+
+
 def test_the_prefetched_weights_land_in_the_callers_cache(monkeypatch, fresh_probe):
-    fetched = []
-    monkeypatch.setitem(
-        sys.modules,
-        'faster_whisper',
-        types.SimpleNamespace(download_model=lambda name, cache_dir=None: fetched.append(cache_dir)),
-    )
+    _local_lookup(monkeypatch, None)
+    fetch = _fetch_child(monkeypatch, ['ok'])
     seen = {}
 
     def _run(*a, **k):
@@ -504,8 +651,8 @@ def test_the_prefetched_weights_land_in_the_callers_cache(monkeypatch, fresh_pro
     monkeypatch.setattr(subprocess, 'run', _run)
 
     assert WhisperLoader._check_gpu_compatible(download_root='/models') is True
-    assert fetched == ['/models']
-    assert "name, root = 'tiny', '/models'" in seen['script']  # the child looks in the same cache
+    assert fetch.starts[0][-2:] == [whispermod._GPU_PROBE_MODEL, '/models']  # the fetch child fills the same cache
+    assert "name, root = 'tiny', '/models'" in seen['script']  # the probe child looks in the same cache
 
 
 def test_first_candidate_gpu_skips_excluded_devices():

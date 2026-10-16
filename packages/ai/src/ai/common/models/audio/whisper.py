@@ -56,6 +56,12 @@ _GPU_PROBE_MODEL = 'tiny'
 # context (10-30 s on H100-class GPUs, #1936), the tiny load and one second of audio.
 # A timeout is cached for the process, so the bound errs on the generous side.
 _GPU_PROBE_TIMEOUT_S = 120
+# The longest the parent waits for the probe weights to download when they are not
+# cached. The fetch holds the probe lock, so a hub that accepts the connection but
+# never answers, or a firewall that drops packets until the OS connect timeout
+# (minutes), must not stall every Whisper load in the process. A fetch that runs
+# out of time is killed; the download resumes from its partial files next time.
+_GPU_PROBE_PREFETCH_TIMEOUT_S = 30
 
 
 def _gpu_probe_script(
@@ -201,6 +207,9 @@ class WhisperLoader(BaseLoader):
     _gpu_probe_reason: Optional[str] = None
     # Set when the verdict rests on the storage view alone (the probe weights were not local).
     _gpu_probe_inference_skipped: Optional[str] = None
+    # Weight fetches that ran out of time in this process. After the first, a
+    # storage-view-only verdict is provisional (the next load fetches again).
+    _gpu_probe_fetch_timeouts: int = 0
     _gpu_probe_lock = threading.Lock()
 
     @classmethod
@@ -241,12 +250,13 @@ class WhisperLoader(BaseLoader):
             # waits on the network. The result decides nothing: without the weights
             # the child stops at the storage view and the GPU is still used.
             refused = cls._guard_refuses_installed_versions()
+            fetched: Optional[bool] = True
             if local_files_only:
                 logger.debug('Whisper GPU probe: local_files_only set, not fetching the probe weights')
             elif refused:
                 logger.debug('Whisper GPU probe: not fetching the probe weights, the guard refuses %s', refused)
             else:
-                cls._prefetch_probe_weights(download_root)
+                fetched = cls._prefetch_probe_weights(download_root)
 
             script = _gpu_probe_script(device_index=device_index, download_root=download_root)
             try:
@@ -276,10 +286,22 @@ class WhisperLoader(BaseLoader):
             # "probe: ok" must be the last stage: a crash at shutdown still
             # prints it, so the exit code decides as well.
             if result.returncode == 0 and lines and lines[-1] == 'probe: ok':
-                cls._gpu_compatible = True
                 cls._gpu_probe_reason = None
                 skipped = next((line for line in lines if line.startswith('probe: inference skipped')), None)
                 cls._gpu_probe_inference_skipped = skipped
+                if skipped and fetched is None and cls._gpu_probe_fetch_timeouts <= 1:
+                    # The weights were slow, not unavailable: this load keeps the
+                    # GPU on the storage-view verdict, but the verdict is not cached,
+                    # so the next load fetches again (resuming the download) and can
+                    # run the inference stage. Once only: a hub that never answers
+                    # must not cost every load the fetch bound.
+                    logger.warning(
+                        'Whisper GPU probe passed on the storage view only while the %s weights were still '
+                        'downloading; the next load probes again.',
+                        _GPU_PROBE_MODEL,
+                    )
+                    return True
+                cls._gpu_compatible = True
                 if skipped:
                     logger.warning('Whisper GPU probe passed on the storage view only; %s', skipped[len('probe: ') :])
             else:
@@ -322,42 +344,98 @@ class WhisperLoader(BaseLoader):
             return f'ctranslate2 {ct2_version} with the CUDA {cuda} runtime'
         return None
 
+    @staticmethod
+    def _probe_weights_cached(download_model: Any, download_root: Optional[str]) -> bool:
+        """Whether a complete copy of the probe weights is in the local cache (no network call)."""
+        try:
+            path = download_model(_GPU_PROBE_MODEL, cache_dir=download_root, local_files_only=True)
+        except Exception:  # noqa: BLE001
+            return False
+        # The hub cache lists a snapshot before its files have all arrived, and a
+        # local-only lookup cannot tell: a fetch stopped at the bound leaves
+        # config.json and no model.bin. The child treats such a snapshot as not
+        # cached, and so must the parent, or it would never fetch again.
+        return bool(path) and os.path.isfile(os.path.join(str(path), 'model.bin'))
+
     @classmethod
-    def _prefetch_probe_weights(cls, download_root: Optional[str]) -> bool:
+    def _prefetch_probe_weights(cls, download_root: Optional[str]) -> Optional[bool]:
         """Fetch the probe model's weights into the cache the child reads, best effort.
 
-        This is the only place the probe may touch the network. A failure is
-        logged and the probe goes on: the child skips the inference stage when
-        the weights are not local and still returns a storage-view verdict, so
-        an offline host, an image that bakes in only the model it serves, or a
-        local model path never lands on the CPU because of the probe.
+        This is the only place the probe may touch the network, and only when a
+        complete copy of the weights is not already cached. The download runs in
+        a child process waited for at most ``_GPU_PROBE_PREFETCH_TIMEOUT_S`` and
+        killed after that: the probe lock is held meanwhile, and a hub that
+        accepts the connection but never answers must not stall every Whisper
+        load in the process, nor may a slow download hold the interpreter at exit
+        (a thread would, through huggingface_hub's non-daemon worker pool). The
+        partial files stay in the cache, so the next attempt resumes. A failure
+        or a timeout is logged and the probe goes on: the child skips the
+        inference stage when the weights are not local and still returns a
+        storage-view verdict, so an offline host, an image that bakes in only the
+        model it serves, or a local model path never lands on the CPU because of
+        the probe.
 
         Returns:
-            True when the weights are cached (or faster-whisper is not importable,
-            a test host), False when the fetch failed.
+            True when the weights are cached in full (or faster-whisper is not
+            importable, a test host), False when the fetch failed, None when it
+            ran out of time and was stopped (the caller keeps the verdict
+            provisional once, so the next load tries again).
         """
         try:
             from faster_whisper import download_model
         except ImportError:
             return True
-        try:
-            # Already cached: no network call at all.
-            download_model(_GPU_PROBE_MODEL, cache_dir=download_root, local_files_only=True)
+        if cls._probe_weights_cached(download_model, download_root):
             return True
-        except Exception:  # noqa: BLE001
-            pass
+
+        import subprocess
+        import sys
+
+        script = (
+            'import sys\n'
+            'from faster_whisper import download_model\n'
+            'download_model(sys.argv[1], cache_dir=sys.argv[2] or None)\n'
+        )
         try:
-            download_model(_GPU_PROBE_MODEL, cache_dir=download_root)
+            fetch = subprocess.Popen(
+                [sys.executable, '-c', script, _GPU_PROBE_MODEL, download_root or ''],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                'Could not fetch the %s weights for the Whisper GPU probe (%s: %s); '
+                'Could not start the fetch of the %s weights for the Whisper GPU probe (%s: %s); '
                 'the probe will stop at the storage view unless they are cached.',
                 _GPU_PROBE_MODEL,
                 type(exc).__name__,
                 exc,
             )
             return False
-        return True
+        try:
+            _stdout, stderr = fetch.communicate(timeout=_GPU_PROBE_PREFETCH_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            fetch.kill()
+            fetch.communicate()
+            cls._gpu_probe_fetch_timeouts += 1
+            logger.warning(
+                'Fetching the %s weights for the Whisper GPU probe did not finish within %s s and was stopped; '
+                'the probe goes on with what is local and the download resumes on the next attempt.',
+                _GPU_PROBE_MODEL,
+                _GPU_PROBE_PREFETCH_TIMEOUT_S,
+            )
+            return None
+        if fetch.returncode != 0:
+            tail = ' | '.join((stderr or '').strip().splitlines()[-3:])
+            logger.warning(
+                'Could not fetch the %s weights for the Whisper GPU probe (exit %s%s); '
+                'the probe will stop at the storage view unless they are cached.',
+                _GPU_PROBE_MODEL,
+                fetch.returncode,
+                f': {tail}' if tail else '',
+            )
+            return False
+        return cls._probe_weights_cached(download_model, download_root)
 
     @staticmethod
     def _first_candidate_gpu(exclude_gpus: List[int], torch: Any) -> int:
