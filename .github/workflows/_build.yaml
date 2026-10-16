@@ -47,7 +47,7 @@ on:
         type: boolean
         default: true
       container_test:
-        description: Build the node image and run nodes:test-container (Linux)
+        description: Build the node image and run container:test (Linux)
         required: false
         type: boolean
         default: false
@@ -168,8 +168,9 @@ jobs:
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }} --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       # The node image, built from the dist/server just built and checked as a
-      # run gets it. Before the tests, which install into dist/server (the image
-      # filters that out, but there is no reason to build from a dirtier tree).
+      # run gets it, then the node tests with every task in a container
+      # (--runtime=docker). Before the tests, which install into dist/server (the
+      # image filters that out, but there is no reason to build from a dirtier tree).
       # Docker's data goes to /mnt, the runner's large disk: the image is ~6 GB
       # unpacked, and the root filesystem is needed by the tests that follow.
       - name: Test the node container image / Linux
@@ -182,7 +183,7 @@ jobs:
           sudo mv "$conf.new" "$conf"
           sudo systemctl restart docker
           docker info --format 'docker {{.ServerVersion}}, data in {{.DockerRootDir}}'
-          ${{ matrix.builder_cmd }} nodes:test-container --verbose
+          ${{ matrix.builder_cmd }} container:test --verbose
           docker system prune -af >/dev/null
 
       # S3-compatible server for S3Store integration tests (Linux only): moto,

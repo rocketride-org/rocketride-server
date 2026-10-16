@@ -9,24 +9,8 @@ from typing import Optional, Tuple, Any
 if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or sys.path[0].endswith('ai/')):
     sys.path.pop(0)
 
-# Make this task's /proc entries private before any pipeline code loads (see
-# ai.proc_privacy). A task that should be private and cannot be refuses to run.
-from ai.proc_privacy import make_process_private, should_make_private
-
-_proc_private_error = None
-if should_make_private():
-    try:
-        make_process_private()
-    except Exception as e:
-        _proc_private_error = str(e) or type(e).__name__
-
-
 # Import directly from C++
 from engLib import debug, warning
-
-
-class TaskNotPrivateError(RuntimeError):
-    """The task should be private and is not; __main__ exits non-zero on it."""
 
 
 # Total budget for the shared WebServer to come up: the startup callback plus
@@ -105,6 +89,24 @@ def _parse_data_host_port() -> Tuple[str, Optional[int]]:
     return args.data_host, args.data_port
 
 
+def _parse_data_token_sha256() -> Optional[str]:
+    """Parse ``--data_token_sha256`` from ``sys.argv``.
+
+    The engine keeps the channel token and hands this process only its hex
+    SHA-256, which is safe on argv: the token cannot be recovered from it.
+    The first occurrence wins: the engine's comes before any pipeline args,
+    so a pipeline cannot substitute its own.
+
+    Returns:
+        The hash, or ``None`` when the flag is absent or empty.
+    """
+    # No abbreviations, so e.g. --data_token=... is not taken for it
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument('--data_token_sha256', type=str, action='append', default=None)
+    args, _unknown = parser.parse_known_args(sys.argv)
+    return (args.data_token_sha256 or [None])[0] or None
+
+
 def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     """Bootstrap the shared subprocess WebServer, if this process asked for one.
 
@@ -112,8 +114,12 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     (data flow, profiling, future trace control) can reach this process
     on ``ws://127.0.0.1:N/task/data`` regardless of pipeline shape. This
     function constructs the WebServer on the existing ``server_loop``
-    daemon thread, registers the ``data`` module (which exposes
-    ``/task/data``), and blocks until the server signals it is up.
+    daemon thread, without the standard endpoints (``/use``, ``/ping``,
+    ``/shutdown``, ``/auth/callback``), registers the ``data`` module
+    (which exposes ``/task/data``) with the hash of the run's channel
+    token from ``--data_token_sha256``, and blocks until the server
+    signals it is up. Without the hash ``/task/data`` refuses every
+    connection.
 
     Source nodes (webhook, telegram) discover the server via
     ``from ai.node import shared_web_server`` from inside their
@@ -148,6 +154,11 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     async def _on_startup() -> None:
         startup_ready.set()
 
+    # Only the engine may use /task/data; without the hash it fails closed
+    token_sha256 = _parse_data_token_sha256()
+    if token_sha256 is None:
+        warning('no --data_token_sha256 supplied; /task/data will refuse every connection')
+
     # load_env=False: this process runs pipeline code on the allowlisted
     # environment the engine handed it; reading the engine's .env here would
     # put the excluded names straight back.
@@ -155,10 +166,11 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
         config={'host': data_host, 'port': data_port},
         on_startup=_on_startup,
         load_env=False,
+        standardEndpoints=False,
     )
     # Mount `/task/data` — the WebSocket EaaS uses to send DAP traffic
     # (data ops, cprofile, future trace control).
-    server.use('data')
+    server.use('data', {'token_sha256': token_sha256})
 
     future = asyncio.run_coroutine_threadsafe(server.serve(), server_loop)
 
@@ -287,13 +299,6 @@ def run():
     """
     import os
 
-    # See the module top: a task that should hide its /proc entries and could
-    # not must not run pipeline code.
-    if _proc_private_error:
-        message = f'Refusing to run: could not make the task process private ({_proc_private_error})'
-        warning(message)
-        raise TaskNotPrivateError(message)
-
     # Inject mock modules path if set (for testing)
     mock_path = os.environ.get('ROCKETRIDE_MOCK')
     if mock_path:
@@ -373,11 +378,6 @@ def run():
 if __name__ == '__main__':
     try:
         run()
-
-    except TaskNotPrivateError:
-        # Non-zero exit with no >EXIT event: the engine records the task as
-        # ended abnormally rather than completed.
-        sys.exit(1)
 
     except Exception as e:
         debug(e)
