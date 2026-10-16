@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Tenki Sandbox">
+  <!-- Neutral placeholder glyph (a terminal window), not the Tenki brand mark. -->
+  <rect x="6" y="10" width="52" height="44" rx="8" fill="none" stroke="currentColor" stroke-width="4"/>
+  <path d="M6 22h52" fill="none" stroke="currentColor" stroke-width="4"/>
+  <path d="M18 31l8 7-8 7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32 45h14" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+</svg>
