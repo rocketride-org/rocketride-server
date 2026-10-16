@@ -256,10 +256,13 @@ class WhisperLoader(BaseLoader):
                     text=True,
                     timeout=_GPU_PROBE_TIMEOUT_S,
                 )
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
                 # The child reads only local files, so a hang is not a slow link.
                 # Cached like any other failure: it costs once per process, not per load.
-                cls._gpu_probe_reason = f'the GPU probe gave no answer within {_GPU_PROBE_TIMEOUT_S} s'
+                out = exc.stdout.decode(errors='replace') if isinstance(exc.stdout, bytes) else (exc.stdout or '')
+                reached = [line.strip() for line in out.splitlines() if line.startswith('probe:')]
+                stage = reached[-1] if reached else 'no output'
+                cls._gpu_probe_reason = f'the GPU probe gave no answer within {_GPU_PROBE_TIMEOUT_S} s, after "{stage}"'
                 cls._gpu_compatible = False
                 return False
             except Exception as exc:  # noqa: BLE001
