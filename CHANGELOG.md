@@ -5,11 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — since 2026-09-22
+## [Unreleased] — since 2026-10-16
+
+## [3.5.0] - 2026-10-16
 
 ### Added
 - **nodes**: `rocketride_vector` can expose its store to agents and apps as tools (agents call `<node id>.search`, apps call `client.tool` with the tool name and the node id): `search`, `objdir`, `get` and `stats` when the new "Expose as tools" setting is on, `upsert` and `delete` only when "Allow writes through tools" is on as well. Both are off by default, since the table lives in the team's managed database. The node now sits on the shared store base classes instead of a copy of their lane code (#2587)
 - **docker**: releases publish `rocketride-node`, an image that runs one pipeline task (engine-base plus a warmed wheel cache), and `rocketride-engine-base`; both cosign-signed, the node image checked before signing and never tagged `latest`.
+- **cli**: `rocketride profile` subcommand (Python + TS) — profile the server process or a pipeline (#2382)
+- **nodes**: add discord — Discord Bot source node over the Gateway; routes messages and image/audio/video/document attachments to the text/image/audio/video/tags lanes and posts the pipeline's first answer back as a reply, channel message, or thread (with thread naming); guild/channel/mention/bot gates, chunked replies (optionally numbered), mention allowlists, text-attachment decoding and attachment merge, and reaction/no_reply/outbound events (#1503)
+- **nodes**: discord support behaviours, each opt-in — thread history as context, escalation pause with a team mention alias (which also limits role pings to the final answer and one per user per hour), acknowledgement and feedback reactions, reply sanitizing with non-answer retries, a pipeline timeout, and startup backfill; engine and provider errors are never posted as answers (on by default), and generic error-shaped openings such as `Error:` are suppressed only with reply sanitizing on (#2547)
+- **nodes**: discord event capture, opt-in — writes every event the node handles (question, reply, no_reply, reaction) to a PostgreSQL table through a database node connected to the source, deduplicated per event and off the answering path, so a slow or unreachable database never delays a reply; `outbound`, `no_reply` and `reaction` rows need `emitOutbound`, `emitNoReply` and `emitReactions` on (#2548)
+- **account**: `AccountBase.authorize_db_target` default for single-tenant editions (#2614)
+- **ai**: let Anthropic cache the unchanging start of an agent's prompt (#2525)
+- **ai, appdev**: show whether an app is actually serving in App Builder (#2580)
+- **datacore**: cloud DB nodes choose org, team or user; task start authorizes every database (#2626)
+- **log**: list every run log of a source in one call (#2583)
+- **nodes**: gate heavy-model tests on hardware (`requiresHardware`) (#2314)
+- **nodes**: let Claude on Bedrock cache the unchanging start of an agent's prompt (#2569)
+- **server**: c++ node infrastructure (#2423)
+- **server, nodes**: c++ hash node (#2435)
+- **server, nodes**: c++ parse node (#2440)
+- **server, nodes**: c++ indexer node (#2478)
+- **server, nodes**: c++ objstore node (#2489)
+- **server, nodes**: c++ azure node (#2490)
+- **server, nodes**: c++ microsoft nodes (#2491)
+- **server, nodes**: c++ overlay nodes (#2537)
+- **server, nodes**: drop the c++ classify filter (#2481)
+- **shell**: serve the legal and superfans pages as public deep links (#2643)
+- **tool_github**: GitHub App installation-token auth (#2611)
+- **tool_http_request**: config-level auth with pinned whitelist and default headers (#2495) (#2575)
+- **tools**: sync model lists for the vision, GMI Cloud and Nebius nodes (#2317)
+- **web**: compression, cached shell assets and security headers, so the engine needs no CDN (#2419)
 
 ### Changed
 - **docker**: the engine image is built FROM a shared `engine-base` and runs as uid 1000 (was a system user, uid 999). An existing `/opt/data` volume has to be handed over once: `docker run --rm -v rocketride-data:/opt/data alpine chown -R 1000:1000 /opt/data`. The engine now refuses to start, naming that command, when its data directory is not writable.
@@ -18,6 +45,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: the `objdir` tool of `store_postgres` and `rocketride_vector` no longer lists the store's internal `schema` control row (it appeared as a `None` key) or soft-deleted documents (#2587)
 - **ai**: the shared embedding factory imports providers from the shipped `nodes` package (#2587).
 - **nodes**: PostgreSQL vector stores accept document metadata fields outside the SQL schema and roll back failed chunk replacements, preserving existing documents (#2587).
+- **account**: apply requiredPermissions to the versioned bundle route (#2401) (#2406)
+- **agent_rocketride**: show whole tool results and send instructions once (#2517)
+- **agent_rocketride**: never lose gathered work; record why a run stopped (#2519)
+- **agent_rocketride**: show the model its own calls; add an enforced check tool (#2520)
+- **agent_rocketride**: enforce the tool time limit; keep run state per run (#2521)
+- **agent_rocketride**: check the shape of every plan before acting on it (#2568)
+- **ai**: give the task subprocess an env allowlist instead of a copy of the engine env (#2410)
+- **ai**: hosted engines refuse nosaas nodes and stdio MCP before launch (#2412)
+- **ai**: make engine and task processes non-dumpable on hosted engines (#2414)
+- **ai**: resolve pipeline placeholders from saved secrets only (#2424)
+- **ai**: read JSON replies wrapped in prose; fail fast on an empty JSON reply (#2522)
+- **ai**: keep the task's control token out of agent answers (#2524)
+- **ai**: fail requests waiting on a task data channel when it closes (#2628)
+- **ai**: `close_all()` waits for an in-flight sweep before returning (#2638)
+- **ai, nodes**: guard AGE 1.5.0 MERGE+SET and empty-list IN gaps (#2514)
+- **ai, nodes**: make the llm connection optional on SQL nodes (#2563)
+- **ai, nodes**: roll back an over-limit graph_neo4j execute and bind params (#2610)
+- **ai, nodes, client**: bind `$params` on the graph execute path (#2515)
+- **appdev**: keep failed builds out of the App Builder preview (#2508)
+- **cli**: upload finds files through Windows paths again (#2350)
+- **client-python**: work with opentelemetry-exporter-otlp-proto-http 1.45 (#2426)
+- **client-python**: keep the indentation inside prompt instruction blocks (#2523)
+- **client-python**: run OTEL gRPC-missing tests on any install state (#2622)
+- **docker**: stop counting a failed torch plan as "no torch" (#2653)
+- **docs**: run docs:validate under the engine's Python (#2384)
+- **nodes**: embedding length sorted batching (#2197)
+- **nodes**: give the synced Kimi profiles the endpoint the driver needs (#2451)
+- **nodes**: report a missing GMI Cloud endpoint while the node is configured (#2452)
+- **nodes**: let Bedrock chats run without the transformers package (#2527)
+- **nodes**: count Bedrock cached tokens once with langchain-aws 1.9 (#2651)
+- **nodes, ai**: stop loading and installing torch in nodes that never use it (#2448)
+- **nodes, ai**: let a custom model's output limit be set in its settings (#2528)
+- **nodex**: internal objstore/aws source node (#2666)
+- **server**: report Crashpad dumps at crash time on Linux (#2429)
+- **server**: rocketlib requirements (#2442)
+- **server**: allow one second of clock slack in `file::Timestamps` (#2624)
+- **shell**: 404 on missing /shell/static/* assets instead of SPA HTML (#2225)
+- **shell**: cap the app bundle browser cache at one hour (#2411)
+- **shell**: end the dev-preview hold and name unresolvable apps (#2460) (#2506)
+- **task**: report a missing cloud database instead of ROCKETRIDE_CLIENT_ID (#2578)
+- **tools**: stamp reasoning for models stored under a prefixed ID (#2447)
+- **tools**: ignore OpenRouter routing variants during discovery (#2480)
+
+### Maintenance
+
+- 8 docs, 6 chore, 2 CI and 2 revert commits are omitted from the list above. #2518 and #2526 were reverted (#2565, #2566) and re-landed as #2568 and #2569, which are listed.
 
 ## [3.4.0] - 2026-09-22
 
@@ -35,7 +108,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ci**: migrate Discord notifier workflows to forum channels (tags + auto-archive) (#1510)
 - **ci**: on-demand + monthly multi-OS compile/test matrix (#1537)
 - **ci**: keep Discord forum tags live (re-apply on state/label change via bot) (#1722)
-- **cli**: `rocketride profile` subcommand (Python + TS) — profile the server process or a pipeline (#2382)
 - **cli**: rocketride validate subcommand (Python + TS) + validate-pipes composite action (#1573)
 - **client-python**: `rocketride diff` — semantic `.pipe` diff + pipe-diff composite action (#1607)
 - **client-python**: `rocketride otel` — OpenTelemetry bridge over the ingester protocol (#1612)
@@ -51,9 +123,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: add cognee node (#1501)
 - **nodes**: add context_optimizer node — fits questions into the model context window by token budget (#1489)
 - **nodes**: add currency_convert_explicit node (#1497)
-- **nodes**: add discord — Discord Bot source node over the Gateway; routes messages and image/audio/video/document attachments to the text/image/audio/video/tags lanes and posts the pipeline's first answer back as a reply, channel message, or thread (with thread naming); guild/channel/mention/bot gates, chunked replies (optionally numbered), mention allowlists, text-attachment decoding and attachment merge, and reaction/no_reply/outbound events (#1503)
-- **nodes**: discord support behaviours, each opt-in — thread history as context, escalation pause with a team mention alias (which also limits role pings to the final answer and one per user per hour), acknowledgement and feedback reactions, reply sanitizing with non-answer retries, a pipeline timeout, and startup backfill; engine and provider errors are never posted as answers (on by default), and generic error-shaped openings such as `Error:` are suppressed only with reply sanitizing on (#2547)
-- **nodes**: discord event capture, opt-in — writes every event the node handles (question, reply, no_reply, reaction) to a PostgreSQL table through a database node connected to the source, deduplicated per event and off the answering path, so a slow or unreachable database never delays a reply; `outbound`, `no_reply` and `reaction` rows need `emitOutbound`, `emitNoReply` and `emitReactions` on (#2548)
 - **nodes**: add extract_facts node — document-context + cell-by-cell reader + validator (#1426) (#1545)
 - **nodes**: add n8n workflow-automation node (#1231)
 - **nodes**: add tool_oura Oura Ring connector (#1625)
