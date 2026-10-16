@@ -33,7 +33,7 @@ The registered tool names are the bare method names below (an agent catalog name
 | `get_data` | Requires a non-empty `question`; optional `limit` is clamped to the graph row cap. Returns sanitized rows, generated query, applied limit, and truncation state; generation/execution failure returns `error`, `valid: false`, and no rows. |
 | `get_schema` | Takes no meaningful arguments and returns reflected `labels`, node properties, and relationships. |
 | `get_query` | Requires a non-empty `question`, with optional `limit`; returns validated read-only Cypher and `valid: true`, or an `error`/off-topic `answer` with `valid: false`. |
-| `execute` | Requires raw `query` and runs it without LLM translation; it raises an error unless `allow_execute` is enabled, and fails when the result exceeds the execute row cap. |
+| `execute` | Requires raw `query` and runs it without LLM translation; it raises an error unless `allow_execute` is enabled. Optional `params` binds `$name` values. If the result exceeds the execute row cap, the call fails and nothing is saved. A statement that returns rows is wrapped in `CALL { }`, which needs FalkorDB 4.0 or newer. `RETURN *` is refused until the columns are named. |
 | `dialect` | Takes no meaningful arguments and returns `{dialect: "falkordb"}`. |
 | `query` | Requires non-empty `cypher`; accepts optional object `params` and optional `graph`. Returns columns, serialized rows, count, and truncation state; Redis failures return `error` with empty rows. |
 | `list_graphs` | Takes no arguments and returns graph names, or `error` with an empty graph list on a Redis failure. |
@@ -61,7 +61,7 @@ The manual profile passes host, port, optional username/password, and TLS to the
 
 ### Write access, row caps, and timeout
 
-`allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` truncates ordinary results and marks them truncated; `max_execute_rows` makes oversized direct-execute results fail. `query_timeout_ms` bounds a single server query.
+`allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` truncates ordinary results and marks them truncated; `max_execute_rows` makes oversized direct-execute results fail, and that write is not saved. A returning `execute` is wrapped in a `CALL { }` subquery so the server itself rejects an over-cap result and saves nothing. That clause needs FalkorDB 4.0 or newer; an older server fails the call with a message naming that version, and nothing is saved. `RETURN *` is refused until the returned columns are named. `execute` also accepts `params` for `$name` placeholders, so values are bound instead of pasted into the query text. `query_timeout_ms` bounds a single server query.
 
 ## Authentication
 
