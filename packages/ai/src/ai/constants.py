@@ -40,7 +40,15 @@ CONST_TASK_DATA_PATH = os.path.abspath(os.path.join(os.path.dirname(sys.executab
 # Metrics Sampling and Reporting Intervals
 # =============================================================================
 CONST_METRICS_SAMPLE_INTERVAL = 0.25  # seconds between metric samples (250ms)
-CONST_BILLING_REPORT_INTERVAL = 15.0  # 5 * 60.0  # seconds between billing reports (5 minutes)
+CONST_BILLING_REPORT_INTERVAL = 15.0  # seconds between billing reports
+# The spend gate: an org out of credit is refused a pipe for new data. Off = the
+# behaviour before the gate existed; the switch is the rollback path.
+CONST_SPEND_GATE_ENABLED = os.environ.get('RR_SPEND_GATE_ENABLED', '1').strip().lower() not in (
+    '0',
+    'false',
+    'no',
+    'off',
+)
 CONST_METRICS_STOP_TIMEOUT = 5.0  # seconds to wait for metrics monitoring to stop gracefully
 
 # =============================================================================

@@ -101,6 +101,14 @@ Expose the engine beyond localhost and you should put it behind TLS and
 authentication (set `ROCKETRIDE_APIKEY`). For a clustered deployment, see the Helm
 chart under `deploy/helm/rocketride/`.
 
+## Spend gate
+
+In the cloud, an org out of credit is refused a pipe for new data (a chat
+message, an upload, a tool call, a webhook request) until it tops up; a
+self-hosted engine answers "allowed" to every check, so nothing changes unless
+you implement `AccountBase.check_spend`. `RR_SPEND_GATE_ENABLED=0` switches the
+gate off, the rollback path if a billing integration misbehaves.
+
 ## Provider credentials
 
 Pipelines that call external models or stores need those providers' API keys.

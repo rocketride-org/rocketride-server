@@ -1140,6 +1140,10 @@ class Task(DAPBase):
         # Prevent operations during termination
         if self._is_terminating:
             raise RuntimeError('Task is terminating, cannot process data requests')
+        # A pipe is what spends: an org out of credit gets no new one. Writes
+        # and closes on a pipe already granted go through.
+        if data.get('arguments', {}).get('subcommand', '') in ('open', 'tool'):
+            await self._server._require_spend(self.org_id)
 
         # Thread-safe data channel access
         async with self._data_lock:

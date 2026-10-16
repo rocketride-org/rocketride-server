@@ -76,6 +76,8 @@ from fastapi import WebSocket
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Set
 from ai.constants import (
+    CONST_BILLING_REPORT_INTERVAL,
+    CONST_SPEND_GATE_ENABLED,
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
     CONST_DEFAULT_TTL,
@@ -86,6 +88,7 @@ from ai.constants import (
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
+from ai.account.base import OutOfCreditsError
 from ai.account.models import AccountInfo, resolve_run_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
@@ -1223,6 +1226,30 @@ class TaskServer(DAPBase):
         # Log task removal for audit trail and debugging
         self.debug_message(f'Task status for "{control.id}" removed')
         return control
+
+    # One ledger answer per org per billing interval, shared by every task of
+    # that org on this server: a chat of N messages costs the ledger one query.
+    _spend_answers: Dict[str, 'tuple[float, Optional[str]]'] = {}
+
+    async def _require_spend(self, org_id: str) -> None:
+        """
+        Refuse with OutOfCreditsError when the org is out of credit.
+
+        The gate of the spend limit: called when a task is asked for a pipe to
+        carry new data (a data-channel open, a tool call, a webhook request).
+        A run with no org (OSS) never asks.
+        """
+        if not org_id or not CONST_SPEND_GATE_ENABLED:
+            return
+        now = time.time()
+        cached = self._spend_answers.get(org_id)
+        if cached and now - cached[0] < CONST_BILLING_REPORT_INTERVAL:
+            refusal = cached[1]
+        else:
+            refusal = await self._server.account.check_spend(org_id)
+            self._spend_answers[org_id] = (now, refusal)
+        if refusal:
+            raise OutOfCreditsError(refusal)
 
     async def start_task(
         self,

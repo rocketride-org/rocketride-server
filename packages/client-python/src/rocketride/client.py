@@ -43,7 +43,7 @@ Basic Usage:
 
 import os
 from functools import cached_property
-from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .core import DAPClient, ExecutionException, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .account import AccountApi
 from .billing import BillingApi
 from .database import DatabaseApi
@@ -314,7 +314,8 @@ class RocketRideClient(
         if self.did_fail(response):
             if self._on_trace:
                 self._on_trace(self.TRACE_ERROR, response)
-            raise RuntimeError(response.get('message', f'{command} failed'))
+            # Keeps the server's code and hint; still a RuntimeError for old handlers.
+            raise ExecutionException({**response, 'message': response.get('message') or f'{command} failed'})
 
         # Trace: success response
         if self._on_trace:
