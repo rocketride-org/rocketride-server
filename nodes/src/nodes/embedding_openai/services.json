@@ -79,8 +79,8 @@
 				"title": "Text Small   - A highly efficient model",
 				"model": "text-embedding-3-small",
 				"modelSource": "manual",
-				"modelTotalTokens": 8191, // litellm
-				"modelOutputTokens": 0, // default
+				"modelTotalTokens": 8192, // litellm
+				"modelOutputTokens": 0, // manual
 				"tokens": 8191,
 				"apikey": ""
 			},
@@ -88,8 +88,8 @@
 				"title": "Text Large   - A larger and more powerful model",
 				"model": "text-embedding-3-large",
 				"modelSource": "manual",
-				"modelTotalTokens": 8191, // litellm
-				"modelOutputTokens": 0, // default
+				"modelTotalTokens": 8192, // litellm
+				"modelOutputTokens": 0, // manual
 				"tokens": 8191,
 				"apikey": ""
 			},
@@ -97,8 +97,8 @@
 				"title": "Text Ada     - First OpenAI embeddings model",
 				"model": "text-embedding-ada-002",
 				"modelSource": "manual",
-				"modelTotalTokens": 8191, // litellm
-				"modelOutputTokens": 0, // default
+				"modelTotalTokens": 8192, // litellm
+				"modelOutputTokens": 0, // manual
 				"tokens": 8191
 			},
 			"text-embedding-004": {
@@ -106,7 +106,7 @@
 				"model": "text-embedding-004",
 				"modelSource": "litellm",
 				"modelTotalTokens": 2048, // litellm
-				"modelOutputTokens": 0, // default
+				"modelOutputTokens": 0, // manual
 				"apikey": ""
 			},
 			"text-embedding-005": {
@@ -114,7 +114,7 @@
 				"model": "text-embedding-005",
 				"modelSource": "litellm",
 				"modelTotalTokens": 2048, // litellm
-				"modelOutputTokens": 0, // default
+				"modelOutputTokens": 0, // manual
 				"apikey": ""
 			},
 			"text-embedding-3-small-inference": {
@@ -122,7 +122,7 @@
 				"model": "text-embedding-3-small-inference",
 				"modelSource": "litellm",
 				"modelTotalTokens": 8191, // litellm
-				"modelOutputTokens": 0, // default
+				"modelOutputTokens": 0, // manual
 				"apikey": ""
 			},
 			"text-embedding-ada-002-v2": {
@@ -130,7 +130,7 @@
 				"model": "text-embedding-ada-002-v2",
 				"modelSource": "litellm",
 				"modelTotalTokens": 8191, // litellm
-				"modelOutputTokens": 0, // default
+				"modelOutputTokens": 0, // manual
 				"apikey": ""
 			},
 			"text-embedding-large-exp-03-07": {
@@ -138,7 +138,7 @@
 				"model": "text-embedding-large-exp-03-07",
 				"modelSource": "litellm",
 				"modelTotalTokens": 8192, // litellm
-				"modelOutputTokens": 0, // default
+				"modelOutputTokens": 0, // manual
 				"apikey": ""
 			},
 			"text-embedding-preview-0409": {
@@ -146,7 +146,7 @@
 				"model": "text-embedding-preview-0409",
 				"modelSource": "litellm",
 				"modelTotalTokens": 3072, // litellm
-				"modelOutputTokens": 0, // default
+				"modelOutputTokens": 0, // manual
 				"apikey": ""
 			}
 		}

@@ -361,7 +361,7 @@
 				"title": "Mistral: Mistral Small 3.2 24B",
 				"model": "mistral-small-3.2-24b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
+				"modelTotalTokens": 256000, // openrouter
 				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
@@ -369,10 +369,21 @@
 				"title": "Mistral: Mistral Medium 3.5 (batch)",
 				"model": "mistral-medium-3-5:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 26214, // openrouter
+				"modelTotalTokens": 32768, // manual
+				"modelOutputTokens": 26214, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the Mistral API serves no model with this ID. Please use 'mistral-medium-3-5' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"mistral-large-4-0": {
+				"title": "Mistral: Mistral Large 4",
+				"model": "mistral-large-4-0",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 262144, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -749,6 +760,12 @@
 					"properties": [
 						"mistral.mistral-medium-3-5-batch"
 					]
+				},
+				{
+					"value": "mistral-large-4-0",
+					"properties": [
+						"mistral.mistral-large-4-0"
+					]
 				}
 			]
 		},
@@ -971,6 +988,13 @@
 		},
 		"mistral.mistral-medium-3-5-batch": {
 			"object": "mistral-medium-3-5-batch",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"mistral.mistral-large-4-0": {
+			"object": "mistral-large-4-0",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
