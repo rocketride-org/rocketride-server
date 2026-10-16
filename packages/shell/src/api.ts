@@ -512,7 +512,7 @@ export const shellApi = {
 	get BxChevronRight() { return BxChevronRight; },
 	get BxFolderOpen() { return BxFolderOpen; },
 	get AppLayout() { return AppLayout; },
-	// Desktop version selector — session override read + apply/clear
+	// Desktop version selector — version pin read + apply/clear (URL-backed)
 	get getAppVersionOverride() { return getAppVersionOverride; },
 	get applyAppVersionOverride() { return applyAppVersionOverride; },
 	// Stable versioned entry URL (constructed, never minted — the server
@@ -558,7 +558,7 @@ export {
 	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen,
 	// The one app-root layout
 	AppLayout,
-	// Desktop version selector — session override read + apply/clear
+	// Desktop version selector — version pin read + apply/clear (URL-backed)
 	getAppVersionOverride, applyAppVersionOverride, versionedEntryUrl,
 };
 
