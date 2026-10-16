@@ -3,6 +3,7 @@ import sys
 import asyncio
 import threading
 import time
+import traceback
 from typing import Optional, Tuple, Any
 
 # Remove auto-added script directory to avoid import conflicts with the ai package
@@ -380,7 +381,12 @@ if __name__ == '__main__':
         sys.exit(1)
 
     except Exception as e:
+        # Write traceback to stderr so a startup crash reaches the task log
+        # before exiting non-zero (issue #2416).
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
         debug(e)
+        sys.exit(1)
 
     except (KeyboardInterrupt, SystemExit):
         pass
