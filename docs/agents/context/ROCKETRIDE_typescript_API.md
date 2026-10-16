@@ -898,8 +898,8 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 **Environment secrets** (the layered `ROCKETRIDE_*` store, merged server-side at auth):
 
 - `getEnvironmentKeys(): Promise<string[]>` — available key NAMES from the merged environment (no values; for dropdowns)
-- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — read one scope's dict (org: pass orgId; team: pass teamId; user: omit)
-- `setEnv(scope, env, scopeId?): Promise<void>` — write one scope's FULL dict (replaces the entire set at that level)
+- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — the names stored at one scope, each mapped to a mask; values are never returned (org: pass orgId; team: pass teamId; user: omit)
+- `setEnv(scope, env, scopeId?): Promise<void>` — merge into one scope: a value sets, `null` deletes, the mask keeps the stored value; names not sent are untouched
 
 #### What members can do vs admins
 

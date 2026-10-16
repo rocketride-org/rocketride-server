@@ -970,8 +970,8 @@ Account management: profile, API keys, organization, members, teams, and server-
 **Server-side environment layers** (`ROCKETRIDE_*` secrets stored per scope and merged org -> team -> user for pipeline resolution):
 
 - `async get_environment_keys() -> list[str]` — merged list of key NAMES across all scopes (no values).
-- `async get_env(scope: str, scope_id: str | None = None) -> dict[str, str]` — read one scope's env dict. `scope` is `'org'`, `'team'`, or `'user'`; `scope_id` is the orgId/teamId (omit for user).
-- `async set_env(scope: str, env: dict[str, str], scope_id: str | None = None) -> None` — write one scope's FULL env dict (replaces the entire set of keys at that scope level).
+- `async get_env(scope: str, scope_id: str | None = None) -> dict[str, str]` — the names stored at one scope, each mapped to a mask; values are never returned. `scope` is `'org'`, `'team'`, or `'user'`; `scope_id` is the orgId/teamId (omit for user).
+- `async set_env(scope: str, env: dict[str, str | None], scope_id: str | None = None) -> None` — merge into one scope: a value sets, `None` deletes, the mask keeps the stored value; names not sent are untouched.
 
 ```python
 new_key = await client.account.create_key(name='ci-runner')

@@ -306,11 +306,14 @@ export class AccountApi {
 	}
 
 	/**
-	 * Reads the environment dict for a scope (org, team, or user).
+	 * Lists the environment names stored at a scope (org, team, or user).
+	 *
+	 * Values are write-only: every name maps to a mask, never to the stored
+	 * value. Pass the dict back to `setEnv` unchanged to keep the values it masks.
 	 *
 	 * @param scope   - One of 'org', 'team', 'user'.
 	 * @param scopeId - For org: orgId. For team: teamId. For user: omit (uses current user).
-	 * @returns Decrypted key-value dict.
+	 * @returns Dict of stored names to the mask.
 	 */
 	async getEnv(scope: 'org' | 'team' | 'user', scopeId?: string): Promise<Record<string, string>> {
 		const command = scope === 'org' ? 'rrext_account_org' : scope === 'team' ? 'rrext_account_teams' : 'rrext_account_me';
@@ -322,16 +325,28 @@ export class AccountApi {
 	}
 
 	/**
-	 * Writes the full environment dict for a scope (org, team, or user).
-	 * Replaces the entire set of keys at that scope level.
+	 * Merges environment changes into a scope (org, team, or user).
+	 *
+	 * A name with a value is set, a name with `null` is deleted, and a name
+	 * whose value is the mask from `getEnv` keeps its stored value. Names not
+	 * in `env` are left as they are. A name outside `ROCKETRIDE_*` rejects the
+	 * whole write.
 	 *
 	 * @param scope   - One of 'org', 'team', 'user'.
-	 * @param env     - Full key-value dict to store.
+	 * @param env     - Names to set, delete (`null`) or keep (mask).
 	 * @param scopeId - For org: orgId. For team: teamId. For user: omit.
 	 */
-	async setEnv(scope: 'org' | 'team' | 'user', env: Record<string, string>, scopeId?: string): Promise<void> {
+	async setEnv(scope: 'org' | 'team' | 'user', env: Record<string, string | null>, scopeId?: string): Promise<void> {
 		const command = scope === 'org' ? 'rrext_account_org' : scope === 'team' ? 'rrext_account_teams' : 'rrext_account_me';
-		const args: Record<string, unknown> = { subcommand: 'set_env', env };
+		// Deletions travel as a list: a server with the old full-replacement
+		// contract ignores it instead of storing null as a value.
+		const set: Record<string, string> = {};
+		const del: string[] = [];
+		for (const [name, value] of Object.entries(env)) {
+			if (value === null) del.push(name);
+			else set[name] = value;
+		}
+		const args: Record<string, unknown> = { subcommand: 'set_env', env: set, delete: del };
 		if (scope === 'org' && scopeId) args.orgId = scopeId;
 		if (scope === 'team' && scopeId) args.teamId = scopeId;
 		await this.client.call(command, args);
