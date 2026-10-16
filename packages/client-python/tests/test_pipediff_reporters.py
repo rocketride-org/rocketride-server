@@ -265,6 +265,11 @@ class TestRenderHuman(unittest.TestCase):
         self.assertIn('~ viewport.x: 0 -> 120', out)
         self.assertIn('1 viewport field changed', out)
 
+    def test_source_change_is_rendered_and_escaped(self) -> None:
+        out = render_human(PipeDiff(source_change=('old', 'new\x1b[2J')), use_color=False)
+        self.assertIn('Source: old -> new\\x1b[2J', out)
+        self.assertNotIn('\x1b', out)
+
 
 class TestRenderJson(unittest.TestCase):
     def test_empty_diff_shape(self) -> None:
@@ -277,6 +282,7 @@ class TestRenderJson(unittest.TestCase):
         self.assertEqual(doc['viewport'], [])
         self.assertFalse(doc['summary']['has_semantic_changes'])
         self.assertIsNone(doc['summary']['version_change'])
+        self.assertIsNone(doc['summary']['source_change'])
         self.assertFalse(doc['summary']['layout_changed'])
         self.assertEqual(doc['summary']['viewport_changes'], 0)
 
@@ -360,6 +366,11 @@ class TestRenderJson(unittest.TestCase):
         doc = render_json(_mixed_diff())
         self.assertEqual(json.loads(json.dumps(doc)), doc)
 
+    def test_source_change_in_summary(self) -> None:
+        doc = render_json(PipeDiff(source_change=(None, 'chat_1')))
+        self.assertEqual(doc['summary']['source_change'], [None, 'chat_1'])
+        self.assertTrue(doc['summary']['has_semantic_changes'])
+
 
 class TestRenderMarkdown(unittest.TestCase):
     def test_empty_diff_summary(self) -> None:
@@ -386,6 +397,13 @@ class TestRenderMarkdown(unittest.TestCase):
         out = render_markdown(PipeDiff(version_change=('1', '2`\n\n# pwned')))
         summary_line = out.splitlines()[0]
         self.assertIn('**Pipeline diff:**', summary_line)
+        self.assertNotIn('\n\n#', out)
+        for line in out.splitlines():
+            self.assertFalse(line.lstrip().startswith('# pwned'), line)
+
+    def test_source_change_is_code_spanned(self) -> None:
+        out = render_markdown(PipeDiff(source_change=('old', 'new`\n\n# pwned')))
+        self.assertIn('**Source:**', out)
         self.assertNotIn('\n\n#', out)
         for line in out.splitlines():
             self.assertFalse(line.lstrip().startswith('# pwned'), line)

@@ -336,9 +336,50 @@ def test_equal_int_version_is_still_not_a_change():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ('old_source', 'new_source'),
+    [('webhook_1', 'chat_1'), (None, 'chat_1'), ('webhook_1', None)],
+)
+def test_source_change_is_reported_and_is_semantic(old_source, new_source):
+    old = _sample_pipe()
+    new = copy.deepcopy(old)
+    if old_source is not None:
+        old['source'] = old_source
+    if new_source is not None:
+        new['source'] = new_source
+
+    for include_layout in (False, True):
+        diff = diff_pipes(old, new, include_layout=include_layout)
+        assert diff.source_change == (old_source, new_source)
+        assert diff.has_semantic_changes is True
+
+
+@pytest.mark.parametrize(('old_has_source', 'new_has_source'), [(False, True), (True, False)])
+def test_adding_or_removing_null_source_is_semantic(old_has_source, new_has_source):
+    """An omitted source and an explicit null source have different key presence."""
+    old = _sample_pipe()
+    new = copy.deepcopy(old)
+    if old_has_source:
+        old['source'] = None
+    if new_has_source:
+        new['source'] = None
+
+    diff = diff_pipes(old, new)
+    assert diff.source_change == (None, None)
+    assert diff.has_semantic_changes is True
+
+
+def test_unchanged_source_is_not_reported():
+    old = _sample_pipe()
+    old['source'] = 'webhook_1'
+    diff = diff_pipes(old, copy.deepcopy(old))
+    assert diff.source_change is None
+    assert diff.has_semantic_changes is False
+
+
 def test_unknown_top_level_keys_are_ignored():
-    # `diff_pipes` reads exactly three top-level keys: `components`, `version`,
-    # and `viewport`. Everything else a .pipe carries -- `project_id`,
+    # `diff_pipes` reads exactly four top-level keys: `components`, `source`,
+    # `version`, and `viewport`. Everything else a .pipe carries -- `project_id`,
     # `isLocked`, and any key a future schema adds -- is deliberately ignored,
     # because none of it changes what the pipeline does. Pinned here so the set
     # cannot drift silently: widening it would make editor/session metadata gate
@@ -355,6 +396,7 @@ def test_unknown_top_level_keys_are_ignored():
         assert diff.node_changes == []
         assert diff.edge_changes == []
         assert diff.version_change is None
+        assert diff.source_change is None
         assert diff.viewport_changes == []
         assert diff.layout_changed is False
         assert diff.has_semantic_changes is False
