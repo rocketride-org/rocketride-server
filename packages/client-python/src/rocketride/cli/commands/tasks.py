@@ -141,7 +141,9 @@ async def run_upload(args) -> int:
     Upload files to a pipeline with plain per-file progress lines.
 
     Args:
-        args: Parsed argparse namespace (files, pipeline, token, threads).
+        args: Parsed argparse namespace (files, pipeline, token, threads,
+            max_concurrent). ``threads`` sizes the pipeline this command may
+            start; ``max_concurrent`` caps the upload fan-out.
 
     Returns:
         Exit code.
@@ -197,7 +199,7 @@ async def run_upload(args) -> int:
         # command started, instead of leaving it alive until its TTL expires
         start_time = time.time()
         try:
-            results = await client.send_files(valid_files, task_token)
+            results = await client.send_files(valid_files, task_token, max_concurrent=args.max_concurrent)
         finally:
             # step: tear down a pipeline this command started
             if manage_pipeline and task_token:

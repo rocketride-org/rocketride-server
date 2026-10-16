@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **nodes**: the `objdir` tool of `store_postgres` and `rocketride_vector` no longer lists the store's internal `schema` control row (it appeared as a `None` key) or soft-deleted documents (#2587)
 - **ai**: the shared embedding factory imports providers from the shipped `nodes` package (#2587).
 - **nodes**: PostgreSQL vector stores accept document metadata fields outside the SQL schema and roll back failed chunk replacements, preserving existing documents (#2587).
+- **client-python**: bound `send_files()` concurrency with `max_concurrent` (default 5) and wire the CLI's `--max-concurrent` to it (#1895)
 
 ## [3.4.0] - 2026-09-22
 
