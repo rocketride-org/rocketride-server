@@ -33,18 +33,12 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const {
-	exists,
 	syncDir,
 	syncFile,
-	readDirSafe,
-	readJson,
 	formatSyncStats,
 	isDirectory,
 	removeDir,
-	getSharedName,
-	getSymName,
 	PROJECT_ROOT,
-	BUILD_ROOT,
 	DIST_ROOT,
 	OVERLAY_ROOT,
 	startServer,
@@ -61,6 +55,7 @@ const {
 	isLinux,
 	loadPackageJson,
 } = require('../../scripts/lib');
+const { stageNodeLibrary, makeNodeModule } = require('./node-build');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 
@@ -82,8 +77,21 @@ const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', 
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
 
-// Where cmake leaves the c++ node binaries
-const BUILD_NODES_DIR = path.join(BUILD_ROOT, 'nodes');
+// A builder module of a node's own, by the names the registry discovers
+const hasOwnModule = (nodeDir) =>
+	['tasks.js', 'tasks.cjs'].some((file) => fs.existsSync(path.join(nodeDir, 'scripts', file)));
+
+// A c++ node is one with a CMakeLists.txt and without a module of its own.
+const CPP_NODES = [...SRC_NODE_DIRS]
+	.filter(
+		([name, srcDir]) =>
+			fs.existsSync(path.join(srcDir, name, 'CMakeLists.txt')) && !hasOwnModule(path.join(srcDir, name))
+	)
+	.map(([name, srcDir]) => ({ name, srcDir }));
+
+const CPP_NODE_BUILDS = [...SRC_NODE_DIRS]
+	.filter(([name, srcDir]) => fs.existsSync(path.join(srcDir, name, 'CMakeLists.txt')))
+	.map(([name]) => `${name}:build`);
 
 // ============================================================================
 // Action Factories
@@ -106,37 +114,6 @@ function makeSyncNodesAction() {
 			task.output = formatSyncStats(stats);
 		},
 	};
-}
-
-async function syncNode(name, srcDir, stats) {
-	const distDir = path.join(DIST_DIR, name);
-	const libs = new Set();
-
-	await syncDir(srcDir, distDir, { mirror: false, package: true, ignore: IGNORE }, stats);
-
-	for (const file of await readDirSafe(srcDir)) {
-		if (!/^services.*\.json$/.test(file)) continue;
-
-		const services = await readJson(path.join(srcDir, file));
-		if (services.node !== 'cpp') continue;
-
-		if (typeof services.path !== 'string' || !services.path)
-			throw new Error(`${path.join(srcDir, file)}: ` + 'a cpp service needs a library name in "path"');
-
-		libs.add(services.path);
-	}
-
-	if (libs.size > 1) throw new Error(`The node ${name} names more than one library: ` + [...libs].join(', '));
-
-	const [lib] = libs;
-	if (!lib) return;
-
-	for (const file of [getSharedName(lib), getSymName(lib)].filter(Boolean)) {
-		const built = path.join(BUILD_NODES_DIR, name, file);
-		if (!(await exists(built))) continue;
-
-		await syncFile(built, path.join(distDir, file), { package: true }, stats);
-	}
 }
 
 function makeStartTestServerAction(options = {}) {
@@ -405,29 +382,6 @@ function makeTestAction(options = {}) {
 	return { description: 'Testing nodes', steps };
 }
 
-// Why the container tasks cannot run here, or null. Linux only: elsewhere
-// dist/server holds a Windows or macOS engine, which cannot go into a Linux image.
-async function containerUnavailable() {
-	if (!isLinux()) return 'Linux only; dist/server here is not a Linux engine. Pull a published engine-base instead';
-	try {
-		await execCommand('docker', ['info'], { stdio: 'ignore', silent: true });
-	} catch {
-		return 'no Docker daemon reachable';
-	}
-	return null;
-}
-
-function skipLoudly(taskName, task, reason) {
-	task.output = `Skipped: ${reason}`;
-	console.warn(`WARNING: ${taskName} skipped — ${reason}`);
-}
-
-// Both images carry the engine version: the task protocol is not versioned.
-async function imageNames() {
-	const { version } = await loadPackageJson();
-	return { base: `rocketride/engine-base:${version}`, node: `rocketride/node:${version}` };
-}
-
 // Builds engine-base from dist/server, then the node image FROM it.
 function makeBuildImageAction(options = {}) {
 	return {
@@ -490,6 +444,38 @@ function makeTestImageAction(options = {}) {
 }
 
 // ============================================================================
+// Utilities
+// ============================================================================
+
+async function syncNode(name, srcDir, stats) {
+	const distDir = path.join(DIST_DIR, name);
+
+	await syncDir(srcDir, distDir, { mirror: false, package: true, ignore: IGNORE }, stats);
+	await stageNodeLibrary(name, srcDir, stats);
+}
+
+async function containerUnavailable() {
+	if (!isLinux()) return 'Linux only; dist/server here is not a Linux engine. Pull a published engine-base instead';
+	try {
+		await execCommand('docker', ['info'], { stdio: 'ignore', silent: true });
+	} catch {
+		return 'no Docker daemon reachable';
+	}
+	return null;
+}
+
+function skipLoudly(taskName, task, reason) {
+	task.output = `Skipped: ${reason}`;
+	console.warn(`WARNING: ${taskName} skipped — ${reason}`);
+}
+
+// Both images carry the engine version: the task protocol is not versioned.
+async function imageNames() {
+	const { version } = await loadPackageJson();
+	return { base: `rocketride/engine-base:${version}`, node: `rocketride/node:${version}` };
+}
+
+// ============================================================================
 // Module Export
 // ============================================================================
 
@@ -506,13 +492,25 @@ module.exports = {
 		{ name: 'nodes:docs-generate', action: makeDocsGenerateAction },
 		{ name: 'nodes:credentials-generate', action: makeCredentialsGenerateAction },
 		{ name: 'nodes:credentials-check', action: makeCredentialsCheckAction },
+		{
+			name: 'nodes:submodule-build',
+			action: () => ({
+				// Each node builds itself; the sync stages every node's sources
+				steps: [parallel(CPP_NODE_BUILDS, 'Build c++ nodes'), 'nodes:sync'],
+			}),
+		},
 
 		// Public actions (have descriptions)
 		{
 			name: 'nodes:build',
 			action: () => ({
 				description: 'Build nodes',
-				steps: ['server:build', 'nodes:sync', 'nodes:docs-generate', 'nodes:credentials-generate'],
+				steps: [
+					'server:build-core',
+					'nodes:submodule-build',
+					'nodes:docs-generate',
+					'nodes:credentials-generate',
+				],
 			}),
 		},
 		{
@@ -551,6 +549,9 @@ module.exports = {
 		},
 	],
 };
+
+// C++ node actions
+module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
 
 // Export paths for external use
 module.exports.DIST_DIR = DIST_DIR;

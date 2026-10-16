@@ -194,7 +194,7 @@ jobs:
       # Env vars are exported to $GITHUB_ENV only after the server is healthy;
       # S3 tests gate on those vars so they skip on win/macOS.
       - name: Start S3 test server (moto) / Linux
-        if: matrix.platform == 'ubuntu' && inputs.codeql == false
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
         env:
           AWS_ACCESS_KEY_ID: minioadmin
           AWS_SECRET_ACCESS_KEY: minioadmin
@@ -228,7 +228,7 @@ jobs:
       # credential — not a secret. Env vars exported to $GITHUB_ENV only after
       # Azurite is live; Azure tests gate on those vars, so they skip on win/macOS.
       - name: Start Azurite for tests / Linux
-        if: matrix.platform == 'ubuntu' && inputs.codeql == false
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
         run: |
           set -euo pipefail
           docker run -d --name azurite -p 10000:10000 \
@@ -269,7 +269,7 @@ jobs:
       # image and the two-images-vs-one-database split; publishing the exact
       # single-image cloud pin to GHCR is a noted follow-up.
       - name: Start Postgres (pgvector + AGE) for tests / Linux
-        if: matrix.platform == 'ubuntu' && inputs.codeql == false
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
         run: |
           set -euo pipefail
           docker run -d --name rr-pgvector -p 55432:5432 \

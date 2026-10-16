@@ -58,12 +58,15 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `dropper-ui` | File drop web interface | build, clean, dev |
 | `events-ui` | Event monitor application | build, clean, dev |
 | `explorer-ui` | File explorer application | build, clean |
+| `hash` | C++ filter fingerprinting document content, for deduplication | build |
 | `hello-ui` | RocketRide Hello — OSS landing application | build, clean, dev |
+| `indexer` | C++ filter building the inverted word index for full-text search | build |
 | `java` | JDK, JRE, and Maven (auto-installed for Tika) | setup-jdk, setup-jre, setup-maven |
 | `mcp-widgets` | MCP Apps widgets (embedded UI served by the ai MCP module) | build, clean, test |
 | `models` | LLM model sync | stamp-locals, update |
 | `monitor-ui` | Server monitor web interface | build, clean |
 | `nodes` | Pipeline nodes | build, clean, test, test-contracts, test-full |
+| `parse` | C++ and Java filter extracting content from documents (Tika) | build |
 | `profiler-ui` | cProfile process profiler | build, clean |
 | `rocket-ui` | Data toolchain interface application | build, clean, dev |
 | `server` | C++ engine (downloads pre-built first, or compile from source) | build, compile, clean, test, build-all, clean-all, configure-cmake, dev, package, run, setup-test-deps |
@@ -71,7 +74,6 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `shell` | Shell platform (host + frozen API surface) | build, check, clean, dev, freeze, regen, regen-derived, test |
 | `sql-ui` | SQL Explorer application | build, clean, dev |
 | `test-ui` | Test UI application | build, clean, dev |
-| `tika` | Java document parser | build-jar, build-dbgconn, sync, test-jar, test-dbgconn |
 | `ui` | All UI applications | build, clean, register |
 | `vcpkg` | C++ package manager (auto-installed for server build) | bootstrap, clone |
 | `vscode` | VSCode extension | build, compile, clean |
@@ -89,6 +91,32 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 ./builder server:clean nodes:clean
 ./builder --help
 ```
+
+### Building a C++ node
+
+Each C++ node (`hash`, `indexer`, `parse`) is its own CMake project with its own
+build action, for a change-build-test cycle on one node:
+
+```bash
+./builder hash:build
+```
+
+It takes the engine the same way `server:build` does — a prebuilt download when
+the local `packages/server` sources match a release, a source compile otherwise —
+and links the node against the engine in `dist/server`, never a build tree.
+
+A node also links the native packages the engine was built with. It has no
+vcpkg manifest of its own, so it installs from the engine's
+(`packages/server/vcpkg.json`) into the same `build/vcpkg_installed` the engine
+uses, and vcpkg does that while the node configures. Nothing has to be
+installed by hand — but on a tree whose engine was **downloaded**, the first
+node build pays for the packages, which is long when the binary cache has
+nothing to offer.
+
+Changing anything under `packages/server` gives the engine a new build hash, and
+since a node's library records the engine it was built against, every node
+rebuilds with it. The reverse is not true: changing one node rebuilds that node
+only.
 
 ### Build output layout
 
@@ -122,6 +150,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 ./builder build --sequential                # Run modules sequentially
 ./builder build --autoinstall               # Install missing tools automatically
 ./builder build --arch=arm                  # Target architecture (macOS cross-compile)
+./builder build --suffix=cpp-nodes          # Take the server from the server-v<version>-cpp-nodes release
 
 # Show help
 ./builder --help

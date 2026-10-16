@@ -421,13 +421,13 @@ Build systems often have tasks that don't depend on each other. Running them seq
 
 ```text
 Sequential (slow):
-  nodes:sync ----------------> ai:sync ----------------> client-python:sync-source
+  nodes:submodule-build --> ai:sync --> client-python:sync-source
   [2 seconds]                [2 seconds]           [1 second]
   Total: 5 seconds
 
 Parallel (fast):
-  +-- nodes:sync -----------+
-  +-- ai:sync --------------+-> Done
+  +-- nodes:submodule-build ------+
+  +-- ai:sync --------------------+
   +-- client-python:sync-source --+
   Total: 2 seconds (limited by slowest)
 ```

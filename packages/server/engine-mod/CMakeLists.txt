@@ -55,9 +55,17 @@ add_custom_command(TARGET engineMod POST_BUILD
 
 # Mirror the exe -> dist/server copy that rocketride_add_executable performs
 if(ROCKETRIDE_CMAKE_KITS)
+    # Copy import library on Windows
+    set(copyEngineModImport "")
+    if(ROCKETRIDE_PLAT_WIN)
+        set(copyEngineModImport COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_LINKER_FILE:engineMod> "${ROCKETRIDE_DIST_DIR}/")
+    endif()
+
     add_custom_command(TARGET engineMod POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ROCKETRIDE_DIST_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:engineMod> "${ROCKETRIDE_DIST_DIR}/"
+        ${copyEngineModImport}
         COMMENT "Copying $<TARGET_FILE_NAME:engineMod> to dist/server")
 endif()
 

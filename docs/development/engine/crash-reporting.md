@@ -224,8 +224,8 @@ gdbdump() {  # gdbdump <binary> <dump.dmp>
 ```
 
 **Windows** -- open the `.dmp` directly in **WinDbg** or Visual Studio with
-`engine.dll.pdb` and `engine.exe.pdb` available (both ship in the release's
-`*.symbols.zip`).
+`engine.dll.pdb` and `engine.exe.pdb` available (both ship in the release
+archive, beside `engine.exe`).
 
 ## Memory capture
 
