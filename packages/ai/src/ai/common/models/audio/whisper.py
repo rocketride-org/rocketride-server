@@ -338,6 +338,12 @@ class WhisperLoader(BaseLoader):
         except ImportError:
             return True
         try:
+            # Already cached: no network call at all.
+            download_model(_GPU_PROBE_MODEL, cache_dir=download_root, local_files_only=True)
+            return True
+        except Exception:  # noqa: BLE001
+            pass
+        try:
             download_model(_GPU_PROBE_MODEL, cache_dir=download_root)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
