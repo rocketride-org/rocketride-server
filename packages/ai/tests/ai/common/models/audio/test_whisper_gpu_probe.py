@@ -45,6 +45,9 @@ def fresh_probe(monkeypatch):
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_reason', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_inference_skipped', None)
     monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=lambda *a, **k: None))
+    # The guard shortcut imports ai.common.torch, whose load_depends installs torch on a bare host.
+    no_cuda = types.SimpleNamespace(torch=types.SimpleNamespace(version=types.SimpleNamespace(cuda=None)))
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', no_cuda)
 
 
 # ---------------------------------------------------------------------------
