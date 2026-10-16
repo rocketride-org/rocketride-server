@@ -30,9 +30,17 @@ def preprocess_image_transparency(image_bytes: bytes) -> bytes:
         Preprocessed image bytes (always RGB PNG)
     """
     import numpy as np
-    from PIL import Image
+    from PIL import Image, ImageOps
+
+    try:
+        import pillow_heif
+
+        pillow_heif.register_heif_opener()
+    except ImportError:
+        pass
 
     img = Image.open(io.BytesIO(image_bytes))
+    img = ImageOps.exif_transpose(img) or img
 
     # Handle different image modes
     if img.mode in ('RGBA', 'LA'):

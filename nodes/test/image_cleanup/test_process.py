@@ -170,3 +170,69 @@ def test_ensure_png_reports_conversion_failures(monkeypatch):
 
     with pytest.raises(ValueError, match='Failed to convert image to PNG: bad image'):
         module.ensure_png('image/jpeg', b'not-an-image')
+
+
+def test_ensure_png_transposes_exif_orientation(monkeypatch):
+    """Real JPEG with EXIF orientation 6 is transposed to upright RGBA PNG."""
+    import io
+    from PIL import Image
+
+    module = _load_module(monkeypatch, '_image_cleanup_png_test.png', 'png.py')
+    ensure_png = module.ensure_png
+
+    buf = io.BytesIO()
+    img = Image.new('RGB', (20, 10), (10, 20, 30))
+    exif = img.getexif()
+    exif[0x0112] = 6  # Rotate 90 CW (transposes to 10, 20)
+    img.save(buf, format='JPEG', exif=exif)
+
+    mime, out_bytes = ensure_png('image/jpeg', buf.getvalue())
+    assert mime == 'image/png'
+    with Image.open(io.BytesIO(out_bytes)) as out_img:
+        assert out_img.format == 'PNG'
+        assert out_img.size == (10, 20)
+        assert out_img.mode == 'RGBA'
+
+
+def test_ensure_png_converts_heif_to_png(monkeypatch):
+    """HEIF image bytes are decoded to PNG."""
+    pytest.importorskip('pillow_heif', reason='pillow-heif not installed')
+    import io
+    from PIL import Image
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+
+    module = _load_module(monkeypatch, '_image_cleanup_png_test.png', 'png.py')
+    ensure_png = module.ensure_png
+
+    buf = io.BytesIO()
+    Image.new('RGB', (16, 8), (10, 20, 30)).save(buf, format='HEIF')
+
+    mime, out_bytes = ensure_png('image/heif', buf.getvalue())
+    assert mime == 'image/png'
+    with Image.open(io.BytesIO(out_bytes)) as out_img:
+        assert out_img.format == 'PNG'
+        assert out_img.size == (16, 8)
+
+
+def test_ensure_png_transposes_png_input_with_exif_orientation(monkeypatch):
+    """PNG input that carries an EXIF orientation is transposed rather than passed through."""
+    import io
+    from PIL import Image
+
+    module = _load_module(monkeypatch, '_image_cleanup_png_test.png', 'png.py')
+    ensure_png = module.ensure_png
+
+    buf = io.BytesIO()
+    img = Image.new('RGB', (20, 10), (10, 20, 30))
+    exif = img.getexif()
+    exif[0x0112] = 6  # Rotate 90 CW (transposes to 10, 20)
+    img.save(buf, format='PNG', exif=exif)
+
+    mime, out_bytes = ensure_png('image/png', buf.getvalue())
+    assert mime == 'image/png'
+    with Image.open(io.BytesIO(out_bytes)) as out_img:
+        assert out_img.format == 'PNG'
+        assert out_img.size == (10, 20)
+        assert out_img.mode == 'RGBA'

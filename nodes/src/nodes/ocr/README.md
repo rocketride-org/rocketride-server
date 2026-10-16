@@ -205,6 +205,7 @@ The `_IMG2TABLE_V2` flag is set at import time and gates each code path. `extern
 
 - `img2table`
 - `pillow`
+- `pillow-heif`
 - `numpy`
 
 ## Source
