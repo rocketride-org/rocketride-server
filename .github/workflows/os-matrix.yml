@@ -151,6 +151,17 @@ jobs:
         shell: bash
         run: ./builder test --verbose --sequential
 
+      # What the test servers printed; the job log carries only the clients' side.
+      - name: Upload test server logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          # matrix.image contains ':', which an artifact name cannot
+          name: test-server-logs-${{ strategy.job-index }}
+          retention-days: 7
+          path: dist/server/test-logs/
+          if-no-files-found: ignore
+
       # Runs only when the tests failed. memory.events.oom_kill is a cumulative
       # counter that survives the killed process, so a non-zero value here is
       # positive proof the cgroup OOM killer fired during this job - the one

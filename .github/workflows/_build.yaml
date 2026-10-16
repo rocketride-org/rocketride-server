@@ -329,6 +329,17 @@ jobs:
         #       after the appropriate fixes have been made, see #743 #1048 for details.
         run: ${{ matrix.builder_cmd }} test --verbose --sequential
 
+      # What the test servers printed; the job log carries only the clients'
+      # side. Small text files, uploaded only on failure, so a week is cheap.
+      - name: Upload test server logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-server-logs-${{ matrix.platform }}
+          retention-days: 7
+          path: ${{ github.workspace }}/dist/server/test-logs/
+          if-no-files-found: ignore
+
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
         uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3

@@ -198,6 +198,8 @@ function makeStartTestServerAction(options = {}) {
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
+				logName: 'client-mcp',
+				verbose: ctx.options?.verbose,
 				basePort: 20000,
 				onOutput: (text) => {
 					if (taskComplete) return;
