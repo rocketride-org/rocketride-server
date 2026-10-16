@@ -23,9 +23,11 @@
 """
 How a task is started: the ``Launcher`` seam and its runtimes.
 
-``--runtime`` on ``eaas.py`` picks one; without it a hosted (``--saas``)
-engine runs docker and any other spawn. ``TaskServer`` keeps a single
-launcher per runtime and every ``Task`` of the process uses it.
+``--runtime`` on ``eaas.py`` picks one: spawn (a child process), docker (a
+container per task) or k8s (a Kubernetes Job per task). Without it a hosted
+(``--saas``) engine runs docker and any other spawn; k8s is never a default.
+``TaskServer`` keeps a single launcher per runtime and every ``Task`` of the
+process uses it.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer
 
 # The runtimes --runtime accepts
-RUNTIMES = ('spawn', 'docker')
+RUNTIMES = ('spawn', 'docker', 'k8s')
 
 __all__ = [
     'CONST_HOSTED_CHILD_FLAG',
@@ -89,4 +91,8 @@ def create_launcher(runtime: str, server: 'TaskServer') -> Launcher:
         from .docker import DockerLauncher
 
         return DockerLauncher(server)
+    if runtime == 'k8s':
+        from .k8s import K8sLauncher
+
+        return K8sLauncher(server)
     raise ValueError(f'Unknown runtime {runtime!r}; expected one of {", ".join(RUNTIMES)}')

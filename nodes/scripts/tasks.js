@@ -72,6 +72,8 @@ const {
 	diagnoseLocalDocker,
 	diagnoseWsl,
 	missingImage,
+	k8sLabelValue,
+	diagnoseKubernetes,
 	unavailableReason,
 	formatDiagnosis,
 } = require('./container-checks');
@@ -175,11 +177,13 @@ function makeStartTestServerAction(options = {}) {
 			// Under --runtime=docker this server labels its containers with an id of its own,
 			// so the teardown can remove the ones it leaves (see removeTaskContainers)
 			const dockerInstance = options.runtime === 'docker' ? `nodes-test-${crypto.randomUUID()}` : null;
+			// Under --runtime=k8s its Jobs, for the same reason (see removeTaskJobs)
+			const k8s = options.runtime === 'k8s' ? await k8sTestServer(ctx.k8sTarget) : null;
 
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
-				// --runtime=docker: every task in a container (container:test)
+				// --runtime=docker: every task in a container (container:test); k8s: in a Job
 				args: options.runtime ? [`--runtime=${options.runtime}`] : [],
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
@@ -194,6 +198,7 @@ function makeStartTestServerAction(options = {}) {
 								RR_DOCKER_INSTANCE: dockerInstance,
 							}
 						: {}),
+					...(k8s ? k8s.env : {}),
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;
@@ -208,7 +213,7 @@ function makeStartTestServerAction(options = {}) {
 			const runtime = options.runtime ? `, runtime ${options.runtime}` : '';
 			task.output = `Server ready on port ${ctx.port} (mocks enabled${runtime})`;
 			taskComplete = true;
-			return { port: result.port, server: result.server, dockerInstance };
+			return { port: result.port, server: result.server, dockerInstance, k8s };
 		},
 	};
 }
@@ -220,9 +225,18 @@ function makeStopTestServerAction() {
 			const bracket = ctx.brackets?.['node-test-server'];
 			if (bracket?.server) {
 				task.output = 'Stopping server...';
+				// Listed while the server lives: on POSIX a child's parent is lost with it
+				const helpers = bracket.k8s ? await kubectlChildren(bracket.server.pid) : [];
 				await stopServer({ server: bracket.server });
 				const removed = bracket.dockerInstance ? await removeTaskContainers(bracket.dockerInstance) : 0;
-				task.output = removed ? `Server stopped, ${removed} task container(s) removed` : 'Server stopped';
+				const jobs = bracket.k8s ? await removeTaskJobs(bracket.k8s) : 0;
+				const ended = await endKubectl(helpers);
+				const left = [
+					...(removed ? [`${removed} task container(s) removed`] : []),
+					...(jobs ? [`${jobs} task job(s) removed`] : []),
+					...(ended ? [`${ended} kubectl process(es) ended`] : []),
+				];
+				task.output = ['Server stopped', ...left].join(', ');
 			} else {
 				task.output = 'No server to stop';
 			}
@@ -255,6 +269,99 @@ async function removeTaskContainers(instance) {
 	return removed.stdout.split(/\s+/).filter(Boolean).length;
 }
 
+// The kubectl processes a test server's k8s runtime keeps: its pod watch, and for each task
+// still running an attach and a port-forward. The server is stopped by closing its stdin,
+// which ends it at once (quick_exit): nothing it would do on exit happens, and a
+// port-forward does not end with its pod. Returns their pids.
+async function kubectlChildren(pid) {
+	const listed = isWindows()
+		? await capture('powershell.exe', [
+				'-NoProfile',
+				'-NonInteractive',
+				'-Command',
+				`Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid} AND Name='kubectl.exe'" | ` +
+					'ForEach-Object { $_.ProcessId }',
+			])
+		: await capture('pgrep', ['-P', String(pid), '-x', 'kubectl']);
+	return listed.stdout.split(/\s+/).filter((id) => /^\d+$/.test(id));
+}
+
+// Ends the ones that outlived their server. A pid is signalled only while it is still a
+// kubectl: one that ended by itself may be another process by now. Returns how many ended.
+async function endKubectl(pids) {
+	let ended = 0;
+	for (const pid of pids) {
+		// It goes into a shell command below: digits only, whoever the caller is
+		if (!/^\d+$/.test(String(pid))) continue;
+		const done = isWindows()
+			? await capture('taskkill', ['/F', '/PID', String(pid), '/FI', 'IMAGENAME eq kubectl.exe'])
+			: await capture('sh', ['-c', `[ "$(ps -p ${pid} -o comm=)" = kubectl ] && kill ${pid}`]);
+		if (done.code === 0 && (!isWindows() || /SUCCESS/.test(done.stdout))) ended += 1;
+	}
+	return ended;
+}
+
+// How long a kubectl call that asks the cluster may wait for an answer; kubectl's own
+// default is to wait without end
+const KUBECTL_REQUEST_TIMEOUT = '30s';
+
+// Where the k8s runtime runs tasks: the context named in RR_K8S_CONTEXT, else kubectl's
+// current one, and the namespace. `current` is what kubectl answered, for the preflight.
+async function k8sTarget() {
+	const current = await capture('kubectl', ['config', 'current-context']);
+	const context = process.env.RR_K8S_CONTEXT || (current.code === 0 ? current.stdout.trim() : '');
+	const namespace = process.env.RR_K8S_NAMESPACE || 'rocketride-tasks';
+	return { current, context, namespace, scope: [...(context ? ['--context', context] : []), '-n', namespace] };
+}
+
+// What a test server's k8s runtime is told, and what its teardown needs. Its Jobs carry an
+// id of this server's own, the mocks reach each task's pod in its start stream, and the
+// image is the local one, never pulled. The context is named even when it is the current
+// one: the tests stay on the cluster the preflight judged, whatever becomes current
+// meanwhile. Docker Desktop's cluster reaches this host by a name of its own; no other
+// local cluster is given one here. What the user set in the environment stays, and the
+// mocks are added to whatever RR_K8S_MOUNTS already names. `checked` is the target the
+// preflight judged: the server runs on that one, not on whatever is current by now.
+async function k8sTestServer(checked) {
+	const { context, scope } = checked || (await k8sTarget());
+	const env = {
+		RR_K8S_INSTANCE: `nodes-test-${crypto.randomUUID()}`,
+		RR_K8S_IMAGE_PULL_POLICY: 'Never',
+		...(context ? { RR_K8S_CONTEXT: context } : {}),
+		...(context === 'docker-desktop' ? { RR_K8S_HOST_ALIAS: 'host.docker.internal' } : {}),
+	};
+	const instance = process.env.RR_K8S_INSTANCE || env.RR_K8S_INSTANCE;
+	for (const name of Object.keys(env)) if (process.env[name]) delete env[name];
+	const mounts = (process.env.RR_K8S_MOUNTS || '').split(',').map((name) => name.trim());
+	env.RR_K8S_MOUNTS = [...new Set([...mounts.filter(Boolean), 'ROCKETRIDE_MOCK'])].join(',');
+	return { env, scope, instance };
+}
+
+// The Jobs a test server leaves behind, and their pods with them: it is stopped without a
+// cleanup, and no later test server sweeps for its instance. Returns how many were removed;
+// what could not be removed is said, with the command that removes it.
+async function removeTaskJobs({ instance, scope }) {
+	const selector = `rocketride.eas=${k8sLabelValue(instance)}`;
+	const deleted = await capture('kubectl', [
+		...scope,
+		// An API server that stops answering must not hold the teardown
+		`--request-timeout=${KUBECTL_REQUEST_TIMEOUT}`,
+		'delete',
+		'jobs',
+		'-l',
+		selector,
+		'--ignore-not-found',
+		'--wait=false',
+	]);
+	if (deleted.code !== 0) {
+		console.warn(
+			`WARNING: task jobs left behind (${selector}): ${(deleted.stderr || deleted.stdout).trim()}; ` +
+				`remove them with: kubectl ${[...scope, 'delete', 'jobs', '-l', selector].join(' ')}`
+		);
+	}
+	return deleted.stdout.split(/\r?\n/).filter((line) => / deleted/.test(line)).length;
+}
+
 // Modes: 'run' (the tests), 'warmup' (download the models of the selected heavy
 // tests; options.warmup === 'plan' only lists them), 'list-skipped' (report the
 // selected tests that will be skipped). Only 'run' needs the test server.
@@ -268,13 +375,16 @@ function makeRunPytestAction(options = {}) {
 			const testEnv = {
 				...process.env,
 				ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks'),
-				// Tests whose outcome depends on the runtime (the store under docker) read it here
+				// Tests whose outcome depends on the runtime (the store under docker and k8s,
+				// a crashed task's dump under k8s) read it here
 				ROCKETRIDE_TEST_RUNTIME: options.runtime || 'spawn',
 			};
 			if (mode === 'run') {
 				const bracket = ctx.brackets?.['node-test-server'];
 				if (!bracket?.port) throw new Error('node-test-server bracket missing — server did not start');
 				testEnv.ROCKETRIDE_URI = bracket.serverUri || `http://localhost:${bracket.port}`;
+				// A test that looks into the cluster looks where this server runs its tasks
+				if (bracket.k8s) Object.assign(testEnv, bracket.k8s.env);
 			} else if (options.taskserver) {
 				// The hardware gate needs to know the tests would run on another machine.
 				testEnv.ROCKETRIDE_URI = parseServerAddress(options.taskserver).uri;
@@ -454,6 +564,10 @@ function makeTestAction(options = {}) {
 	if (options.runtime === 'docker' && !options.taskserver) {
 		steps.unshift({ name: 'nodes:docker-preflight', action: makeDockerPreflightAction() });
 	}
+	// A local cluster, its namespace and the image, the same way
+	if (options.runtime === 'k8s' && !options.taskserver) {
+		steps.unshift({ name: 'nodes:k8s-preflight', action: makeK8sPreflightAction() });
+	}
 
 	// The collect-only modes above report the environment as it is; test runs complete it.
 	steps.push({ name: 'nodes:install-test-deps', action: makeInstallTestDepsAction() });
@@ -495,6 +609,60 @@ function makeDockerPreflightAction() {
 			if ((await imageLabels(image)) === null)
 				throw new Error(formatDiagnosis(name, missingImage(os.platform(), image)));
 			task.output = `${image} is on the daemon`;
+		},
+	};
+}
+
+// nodes:test --runtime=k8s needs kubectl, a cluster on this machine and the namespace tasks
+// run in; without them every test would fail on its own. A context that is not a local one
+// is refused before the cluster is asked anything: the tests never run against a remote one.
+// Docker Desktop's cluster takes its images from the docker daemon, so there the node image
+// is checked as the docker runtime checks it; any other cluster has to be given the image.
+function makeK8sPreflightAction() {
+	return {
+		run: async (ctx, task) => {
+			const name = 'nodes:test --runtime=k8s';
+			const { current, context, namespace, scope } = await k8sTarget();
+			let problem = diagnoseKubernetes({ context, current, namespace });
+			if (!problem) {
+				// The context's API server, read from the kubeconfig: a local name is not enough
+				const view = await capture('kubectl', [
+					'config',
+					'view',
+					'--minify',
+					'--context',
+					context,
+					'-o',
+					'jsonpath={.clusters[0].cluster.server}',
+				]);
+				const server = view.code === 0 ? view.stdout.trim() : '';
+				problem = diagnoseKubernetes({ context, current, namespace, server });
+				if (!problem) {
+					const found = await capture('kubectl', [
+						...scope,
+						`--request-timeout=${KUBECTL_REQUEST_TIMEOUT}`,
+						'get',
+						'namespace',
+						namespace,
+						'-o',
+						'name',
+					]);
+					problem = diagnoseKubernetes({ context, current, namespace, server, found });
+				}
+			}
+			if (problem) throw new Error(formatDiagnosis(name, problem));
+			// The test server runs its tasks on this context, the one judged here
+			ctx.k8sTarget = { context, namespace, scope };
+
+			const image = process.env.RR_K8S_IMAGE || (await imageNames()).node;
+			if (context !== 'docker-desktop') {
+				task.output = `${context}, namespace ${namespace}; ${image} must be loaded into the cluster`;
+				return;
+			}
+			await checkLocalDocker(name);
+			if ((await imageLabels(image)) === null)
+				throw new Error(formatDiagnosis(name, missingImage(os.platform(), image)));
+			task.output = `${context}, namespace ${namespace}; ${image} is on the daemon`;
 		},
 	};
 }

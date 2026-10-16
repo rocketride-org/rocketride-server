@@ -178,3 +178,6 @@ An updated image is a local artifact, labelled `rocketride.overlay` with `git
 describe --dirty`: it is never pushed, and release images are built from
 scratch in CI. `container:build-on-wsl` and `container:sync-from-wsl` are
 optional and not part of the Windows pipeline.
+
+Testing the runtimes that use this image, by the test suites and by hand, is
+in [Testing the task runtimes](../docs/development/engine/task-runtimes.md).

@@ -314,8 +314,8 @@ def test_create_launcher_defaults_to_spawn(runtime):
 
 def test_create_launcher_refuses_an_unknown_runtime():
     """A runtime nobody implements is an error, not a silent spawn."""
-    with pytest.raises(ValueError, match='k8s'):
-        create_launcher('k8s', _server())
+    with pytest.raises(ValueError, match='podman'):
+        create_launcher('podman', _server())
 
 
 @pytest.mark.parametrize('hosted, expected', [(False, 'spawn'), (True, 'docker')])
