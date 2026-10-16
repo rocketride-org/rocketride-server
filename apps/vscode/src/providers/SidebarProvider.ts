@@ -35,6 +35,7 @@ import { getLogger } from '../shared/util/output';
 import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, EMPTY_FILE_SETTLE_MS } from '../shared/util/pipeFileDecision';
 import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
 import { SerialQueue } from '../shared/util/serialQueue';
+import { ReloadingCache, isUnderNodeModules } from '../shared/util/reloadingCache';
 import { getProjectProvider } from '../extension';
 import { scanWorkspaceApps, appIconDataUri } from '../appdev/appScan';
 import type { ScannedApp } from '../appdev/appScan';
@@ -86,7 +87,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private deployManager = DeployManager.getDeployInstance();
 
 	// ── Pipeline file state ──────────────────────────────────────────────────
-	private parsedFiles = new Map<string, ParsedPipelineFile>();
+	/**
+	 * The parsed .pipe files, keyed by path. Handlers write through
+	 * cacheParsedFile; loadPipelineFiles rebuilds the map and installs it in
+	 * one assignment, with the writes made meanwhile re-applied, and of two
+	 * overlapping reloads only the newer installs (see ReloadingCache).
+	 */
+	private cache = new ReloadingCache<ParsedPipelineFile>();
 	/**
 	 * Created files are handled one at a time, behind the initial load. Each
 	 * handler judges its file against parsedFiles and adds its file to
@@ -95,18 +102,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * unreported.
 	 */
 	private createdFileQueue = new SerialQueue();
-	/**
-	 * Monotonic reload counter (the rescanSeq pattern): the refresh button and
-	 * a services update can start a reload while another is still parsing, and
-	 * only the newest run may install its cache.
-	 */
-	private loadSeq = 0;
-	/**
-	 * Cache writes the watcher handlers make while loadPipelineFiles is
-	 * parsing. They land in the cache the reload is about to replace, so the
-	 * reload re-applies them after the swap. Undefined while no reload runs.
-	 */
-	private writesDuringLoad?: Map<string, ParsedPipelineFile | null>;
 
 	// ── App Builder state ────────────────────────────────────────────────────
 	// Cached workspace scan (re-run on .rrapp / package.json events) and the
@@ -127,6 +122,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'apps';
 
 	private logger = getLogger();
+
+	/** The installed parsed-file cache, read only; writes go through cacheParsedFile. */
+	private get parsedFiles(): ReadonlyMap<string, ParsedPipelineFile> {
+		return this.cache.entries;
+	}
 	/** Set by dispose(): a settle wait that outlives the provider must not write. */
 	private disposed = false;
 	/** `<fsPath>\n<project_id>` pairs the duplicate warning was already shown for. */
@@ -241,20 +241,35 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// FILE WATCHING
 	// =========================================================================
 
-	/** Watches for .pipe / .pipe.json create/delete/change events in the workspace. */
+	/**
+	 * Watches for .pipe / .pipe.json create/delete/change events in the workspace.
+	 *
+	 * findFiles excludes node_modules; the watcher does not, and the default
+	 * files.watcherExclude leaves a top-level node_modules/x.pipe through. Every
+	 * event is filtered here, once, by whole path segment, before any handler
+	 * runs: a .pipe file inside an installed package is never written to (the
+	 * created and changed reconciles write) and never cached (a reload would not
+	 * list it, so it would appear and vanish).
+	 */
 	private setupFileWatching(): void {
 		const watcherPipe = vscode.workspace.createFileSystemWatcher('**/*.pipe');
 		const watcherPipeJson = vscode.workspace.createFileSystemWatcher('**/*.pipe.json');
+		const outsideNodeModules =
+			(handle: (uri: vscode.Uri) => void) =>
+			(uri: vscode.Uri): void => {
+				if (isUnderNodeModules(uri.fsPath)) return;
+				handle(uri);
+			};
 
 		this.disposables.push(
 			watcherPipe,
-			watcherPipe.onDidCreate((uri) => this.enqueueCreatedFile(uri)),
-			watcherPipe.onDidDelete((uri) => this.handleFileDeleted(uri)),
-			watcherPipe.onDidChange((uri) => this.handleFileChanged(uri)),
+			watcherPipe.onDidCreate(outsideNodeModules((uri) => this.enqueueCreatedFile(uri))),
+			watcherPipe.onDidDelete(outsideNodeModules((uri) => this.handleFileDeleted(uri))),
+			watcherPipe.onDidChange(outsideNodeModules((uri) => this.handleFileChanged(uri))),
 			watcherPipeJson,
-			watcherPipeJson.onDidCreate((uri) => this.enqueueCreatedFile(uri)),
-			watcherPipeJson.onDidDelete((uri) => this.handleFileDeleted(uri)),
-			watcherPipeJson.onDidChange((uri) => this.handleFileChanged(uri))
+			watcherPipeJson.onDidCreate(outsideNodeModules((uri) => this.enqueueCreatedFile(uri))),
+			watcherPipeJson.onDidDelete(outsideNodeModules((uri) => this.handleFileDeleted(uri))),
+			watcherPipeJson.onDidChange(outsideNodeModules((uri) => this.handleFileChanged(uri)))
 		);
 
 		// App discovery is .rrapp-driven, and the marker's adjacent
@@ -273,7 +288,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			}, 500);
 		};
 		const onBindingEvent = (uri: vscode.Uri): void => {
-			if (uri.fsPath.includes('node_modules')) return;
+			if (isUnderNodeModules(uri.fsPath)) return;
 			scheduleRescan();
 		};
 		this.disposables.push(
@@ -359,10 +374,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		// the settle wait inside reconcileProjectId; a disposed provider has
 		// nothing to refresh.
 		if (this.disposed) return;
+		// node_modules events never get here: setupFileWatching filters them.
 		await this.reconcileProjectId(uri, 'created');
 		if (this.disposed) return;
-		// findFiles excludes node_modules; the watcher does not.
-		if (uri.fsPath.includes('node_modules')) return;
 		const text = await this.readPipeText(uri);
 		// Gone again already (a checkout, a temporary file): nothing to show.
 		if (text === undefined) return;
@@ -392,14 +406,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
-	 * The one way a watcher handler writes to parsedFiles. A reload in
-	 * progress builds its own map and would drop the write on its swap, so the
-	 * write is also recorded for the reload to re-apply. `null` deletes.
+	 * The one way a watcher handler writes to the parsed-file cache. A reload
+	 * in progress builds its own map and would drop the write on its swap, so
+	 * the cache also records the write for the reload to re-apply. `null`
+	 * deletes.
 	 */
 	private cacheParsedFile(fsPath: string, parsed: ParsedPipelineFile | null): void {
-		if (parsed === null) this.parsedFiles.delete(fsPath);
-		else this.parsedFiles.set(fsPath, parsed);
-		this.writesDuringLoad?.set(fsPath, parsed);
+		this.cache.write(fsPath, parsed);
 	}
 
 	// =========================================================================
@@ -572,7 +585,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 		// Re-parse when service definitions arrive
 		const servicesUpdatedHandler = () => {
-			this.loadPipelineFiles();
+			void this.loadPipelineFiles().catch((error) => {
+				this.logger.error(`Pipeline file reload after a services update failed (${error instanceof Error ? error.message : String(error)}).`);
+			});
 		};
 		this.connectionManager.on('shell:servicesUpdated', servicesUpdatedHandler);
 
@@ -720,32 +735,45 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 *
 	 * The delete and change handlers write to that previous cache meanwhile,
 	 * and the swap would drop their writes: a file deleted during the reload
-	 * would come back, a changed one would keep its old sources and id. Their
-	 * writes are recorded and re-applied after the swap. Of two overlapping
-	 * reloads only the newer installs its map; the older returns without
-	 * touching anything.
+	 * would come back, a changed one would keep its old sources and id. The
+	 * cache records their writes and re-applies them after the swap. Of two
+	 * overlapping reloads only the newer installs its map; the older waits for
+	 * the newer to finish before it returns, whether it was superseded while
+	 * parsing or failed, so the created-file queue, which runs the initial
+	 * load first, continues against the newer reload's map, or, when that
+	 * reload failed, against the current one (ReloadingCache holds this logic,
+	 * with its tests).
+	 *
+	 * Invariant that keeps the queue deadlock-free: only the initial load runs
+	 * on createdFileQueue. The refresh button and a services update reload
+	 * outside it on purpose; a queued load awaiting settled() on a load queued
+	 * behind it would wait on itself (see serialQueue.ts).
 	 */
 	private async loadPipelineFiles(): Promise<void> {
-		const mine = ++this.loadSeq;
-		const writes = new Map<string, ParsedPipelineFile | null>();
-		this.writesDuringLoad = writes;
-
-		const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
-		const files = [...pipeFiles, ...pipeJsonFiles];
-
-		const parsed = new Map<string, ParsedPipelineFile>();
-		for (const uri of files) {
-			parsed.set(uri.fsPath, await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap()));
+		const seq = this.cache.beginReload();
+		let parsed: Map<string, ParsedPipelineFile>;
+		try {
+			const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
+			parsed = new Map<string, ParsedPipelineFile>();
+			for (const uri of [...pipeFiles, ...pipeJsonFiles]) {
+				parsed.set(uri.fsPath, await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap()));
+			}
+		} catch (error) {
+			// Nothing to install. When this was the newest reload, whoever waits on
+			// it goes on with the current cache; when a newer one is in flight, wait
+			// for it like a superseded load does, so the created-file queue does
+			// not run against the constructor's empty map because a scan failed.
+			this.cache.finishReload(seq, undefined);
+			await this.cache.settled();
+			throw error;
 		}
 
-		// A newer reload has started since: it saw everything this one saw.
-		if (mine !== this.loadSeq) return;
-		this.writesDuringLoad = undefined;
-		for (const [fsPath, file] of writes) {
-			if (file === null) parsed.delete(fsPath);
-			else parsed.set(fsPath, file);
+		if (!this.cache.finishReload(seq, parsed)) {
+			// A newer reload has started since: it saw everything this one saw.
+			// Wait for it, so whatever is queued behind this load finds its map.
+			await this.cache.settled();
+			return;
 		}
-		this.parsedFiles = parsed;
 
 		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', this.parsedFiles.size === 0);
 		this.sendEntriesUpdate();
