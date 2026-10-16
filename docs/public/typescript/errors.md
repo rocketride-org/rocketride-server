@@ -15,7 +15,8 @@ What the SDK throws, when, and how to catch it.
 | Transport loss and connection failures (including during login) | `ConnectionException` |
 | Data-pipe errors (open / write / close) | `PipeException` |
 | A login superseded, logged out, or detached mid-flight | `LoginAttemptCancelledError` |
-| Most argument and server-rejection errors (`use()`, `getService()`, DAP failures) | plain `Error` |
+| Argument errors (`use()` without a pipeline, `getService()` with a bad name) | plain `Error` |
+| Server rejects a pipeline start or a DAP request | `ExecutionException` (an `Error`), with the server's `code` when it sent one |
 | `sendFiles` with a non-positive `maxConcurrent` | `RangeError` |
 | `Answer.getJson()` on non-JSON content | throws |
 
@@ -73,8 +74,21 @@ context (mirroring Python's `dap_result`), plus two optional fields:
 - `code` — the server's machine-readable classification, absent when the failure
   has none. Task failures carry one: `TASK_NOT_REGISTERED` (the token names no
   live task — never started, terminated, replaced, or the engine restarted),
-  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
-  on `message`**, which is written for people and may be reworded.
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`; a refused pipe (a `chat()`, an upload, a tool call) throws
+  `ExecutionException` with `code === 'OUT_OF_CREDITS'` (the org is past its
+  spend limit; clears when it tops up). **Classify on `code`, not on
+  `message`**, which is written for people and may be reworded:
+
+  ```typescript
+  import { ExecutionException } from 'rocketride';
+
+  try {
+  	const answer = await client.chat({ token, question });
+  } catch (e) {
+  	if (e instanceof ExecutionException && e.code === 'OUT_OF_CREDITS') showBillingPage(e);
+  	else throw e;
+  }
+  ```
 - `hint` — troubleshooting text the SDK attached for a developer, absent when
   there is none. Kept out of `message` so an application can show the message
   to an end user without the developer checklist.

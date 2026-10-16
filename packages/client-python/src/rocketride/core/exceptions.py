@@ -217,9 +217,14 @@ class PipeException(RocketRideException, RuntimeError):
     pass
 
 
-class ExecutionException(RocketRideException):
+class ExecutionException(RocketRideException, RuntimeError):
     """
-    Exception raised for pipeline execution issues.
+    The server rejected a request: a pipeline start, a restart, or any DAP
+    command. Carries the server's ``code`` (for example ``OUT_OF_CREDITS``)
+    and ``hint`` so a caller classifies the failure without matching the text.
+
+    Also inherits from :class:`RuntimeError`, which is what these rejections
+    raised before, so existing ``except RuntimeError`` handlers keep working.
 
     Raised when there are problems starting, running, or managing
     RocketRide pipelines and processing tasks.

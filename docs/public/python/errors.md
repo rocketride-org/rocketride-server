@@ -16,7 +16,7 @@ What the SDK raises, when, and how to catch it.
 | Data-pipe errors (open / write / close) | `PipeException` |
 | `use()` argument problems (neither `filepath` nor `pipeline`; both; bad types) | `ValueError` |
 | `use()` with a missing pipeline file | `FileNotFoundError` |
-| Server rejects a pipeline start or a DAP request | `RuntimeError` |
+| Server rejects a pipeline start or a DAP request | `ExecutionException` (also a `RuntimeError`), with the server's `code` when it sent one |
 | `get_service('')` / unknown service name | `ValueError` / `RuntimeError` |
 | `send_files` without an API key, or a missing file | `RuntimeError` / `ValueError` |
 | `Answer.getJson()` on non-JSON content | `ValueError` |
@@ -54,7 +54,7 @@ DAPException                    # Base DAP protocol error (has dap_result dict)
     ├── ConnectionException     # Reserved: transport failures raise builtin ConnectionError
     │   └── AuthenticationException  # Bad API key or credentials (actively raised)
     ├── PipeException           # Data pipe errors (also subclasses RuntimeError)
-    ├── ExecutionException      # Reserved: defined but not currently raised
+    ├── ExecutionException      # Server rejected a start or a DAP request (also a RuntimeError)
     └── ValidationException     # Reserved: defined but not currently raised
 ```
 
@@ -64,8 +64,22 @@ error context, plus `code` and `hint`:
 - `code` is the server's machine-readable classification, or `None`. Task
   failures carry one: `TASK_NOT_REGISTERED` (the token names no live task —
   never started, terminated, replaced, or the engine restarted),
-  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
-  on the message text**, which is written for people and may be reworded.
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`; a refused pipe (a `chat()`, an upload, a tool call) raises
+  `ExecutionException` with `code == 'OUT_OF_CREDITS'` (the org is past its
+  spend limit; clears when it tops up). **Classify on `code`, not on the
+  message text**, which is written for people and may be reworded:
+
+  ```python
+  from rocketride.core.exceptions import ExecutionException
+
+  try:
+      answer = await client.chat(token=token, question=question)
+  except ExecutionException as e:
+      if e.code == 'OUT_OF_CREDITS':
+          show_billing_page(e)
+      else:
+          raise
+  ```
 - `hint` is troubleshooting text the SDK attached for a developer, or `None`.
   It is kept out of `str(e)` so an application can show the message to an end
   user without the developer checklist.

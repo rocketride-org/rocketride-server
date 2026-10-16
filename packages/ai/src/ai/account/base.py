@@ -59,6 +59,14 @@ class DbDecision(NamedTuple):
         return self.allowed
 
 
+class OutOfCreditsError(PermissionError):
+    """The spend gate refused the run. Clears on its own once the org tops up."""
+
+    # Copied onto the DAP error packet by build_exception, so a client classifies
+    # the refusal without matching the prose. Upper snake like the other codes.
+    code = 'OUT_OF_CREDITS'
+
+
 class AccountBase(ABC):
     """
     Abstract interface for the RocketRide Account facade.
@@ -321,6 +329,23 @@ class AccountBase(ABC):
             ``{'balances': {resource: float, ...}}``
         """
         return {'balances': {}}
+
+    async def check_spend(self, org_id: str) -> 'str | None':
+        """
+        Say whether the org may spend any more.
+
+        Called when a task is asked for a pipe to carry new data: a
+        data-channel open, a tool call, a webhook request.  OSS default
+        always allows.  The SaaS implementation compares the org's token
+        balance with its plan's overdraft allowance.
+
+        Args:
+            org_id: Organisation the run is billed to.
+
+        Returns:
+            None when the org may run, else the reason shown to the user.
+        """
+        return None
 
     async def get_transactions(
         self,
