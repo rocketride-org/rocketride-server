@@ -194,6 +194,22 @@ lane of source nodes (and of `tool_pipe`). Its value array is what the node **pr
 `chat` has `"_source": ["questions"]`, so downstream wires
 `{ "lane": "questions", "from": "chat_1" }`.
 
+### The `*` lane: any lane
+
+A node that acts on whatever flows through a wire, such as `gate`, declares
+`"lanes": {"*": ["*"]}` and is wired with `{ "lane": "*", "from": "<id>" }`. It
+forwards each item on the lane it arrived on. The engine binds it on exactly the
+lanes the nodes after it ask for: `parse → gate(*) → response(text)` binds the
+gate on `text` alone, and `parse` behaves as if `response` were wired to it
+directly. Three things are rejected when the pipeline is built: a `*` node with
+nothing wired after it (it would receive nothing), a lane asked of it that
+nothing wired into it produces, and a `*` wire whose source produces none of
+the lanes asked of it. A node that takes any lane and forwards nothing declares
+`"lanes": {"*": []}`; with no consumer to ask, it is bound on everything its
+source produces. Only the exact `*` is the any lane; `**` or
+`text*` are unknown lanes. `*` is valid on `input` entries only, never on
+`control` or `_source`.
+
 ### Media lanes are streamed
 
 `image`, `audio`, and `video` stream in chunks rather than as single payloads, so arbitrarily

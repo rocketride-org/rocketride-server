@@ -164,6 +164,12 @@ public:
     static Error deinit() noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr> getServiceDefinition(
         const Text &type) noexcept;
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Refuses a `lanes` map that puts "*" beside named lanes.
+    //-----------------------------------------------------------------
+    static Error validateLanesShape(const json::Value &lanes,
+                                    const std::string &logicalType) noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr>
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;

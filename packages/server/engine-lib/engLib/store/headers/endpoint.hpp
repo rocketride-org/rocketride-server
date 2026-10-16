@@ -133,6 +133,31 @@ ErrorOr<LifecycleRegions> computeLifecycleRegions(
 
 //-------------------------------------------------------------------------
 /// @details
+///		What a service declares about its lanes: what it produces, and whether
+///		it is an any-lane sink (`{"*": []}`: takes any lane, forwards nothing).
+//-------------------------------------------------------------------------
+struct LaneDeclaration {
+    std::vector<std::string> produces;
+    bool anySink = false;
+};
+
+//-------------------------------------------------------------------------
+/// @details
+///		Replace every "*" connection by typed ones. A "*" node is bound on the
+///		lanes wired out of it (through later "*" nodes), limited to what its
+///		source produces (declared lanes plus what is wired into it), so the
+///		source sees the same listeners as with typed wires. A sink takes all
+///		its source declares. Rejects a "*" node with no consumer, a lane no
+///		source produces, a "*" edge that stands for no lane, and a cycle.
+//-------------------------------------------------------------------------
+ErrorOr<std::vector<std::tuple<int, int, std::string>>> resolveAnyLanes(
+    const std::vector<std::tuple<int, int, std::string>> &connections,
+    const std::function<ErrorOr<LaneDeclaration>(int)> &declaredLanes,
+    const std::vector<std::string> &nodeLabels = {},
+    const std::string &sourceLabel = "the source") noexcept;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Define the pipe stack we build
 //-------------------------------------------------------------------------
 struct IPipeType {

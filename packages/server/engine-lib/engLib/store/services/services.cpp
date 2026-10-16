@@ -248,6 +248,9 @@ static application::Opt NodePath{"--node_path"};
 //          If it is only passing through data on other lanes, it should
 //          not be included.
 //
+//          {"*": ["*"]} accepts any lane and forwards it; {"*": []} accepts
+//          any lane and forwards nothing. See resolveAnyLanes.
+//
 //      "render":
 //          Array of strings that define the fields within the configuration
 //          information which should be rendered to a summmary title. They
@@ -1888,6 +1891,10 @@ Error IServices::init() noexcept {
                 // Get the lanes array
                 const auto &lanes = serviceInfo["lanes"];
 
+                if (auto ccode = IServices::validateLanesShape(
+                        lanes, std::string((Text)protocol)))
+                    return ccode;
+
                 // Iterate through each lane
                 for (const auto &laneId : lanes.getMemberNames()) {
                     // Get the lane
@@ -2211,6 +2218,37 @@ ErrorOr<json::Value> IServices::getServiceSchemas() noexcept {
 
     // Return the schemas of the services
     return _mv(res);
+}
+
+//-----------------------------------------------------------------------------
+/// @brief Refuses a `lanes` map that mixes "*" with named lanes: the named
+///        half would be silently dead.
+//-----------------------------------------------------------------------------
+Error IServices::validateLanesShape(const json::Value &lanes,
+                                    const std::string &logicalType) noexcept {
+    if (!lanes.isObject() || !lanes.isMember("*")) return {};
+
+    for (const auto &key : lanes.getMemberNames())
+        if (key != "*")
+            return APERR(Ec::InvalidParam, "Service", logicalType,
+                         "declares the \"*\" lane beside the named lane", key,
+                         "- a service that accepts any lane declares only "
+                         "\"*\"");
+
+    const auto &outputs = lanes["*"];
+    if (!outputs.isArray())
+        return APERR(Ec::InvalidParam, "Service", logicalType,
+                     "lanes[\"*\"] must be a list of lanes, [\"*\"] to forward "
+                     "on the lane that arrived");
+    bool star = false;
+    for (const auto &output : outputs)
+        if (output.isString() && output.asString() == "*") star = true;
+    if (star && outputs.size() > 1)
+        return APERR(Ec::InvalidParam, "Service", logicalType,
+                     "lists \"*\" beside named lanes in lanes[\"*\"] - it is "
+                     "either [\"*\"] (forward on the lane that arrived) or a "
+                     "list of named lanes");
+    return {};
 }
 
 }  // namespace engine::store

@@ -511,6 +511,51 @@ Error IServiceEndpoint::buildConnections() noexcept {
         nodeLabels.push_back(label);
     }
 
+    // Resolve "*" connections so regions and bindFilters see typed lanes only
+    auto sourceProvider =
+        config.pipeline.source().lookup<Text>("provider", "");
+    std::string sourceLabel(config.pipeline.source().lookup<Text>("id", "source"));
+    if (auto sourceInfo = IServices::getServiceDefinition(sourceProvider)) {
+        const auto &def = (*sourceInfo)->serviceDefinition;
+        std::string title;
+        if (def.isMember("title")) title = std::string(def["title"].asString());
+        if (!title.empty()) sourceLabel = "\"" + title + "\" (" + sourceLabel + ")";
+    }
+    auto declaredLanes = localfcn(int index)->ErrorOr<LaneDeclaration> {
+        Text provider;
+        if (index == -1)
+            provider = sourceProvider;
+        else if (index >= 0 && (size_t)index < pipeStack.size())
+            provider = pipeStack[index].logicalType;
+        std::string who = index == -1 ? sourceLabel
+                          : (index >= 0 && (size_t)index < nodeLabels.size())
+                              ? nodeLabels[index]
+                              : std::to_string(index);
+        auto service = IServices::getServiceDefinition(provider);
+        if (!service)
+            return APERR(Ec::InvalidParam, "Component", who,
+                         "has no service definition, so its lanes cannot be "
+                         "resolved for a \"*\" connection");
+        // isMember, not operator[]: that would add a null "lanes" to the shared
+        // definition, and the catalogue would serve it to every client
+        LaneDeclaration lanes;
+        const auto &def = (*service)->serviceDefinition;
+        if (def.isMember("lanes") && def["lanes"].isObject()) {
+            const auto &decl = def["lanes"];
+            for (const auto &key : decl.getMemberNames())
+                for (const auto &output : decl[key])
+                    if (output.isString())
+                        lanes.produces.push_back(output.asString());
+            lanes.anySink = decl.isMember("*") && decl["*"].isArray() &&
+                            decl["*"].empty();
+        }
+        return lanes;
+    };
+    auto resolved =
+        resolveAnyLanes(connections, declaredLanes, nodeLabels, sourceLabel);
+    if (!resolved) return resolved.ccode();
+    connections = _mv(*resolved);
+
     auto regions = computeLifecycleRegions(connections, invoked, nodeLabels);
     if (!regions) return regions.ccode();
     lifecycleOrder = _mv(regions->head);
@@ -518,6 +563,266 @@ Error IServiceEndpoint::buildConnections() noexcept {
 
     // And done
     return {};
+}
+
+namespace {
+
+using Conn = std::tuple<int, int, std::string>;
+using Lanes = std::set<std::string>;
+const int ANY_SOURCE = -1;
+const std::string ANY = "*";
+
+//-------------------------------------------------------------------------
+/// @details
+///		The connection table split for the walks: typed lanes out of / into
+///		each node, star edges by source and by target, and the star targets.
+//-------------------------------------------------------------------------
+struct AnyLaneGraph {
+    std::map<int, Lanes> typedOut, typedIn;
+    std::map<int, std::vector<int>> starOut, starIn;
+    std::set<int> starNodes;
+
+    explicit AnyLaneGraph(const std::vector<Conn> &connections) {
+        for (const auto &[from, to, lane] : connections) {
+            if (lane == ANY) {
+                starOut[from].push_back(to);
+                starIn[to].push_back(from);
+                starNodes.insert(to);
+            } else {
+                typedOut[from].insert(lane);
+                typedIn[to].insert(lane);
+            }
+        }
+    }
+
+    bool hasStar() const noexcept { return !starNodes.empty(); }
+};
+
+//-------------------------------------------------------------------------
+/// @details
+///		See endpoint.hpp. Two walks over the graph: what the consumers after a
+///		node ask for, and what the sources before a node produce. A "*" edge
+///		becomes one typed edge per lane in both, in MethodNames order.
+//-------------------------------------------------------------------------
+class AnyLaneResolver {
+public:
+    AnyLaneResolver(const std::vector<Conn> &connections,
+                    const std::function<ErrorOr<LaneDeclaration>(int)> &declaredLanes,
+                    const std::vector<std::string> &nodeLabels,
+                    const std::string &sourceLabel)
+        : m_connections(connections),
+          m_graph(connections),
+          m_declaredLanes(declaredLanes),
+          m_nodeLabels(nodeLabels),
+          m_sourceLabel(sourceLabel) {}
+
+    ErrorOr<std::vector<Conn>> resolve() {
+        if (auto ccode = rejectStarNodesLeftUnfed()) return ccode;
+        return rebuildWithStarsExpanded();
+    }
+
+private:
+    //----- inputs -----------------------------------------------------
+    const std::vector<Conn> &m_connections;
+    AnyLaneGraph m_graph;
+    const std::function<ErrorOr<LaneDeclaration>(int)> &m_declaredLanes;
+    const std::vector<std::string> &m_nodeLabels;
+    const std::string &m_sourceLabel;
+
+    //----- memo of the three lane sets, per node ----------------------
+    struct Memo {
+        std::map<int, Lanes> done;
+        std::set<int> inProgress;
+    };
+    Memo m_asked, m_declared, m_produced;
+    std::set<int> m_sinks;
+
+    //----- the three lane sets ----------------------------------------
+
+    // What the consumers after `node` ask for, through later star nodes
+    ErrorOr<Lanes> lanesConsumersAskOf(int node) {
+        return remembered(m_asked, node, [&]() -> ErrorOr<Lanes> {
+            Lanes lanes = m_graph.typedOut[node];
+            for (int child : m_graph.starOut[node]) {
+                auto more = lanesConsumersAskOf(child);
+                if (!more) return more.ccode();
+                lanes.insert(more->begin(), more->end());
+            }
+            return lanes;
+        });
+    }
+
+    // What `node`'s definition says it produces; a sink is noted on the way
+    ErrorOr<Lanes> lanesDeclaredBy(int node) {
+        return remembered(m_declared, node, [&]() -> ErrorOr<Lanes> {
+            auto decl = m_declaredLanes(node);
+            if (!decl) return decl.ccode();
+            if (decl->anySink) m_sinks.insert(node);
+            Lanes lanes(decl->produces.begin(), decl->produces.end());
+            lanes.erase(ANY);
+            return lanes;
+        });
+    }
+
+    // What `node` produces: what it declares, plus what is bound into it.
+    // Through a star parent, only what that parent produces and `node` asks for
+    ErrorOr<Lanes> lanesProducedBy(int node) {
+        return remembered(m_produced, node, [&]() -> ErrorOr<Lanes> {
+            auto declared = lanesDeclaredBy(node);
+            if (!declared) return declared.ccode();
+            Lanes lanes = *declared;
+            lanes.insert(m_graph.typedIn[node].begin(), m_graph.typedIn[node].end());
+            if (!m_graph.starNodes.count(node)) return lanes;
+
+            auto asked = lanesConsumersAskOf(node);
+            if (!asked) return asked.ccode();
+            for (int parent : m_graph.starIn[node]) {
+                auto fromParent = lanesProducedBy(parent);
+                if (!fromParent) return fromParent.ccode();
+                for (const auto &lane : *asked)
+                    if (fromParent->count(lane)) lanes.insert(lane);
+            }
+            return lanes;
+        });
+    }
+
+    // What a star edge `from -> to` should carry: for a sink, what its source
+    // declares (or, if it declares nothing, what it produces); otherwise what
+    // the consumers after `to` ask for
+    ErrorOr<Lanes> lanesWantedOn(int from, int to) {
+        if (!m_sinks.count(to)) return lanesConsumersAskOf(to);
+        auto declared = lanesDeclaredBy(from);
+        if (!declared) return declared.ccode();
+        if (!declared->empty()) return *declared;
+        return lanesProducedBy(from);
+    }
+
+    //----- the checks, first so a rejection names the real gap ---------
+
+    Error rejectStarNodesLeftUnfed() {
+        for (int node : m_graph.starNodes) {
+            if (auto declared = lanesDeclaredBy(node); !declared) return declared.ccode();
+            if (m_sinks.count(node)) continue;
+
+            auto asked = lanesConsumersAskOf(node);
+            if (!asked) return asked.ccode();
+            if (asked->empty()) return noConsumer(node);
+
+            auto produced = lanesProducedBy(node);
+            if (!produced) return produced.ccode();
+            for (const auto &lane : *asked)
+                if (!produced->count(lane)) return nobodyProduces(node, lane);
+        }
+        return {};
+    }
+
+    //----- the rebuild ------------------------------------------------
+
+    ErrorOr<std::vector<Conn>> rebuildWithStarsExpanded() {
+        std::vector<Conn> resolved;
+        std::set<Conn> seen;
+        auto emit = [&](const Conn &conn) {
+            if (seen.insert(conn).second) resolved.push_back(conn);
+        };
+        for (const auto &[from, to, lane] : m_connections) {
+            if (lane != ANY) {
+                emit({from, to, lane});
+                continue;
+            }
+            auto edges = expand(from, to);
+            if (!edges) return edges.ccode();
+            for (const auto &edge : *edges) emit(edge);
+        }
+        return resolved;
+    }
+
+    // The typed edges one star edge stands for, in MethodNames order
+    ErrorOr<std::vector<Conn>> expand(int from, int to) {
+        auto wanted = lanesWantedOn(from, to);
+        if (!wanted) return wanted.ccode();
+        auto produced = lanesProducedBy(from);
+        if (!produced) return produced.ccode();
+
+        std::vector<Conn> edges;
+        for (const char *name : Binder::MethodNames) {
+            std::string lane = name;
+            if (wanted->count(lane) && produced->count(lane))
+                edges.emplace_back(from, to, lane);
+        }
+        logResolution(from, to, edges);
+        if (edges.empty()) return standsForNothing(from, to);
+        return edges;
+    }
+
+    //----- helpers ----------------------------------------------------
+
+    // Memoised walk with a cycle guard: a node met again while being
+    // computed is a loop of star edges
+    template <typename Compute>
+    ErrorOr<Lanes> remembered(Memo &memo, int node, Compute compute) {
+        if (auto it = memo.done.find(node); it != memo.done.end())
+            return it->second;
+        if (!memo.inProgress.insert(node).second) return cycleAt(node);
+        auto lanes = compute();
+        memo.inProgress.erase(node);
+        if (!lanes) return lanes.ccode();
+        memo.done[node] = *lanes;
+        return *lanes;
+    }
+
+    // Routing by rule is invisible when a lane does not arrive: log it
+    void logResolution(int from, int to, const std::vector<Conn> &edges) const {
+        std::string lanes;
+        for (const auto &edge : edges)
+            lanes += (lanes.empty() ? "" : ", ") + std::get<2>(edge);
+        LOG(Services, "Any lane:", label(to), "<-", label(from), "on [", lanes, "]");
+    }
+
+    std::string label(int node) const {
+        if (node == ANY_SOURCE) return m_sourceLabel;
+        if (node >= 0 && (size_t)node < m_nodeLabels.size() &&
+            !m_nodeLabels[node].empty())
+            return m_nodeLabels[node];
+        return std::to_string(node);
+    }
+
+    //----- the rejections, each naming the node at fault --------------
+
+    Error noConsumer(int node) const {
+        return APERR(Ec::InvalidParam, "Component", label(node),
+                     "accepts any lane but nothing is wired after it, so there "
+                     "is no lane to bind: wire a consumer");
+    }
+
+    Error nobodyProduces(int node, const std::string &lane) const {
+        return APERR(Ec::InvalidParam, "Component", label(node), "is asked for",
+                     lane, "by what follows it, but nothing wired into it produces",
+                     lane);
+    }
+
+    // An edge that stands for no lane would leave the target silently unfed
+    Error standsForNothing(int from, int to) const {
+        return APERR(Ec::InvalidParam, "Component", label(to),
+                     "takes any lane from", label(from), "but", label(from),
+                     "produces none of the lanes asked of it");
+    }
+
+    Error cycleAt(int node) const {
+        return APERR(Ec::InvalidParam, "Cycle through \"*\" connections at",
+                     label(node));
+    }
+};
+
+}  // namespace
+
+ErrorOr<std::vector<std::tuple<int, int, std::string>>> resolveAnyLanes(
+    const std::vector<std::tuple<int, int, std::string>> &connections,
+    const std::function<ErrorOr<LaneDeclaration>(int)> &declaredLanes,
+    const std::vector<std::string> &nodeLabels,
+    const std::string &sourceLabel) noexcept {
+    if (!AnyLaneGraph(connections).hasStar()) return connections;
+    return AnyLaneResolver(connections, declaredLanes, nodeLabels, sourceLabel)
+        .resolve();
 }
 
 //-----------------------------------------------------------------------------
