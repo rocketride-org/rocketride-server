@@ -1,0 +1,133 @@
+{
+  "components": [
+    {
+      "id": "ingest_webhook",
+      "provider": "webhook",
+      "name": "Webhook",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "webhook",
+        "name": "Webhook"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "ingest_parse",
+      "provider": "parse",
+      "name": "Parser",
+      "config": {
+        "name": "Parser"
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "ingest_webhook"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "ingest_split",
+      "provider": "preprocessor_langchain",
+      "name": "Markdown splitter",
+      "config": {
+        "profile": "default",
+        "default": {
+          "mode": "strlen",
+          "splitter": "RecursiveCharacterTextSplitter"
+        },
+        "name": "Markdown splitter"
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "ingest_parse"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "ingest_embed",
+      "provider": "embedding_transformer",
+      "name": "Transformer",
+      "config": {
+        "profile": "miniLM",
+        "name": "Transformer"
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "ingest_split"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 680,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "ingest_store",
+      "provider": "chroma",
+      "name": "Chroma (RocketRide docs) — KB writeback",
+      "config": {
+        "profile": "local",
+        "local": {
+          "host": "localhost",
+          "port": "8000",
+          "collection": "ROCKETRIDE_DOCS",
+          "serverName": "chroma"
+        },
+        "name": "Chroma (RocketRide docs)"
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "ingest_embed"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 900,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "source": "ingest_webhook",
+  "project_id": "65a34f6f-74f8-4589-bd8a-a8beadfab843",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

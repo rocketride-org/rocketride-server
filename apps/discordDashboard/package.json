@@ -1,0 +1,121 @@
+{
+	"name": "rocketride-discorddashboard",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Run and supervise a Discord support bot built on the discord node",
+	"license": "MIT",
+	"appManifest": {
+		"id": "mithilesh_clock.discordDashboard",
+		"publisher": "rocketride",
+		"name": "Discord Dashboard",
+		"description": "Run and supervise a Discord support bot built on the discord node",
+		"icon": "./icon.svg",
+		"readme": "./README.md",
+		"categories": [
+			"tools",
+			"ai"
+		],
+		"mode": "free",
+		"authenticated": true,
+		"showStatusBar": true,
+		"contributes": {
+			"configuration": {
+				"title": "Discord Dashboard",
+				"properties": {
+					"mithilesh_clock.discordDashboard.botToken": {
+						"type": "string",
+						"format": "rocketride.envkey",
+						"required": true,
+						"default": "ROCKETRIDE_DISCORD_DISCORD_BOT_TOKEN",
+						"description": "Variable holding the Discord bot token. The value is the NAME of a server variable; the token itself stays encrypted on the server."
+					},
+					"mithilesh_clock.discordDashboard.openaiKey": {
+						"type": "string",
+						"format": "rocketride.envkey",
+						"required": true,
+						"default": "ROCKETRIDE_OPENAI_KEY",
+						"description": "Variable holding the OpenAI key the answer pipeline uses. The value is the NAME of a server variable."
+					},
+					"mithilesh_clock.discordDashboard.githubToken": {
+						"type": "string",
+						"format": "rocketride.envkey",
+						"required": false,
+						"default": "ROCKETRIDE_GITHUB_TOKEN",
+						"description": "Variable holding a read-only GitHub token. Only the RAG pipe's agent tools need it; the app checks it before starting that pipe. The value is the NAME of a server variable."
+					},
+					"mithilesh_clock.discordDashboard.qdrantHost": {
+						"type": "string",
+						"format": "rocketride.envkey",
+						"required": false,
+						"default": "ROCKETRIDE_QDRANT_HOST",
+						"description": "Variable holding the Qdrant host for the eval-capture store. Only the capture pipe needs it; the app checks it before starting that branch. The value is the NAME of a server variable."
+					},
+					"mithilesh_clock.discordDashboard.slackWebhook": {
+						"type": "string",
+						"format": "rocketride.envkey",
+						"required": false,
+						"default": "ROCKETRIDE_SLACK_WEBHOOK_URL",
+						"description": "Variable holding the Slack incoming-webhook URL the agent pages on the first escalation in a thread. Only the Slack-paging pipe needs it; use a test webhook while testing. The value is the NAME of a server variable."
+					},
+					"mithilesh_clock.discordDashboard.dbProvider": {
+						"type": "string",
+						"enum": [
+							"db_postgres",
+							"rocketride_sql"
+						],
+						"required": true,
+						"default": "db_postgres",
+						"description": "Which database node holds the dashboard's data. db_postgres connects to the host below; rocketride_sql uses your provisioned RocketRide cloud database and ignores the host, name, user and password settings."
+					},
+					"mithilesh_clock.discordDashboard.dbHost": {
+						"type": "string",
+						"required": false,
+						"default": "127.0.0.1:55432",
+						"description": "host:port of the dashboard's Postgres. db_postgres only. The default is the local rr-discord-pg container — see the app README."
+					},
+					"mithilesh_clock.discordDashboard.dbName": {
+						"type": "string",
+						"required": false,
+						"default": "discord_dashboard",
+						"description": "Database name. db_postgres only."
+					},
+					"mithilesh_clock.discordDashboard.dbUser": {
+						"type": "string",
+						"required": false,
+						"default": "rr_discord",
+						"description": "Database user. db_postgres only."
+					},
+					"mithilesh_clock.discordDashboard.dbPassword": {
+						"type": "string",
+						"format": "rocketride.envkey",
+						"required": false,
+						"default": "ROCKETRIDE_DISCORD_PG_PASSWORD",
+						"description": "Variable holding the database password. The value is the NAME of a server variable; the password itself stays encrypted on the server. db_postgres only."
+					}
+				}
+			}
+		},
+		"projectId": "5b29cb8e-497e-40a0-a8e8-bd718f2b52a5"
+	},
+	"scripts": {
+		"dev": "rsbuild dev",
+		"build": "tsc --noEmit && rsbuild build",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0",
+		"rocketride": "file:../../.rocketride/client/rocketride.tgz",
+		"shell": "file:../../.rocketride/shell/shell.tgz"
+	},
+	"devDependencies": {
+		"@module-federation/rsbuild-plugin": "2.5.1",
+		"@rsbuild/core": "~2.0.11",
+		"@rsbuild/plugin-react": "~2.0.1",
+		"@types/node": "^20.19.41",
+		"@types/react": "^18.2.0",
+		"@types/react-dom": "^18.2.0",
+		"react-refresh": "^0.14.2",
+		"typescript": "^5.3.0"
+	}
+}

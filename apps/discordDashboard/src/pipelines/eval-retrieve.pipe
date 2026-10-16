@@ -1,0 +1,151 @@
+{
+  "components": [
+    {
+      "id": "eval_webhook",
+      "provider": "webhook",
+      "name": "Webhook",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "webhook",
+        "name": "Webhook"
+      },
+      "ui": {
+        "position": {
+          "x": 400,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "eval_parse",
+      "provider": "parse",
+      "name": "Parser",
+      "config": {
+        "name": "Parser"
+      },
+      "ui": {
+        "position": {
+          "x": 640,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "eval_webhook"
+        }
+      ]
+    },
+    {
+      "id": "eval_question",
+      "provider": "question",
+      "name": "Question",
+      "config": {
+        "type": "question",
+        "name": "Question"
+      },
+      "ui": {
+        "position": {
+          "x": 880,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "eval_parse"
+        }
+      ]
+    },
+    {
+      "id": "eval_embed",
+      "provider": "embedding_transformer",
+      "name": "Transformer",
+      "config": {
+        "profile": "miniLM",
+        "name": "Transformer"
+      },
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "eval_question"
+        }
+      ]
+    },
+    {
+      "id": "eval_chroma",
+      "provider": "chroma",
+      "name": "Chroma (RocketRide docs)",
+      "config": {
+        "profile": "local",
+        "local": {
+          "host": "localhost",
+          "port": "8000",
+          "collection": "ROCKETRIDE_DOCS",
+          "serverName": "chroma"
+        },
+        "name": "Chroma (RocketRide docs)"
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "eval_embed"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 1360,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "eval_response",
+      "provider": "response_documents",
+      "name": "Return Documents",
+      "config": {
+        "laneName": "documents",
+        "name": "Return Documents"
+      },
+      "ui": {
+        "position": {
+          "x": 1600,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "eval_chroma"
+        }
+      ]
+    }
+  ],
+  "project_id": "64362bb3-3a01-48db-961c-17027bb65d10",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

@@ -1,0 +1,176 @@
+{
+  "components": [
+    {
+      "id": "discord_1",
+      "provider": "discord",
+      "name": "Discord Bot",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "type": "discord",
+        "parameters": {
+          "botToken": "${ROCKETRIDE_DISCORD_DISCORD_BOT_TOKEN}",
+          "guildIds": [
+            "${ROCKETRIDE_DISCORD_GUILD_ID}"
+          ],
+          "channelIds": [
+            "${ROCKETRIDE_DISCORD_SUPPORT_CHANNEL_ID}"
+          ],
+          "replyMode": "thread",
+          "threadName": "{content}",
+          "threadNameMaxLength": 90,
+          "threadAutoArchiveMinutes": 1440,
+          "requireMentionChannelIds": [
+            "${ROCKETRIDE_DISCORD_MENTION_CHANNEL_ID}"
+          ],
+          "allowedMentionRoleIds": [
+            "${ROCKETRIDE_DISCORD_TEAM_ROLE_ID}"
+          ],
+          "emitReactions": true,
+          "emitNoReply": true,
+          "emitOutbound": true,
+          "includeMemberMetadata": true,
+          "sendResponses": false
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "parse_1",
+      "provider": "parse",
+      "name": "Parse Events",
+      "config": {},
+      "input": [
+        {
+          "lane": "tags",
+          "from": "discord_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 300
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "preprocessor_langchain_1",
+      "provider": "preprocessor_langchain",
+      "name": "Capture Records",
+      "config": {
+        "profile": "default",
+        "default": {
+          "mode": "strlen",
+          "splitter": "RecursiveCharacterTextSplitter"
+        },
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "discord_1"
+        },
+        {
+          "lane": "text",
+          "from": "parse_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "embedding_transformer_1",
+      "provider": "embedding_transformer",
+      "name": "Transformer",
+      "config": {
+        "profile": "miniLM",
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "preprocessor_langchain_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 680,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "qdrant_1",
+      "provider": "qdrant",
+      "name": "Eval Capture Store",
+      "config": {
+        "profile": "local",
+        "local": {
+          "host": "${ROCKETRIDE_QDRANT_HOST}",
+          "port": 6333,
+          "collection": "RALPH_EVAL_CAPTURE",
+          "serverName": "qdrant"
+        },
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_transformer_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 900,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 135
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "144f2de0-f6b5-42c7-96e2-8ccf54906320",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

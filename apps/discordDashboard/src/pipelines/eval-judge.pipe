@@ -1,0 +1,111 @@
+{
+  "components": [
+    {
+      "id": "webhook_1",
+      "provider": "webhook",
+      "name": "Webhook",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "webhook",
+        "name": "Webhook"
+      },
+      "ui": {
+        "position": {
+          "x": 440,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "prompt_1",
+      "provider": "prompt",
+      "name": "Judge Instructions",
+      "config": {
+        "instructions": [
+          "You judge whether the support bot's REPLY adequately answers the question, given a known-good golden answer.",
+          "You receive ONE JSON object: { \"question\", \"golden_answer\", \"reply\" }.",
+          "Return STRICT JSON: { \"verdict\": \"pass\"|\"partial\"|\"fail\", \"notes\": string }.",
+          "pass = the reply is correct and covers the golden answer's key points. partial = partially correct or missing key points. fail = wrong, missing, or off-topic.",
+          "Judge on substance, not wording. Output ONLY the JSON object — no markdown fences, no commentary."
+        ],
+        "parameters": {},
+        "name": "Judge Instructions"
+      },
+      "ui": {
+        "position": {
+          "x": 940,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "webhook_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "Judge LLM",
+      "config": {
+        "profile": "openai-5-4",
+        "openai-5-4": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {},
+        "name": "Judge LLM"
+      },
+      "ui": {
+        "position": {
+          "x": 1190,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "prompt_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Verdict",
+      "config": {
+        "laneName": "answers",
+        "name": "Return Verdict"
+      },
+      "ui": {
+        "position": {
+          "x": 1440,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "llm_openai_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "f6ab77fa-1715-4852-9eb4-1a689d03bd6f",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

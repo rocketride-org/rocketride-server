@@ -1,0 +1,202 @@
+{
+  "components": [
+    {
+      "id": "discord_1",
+      "provider": "discord",
+      "name": "Discord Bot",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "type": "discord",
+        "parameters": {
+          "botToken": "${ROCKETRIDE_DISCORD_DISCORD_BOT_TOKEN}",
+          "guildIds": [
+            "${ROCKETRIDE_DISCORD_GUILD_ID}"
+          ],
+          "channelIds": [
+            "${ROCKETRIDE_DISCORD_SUPPORT_CHANNEL_ID}"
+          ],
+          "replyMode": "thread",
+          "threadName": "{content}",
+          "threadNameMaxLength": 90,
+          "threadAutoArchiveMinutes": 1440,
+          "requireMentionChannelIds": [],
+          "allowedMentionRoleIds": [],
+          "allowedBotIds": [],
+          "emitNoReply": true,
+          "emitOutbound": true
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "question_1",
+      "provider": "question",
+      "name": "Question",
+      "config": {
+        "type": "question",
+        "name": "Question"
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "discord_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "embed_question",
+      "provider": "embedding_transformer",
+      "name": "Transformer",
+      "config": {
+        "profile": "miniLM",
+        "name": "Transformer"
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "question_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "retrieve_docs",
+      "provider": "chroma",
+      "name": "Chroma (RocketRide docs)",
+      "config": {
+        "profile": "local",
+        "local": {
+          "host": "localhost",
+          "port": "8000",
+          "collection": "ROCKETRIDE_DOCS",
+          "serverName": "chroma"
+        },
+        "name": "Chroma (RocketRide docs)"
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "embed_question"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 680,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "prompt_1",
+      "provider": "prompt",
+      "name": "Support Prompt",
+      "config": {
+        "instructions": [
+          "You are Rocket Ralph, the RocketRide support assistant in a Discord support channel. RocketRide is a platform for building AI pipelines and apps.",
+          "The question comes with retrieved passages from the official RocketRide documentation (docs.rocketride.org). Answer from those passages. Quote the exact command, field name, or setting they show, and mention the page it comes from when the passage names one.",
+          "Answer briefly — two or three sentences where you can, and never more than a short paragraph. Discord messages are read on phones.",
+          "Do not invent product names, config fields, SDK methods, URLs, prices, or dates that are not in the passages.",
+          "If the passages do not cover the question, or it needs a human (account, billing, access, an outage), answer what the passages support and end your reply with exactly this line: Escalated to the RocketRide team.",
+          "Never write that line when the passages answer the question.",
+          "Each message is a separate question from a separate person unless it is explicitly a follow-up in the same thread. Do not carry facts from one question into another."
+        ],
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "retrieve_docs"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 900,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "OpenAI",
+      "config": {
+        "profile": "openai-5-2",
+        "openai-5-2": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "prompt_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 1120,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "llm_openai_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 1340,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "source": "discord_1",
+  "project_id": "21b62183-16c3-4b1e-acaa-e7f7b78793e1",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

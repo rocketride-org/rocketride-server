@@ -1,0 +1,117 @@
+{
+  "components": [
+    {
+      "id": "webhook_1",
+      "provider": "webhook",
+      "name": "Webhook",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "webhook",
+        "name": "Webhook"
+      },
+      "ui": {
+        "position": {
+          "x": 440,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "prompt_1",
+      "provider": "prompt",
+      "name": "Grader Instructions",
+      "config": {
+        "instructions": [
+          "You are the grader for RocketRide's Discord support bot (Rocket Ralph). You read one support thread the bot could not clearly resolve and label it, so the team can fix the most common gaps first.",
+          "You receive ONE JSON object: { \"question\", \"transcript\": [{\"role\":\"user\"|\"ralph\"|\"team\"|\"other\",\"text\"}], \"escalation\": {\"present\":bool,\"text\"}, \"clusters\": [{\"id\",\"label\",\"description\"}] }.",
+          "Return STRICT JSON with EXACTLY these fields:",
+          "{ \"cluster\": {\"id\": <existing id>} | {\"new\": {\"label\": string, \"description\": string}}, \"escalation_category\": \"policy_public\"|\"policy_account\"|\"policy_other\"|\"knowledge\"|null, \"team_reply_kind\": \"none\"|\"ack\"|\"correction\"|\"addition\", \"user_signal\": \"confirmed\"|\"rejected\"|\"neutral\", \"llm_cause\": \"product_defect\"|\"feature_request\"|null, \"qa_draft\": {\"question\": string, \"answer\": string}|null, \"summary\": string }",
+          "cluster: reuse an existing cluster id when the problem matches one; otherwise propose a new SHORT label + one-line description.",
+          "escalation_category (meaningful only if escalation.present): policy_public = public info could answer it (pricing, limits, public event pages, public roadmap); policy_account = needs account access or a human decision (refunds, billing disputes, eligibility, account changes); policy_other = partnership/press/internal; knowledge = a normal product/docs question Ralph SHOULD have answered.",
+          "team_reply_kind: did a team member CORRECT Ralph (correction), ADD to an already-correct answer (addition), just acknowledge (ack), or none.",
+          "user_signal: did the asker confirm it was resolved (confirmed), say it did not work (rejected), or neither (neutral).",
+          "llm_cause: product_defect if the root cause is a real product bug; feature_request if they want something that doesn't exist yet; else null.",
+          "qa_draft: produce one ONLY when a team member supplied the answer. Write it as standalone documentation (a clean question + answer). No usernames, no references to the thread, and NOTHING that isn't in the team's messages. Otherwise null.",
+          "Output ONLY the JSON object — no markdown fences, no commentary."
+        ],
+        "parameters": {},
+        "name": "Grader Instructions"
+      },
+      "ui": {
+        "position": {
+          "x": 940,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "webhook_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "Grader LLM",
+      "config": {
+        "profile": "openai-5-4",
+        "openai-5-4": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {},
+        "name": "Grader LLM"
+      },
+      "ui": {
+        "position": {
+          "x": 1190,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "prompt_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Grade",
+      "config": {
+        "laneName": "answers",
+        "name": "Return Grade"
+      },
+      "ui": {
+        "position": {
+          "x": 1440,
+          "y": 300
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "llm_openai_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "2d8a65a8-408d-453c-83e9-05bf864a4fef",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}

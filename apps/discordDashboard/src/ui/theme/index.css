@@ -1,0 +1,10 @@
+/* =============================================================================
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * =============================================================================
+ * The Discord Dashboard theme, in load order: fonts, tokens (the only colour
+ * values in src/), then the components that use them.
+ * ============================================================================= */
+@import './fonts.css';
+@import './tokens.css';
+@import './components.css';

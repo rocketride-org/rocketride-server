@@ -1,0 +1,265 @@
+/* =============================================================================
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * =============================================================================
+ */
+/* =============================================================================
+ * DISCORD DASHBOARD TOKENS — the only file in src/ with colour values
+ * =============================================================================
+ *
+ * Generated from the design system's tokens.json. Scoped to the app's root
+ * element, so nothing leaks into the shell's left bar, tab frame or status
+ * bar. Light values sit on `.dd-root`; dark values sit under
+ * `html[data-theme="dark"] .dd-root`. The shell applies its themes as inline
+ * variables and does not set that attribute, so the root also carries its own
+ * `data-theme`, mirrored from the shell's `--rr-palette-mode`
+ * (`src/ui/theme/useThemeMode.ts`); the dark block matches either.
+ * ============================================================================= */
+
+.dd-root,
+html.dd-app-active {
+	color-scheme: light;
+	--canvas: #f5f6fa;
+	--surface: #ffffff;
+	--surface-sunken: #eef0f5;
+	--surface-hover: #f7f8fb;
+	--line: #e2e5ee;
+	--line-control: #858c9e;
+	--ink: #14161c;
+	--ink-muted: #555b6d;
+	--ink-faint: #676d80;
+	--brand: #f7901f;
+	--brand-hover: #ea8410;
+	--on-brand: #1c1206;
+	--brand-ink: #b04f05;
+	--brand-soft: #fff0e0;
+	--focus: #2f6fe0;
+	--ok: #0b7a5e;
+	--ok-soft: #ddf5ec;
+	--warn: #875400;
+	--warn-soft: #fff1d1;
+	--bad: #c2222f;
+	--bad-soft: #fde4e5;
+	--info: #1d5fc4;
+	--info-soft: #e2edfd;
+	--cat-1: #f7901f;
+	--cat-2: #14a38b;
+	--cat-3: #7a5af8;
+	--cat-4: #e0457b;
+	--cat-5: #2c8be6;
+	--shadow-card: 0 1px 2px rgba(20,22,28,0.05), 0 1px 1px rgba(20,22,28,0.03);
+	--shadow-pop: 0 12px 32px rgba(20,22,28,0.14), 0 2px 6px rgba(20,22,28,0.06);
+	--shadow-ink: rgba(20, 22, 28, 0.14);
+
+	--font-display: "Bricolage Grotesque", "Figtree", system-ui, sans-serif;
+	--font-sans: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 20px;
+	--space-6: 24px;
+	--space-8: 32px;
+	--radius-sm: 6px;
+	--radius-md: 10px;
+	--radius-lg: 14px;
+	--radius-pill: 999px;
+
+	/* The shell's own variables, pointed at the tokens above. Every shell
+	   component (Card, Banner, DataGrid, DetailPanel, EmptyState, …) styles
+	   itself with these, so inside the app it picks the design system up
+	   without being rewritten — and the dark block below switches it too. */
+	--rr-brand: var(--brand);
+	--rr-bg-default: var(--canvas);
+	--rr-bg-paper: var(--surface);
+	--rr-bg-surface: var(--surface);
+	--rr-bg-surface-alt: var(--surface-sunken);
+	--rr-bg-input: var(--surface);
+	--rr-bg-list-hover: var(--surface-hover);
+	--rr-bg-list-active: var(--brand-soft);
+	--rr-fg-list-active: var(--ink);
+	--rr-bg-titleBar-inactive: var(--surface);
+	--rr-bg-titleBar-active: var(--surface);
+	--rr-fg-titleBar-active: var(--ink);
+	--rr-fg-titleBar-inactive: var(--ink-muted);
+	--rr-bg-widget: var(--surface);
+	--rr-fg-widget: var(--ink);
+	--rr-bg-widget-header: var(--surface-sunken);
+	--rr-bg-widget-hover: var(--surface-hover);
+	--rr-bg-toolbar-hover: var(--surface-hover);
+	--rr-bg-scrollbar-thumb: var(--line-control);
+	--rr-text-primary: var(--ink);
+	--rr-text-secondary: var(--ink-muted);
+	--rr-text-caption: var(--ink-faint);
+	--rr-text-disabled: var(--ink-faint);
+	--rr-text-link: var(--brand-ink);
+	--rr-border: var(--line);
+	--rr-border-hover: var(--line-control);
+	--rr-border-input: var(--line-control);
+	--rr-border-paper: var(--line);
+	--rr-border-focus: var(--focus);
+	--rr-accent: var(--brand);
+	--rr-accent-faded: var(--brand-soft);
+	--rr-bg-button: var(--brand);
+	--rr-fg-button: var(--on-brand);
+	--rr-color-success: var(--ok);
+	--rr-color-warning: var(--warn);
+	--rr-color-error: var(--bad);
+	--rr-color-error-light: var(--bad-soft);
+	--rr-color-info: var(--info);
+	--rr-shadow-widget: var(--shadow-ink);
+	--rr-font-family: var(--font-sans);
+	--rr-font-family-mono: var(--font-mono);
+	--rr-font-mono: var(--font-mono);
+
+	font-family: var(--font-sans);
+	color: var(--ink);
+	background: var(--canvas);
+	-webkit-font-smoothing: antialiased;
+}
+
+html[data-theme='dark'] .dd-root,
+.dd-root[data-theme='dark'],
+html.dd-app-active.dd-theme-dark {
+	color-scheme: dark;
+	--canvas: #0e1014;
+	--surface: #171a21;
+	--surface-sunken: #1e222b;
+	--surface-hover: #1b1f27;
+	--line: #2a2f3b;
+	--line-control: #6c758c;
+	--ink: #eceef4;
+	--ink-muted: #a4abbc;
+	--ink-faint: #8a92a6;
+	--brand: #ff9a2e;
+	--brand-hover: #ffab4f;
+	--on-brand: #1c1206;
+	--brand-ink: #ffae5e;
+	--brand-soft: #3a2411;
+	--focus: #7fb0ff;
+	--ok: #4fd1a5;
+	--ok-soft: #0f3127;
+	--warn: #f3c351;
+	--warn-soft: #372a0a;
+	--bad: #ff7b82;
+	--bad-soft: #3c1519;
+	--info: #7fb0ff;
+	--info-soft: #13284a;
+	--cat-1: #ff9a2e;
+	--cat-2: #3fd0b5;
+	--cat-3: #a08bff;
+	--cat-4: #ff7aa8;
+	--cat-5: #6cb4ff;
+	--shadow-card: 0 1px 2px rgba(0,0,0,0.45);
+	--shadow-pop: 0 12px 32px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.4);
+	--shadow-ink: rgba(0, 0, 0, 0.6);
+}
+
+/* =============================================================================
+ * THE SHELL'S FRAME, WHILE THIS APP IS OPEN
+ * =============================================================================
+ *
+ * The shell's left bar, tab frame and status bar style themselves with the
+ * same `--rr-*` variables, set inline on <html> by the shell's theme. While
+ * the Discord Dashboard is mounted, `DdRoot` puts `dd-app-active` (and
+ * `dd-theme-dark` in dark mode) on <html>, and these rules point those
+ * variables at the design tokens — `!important` because the shell's are inline.
+ * The classes come off when the app unmounts, so no other app is touched and
+ * the shell package itself is unchanged.
+ * ============================================================================= */
+html.dd-app-active {
+	--canvas: #f5f6fa;
+	--surface: #ffffff;
+	--surface-sunken: #eef0f5;
+	--surface-hover: #f7f8fb;
+	--line: #e2e5ee;
+	--line-control: #858c9e;
+	--ink: #14161c;
+	--ink-muted: #555b6d;
+	--ink-faint: #676d80;
+	--brand: #f7901f;
+	--brand-hover: #ea8410;
+	--on-brand: #1c1206;
+	--brand-ink: #b04f05;
+	--brand-soft: #fff0e0;
+	--focus: #2f6fe0;
+	--ok: #0b7a5e;
+	--ok-soft: #ddf5ec;
+	--warn: #875400;
+	--warn-soft: #fff1d1;
+	--bad: #c2222f;
+	--bad-soft: #fde4e5;
+	--info: #1d5fc4;
+	--info-soft: #e2edfd;
+	--cat-1: #f7901f;
+	--cat-2: #14a38b;
+	--cat-3: #7a5af8;
+	--cat-4: #e0457b;
+	--cat-5: #2c8be6;
+	--shadow-card: 0 1px 2px rgba(20,22,28,0.05), 0 1px 1px rgba(20,22,28,0.03);
+	--shadow-pop: 0 12px 32px rgba(20,22,28,0.14), 0 2px 6px rgba(20,22,28,0.06);
+	--shadow-ink: rgba(20, 22, 28, 0.14);
+	--font-display: "Bricolage Grotesque", "Figtree", system-ui, sans-serif;
+	--font-sans: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 20px;
+	--space-6: 24px;
+	--space-8: 32px;
+	--radius-sm: 6px;
+	--radius-md: 10px;
+	--radius-lg: 14px;
+	--radius-pill: 999px;
+
+	/* The shell's own variables, pointed at the tokens above. Every shell
+	   component (Card, Banner, DataGrid, DetailPanel, EmptyState, …) styles
+	   itself with these, so inside the app it picks the design system up
+	   without being rewritten — and the dark block below switches it too. */
+	--rr-brand: var(--brand) !important;
+	--rr-bg-default: var(--canvas) !important;
+	--rr-bg-paper: var(--surface) !important;
+	--rr-bg-surface: var(--surface) !important;
+	--rr-bg-surface-alt: var(--surface-sunken) !important;
+	--rr-bg-input: var(--surface) !important;
+	--rr-bg-list-hover: var(--surface-hover) !important;
+	--rr-bg-list-active: var(--brand-soft) !important;
+	--rr-fg-list-active: var(--ink) !important;
+	--rr-bg-titleBar-inactive: var(--surface) !important;
+	--rr-bg-titleBar-active: var(--surface) !important;
+	--rr-fg-titleBar-active: var(--ink) !important;
+	--rr-fg-titleBar-inactive: var(--ink-muted) !important;
+	--rr-bg-widget: var(--surface) !important;
+	--rr-fg-widget: var(--ink) !important;
+	--rr-bg-widget-header: var(--surface-sunken) !important;
+	--rr-bg-widget-hover: var(--surface-hover) !important;
+	--rr-bg-toolbar-hover: var(--surface-hover) !important;
+	--rr-bg-scrollbar-thumb: var(--line-control) !important;
+	--rr-text-primary: var(--ink) !important;
+	--rr-text-secondary: var(--ink-muted) !important;
+	--rr-text-caption: var(--ink-faint) !important;
+	--rr-text-disabled: var(--ink-faint) !important;
+	--rr-text-link: var(--brand-ink) !important;
+	--rr-border: var(--line) !important;
+	--rr-border-hover: var(--line-control) !important;
+	--rr-border-input: var(--line-control) !important;
+	--rr-border-paper: var(--line) !important;
+	--rr-border-focus: var(--focus) !important;
+	--rr-accent: var(--brand) !important;
+	--rr-accent-faded: var(--brand-soft) !important;
+	--rr-bg-button: var(--brand) !important;
+	--rr-fg-button: var(--on-brand) !important;
+	--rr-color-success: var(--ok) !important;
+	--rr-color-warning: var(--warn) !important;
+	--rr-color-error: var(--bad) !important;
+	--rr-color-error-light: var(--bad-soft) !important;
+	--rr-color-info: var(--info) !important;
+	--rr-shadow-widget: var(--shadow-ink) !important;
+	--rr-font-family: var(--font-sans) !important;
+	--rr-font-family-mono: var(--font-mono) !important;
+	--rr-font-mono: var(--font-mono) !important;
+
+}
