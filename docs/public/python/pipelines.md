@@ -20,7 +20,12 @@ token = result['token']
 ```
 
 Beyond `filepath`/`pipeline`, `use()` accepts `token` (a custom task token; the
-server generates one when omitted), `source`, `threads`, `use_existing`,
+server generates one when omitted), `source`, `threads` (engine worker
+threads: how many pipes the task processes at once), `torch_threads` (the
+BLAS/OMP threads one model's inference may use inside the task's engine
+process; unset uses the engine's `RR_TORCH_THREADS` default, from its process
+env or `.env` and read when each task starts; 0 disables pinning for this
+task), `use_existing`,
 `args`, `ttl`, `pipelineTraceLevel` (trace verbosity for the
 [run log](/clients/python/logs)), `name` (a display name for the task), and `env`
 (per-run variable overrides). Pass the pipeline config **as-is** — the client sends it

@@ -67,6 +67,7 @@ Central orchestration server managing:
 
 import time
 import errno
+import os
 import socket
 import sys
 import asyncio
@@ -79,6 +80,8 @@ from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
     CONST_DEFAULT_TTL,
+    CONST_TORCH_THREADS_CPU_FALLBACK,
+    CONST_TORCH_THREADS_ENV,
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
@@ -94,7 +97,73 @@ from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
 
-from rocketlib import debug
+from rocketlib import debug, warning
+
+
+def _usable_cpu_count() -> int:
+    """Cores this process may run on.
+
+    The affinity mask where the OS has one, else os.cpu_count(), else a fixed
+    fallback. A cpuset-limited container counts; a CFS cpu quota does not narrow the mask.
+    """
+    try:
+        cores = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):  # no sched_getaffinity on Windows or macOS
+        cores = os.cpu_count()
+    return cores or CONST_TORCH_THREADS_CPU_FALLBACK
+
+
+def _parse_thread_count(value: Any, ceiling: int) -> Optional[int]:
+    """Return value as a whole number from 0 to ceiling, or None if it is not one."""
+    # bool is an int subclass, so True would pin one thread. int() would
+    # quietly truncate 4.7 to 4, so a float has to be whole (inf and nan
+    # are not). int() trims whitespace around a numeric string itself.
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+        return None
+    try:
+        threads = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if threads < 0 or threads > ceiling:
+        return None
+    return threads
+
+
+def resolve_torch_threads(requested: Any) -> int:
+    """Resolve this task's BLAS/OMP thread count; 0 means pin nothing.
+
+    The server default is RR_TORCH_THREADS, read on every call: unset is 0,
+    invalid warns and counts as 0. A `torchThreads` of None or '' uses it.
+    Any other request value is used if it is a whole number from 0 to the
+    usable cores; otherwise it warns and the server default is used.
+    """
+    ceiling = _usable_cpu_count()
+
+    default = 0
+    raw_default = os.environ.get(CONST_TORCH_THREADS_ENV, '').strip()
+    if raw_default:
+        parsed = _parse_thread_count(raw_default, ceiling)
+        if parsed is None:
+            # Warn, not debug: an operator typo has to show at normal verbosity.
+            warning(
+                f'[TASK] ignoring {CONST_TORCH_THREADS_ENV}={raw_default!r}: expected an integer '
+                f'from 0 to {ceiling}; not pinning BLAS/OMP threads by default'
+            )
+        else:
+            default = parsed
+
+    if requested is None or requested == '':
+        return default
+
+    threads = _parse_thread_count(requested, ceiling)
+    if threads is None:
+        warning(
+            f'[TASK] ignoring torchThreads={requested!r}: expected an integer from 0 to {ceiling}; '
+            f'using the server default ({default})'
+        )
+        return default
+
+    return threads
 
 
 @dataclass
@@ -1480,6 +1549,10 @@ class TaskServer(DAPBase):
             self._task_control.pop(control.token, None)
             self.debug_message(f'Replaced completed task "{control.id}"...')
 
+        # BLAS/OMP threads to pin into the engine subprocess (0 = pin nothing).
+        # Resolved only now, so a reused task or a rejected request never warns.
+        torch_threads = resolve_torch_threads(args.get('torchThreads'))
+
         try:
             # Create new Task instance with complete configuration
             control.task = Task(
@@ -1501,6 +1574,7 @@ class TaskServer(DAPBase):
                 run_kind=run_kind,
                 owner_kind=control.owner_kind,
                 trigger=trigger,
+                torch_threads=torch_threads,
             )
 
             # Register task in central registry

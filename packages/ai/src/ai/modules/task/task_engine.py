@@ -53,6 +53,7 @@ from ai.constants import (
     CONST_STATUS_HISTORY_LIMIT,
     CONST_ANALYTICS_SLOWEST_DOCS,
     CONST_TASK_DATA_PATH,
+    CONST_TORCH_THREAD_ENV_VARS,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
@@ -280,6 +281,9 @@ CONST_SUBPROCESS_ENV_PREFIXES = (
     'OMP_',
     'MKL_',
     'OPENBLAS_',
+    # vecLib and numexpr thread counts, also pinned by torch_threads
+    'VECLIB_',
+    'NUMEXPR_',
     'TIKTOKEN_',
     'NLTK_',
 )
@@ -512,6 +516,7 @@ class Task(DAPBase):
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = 'manual',
+        torch_threads: int = 0,
         **kwargs,
     ) -> None:
         """
@@ -533,6 +538,9 @@ class Task(DAPBase):
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
+            torch_threads: BLAS/OMP threads to pin into the engine
+                subprocess; 0 pins nothing, leaving whatever thread
+                settings the filtered environment carries
             **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication
@@ -689,6 +697,9 @@ class Task(DAPBase):
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
         self._env: Dict[str, str] = env or {}
+
+        # BLAS/OMP threads pinned into the subprocess (0 = pin nothing).
+        self._torch_threads: int = torch_threads
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
@@ -870,8 +881,21 @@ class Task(DAPBase):
         that actually contain one of the DB nodes. Identity is NOT delivered
         through the environment (it rides the task file's 'identity' block —
         the ROCKETRIDE_* env namespace is caller-influenced by design).
+
+        BLAS/OMP thread pinning rides along here: the libraries read their
+        thread counts once, at import time inside the child, so the values
+        have to be in place before the subprocess starts.
         """
         subprocess_env = filter_subprocess_env(os.environ)
+
+        # Pin the BLAS/OMP pools for this task. This runs after the
+        # allowlist filter, so with a resolved count (>0) all six names
+        # reach the child. With 0 nothing is injected and the child keeps
+        # the operator's own values for these names, if any: the allowlist
+        # passes all six prefixes.
+        if self._torch_threads > 0:
+            for var in CONST_TORCH_THREAD_ENV_VARS:
+                subprocess_env[var] = str(self._torch_threads)
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)

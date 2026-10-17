@@ -94,7 +94,7 @@ async def test_run_pipeline_forwards_optional_kwargs(fake_engine):
     await registry.handler('run_pipeline')(
         fake_engine,
         tasks,
-        {'pipeline': PIPE, 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4},
+        {'pipeline': PIPE, 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4, 'torch_threads': 2},
     )
 
     assert fake_engine.used == [
@@ -104,6 +104,7 @@ async def test_run_pipeline_forwards_optional_kwargs(fake_engine):
             'use_existing': True,
             'source': 'src',
             'threads': 4,
+            'torch_threads': 2,
             'pipelineTraceLevel': 'summary',
         }
     ]
@@ -341,7 +342,15 @@ async def test_run_dropper_pipe_forwards_kwargs_and_never_inline_sends(fake_engi
     await registry.handler('run_dropper_pipe')(
         fake_engine,
         tasks,
-        {'pipeline': PIPE, 'ttl': 30, 'use_existing': True, 'source': 'src', 'threads': 4, 'inputs': 'ignored'},
+        {
+            'pipeline': PIPE,
+            'ttl': 30,
+            'use_existing': True,
+            'source': 'src',
+            'threads': 4,
+            'torch_threads': 2,
+            'inputs': 'ignored',
+        },
     )
 
     # `inputs` is NOT forwarded and NO send() happens -- this tool never inline-sends.
@@ -352,6 +361,7 @@ async def test_run_dropper_pipe_forwards_kwargs_and_never_inline_sends(fake_engi
             'use_existing': True,
             'source': 'src',
             'threads': 4,
+            'torch_threads': 2,
             'pipelineTraceLevel': 'summary',
         }
     ]

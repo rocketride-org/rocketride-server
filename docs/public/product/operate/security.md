@@ -55,8 +55,9 @@ in the engine.
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment; use that only on a single-user install. |
 | `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                           |
+| `RR_TORCH_THREADS`  | Default BLAS/OMP thread count pinned into each task's engine process when the client passes no `torchThreads`; read when each task starts. Unset or `0` pins nothing.                                         |
 
-Set both in the engine's own environment or its `.env` file. Pipelines cannot
+Set these in the engine's own environment or its `.env` file. Pipelines cannot
 change `RR_` variables.
 
 Limits of `RR_PROC_PRIVATE`:

@@ -67,6 +67,32 @@ CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (1
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 
 # =============================================================================
+# Per-Task BLAS/OMP Thread Pinning
+# =============================================================================
+# Every BLAS/OMP stack the engine subprocess may load reads its own variable,
+# so they are pinned together: capping OMP alone still lets MKL or OpenBLAS
+# start one thread per core, and a few tasks on one box then oversubscribe it.
+CONST_TORCH_THREAD_ENV_VARS = (
+    'OMP_NUM_THREADS',
+    'MKL_NUM_THREADS',
+    'OPENBLAS_NUM_THREADS',
+    'VECLIB_MAXIMUM_THREADS',
+    'NUMEXPR_NUM_THREADS',
+    'TORCH_NUM_THREADS',
+)
+
+# Operator variable holding the server-wide default, overridden per request
+# by `torchThreads`. resolve_torch_threads() in task_server.py reads it when
+# each task starts, so the engine's .env (loaded after this module) applies.
+# It is RR_* because clients can set ROCKETRIDE_* names through set_env.
+CONST_TORCH_THREADS_ENV = 'RR_TORCH_THREADS'
+
+# Assumed core count when neither the CPU affinity mask nor os.cpu_count()
+# can tell us. Only used as the ceiling a requested thread count is checked
+# against.
+CONST_TORCH_THREADS_CPU_FALLBACK = 64
+
+# =============================================================================
 # Run Logging (per-task JSONL event continuum) Configuration
 # =============================================================================
 # Run-analytics slowest-completions list: the status body keeps this many
