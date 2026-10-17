@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **nodes**: `rocketride_vector` can expose its store to agents and apps as tools (agents call `<node id>.search`, apps call `client.tool` with the tool name and the node id): `search`, `objdir`, `get` and `stats` when the new "Expose as tools" setting is on, `upsert` and `delete` only when "Allow writes through tools" is on as well. Both are off by default, since the table lives in the team's managed database. The node now sits on the shared store base classes instead of a copy of their lane code (#2587)
 - **docker**: releases publish `rocketride-node`, an image that runs one pipeline task (engine-base plus a warmed wheel cache), and `rocketride-engine-base`; both cosign-signed, the node image checked before signing and never tagged `latest`.
+- **nodes**: add `tick`, a one-shot timer source so a scheduled deployment has something to fire (#2274)
 
 ### Changed
 - **docker**: the engine image is built FROM a shared `engine-base` and runs as uid 1000 (was a system user, uid 999). An existing `/opt/data` volume has to be handed over once: `docker run --rm -v rocketride-data:/opt/data alpine chown -R 1000:1000 /opt/data`. The engine now refuses to start, naming that command, when its data directory is not writable.
