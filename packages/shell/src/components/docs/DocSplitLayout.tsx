@@ -34,6 +34,7 @@ import type { CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
+import DocDropZones from './DocDropZones';
 import type { Documents, Public, LayoutNode, LayoutSplit } from './Documents';
 
 // =============================================================================
@@ -44,11 +45,6 @@ const styles = {
 	root: {
 		...commonStyles.columnFill,
 		flex: 1,
-		minWidth: 0,
-		overflow: 'hidden',
-	} as CSSProperties,
-	leaf: {
-		...commonStyles.columnFill,
 		minWidth: 0,
 		overflow: 'hidden',
 	} as CSSProperties,
@@ -122,7 +118,13 @@ interface LayoutNodeRendererProps {
  */
 const LayoutNodeRenderer: React.FC<LayoutNodeRendererProps> = ({ node, docs, renderPane }) => {
 	if (node.type === 'leaf') {
-		return <div style={styles.leaf}>{renderPane(node.groupId)}</div>;
+		// DocDropZones carries the leaf wrapper styling itself and layers the
+		// drag-a-tab-to-split drop targets over the pane content
+		return (
+			<DocDropZones docs={docs} groupId={node.groupId}>
+				{renderPane(node.groupId)}
+			</DocDropZones>
+		);
 	}
 
 	// Split node — render allotment container with debounced size persistence

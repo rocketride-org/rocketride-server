@@ -130,15 +130,23 @@ if (manifest.prod.css.length === 0)
 // Beside the flavor choice it persists the dev-locked app id ('rr:devAppId'):
 // the OAuth redirect strips the query string, and previewLockedAppId falls
 // back to this session copy.
+// TOP-LEVEL ONLY: same-origin iframes share the tab's session storage area
+// (per WHATWG), so a persisting EMBEDDED preview would dev-gate and app-lock
+// the host shell's next load. An embedded preview never runs the OAuth
+// redirect (its session arrives via rrdev:auth), so its query string — which
+// the embedder owns — survives for the frame's whole lifetime and no
+// persistence is needed.
 const picker = `<script>(function(){
 var RR_FLAVORS=${JSON.stringify(manifest)};
 var dev=false;
 try{
 	var p=new URLSearchParams(location.search);
 	if(p.get('rrdev')==='1'){
-		try{sessionStorage.setItem('rr:dev','1');}catch(e){}
-		var a=p.get('appId')||p.get('appid');
-		if(a){try{sessionStorage.setItem('rr:devAppId',a);}catch(e){}}
+		if(window.self===window.top){
+			try{sessionStorage.setItem('rr:dev','1');}catch(e){}
+			var a=p.get('appId')||p.get('appid');
+			if(a){try{sessionStorage.setItem('rr:devAppId',a);}catch(e){}}
+		}
 	}
 	dev=p.get('rrdev')==='1';
 	if(!dev){try{dev=sessionStorage.getItem('rr:dev')==='1';}catch(e){}}

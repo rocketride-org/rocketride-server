@@ -51,7 +51,7 @@ import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
 import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
-import { isEmbeddedDevShell, tokenStore } from '../util/devGate';
+import { isEmbeddedDevShell, isSameOriginEmbed, tokenStore, sessionScopedStore } from '../util/devGate';
 import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
@@ -1259,13 +1259,15 @@ export class ConnectionManager implements IConnectionManager {
 		try { tokenStore().setItem(LS_TOKEN, token); } catch (e) {
 			console.error('[ConnectionManager] Failed to save token:', e);
 		}
-		// An embedded preview must not stamp the HOST-WIDE /apps cookie: the
-		// cookie jar is shared by every same-origin frame, so a panel's
-		// injected dev session would swap the bundle credentials out from
-		// under the embedding user's real session and every sibling panel.
-		// The preview's own dev bundle is served by the dev overlay, not
-		// /apps, so the prime is not needed there either.
-		if (isEmbeddedDevShell()) return;
+		// A SAME-ORIGIN embedded preview (the web App Builder iframe) must
+		// not stamp the HOST-WIDE /apps cookie: the jar is shared by every
+		// same-origin frame, so a panel's injected dev session would swap
+		// the bundle credentials out from under the embedding user's real
+		// session and every sibling panel. A CROSS-origin preview (VS Code —
+		// served from its app's dev-proxy origin) owns its jar outright, and
+		// its PUBLISHED app bundles load through the proxy's /apps routes,
+		// so the prime must run there.
+		if (isEmbeddedDevShell() && isSameOriginEmbed()) return;
 		this.primeAppsCookie(token);
 	}
 
@@ -1316,14 +1318,20 @@ export class ConnectionManager implements IConnectionManager {
 	// SESSION STORAGE HELPERS
 	// =========================================================================
 
-	/** Read session-locked app ID from sessionStorage. */
+	// All tab-session keys route through sessionScopedStore(): a FRAMED
+	// shell (App Builder previews — live and built) gets a frame-local slot
+	// so its session lock / pending app can never stamp the top shell's
+	// next boot; top-level shells keep real sessionStorage (deep links and
+	// the OAuth redirect round-trip depend on it).
+
+	/** Read session-locked app ID from the tab-session store. */
 	public getSessionAppId(): string {
-		try { return sessionStorage.getItem(SS_APP_ID) ?? ''; } catch { return ''; }
+		try { return sessionScopedStore().getItem(SS_APP_ID) ?? ''; } catch { return ''; }
 	}
 
-	/** Save session-locked app ID to sessionStorage. */
+	/** Save session-locked app ID to the tab-session store. */
 	public setSessionAppId(id: string): void {
-		try { sessionStorage.setItem(SS_APP_ID, id); } catch (e) {
+		try { sessionScopedStore().setItem(SS_APP_ID, id); } catch (e) {
 			console.error('[ConnectionManager] Failed to set session app ID:', e);
 		}
 	}
@@ -1331,8 +1339,8 @@ export class ConnectionManager implements IConnectionManager {
 	/** Clear session app ID. */
 	private clearSessionAppId(): void {
 		try {
-			sessionStorage.removeItem(SS_APP_ID);
-			sessionStorage.removeItem(SS_PENDING_APP_ID);
+			sessionScopedStore().removeItem(SS_APP_ID);
+			sessionScopedStore().removeItem(SS_PENDING_APP_ID);
 		} catch (e) {
 			console.error('[ConnectionManager] Failed to clear session storage:', e);
 		}
@@ -1340,19 +1348,19 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Read the pending app ID (set before OAuth redirect). */
 	public getPendingAppId(): string {
-		try { return sessionStorage.getItem(SS_PENDING_APP_ID) ?? ''; } catch { return ''; }
+		try { return sessionScopedStore().getItem(SS_PENDING_APP_ID) ?? ''; } catch { return ''; }
 	}
 
 	/** Clear the pending app ID. Called when an OAuth round-trip is abandoned
 	 *  (user pressed Back from Zitadel) so the stale target can't re-seed the
 	 *  auth gate on the next load and bounce them straight back to login. */
 	public clearPendingAppId(): void {
-		try { sessionStorage.removeItem(SS_PENDING_APP_ID); } catch { /* storage unavailable */ }
+		try { sessionScopedStore().removeItem(SS_PENDING_APP_ID); } catch { /* storage unavailable */ }
 	}
 
 	/** Save pending app ID (for retrieval after OAuth callback). */
 	public setPendingAppId(id: string): void {
-		try { sessionStorage.setItem(SS_PENDING_APP_ID, id); } catch (e) {
+		try { sessionScopedStore().setItem(SS_PENDING_APP_ID, id); } catch (e) {
 			console.error('[ConnectionManager] Failed to set pending app ID:', e);
 		}
 	}

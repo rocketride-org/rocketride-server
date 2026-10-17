@@ -36,17 +36,24 @@ import { useAnnouncements } from '../../hooks/useAnnouncements';
 import { useOptionalWorkspace } from '../workspace/WorkspaceContext';
 import { PopupRow } from '../PopupRow';
 import { BxBookOpen, BxChevronRight, BxCheck, BxCog } from '../BoxIcon';
+import { ThemedSvgImage } from '../ThemedSvgImage';
 import type { IconComponent } from '../BoxIcon';
 
 // =============================================================================
 // ANNOUNCEMENT MARKDOWN
 // =============================================================================
 
-/** Custom component overrides for announcement markdown — compact sizing. */
+/** Custom component overrides for announcement markdown — compact sizing.
+    SVG images inline through ThemedSvgImage so they follow the sidebar's
+    foreground color (authored colors inside the SVG still win); raster
+    images keep the plain <img>. */
 const annMarkdownComponents = {
-	img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
-		<img {...props} style={{ maxWidth: 12, maxHeight: 12, display: 'inline-block', verticalAlign: 'middle' }} />
-	),
+	img: ({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>) =>
+		typeof src === 'string' && /\.svg(\?|#|$)/i.test(src) ? (
+			<ThemedSvgImage src={src} alt={alt} size={12} style={{ verticalAlign: 'middle' }} />
+		) : (
+			<img src={src} alt={alt ?? ''} style={{ maxWidth: 12, maxHeight: 12, display: 'inline-block', verticalAlign: 'middle' }} />
+		),
 	p: (props: React.HTMLAttributes<HTMLParagraphElement>) => (
 		<span {...props} style={{ display: 'block', margin: 0, fontSize: 10 }} />
 	),
@@ -163,7 +170,10 @@ const S = {
 		width: 32,
 		height: 32,
 		borderRadius: '50%',
-		background: 'var(--rr-text-secondary)',
+		// OPAQUE fill, never a text token: --rr-text-secondary is a
+		// translucent rgba in dark themes, which made the avatar read as a
+		// smudged see-through disc on the rail (design feedback 2026-10-12).
+		background: 'var(--rr-bg-avatar, #64748b)',
 		color: '#ffffff',
 		display: 'flex',
 		alignItems: 'center',
@@ -214,6 +224,117 @@ const S = {
 		marginLeft: -8,
 		marginRight: -8,
 	} as CSSProperties,
+};
+
+// =============================================================================
+// PLATFORM DOCS — the one place the documentation URL lives
+// =============================================================================
+
+/** Opens the platform documentation site — the standard `onOpenDocs`. */
+export function openPlatformDocs(): void {
+	window.open('https://docs.rocketride.org', '_blank', 'noopener');
+}
+
+// =============================================================================
+// FOOTER EXTRAS — announcements ticker + Documentation row (expanded form)
+// =============================================================================
+
+/**
+ * The footer's non-account content: the announcements ticker and the
+ * Documentation row. Extracted from SidebarFooter so the workbench frame can
+ * place it at the PANEL's foot (the account row lives on the rail there),
+ * while the classic/drawer footer keeps rendering it inline above the
+ * account row. One markup, two placements.
+ */
+export const SidebarFooterExtras: React.FC<{
+	onOpenDocs?: () => void;
+	/** Standalone placements (the workbench panel foot) bring their own
+	    8px wrapper padding; inside SidebarFooter the wrapper already has it. */
+	padded?: boolean;
+}> = ({ onOpenDocs, padded = false }) => {
+	const [docsHovered, setDocsHovered] = useState(false);
+
+	// ── Announcements ticker ────────────────────────────────────────────────
+	//
+	// The ticker is the PLATFORM's channel. An app carrying its own brand can
+	// ask for it to stay out of its sidebar, where it otherwise reads as the
+	// host talking over the product. Opting out is the app's choice to make;
+	// an app that says nothing keeps it, so this cannot turn the channel off
+	// for anyone who did not ask for that.
+	// OPTIONAL, because this component is not the shell's alone: the VS Code
+	// sidebar renders it straight from 'shell' with no `WorkspaceProvider` in
+	// its tree, so `useWorkspace()` would throw and take the whole sidebar with
+	// it. No workspace means no app branding to read, which is the same answer
+	// as an app that asked for nothing.
+	const workspace = useOptionalWorkspace();
+	const hideAnnouncements = !!workspace?.loadedApps[workspace.activeAppId]?.branding?.hideAnnouncements;
+	const announcements = useAnnouncements();
+	const [tickerIndex, setTickerIndex] = useState(0);
+	const [tickerFade, setTickerFade] = useState(true);
+
+	useEffect(() => {
+		if (announcements.length === 0) return;
+		const interval = setInterval(() => {
+			setTickerFade(false);
+			setTimeout(() => {
+				setTickerIndex((i) => (i + 1) % announcements.length);
+				setTickerFade(true);
+			}, 300);
+		}, 15000);
+		return () => clearInterval(interval);
+	}, [announcements.length]);
+
+	return (
+		<div style={padded ? S.wrapper : { flexShrink: 0 }}>
+			{/* ── Announcements ticker ──────────────────────────────────── */}
+			{!hideAnnouncements && announcements.length > 0 && (() => {
+				const current = announcements[tickerIndex % announcements.length];
+				return (
+					<>
+						<div style={S.fullDivider} />
+						<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
+							<div style={{ opacity: tickerFade ? 1 : 0, transition: 'opacity 300ms ease' }}>
+								<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>
+									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.title}</ReactMarkdown>
+								</div>
+								<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
+									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.body}</ReactMarkdown>
+								</div>
+								{/* THE ROW IS THE TOUCH AREA. Each control was given its 44px
+								    with a negative margin instead, which made the boxes
+								    overlap what sat around them: the two arrows overlapped
+								    each other by 6px, so a press at the right edge of
+								    Previous hit Next (later in DOM order, so painted on
+								    top), and the link's box reached up over the
+								    announcement body, which is markdown and carries links
+								    of its own. Giving the row the height and stretching the
+								    controls into it keeps the targets and overlaps nothing. */}
+								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }}>
+									{current.link && /^https?:\/\//i.test(current.link) ? (
+										<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', alignSelf: 'stretch', paddingRight: 8 }}>Learn more &rarr;</a>
+									) : <span />}
+									{announcements.length > 1 && (
+										<div style={{ display: 'flex', gap: 2, alignSelf: 'stretch' }}>
+											<button type="button" aria-label="Previous announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, alignSelf: 'stretch', flexShrink: 0 }}>&lsaquo;</button>
+											<button type="button" aria-label="Next announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, alignSelf: 'stretch', flexShrink: 0 }}>&rsaquo;</button>
+										</div>
+									)}
+								</div>
+							</div>
+						</div>
+					</>
+				);
+			})()}
+
+			{/* ── Documentation row ─────────────────────────────────────── */}
+			{onOpenDocs && (
+				<button style={{ ...S.docsBtn, background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>
+					<BxBookOpen size={16} />
+					Documentation
+				</button>
+			)}
+		</div>
+	);
 };
 
 // =============================================================================
@@ -327,85 +448,17 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 
 	const topLevelItems = menuItems ?? [];
 
-	// ── Announcements ticker ────────────────────────────────────────────────
-	//
-	// The ticker is the PLATFORM's channel. An app carrying its own brand can
-	// ask for it to stay out of its sidebar, where it otherwise reads as the
-	// host talking over the product. Opting out is the app's choice to make;
-	// an app that says nothing keeps it, so this cannot turn the channel off
-	// for anyone who did not ask for that.
-	// OPTIONAL, because this component is not the shell's alone: the VS Code
-	// sidebar renders it straight from 'shell' with no `WorkspaceProvider` in
-	// its tree, so `useWorkspace()` would throw and take the whole sidebar with
-	// it. No workspace means no app branding to read, which is the same answer
-	// as an app that asked for nothing.
-	const workspace = useOptionalWorkspace();
-	const hideAnnouncements = !!workspace?.loadedApps[workspace.activeAppId]?.branding?.hideAnnouncements;
-	const announcements = useAnnouncements();
-	const [tickerIndex, setTickerIndex] = useState(0);
-	const [tickerFade, setTickerFade] = useState(true);
-
-	useEffect(() => {
-		if (announcements.length === 0) return;
-		const interval = setInterval(() => {
-			setTickerFade(false);
-			setTimeout(() => {
-				setTickerIndex((i) => (i + 1) % announcements.length);
-				setTickerFade(true);
-			}, 300);
-		}, 15000);
-		return () => clearInterval(interval);
-	}, [announcements.length]);
-
 	// ── Render ──────────────────────────────────────────────────────────────
 
 	return (
 		<div style={S.wrapper}>
-			{/* ── Announcements ticker (popup mode) ────────────────────── */}
-			{!collapsed && !hideAnnouncements && announcements.length > 0 && (() => {
-				const current = announcements[tickerIndex % announcements.length];
-				return (
-					<>
-						<div style={S.fullDivider} />
-						<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
-							<div style={{ opacity: tickerFade ? 1 : 0, transition: 'opacity 300ms ease' }}>
-								<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>
-									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.title}</ReactMarkdown>
-								</div>
-								<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
-									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.body}</ReactMarkdown>
-								</div>
-								{/* THE ROW IS THE TOUCH AREA. Each control was given its 44px
-								    with a negative margin instead, which made the boxes
-								    overlap what sat around them: the two arrows overlapped
-								    each other by 6px, so a press at the right edge of
-								    Previous hit Next (later in DOM order, so painted on
-								    top), and the link's box reached up over the
-								    announcement body, which is markdown and carries links
-								    of its own. Giving the row the height and stretching the
-								    controls into it keeps the targets and overlaps nothing. */}
-								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }}>
-									{current.link && /^https?:\/\//i.test(current.link) ? (
-										<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', alignSelf: 'stretch', paddingRight: 8 }}>Learn more &rarr;</a>
-									) : <span />}
-									{announcements.length > 1 && (
-										<div style={{ display: 'flex', gap: 2, alignSelf: 'stretch' }}>
-											<button type="button" aria-label="Previous announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, alignSelf: 'stretch', flexShrink: 0 }}>&lsaquo;</button>
-											<button type="button" aria-label="Next announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, alignSelf: 'stretch', flexShrink: 0 }}>&rsaquo;</button>
-										</div>
-									)}
-								</div>
-							</div>
-						</div>
-					</>
-				);
-			})()}
+			{/* ── Ticker + Documentation (expanded form; see SidebarFooterExtras) */}
+			{!collapsed && <SidebarFooterExtras onOpenDocs={onOpenDocs} />}
 
-			{/* ── Documentation button ──────────────────────────────────── */}
-			{onOpenDocs && (
-				<button style={{ ...S.docsBtn, background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>
+			{/* ── Documentation button (collapsed: icon-only, above the avatar) */}
+			{collapsed && onOpenDocs && (
+				<button title="Documentation" aria-label="Documentation" style={{ ...S.docsBtn, justifyContent: 'center', background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>
 					<BxBookOpen size={16} />
-					{!collapsed && 'Documentation'}
 				</button>
 			)}
 

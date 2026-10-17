@@ -49,6 +49,7 @@
 import React, { CSSProperties } from 'react';
 import type { ReactNode } from 'react';
 import { useSidebarContent, useStatusBarContent } from './HostChromeContext';
+import type { ShellSidebarMode, SidebarViewContainer } from '../../types/sidebarChrome';
 
 // =============================================================================
 // STYLES
@@ -79,6 +80,17 @@ export interface AppLayoutProps {
 	    inside read `useSidebarCollapsed()` to choose their collapsed
 	    (icon-rail) form. */
 	sidebar?: ReactNode;
+	/** The sidebar chrome this app asks for. With a non-empty `sidebarViews`
+	    an omitted mode renders the 'vscode' workbench; without declared views
+	    the shell always clamps to 'rocketride' (the classic column — today's
+	    behavior, untouched). 'cursor' is the tab-strip panel. The user's
+	    `rocketride.general.sidebar` setting overrides the app's request. */
+	sidebarMode?: ShellSidebarMode;
+	/** The app's sidebar view containers — the data behind the richer
+	    chromes. A container WITHOUT its own `content` shares the `sidebar`
+	    node, which reads `useSidebarActiveView()` to present the selected
+	    view (one data owner behind N rail icons). Ignored by 'rocketride'. */
+	sidebarViews?: SidebarViewContainer[];
 	/** Show the status bar (stock connection identity). Defaults to false. */
 	showStatus?: boolean;
 	/** App content for the status bar's middle slot. Providing it implies
@@ -98,11 +110,13 @@ export interface AppLayoutProps {
  *
  * @param props - See {@link AppLayoutProps}.
  */
-export const AppLayout: React.FC<AppLayoutProps> = ({ sidebar, showStatus, status, children }) => {
+export const AppLayout: React.FC<AppLayoutProps> = ({ sidebar, sidebarMode, sidebarViews, showStatus, status, children }) => {
 	// Bridge the declared chrome nodes into the shell slots. A non-null
 	// status registration is what summons the bar, so a bare `showStatus`
-	// registers an empty fragment (stock identity only).
-	useSidebarContent(sidebar ?? null);
+	// registers an empty fragment (stock identity only). The view-container
+	// and mode declarations ride the same sidebar registration; the frame
+	// clamps the mode to what the declared data supports.
+	useSidebarContent(sidebar ?? null, { views: sidebarViews ?? null, mode: sidebarMode ?? null });
 	useStatusBarContent(status ?? (showStatus ? <></> : null));
 	return <div style={styles.screen}>{children}</div>;
 };

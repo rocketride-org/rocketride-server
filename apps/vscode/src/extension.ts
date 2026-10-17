@@ -45,6 +45,7 @@ import { SidebarProvider } from './providers/SidebarProvider';
 import { ProjectProvider } from './providers/ProjectProvider';
 import { SettingsProvider } from './providers/SettingsProvider';
 import { MonitorProvider } from './providers/MonitorProvider';
+import { IntroProvider } from './providers/IntroProvider';
 // DeployProvider removed — Docker/Service operations now live in Settings panels
 import { StatusProvider } from './providers/StatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
@@ -52,15 +53,18 @@ import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
 import { EnvironmentProvider } from './providers/EnvironmentProvider';
 import { NewAppProvider } from './providers/NewAppProvider';
+import { DevToolStore } from './providers/DevToolStore';
+import { DevToolBridge } from './providers/DevToolBridge';
+import { DevToolPanelProvider } from './providers/DevToolPanelProvider';
+import { DevToolReadmeProvider } from './providers/DevToolReadmeProvider';
 // BillingProvider removed — billing is now a tab in AccountProvider
 // AuthProvider removed — auth failures now open the Settings page directly
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 import { AppScreenProvider } from './providers/AppScreenProvider';
-import { initWatchManager } from './appdev/watchManager';
+import { initDevSessionManager } from './appdev/devSessionManager';
 import { ensureShell, refreshVendoredPlatform } from './appdev/appTypes';
-import { debugApp } from './appdev/debug';
 
 // Extension context — set once in activate(), available via getExtensionContext()
 let extensionContext: vscode.ExtensionContext;
@@ -75,6 +79,7 @@ let sidebar: SidebarProvider | undefined;
 let project: ProjectProvider | undefined;
 let settings: SettingsProvider | undefined;
 let _monitor: MonitorProvider | undefined;
+let _intro: IntroProvider | undefined;
 // deploy removed — functionality moved to Settings panels
 let status: StatusProvider | undefined;
 let appScreen: AppScreenProvider | undefined;
@@ -279,9 +284,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				logger.output(`${icons.info} Creating tree providers...`);
 				progress.report({ increment: 50, message: 'Creating tree providers...' });
 
-				// Register unified sidebar webview
-				sidebar = new SidebarProvider(context.extensionUri);
-				const sidebarWebviewProvider = vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebar);
+				// Pinned dev-tools store — created before the sidebar (which
+				// renders the tool tabs) and shared with the picker below —
+				// plus the peer bridge relaying frame ↔ sidebar tool messages.
+				const devTools = new DevToolStore(context);
+				const devToolBridge = new DevToolBridge();
+				// A sidebar interaction with a closed tool panel reopens it —
+				// the message waits in the bridge buffer and flushes on mount.
+				devToolBridge.onPanelNeeded = (appId) => {
+					void vscode.commands.executeCommand('rocketride.devtool.open', appId);
+				};
+
+				// Register unified sidebar webview. retainContextWhenHidden: the
+				// sidebar carries live state (dev-tool sidebar mounts, their SDK
+				// connections, task indicators) that must survive switching to
+				// another activity-bar container (Explorer, Git, ...).
+				sidebar = new SidebarProvider(context.extensionUri, context, devTools, devToolBridge);
+				const sidebarWebviewProvider = vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebar, {
+					webviewOptions: { retainContextWhenHidden: true },
+				});
 
 				context.subscriptions.push(sidebarWebviewProvider);
 
@@ -293,6 +314,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 				settings = new SettingsProvider(context.extensionUri);
 				_monitor = new MonitorProvider(context);
+				// Embedded "Introduction to ..." pages (sidebar Introduction rows).
+				_intro = new IntroProvider(context);
 				// deploy removed — register redirect command so sidebar "Deploy" opens Settings
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
@@ -305,14 +328,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				// The guard wrapper ships beside the bundle (staged by
 				// vscode:stage-files); every dev server spawns through it so
 				// it dies with this extension host.
-				const watchManager = initWatchManager(appScreen, context.asAbsolutePath('devServerGuard.cjs'));
+				const devSessions = initDevSessionManager(appScreen, context.asAbsolutePath('devServerGuard.cjs'));
 				context.subscriptions.push(
 					vscode.window.registerCustomEditorProvider('rocketride.appBuilder', appScreen, {
 						webviewOptions: { retainContextWhenHidden: true },
 						supportsMultipleEditorsPerDocument: false,
 					}),
 					appScreen,
-					{ dispose: () => watchManager.dispose() },
+					{ dispose: () => devSessions.dispose() },
 				);
 				// Tabs that predate this host ("Developer: Restart Extension
 				// Host" keeps them open but never re-resolves them) still need
@@ -324,7 +347,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				const environment = new EnvironmentProvider(context);
 				// New App wizard — registers rocketride.app.create itself
 				const newApp = new NewAppProvider(context);
-				context.subscriptions.push(account, environment, newApp);
+				// Dev tools: the tool panels (MF host webviews) + the modules
+				// flow's details page (README + Install/Remove — Remove also
+				// closes the tool's open panel). Each registers its own command.
+				const devToolPanels = new DevToolPanelProvider(context, devToolBridge);
+				// Focusing a tool's editor tab highlights its tab on the
+				// sidebar strip (and shows its sidebar body).
+				devToolPanels.onPanelFocused = (appId) => sidebar?.setModeExternal(`tool:${appId}`);
+				// Tool sidebars follow the editor's fronted tab: the fronted
+				// tool document's key, or null when a non-tool tab is active.
+				devToolPanels.onActiveDocChange = (appId, docKey) => sidebar?.notifyToolActiveDoc(appId, docKey);
+				const devToolReadme = new DevToolReadmeProvider(context, devTools, (appId) => devToolPanels.close(appId));
+				context.subscriptions.push(account, environment, newApp, devTools, devToolPanels, devToolReadme);
 
 				// Register unified project editor (canvas + status + trace)
 				project = new ProjectProvider(context);
@@ -519,9 +553,6 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			// Fire-and-forget: a rejection has no other surface here — say it.
 			appScreen?.show(appId).catch((err) => vscode.window.showErrorMessage(`Failed to open app: ${err instanceof Error ? err.message : String(err)}`));
 		}),
-		vscode.commands.registerCommand('rocketride.app.debug', (appId: string) => {
-			debugApp(appId).catch((err) => vscode.window.showErrorMessage(`Failed to debug app: ${err instanceof Error ? err.message : String(err)}`));
-		}),
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();
 			vscode.window.showInformationMessage('RocketRide views refreshed');
@@ -704,6 +735,15 @@ async function refreshAllProviders(): Promise<void> {
  * Extension deactivation cleanup
  */
 export async function deactivate(): Promise<void> {
+	if (_intro) {
+		try {
+			_intro.dispose();
+		} catch (error: unknown) {
+			if (!(error instanceof Error) || error.name !== 'Canceled') {
+				console.error('[ROCKETRIDE] Error disposing intro pages:', error);
+			}
+		}
+	}
 	if (_monitor) {
 		try {
 			_monitor.dispose();

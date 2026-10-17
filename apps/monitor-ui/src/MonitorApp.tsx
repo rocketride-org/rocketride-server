@@ -31,21 +31,19 @@
 // MonitorPage.tsx.
 // =============================================================================
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell';
+import type { DevToolProps, ShellAppProps } from 'shell';
 import { useShellConnection, useDashboardData, usePolling, AppLayout } from 'shell';
 import { commonStyles } from 'shell';
 import { MonitorView } from 'shell';
-import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse } from 'shell';
+import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse, MonitorPageId } from 'shell';
+import { MonitorSidebar } from './MonitorSidebar';
+import type { MonitorPeerMessage } from './MonitorSidebar';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
-// (header + account footer) present with an empty middle slot.
-const SIDEBAR_FRAME_ONLY = <></>;
 
 /** Grid refresh cadence (ms) — matches the dashboard hook's 3s poll. */
 const GRID_POLL_INTERVAL_MS = 3000;
@@ -76,7 +74,20 @@ const styles = {
  * sort, filter, and search server-side, and this host polls their combined
  * refetch every 3 seconds (the admin views' grid pattern).
  */
-const MonitorApp: React.FC<ShellAppProps> = (_props) => {
+/** Props for {@link MonitorSurface} — host-controlled page selection. */
+export interface IMonitorSurfaceProps {
+	/** The active page (the host's sidebar menu drives it). */
+	page: MonitorPageId;
+}
+
+/**
+ * The monitor surface — dashboard + grids, no app chrome and NO tab strip
+ * (navigation moved to the sidebar menu, 2026-10-14). Shared by the full app
+ * (inside its AppLayout) and the devToolFrame mount, where a host workbench
+ * renders it directly. All data flows through the shell connection
+ * singleton, which the host has connected before mounting.
+ */
+export const MonitorSurface: React.FC<IMonitorSurfaceProps> = ({ page }) => {
 	const { client, isConnected } = useShellConnection();
 
 	// Shared 3s dashboard snapshot + activity feed (module-level singleton hook,
@@ -127,20 +138,66 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	// =========================================================================
 
 	return (
-		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
-			<div style={styles.container}>
-				<MonitorView
-					data={data}
-					events={events}
-					isConnected={isConnected}
-					onRefresh={refresh}
-					listConnections={listConnections}
-					listTasks={listTasks}
-					onRefetchReady={handleRefetchReady}
-				/>
-			</div>
+		<div style={styles.container}>
+			<MonitorView
+				data={data}
+				events={events}
+				isConnected={isConnected}
+				onRefresh={refresh}
+				listConnections={listConnections}
+				listTasks={listTasks}
+				onRefetchReady={handleRefetchReady}
+				activePage={page}
+				hideTabs
+			/>
+		</div>
+	);
+};
+
+/**
+ * Server Monitor app — the monitor surface inside the app chrome, with the
+ * page menu in the sidebar (replacing the old top tab strip) and the status
+ * bar below.
+ */
+const MonitorApp: React.FC<ShellAppProps> = (_props) => {
+	const [page, setPage] = useState<MonitorPageId>('overview');
+	return (
+		<AppLayout sidebar={<MonitorSidebar activeId={page} onSelect={setPage} />} showStatus>
+			<MonitorSurface page={page} />
 		</AppLayout>
 	);
+};
+
+// =============================================================================
+// DEV-TOOL FRAME — the surface in a host workbench, page-synced over peer
+// =============================================================================
+
+/**
+ * The monitor surface as a host-mounted devToolFrame: page selections arrive
+ * from the tool's sidebar mount over the peer channel (user actions only —
+ * the two mounts may be isolated documents), and this frame PUSHES its page
+ * on mount and on every change; the host retains the last push so a
+ * reloaded sidebar highlights correctly without asking.
+ */
+export const MonitorDevToolFrame: React.FC<DevToolProps> = ({ peer }) => {
+	const [page, setPage] = useState<MonitorPageId>('overview');
+
+	// Apply sidebar selections.
+	useEffect(
+		() =>
+			peer.subscribe((message) => {
+				const msg = message as MonitorPeerMessage;
+				if (msg && msg.op === 'page') setPage(msg.page);
+			}),
+		[peer]
+	);
+
+	// Push the current page — on mount and on every change.
+	useEffect(() => {
+		peer.post({ op: 'page', page } satisfies MonitorPeerMessage);
+	}, [peer, page]);
+
+	return <MonitorSurface page={page} />;
 };
 
 export default MonitorApp;

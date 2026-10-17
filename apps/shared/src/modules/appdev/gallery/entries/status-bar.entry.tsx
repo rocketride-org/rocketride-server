@@ -56,6 +56,8 @@ function RunControls({ onRun }: { onRun: () => void }) {
 }`,
 	propsLabel: 'Hooks',
 	props: [
+		{ name: 'AppLayout showStatus', type: 'boolean', dir: 'in', note: 'Show the status bar (stock connection identity). Defaults to false - the bar renders only when the app declares it.' },
+		{ name: 'AppLayout status', type: 'ReactNode', dir: 'in', note: 'App content for the bar\'s flexible middle slot, between the connection identity and the shell status message; providing it implies showStatus.' },
 		{ name: 'useShellConnection', type: '() => { client, isConnected, statusMessage }', dir: 'out', note: 'The same global state the StatusBar renders - subscribe to react to connect/disconnect and transient status messages.' },
 	],
 };

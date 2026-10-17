@@ -128,9 +128,27 @@ export interface IMonitorViewProps {
 	 * the admin views poll their own grids.
 	 */
 	onRefetchReady?: (refetch: () => void) => void;
+	/**
+	 * Controlled active page. When set, the view renders this page and
+	 * ignores its internal tab state; page switches (if the strip is shown)
+	 * are reported through `onPageChange` instead of applied locally. Hosts
+	 * that render their own switcher (monitor-ui's sidebar menu) pair this
+	 * with `hideTabs`.
+	 */
+	activePage?: MonitorPageId;
+	/** Fired with the target page id when the user picks a strip tab. */
+	onPageChange?: (page: MonitorPageId) => void;
+	/**
+	 * Hide the top TabControl strip — the host provides the page switcher
+	 * (e.g. a sidebar menu) and drives the view via `activePage`.
+	 */
+	hideTabs?: boolean;
 }
 
-type TabId = 'overview' | 'connections' | 'tasks' | 'activity';
+/** One of the monitor's four pages — the ids the page switcher selects. */
+export type MonitorPageId = 'overview' | 'connections' | 'tasks' | 'activity';
+
+type TabId = MonitorPageId;
 
 /**
  * Per-page header subtitles — "{Page} — {short descriptor}" (the ProjectView
@@ -147,8 +165,15 @@ const PAGE_SUBTITLES: Record<TabId, string> = {
 // COMPONENT
 // =============================================================================
 
-const MonitorView: React.FC<IMonitorViewProps> = ({ documentTitle, data, events, isConnected, onRefresh, listConnections, listTasks, onRefetchReady }) => {
-	const [activeTab, setActiveTab] = useState<TabId>('overview');
+const MonitorView: React.FC<IMonitorViewProps> = ({ documentTitle, data, events, isConnected, onRefresh, listConnections, listTasks, onRefetchReady, activePage, onPageChange, hideTabs }) => {
+	const [localTab, setLocalTab] = useState<TabId>('overview');
+	// Controlled when the host passes activePage; self-managed otherwise.
+	const activeTab = activePage ?? localTab;
+	/** Routes a page pick to the controller (host or local state). */
+	const selectTab = (id: TabId): void => {
+		if (activePage !== undefined) onPageChange?.(id);
+		else setLocalTab(id);
+	};
 
 	// ── Combined remote-grid refetch ─────────────────────────────────────
 	// Each remote grid registers its silent current-page refetch here; the
@@ -235,8 +260,9 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ documentTitle, data, events,
 
 	return (
 		<div style={styles.root}>
-			{/* Page strip — the view renders its own tabs at the very top. */}
-			<TabControl menu={viewMenu} activeId={activeTab} onSelect={(id) => setActiveTab(id as TabId)} />
+			{/* Page strip — the view renders its own tabs at the very top,
+			    unless the host supplies its own switcher (hideTabs). */}
+			{!hideTabs && <TabControl menu={viewMenu} activeId={activeTab} onSelect={(id) => selectTab(id as TabId)} />}
 			{/* Page title, PINNED with the strip (shell hosts only — see the
 			    documentTitle prop); only the panel bodies below scroll. */}
 			{documentTitle && <ContentHeader title={documentTitle} subtitle={PAGE_SUBTITLES[activeTab]} />}

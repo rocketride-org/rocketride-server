@@ -122,6 +122,11 @@ function makeBuildWebviewAction() {
 
 			await execCommand('pnpm', ['exec', 'rsbuild', 'build'], { task, cwd: APP_ROOT });
 
+			// The dev-tool page is a Module Federation HOST — it needs a normal
+			// chunk graph, so it builds from its own config into webview/devtool/.
+			const devtoolArgs = ['exec', 'rsbuild', 'build', '--config', 'rsbuild.devtool.config.mjs'];
+			await execCommand('pnpm', devtoolArgs, { task, cwd: APP_ROOT });
+
 			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
 		},
 	};

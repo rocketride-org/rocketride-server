@@ -21,98 +21,356 @@
 // SOFTWARE.
 
 // =============================================================================
-// SQL-UI — SIDEBAR (navigation menu + active connection's schema tree)
+// SQL-UI — SIDEBAR (the saved-connection list: the tool's CONTROLLER)
+// =============================================================================
+//
+// The saved-connection list IS the whole sidebar: every connection the user
+// has made renders as a row with hover edit/delete actions, "+ New
+// Connection" opens the editor document, and clicking a row opens the
+// connection's workbench document (direct mode materialises its temp tool
+// pipeline). Deliberately NO schema tree here (2026-10-16) — tables belong
+// to the workbench documents.
+//
+// All frame-owned effects (documents, overlays) go through the
+// SqlSidebarBridge: straight calls in the full app, the tool channel in the
+// host-mounted devToolSidebar (see sqlBridge.ts).
 // =============================================================================
 
-import React, { useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useShellConnection } from 'shell';
-import { Explorer, SidebarMenu } from 'shell';
-import type { ViewMenu } from 'shell';
-import { NOOP_VFS } from 'shell';
-import type { ExplorerEntry } from 'shell';
-import { useSqlEndpoints } from './connect';
-import { refreshSchema, useSchema } from './schema/schemaStore';
-import { requestTableRecord, useActiveConnection } from './navigation';
-import { CONNECTIONS_URI, getDocs } from './docs';
+import { SidebarMenu, BxPlus, BxCheck, BxEditAlt, BxTrash } from 'shell';
+import type { DevToolProps, ViewMenu } from 'shell';
+import { useSavedConnections, useSavedConnectionsStatus, loadSavedConnections, deleteSavedConnection, endpointKeyForConnection, releaseDirectEndpoint } from './connect';
+import type { SavedSqlConnection } from './connect';
+import { localSidebarBridge, createSidebarToolBridge } from './sqlBridge';
+import type { SqlSidebarBridge } from './sqlBridge';
 import { DatabaseIcon } from './icons';
 
+// =============================================================================
+// STYLES
+// =============================================================================
+
+const styles = {
+	/**
+	 * Nav section above the Connections list — the app-builder sidebar's
+	 * geometry. No horizontal padding: the SidebarMenu inside carries its own
+	 * tree-list padding (2px 6px), so adding more here would indent the nav
+	 * row past the connection rows and break the shared left rhythm.
+	 */
+	navSection: {
+		padding: '8px 0 12px',
+		flexShrink: 0,
+	} as CSSProperties,
+
+	/** Section container padding (the SidebarMenu geometry). */
+	section: {
+		padding: '2px 6px',
+	} as CSSProperties,
+
+	/** Uppercase section header. */
+	sectionLabel: {
+		padding: '6px 8px 4px',
+		fontSize: 11,
+		fontWeight: 600,
+		textTransform: 'uppercase',
+		letterSpacing: '0.5px',
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** One connection row (the compact list-row family). */
+	row: (active: boolean, hovered: boolean): CSSProperties => ({
+		display: 'flex',
+		alignItems: 'center',
+		gap: 6,
+		padding: '1px 8px',
+		paddingLeft: 18,
+		borderRadius: 5,
+		fontSize: 13,
+		lineHeight: '22px',
+		cursor: 'pointer',
+		color: active ? 'var(--rr-fg-list-active)' : 'var(--rr-text-primary)',
+		...(active ? { background: 'var(--rr-bg-list-active)' } : null),
+		...(!active && hovered ? { background: 'var(--rr-bg-list-hover)' } : null),
+	}),
+
+	/** Leading glyph slot. */
+	rowIcon: (active: boolean): CSSProperties => ({
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		width: 17,
+		height: 17,
+		flexShrink: 0,
+		color: active ? 'inherit' : 'var(--rr-text-secondary)',
+	}),
+
+	/** Row label (fills so the actions right-align). */
+	rowLabel: {
+		flex: 1,
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+		whiteSpace: 'nowrap',
+	} as CSSProperties,
+
+	/** Hover action button (edit / delete). */
+	rowAction: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		width: 20,
+		height: 20,
+		flexShrink: 0,
+		border: 'none',
+		borderRadius: 4,
+		background: 'transparent',
+		color: 'var(--rr-text-secondary)',
+		cursor: 'pointer',
+		padding: 0,
+	} as CSSProperties,
+
+	/** Muted empty-list line. */
+	empty: {
+		padding: '2px 8px 4px 18px',
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** Open-failure line under the list. */
+	error: {
+		padding: '2px 8px 4px 18px',
+		fontSize: 12,
+		color: 'var(--rr-error, #f44747)',
+	} as CSSProperties,
+};
+
+// =============================================================================
+// COMPONENT
+// =============================================================================
+
+/** Props for {@link SqlSidebar}. */
+export interface ISqlSidebarProps {
+	/** The frame bridge (in-document calls by default; peer in a tool mount). */
+	bridge?: SqlSidebarBridge;
+	/**
+	 * Host-tracked selection (DevToolProps.activeDocKey): the fronted SQL
+	 * document's key — a saved connection id highlights that row and shows
+	 * its schema; any other value (an editor doc, null for a non-SQL tab)
+	 * clears both. undefined = the host cannot tell; the sidebar falls back
+	 * to the frames' own active pushes.
+	 */
+	hostActiveDoc?: string | null;
+}
+
 /**
- * SQL Explorer sidebar: the app navigation menu on top, and — while a
- * connection document is active — the stock Explorer tree showing that
- * connection's tables with their columns as children. Clicking a table opens
- * its record drawer in the active workbench's Overview page.
+ * SQL Explorer sidebar: the saved-connection list (with add/edit/delete) on
+ * top, and — while a connection document is active — the stock Explorer tree
+ * showing that connection's tables. Clicking a table opens its record drawer
+ * in the active workbench's Overview page.
  *
- * Passed to AppLayout's `sidebar` prop by SqlApp — part of the app's one
- * tree, sharing the Documents singleton and navigation pub/sub directly.
+ * Two mounts, one sidebar: AppLayout's `sidebar` slot in the full app (local
+ * bridge), and the host's sidebar panel as a devToolSidebar (peer bridge).
  */
-const SqlSidebar: React.FC = () => {
+const SqlSidebar: React.FC<ISqlSidebarProps> = ({ bridge = localSidebarBridge, hostActiveDoc }) => {
 	const { client, isConnected } = useShellConnection();
-	const { endpoints } = useSqlEndpoints();
+	const connections = useSavedConnections();
+	const connectionsStatus = useSavedConnectionsStatus();
 
-	// The connection document currently focused in the client area.
-	const activeKey = useActiveConnection();
-	const snapshot = useSchema(activeKey);
-	const activeEndpoint = useMemo(
-		() => endpoints.find((e) => e.key === activeKey) ?? null,
-		[endpoints, activeKey],
+	// Row hover + in-flight open (direct mode starts a pipeline — not instant).
+	const [hoveredId, setHoveredId] = useState<string | null>(null);
+	const [openingId, setOpeningId] = useState<string | null>(null);
+	const [openError, setOpenError] = useState('');
+	// Two-step inline delete: the row's trash click arms it, check confirms.
+	// Inline (not a dialog) so it works identically in every mount — drawers
+	// and tool webviews have no overlay-safe place to raise a confirm.
+	const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+	// The connection document currently focused in the frame — from the
+	// bridge: the navigation store in-app, the frame's pushes as a tool.
+	const [peerActiveKey, setPeerActiveKey] = useState<string | null>(null);
+	useEffect(() => bridge.subscribeActive((key) => {
+		setPeerActiveKey(key);
+		// Any focus change settles an in-flight open (success path).
+		setOpeningId(null);
+	}), [bridge]);
+
+	// Open failures arrive from wherever the resolve ran (frame or local).
+	useEffect(() => bridge.subscribeError((message) => {
+		setOpenError(message);
+		setOpeningId(null);
+	}), [bridge]);
+
+	// The selection this sidebar follows. The host's signal wins when it has
+	// one: a saved connection's docKey maps to its endpoint key; anything
+	// else fronted (an editor doc, another tool, a text file) clears the
+	// selection outright — highlight AND schema tree.
+	const hostConnection = useMemo(
+		() => (typeof hostActiveDoc === 'string' ? connections.find((c) => c.id === hostActiveDoc) ?? null : null),
+		[connections, hostActiveDoc],
 	);
+	const activeKey = hostActiveDoc === undefined
+		? peerActiveKey
+		: (hostConnection ? endpointKeyForConnection(hostConnection) : null);
 
-	// ── Navigation menu ──────────────────────────────────────────────────────
-	// One entry today; count reflects live discovery (hidden while 0).
-	const menu: ViewMenu = useMemo(() => ({
-		entries: [
-			{
-				id: 'connections',
-				label: 'Connections',
-				icon: <DatabaseIcon />,
-				...(endpoints.length > 0 ? { count: endpoints.length } : {}),
-			},
-		],
-	}), [endpoints.length]);
+	// A connection coming to front settles an in-flight open (host-signal path).
+	useEffect(() => { if (activeKey) setOpeningId(null); }, [activeKey]);
 
-	// ── Schema tree entries ──────────────────────────────────────────────────
-	// Tables as file entries; each table's columns as its children, with the
-	// datatype in the child's provider slot.
-	const entries = useMemo<ExplorerEntry[]>(() => {
-		const tables = snapshot.schema?.tables ?? {};
-		return Object.entries(tables).map(([name, def]) => ({
-			path: name,
-			type: 'file',
-			children: def.columns.map((col) => ({
-				id: `${name}:${col.column}`,
-				name: col.column,
-				provider: col.type,
-			})),
-		}));
-	}, [snapshot.schema]);
+	// ── Open a connection ────────────────────────────────────────────────────
+
+	const openConnection = useCallback((conn: SavedSqlConnection) => {
+		if (!isConnected) { setOpenError('Not connected to a server.'); return; }
+		setOpenError('');
+		setOpeningId(conn.id);
+		bridge.openConnection(conn);
+	}, [bridge, isConnected]);
+
+	// "+ New Connection" as a stock SidebarMenu entry, mirroring the app-builder
+	// sidebar's "+ New app" nav above its MY APPS list. No persistent selection
+	// (activeId='').
+	const navMenu: ViewMenu = {
+		entries: [{ id: 'newConnection', label: 'New Connection', icon: <BxPlus size={16} /> }],
+	};
 
 	return (
 		<>
-			<SidebarMenu
-				menu={menu}
-				activeId={activeKey ? '' : 'connections'}
-				onSelect={() => getDocs()?.openStaticDocument(CONNECTIONS_URI, 'Connections')}
-				sectionLabel="SQL Explorer"
-			/>
-
-			{/* Schema tree for the active connection document. */}
-			{activeKey && activeEndpoint && snapshot.status === 'ready' && (
-				<Explorer
-					vfs={NOOP_VFS}
-					config={{
-						title: snapshot.schema?.database ?? activeEndpoint.nodeName,
-						extensions: null,
-						emptyMessage: 'No tables',
-						allowFolders: false,
+			{/* ── Navigation ────────────────────────────────────────────────── */}
+			<div style={styles.navSection}>
+				<SidebarMenu
+					menu={navMenu}
+					activeId=""
+					onSelect={(id) => {
+						if (id === 'newConnection') bridge.openConnectionEditor(null);
 					}}
-					entries={entries}
-					isConnected={isConnected}
-					onOpenFile={(path) => requestTableRecord(activeKey, path)}
-					onRefresh={() => { if (client) void refreshSchema(client, activeEndpoint, { fresh: true }); }}
 				/>
-			)}
+			</div>
+
+			{/* ── Saved connections ─────────────────────────────────────────── */}
+			<div style={styles.section}>
+				<div style={styles.sectionLabel}>Connections</div>
+
+				{connections.length === 0 && (
+					<div style={styles.empty}>{connectionsStatus === 'ready' ? 'No connections yet.' : 'Loading connections…'}</div>
+				)}
+
+				{connections.map((conn) => {
+					const isActive = endpointKeyForConnection(conn) === activeKey;
+					const isHovered = hoveredId === conn.id;
+					const isOpening = openingId === conn.id;
+					const isConfirming = confirmDeleteId === conn.id;
+					return (
+						<div
+							key={conn.id}
+							role="button"
+							tabIndex={0}
+							title={conn.mode === 'pipeline' ? `${conn.name} — pipeline: ${conn.pipelineName}` : `${conn.name} — direct (${conn.provider})`}
+							style={styles.row(isActive, isHovered)}
+							onClick={() => { if (!isOpening && !isConfirming) openConnection(conn); }}
+							onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isOpening && !isConfirming) { e.preventDefault(); openConnection(conn); } }}
+							onMouseEnter={() => setHoveredId(conn.id)}
+							onMouseLeave={() => setHoveredId(null)}
+						>
+							<span style={styles.rowIcon(isActive)}><DatabaseIcon /></span>
+							{isConfirming ? (
+								<>
+									<span style={{ ...styles.rowLabel, color: 'var(--rr-error, #f44747)' }}>Delete {conn.name}?</span>
+									<button
+										type="button"
+										style={styles.rowAction}
+										title="Confirm delete"
+										aria-label={`Confirm delete ${conn.name}`}
+										onClick={(e) => {
+											e.stopPropagation();
+											// Best-effort stop of a direct connection's temp
+											// pipeline; the idle TTL reaps it otherwise.
+											if (conn.mode === 'direct' && client) void releaseDirectEndpoint(client, endpointKeyForConnection(conn));
+											deleteSavedConnection(conn.id);
+											setConfirmDeleteId(null);
+										}}
+									>
+										<BxCheck size={14} />
+									</button>
+									<button
+										type="button"
+										style={styles.rowAction}
+										title="Cancel delete"
+										aria-label="Cancel delete"
+										onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+									>
+										✕
+									</button>
+								</>
+							) : (
+								<>
+									<span style={styles.rowLabel}>{isOpening ? `${conn.name}…` : conn.name}</span>
+									{/* Hover actions: modify / delete. */}
+									{isHovered && !isOpening && (
+										<>
+											<button
+												type="button"
+												style={styles.rowAction}
+												title="Edit connection"
+												aria-label={`Edit ${conn.name}`}
+												onClick={(e) => { e.stopPropagation(); bridge.openConnectionEditor(conn); }}
+											>
+												<BxEditAlt size={14} />
+											</button>
+											<button
+												type="button"
+												style={styles.rowAction}
+												title="Delete connection"
+												aria-label={`Delete ${conn.name}`}
+												onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(conn.id); }}
+											>
+												<BxTrash size={14} />
+											</button>
+										</>
+									)}
+								</>
+							)}
+						</div>
+					);
+				})}
+
+				{openError && <div style={styles.error}>{openError}</div>}
+			</div>
+
+			{/* No schema tree here by design (2026-10-16): the sidebar is the
+			    connection list alone — tables live in the workbench documents
+			    (Overview, Query autocomplete, Diagram).
+
+			    Add/edit opens the connection-editor DOCUMENT (a top-level tab);
+			    delete confirms inline on the row. No overlays are raised from
+			    this subtree — it has no overlay-safe host (compact drawer
+			    transform in-app, a ~300px webview as a tool). */}
 		</>
 	);
+};
+
+// =============================================================================
+// DEV-TOOL SIDEBAR — the same sidebar in the host's sidebar panel
+// =============================================================================
+
+/**
+ * The sidebar as a host-mounted devToolSidebar — the tool's CONTROLLER: it
+ * owns the saved-connection list (loads it with persistence, commits every
+ * mutation, publishes it as retained channel state) and follows the host's
+ * activeDocKey to highlight the fronted connection.
+ */
+export const SqlDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, documents, activeDocKey }) => {
+	const { client, isConnected } = useShellConnection();
+	// Controller bridge: commits incoming saves, publishes the list as
+	// retained channel state, and carries the sidebar's actions.
+	const bridge = useMemo(() => createSidebarToolBridge({ peer, ...(channel ? { channel } : {}), ...(documents ? { documents } : {}) }), [peer, channel, documents]);
+
+	// This is the OWNER realm: load the list from the server store with the
+	// persistence writer installed. Every mutation — inline delete here,
+	// editor saves arriving over the channel — commits in this realm, and
+	// each commit republishes the state topic to every document.
+	useEffect(() => {
+		if (client && isConnected) void loadSavedConnections(client);
+	}, [client, isConnected]);
+
+	return <SqlSidebar bridge={bridge} {...(activeDocKey !== undefined ? { hostActiveDoc: activeDocKey } : {})} />;
 };
 
 export default SqlSidebar;

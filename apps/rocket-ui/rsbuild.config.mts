@@ -86,6 +86,19 @@ export default defineConfig(() => {
 		// allowlist is possible; declaring it also stops the MF plugin injecting
 		// its own wildcard defaults (and warning about it).
 		server: { port: 3010, cors: { origin: '*' } },
+		// hmr on; liveReload stays at its DEFAULT (true): a failed hot update
+		// that rejects check() falls back to a full reload of the preview page.
+		// lazyCompilation stays off: this bundle runs INSIDE the preview shell's
+		// page (a different origin), so the lazy-compilation client's relative
+		// "active modules" XHR resolves against the SHELL's origin and 401s on
+		// the platform server — the first async chunk (Monaco) kills the dev
+		// session. Compile-on-request also made every served bundle one hash
+		// behind, so the dev client always saw itself as stale.
+		// client: same different-origin problem for the HMR websocket — without
+		// an explicit host the client derives its URL from the shell page's
+		// location and never reaches this dev server. '<port>' is rsbuild's
+		// runtime placeholder for the ACTUAL bound port.
+		dev: { hmr: true, lazyCompilation: false, client: { protocol: 'ws', host: 'localhost', port: '<port>' } as const },
 		source: {
 			entry: {
 				index: './src/index.ts',
@@ -102,9 +115,37 @@ export default defineConfig(() => {
 		},
 		tools: {
 			rspack: (config, { rspack }) => {
+				// react-refresh/babel (the HMR instrumenter) carries a GUARDED
+				// require('crypto') for signature hashing; the dev session passes
+				// emitFullSignatures so the path never runs — stub the builtin so
+				// the browser bundle resolves.
+				config.resolve ??= {};
+				(config.resolve as { fallback?: Record<string, false | string> }).fallback = {
+					...(config.resolve as { fallback?: Record<string, false | string> }).fallback,
+					crypto: false,
+				};
+				// typescript.js (lazy-loaded by appdev ATA) references
+				// __filename/__dirname in its Node-only sys layer, which never
+				// runs in the browser (ts.sys is undefined there). Opting into
+				// the mock explicitly keeps rspack's default substitution but
+				// silences its warn-variant on every build.
+				config.node = {
+					...config.node,
+					__filename: 'mock',
+					__dirname: 'mock',
+				};
 				config.module ??= {};
 				config.module.rules ??= [];
 				config.module.rules.push(
+					// typescript.js's resolveJSModule carries a require(<expression>)
+					// in that same Node-only sys layer — unreachable in the browser.
+					// Marking expression requires non-critical for this one module
+					// drops the "Critical dependency" warning every (re)build would
+					// otherwise forward into the preview console.
+					{
+						test: /node_modules[\\/]typescript[\\/]lib[\\/]typescript\.js$/,
+						parser: { exprContextCritical: false },
+					},
 					{
 						resourceQuery: /raw/,
 						type: 'asset/source',

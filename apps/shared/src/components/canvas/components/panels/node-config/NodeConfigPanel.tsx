@@ -45,13 +45,9 @@
 
 import { ReactElement, useRef, useState, useEffect, useMemo, useCallback, CSSProperties } from 'react';
 import { RJSFValidationError } from '@rjsf/utils';
-import Form from '@rjsf/core';
-import validator from '@rjsf/validator-ajv8';
 
 import { IFormData } from '../../../types';
 import { IServiceSchema } from '../../../types';
-import ThemedForm, { translate } from '../../rjsf-widgets/theme';
-import { getSecuredFormData, removeRequired, setUiSchemaProperty } from '../../../util/rjsf';
 import { Icon } from '../../../util/Icon';
 
 import { useFlowGraph } from '../../../context/FlowGraphContext';
@@ -63,6 +59,8 @@ import { getComponentFromNode } from '../../../util/graph';
 
 import { IAuthTokensRef, persistTokensFromFormData, mergeAuthTokensIntoFormData, persistOAuthTokensAndSave } from './authTokenHelpers';
 import { useOAuthCallbacks } from './useOAuthCallbacks';
+import NodeConfigForm, { validationProblemFromResponse } from './NodeConfigForm';
+import type { INodeConfigFormHandle } from './NodeConfigForm';
 import { DetailPanel } from 'shell';
 import { Button } from 'shell';
 import { Banner } from 'shell';
@@ -139,11 +137,6 @@ const styles = {
 		background: 'var(--rr-bg-input)',
 	} as CSSProperties,
 
-	// Env-var autocomplete hint under the form.
-	envHint: {
-		...commonStyles.textMuted,
-		marginTop: 12,
-	} as CSSProperties,
 };
 
 // =============================================================================
@@ -169,7 +162,7 @@ interface INodeConfigPanelProps {
  * @returns The DetailPanel drawer element.
  */
 export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps): ReactElement {
-	const formRef = useRef<Form | null>(null);
+	const formRef = useRef<INodeConfigFormHandle | null>(null);
 
 	// Persist auth tokens across RJSF re-renders (RJSF drops hidden fields)
 	const persistedAuthTokens = useRef<IAuthTokensRef>({});
@@ -217,11 +210,6 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	});
 	const [bgColor, setBgColor] = useState<string>((node.data.config?.bgColor as string) || 'var(--rr-annotation-bg-default)');
 	const [fgColor, setFgColor] = useState<string>((node.data.config?.fgColor as string) || 'var(--rr-text-primary)');
-
-	// --- Secured field transforms -------------------------------------------
-	const securedFormData = getSecuredFormData(formValues);
-	const _schema = useMemo(() => removeRequired(schema?.schema, securedFormData), [schema?.schema, securedFormData]);
-	const _uiSchema = useMemo(() => setUiSchemaProperty(schema?.ui, securedFormData, { 'ui:encrypted': true }), [schema?.ui, securedFormData]);
 
 	// --- Initialise state when a different node is selected -----------------
 	useEffect(() => {
@@ -296,50 +284,24 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pendingOAuthTokens, node.id, isLocked]);
 
-	// --- RJSF change handler ------------------------------------------------
+	// --- Form change handler --------------------------------------------------
 	const onChange = useCallback(
-		({ formData }: Partial<{ formData: IFormData }>) => {
+		(formData: IFormData) => {
 			// Merge auth tokens back in (RJSF drops hidden fields)
 			const previousConfig = node.data.config ?? {};
-			const merged = mergeAuthTokensIntoFormData(formData ?? {}, previousConfig, persistedAuthTokens);
+			const merged = mergeAuthTokensIntoFormData(formData, previousConfig, persistedAuthTokens);
 			setFormValues(merged);
 			setIsDirty(true);
 		},
 		[node.data.config]
 	);
 
-	// --- RJSF error handler -------------------------------------------------
+	// --- Form error handler ----------------------------------------------------
 	const onError = useCallback(
 		(errors: RJSFValidationError[]) => {
 			updateNode(node.id, { formDataErrors: errors, formDataValid: false });
 		},
 		[node.id, updateNode]
-	);
-
-	// --- Friendly auth error messages + env var bypass -----------------------
-	const transformErrors = useCallback(
-		(errors: RJSFValidationError[]) => {
-			return errors
-				.filter((error) => {
-					// Suppress validation errors for fields whose value is an env var reference
-					if (error.property) {
-						const fieldPath = error.property.replace(/^\./, '').split('.');
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const fieldValue = fieldPath.reduce((obj: any, key) => obj?.[key], formValues);
-						if (typeof fieldValue === 'string' && /^\$\{ROCKETRIDE_\w+\}$/.test(fieldValue)) {
-							return false;
-						}
-					}
-					return true;
-				})
-				.map((error) => {
-					if (['accessToken', 'refreshToken', 'userToken'].includes(error.params?.missingProperty ?? '')) {
-						error.stack = 'Authentication required';
-					}
-					return error;
-				});
-		},
-		[formValues]
 	);
 
 	// --- Save: details only (no schema) ------------------------------------
@@ -366,14 +328,14 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Save: full form with server validation ----------------------------
 	const onSubmit = useCallback(
-		async ({ formData }: Partial<{ formData: IFormData }>) => {
+		async (formData: IFormData) => {
 			setIsSubmitting(true);
 			try {
 				setValidationError(null);
 
 				// Merge auth tokens back in before saving
 				const previousConfig = node.data.config ?? {};
-				const merged = mergeAuthTokensIntoFormData(formData ?? {}, previousConfig, persistedAuthTokens);
+				const merged = mergeAuthTokensIntoFormData(formData, previousConfig, persistedAuthTokens);
 
 				// Write to node
 				const updatedNode = updateNode(node.id, {
@@ -393,25 +355,8 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 					};
 
 					const resp = await handleValidatePipeline(payload);
-
-					// Check top-level error
-					if (resp?.error) {
-						throw new Error(`Validation error: ${resp.error.message ?? ''}`);
-					}
-
-					// Check errors — may be at resp.errors or resp.data.errors
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					const respAny = resp as any;
-					const errors = respAny?.errors ?? resp?.data?.errors ?? [];
-					if (errors.length > 0) {
-						throw new Error(`Validation error: ${errors.map((e: { message?: string }) => e.message).join(' ')}`);
-					}
-
-					// Check warnings
-					const warnings = respAny?.warnings ?? resp?.data?.warnings ?? [];
-					if (warnings.length > 0) {
-						throw new Error(`Warning: ${warnings.map((w: { message?: string }) => w.message).join(' ')}`);
-					}
+					const problem = validationProblemFromResponse(resp);
+					if (problem) throw new Error(problem);
 				}
 
 				// Success
@@ -560,44 +505,25 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 					</>
 				)}
 
-				{/* Configuration form (RJSF) */}
+				{/* Configuration form — the context-free core (also embeddable by
+				    other apps, e.g. sql-ui's New Connection modal). */}
 				{schema && (
-					<ThemedForm
+					<NodeConfigForm
 						key={node.id}
 						ref={formRef}
-						schema={_schema}
-						uiSchema={{
-							..._uiSchema,
-							'ui:options': {
-								...(typeof (_uiSchema ?? {})['ui:options'] === 'object' ? (_uiSchema ?? {})['ui:options'] : {}),
-								hideRootTitle: true,
-							},
-							'ui:submitButtonOptions': { norender: true },
-						}}
+						provider={node.data.provider}
+						schema={schema}
 						formData={formValues}
-						formContext={{
-							formValues,
-							compactDescriptions: _uiSchema?.['ui:options']?.compactDescriptions === true,
-							hideFor: formValues.parameters?.authType,
-							googlePickerDeveloperKey,
-							googlePickerClientId,
-							nodeId: node.id,
-							provider: node.data.provider,
-							formDataErrors: node.data.formDataErrors,
-							envKeys,
-						}}
-						disabled={false}
-						validator={validator}
-						transformErrors={transformErrors}
-						onError={onError}
-						onSubmit={onSubmit}
 						onChange={onChange}
-						translateString={translate}
+						onSubmit={(formData) => { void onSubmit(formData); }}
+						onError={onError}
+						envKeys={envKeys}
+						nodeId={node.id}
+						formDataErrors={node.data.formDataErrors}
+						googlePickerDeveloperKey={googlePickerDeveloperKey}
+						googlePickerClientId={googlePickerClientId}
 					/>
 				)}
-
-				{/* Env-var autocomplete hint. */}
-				{envKeys.length > 0 && <div style={styles.envHint}>Type $&#123; in a field to pick from your variables</div>}
 			</DetailPanel>
 
 			{/* Footer-Cancel discard confirm (stock dialog, same copy as the

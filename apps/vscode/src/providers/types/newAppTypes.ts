@@ -13,26 +13,19 @@
  */
 
 import type { FrameOptions } from 'shared/modules/appdev/templates';
+// Deep .ts import (never the barrel — it drags the .tsx view layer into
+// the jsx-less extension-host program).
+import type { NewAppIdentity } from 'shared/modules/appdev/types';
 
 // =============================================================================
 // NEW APP WIZARD PROTOCOL
 // =============================================================================
 
-/**
- * Identity state sent from the extension host to the New App wizard.
- * Pushed on init and whenever the connection/account changes, so the wizard's
- * developer id chip and linkage name always reflect the live connection.
- */
-export interface NewAppIdentity {
-	/** The publisher slug applied to new apps — the org developer id, or 'local' when none. */
-	developerId: string;
-	/** Where the developer id came from: the organization profile, or the local default. */
-	source: 'organization' | 'default';
-	/** Whether a workspace folder is open (the scaffold needs a target). */
-	workspaceOpen: boolean;
-	/** Folder names already under apps/ — used for live collision validation. */
-	existingFolders: string[];
-}
+// The identity snapshot itself is the shared type — the extension host
+// pushes it on init and whenever the connection/account changes, so the
+// wizard's developer id chip and linkage name always reflect the live
+// connection.
+export type { NewAppIdentity } from 'shared/modules/appdev/types';
 
 /** All messages the extension host can send to the NewAppWebview. */
 export type NewAppHostToWebview =

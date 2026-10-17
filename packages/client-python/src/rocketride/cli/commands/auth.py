@@ -254,8 +254,15 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
     # step: exchange the code over a temporary DAP connection — the
     # credential string is the cd_-encoded PKCE triple; the server
     # consumes the Zitadel tokens and returns an rr_* session key
+    # clientId rides along: Zitadel binds the code to the CLI's own client
+    # registration, and the server-side exchange must name the same client.
     credential = encode_cd_credential(
-        {'code': grant['code'], 'verifier': verifier, 'redirectUri': grant['redirectUri']}
+        {
+            'code': grant['code'],
+            'verifier': verifier,
+            'redirectUri': grant['redirectUri'],
+            'clientId': DEFAULT_CLI_CLIENT_ID,
+        }
     )
     client = RocketRideClient(uri, auth=credential)
     try:

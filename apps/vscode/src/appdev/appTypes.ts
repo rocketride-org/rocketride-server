@@ -60,7 +60,7 @@ export type ShellVendorResult =
 let ensureShellPromise: Promise<ShellVendorResult> | null = null;
 
 /**
- * The workspace-install AUTHORITY — the WatchManager's generation-chained
+ * The workspace-install AUTHORITY — the DevSessionManager's generation-chained
  * single-flight, registered at its construction.
  *
  * While registered, every install this module needs routes through it, so
@@ -68,7 +68,7 @@ let ensureShellPromise: Promise<ShellVendorResult> | null = null;
  * the vendor pass spawning its OWN pnpm beside the watch/scaffold install
  * raced it on fresh workspaces, and concurrent pnpm runs on one root fail
  * with ERR_PNPM_EEXIST during symlinkAllModules (a half-linked virtual
- * store). An injected seam rather than an import: watchManager already
+ * store). An injected seam rather than an import: the dev-session manager already
  * imports from this module, so importing it back would be a cycle.
  */
 let workspaceInstallDelegate: (() => Promise<boolean>) | null = null;
@@ -494,7 +494,7 @@ function runRootInstall(workspaceRoot: string): Promise<void> {
 		// must fail the pass instead of hanging it forever. shell:true wraps
 		// pnpm in cmd.exe on Windows, so SIGKILL fells only the wrapper while
 		// pnpm keeps running (and holding locks) — taskkill /T fells the whole
-		// tree, same approach as watchManager.stop().
+		// tree, same approach as DevSessionManager.stop().
 		const timer = setTimeout(() => {
 			if (process.platform === 'win32' && proc.pid) {
 				spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
@@ -714,7 +714,7 @@ export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: st
 		}
 
 		// step: install at the workspace root — links the new tarball into
-		// every app that depends on it. Routed through the WatchManager's
+		// every app that depends on it. Routed through the DevSessionManager's
 		// single-flight whenever it is registered: a private pnpm spawn here
 		// ran BESIDE the watch/scaffold install on fresh workspaces, and two
 		// pnpm processes on one node_modules corrupt the virtual store

@@ -24,7 +24,7 @@
 // INPUT FIELD — GALLERY ENTRY
 // =============================================================================
 
-/** Gallery entry for the stock InputField text/select base. */
+/** Gallery entry for the stock InputField text-input base. */
 
 import React from 'react';
 import { InputField } from 'shell';

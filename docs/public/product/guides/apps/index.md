@@ -22,9 +22,10 @@ A complete guide for developers building micro-frontend applications for the Roc
 10. [The Virtual File System (IVirtualFileSystem)](#the-virtual-file-system-ivirtualfilesystem)
 11. [DocExplorer: File Tree Component](#docexplorer-file-tree-component)
 12. [DocTabs: Tab Bar Component](#doctabs-tab-bar-component)
-13. [Cross-App Component Loading](#cross-app-component-loading)
-14. [Theming](#theming)
-15. [Build Configuration](#build-configuration)
+13. [DesktopView: The Shared Desktop Page](#desktopview-the-shared-desktop-page)
+14. [Cross-App Component Loading](#cross-app-component-loading)
+15. [Theming](#theming)
+16. [Build Configuration](#build-configuration)
 
 ---
 
@@ -266,6 +267,8 @@ Settings are:
 - Persisted to `.workspace/settings.json`
 - Available to your app via `useShellApiConfig()`, access as `config['mycompany.myApp.apiKey']`
 
+The shell contributes its own **General** section (keys under `rocketride.general.*`), which always appears first in the Settings overlay. Its keys are reserved — an app redeclaring one is ignored. `rocketride.general.sidebar` (`default` | `vscode` | `cursor` | `rocketride`, default `default`) picks the sidebar layout for every app: `default` defers to each app's declared `sidebarMode`, any other choice overrides it. `vscode`/`cursor` take effect only on apps that declare `sidebarViews`; apps with a classic `sidebar` node keep the classic column.
+
 ---
 
 ## The App Descriptor
@@ -340,13 +343,29 @@ interface ShellAppProps {
 
 | Zone | Owner | Content |
 |------|-------|---------|
-| **Sidebar** | Your `app` component's layout (`AppLayout`) | App switcher header, your sidebar content, theme/account/settings footer |
+| **Sidebar** | Your `app` component's layout (`AppLayout`) | Classic column for a `sidebar` node; activity rail + panel when the app declares `sidebarViews` (app icon and name in the panel header, your content in the panel, account footer on the rail) |
 | **Client Area** | Your `app` component | Whatever your app renders |
 | **Debug Panel** | Shell (ALT+D toggle) | Live event log, postMessage traffic |
 | **Status Bar** | Shell | Connection status, app name, ready state |
 | **Overlays** | Shell | Account, Billing, Settings (triggered from sidebar footer) |
 
 If your app's layout renders no sidebar, the client area gets the full window width.
+
+**Sidebar chrome.** The chrome follows the declaration. A plain
+`sidebar={content}` node renders the classic single column (which iconifies
+when collapsed). Declaring `sidebarViews` (one entry per rail icon; see
+`SidebarViewContainer`) unlocks the VS Code-style frame instead: a fixed
+activity rail beside a resizable panel holding your content. There,
+collapsing closes the panel; the rail and account footer never disappear,
+and your content is never asked to render an iconified form of itself. An
+existing menu can be projected onto the rail with `viewsFromMenu(menu)` —
+an explicit opt-in, never applied automatically. `sidebarMode: 'rocketride'`
+opts a view-declaring app back into the classic column; compact (mobile)
+widths always render a drawer. The user's **General > Sidebar** setting
+(`rocketride.general.sidebar`) overrides `sidebarMode` whenever it is set to
+anything other than `default`; on `default` the app's declaration applies.
+The `vscode`/`cursor` choices apply only to apps that declare `sidebarViews`
+— a classic sidebar is never shoehorned onto the rail.
 
 ---
 
@@ -807,6 +826,63 @@ Features:
 - Close button (on hover)
 - Active tab highlight
 - Calls `docs.setActiveEditor()` / `docs.closeEditor()` on the provided instance
+
+---
+
+## DesktopView: The Shared Desktop Page
+
+`DesktopView` renders the RocketRide desktop content — a time-aware greeting, a rotating quote, and the responsive app-card grid (launch, version switcher, remove/unsubscribe, subscription badges). It is the one desktop implementation shared by the OSS and SaaS home apps; a launcher app renders it and supplies only the app list and chrome (nav, footer, padding).
+
+```tsx
+import { DesktopView } from 'shell';     // or getShellApi().DesktopView
+
+<DesktopView
+	apps={apps}                            // AppManifestEntry[], pre-filtered/sorted
+	style={{ padding: '60px 40px 80px' }}  // host-owned spacing
+/>
+```
+
+Server interactions (version rails, session overrides, desktop remove, unsubscribe, subscription status) are built in — the component talks to the shell's connection itself. Optional props adjust behavior:
+
+| Prop | Purpose |
+|---|---|
+| `onLaunch` | Replace the default launch (`shell:switchApp`) |
+| `greetingName` / `greetingOverride` | Personalize or pin the greeting |
+| `showQuote` | Hide the rotating quote column (default shown) |
+| `allowRemove` | Disable the hover X + remove/unsubscribe popover |
+| `resolveIcon` | Theme-adaptive icon override per app |
+| `adapter` | Override the server operations (`DesktopAdapter`) |
+| `popoverBoundarySelector` | Host sticky-header selector for drop-list placement |
+| `emptyMessage` | Zero-apps text |
+
+Types: `DesktopViewProps`, `DesktopAdapter`, `DesktopQuote`, `DesktopVersionRow`, `DesktopVersionOverride`. Animations (card cascade, greeting reveal, icon fade) honor `prefers-reduced-motion`. Theming uses the standard `--rr-*` CSS variables.
+
+### Dev Tools
+
+An app can declare itself a **dev tool**: a UI that host workbenches (the VS Code extension, rocket-ui) mount directly as a component — no shell boot, no iframe. Declare the manifest category and the descriptor mount points:
+
+```jsonc
+// package.json → appManifest
+"categories": ["devTool"]
+```
+
+```ts
+// AppDescriptor
+const MY_TOOL: AppDescriptor = {
+	// ...existing fields
+	devToolFrame: MyToolSurface,      // the tool's main surface
+	devToolSidebar: MyToolSidebar,    // optional panel shown in the host's sidebar
+};
+```
+
+Both components receive `DevToolProps`:
+
+| Prop | Purpose |
+|---|---|
+| `client` | A live, authenticated RocketRide client owned by the host |
+| `peer` | Ephemeral channel to the tool's other mount (`post` / `subscribe`) — frame and sidebar may live in isolated documents, so durable state belongs on the server via `client`; `peer` is for UI coordination only |
+
+There is no theme prop: dev-tool components are themed by the ambient `--rr-*` CSS custom properties of the document they mount into (the active shell theme in a browser; the editor-variable mapping in VS Code) — style exclusively with `var(--rr-*)` tokens. The tab icon hosts show comes from the manifest `icon`; the descriptor is loaded only when the tool is opened.
 
 ---
 

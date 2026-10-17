@@ -113,9 +113,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		commonStyles: {},
 	},
 	'explorer': {
-		direct: ['--rr-bg-input', '--rr-bg-list-active', '--rr-bg-list-hover', '--rr-bg-paper', '--rr-bg-surface-alt', '--rr-bg-toolbar-hover', '--rr-border', '--rr-brand', '--rr-color-error', '--rr-color-success', '--rr-color-warning', '--rr-fg-list-active', '--rr-font-family', '--rr-text-primary', '--rr-text-secondary'],
+		direct: ['--rr-accent', '--rr-bg-input', '--rr-bg-list-active', '--rr-bg-list-hover', '--rr-bg-paper', '--rr-bg-surface-alt', '--rr-bg-toolbar-hover', '--rr-border', '--rr-brand', '--rr-color-error', '--rr-color-success', '--rr-color-warning', '--rr-fg-list-active', '--rr-font-family', '--rr-scm-added', '--rr-scm-deleted', '--rr-scm-modified', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {
 			labelUppercase: ['--rr-text-secondary'],
+			paneHeaderButton: ['--rr-text-secondary'],
 			textMuted: ['--rr-text-secondary'],
 		},
 	},
@@ -165,7 +166,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		commonStyles: {},
 	},
 	'sidebar-footer': {
-		direct: ['--rr-bg-scrollbar-thumb', '--rr-bg-surface-alt', '--rr-brand', '--rr-color-error', '--rr-color-success', '--rr-text-primary', '--rr-text-secondary'],
+		direct: ['--rr-bg-avatar', '--rr-bg-scrollbar-thumb', '--rr-bg-surface-alt', '--rr-brand', '--rr-color-error', '--rr-color-success', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {
 			divider: ['--rr-border'],
 			popupMenu: ['--rr-bg-paper', '--rr-border', '--rr-shadow-widget'],
@@ -180,7 +181,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		commonStyles: {},
 	},
 	'tab-control': {
-		direct: ['--rr-bg-scrollbar-thumb', '--rr-bg-widget-header', '--rr-border', '--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-scrollbar-thumb', '--rr-text-primary', '--rr-text-secondary'],
+		direct: ['--rr-bg-paper', '--rr-bg-scrollbar-thumb', '--rr-bg-widget-header', '--rr-border', '--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-scrollbar-thumb', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {},
 	},
 	'toggle-group': {

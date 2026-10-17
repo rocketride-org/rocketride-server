@@ -36,12 +36,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell';
+import type { ShellAppProps, DevToolProps } from 'shell';
 import { commonStyles } from 'shell';
 import { useShellConnection, useWorkspace, DocTabs, DocSplitLayout, AppLayout, EmptyState, BxFolderOpen } from 'shell';
 import type { Documents } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
-import { createStoreVfs, isFileLoadError } from './store';
+import { createStoreVfs, isFileLoadError, isLiveBlobUrl, forgetBlobUrl } from './store';
 import { getMediaInfo } from './mediaTypes';
 import {
 	AudioViewer, BinaryViewer, DocxViewer, HexViewer, ImageViewer,
@@ -50,6 +50,7 @@ import {
 } from './viewers';
 import type { ViewerId } from './viewerRegistry';
 import ExplorerSidebar from './ExplorerSidebar';
+import { attachExplorerPeerHost } from './explorerBridge';
 
 // =============================================================================
 // BLOB URL REF-COUNTING
@@ -69,6 +70,10 @@ function releaseBlobUrl(url: string): void {
 	if (count <= 0) {
 		blobRefCounts.delete(url);
 		URL.revokeObjectURL(url);
+		// A document may still hold this string as content — forgetting it
+		// makes isLiveBlobUrl false, so the next pane re-reads instead of
+		// rendering a dead reference.
+		forgetBlobUrl(url);
 	} else {
 		blobRefCounts.set(url, count);
 	}
@@ -154,6 +159,40 @@ const ExplorerApp: React.FC<ShellAppProps> = () => {
 			<ExplorerAppReady docs={getDocs()!} />
 		</AppLayout>
 	);
+};
+
+// =============================================================================
+// DEV-TOOL SURFACE — the explorer without shell chrome
+// =============================================================================
+
+/**
+ * Dev-tool surface — the editor groups without the shell AppLayout chrome,
+ * for host workbenches that mount the tool directly (the VS Code dev-tool
+ * panel). The file tree lives in the HOST's sidebar (devToolSidebar below);
+ * its opens/renames/moves arrive over the peer channel and are applied to
+ * this document's Documents singleton. No workspace binding: tab layout is
+ * session-local here.
+ */
+export const ExplorerDevTool: React.FC<DevToolProps> = ({ peer }) => {
+	const { client } = useShellConnection();
+	const [ready, setReady] = useState(false);
+
+	useEffect(() => {
+		if (!client) return;
+		createDocs(createStoreVfs(client));
+		setReady(true);
+		return () => { destroyDocs(); setReady(false); };
+	}, [client]);
+
+	// Frame side of the tree's peer protocol — apply incoming document
+	// actions, publish the active path for the tree highlight.
+	useEffect(() => {
+		if (!ready) return;
+		return attachExplorerPeerHost(peer);
+	}, [ready, peer]);
+
+	if (!ready) return <div style={styles.welcome}>Initialising...</div>;
+	return <ExplorerAppReady docs={getDocs()!} />;
 };
 
 // =============================================================================
@@ -252,10 +291,15 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 	const { category, contentMode } = getMediaInfo(uri);
 	const viewerOverride = editor?.viewState?.viewerId as ViewerId | undefined;
 
-	// Blob documents store a local blob: URL as content.  These aren't
-	// persisted, so re-read from the server when content is missing.
+	// Blob documents store a local blob: URL as content — but the Documents
+	// store can hand back content that OUTLIVED the session that minted it
+	// (a dead blob: URL after a reload, or raw text from before the media
+	// table classified this extension as blob). Anything that is not a
+	// this-session blob URL and not a load-error sentinel is stale: re-read
+	// it from the server. A pending load (content === '') re-reads too,
+	// exactly as before.
 	useEffect(() => {
-		if (contentMode === 'blob' && doc && !doc.content) {
+		if (contentMode === 'blob' && doc && !isLiveBlobUrl(doc.content) && !isFileLoadError(doc.content)) {
 			docs.revertDocument(uri);
 		}
 	}, [contentMode, doc, uri, docs]);
@@ -293,7 +337,11 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 	// its message so viewers can show the error instead of hanging on "Loading...".
 	// Genuine pending loads keep content === '' (loadError undefined) → "Loading...".
 	const loadError = isFileLoadError(doc.content) ? doc.content.message : undefined;
-	const content = typeof doc.content === 'string' ? doc.content : '';
+	// Blob viewers only ever see a LIVE blob URL — stale content (see the
+	// revert effect above) reads as "still loading" while the re-read runs.
+	const content = typeof doc.content === 'string'
+		? (contentMode === 'blob' && doc.content && !isLiveBlobUrl(doc.content) ? '' : doc.content)
+		: '';
 
 	// --- Viewer override: if the user chose "Open with…", use that viewer ---
 

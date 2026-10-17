@@ -413,12 +413,14 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 	// embedded dev preview — its token must live in frame-local memory
 	// (sessionStorage is shared between same-origin sibling iframes in one
 	// top-level browsing context, so it cannot isolate panels either). The
-	// gate cache is reset so it recomputes from this staged environment (the
-	// test runner builds with NODE_ENV=production, so the URL flag is the
-	// live path).
+	// parent shares this page's origin — the web App Builder flavor — which
+	// is the case where the /apps cookie prime must be suppressed. The gate
+	// cache is reset so it recomputes from this staged environment (the test
+	// runner builds with NODE_ENV=production, so the URL flag is the live
+	// path).
 	Object.defineProperty(globalThis, 'window', {
 		configurable: true,
-		value: { self: {}, top: {}, location: { search: '?rrdev=1' } },
+		value: { self: {}, top: {}, parent: { location: { origin: 'https://cloud.test' } }, location: { search: '?rrdev=1', origin: 'https://cloud.test' } },
 	});
 	resetDevGateForTests();
 	Object.defineProperty(globalThis, 'localStorage', {
@@ -456,9 +458,9 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 		// session through one.
 		assert.deepEqual(localTouches, []);
 		assert.deepEqual(sessionTouches, []);
-		// And the HOST-WIDE /apps cookie was never primed: the cookie jar is
-		// shared by every same-origin frame, so a panel's injected session
-		// must not replace the embedding user's bundle credentials.
+		// And the HOST-WIDE /apps cookie was never primed: a SAME-ORIGIN
+		// embed shares the embedding user's cookie jar, so a panel's
+		// injected session must not replace their bundle credentials.
 		assert.deepEqual(fetchCalls, []);
 	} finally {
 		resetDevGateForTests();
@@ -468,6 +470,45 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 		else delete (globalThis as { localStorage?: Storage }).localStorage;
 		if (originalSessionStorage) Object.defineProperty(globalThis, 'sessionStorage', originalSessionStorage);
 		else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
+		else delete (globalThis as { fetch?: typeof fetch }).fetch;
+	}
+});
+
+test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+	const fetchCalls: string[] = [];
+
+	// The VS Code flavor: the preview is framed by the webview (whose
+	// location is unreadable — cross-origin access throws), and the page is
+	// served from its app's dev-proxy origin with a PRIVATE cookie jar.
+	// Published app bundles load through that proxy's /apps routes, so the
+	// prime MUST fire here (the token itself stays frame-local).
+	const hostileParent = {};
+	Object.defineProperty(hostileParent, 'location', {
+		get() { throw new Error('cross-origin'); },
+	});
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { self: {}, top: {}, parent: hostileParent, location: { search: '?rrdev=1', origin: 'http://localhost:3013' } },
+	});
+	resetDevGateForTests();
+	Object.defineProperty(globalThis, 'fetch', {
+		configurable: true,
+		value: (url: string) => { fetchCalls.push(url); return Promise.resolve({}); },
+	});
+
+	try {
+		const { manager } = createTestManager();
+		manager.saveToken = ConnectionManager.prototype.saveToken;
+		manager.saveToken('rr_proxy-token');
+		assert.equal(manager.loadToken(), 'rr_proxy-token');
+		assert.deepEqual(fetchCalls, ['/apps/session']);
+	} finally {
+		resetDevGateForTests();
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
 		if (originalFetch) Object.defineProperty(globalThis, 'fetch', originalFetch);
 		else delete (globalThis as { fetch?: typeof fetch }).fetch;
 	}

@@ -230,6 +230,10 @@ class AppsMixin(DAPClient):
         body = await self.call('rrext_deploy_app', subcommand='where', appId=app_id)
         return body.get('pins', [])
 
+    # (register_dev is RETIRED: dev previews are LOCAL-FIRST - the app's dev
+    # server proxies the engine and preview pages register the app
+    # client-side; the server holds no dev state.)
+
     # (app_entry is RETIRED: versions serve from stable constructed URLs —
     # /apps/<appId>/v<N>/remoteEntry.js — with entitlement enforced per
     # request by the serve route, so there is nothing to mint.)

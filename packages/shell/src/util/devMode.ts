@@ -40,9 +40,13 @@
 
 import React from 'react';
 import * as ReactDom from 'react-dom';
+import * as ReactJsxRuntime from 'react/jsx-runtime';
+import * as ReactJsxDevRuntime from 'react/jsx-dev-runtime';
+import * as rocketride from 'rocketride';
 import { ConnectionManager } from '../connection/connection';
 import { isDevHooksEnabled, isEmbeddedDevShell } from './devGate';
-import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote } from './appLoader';
+import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote, failDevRemoteWait } from './appLoader';
+import type { LocalAppMeta } from './appLoader';
 
 // The gate lives in devGate.ts (a leaf module — the ConnectionManager needs
 // it too, and this module imports the ConnectionManager); re-exported here so
@@ -58,15 +62,25 @@ export { isDevHooksEnabled };
  * Consumed by same-origin embedders via iframe.contentWindow.__rrShellDev.
  */
 export interface RrShellDevApi {
-	/** API version — bump on breaking changes so embedders can feature-gate. */
-	version: 1;
+	/**
+	 * API version — bump on additions/breaking changes so embedders can
+	 * feature-gate. v2: share scope grew 'react/jsx-runtime',
+	 * 'react/jsx-dev-runtime' (automatic-JSX dev links), and 'rocketride'
+	 * (the SDK singleton, matching the MF share scope). v3: local-first dev —
+	 * rrdev:registerRemote accepts a `manifest` payload (workspace
+	 * package.json appManifest) and URL-convention self-registration exists.
+	 */
+	version: 3;
 	/** Registers a local descriptor loader for an app (see appLoader). */
 	registerLocalApp: typeof registerLocalApp;
 	/** Removes a local descriptor loader (see appLoader). */
 	unregisterLocalApp: typeof unregisterLocalApp;
 	/** Evicts an app's cached descriptor; active apps reload + remount. */
 	invalidateApp: typeof invalidateAppDescriptor;
-	/** Returns the host's live shared modules (react, react-dom, shell, shared). */
+	/**
+	 * Returns the host's live shared modules (react, react-dom, the jsx
+	 * runtimes, shell, rocketride).
+	 */
 	getShareScope: () => Record<string, unknown> | undefined;
 }
 
@@ -183,16 +197,22 @@ export async function installDevHooks(): Promise<void> {
 	const shellUi = await import('../index');
 
 	// Anchor the share scope on globalThis (see DEV_SHARE_SCOPE_KEY note).
+	// The jsx runtimes ride along so automatic-JSX dev links resolve them to
+	// the shell's copies (whose internal 'react' is the shared singleton), and
+	// 'rocketride' hands out the SAME SDK singleton the MF share scope serves.
 	const scope: Record<string, unknown> = {
 		'react': React,
 		'react-dom': ReactDom,
+		'react/jsx-runtime': ReactJsxRuntime,
+		'react/jsx-dev-runtime': ReactJsxDevRuntime,
 		'shell': shellUi,
+		'rocketride': rocketride,
 	};
 	Reflect.set(globalThis, DEV_SHARE_SCOPE_KEY, scope);
 
 	// Expose the dev API for same-origin embedders and the browser console.
 	window.__rrShellDev = {
-		version: 1,
+		version: 3,
 		registerLocalApp,
 		unregisterLocalApp,
 		invalidateApp: invalidateAppDescriptor,
@@ -206,6 +226,39 @@ export async function installDevHooks(): Promise<void> {
 	installConsoleForwarding();
 
 	// Embedded previews: accept dev-remote registrations and session state
+	/**
+	 * Maps a posted workspace manifest (appManifest + top-level version) to
+	 * the local registration meta. The icon stays a PATH — it is resolved
+	 * under the app's dev prefix, where the proxy serves the app folder.
+	 *
+	 * @param manifest - The posted manifest payload, when any.
+	 * @returns Registration meta, or undefined when nothing was posted.
+	 */
+	const metaFromManifest = (manifest?: Record<string, unknown>): LocalAppMeta | undefined => {
+		if (!manifest || typeof manifest !== 'object') return undefined;
+		const appId = typeof manifest.id === 'string' ? manifest.id : '';
+		const contributes = manifest.contributes;
+		const configuration = contributes && typeof contributes === 'object' && !Array.isArray(contributes)
+			? (contributes as Record<string, unknown>).configuration
+			: manifest.configuration;
+		// data:/absolute icons pass through verbatim (the VSCode watcher now
+		// INLINES the workspace icon as a data URI); only bare relative paths
+		// still map under the dev prefix as a legacy fallback.
+		const iconPath = typeof manifest.icon === 'string' && manifest.icon && appId
+			? (/^(data:|https?:)/i.test(manifest.icon)
+				? manifest.icon
+				: `/apps/${encodeURIComponent(appId)}/dev/${manifest.icon.replace(/^\.\//, '')}`)
+			: undefined;
+		return {
+			name: typeof manifest.name === 'string' ? manifest.name : undefined,
+			description: typeof manifest.description === 'string' ? manifest.description : undefined,
+			version: typeof manifest.version === 'string' ? manifest.version : undefined,
+			icon: iconPath,
+			configuration: configuration as LocalAppMeta['configuration'],
+			categories: Array.isArray(manifest.categories) ? (manifest.categories as string[]) : undefined,
+		};
+	};
+
 	// from the embedder. The App Builder panel KNOWS its rsbuild dev server's
 	// address — it posts it here and this shell wires the remote itself.
 	// rrdev:auth carries the embedder's DEFINITIVE session state: a token to
@@ -213,13 +266,20 @@ export async function installDevHooks(): Promise<void> {
 	// (signed out, or Inherit Auth off). One message covers grant and revoke —
 	// there is no separate clear message.
 	window.addEventListener('message', (e: MessageEvent) => {
-		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string } | undefined;
+		// step: registrations and session state are only ever legitimate from
+		// the embedding parent — refuse anything else (no origin allowlist is
+		// possible: the parent is a vscode-webview:// or app-builder origin)
+		if (e.source !== window.parent) return;
+		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string; manifest?: Record<string, unknown> } | undefined;
 		if (data?.type === 'rrdev:registerRemote') {
 			if (!data.appId || !data.moduleId || !data.entry) {
 				console.warn(`[devMode] ignoring rrdev:registerRemote without appId/moduleId/entry: ${JSON.stringify({ appId: data.appId, moduleId: data.moduleId, entry: data.entry })}`);
 				return;
 			}
-			registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry);
+			// step: the optional manifest is the WORKSPACE package.json's
+			// appManifest — in dev the workspace is the truth for metadata
+			// (name, icon path, configuration), not the server registry
+			registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry, metaFromManifest(data.manifest));
 		} else if (data?.type === 'rrdev:auth' && typeof data.token === 'string') {
 			const cm = ConnectionManager.getInstance();
 			// loadToken() yields '' when absent, so '' compares as "no session"
@@ -246,6 +306,54 @@ export async function installDevHooks(): Promise<void> {
 			}
 		}
 	});
+
+	// URL-CONVENTION SELF-REGISTRATION (local-first dev): a tab opened with
+	// ?appid=X&rrdev=1 on a dev origin needs no message channel — the dev
+	// server's proxy serves the app's workspace files at the conventional
+	// /apps/X/dev/ prefix, so the shell registers the app from its own URL.
+	// External browser tabs and F5 sessions work with no panel attached;
+	// the embedded preview gets the same registration as a boot-time
+	// fallback (the parent's push remains the live-update channel). In a
+	// NON-proxy session (cloud with rrdev=1) the fetch 404s and this is a
+	// silent no-op by design.
+	void (async () => {
+		const params = new URLSearchParams(window.location.search);
+		const appId = params.get('appid');
+		if (!appId || params.get('rrdev') !== '1') return;
+		// Failure settles the TOP-LEVEL page's dev-remote hold (no embedder
+		// exists to register instead). A FRAMED page's fetch failing is the
+		// NORMAL web-builder case (blob injection, no /dev prefix) — there the
+		// parent's push is the registration channel, so never fail the wait.
+		const failHold = (reason: string): void => {
+			if (window.self === window.top) failDevRemoteWait(appId, reason);
+		};
+		try {
+			const prefix = `/apps/${encodeURIComponent(appId)}/dev`;
+			const res = await fetch(`${prefix}/package.json`, { cache: 'no-store' });
+			if (!res.ok) {
+				failHold(`No dev app at ${prefix} (HTTP ${res.status}) — is this the app's dev-proxy origin?`);
+				return;
+			}
+			const pkg = (await res.json()) as Record<string, unknown>;
+			const manifest = (pkg.appManifest ?? {}) as Record<string, unknown>;
+			if (manifest.id !== appId) {
+				failHold(`Dev app at ${prefix} is "${String(manifest.id)}", not "${appId}"`);
+				return;
+			}
+			const moduleId = typeof manifest.moduleId === 'string' && manifest.moduleId
+				? manifest.moduleId
+				: appId.replace(/[^a-zA-Z0-9_$]/g, '_');
+			const name = typeof manifest.name === 'string' && manifest.name ? manifest.name : appId;
+			console.log(`[devMode] self-registering "${appId}" from ${prefix} (URL convention)`);
+			registerDevRemote(appId, moduleId, name, `${prefix}/remoteEntry.js`, metaFromManifest({
+				...manifest,
+				version: typeof pkg.version === 'string' ? pkg.version : undefined,
+			}));
+		} catch (err) {
+			/* not a dev-proxy origin — nothing to register */
+			failHold(`Dev manifest fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	})();
 
 	// Tell a parent embedder the hooks are ready so it doesn't have to poll.
 	try {

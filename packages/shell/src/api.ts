@@ -100,7 +100,10 @@ import { Documents } from './components/docs/Documents';
 // The no-op virtual filesystem — Documents' companion for apps that mount
 // document workspaces without a backing store (demonstrated third-party
 // need; entered the surface via the graduation pipeline).
-import { NOOP_VFS, Explorer } from './modules/explorer';
+import { NOOP_VFS, Explorer, CachedVfs } from './modules/explorer';
+// The caching VFS decorator's standalone types (entry inventory + overlay
+// producer contract) — append-only additions alongside IVirtualFileSystem.
+export type { VfsEntry, VfsOverlay, CachedVfsOptions } from './modules/explorer';
 // Explorer's contract types under their NATIVE names (the Doc* aliases the
 // document system exports remain; both names refer to the same types —
 // append-only). Standalone apps cannot bundle the library, so a
@@ -128,6 +131,7 @@ import { NavButton } from './components/layout/Sidebar';
 // shell-internal chrome.
 import { ConfirmDialog } from './components/modal/ConfirmDialog';
 import { PopupRow } from './components/PopupRow';
+import { AnchoredPopup } from './components/AnchoredPopup';
 
 // Shell-owned overlay pages
 import AccountProvider from './providers/AccountProvider';
@@ -154,12 +158,20 @@ import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxSt
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types
-export type { ShellAppProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+export type { ShellAppProps, AppDescriptor, DevToolProps, DevToolClient, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+
+// Tool channel — the typed state/event surface between a tool's controller
+// (devToolSidebar) and its document views (devToolFrame). Hosts construct it
+// over the peer transport; tools receive it as DevToolProps.channel.
+export { createToolChannel, asToolStateMessage, asToolEventMessage } from './components/workspace/toolChannel';
+export type { ToolChannel, ToolChannelUnsubscribe, IToolStateMessage, IToolEventMessage } from './components/workspace/toolChannel';
 
 // Top-level shell + sidebar component prop types
 export type { ShellProps } from './components/layout/Shell';
 export type { SidebarProps, NavButtonProps } from './components/layout/Sidebar';
 export type { IConfirmDialogProps as ConfirmDialogProps } from './components/modal/ConfirmDialog';
+export type { AnchoredPopupProps } from './components/AnchoredPopup';
+export type { FixedPopupOptions } from './hooks/useFixedPopupPosition';
 
 // Workspace context interface + provider props
 export type { IWorkspaceContext, IWorkspaceProviderProps } from './components/workspace/WorkspaceContext';
@@ -191,6 +203,8 @@ export type { AuthUser } from './hooks/useAuthUser';
 
 // Event map + connection status/mode/auth-provider types (from shared)
 export type { ShellConnectionEventMap as ShellEventMap } from './types/shell';
+// The shell:notify payload union (platform notification bus)
+export type { ShellNotification } from './types/shell';
 export type { ConnectionStatus, ConnectionMode, IAuthProvider } from './types/connection';
 
 // Iframe protocol message types
@@ -199,7 +213,7 @@ export type { ShellToIframeMsg, IframeToShellMsg, ShellInitMsg } from './util/if
 // Document component library standalone types.
 // `Documents` itself is captured as a constructor via `shellApi.Documents`;
 // these are its standalone helper/model types that apps import directly.
-export type { Editor, WorkspaceBinding, Document, EditorGroup, SplitOrientation, DocumentsState, LayoutNode, LayoutLeaf, LayoutSplit } from './components/docs/Documents';
+export type { Editor, WorkspaceBinding, Document, EditorGroup, SplitOrientation, SplitPosition, EditorDragSession, DocumentsState, LayoutNode, LayoutLeaf, LayoutSplit } from './components/docs/Documents';
 export type { DocTabsProps } from './components/docs/DocTabs';
 export type { DocSplitLayoutProps } from './components/docs/DocSplitLayout';
 export type { DocExplorerProps, DocExplorerConfig, DocEntry, DocEntryChild, DocEntryStatus } from './components/docs/DocExplorer';
@@ -246,10 +260,12 @@ import { DetailPanel } from './components/detail-panel/DetailPanel';
 import { PanelTabBody } from './components/detail-panel/PanelTabBody';
 import { TabControl } from './components/tab-control/TabControl';
 import { TabPanel } from './components/tab-panel/TabPanel';
-import { Modal, CLOSE_GLYPH } from './components/modal/Modal';
+import { Modal, CLOSE_GLYPH, acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from './components/modal/Modal';
 import { SaveFileDialog } from './components/save-file-dialog/SaveFileDialog';
 import { SidebarMenu } from './components/sidebar-menu/SidebarMenu';
 import { SidebarCollapsedProvider, SidebarCollapsedGate, useSidebarCollapsed } from './components/sidebar-menu/SidebarCollapsedContext';
+import { SidebarActiveViewProvider, useSidebarActiveView } from './components/sidebar-menu/SidebarActiveViewContext';
+import { viewsFromMenu, menuSectionEntries } from './components/sidebar-menu/viewsFromMenu';
 import { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
 import { DataGrid } from './components/data-grid/DataGrid';
 import { CardDataGrid } from './components/data-grid/CardDataGrid';
@@ -283,9 +299,19 @@ export {
 	ToggleGroup, Chip, ChipAdd, DropZone, Card, MiniCard, MiniContainer,
 	Section, LabelValue, ContentHeader, RocketRideMark,
 	DetailPanel, PanelTabBody, TabControl, TabPanel, Modal, CLOSE_GLYPH,
+	// The overlay-layer stack (Escape/scroll coordination across stacked
+	// overlays) — public so shared surfaces coordinate with shell modals
+	// through the barrel; the tgz's exports map closes every deep path.
+	acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer,
 	SaveFileDialog,
 	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
 	useSidebarCollapsed, SidebarFooter,
+	// Workbench sidebar modes ('vscode'/'cursor'): the active-view channel
+	// shared sidebar content reads when the shell rail owns the selection.
+	SidebarActiveViewProvider, useSidebarActiveView,
+	// Opt-in projection of a menu-shaped sidebar onto the activity rail
+	// (sections -> rail views); never applied automatically by the shell.
+	viewsFromMenu, menuSectionEntries,
 	DataGrid, CardDataGrid, FilterStrip, createActionsColumn, autoFormatter,
 	badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch,
 	createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET,
@@ -303,7 +329,7 @@ export {
 // concrete module paths (generated from the retired barrel's map).
 export type { IButtonProps, ButtonVariant } from './components/button/Button';
 export type { IStatusBadgeProps, IStatusDotProps, StatusVariant } from './components/status-badge/StatusBadge';
-export type { IChatViewProps, ChatMessage, UseChatMessagesOptions } from './components/chat/types';
+export type { IChatViewProps, ChatMessage, UseChatMessagesOptions, TextResult } from './components/chat/types';
 export type { IConnectionCardProps, IConnectionCardAddProps } from './components/connection-card/ConnectionCard';
 export type { IConnectionManagerViewProps, IConnectionCardDisplay, IConnectionFormField } from './components/connection-manager/ConnectionManagerView';
 export type { IEmptyStateProps } from './components/empty-state/EmptyState';
@@ -326,6 +352,10 @@ export type { IConfirmDialogProps } from './components/modal/ConfirmDialog';
 export type { ISaveFileDialogProps, ISaveFileType } from './components/save-file-dialog/SaveFileDialog';
 export type { ISidebarMenuProps } from './components/sidebar-menu/SidebarMenu';
 export type { ISidebarCollapsedProviderProps, ISidebarCollapsedGateProps } from './components/sidebar-menu/SidebarCollapsedContext';
+export type { SidebarActiveView, ISidebarActiveViewProviderProps } from './components/sidebar-menu/SidebarActiveViewContext';
+// Sidebar chrome declaration types (AppLayout's sidebarMode/sidebarViews).
+export type { ShellSidebarMode, SidebarViewContainer } from './types/sidebarChrome';
+export type { ViewsFromMenuOptions } from './components/sidebar-menu/viewsFromMenu';
 export type { SidebarFooterProps, SidebarFooterMenuItem } from './components/sidebar-footer/SidebarFooter';
 export type { IDataGridProps, IDataGridHandle, IDataGridPage, IDataGridPageRequest } from './components/data-grid/DataGrid';
 export type { ICardDataGridProps } from './components/data-grid/CardDataGrid';
@@ -334,7 +364,7 @@ export type { IGridFilterDef, IGridFilterOption, IFilterStripProps } from './com
 export type { IDataGridPersistence, DataGridLayout } from './components/data-grid/persistence';
 export type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail } from './components/data-grid/gridConfigChannel';
 export type { Announcement } from './hooks/useAnnouncements';
-export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from './modules/server';
+export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse, MonitorPageId } from './modules/server';
 // =============================================================================
 // PLATFORM VIEW MODULES — the shared partition's shell half, now in-package
 // =============================================================================
@@ -349,6 +379,7 @@ import MonitorView, { parseActivityEvent } from './modules/server';
 import { ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay } from './modules/server/components';
 import { formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime } from './modules/server/util';
 import AccountView from './modules/account';
+import { DesktopView } from './modules/desktop';
 import { EnvironmentView } from './modules/environment';
 import { CheckoutModal, PlanPicker } from './modules/checkout';
 import { UpgradeModal } from './modules/billing';
@@ -357,9 +388,13 @@ export {
 	MonitorView, parseActivityEvent,
 	ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay,
 	formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime,
-	AccountView, EnvironmentView,
+	AccountView, DesktopView, EnvironmentView,
 	CheckoutModal, PlanPicker, UpgradeModal,
 };
+
+// The shared desktop page's type surface (the component itself is exported
+// above and on shellApi; its default server adapter stays internal).
+export type { DesktopApp, DesktopViewProps, DesktopAdapter, DesktopQuote, DesktopVersionRow, DesktopVersionOverride } from './modules/desktop';
 
 export type { EventTone } from './modules/server/components';
 export type { CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './modules/checkout/types';
@@ -433,6 +468,8 @@ export const shellApi = {
 	get SidebarCollapsedProvider() { return SidebarCollapsedProvider; },
 	get SidebarCollapsedGate() { return SidebarCollapsedGate; },
 	get useSidebarCollapsed() { return useSidebarCollapsed; },
+	get SidebarActiveViewProvider() { return SidebarActiveViewProvider; },
+	get useSidebarActiveView() { return useSidebarActiveView; },
 	get SidebarFooter() { return SidebarFooter; },
 	get DataGrid() { return DataGrid; },
 	get CardDataGrid() { return CardDataGrid; },
@@ -480,6 +517,7 @@ export const shellApi = {
 	get PrefsProvider() { return PrefsProvider; },
 	get Documents() { return Documents; },
 	get NOOP_VFS() { return NOOP_VFS; },
+	get CachedVfs() { return CachedVfs; },
 	get Explorer() { return Explorer; },
 	get DocTabs() { return DocTabs; },
 	get DocSplitLayout() { return DocSplitLayout; },
@@ -491,6 +529,7 @@ export const shellApi = {
 	get NavButton() { return NavButton; },
 	get ConfirmDialog() { return ConfirmDialog; },
 	get PopupRow() { return PopupRow; },
+	get AnchoredPopup() { return AnchoredPopup; },
 	get AccountProvider() { return AccountProvider; },
 	get SettingsProvider() { return SettingsProvider; },
 	get BxPlus() { return BxPlus; },
@@ -512,6 +551,9 @@ export const shellApi = {
 	get BxChevronRight() { return BxChevronRight; },
 	get BxFolderOpen() { return BxFolderOpen; },
 	get AppLayout() { return AppLayout; },
+	// The shared desktop page (greeting + quote + app-card grid) — consumed
+	// by every launcher host (hello, home, rocket-ui's Desktop page).
+	get DesktopView() { return DesktopView; },
 	// Desktop version selector — session override read + apply/clear
 	get getAppVersionOverride() { return getAppVersionOverride; },
 	get applyAppVersionOverride() { return applyAppVersionOverride; },
@@ -545,11 +587,11 @@ export {
 	// Workspace provider + prefs provider
 	WorkspaceProvider, PrefsProvider,
 	// Document component library
-	Documents, NOOP_VFS, Explorer, DocTabs, DocSplitLayout, DocExplorer,
+	Documents, NOOP_VFS, CachedVfs, Explorer, DocTabs, DocSplitLayout, DocExplorer,
 	// Top-level shell frame + zone components
 	Shell, Sidebar, BottomPanel, DebugPanel,
 	// Layout building blocks
-	NavButton, ConfirmDialog, PopupRow,
+	NavButton, ConfirmDialog, PopupRow, AnchoredPopup,
 	// Shell-owned overlay pages
 	AccountProvider, SettingsProvider,
 	// Icons

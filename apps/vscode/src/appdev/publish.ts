@@ -29,7 +29,8 @@ import * as vscode from 'vscode';
 // package-specifier import cannot resolve from a bundle).
 import 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
-import { scanWorkspaceApps } from './appScan';
+import { scanWorkspaceApps } from 'shared/tools/appdev';
+import { hostWorkspaceFs } from '../providers/toolhost/hostWorkspaceFs';
 import { ensureProjectId, readAppListing } from './appMarker';
 import type { AppListing } from './appMarker';
 import { getLogger } from '../shared/util/output';
@@ -49,7 +50,7 @@ import { getLogger } from '../shared/util/output';
 export async function deployApp(appId: string, message: string): Promise<Record<string, unknown>> {
 	const logger = getLogger();
 	logger.output(`[appdev:pack] deploy ${appId} — pre-pack checks:`);
-	const apps = await scanWorkspaceApps();
+	const apps = await scanWorkspaceApps(hostWorkspaceFs);
 	const app = apps.find((a) => a.id === appId);
 	if (!app) {
 		logger.output(`[appdev:pack]   check bound folder — FAILED: no bound folder for ${appId}`);

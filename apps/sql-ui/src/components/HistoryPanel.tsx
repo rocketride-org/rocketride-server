@@ -63,6 +63,7 @@ import {
 import { DEFAULT_HISTORY_LIMITS } from '../history/trim';
 import { getDocs, nextQueryDoc } from '../docs';
 import type { IQueryDocPayload } from '../docs';
+import { useSqlPageNav } from '../pageNav';
 import { announce } from '../a11y/announce';
 import { DatabaseIcon } from '../icons';
 
@@ -345,6 +346,9 @@ function rowLabel(entry: IHistoryEntry): string {
 export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
 	const { endpoint, open, onClose, onLoadIntoEditor, onRerun } = props;
 
+	// In-workbench page navigation (null in legacy standalone documents).
+	const pageNav = useSqlPageNav();
+
 	const entries = useHistory(endpoint.key);
 	const isRecording = useRecording(endpoint.key);
 
@@ -394,9 +398,16 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
 	 * @param entry - The entry to open.
 	 */
 	const openInNewQuery = (entry: IHistoryEntry): void => {
+		// Inside a connection workbench the statement re-seeds the QUERY page
+		// (one query surface per connection); standalone, it opens a document.
+		// No `origin: 'generated'` either way — this statement is the user's
+		// own text, not something this app wrote, and must not claim otherwise.
+		if (pageNav) {
+			pageNav.openQuery({ sql: entry.sql, label: 'Query' });
+			announce('Opened in query page');
+			return;
+		}
 		const { uri, label } = nextQueryDoc(endpoint.key);
-		// No `origin: 'generated'` — this statement is the user's own text,
-		// not something this app wrote, and must not claim otherwise.
 		const payload: IQueryDocPayload = { endpoint, label, initialSql: entry.sql };
 		getDocs()?.openStaticDocument(uri, label, payload);
 		announce(`Opened ${label}`);

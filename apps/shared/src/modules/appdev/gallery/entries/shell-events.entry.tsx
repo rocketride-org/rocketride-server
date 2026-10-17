@@ -44,7 +44,7 @@ Press **ALT+D** to watch the bus live in the Debug panel.`,
 
 // Subscribe - typed payload, auto-cleanup on unmount:
 useShellEvent('shell:event', ({ event }) => {
-	if (event.type === 'apaext_billing') refreshLedger();
+	if (event.event === 'apaext_billing') refreshLedger();
 });
 useShellEvent('shell:themeChange', ({ tokens }) => repaintCanvas(tokens));
 
@@ -70,8 +70,15 @@ ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'monitor' });`,
 			rows: [
 				{ name: 'shell:event', type: '{ event: DAPMessage }', dir: 'out', note: 'EVERY server push over the WebSocket - the one live-data firehose.' },
 				{ name: 'shell:accountUpdate', type: 'ConnectResult', dir: 'out', note: 'Server-pushed account/subscription update.' },
+				{ name: 'shell:orgChanged', type: '{ orgId }', dir: 'out', note: "The user's default org changed - a pure notification; each client reacts its own way (the shell reloads)." },
 				{ name: 'shell:servicesUpdated', type: '{ services, icons?, servicesError? }', dir: 'out', note: 'Service catalog fetched or refreshed (icons = deduplicated icon table).' },
 				{ name: 'shell:appsUpdated', type: '{ apps: ShellAppEntry[] }', dir: 'out', note: 'App catalog changed (full replacement).' },
+			],
+		},
+		{
+			label: 'Platform notifications',
+			rows: [
+				{ name: 'shell:notify', type: 'ShellNotification', dir: 'out', note: 'The general platform notification bus - a typed union, narrow on kind; page-local today (in-page producers, never the server).' },
 			],
 		},
 		{
@@ -90,13 +97,14 @@ ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'monitor' });`,
 				{ name: 'shell:myApps', type: 'void', dir: 'in', note: 'Navigate to the My Apps launcher.' },
 				{ name: 'shell:themeChange', type: '{ tokens: Record<string, string> }', dir: 'out', note: 'Theme tokens changed - canvases repaint from these.' },
 				{ name: 'shell:viewActivated / shell:sidebarCollapsing', type: '{ viewId } / void', dir: 'out', note: 'A view became active / the sidebar is starting to collapse.' },
+				{ name: 'shell:setSidebarCollapsed', type: '{ collapsed: boolean }', dir: 'in', note: 'An app asking for the rail collapsed or expanded; the shell remembers the answer per app.' },
 			],
 		},
 		{
 			label: 'App development',
 			rows: [
 				{ name: 'shell:manifestRefresh', type: '{ source }', dir: 'out', note: 'Server-side app manifest changed (dev overlay, publish, expiry).' },
-				{ name: 'app:statusChanged', type: '{ appId, status, notes? }', dir: 'out', note: 'Marketplace review status changed.' },
+				{ name: 'app:statusChanged', type: '{ appId, version?, status, notes? }', dir: 'out', note: 'Marketplace review status changed.' },
 				{ name: 'store:changed', type: '{ prefix, paths }', dir: 'out', note: 'Files changed under a watched store prefix.' },
 			],
 		},

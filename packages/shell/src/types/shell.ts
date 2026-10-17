@@ -64,6 +64,32 @@ export interface ShellAppEntry {
 }
 
 // =============================================================================
+// PLATFORM NOTIFICATIONS
+// =============================================================================
+
+/**
+ * One platform notification (the `shell:notify` payload).
+ *
+ * A discriminated union — narrow on `kind`. New notification kinds are
+ * APPENDED as union members; existing members never change shape, so
+ * consumer narrowing stays valid (the same append-only rule as the event
+ * map itself).
+ *
+ * Today every producer is PAGE-LOCAL (the event never rides the wire); a
+ * server-pushed feed may later emit the same event, so consumers must not
+ * assume the producer shares their realm beyond what the payload carries.
+ */
+export type ShellNotification =
+	/**
+	 * A store-VFS file changed — any write through the app-dev VFS seam.
+	 * `uri` is the full store path; `origin` identifies the writer (a
+	 * dev-session id, or a verb like 'scaffold') so writers can skip their
+	 * own echo; `rev` is a page-monotonic write counter so a consumer
+	 * hearing one change over several transports can dedupe.
+	 */
+	{ kind: 'onFsChange'; uri: string; origin: string; rev: number };
+
+// =============================================================================
 // EVENT MAP
 // =============================================================================
 
@@ -163,6 +189,15 @@ export interface ShellConnectionEventMap {
 	 * Hosts cast to their concrete AppManifestEntry type.
 	 */
 	'shell:appsUpdated': { apps: ShellAppEntry[] };
+
+	// ── Platform notifications ───────────────────────────────────────────
+
+	/**
+	 * The general platform notification bus — a typed union; narrow on
+	 * `kind` (see {@link ShellNotification}). Page-local today: emitted by
+	 * in-page producers (the app-dev VFS seam), never by the server.
+	 */
+	'shell:notify': ShellNotification;
 
 	// ── Auth ─────────────────────────────────────────────────────────────
 

@@ -483,11 +483,6 @@
 				"command": "rocketride.app.open",
 				"title": "Open App Builder",
 				"category": "RocketRide"
-			},
-			{
-				"command": "rocketride.app.debug",
-				"title": "Debug App (external browser)",
-				"category": "RocketRide"
 			}
 		],
 		"keybindings": [
@@ -585,10 +580,6 @@
 				{
 					"command": "rocketride.app.open",
 					"when": "false"
-				},
-				{
-					"command": "rocketride.app.debug",
-					"when": "false"
 				}
 			],
 			"view/title": [
@@ -634,7 +625,8 @@
 	},
 	"main": "./dist/rocketride.js",
 	"devDependencies": {
-		"@rsbuild/core": "~2.0.11",
+		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"@rsbuild/plugin-type-check": "~1.3.5",
 		"@types/adm-zip": "^0.5.8",
@@ -657,10 +649,12 @@
 		"typescript": "^5.8.3"
 	},
 	"dependencies": {
+		"@module-federation/runtime": "^2.5.1",
 		"@octokit/rest": "^22.0.1",
 		"adm-zip": "^0.6.0",
 		"chart.js": "^4.4.0",
 		"dockerode": "^4.0.12",
+		"es-module-lexer": "^1.7.0",
 		"ignore": "^7.0.5",
 		"proper-lockfile": "^4.1.2",
 		"shared": "file:../shared",

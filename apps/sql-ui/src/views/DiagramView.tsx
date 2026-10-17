@@ -206,14 +206,6 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 					Auto-layout
 				</Button>
 				<Button variant="ghost" small onClick={() => fitView({ padding: 0.15 })}>Fit</Button>
-				<Button
-					variant="secondary"
-					small
-					onClick={() => { if (client) void refreshSchema(client, endpoint, { fresh: true }); }}
-					disabled={!client || snapshot.status !== 'ready'}
-				>
-					Reverse Engineer
-				</Button>
 				<span style={styles.toolbarInfo}>
 					{nodes.length} tables - {edges.length} relations
 				</span>
@@ -254,14 +246,17 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
  */
 export const DiagramView: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 	const { client, isConnected } = useShellConnection();
-	const snapshot = useSchema(endpoint.key);
 
-	// A diagram opened before the schema was read kicks the reflection itself.
+	// First open reverse-engineers automatically: one fresh re-read of the
+	// database (not the task-start reflection), so the diagram always draws
+	// the live schema. There is deliberately no toolbar button for it — the
+	// header's Refresh Schema re-runs the reflection later if needed.
+	const engineeredRef = useRef(false);
 	useEffect(() => {
-		if (client && isConnected && snapshot.status === 'idle') {
-			void refreshSchema(client, endpoint);
-		}
-	}, [client, isConnected, snapshot.status, endpoint]);
+		if (!client || !isConnected || engineeredRef.current) return;
+		engineeredRef.current = true;
+		void refreshSchema(client, endpoint, { fresh: true });
+	}, [client, isConnected, endpoint]);
 
 	return (
 		<div style={styles.root}>

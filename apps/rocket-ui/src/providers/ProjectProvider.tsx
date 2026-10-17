@@ -50,7 +50,7 @@ import type { DeployArtifact } from 'shell';
 import { useDeployments } from '../hooks/useDeployments';
 import { PrefsProvider } from 'shell';
 import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, TraceLevel, ViewState } from 'shared/modules/project';
-import { saveProject, displayName as projectDisplayName } from '../utils/projectStore';
+import { displayName as projectDisplayName } from '../utils/projectStore';
 import { createProjectVfs } from '../utils/projectVfs';
 import { downloadJson } from '../utils/downloadFile';
 import DeploymentProvider from './DeploymentProvider';
@@ -164,7 +164,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	// Full task debug output; adds --trace=debugOut to the task args when enabled
 	const settingDebugOutput = settings['rocketride.pipeBuilder.pipelineDebugOutput'] === true;
 
-	// Pipeline Builder is a paywalled app. Running requires an active sub —
+	// Rocket Builder is a paywalled app. Running requires an active sub —
 	// gate the run controls (lock icon) and the run action on this. Reactive:
 	// updates live when the subscription status changes.
 	const { getStatus } = useSubscriptions();
@@ -320,7 +320,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 		async (saveFilename: string, project: PipelineConfig, opts?: { rethrow?: boolean }) => {
 			if (!client || !isConnected) return;
 			try {
-				await saveProject(client, saveFilename, project);
+				await projectVfs.write(saveFilename, project);
 				// Mark clean in Documents model
 				await getDocs()?.saveDocument(uri);
 				window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId } }));
@@ -334,19 +334,19 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				if (opts?.rethrow) throw err;
 			}
 		},
-		[client, isConnected, projectId, uri]
+		[client, isConnected, projectId, uri, projectVfs]
 	);
 
 	// --- Pipeline run/stop/restart -------------------------------------------
 
 	/**
-	 * Opens the subscription checkout (plan picker) for Pipeline Builder.
+	 * Opens the subscription checkout (plan picker) for Rocket Builder.
 	 * Uses the app entry from account info when present, else a minimal entry —
 	 * the checkout only needs the app id (to fetch prices) plus name/description.
 	 */
 	const promptSubscribe = useCallback(() => {
 		const info: any = getClient()?.getAccountInfo();
-		const app = info?.apps?.find((a: any) => a.id === 'rocketride.pipeBuilder') ?? { id: 'rocketride.pipeBuilder', name: 'Pipeline Builder', description: '' };
+		const app = info?.apps?.find((a: any) => a.id === 'rocketride.pipeBuilder') ?? { id: 'rocketride.pipeBuilder', name: 'Rocket Builder', description: '' };
 		ConnectionManager.getInstance().emit('shell:subscribe', { app });
 	}, []);
 
@@ -446,7 +446,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 
 			// Save to the new path
 			try {
-				await saveProject(client, fileRelPath, pipeline);
+				await projectVfs.write(fileRelPath, pipeline);
 			} catch (err) {
 				console.error('[ProjectProvider] Save-as failed:', err);
 				// Surface the failure — a silent catch leaves the user believing
@@ -475,7 +475,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				executePipelineAction(deferredRun.action, deferredRun.source);
 			}
 		},
-		[pipeline, client, isConnected, uri, projectId, executePipelineAction]
+		[pipeline, client, isConnected, uri, projectId, executePipelineAction, projectVfs]
 	);
 
 	/**
@@ -526,13 +526,13 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 		const run = pendingRun;
 		setPendingRun(null);
 		if (!client || !isConnected) return;
-		saveProject(client, filename, pipeline)
+		projectVfs.write(filename, pipeline)
 			.then(() => {
 				getDocs()?.saveDocument(uri);
 				executePipelineAction(run.action, run.source);
 			})
 			.catch((err) => setPipelineError(err instanceof Error ? err.message : String(err)));
-	}, [pendingRun, isNew, filename, pipeline, client, isConnected, uri, executePipelineAction]);
+	}, [pendingRun, isNew, filename, pipeline, client, isConnected, uri, executePipelineAction, projectVfs]);
 
 	// --- ProjectView callbacks ------------------------------------------------
 

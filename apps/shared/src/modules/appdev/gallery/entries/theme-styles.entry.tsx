@@ -63,7 +63,7 @@ const styles: Record<string, React.CSSProperties> = {
 };`,
 	propsLabel: 'Exports',
 	props: [
-		{ name: 'commonStyles', type: 'Record<string, CSSProperties | (active: boolean) => CSSProperties>', dir: 'in', note: 'The shared style map (54 members, families listed above).' },
+		{ name: 'commonStyles', type: 'Record<string, CSSProperties | (active: boolean) => CSSProperties>', dir: 'in', note: 'The shared style map (53 members, families listed above).' },
 		{ name: 'ThemeTokens', type: "{ '--rr-...': string, [key: string]: string }", dir: 'in', note: 'The typed theme token map (~80 tokens: palette, backgrounds, text, borders, buttons, fonts, chart hues).' },
 	],
 };

@@ -33,15 +33,27 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useShellConnection, ConnectionManager, ConfirmDialog } from 'shell';
+import { useShellConnection, ConnectionManager, ConfirmDialog, useWorkspace } from 'shell';
+import type { ShellNotification } from 'shell';
 import { getDocs } from '../docs';
-import { SidebarView } from 'shared/modules/sidebar/SidebarView';
-import { BxExport, useSidebarCollapsed } from 'shell';
+import { SidebarChrome } from 'shared/tools/core/chrome/SidebarChrome';
+import { buildBuiltinSidebarItems } from './sidebarBuiltinTools';
+import { BxExport, useSidebarCollapsed, useSidebarActiveView } from 'shell';
 import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, SidebarMode } from 'shared/modules/sidebar/types';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, SidebarMode, AgentSidebar, AppBuilderSidebar, AppListItem, ToolTabsSidebar } from 'shared/modules/sidebar/types';
+import { useDevToolPins, toToolTab } from '../devtools/devToolPins';
+import { setToolFrameOpener } from '../devtools/peer';
+import DevToolMount from '../devtools/DevToolMount';
 import type { TaskLifecycleEvent } from 'shared/modules/sidebar/taskFold';
-import { loadProject, listProjectDir, isPipelineFile, pipelineExtension } from '../utils/projectStore';
+import { AgentSession, AGENTS_DIR } from 'shared/agent/agent';
+import type { AgentSessionMeta } from 'shared/agent/agent';
+import { isPipelineFile, pipelineExtension } from '../utils/projectStore';
+import { createProjectVfs } from '../utils/projectVfs';
+import { getWorkspaceVfs, storePathToVirtual } from '../workspace/workspace';
 import { downloadJson } from '../utils/downloadFile';
+import { scanApps } from '../appdev/appStore';
+import { INTRO_PAGES } from 'shared/modules/intro/introPages';
+import type { IntroMode } from 'shared/modules/intro/introPages';
 
 // =============================================================================
 // COLLAPSED GATE
@@ -79,6 +91,9 @@ const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) =
  */
 const SidebarProvider: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
+	// The pipelines mount of the shared staged view, project-relative — the
+	// ONE adapter every pipeline file operation goes through.
+	const projectVfs = useMemo(() => createProjectVfs(client), [client]);
 
 	// --- Build entries from server file tree ----------------------------------
 
@@ -122,11 +137,16 @@ const SidebarProvider: React.FC = () => {
 		const id = ++refreshCountRef.current;
 
 		try {
-			// Recursive list
+			// Recursive list — through the workspace VIEW, so staged
+			// (uncommitted) pipelines list exactly like committed ones.
+			const view = getWorkspaceVfs();
 			const listRecursive = async (dir: string): Promise<ProjectEntry[]> => {
-				const result = await listProjectDir(client, dir);
+				const result = { entries: await view.list(dir ? `pipelines/${dir}` : 'pipelines') };
 				const out: ProjectEntry[] = [];
 				for (const e of result.entries ?? []) {
+					// Dot-directories at the store root are OTHER surfaces'
+					// trees (.appdev working copies) — never pipeline content.
+					if (!dir && e.type === 'dir' && e.name.startsWith('.')) continue;
 					const path = dir ? `${dir}/${e.name}` : e.name;
 					if (e.type === 'dir') {
 						out.push({ path, type: 'dir' });
@@ -134,7 +154,7 @@ const SidebarProvider: React.FC = () => {
 					} else if (isPipelineFile(e.name)) {
 						// Parse pipeline for projectId + sources
 						try {
-							const pipeline = await loadProject(client, path);
+							const pipeline = JSON.parse(String(await view.read(`pipelines/${path}`)));
 							out.push({
 								path,
 								type: 'file',
@@ -166,6 +186,8 @@ const SidebarProvider: React.FC = () => {
 		window.addEventListener('project:saved', handler);
 		return () => window.removeEventListener('project:saved', handler);
 	}, [refresh]);
+	// Staged workspace ticks (agent writes, commits, rollbacks) re-list too
+	useEffect(() => getWorkspaceVfs().subscribe(() => refresh()), [refresh]);
 
 	// --- Active tasks (from server events) -----------------------------------
 
@@ -295,8 +317,6 @@ const SidebarProvider: React.FC = () => {
 		if (!docs) return;
 		if (target === 'new') {
 			docs.createDocument(undefined, { project_id: crypto.randomUUID(), components: [] });
-		} else if (target === 'monitor') {
-			docs.openStaticDocument('monitor', 'Monitor');
 		}
 	}, []);
 
@@ -313,7 +333,6 @@ const SidebarProvider: React.FC = () => {
 	const handleFileManage = useCallback(
 		async (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => {
 			if (!client) return;
-			const { saveProject, deleteProject, renameProject, mkdirProject, rmdirProject } = await import('../utils/projectStore');
 			try {
 				switch (action) {
 					case 'rename': {
@@ -325,7 +344,7 @@ const SidebarProvider: React.FC = () => {
 						const ext = pipelineExtension(path);
 						const newPath = dir ? `${dir}/${newName}${ext}` : `${newName}${ext}`;
 						if (newPath !== path) {
-							await renameProject(client, path, newPath);
+							await projectVfs.rename(path, newPath);
 							// Update open editor tabs: close old, reopen at new path
 							const docs = getDocs();
 							if (docs) {
@@ -345,10 +364,9 @@ const SidebarProvider: React.FC = () => {
 						const confirmed = await showConfirm('Delete', `Are you sure you want to delete "${label}"?`, 'Delete');
 						if (!confirmed) break;
 
-						// Server's fs_delete only handles files; folders need fs_rmdir.
-						const isFile = isPipelineFile(path);
-						if (isFile) await deleteProject(client, path);
-						else await rmdirProject(client, path);
+						// The view routes by actual kind (files delete, folders
+						// remove recursively) — one verb covers both.
+						await projectVfs.delete(path);
 
 						// Force-remove the document and all editors regardless of dirty state
 						// so stale content doesn't linger if a new file reuses the same name
@@ -356,10 +374,10 @@ const SidebarProvider: React.FC = () => {
 						break;
 					}
 					case 'createFolder':
-						await mkdirProject(client, path);
+						await projectVfs.mkdir(path);
 						break;
 					case 'createFile':
-						await saveProject(client, path, { project_id: crypto.randomUUID(), components: [] });
+						await projectVfs.write(path, { project_id: crypto.randomUUID(), components: [] });
 						break;
 				}
 				refresh();
@@ -368,7 +386,7 @@ const SidebarProvider: React.FC = () => {
 				console.error('[SidebarProvider] action failed:', action, err);
 			}
 		},
-		[client, refresh]
+		[client, refresh, projectVfs]
 	);
 
 	/**
@@ -379,14 +397,16 @@ const SidebarProvider: React.FC = () => {
 		async (path: string) => {
 			if (!client) return;
 			try {
-				const pipeline = await loadProject(client, path);
+				// Through the view: an export of a staged (uncommitted)
+				// pipeline downloads what the user SEES, not the server copy.
+				const pipeline = await projectVfs.read(path);
 				const filename = path.split('/').pop() ?? 'pipeline.pipe';
 				downloadJson(filename, pipeline);
 			} catch (err) {
 				console.error('[SidebarProvider] export failed:', err);
 			}
 		},
-		[client]
+		[client, projectVfs]
 	);
 
 	// Action error state — shown as a dialog when run/stop fails
@@ -400,7 +420,9 @@ const SidebarProvider: React.FC = () => {
 			if (!client || !isConnected) return;
 			if (action === 'run' && filePath) {
 				try {
-					const pipeline = await loadProject(client, filePath);
+					// D1: a run executes what is SAVED to the workspace (staged
+					// included) — the view, not necessarily the server copy.
+					const pipeline = JSON.parse(String(await projectVfs.read(filePath)));
 					const name =
 						filePath
 							.split('/')
@@ -455,11 +477,252 @@ const SidebarProvider: React.FC = () => {
 		[client]
 	);
 
+	// --- App Builder (MY APPS) -----------------------------------------------
+
+	// The MY APPS list from the .appdev store scan — the web twin of the
+	// VSCode workspace scan (working copies only; no registry state).
+	const [apps, setApps] = useState<AppListItem[]>([]);
+	// step: every refresh takes a ticket — a slow scan that resolves after a
+	// disconnect or after a NEWER refresh must not land its stale rows
+	const appsReqRef = useRef(0);
+	const refreshApps = useCallback(async () => {
+		const req = ++appsReqRef.current;
+		if (!client || !isConnected) {
+			setApps([]);
+			return;
+		}
+		try {
+			const scanned = await scanApps();
+			if (req !== appsReqRef.current) return;
+			setApps(scanned.map((a) => ({ id: a.id, name: a.name })));
+		} catch {
+			if (req === appsReqRef.current) setApps([]);
+		}
+	}, [client, isConnected]);
+	useEffect(() => {
+		void refreshApps();
+	}, [refreshApps]);
+
+	// The App Builder sidebar contract: presence adds the Apps mode tab.
+	const appBuilder: AppBuilderSidebar = useMemo(
+		() => ({
+			apps,
+			// The open App Builder document is `app:<appId>`.
+			activeAppId: activeFilePath.startsWith('app:') ? activeFilePath.slice('app:'.length) : undefined,
+			onNewApp: () => {
+				getDocs()?.openStaticDocument('newapp', 'New App');
+			},
+			onOpenApp: (appId: string) => {
+				const name = apps.find((a) => a.id === appId)?.name ?? appId;
+				getDocs()?.openStaticDocument(`app:${appId}`, name);
+			},
+		}),
+		[apps, activeFilePath]
+	);
+
+	// --- Agent (MY SESSIONS) ---------------------------------------------------
+
+	// The agent's session HISTORY is namespaced by this hosting app's id —
+	// the workspace supplies it (never hardcoded); AgentSession.configure
+	// stamps it once for the shared storage layer. Sessions themselves are
+	// operationally unrestricted (any app/node/pipeline).
+	const { activeAppId: hostAppId, prefs, updatePrefs } = useWorkspace();
+	useEffect(() => {
+		AgentSession.configure(hostAppId);
+	}, [hostAppId]);
+
+	// The MY SESSIONS list from the .agents catalog.
+	const [sessions, setSessions] = useState<AgentSessionMeta[]>([]);
+	// step: same ticket guard as refreshApps — only the newest listing lands
+	const sessionsReqRef = useRef(0);
+	const refreshSessions = useCallback(async () => {
+		const req = ++sessionsReqRef.current;
+		if (!client || !isConnected) {
+			setSessions([]);
+			return;
+		}
+		try {
+			const listed = await AgentSession.getSessions();
+			if (req !== sessionsReqRef.current) return;
+			setSessions(listed);
+		} catch {
+			if (req === sessionsReqRef.current) setSessions([]);
+		}
+	}, [client, isConnected]);
+	useEffect(() => {
+		void refreshSessions();
+	}, [refreshSessions]);
+
+	// Two change sources serve the list refreshes: the workspace view's
+	// change stream covers in-page writes (staged ones included — those
+	// never reach the server, so no bus event exists for them), and the
+	// shell bus covers CROSS-page writers, translated once by the workspace
+	// module. Agent history is a separate store tree (not a workspace
+	// mount), so it stays bus-only.
+	useEffect(() => {
+		const unsubView = getWorkspaceVfs().subscribe(() => void refreshApps());
+		const unsubBus = ConnectionManager.getInstance().on('shell:notify', (notification: ShellNotification) => {
+			if (notification.kind !== 'onFsChange') return;
+			if (storePathToVirtual(notification.uri)?.startsWith('apps')) void refreshApps();
+			else if (notification.uri.startsWith(`${AGENTS_DIR}/${hostAppId}/`)) void refreshSessions();
+		});
+		return () => {
+			unsubView();
+			unsubBus();
+		};
+	}, [refreshApps, refreshSessions, hostAppId]);
+
+	// The Agent sidebar contract: presence adds the Agent mode tab.
+	const agent: AgentSidebar = useMemo(
+		() => ({
+			sessions,
+			// The open conversation document is `agent:<sessionId>`.
+			activeSessionId: activeFilePath.startsWith('agent:') ? activeFilePath.slice('agent:'.length) : undefined,
+			onNewSession: () => {
+				// step: mint the GUID now; nothing hits disk until the first send
+				const session = AgentSession.newSession();
+				getDocs()?.openStaticDocument(`agent:${session.sessionId}`, session.title);
+			},
+			onOpenSession: (sessionId: string) => {
+				const title = sessions.find((s) => s.sessionId === sessionId)?.title ?? 'Agent session';
+				getDocs()?.openStaticDocument(`agent:${sessionId}`, title);
+			},
+			onDeleteSession: (sessionId: string) => {
+				void (async () => {
+					const title = sessions.find((s) => s.sessionId === sessionId)?.title ?? sessionId;
+					const confirmed = await showConfirm('Delete session', `Are you sure you want to delete "${title}"?`, 'Delete');
+					if (!confirmed) return;
+					await AgentSession.deleteSession(sessionId);
+					// Force-close the conversation tab regardless of state.
+					getDocs()?.discardDocument(`agent:${sessionId}`);
+				})();
+			},
+		}),
+		[sessions, activeFilePath, showConfirm]
+	);
+
+	// --- Dev tools (pinned tool tabs + catalog) --------------------------------
+
+	// Pins, strip order, and the server's devTool catalog — prefs-backed, one
+	// source of truth shared with RocketApp's rail containers.
+	const { tabOrder, catalog: toolCatalog, pinnedTools, unpin: unpinTool, setTabOrder } = useDevToolPins();
+
+	/** Opens (or focuses) a tool's frame as a `tool:<appId>` document. */
+	const handleOpenTool = useCallback((id: string) => {
+		const name = toolCatalog.find((a) => a.id === id)?.name ?? id;
+		getDocs()?.openStaticDocument(`tool:${id}`, name);
+	}, [toolCatalog]);
+
+	/** Strip tab selection: bring an OPEN document of the tool forward —
+	 *  never create one; selecting a sidebar tab must not spawn tabs. */
+	const handleFocusTool = useCallback((id: string) => {
+		const docs = getDocs();
+		if (!docs) return;
+		const state = docs.getState();
+		for (const [groupId, group] of Object.entries(state.groups)) {
+			for (let i = 0; i < group.editorIds.length; i++) {
+				const editorId = group.editorIds[i];
+				const uri = editorId ? state.editors[editorId]?.documentUri : undefined;
+				if (uri === `tool:${id}` || uri?.startsWith(`tool:${id}/`)) {
+					docs.setActiveGroup(groupId);
+					docs.setActiveEditor(groupId, i);
+					return;
+				}
+			}
+		}
+	}, []);
+
+	// A sidebar-mount peer post with no mounted frame summons the tool's
+	// document (the in-memory counterpart of the bridge's onPanelNeeded).
+	useEffect(() => {
+		setToolFrameOpener(handleOpenTool);
+		return () => setToolFrameOpener(null);
+	}, [handleOpenTool]);
+
+	// The dev-tool tabs contract: presence adds the pinned tool tabs and the
+	// Dev Tools catalog tab to the mode strip (classic mode); the workbench
+	// rail mirrors the same pins through RocketApp's sidebarViews.
+	const toolTabs: ToolTabsSidebar = useMemo(() => ({
+		tools: pinnedTools,
+		available: toolCatalog.map(toToolTab),
+		onOpenTool: handleOpenTool,
+		onFocusTool: handleFocusTool,
+		onShowTool: (id: string) => {
+			const name = toolCatalog.find((a) => a.id === id)?.name ?? id;
+			getDocs()?.openStaticDocument(`toolreadme:${id}`, `Dev Tool: ${name}`);
+		},
+		onRemoveTool: (id: string) => {
+			// A removed tool keeps no live surface — close its open frame and
+			// every per-document tab it opened (`tool:<id>/<docKey>`).
+			unpinTool(id);
+			const docs = getDocs();
+			if (!docs) return;
+			for (const uri of Object.keys(docs.getState().documents)) {
+				if (uri === `tool:${id}` || uri.startsWith(`tool:${id}/`)) docs.discardDocument(uri);
+			}
+		},
+		renderToolPanel: (id: string) => <DevToolMount appId={id} name={pinnedTools.find((t) => t.id === id)?.name ?? id} slot="sidebar" />,
+	}), [pinnedTools, toolCatalog, handleOpenTool, handleFocusTool, unpinTool]);
+
+	/** Opens a mode's embedded "Introduction to ..." page as a document tab. */
+	const handleShowIntro = useCallback((mode: IntroMode) => {
+		getDocs()?.openStaticDocument(`intro:${mode}`, INTRO_PAGES[mode].title);
+	}, []);
+
+	/** Opens the shared Desktop page (shell's DesktopView) as a document tab. */
+	const handleShowDesktop = useCallback(() => {
+		getDocs()?.openStaticDocument('desktop', 'Desktop');
+	}, []);
+
 	// --- Render ----------------------------------------------------------------
 
-	// Mode tab selection (Pipelines | Nodes on this host — no app builder).
-	// Session-scoped only, matching the VS Code host's session persistence.
-	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('pipelines');
+	// Mode tab selection (Agent | Apps | Nodes | Pipelines) — prefs-backed so
+	// the choice survives reload via workspace state. Agent is the startup
+	// default when no stored choice exists (requirement: default tab unless
+	// workspace state says otherwise).
+	const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => (prefs?.sidebarMode as SidebarMode | undefined) ?? 'agent');
+	const handleSidebarModeChange = useCallback(
+		(mode: SidebarMode) => {
+			setSidebarMode(mode);
+			updatePrefs({ sidebarMode: mode });
+		},
+		[updatePrefs]
+	);
+
+	// The shell workbench rail (AppLayout sidebarMode 'vscode'/'cursor') owns
+	// the mode selection when it encloses this content: mirror its active
+	// view and hide the in-panel strip — one switcher on screen. Null outside
+	// a workbench (classic sidebar, compact drawer), where the strip and the
+	// prefs-backed state behave exactly as before.
+	const shellView = useSidebarActiveView();
+	/** Narrows a rail container id to the SidebarView mode union. */
+	const isKnownMode = (id: string | undefined): id is SidebarMode =>
+		id === 'agent' || id === 'apps' || id === 'nodes' || id === 'pipelines' || id === 'toolStore' || !!id?.startsWith('tool:');
+	const effectiveMode = shellView && isKnownMode(shellView.activeViewId) ? shellView.activeViewId : sidebarMode;
+
+	// Rail → frame: SELECTING a tool's rail/strip container opens its document
+	// (the classic strip gets this from SidebarView's own tab handler; the
+	// workbench rail only reports the selection). Transitions only — a page
+	// boot restoring a remembered tool selection must not force the document
+	// open.
+	const prevShellViewRef = useRef<string | undefined>(shellView?.activeViewId);
+	useEffect(() => {
+		const id = shellView?.activeViewId;
+		const prev = prevShellViewRef.current;
+		prevShellViewRef.current = id;
+		if (id && id !== prev && prev !== undefined && id.startsWith('tool:')) handleOpenTool(id.slice('tool:'.length));
+	}, [shellView?.activeViewId, handleOpenTool]);
+
+	// Frame → rail: focusing a tool's document highlights its rail container
+	// (the VS Code host's onPanelFocused → setModeExternal, in-tree). The
+	// container id is the tool, so a per-document URI (`tool:<appId>/<docKey>`)
+	// maps back to its tool's container.
+	useEffect(() => {
+		if (!shellView || !activeFilePath.startsWith('tool:')) return;
+		const containerId = `tool:${activeFilePath.slice('tool:'.length).split('/')[0]}`;
+		if (shellView.activeViewId !== containerId) shellView.setActiveView(containerId);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- sync on document focus changes only
+	}, [activeFilePath]);
 
 	// The sidebar node — the pipelines Explorer plus its confirm/error dialogs.
 	// Only the Explorer sits behind the collapse gate: the shell frame owns the
@@ -471,7 +734,36 @@ const SidebarProvider: React.FC = () => {
 	return (
 		<>
 			<SidebarCollapsedGate>
-				<SidebarView connection={connection} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} activeFilePath={activeFilePath} onNavigate={handleNavigate} onOpenFile={handleOpenFile} onFileManage={handleFileManage} fileActions={[{ id: 'export', label: 'Export', icon: <BxExport size={16} />, onSelect: handleExportPipeline }]} onSourceAction={handleSourceAction} onOpenUnknownTask={handleOpenUnknownTask} onRefresh={refresh} showModeStrip sidebarMode={sidebarMode} onSidebarModeChange={setSidebarMode} />
+				<SidebarChrome
+					items={buildBuiltinSidebarItems({
+						agent: { agent, onShowIntro: handleShowIntro },
+						appdev: { appBuilder, onShowIntro: handleShowIntro, onShowDesktop: handleShowDesktop },
+						nodes: { onShowIntro: handleShowIntro },
+						pipelines: {
+							isConnected: connection.state === 'connected',
+							entries,
+							activeTasks,
+							unknownTasks,
+							activeFilePath,
+							onNavigate: handleNavigate,
+							onOpenFile: handleOpenFile,
+							onFileManage: handleFileManage,
+							fileActions: [{ id: 'export', label: 'Export', icon: <BxExport size={16} />, onSelect: handleExportPipeline }],
+							onSourceAction: handleSourceAction,
+							onOpenUnknownTask: handleOpenUnknownTask,
+							onRefresh: refresh,
+							onShowIntro: handleShowIntro,
+						},
+					})}
+					fallbackId="pipelines"
+					showModeStrip
+					hideModeStrip={!!shellView}
+					sidebarMode={effectiveMode}
+					onSidebarModeChange={handleSidebarModeChange}
+					toolTabs={toolTabs}
+					tabOrder={tabOrder}
+					onReorderTabs={setTabOrder}
+				/>
 			</SidebarCollapsedGate>
 			{confirmState && <ConfirmDialog title={confirmState.title} message={confirmState.message} confirmLabel={confirmState.confirmLabel} cancelLabel="Cancel" onConfirm={() => handleConfirmResult(true)} onCancel={() => handleConfirmResult(false)} />}
 			{actionError && <ConfirmDialog title="Pipeline Error" message={actionError} confirmLabel="OK" onConfirm={() => setActionError(null)} onCancel={() => setActionError(null)} />}

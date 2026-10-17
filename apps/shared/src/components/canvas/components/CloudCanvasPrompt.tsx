@@ -12,13 +12,11 @@
 
 import { type CSSProperties, type ReactElement, useEffect, useRef } from 'react';
 
-import { commonStyles } from 'shell';
-// Deliberate deep import via shell's published `./src/*` subpath: these overlay-stack
-// helpers are what DetailPanel uses to keep Escape from crossing between layers, but they
-// are not re-exported from `shell`'s index. Importing them here keeps this prompt on the
-// shared stack without widening shell's public API surface (which the gallery mirrors).
-// @ts-expect-error -- the shell source subpath requires its .tsx suffix.
-import { acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from 'shell/src/components/modal/Modal.tsx';
+// Overlay-stack helpers ride the barrel like everything else: the deep
+// `shell/src/...` path resolves in-repo but the server build materializes
+// shell from the tgz, whose exports map deliberately closes every deep
+// path — the barrel is the ONE import surface that works everywhere.
+import { commonStyles, acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from 'shell';
 
 // =============================================================================
 // RocketRide mark

@@ -57,6 +57,7 @@ import { docSplitLayoutEntry } from './entries/doc-split-layout.entry';
 import { docExplorerEntry } from './entries/doc-explorer.entry';
 
 // --- Content components ------------------------------------------------------
+import { anchoredPopupEntry } from './entries/anchored-popup.entry';
 import { bannerEntry } from './entries/banner.entry';
 import { buttonEntry } from './entries/button.entry';
 import { cardEntry } from './entries/card.entry';
@@ -133,6 +134,7 @@ export const GALLERY_ENTRIES: IGalleryEntry[] = [
 	docSplitLayoutEntry,
 	docExplorerEntry,
 	// Content components - alphabetical
+	anchoredPopupEntry,
 	bannerEntry,
 	buttonEntry,
 	cardEntry,

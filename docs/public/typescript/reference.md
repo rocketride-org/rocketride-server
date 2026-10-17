@@ -189,19 +189,18 @@ Two raw DAP commands carry this surface (call via
 
 - **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
   developerId is a deploy PREREQUISITE, not a marketplace action): the
-  `developer_*` family, `submit`, and `register_dev`.
+  `developer_*` family and `submit`.
 - **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
   install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
   pricing (`pricing_*`).
 
-Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+Grouped families (the `developer_*`/`submit` rows are on
 `rrext_deploy_app`; the rest on `rrext_app`):
 
 | Subcommand family | Subcommands | Guard | Purpose |
 | ----------------- | ----------- | ----- | ------- |
 | developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
 | submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread (sugar over `submitApp`/`withdrawApp`/`replyApp`). |
-| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
 | catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
 | admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` flips it `ready`, `admin_reject(appId, version)` flips it `rejected`. |
 | pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org (owns the app_products row) | Manage Stripe price tiers for a monetized app. |

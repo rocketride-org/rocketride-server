@@ -30,7 +30,7 @@ import type { FrameOptions, TemplateName } from 'shared/modules/appdev/templates
 import { getExtensionContext } from '../extension';
 import { ensureAppTrigger, ensureProjectId } from './appMarker';
 import { vendorAppTypes } from './appTypes';
-import { getWatchManager } from './watchManager';
+import { getDevSessionManager } from './devSessionManager';
 
 // =============================================================================
 // VALIDATION
@@ -231,10 +231,10 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	await ensureAppTrigger(target.fsPath, appId);
 	await ensureProjectId(target.fsPath);
 
-	// No launch.json entry is scaffolded: F5 debugging goes through the
-	// rocketride.app.debug command, which builds its config in-memory and
-	// ensures the watch session first — a static launch entry would open
-	// the preview with no dev bundle being served.
+	// No launch.json entry is scaffolded: a static launch entry would open
+	// the preview with no dev bundle being served. (The external-browser
+	// debug command was removed 2026-10-16; preview + console cover the
+	// in-editor loop.)
 
 	// Dependency trees and build output stay out of the user's repository —
 	// the root install and app builds generate both at multiple depths.
@@ -257,9 +257,9 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	// The root workspace claims apps/* — invalidate the shared install so
 	// the brand-new member links even when no watch session starts (the
 	// single-flight memo dedupes against the watch's own install).
-	const watchManager = getWatchManager();
-	watchManager?.invalidateInstall();
-	void watchManager?.ensureInstalled(appId);
+	const devSessions = getDevSessionManager();
+	devSessions?.invalidateInstall();
+	void devSessions?.ensureInstalled(appId);
 	// No toast: the App Builder opens on the new app — that IS the feedback.
 	return appId;
 }

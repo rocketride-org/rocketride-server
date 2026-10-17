@@ -51,6 +51,41 @@ import { getMediaInfo } from './mediaTypes';
 // effect from re-firing (that effect only reverts while content is empty).
 // =============================================================================
 
+// =============================================================================
+// MINTED BLOB URLS
+// =============================================================================
+
+/**
+ * Every blob: URL this SESSION created. Document content can outlive the
+ * session that minted it (the Documents store keeps content across reloads),
+ * but a blob: URL dies with its page — and a pre-media-table document may
+ * even carry raw text where a blob URL belongs. FilePane treats any blob-mode
+ * content NOT in this set as stale and re-reads it from the server.
+ */
+const mintedBlobUrls = new Set<string>();
+
+/**
+ * Type guard: true when the given content is a blob: URL minted by THIS
+ * session (i.e. still alive and safe to hand to a viewer).
+ *
+ * @param value - The document content to test.
+ * @returns True for a live, this-session blob URL.
+ */
+export function isLiveBlobUrl(value: unknown): value is string {
+	return typeof value === 'string' && mintedBlobUrls.has(value);
+}
+
+/**
+ * Drops a URL from the minted set — called when the last viewer releases it
+ * and the object URL is revoked, so a document still holding the string gets
+ * a fresh read instead of a dead reference.
+ *
+ * @param url - The revoked blob: URL.
+ */
+export function forgetBlobUrl(url: string): void {
+	mintedBlobUrls.delete(url);
+}
+
 /** Sentinel value stored as a document's content when a blob load failed. */
 export interface FileLoadError {
 	/** Discriminant tag identifying this as a load-error sentinel. */
@@ -122,7 +157,9 @@ export function createStoreVfs(client: RocketRideClient): IVirtualFileSystem {
 				}
 				const data = await response.arrayBuffer();
 				const blob = new Blob([data], { type: mime });
-				return URL.createObjectURL(blob);
+				const blobUrl = URL.createObjectURL(blob);
+				mintedBlobUrls.add(blobUrl);
+				return blobUrl;
 			} catch (err) {
 				// Blob loads surface a typed error sentinel (not null/'') so the
 				// failure is distinguishable from "still loading" and carries a

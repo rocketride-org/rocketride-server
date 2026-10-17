@@ -23,7 +23,9 @@ import { ConfigManager } from '../config';
 import type { PipelineConfig, RocketRideClient } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
-import { PipelineFileParser } from '../shared/util/pipelineParser';
+// Deep import on purpose — see SidebarProvider: the barrel drags view types
+// into the extension-host compile; parse.ts is pure.
+import { parsePipelineContent } from 'shared/tools/pipelines/parse';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
@@ -619,7 +621,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 					// Build project from document
 					const text = document.getText();
-					const parsed = PipelineFileParser.parseContent(text, document.uri.fsPath);
+					const parsed = parsePipelineContent(text, document.uri.fsPath);
 					let project: Record<string, unknown> | undefined;
 					if (parsed.isValid) {
 						try {
@@ -1577,7 +1579,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 	private sendCanvasUpdate(webview: vscode.Webview, document: vscode.TextDocument): void {
 		const text = document.getText();
-		const parsed = PipelineFileParser.parseContent(text, document.uri.fsPath);
+		const parsed = parsePipelineContent(text, document.uri.fsPath);
 		if (!parsed.isValid) {
 			return;
 		}

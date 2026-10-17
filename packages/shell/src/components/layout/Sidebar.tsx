@@ -29,25 +29,25 @@
 //   Footer (SidebarFooter — shared component with popup menu)
 // =============================================================================
 
-import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { ShellIdentityContext } from '../../hooks/useAuthUser';
-import {
-	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome, BxX,
-} from '../BoxIcon';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { BxDockLeft, BxX } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
-import { getHomeAppId } from '../../constants';
 import type { IconComponent } from '../BoxIcon';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import type { ShellThemeConfig, ShellAccountConfig } from '../workspace/types';
-import { SidebarFooter } from '../sidebar-footer/SidebarFooter';
-import type { SidebarFooterMenuItem } from '../sidebar-footer/SidebarFooter';
-import { useSubscriptions } from '../../hooks/useSubscriptions';
+import { SidebarFooter, openPlatformDocs } from '../sidebar-footer/SidebarFooter';
+import { useSidebarFooterMenu } from './useSidebarFooterMenu';
 import { RocketRideMark } from '../RocketRideMark';
 import { SidebarCollapsedProvider } from '../sidebar-menu/SidebarCollapsedContext';
-import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
+import { SidebarActiveViewProvider } from '../sidebar-menu/SidebarActiveViewContext';
+import type { SidebarActiveView } from '../sidebar-menu/SidebarActiveViewContext';
+import { SidebarViewStrip, rememberedWorkbench, rememberWorkbench, resolveActiveView, viewTitleStyle } from './SidebarViewStrip';
+import { TabPanel } from '../tab-panel/TabPanel';
+import type { ITabPanelPanel } from '../tab-panel/TabPanel';
 import { useHostChromeState } from './HostChromeContext';
 import { useCompactNav } from './CompactNavContext';
 import { FOCUSABLE_SELECTOR, trapFocus } from '../modal/Modal';
+import type { SidebarViewContainer } from '../../types/sidebarChrome';
 
 // =============================================================================
 // CONSTANTS
@@ -161,18 +161,16 @@ export interface SidebarProps {
  * a hamburger that opens an empty drawer is worse than no hamburger, and two
  * copies of this expression would eventually disagree.
  *
- * Signed out counts as nothing to hold: `Sidebar` renders no frame without an
- * identity, so a public app's sidebar content must not earn a hamburger that
- * opens a drawer that is not there.
+ * Auth state is deliberately NOT consulted (design decision 2026-10-12):
+ * the sidebar is the app's chrome, not a session privilege — it renders
+ * signed out too, with the footer in its anonymous form.
  *
  * @returns Whether to show a sidebar, or a way to open one.
  */
 export function useHasSidebarContent(): boolean {
-	const identity = useContext(ShellIdentityContext);
 	const { activeAppId, loadedApps } = useWorkspace();
-	const { sidebarContent } = useHostChromeState();
-	if (!identity) return false;
-	return !!loadedApps[activeAppId]?.components?.Sidebar || sidebarContent != null;
+	const { sidebarContent, sidebarViews } = useHostChromeState();
+	return !!loadedApps[activeAppId]?.components?.Sidebar || sidebarContent != null || (sidebarViews?.length ?? 0) > 0;
 }
 
 // =============================================================================
@@ -258,33 +256,120 @@ const usePaletteMode = (): 'dark' | 'light' => {
 };
 
 /**
- * Resolves the best icon to display for the active app.
+ * Reads --rr-rail-mode from :root and re-reads on theme changes.
  *
- * Priority: branding.iconDark/iconLight (theme-aware) → branding.icon →
- * manifest icon (URL) → 2-letter monogram fallback.
+ * Rail polarity is a THEME FACT, not a law: most themes keep the activity
+ * rail inverted (dark), but a theme may declare `--rr-rail-mode: light`
+ * (rocketride-light sets the rail to its paper color). Everything that
+ * adapts icons to the rail's ground — the dark-variant preference, the
+ * legibility plate — reads this instead of assuming darkness. Absent
+ * declaration = 'dark', matching the rail tokens' built-in fallbacks.
  */
-const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
+export const useRailMode = (): 'dark' | 'light' => {
+	const read = () => (getComputedStyle(document.documentElement).getPropertyValue('--rr-rail-mode').trim() as 'dark' | 'light') || 'dark';
+	const [mode, setMode] = useState(read);
+	useEffect(() => {
+		const obs = new MutationObserver(() => setMode(read()));
+		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
+		return () => obs.disconnect();
+	}, []);
+	return mode;
+};
+
+/**
+ * The active app's display identity — name, branding, and an icon renderer.
+ *
+ * Icon priority: branding.iconDark/iconLight (theme-aware) → branding.icon →
+ * manifest icon (URL) → RocketRide mark fallback.
+ *
+ * Exported (shell-internal, not on the api.ts surface) so every chrome that
+ * speaks for the app — the classic lockup, the workbench panel header, the
+ * synthetic rail view for legacy single-node sidebars — resolves identity
+ * through ONE path.
+ */
+export function useActiveAppIdentity(): {
+	isHome: boolean;
+	/** Display name — the manifest name; the platform name only as last resort. */
+	name: string;
+	/** App-supplied whole-header lockup, when any (branding.logo). */
+	logo: React.ReactNode | undefined;
+	/**
+	 * Renders the resolved icon at a given square size. `surface` picks the
+	 * theme variant by the GROUND the icon sits on: 'panel' (default) follows
+	 * the page palette; 'rail' follows the theme's declared rail polarity
+	 * (`--rr-rail-mode`, default dark). On a DARK rail, a manifest icon —
+	 * full-color store art designed for light ground — renders on a small
+	 * constant-light plate so it stays legible; branding icons are never
+	 * plated (the author designed them for the chrome and owns them).
+	 */
+	renderIcon: (size: number, surface?: 'panel' | 'rail') => React.ReactNode;
+} {
 	const { activeAppId, appManifest, loadedApps } = useWorkspace();
 	const paletteMode = usePaletteMode();
+	const railMode = useRailMode();
 	const isHome = activeAppId === 'rocketride.home';
 	const activeManifest = appManifest.find((a) => a.id === activeAppId) ?? null;
 	const branding = loadedApps[activeAppId]?.branding;
 
-	// Resolve icon: branding theme-aware → branding generic → manifest URL → RocketRide mark
-	const resolveIcon = (size: number): React.ReactNode => {
-		// Step 1: branding iconDark / iconLight
-		const themed = paletteMode === 'dark' ? branding?.iconDark : branding?.iconLight;
+	const renderIcon = (size: number, surface: 'panel' | 'rail' = 'panel'): React.ReactNode => {
+		// Step 1: branding iconDark / iconLight — picked by the GROUND, not
+		// only the page palette: the rail's polarity is the theme's call
+		// (--rr-rail-mode), so a dark rail takes the dark-ground variant
+		// regardless of the light/dark page setting.
+		const wantDark = surface === 'rail' ? railMode === 'dark' : paletteMode === 'dark';
+		const themed = wantDark ? branding?.iconDark : branding?.iconLight;
 		if (themed) return <div style={{ width: size, height: size, flexShrink: 0 }}>{themed}</div>;
 
 		// Step 2: branding generic icon
 		if (branding?.icon) return <div style={{ width: size, height: size, flexShrink: 0 }}>{branding.icon}</div>;
 
-		// Step 3: manifest icon URL
-		if (!isHome && activeManifest?.icon) return <img src={activeManifest.icon} alt="" style={{ width: size, height: size, flexShrink: 0 }} />;
+		// Step 3: manifest icon URL. On a dark rail it sits on a constant-light
+		// plate: the asset's canonical home is a light surface (MY APPS, the
+		// store tiles), and nobody designed it for inverted chrome. A light
+		// rail IS that surface, so no plate there.
+		if (!isHome && activeManifest?.icon) {
+			const img = <img src={activeManifest.icon} alt="" style={{ width: size, height: size, flexShrink: 0 }} />;
+			if (surface === 'rail' && railMode === 'dark') {
+				return (
+					<div style={{
+						width: size + 8, height: size + 8, borderRadius: 6, flexShrink: 0,
+						display: 'flex', alignItems: 'center', justifyContent: 'center',
+						// OPAQUE by design — a translucent plate reads as a smudge on
+					// the dark rail (design feedback 2026-10-12).
+					background: 'var(--rr-bg-rail-plate, #ffffff)',
+					}}>
+						{img}
+					</div>
+				);
+			}
+			return img;
+		}
 
 		// Step 4: RocketRide mark
 		return <RocketRideMark size={size} color="var(--rr-brand)" />;
 	};
+
+	return { isHome, name: activeManifest?.name ?? 'RocketRide', logo: branding?.logo, renderIcon };
+}
+
+/**
+ * The sidebar header lockup: THE APP'S identity — its icon beside its name.
+ *
+ * Design decision (sidebar refactor): the header speaks for the app, not the
+ * platform — no RocketRide wordmark, no uppercase micro-label. The platform's
+ * identity lives in the footer (account menu) and on the home app, whose own
+ * manifest identity renders here like any other app's. `branding.logo` still
+ * replaces the whole lockup for apps that bring their own.
+ */
+export const AppSwitcherButton: React.FC<{
+	collapsed: boolean;
+	/** Omit the icon from the expanded row — for frames whose rail ALREADY
+	    shows the app's icon right beside this header (the single-view
+	    workbench), where repeating it reads as a stutter: the rail icon and
+	    this name then compose as one lockup. */
+	hideIcon?: boolean;
+}> = ({ collapsed, hideIcon = false }) => {
+	const { name, logo, renderIcon } = useActiveAppIdentity();
 
 	// Collapsed: show the same icon as the expanded state, centered
 	if (collapsed) {
@@ -293,38 +378,30 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 				width: COLLAPSED_BTN, height: COLLAPSED_BTN, margin: '0 auto',
 				display: 'flex', alignItems: 'center', justifyContent: 'center',
 			}}>
-				{resolveIcon(20)}
+				{renderIcon(20)}
 			</div>
 		);
 	}
 
-	// App name for display
-	const appLabel = isHome ? 'ROCKETRIDE CLOUD' : (activeManifest?.name.toUpperCase() ?? '');
-
-	// An app may bring its own header lockup.
-	//
-	// `branding.logo` has been in the contract since it was written and was
-	// never read — this is that seam finally being used. An app that supplies
-	// one owns the whole header and says its own name; an app that does not is
-	// untouched and still gets the RocketRide wordmark over its label, which is
-	// every app but the one that asked.
-	if (branding?.logo) {
+	// An app may bring its own header lockup — it owns the whole row.
+	if (logo) {
 		return (
 			<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '4px 4px 2px', minWidth: 0 }}>
-				{branding.logo}
+				{logo}
 			</div>
 		);
 	}
 
 	return (
-		<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1, padding: '4px 4px 2px' }}>
-			<RocketRideWordmark height={22} color={paletteMode === 'dark' ? '#FAFBF8' : '#1E1A34'} />
+		<div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, padding: '2px 2px' }}>
+			{!hideIcon && renderIcon(20)}
 			<span style={{
-				fontSize: 9, fontWeight: 800, letterSpacing: '0.12em',
-				color: 'var(--rr-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-				textAlign: 'center', maxWidth: '100%',
+				fontSize: 13, fontWeight: 600, letterSpacing: '0.1px',
+				color: 'var(--rr-text-primary)',
+				overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+				minWidth: 0,
 			}}>
-				{appLabel}
+				{name}
 			</span>
 		</div>
 	);
@@ -333,52 +410,6 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 // =============================================================================
 // MAIN COMPONENT
 // =============================================================================
-
-/**
- * App-switcher icon: renders the app's logo when available, otherwise a
- * two-letter monogram fallback (initials of the first two words, or the
- * first two characters of a single-word name).
- *
- * Defined at module scope so it keeps a stable component identity across
- * renders instead of being recreated inline per menu item.
- */
-const AppIcon: React.FC<{ name: string; iconUrl?: string; size?: number }> = ({ name, iconUrl, size = 16 }) => {
-	if (iconUrl) {
-		return (
-			<img
-				src={iconUrl}
-				alt=""
-				width={size}
-				height={size}
-				style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0, display: 'block' }}
-			/>
-		);
-	}
-
-	const words = name.trim().split(/\s+/).filter(Boolean);
-	const monogram = (words.length > 1 ? words.slice(0, 2).map((w) => w[0]).join('') : name.slice(0, 2)).toUpperCase();
-
-	return (
-		<span
-			style={{
-				width: size,
-				height: size,
-				flexShrink: 0,
-				borderRadius: 4,
-				display: 'flex',
-				alignItems: 'center',
-				justifyContent: 'center',
-				background: 'var(--rr-bg-surface-alt)',
-				color: 'var(--rr-text-secondary)',
-				fontSize: Math.round(size * 0.5),
-				fontWeight: 700,
-				lineHeight: 1,
-			}}
-		>
-			{monogram}
-		</span>
-	);
-};
 
 /**
  * Collapsible, resizable sidebar that renders the active app's sidebar
@@ -392,9 +423,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// the drawer is a shell-internal concern no app can see. See
 	// `CompactNavContext`.
 	const { isCompact, drawerOpen, requestClose } = useCompactNav();
-	const identity = useContext(ShellIdentityContext);
-	const { prefs, updatePrefs: _updatePrefs, setTheme, themeOptions, activeAppId, appManifest, loadedApps } = useWorkspace();
-	const { isOnDesktop } = useSubscriptions();
+	const { activeAppId, loadedApps } = useWorkspace();
 
 	// --- Collapse / resize state ---------------------------------------------
 
@@ -419,7 +448,33 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// --- Host-chrome slot content ---------------------------------------------
 	// `sidebarContent` is the app-declared node for the scrolling slot — the
 	// AppLayout `sidebar` prop, registered through the host-chrome context.
-	const { sidebarContent } = useHostChromeState();
+	const { sidebarContent, sidebarViews } = useHostChromeState();
+
+	// --- Drawer view switcher (compact + declared containers) ------------------
+	// Below the breakpoint ShellLayout renders THIS frame even for apps that
+	// declared `sidebarViews` — a rail-plus-panel makes no sense on a phone.
+	// The declaration still applies: the drawer renders the SAME containers as
+	// the workbench, as the SAME icon strip (SidebarViewStrip), sharing the
+	// SAME remembered per-app selection — a rendering switch on the compact
+	// media query, never a different sidebar with its own switcher.
+	const views: SidebarViewContainer[] = (sidebarViews ?? []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+	const [drawerViewId, setDrawerViewId] = useState(() => rememberedWorkbench(activeAppId).view ?? '');
+	// Unlike the workbench (keyed by app id in ShellLayout) this frame stays
+	// mounted across app switches, so the stored selection is re-read here.
+	useEffect(() => {
+		setDrawerViewId(rememberedWorkbench(activeAppId).view ?? '');
+	}, [activeAppId]);
+	const activeDrawerView = resolveActiveView(views, drawerViewId);
+	/** Activate a container — the same memory the workbench reads/writes. */
+	const selectDrawerView = useCallback((id: string) => {
+		setDrawerViewId(id);
+		rememberWorkbench(activeAppId, { view: id });
+	}, [activeAppId]);
+	const drawerViewHandle = useMemo<SidebarActiveView>(() => ({
+		activeViewId: activeDrawerView?.id ?? '',
+		setActiveView: selectDrawerView,
+	}), [activeDrawerView?.id, selectDrawerView]);
+	const drawerHasViews = isCompact && views.length > 0;
 
 	// Whether the scrolling slot has anything to show. Drives self-hiding so the
 	// shell renders NO sidebar (and the client area spans full width) when an
@@ -626,76 +681,13 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 		window.addEventListener('mouseup', cleanup);
 	}, [collapsed, width]);
 
-	// --- Theme selection -----------------------------------------------------
-
-	/**
-	 * Applies a new theme via workspace prefs and the theme config callback.
-	 *
-	 * @param themeId - The ID of the theme to apply.
-	 */
-	/** Apply a theme — delegates to the context's setTheme which handles both prefs and CSS. */
-	const handleThemeSelect = useCallback((themeId: string) => {
-		setTheme(themeId);
-	}, [setTheme]);
-
 	// --- Footer menu items ---------------------------------------------------
+	// The platform footer menu is assembled by the shared hook so this frame
+	// and the workbench frames (vscode/cursor) can never drift apart.
+	const { footerMenuItems, homeAppId } = useSidebarFooterMenu({ account, hideAppSwitcher, onOverlay, isSaas });
 
-	const showAppSwitcher = !hideAppSwitcher && appManifest.length > 1;
-
-	// "Home" destination depends on deployment mode: SaaS lands on
-	// rocketride.home, OSS on rocketride.hello (must match Shell's defaultAppId).
-	const homeAppId = getHomeAppId(!!isSaas);
-
-	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
-		const items: SidebarFooterMenuItem[] = [
-			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId }) },
-			...(isSaas ? [{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') } satisfies SidebarFooterMenuItem] : []),
-			{ id: 'environment', label: 'Variables', icon: BxLock, dividerBefore: !isSaas, onClick: () => onOverlay('environment') },
-			// Settings is a global workspace view (shell "General" plus any installed app's
-			// settings), so it's always available. Per-app gating lives in SettingsProvider.
-			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
-			{
-				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
-				submenu: themeOptions.map((t) => ({
-					id: t.id, label: t.name, checked: prefs.theme === t.id,
-					onClick: () => handleThemeSelect(t.id),
-				})),
-			},
-		];
-
-		if (showAppSwitcher) {
-			/**
-			 * Handles app switching with subscription gating.
-			 * If the target app is paid and the user is not subscribed,
-			 * navigates to home and triggers the subscribe flow.
-			 */
-			const handleSwitchApp = (appId: string) => {
-				console.log('[Sidebar] handleSwitchApp called with appId:', appId);
-				ConnectionManager.getInstance().emit('shell:switchApp', { appId });
-			};
-
-			items.push({
-				id: 'apps', label: 'Switch App', icon: BxGridAlt,
-				submenu: appManifest
-					.filter((a) => a.id !== 'rocketride.home' && a.id !== 'rocketride.hello')
-					.filter((a) => isOnDesktop(a.id))
-					.sort((a, b) => a.name.localeCompare(b.name))
-					.map((app) => ({
-						id: app.id, label: app.name, checked: activeAppId === app.id,
-						icon: ({ size }: { size?: number }) => <AppIcon name={app.name} iconUrl={app.icon} size={size} />,
-						onClick: () => handleSwitchApp(app.id),
-					})),
-			});
-		}
-
-		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
-
-		return items;
-	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay, isSaas, homeAppId]);
-
-	// --- Don't render sidebar when not authenticated -------------------------
-
-	if (!identity) return null;
+	// NOTE: auth state deliberately does NOT gate the frame (design decision
+	// 2026-10-12) — the sidebar is the app's chrome, not a session privilege.
 
 	// --- Don't render sidebar when the frame has no content to hold ----------
 	// A one-column app (no AppLayout sidebar) gets no sidebar chrome and the
@@ -818,6 +810,19 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			</div>
 
 			{/* ================================================================
+			    DRAWER VIEW SWITCHER — the workbench's strip, drawer-rendered
+			    ================================================================ */}
+			{/* OUTSIDE the slot's close-on-click capture (and above its scroll):
+			    switching views opens more UI inside the drawer, so the tap must
+			    not close it — the same reasoning as data-rr-drawer="keep". */}
+			{drawerHasViews && (
+				<>
+					<SidebarViewStrip views={views} activeId={activeDrawerView?.id ?? ''} onSelect={selectDrawerView} />
+					{activeDrawerView && views.length > 1 && <div style={viewTitleStyle}>{activeDrawerView.title}</div>}
+				</>
+			)}
+
+			{/* ================================================================
 			    APP SIDEBAR CONTENT SLOT — scrolls between fixed header/footer
 			    ================================================================ */}
 			<div
@@ -830,21 +835,45 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 				    (SidebarMenu iconifies, free-form content returns null; the
 				    legacy bridge reads it back into the `collapsed` prop). */}
 				<SidebarCollapsedProvider value={effectiveCollapsed}>
-					{sidebarContent}
+					{drawerHasViews ? (
+						// Containers with their own content switch through the stock
+						// TabPanel (all bodies stay mounted — tree/scroll state
+						// survives switches); containers without content share the
+						// registered `sidebar` node, which learns the selection
+						// through the active-view context. The SAME structure as the
+						// workbench's panel body, under the drawer's chrome.
+						<SidebarActiveViewProvider value={drawerViewHandle}>
+							<div style={{ display: activeDrawerView?.content != null ? 'none' : 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+								{sidebarContent}
+							</div>
+							{views.some((v) => v.content != null) && (
+								<div style={{ display: activeDrawerView?.content != null ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+									<TabPanel
+										activeId={activeDrawerView?.content != null ? activeDrawerView.id : views.find((v) => v.content != null)!.id}
+										panels={views.reduce<Record<string, ITabPanelPanel>>((acc, v) => {
+											if (v.content != null) acc[v.id] = { content: v.content };
+											return acc;
+										}, {})}
+									/>
+								</div>
+							)}
+						</SidebarActiveViewProvider>
+					) : (
+						sidebarContent
+					)}
 				</SidebarCollapsedProvider>
 			</div>
 
 			{/* ================================================================
-			    FOOTER — hidden when logged out
+			    FOOTER — anonymous form when logged out
 			    ================================================================ */}
-			{identity && (
-				<SidebarFooter
-					collapsed={effectiveCollapsed}
-					userName={account.userName}
-					userEmail={account.userEmail}
-					menuItems={footerMenuItems}
-				/>
-			)}
+			<SidebarFooter
+				collapsed={effectiveCollapsed}
+				userName={account.userName}
+				userEmail={account.userEmail}
+				menuItems={footerMenuItems}
+				onOpenDocs={openPlatformDocs}
+			/>
 
 			{/* ================================================================
 			    RESIZE HANDLE — desktop only. A drawer has one width, and dragging

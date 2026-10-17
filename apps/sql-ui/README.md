@@ -1,35 +1,78 @@
 # SQL Explorer
 
-SQL Explorer is the app for working with a database your pipelines already
-talk to: browse the schema, read rows, write and run SQL, look at a query
-plan, stage a table change. It is not a database client of its own. Every
-statement travels through a database tool node inside one of your running
-pipelines, so it reaches exactly the database that node is configured for,
-with that node's permissions. If apps are new to you, read
-[Apps](../../docs/public/product/concepts/apps.md) first. What the app deliberately does not do is under
-[Limits](#limits); most of those gaps come from the tool protocol rather
-than from the app.
+Work with your SQL databases — MySQL, PostgreSQL and ClickHouse — right
+inside RocketRide: browse the schema, page through rows, write and run SQL,
+read a query plan, review the schema's health, draw the relationship
+diagram, and stage table changes with the DDL spelled out before anything
+runs.
+
+<p align="center">
+  <img src="./assets/screenshot.png" alt="SQL Explorer" width="900">
+</p>
+
+Every statement travels through a RocketRide database node, so it reaches
+exactly the database that node is configured for, with that node's
+permissions — whether that node lives in one of your pipelines or in a small
+tool pipeline the app runs for you (see [Connections](#connections)). If
+apps are new to you, read
+[Apps](../../docs/public/product/concepts/apps.md) first. What the app
+deliberately does not do is under [Limits](#limits); most of those gaps come
+from the tool protocol rather than from the app.
+
+SQL Explorer runs in the RocketRide shell and as a panel inside the
+RocketRide VS Code extension. It is the same app either way, and your
+connection list follows you between them.
 
 ## Before you start
 
-- **A running pipeline with a database node.** Connections are discovered
-  from running tasks, so a stopped pipeline has none. The supported nodes
-  are [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md) and
-  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md).
-- **Direct execution, if you want to run statements.** Each of those nodes
+- **A reachable database.** The supported engines are the ones with database
+  nodes: [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md),
+  [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md) and
+  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md). You
+  either point the app at a database node already running in one of your
+  pipelines, or give it the connection details directly — both under
+  [Connections](#connections).
+- **Direct execution, if you want to run statements.** Each database node
   has an **Allow direct query execution** setting (`allow_execute`), off by
   default and worth leaving off until a caller truly needs it. With it off,
   schema browsing, the diagram and the Insights page still work; statements
   do not. The first refused statement raises a banner: `This node does not
   allow execute (allow_execute is off). Schema browsing works; statements
-  cannot run.`
+  cannot run.` For a pipeline-bound connection the setting belongs to that
+  pipeline's node; for a direct connection it is part of the configuration
+  you enter yourself.
 
 ## Connections
 
-The Connections page lists every database tool node in every pipeline task
-you can see. Each card shows the pipeline, the dialect and a summary of the
-schema; selecting one opens a drawer where you can probe the endpoint before
-binding to it. An empty list means no running task has a database node.
+The sidebar carries your connection list. Each saved connection is a row;
+hovering one offers edit and delete, **+ New Connection** opens the add
+dialog, and clicking a row opens that database's workbench. The list is
+saved per user on the server you are connected to, so the same connections
+appear in the shell, in the App Builder preview and in VS Code.
+
+<p align="center">
+  <img src="./assets/new-connection.png" alt="Adding a connection" width="700">
+</p>
+
+**New Connection** offers two paths:
+
+- **From pipeline** finds every database node in your currently running
+  pipeline tasks and lets you pick one. The connection stays bound to that
+  node: it is usable while the pipeline runs and goes dark when it stops,
+  and statements run with exactly that node's configuration and permissions.
+  An empty list here means no running task has a database node.
+- **Direct** takes the connection details itself — you pick the engine and
+  fill in the same configuration form the pipeline editor uses, host and
+  credentials included. When you open a direct connection, the app starts a
+  small temporary tool pipeline holding just that database node, and stops
+  it again when you close the connection's last document (an idle one is
+  reaped after 15 minutes either way; the app restarts it transparently the
+  next time you run something).
+
+One thing to know about direct connections: the configuration is stored
+as typed in your per-user file on the server. For passwords and other
+secrets, use a `${ROCKETRIDE_*}` environment reference instead of the
+literal value — the server stores those encrypted.
 
 Opening a connection gives it a workbench document and fills the sidebar
 with that database's tables. Everything else hangs off a connection: query
@@ -67,6 +110,10 @@ twice.
 ## Writing and running queries
 
 A query document is a SQL editor over the results grid.
+
+<p align="center">
+  <img src="./assets/query.png" alt="Running a query" width="900">
+</p>
 
 ### What a run sends
 
@@ -445,6 +492,12 @@ statements ran either way; only the app's picture of the schema is behind.
   ClickHouse declares no foreign keys at all.
 - **The schema is a snapshot** from pipeline start, unless the node can
   re-read it.
+- **A pipeline-bound connection needs its pipeline running.** Discovery sees
+  running tasks only; when the pipeline stops, the connection stops with it.
+  A direct connection has no such dependency — its temporary pipeline is the
+  app's to start and stop.
+- **Direct connections store their configuration as typed** in your per-user
+  server file. Use `${ROCKETRIDE_*}` references for secrets.
 - **The limit moves in front of a locking clause.** MySQL requires the
   locking clause after `LIMIT`; PostgreSQL accepts either order; the app
   inserts its `LIMIT` before a trailing locking clause so the read stays

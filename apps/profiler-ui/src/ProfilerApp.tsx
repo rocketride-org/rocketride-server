@@ -24,206 +24,47 @@
 // PROFILER APP — Main client area component
 // =============================================================================
 //
-// Initialises the Documents singleton and ConnectionStore on mount.
-// When connection tabs are open, renders DocSplitLayout with DocTabs and
-// ProfilerView. When no tabs are open, renders the ConnectionManagerView
-// landing page.
-//
-// Pattern matches ModelsApp from models-ui.
+// The profiler ALWAYS targets the host's connected engine (the shell
+// connection singleton) — the per-connection landing page, saved-connection
+// store, and document tabs are gone (2026-10-14). One surface: the profiler
+// frame (viz + stats) in the content area, with every control in the
+// sidebar panel, the two joined by the profilerBridge channel.
 // =============================================================================
 
-import React, { useState, useEffect } from 'react';
-import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell';
-import { useWorkspace, DocSplitLayout, DocTabs, AppLayout } from 'shell';
-import type { Documents } from 'shell';
-import { commonStyles } from 'shell';
-import { createDocs, destroyDocs, getDocs } from './docs';
-import { initConnectionStore, destroyConnectionStore } from './connections';
-import type { ConnectionContent } from './connections';
+import React, { useMemo } from 'react';
+import type { DevToolProps, ShellAppProps } from 'shell';
+import { AppLayout } from 'shell';
 import ProfilerView from './views/ProfilerView';
-import ConnectionManagerView from './views/ConnectionManagerView';
-
-// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
-// (header + account footer) present with an empty middle slot.
-const SIDEBAR_FRAME_ONLY = <></>;
-
-// =============================================================================
-// STYLES
-// =============================================================================
-
-const styles = {
-	/** Root container fills the entire client area. */
-	container: {
-		...commonStyles.columnFill,
-	} as CSSProperties,
-
-	/** Wrapper for a single editor group pane. */
-	groupPane: {
-		display: 'flex',
-		flexDirection: 'column',
-		flex: 1,
-		minHeight: 0,
-		overflow: 'hidden',
-	} as CSSProperties,
-
-	/** Content area below the tab bar. */
-	content: {
-		flex: 1,
-		display: 'flex',
-		minHeight: 0,
-		overflow: 'hidden',
-	} as CSSProperties,
-
-	/** Loading / initialising placeholder. */
-	center: {
-		...commonStyles.columnFill,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		gap: 12,
-		color: 'var(--rr-text-secondary)',
-		fontSize: 14,
-	} as CSSProperties,
-};
+import ProfilerSidebar from './ProfilerSidebar';
+import { localFrameChannel, createPeerFrameChannel } from './profilerBridge';
 
 // =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
 /**
- * Profiler app — client area.
- *
- * Initialises the Documents singleton (no VFS — all tabs are static documents)
- * and the ConnectionStore (saved connections persisted in workspace appState).
- * Switches between the connection manager landing page and tabbed profiler views.
+ * Profiler app — the profiler frame inside the app chrome, with the control
+ * panel in the sidebar. Both ends share the in-document channel.
  */
-const ProfilerApp: React.FC<ShellAppProps> = (_props) => {
-	const { seeded, appState, updateAppState, settings } = useWorkspace();
-	const [ready, setReady] = useState(false);
-
-	// =========================================================================
-	// INITIALISE DOCUMENTS + CONNECTION STORE
-	// =========================================================================
-
-	useEffect(() => {
-		// Wait for workspace to be seeded before reading appState
-		if (!seeded) return;
-
-		// Create Documents instance (no VFS, static documents only)
-		createDocs({ appState, updateAppState });
-
-		// Initialise saved connections from appState (seeds default from settings).
-		// Bridge the workspace functional updater to the key/value API that
-		// ConnectionStore expects.
-		const keyValueUpdater = (key: string, value: unknown) => {
-			updateAppState((prev) => ({ ...prev, [key]: value }));
-		};
-		initConnectionStore(appState, keyValueUpdater, settings);
-
-		setReady(true);
-
-		return () => {
-			destroyConnectionStore();
-			destroyDocs();
-			setReady(false);
-		};
-	// One-time init gated on `seeded`: re-running on appState/settings churn
-	// would tear down and rebuild the Documents + connection stores.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [seeded]);
-
-	// =========================================================================
-	// RENDER
-	// =========================================================================
-
-	if (!ready) return <AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus><div style={styles.center}>Initialising...</div></AppLayout>;
-	return (
-		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
-			<ProfilerAppReady docs={getDocs()!} />
-		</AppLayout>
-	);
-};
+const ProfilerApp: React.FC<ShellAppProps> = (_props) => (
+	<AppLayout sidebar={<ProfilerSidebar />} showStatus>
+		<ProfilerView channel={localFrameChannel} />
+	</AppLayout>
+);
 
 // =============================================================================
-// INNER COMPONENT — renders once Documents is ready
+// DEV-TOOL FRAME — the profiler without shell chrome
 // =============================================================================
 
 /**
- * Inner component separated so the useStore() hook is called unconditionally.
- * Subscribes to the Documents state and decides between the connection manager
- * landing page and the tabbed split layout.
- *
- * @param props.docs - The initialised Documents instance.
+ * Dev-tool frame — the profiler surface without the shell AppLayout chrome,
+ * for host workbenches that mount the tool directly (the VS Code dev-tool
+ * panel). Controls live in the tool's sidebar mount; the two coordinate over
+ * the host-relayed peer channel.
  */
-const ProfilerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
-	const state = docs.useStore();
-
-	// Check if any editor group has open editors
-	const hasOpenEditors = Object.values(state.groups).some((g) => g.editorIds.length > 0);
-
-	// Whether there are multiple groups (controls close-group button visibility)
-	const canCloseGroups = state.rootNode.type === 'split';
-
-	// =========================================================================
-	// RENDER — LANDING PAGE (no tabs open)
-	// =========================================================================
-
-	if (!hasOpenEditors) {
-		return <ConnectionManagerView />;
-	}
-
-	// =========================================================================
-	// RENDER — TABBED SPLIT LAYOUT
-	// =========================================================================
-
-	return (
-		<div style={styles.container}>
-			<DocSplitLayout
-				docs={docs}
-				renderPane={(groupId: string) => {
-					const group = state.groups[groupId];
-					if (!group) return null;
-
-					// Find the active editor's document
-					const activeEditorId = group.editorIds[group.activeEditorIndex];
-					const activeEditor = activeEditorId ? state.editors[activeEditorId] : undefined;
-					const activeDocUri = activeEditor?.documentUri;
-					const activeDoc = activeDocUri ? state.documents[activeDocUri] : undefined;
-
-					return (
-						<div
-							style={styles.groupPane}
-							onClick={() => docs.setActiveGroup(groupId)}
-						>
-							{/* Tab bar */}
-							<DocTabs
-								docs={docs}
-								groupId={groupId}
-								isActive={state.activeGroupId === groupId}
-								canClose={canCloseGroups}
-								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
-								onCloseGroup={(gid) => docs.closeGroup(gid)}
-							/>
-
-							{/* Profiler content */}
-							<div style={styles.content}>
-								{activeDoc && activeEditorId && activeDocUri?.startsWith('conn:') ? (
-									<ProfilerView
-										host={(activeDoc.content as ConnectionContent).host}
-										port={(activeDoc.content as ConnectionContent).port}
-										name={activeEditor!.label}
-									/>
-								) : (
-									<ConnectionManagerView />
-								)}
-							</div>
-						</div>
-					);
-				}}
-			/>
-		</div>
-	);
+export const ProfilerDevTool: React.FC<DevToolProps> = ({ peer }) => {
+	const channel = useMemo(() => createPeerFrameChannel(peer), [peer]);
+	return <ProfilerView channel={channel} />;
 };
 
 export default ProfilerApp;

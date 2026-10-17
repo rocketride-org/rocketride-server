@@ -323,12 +323,15 @@ export interface BuildStatusTick {
 
 /** What the hosting surface can do — selects per-host affordances. */
 export interface AppBuilderCapabilities {
-	/** Web only: the Code pane (store-backed files + Monaco) exists. */
-	hasCodePane: boolean;
 	/** VSCode only: files are native — show the native-files strip. */
 	hasNativeFiles: boolean;
-	/** VSCode only: Debug (F5) launches a real browser. */
+	/** Debug affordance: VSCode launches a browser via F5; the web host opens the preview in a new tab. */
 	canDebug: boolean;
+	/**
+	 * The server runs the review ladder (SaaS): submit/withdraw gate the
+	 * public rung. False on OSS servers — @public publishes directly.
+	 */
+	hasReviewLadder: boolean;
 }
 
 /**
@@ -468,11 +471,36 @@ export interface IAppBuilderHost {
 }
 
 // =============================================================================
+// NEW APP WIZARD
+// =============================================================================
+
+/**
+ * Identity state the host feeds the New App wizard (NewAppForm). Lives in
+ * this plain-.ts module — not beside the form — so extension-host code can
+ * import it without pulling .tsx modules into a jsx-less program.
+ * Refreshed by the host whenever the connection/account changes, so the
+ * wizard's developer id chip and linkage name always reflect the live
+ * connection.
+ */
+export interface NewAppIdentity {
+	/** The publisher slug applied to new apps — the org developer id, or 'local' when none. */
+	developerId: string;
+	/** Where the developer id came from: the organization profile, or the local default. */
+	source: 'organization' | 'default';
+	/** Whether a scaffold target exists (a workspace folder / a connected store). */
+	workspaceOpen: boolean;
+	/** Folder names already in the scaffold target — used for live collision validation. */
+	existingFolders: string[];
+}
+
+// =============================================================================
 // VIEW VOCABULARY
 // =============================================================================
 
-/** The five activity views. */
+/** The activity views. Code editing lives outside the App Builder on every
+    host (VSCode edits natively; the web edits through the workspace
+    Explorer's file tabs) — there is no Code stage. */
 export type AppBuilderStage = 'dashboard' | 'design' | 'package' | 'store' | 'deploy';
 
-/** The DESIGN pill panes (Code is web-only). */
-export type DesignPane = 'preview' | 'code' | 'components' | 'events' | 'console' | 'errors';
+/** The DESIGN pill panes. */
+export type DesignPane = 'preview' | 'components' | 'events' | 'console' | 'errors';

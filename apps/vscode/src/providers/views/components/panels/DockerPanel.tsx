@@ -12,7 +12,8 @@
  * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
+import { AnchoredPopup } from 'shell';
 import DockerIcon from '../../../../assets/docker.svg';
 import { DockerStatus, VersionOption, displayVersion, stateLabels, IMAGE_BASE, panelStyles as S, statusIndicatorStyle, primaryBtnStyle, secondaryBtnStyle, optionStyle } from './shared';
 import { MessageData } from '../../Settings/SettingsWebview';
@@ -60,18 +61,9 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 	const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 	const [hoveredOption, setHoveredOption] = useState<string | null>(null);
 	const [dropdownOpen, setDropdownOpen] = useState(false);
-
-	// Close dropdown on outside click
-	useEffect(() => {
-		const handler = (e: MouseEvent) => {
-			const target = e.target as HTMLElement;
-			if (!target.closest(`[data-split-button="${idPrefix}-docker"]`)) {
-				setDropdownOpen(false);
-			}
-		};
-		document.addEventListener('click', handler);
-		return () => document.removeEventListener('click', handler);
-	}, [idPrefix]);
+	const closeDropdown = useCallback(() => setDropdownOpen(false), []);
+	// Anchor for the version dropdown (only one split button renders at a time).
+	const splitRef = useRef<HTMLDivElement | null>(null);
 
 	const transitional = status.state === 'starting' || status.state === 'stopping';
 	const allDisabled = busy || transitional;
@@ -90,7 +82,7 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 		const isBusy = busy && action === busyAction;
 
 		return (
-			<div style={S.splitButton} data-split-button={`${idPrefix}-docker`}>
+			<div ref={splitRef} style={S.splitButton}>
 				<button type="button" style={{ ...btnStyle(hoveredBtn === mainId, allDisabled), borderRadius: '4px 0 0 4px', whiteSpace: 'nowrap' }} disabled={allDisabled} onClick={onClick} onMouseEnter={() => setHoveredBtn(mainId)} onMouseLeave={() => setHoveredBtn(null)}>
 					{isBusy ? busyLabel : `${label}: ${currentLabel}`}
 				</button>
@@ -116,8 +108,8 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 				>
 					&#9662;
 				</button>
-				{dropdownOpen && (
-					<div role="menu" style={S.splitDropdown}>
+				<AnchoredPopup anchorRef={splitRef} open={dropdownOpen} onClose={closeDropdown} gap={2} matchAnchorWidth style={S.splitDropdown}>
+					<div role="menu">
 						<div style={S.splitDropdownGroupLabel}>Recommended</div>
 						{versions.filter((v) => v.value === 'latest' || v.value === 'prerelease').map((opt) => {
 							const optKey = `${idPrefix}-docker-${opt.value}`;
@@ -141,7 +133,7 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 							</>
 						)}
 					</div>
-				)}
+				</AnchoredPopup>
 			</div>
 		);
 	};

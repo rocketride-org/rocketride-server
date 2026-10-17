@@ -43,23 +43,33 @@ the `rocketride` twin) — logged loudly, since the yaml is user-owned. A
 workspace that already overrides `shell`/`rocketride` (the platform
 monorepos pin `workspace:*`) is left untouched.
 
-## Live preview overlay & dev servers
+## Local-first preview & dev servers
 
-A local dev build is previewed by registering a per-user `moduleId → entry URL`
-overlay (via `rrext_deploy_app.register_dev`) so the developer's shell points at
-their locally built bundle. The extension manages the underlying rsbuild dev
-servers through a serialized per-app operation chain (start/stop/restart run one
-at a time). Closing a preview **lingers** the server for 60 s so a quick reopen
-revives it instantly; a Reload or extension deactivation stops immediately.
-Every dev server is **owned** by the current extension host and runs under a
-guard wrapper whose stdin tether kills it the moment the host dies (window
-reload, crash, EDH stop — any death mode), so orphaned dev servers cannot
-exist. A server that crashes while its panel is open respawns itself
-automatically (bounded, so a crash loop gives up and points at the Console).
-The dev overlay holds one registration **per editor session** — several
-editors (or windows) can dev-serve the same app concurrently; previews
-launched from an editor carry its `rrsession` nonce and resolve that
-editor's server, and shells without a nonce take the newest registration.
+The preview is **local-first**: the app's rsbuild dev server runs as a
+**passthrough proxy** to the connected engine origin. It serves the dev app's
+workspace files (bundle, chunks, icon, `package.json`) from disk under the
+conventional `/apps/<appId>/dev/**` prefix and proxies EVERYTHING else —
+`/task` websocket, auth, published app bundles — to the engine untouched, so
+the preview shell is same-origin with its dev assets and the server holds
+zero dev state. Registration is a **push**: the preview panel posts
+`rrdev:registerRemote { appId, moduleId, entry, manifest }` into the shell
+(re-posted on rebuild and on manifest change — the workspace `package.json`
+is the metadata truth in dev); a top-level tab (F5 external-browser debug)
+instead **self-registers by URL convention**, fetching
+`/apps/<appId>/dev/package.json` from its own origin. A locally registered
+app id REPLACES the server's manifest row wholesale.
+
+The extension manages the dev servers through a serialized per-app operation
+chain (start/stop/restart run one at a time). Closing a preview **lingers**
+the server for 60 s so a quick reopen revives it instantly; a Reload or
+extension deactivation stops immediately. Every dev server is **owned** by
+the current extension host and runs under a guard wrapper whose stdin tether
+kills it the moment the host dies (window reload, crash, EDH stop — any
+death mode), so orphaned dev servers cannot exist. A server that crashes
+while its panel is open respawns itself automatically (bounded, so a crash
+loop gives up and points at the Console). Several editors can dev-serve the
+same app concurrently — each preview loads through its OWN editor's proxy
+origin, so no cross-editor routing exists to disambiguate.
 
 ## `appdev:call` — the app-control message
 

@@ -103,4 +103,13 @@ export const connectionCardEntry: IGalleryEntry = {
 		{ name: 'onDelete', type: '() => void', dir: 'out', note: 'Delete action - reveals the trash icon on hover.' },
 		{ name: 'onClick', type: '() => void', dir: 'out', note: 'Select action for the whole card.' },
 	],
+	sections: [
+		{
+			label: 'ConnectionCardAdd',
+			rows: [
+				{ name: 'label', type: 'string', dir: 'in', required: true, note: 'Label beneath the plus glyph, e.g. "New Connection".' },
+				{ name: 'onClick', type: '() => void', dir: 'out', required: true, note: 'Fired when the add tile is activated.' },
+			],
+		},
+	],
 };

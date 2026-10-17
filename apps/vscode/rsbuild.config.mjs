@@ -66,6 +66,10 @@ export default defineConfig({
 			'page-environment': './src/providers/views/Environment/index.tsx',
 			'page-app': './src/providers/views/App/index.tsx',
 			'page-newapp': './src/providers/views/NewApp/index.tsx',
+			'page-devtool-readme': './src/providers/views/DevToolReadme/index.tsx',
+			// NOTE: page-devtool is NOT here — it is a Module Federation host
+			// and needs a normal chunk graph, so it builds separately via
+			// rsbuild.devtool.config.mjs into webview/devtool/.
 		},
 	},
 

@@ -38,6 +38,7 @@ import { ConnectionManager } from '../../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../../constants';
 import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote, fallbackSkippedRemote, devPreviewHoldRemainingMs, DEV_REMOTE_TIMEOUT_MS } from '../../util/appLoader';
 import { getAppVersionOverride, clearAppVersionOverride } from '../../util/versionOverride';
+import { sessionScopedStore } from '../../util/devGate';
 import { SHELL_API_VERSION } from '../../apiver';
 
 // =============================================================================
@@ -49,6 +50,14 @@ import { SHELL_API_VERSION } from '../../apiver';
  * the user's last position.  Cleared when returning to 'home' so that a fresh
  * load without a session lock always lands on the home screen.
  *
+ * Tab-session scoped (sessionScopedStore): same-origin iframes SHARE the
+ * tab's sessionStorage, so a FRAMED preview (live OR built) session-locked
+ * to a working-copy app would stamp its id into the TOP shell's restore key
+ * — and the working copy exists only via dev injection, so the top shell's
+ * next refresh restores an app its server manifest cannot resolve ("App not
+ * found"). A framed shell's writes land frame-local instead; its identity
+ * rides its URL, which survives every iframe reload.
+ *
  * @param appId - The app being switched to.
  */
 function persistActiveApp(appId: string): void {
@@ -56,9 +65,9 @@ function persistActiveApp(appId: string): void {
 		// Both home apps count as "home": rocketride.home (SaaS) and
 		// rocketride.hello (OSS) — returning to either clears the session lock.
 		if (appId === HOME_APP_ID || appId === HELLO_APP_ID) {
-			sessionStorage.removeItem('rr:appId');
+			sessionScopedStore().removeItem('rr:appId');
 		} else {
-			sessionStorage.setItem('rr:appId', appId);
+			sessionScopedStore().setItem('rr:appId', appId);
 		}
 	} catch { /* storage unavailable */ }
 }
@@ -383,15 +392,18 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		const load = (async (): Promise<boolean> => {
 		await Promise.resolve();
 		try {
-			// Embedded dev preview: the locked app's remote is registered by the
-			// embedder AFTER boot (its dev server may still be installing —
-			// seconds of pnpm + rsbuild startup against a millisecond shell
-			// boot). Hold this load until the registration arrives; attempting
-			// earlier can only fail with RUNTIME-004 noise. BOUNDED by the
-			// page's shared hold deadline (the same one the layout's splash
-			// honours), and inside the try, so a never-registering dev server
-			// fails into the normal error path (which clears loadingMapRef)
-			// instead of holding the loading flag forever.
+			// Dev preview: the locked app's remote registers AFTER boot — a
+			// framed preview via the embedder's push (its dev server may still
+			// be installing — seconds of pnpm + rsbuild startup against a
+			// millisecond shell boot), a top-level F5 tab via the URL-convention
+			// self-registration. Hold this load until the registration arrives;
+			// attempting earlier can only fail with RUNTIME-004 noise. BOUNDED
+			// by the page's shared hold deadline (the same one the layout's
+			// splash honours), plus failDevRemoteWait rejects early on a
+			// definitive self-registration failure — and inside the try, so a
+			// never-registering dev server fails into the normal error path
+			// (which clears loadingMapRef) instead of holding the loading flag
+			// forever.
 			if (isDevPreviewPage() && previewLockedAppId() === appId) {
 				console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
 				try {

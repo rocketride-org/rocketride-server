@@ -32,6 +32,7 @@
 // =============================================================================
 
 import type { RocketRideClient } from 'shell';
+import { revivalFor } from './resolver';
 import type {
 	ISqlEndpoint,
 	ISqlExecuteResult,
@@ -94,10 +95,23 @@ class SqlToolSession implements ISqlSession {
 	 */
 	private async resolveToken(): Promise<string> {
 		if (this.token) return this.token;
-		const token = await this.client.getTaskToken({
+		let token = await this.client.getTaskToken({
 			projectId: this.endpoint.projectId,
 			source: this.endpoint.source,
 		});
+		if (!token) {
+			// Direct-mode temp pipelines idle out on their TTL — when the
+			// resolver registered a revival for this endpoint, re-`use` the
+			// pipeline once and resolve again before giving up.
+			const revive = revivalFor(this.endpoint.key);
+			if (revive) {
+				await revive();
+				token = await this.client.getTaskToken({
+					projectId: this.endpoint.projectId,
+					source: this.endpoint.source,
+				});
+			}
+		}
 		if (!token) {
 			throw new Error(`No running task for pipeline '${this.endpoint.pipelineName}'. Start the pipeline and retry.`);
 		}

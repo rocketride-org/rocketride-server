@@ -30,9 +30,7 @@
 // silently (the frozen-preview bug).
 import 'react/jsx-dev-runtime';
 
-import React from 'react';
 import type { AppDescriptor } from 'shell';
-import { RocketRideMark } from 'shell';
 import EventsApp from './EventsApp';
 
 /**
@@ -45,10 +43,10 @@ const EVENTS_APP: AppDescriptor = {
 	name: 'Event Monitor',
 	branding: {
 		appName: 'Event Monitor',
-		// style fills the shell's sized icon wrapper (the shared mark defaults to a
-		// fixed 24px; width/height:100% preserves the prior fill-to-slot behaviour).
-		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0', style: { width: '100%', height: '100%' } }),
-		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34', style: { width: '100%', height: '100%' } }),
+		// NO iconDark/iconLight here: branding icons OUTRANK the manifest icon
+		// by contract, and the RocketRideMark entries this block used to carry
+		// (wordmark-header era) masked the app's real icon on the rail and
+		// panel header. Absent, the shell falls through to the manifest icon.
 	},
 	// Frame-only app: EventsApp's root AppLayout keeps the branded sidebar
 	// frame (empty slot) and the status bar.

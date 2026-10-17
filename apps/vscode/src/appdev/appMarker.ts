@@ -20,6 +20,11 @@
 
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
+// Deep file import (like the templates shim) — the barrel would drag the
+// React view layer into the extension-host bundle.
+import { applyListing, projectListing } from 'shared/modules/appdev/listing';
+import type { PackageJsonLike } from 'shared/modules/appdev/listing';
+import type { ListingDraft } from 'shared/modules/appdev/types';
 
 // =============================================================================
 // TRIGGER FILE
@@ -156,22 +161,10 @@ export async function ensureProjectId(folder: string): Promise<string> {
 // STORE LISTING — projection of the appManifest (package.json is the storage)
 // =============================================================================
 
-/** Structural mirror of the shared ListingDraft (the webview contract). */
-export interface AppListing {
-	appId: string;
-	mode: 'free' | 'subscription' | 'paywall';
-	name: string;
-	description: string;
-	plans: Array<Record<string, unknown>>;
-	/** App-folder-relative icon path ('' = undeclared). */
-	icon?: string;
-	/** App-folder-relative README path ('' = undeclared). */
-	readme?: string;
-	/** Workspace-relative extra pack roots (appManifest.include). */
-	include?: string[];
-	/** Server-build typecheck gate (appManifest.typecheck; absent = true). */
-	typecheck?: boolean;
-}
+// The listing IS the shared ListingDraft — the projection logic lives in
+// shared appdev/listing (one implementation for every host); this module
+// contributes only the native-fs read/write plumbing.
+export type AppListing = ListingDraft;
 
 /**
  * Reads the STORE listing from the folder's appManifest.
@@ -181,65 +174,19 @@ export interface AppListing {
  */
 export async function readAppListing(folder: string): Promise<AppListing> {
 	const { pkg } = await readPkg(folder);
-	const m = pkg.appManifest as AppManifestJson;
-	const mode = m.mode === 'subscription' || m.mode === 'paywall' ? m.mode : 'free';
-	return {
-		appId: m.id as string,
-		mode,
-		name: typeof m.name === 'string' ? m.name : (pkg.name ?? ''),
-		description: typeof m.description === 'string' ? m.description : '',
-		plans: Array.isArray(m.billing?.plans) ? m.billing.plans : [],
-		icon: typeof m.icon === 'string' ? m.icon : '',
-		readme: typeof m.readme === 'string' ? m.readme : '',
-		include: Array.isArray(m.include) ? m.include.filter((p): p is string => typeof p === 'string' && p.length > 0) : [],
-		// Normalized: only an explicit false disables the gate.
-		typecheck: m.typecheck !== false,
-	};
+	return projectListing(pkg as PackageJsonLike);
 }
 
 /**
- * Writes the app-manifest draft back into the folder's appManifest — name,
- * description, mode, billing.plans, and the packaging fields (icon, readme,
- * include). Plan metadata rides along verbatim; other billing keys are
- * preserved. Empty values DELETE their key (an empty plan list removes
- * billing.plans and an emptied billing block entirely; '' icon/readme and
- * an empty include list drop the manifest key) so the manifest never
- * accumulates dead fields.
+ * Writes the app-manifest draft back into the folder's appManifest (the
+ * shared applyListing owns the field semantics — empty values delete their
+ * keys, plan metadata rides verbatim, packaging fields only when carried).
  *
  * @param folder - The app's bound folder (absolute path).
  * @param listing - The draft to persist.
  */
 export async function saveAppListing(folder: string, listing: AppListing): Promise<void> {
 	const file = await readPkg(folder);
-	const manifest = file.pkg.appManifest as AppManifestJson;
-	manifest.name = listing.name;
-	manifest.description = listing.description;
-	manifest.mode = listing.mode;
-	if (listing.plans.length > 0) {
-		manifest.billing = { ...(manifest.billing ?? {}), plans: listing.plans };
-	} else if (manifest.billing) {
-		delete manifest.billing.plans;
-		if (Object.keys(manifest.billing).length === 0) delete manifest.billing;
-	}
-	// Packaging fields — only touched when the draft carries them (the STORE
-	// tab's save omits them; the PACKAGE tab's save owns them).
-	if (listing.icon !== undefined) {
-		if (listing.icon) manifest.icon = listing.icon;
-		else delete manifest.icon;
-	}
-	if (listing.readme !== undefined) {
-		if (listing.readme) manifest.readme = listing.readme;
-		else delete manifest.readme;
-	}
-	if (listing.include !== undefined) {
-		const entries = listing.include.map((p) => p.trim()).filter(Boolean);
-		if (entries.length > 0) manifest.include = entries;
-		else delete manifest.include;
-	}
-	if (listing.typecheck !== undefined) {
-		// Only the non-default is stored: absent = strict (true).
-		if (listing.typecheck) delete manifest.typecheck;
-		else manifest.typecheck = false;
-	}
+	applyListing(file.pkg as PackageJsonLike, listing);
 	await writePkg(file);
 }

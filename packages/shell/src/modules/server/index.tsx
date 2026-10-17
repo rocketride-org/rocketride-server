@@ -16,6 +16,6 @@
  */
 
 export { default } from './MonitorView';
-export type { IMonitorViewProps } from './MonitorView';
+export type { IMonitorViewProps, MonitorPageId } from './MonitorView';
 export { parseActivityEvent } from './utils';
 export * from './types';

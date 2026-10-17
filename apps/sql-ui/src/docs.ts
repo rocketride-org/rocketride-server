@@ -66,6 +66,21 @@ export function destroyDocs(): void {
 	_docs = null;
 }
 
+/**
+ * Closes every editor showing one document URI (Documents has no close-by-uri
+ * of its own — editors are the closable unit).
+ *
+ * @param uri - The document URI to close.
+ */
+export function closeDocumentByUri(uri: string): void {
+	const docs = _docs;
+	if (!docs) return;
+	const state = docs.getState();
+	for (const [editorId, editor] of Object.entries(state.editors)) {
+		if (editor.documentUri === uri) docs.closeEditor(editorId);
+	}
+}
+
 // =============================================================================
 // DOCUMENT PAYLOADS
 // =============================================================================
@@ -93,9 +108,6 @@ export interface IQueryDocPayload {
 // =============================================================================
 // DOCUMENT URIS
 // =============================================================================
-
-/** URI of the Connections landing document. */
-export const CONNECTIONS_URI = 'connections';
 
 /**
  * Build the workbench document URI for one connection.
@@ -216,6 +228,67 @@ export function designUri(endpointKey: string, table: string | null): string {
  */
 export function isDesignUri(uri: string): boolean {
 	return uri.startsWith('design:');
+}
+
+// =============================================================================
+// CONNECTION EDITOR (the add/edit form as a top-level document, not a modal)
+// =============================================================================
+
+/**
+ * Build the in-app document URI for the connection editor. One URI per
+ * editing target, so re-invoking focuses the existing tab instead of
+ * stacking a second form.
+ *
+ * @param connId - The connection being edited, or null for a new one.
+ * @returns The document URI.
+ */
+export function connectionEditorUri(connId: string | null): string {
+	return `connedit:${connId ?? '*new*'}`;
+}
+
+/**
+ * Check whether a document URI is the connection editor.
+ *
+ * @param uri - A document URI.
+ * @returns True for connection-editor documents.
+ */
+export function isConnectionEditorUri(uri: string): boolean {
+	return uri.startsWith('connedit:');
+}
+
+/**
+ * The editing target of a connection-editor URI.
+ *
+ * @param uri - A connection-editor document URI.
+ * @returns The connection id being edited, or null for the add form.
+ */
+export function connectionEditorIdFromUri(uri: string): string | null {
+	const rest = uri.slice('connedit:'.length);
+	return rest === '*new*' ? null : rest;
+}
+
+/**
+ * The HOST-document key for the connection editor (VS Code mounts each tool
+ * document as its own editor panel; saved-connection ids are the other keys).
+ *
+ * @param connId - The connection being edited, or null for a new one.
+ * @returns The docKey to pass to DevToolProps.documents.open.
+ */
+export function connectionEditorDocKey(connId: string | null): string {
+	return `edit:${connId ?? '*new*'}`;
+}
+
+/**
+ * Parse a host docKey as a connection-editor key.
+ *
+ * @param docKey - A host-document key.
+ * @returns The editing target ({ connId: null } = add), or null when the key
+ *          names a connection workbench instead.
+ */
+export function parseConnectionEditorDocKey(docKey: string): { connId: string | null } | null {
+	if (!docKey.startsWith('edit:')) return null;
+	const rest = docKey.slice('edit:'.length);
+	return { connId: rest === '*new*' ? null : rest };
 }
 
 /**

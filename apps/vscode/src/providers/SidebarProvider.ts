@@ -26,38 +26,48 @@ import { ConfigManager } from '../config';
 import { ConnectionManager, isCloudConnected } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
-import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
+// Deep import on purpose: the tools/pipelines BARREL exports the discovery
+// controller, which carries sidebar view types the extension host's no-DOM
+// compile must never see. parse.ts is the pure parsing contract.
+import { parsePipelineContent } from 'shared/tools/pipelines/parse';
+import type { ParsedPipelineFile, ServiceClassInfo } from 'shared/tools/pipelines/parse';
 import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
 import { getProjectProvider } from '../extension';
-import { scanWorkspaceApps, appIconDataUri } from '../appdev/appScan';
-import type { ScannedApp } from '../appdev/appScan';
+import { DevToolStore } from './DevToolStore';
+import { DevToolBridge } from './DevToolBridge';
+import { WorkspaceFsService } from './toolhost/workspaceFsService';
 
-// =============================================================================
-// TYPES — App Builder sidebar rows (structural mirror of shared AppListItem)
-// =============================================================================
+/** workspaceState key for the persisted sidebar mode. */
+const SIDEBAR_MODE_KEY = 'rr.sidebarMode';
 
-/** One MY APPS row sent to the webview (shared AppListItem shape). */
-interface AppRowDTO {
+/** workspaceState key for the persisted strip tab order. */
+const TAB_ORDER_KEY = 'rr.sidebarTabOrder';
+
+/** workspaceState key for the last-known pinned tool rows (name + inlined
+ *  icon), keyed by app id — the strip seed renders from this cache before
+ *  any connection exists, so tool tabs paint instantly in their final shape. */
+const TOOL_META_KEY = 'rr.devToolMeta';
+
+/** Upper bound on one tool-icon fetch — a hung engine endpoint degrades that
+ *  icon, never the update it rides in. */
+const ICON_FETCH_TIMEOUT_MS = 5000;
+
+/** One pinned dev-tool row sent to the webview (shared ToolTab shape). */
+interface ToolRowDTO {
 	id: string;
 	name: string;
-	folder?: string;
-	/** Host-resolved icon (a data: URI here — loadable under the webview CSP
-	 * regardless of localResourceRoots, which only cover the extension dir). */
 	iconUrl?: string;
-}
-
-// =============================================================================
-// TYPES — serialisable ProjectEntry sent to webview
-// =============================================================================
-
-interface ProjectEntryDTO {
-	path: string;
-	projectId?: string;
-	sources?: { id: string; name: string; provider?: string }[];
+	version?: string;
+	/** Short description (the modules list's second line). */
+	description?: string;
+	/** MF container name — the sidebar's devToolSidebar mount loads by it. */
+	moduleId?: string;
+	/** Registry version resolving the remote entry URL. */
+	registryVersion?: number;
 }
 
 // =============================================================================
@@ -77,38 +87,45 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private connectionManager = ConnectionManager.getInstance();
 	private deployManager = DeployManager.getDeployInstance();
 
-	// ── Pipeline file state ──────────────────────────────────────────────────
-	private parsedFiles = new Map<string, ParsedPipelineFile>();
+	// ── Sidebar mode (persisted per workspace) ───────────────────────────────
+	// NO App Builder state here: MY APPS discovery runs in the WEBVIEW's
+	// AppDev controller (shared tools/appdev) over the generic workspace-FS
+	// service — the extension host no longer knows what an .rrapp binding is.
+	private sidebarMode: string = 'apps';
 
-	// ── App Builder state ────────────────────────────────────────────────────
-	// Cached workspace scan (re-run on .rrapp / package.json events) and the
-	// current sidebar mode (session-scoped; the webview restores it from updates).
-	private scannedApps: ScannedApp[] = [];
-	// Cached MY APPS rows — building them reads icon files off disk, and
-	// sendFullUpdate must not await that; rescans refresh this cache
-	// out-of-band and push appsUpdate when it lands.
-	private appRows: AppRowDTO[] = [];
-	/** Coalesces .rrapp / package.json event bursts into one workspace rescan. */
-	private rescanTimer?: NodeJS.Timeout;
-	/**
-	 * Monotonic rescan counter (the fetchSeq pattern): connect/auth/watcher
-	 * rescans overlap, and only the NEWEST run may commit its scan/rows —
-	 * a slower earlier run must not overwrite fresher state.
-	 */
-	private rescanSeq = 0;
-	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'apps';
+	/** Persisted strip tab order (mode ids + `tool:<appId>` ids). */
+	private tabOrder: string[] = [];
 
 	private logger = getLogger();
+
+	/** Generic workspace-FS capability for the webview's tool controllers. */
+	private workspaceFs = new WorkspaceFsService();
 
 	/**
 	 * Creates the sidebar provider.
 	 * Sets up file watchers and event listeners, and kicks off initial file load.
+	 *
+	 * @param extensionUri - The extension root for webview resources.
+	 * @param context - Extension context; persists the sidebar mode across reloads.
+	 * @param devTools - The pinned dev-tools store feeding the tool tabs.
 	 */
-	constructor(private readonly extensionUri: vscode.Uri) {
+	/** The engine origin baked into the current webview HTML's CSP. */
+	private htmlEngineOrigin = '';
+
+	constructor(private readonly extensionUri: vscode.Uri, private readonly context?: vscode.ExtensionContext, private readonly devTools?: DevToolStore, private readonly devToolBridge?: DevToolBridge) {
+		// Restore the last mode (previously session-only — it died on reload)
+		// and the persisted strip order.
+		this.sidebarMode = this.context?.workspaceState.get<string>(SIDEBAR_MODE_KEY) ?? 'apps';
+		this.tabOrder = this.context?.workspaceState.get<string[]>(TAB_ORDER_KEY) ?? [];
 		this.setupFileWatching();
 		this.setupEventListeners();
-		this.loadPipelineFiles();
-		void this.rescanApps();
+		this.disposables.push({ dispose: () => this.workspaceFs.dispose() });
+		// Pin/unpin from anywhere (the picker, the tool panel's Remove row)
+		// refreshes the tabs.
+		if (this.devTools) {
+			const sub = this.devTools.onDidChange(() => this.pushToolsUpdate());
+			this.disposables.push(sub);
+		}
 	}
 
 	// =========================================================================
@@ -127,12 +144,40 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		const html = this.getHtmlForWebview(webviewView.webview);
 		webviewView.webview.html = html;
 
+		// Peer relay: panel→sidebar messages land here once the sidebar lives.
+		this.devToolBridge?.registerSidebar((appId, payload) => {
+			void this._view?.webview.postMessage({ type: 'devtool:peer', appId, payload });
+		});
+
 		// Handle messages from the webview
 		webviewView.webview.onDidReceiveMessage(async (message) => {
 			try {
+				// Generic tool-host capability services (workspace FS for the
+				// tool controllers running in this webview) — routed before
+				// the UI messages; the host stays ignorant of what the
+				// controllers are scanning for.
+				if (this.workspaceFs.handle(message, (m) => void this._view?.webview.postMessage(m))) return;
+
 				switch (message.type) {
 					case 'view:ready':
-						await this.sendFullUpdate();
+						// A fresh page restarts its service-subscription ids —
+						// drop the previous page's watchers before anything else.
+						this.workspaceFs.resetSubscriptions();
+						// Seed the mode strip FIRST (synchronous, from persisted
+						// state alone) so its first paint already has the final
+						// tab set and order — the full update below is slow
+						// (icon fetches, dashboard) and must not be what shapes
+						// the strip.
+						this.sendStripSeed();
+						this.sendFullUpdate();
+						// Replay the fronted tool document — a fresh webview
+						// must not boot with every tool sidebar unselected
+						// while a tool tab is in front.
+						void this._view?.webview.postMessage({ type: 'devtool:activeDoc', ...this.activeToolDoc });
+						// Replay each tool's retained frame→sidebar state so a
+						// reloaded sidebar re-renders its mounts without any
+						// ask-the-frame handshake (peer direction discipline).
+						this.devToolBridge?.replayRetainedToSidebar();
 						if (this.connectionManager.isConnected()) {
 							try {
 								const client = this.connectionManager.getClient();
@@ -163,9 +208,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					case 'stopPipeline':
 						this.stopPipeline(message.projectId, message.sourceId);
 						break;
-					case 'refresh':
-						await this.loadPipelineFiles();
-						break;
 					case 'openUnknownTask':
 						vscode.commands.executeCommand('rocketride.page.status.open', message.projectId, message.sourceId, message.displayName);
 						break;
@@ -173,9 +215,45 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						vscode.commands.executeCommand('rocketride.app.open', message.appId);
 						break;
 					case 'setSidebarMode':
-						// Session-scoped persistence: included in every full update
+						// Persisted per workspace and included in every full update
 						// so a reloaded webview restores the user's last mode.
 						this.sidebarMode = message.mode;
+						void this.context?.workspaceState.update(SIDEBAR_MODE_KEY, message.mode);
+						break;
+					case 'openTool':
+						vscode.commands.executeCommand('rocketride.devtool.open', message.toolId);
+						break;
+					case 'focusTool':
+						// Strip tab selection: bring an open window of the tool
+						// forward; never create one for a mere tab switch.
+						vscode.commands.executeCommand('rocketride.devtool.reveal', message.toolId);
+						break;
+					case 'removeTool':
+						this.devTools?.remove(message.toolId);
+						break;
+					case 'reorderTabs':
+						// Full strip order (modes + tools) — persisted per
+						// workspace; the webview already reordered optimistically.
+						this.tabOrder = message.order;
+						void this.context?.workspaceState.update(TAB_ORDER_KEY, message.order);
+						break;
+					case 'showToolReadme':
+						vscode.commands.executeCommand('rocketride.devtool.readme', message.toolId);
+						break;
+					case 'devtool:peer':
+						// Sidebar mount → the tool's frame panel (buffered while
+						// the panel opens). Payloads are opaque to the host; by
+						// the peer contract these are USER actions, so a message
+						// to a closed panel summons it.
+						this.devToolBridge?.toPanel(message.appId, message.payload);
+						break;
+					case 'openToolDocument':
+						// A tool's sidebar mount opens one of ITS documents (the
+						// DevToolProps.documents API) — e.g. a connection's tab.
+						vscode.commands.executeCommand('rocketride.devtool.open', message.appId, message.docKey, message.title);
+						break;
+					case 'closeToolDocument':
+						vscode.commands.executeCommand('rocketride.devtool.close', message.appId, message.docKey);
 						break;
 					case 'setDevelopmentMode':
 						await this.configManager.updateConnectionMode('development', message.mode);
@@ -190,7 +268,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						break;
 				}
 			} catch (error) {
-				console.error('[SidebarProvider] Message handling error:', error);
+				this.logger.error(`Sidebar message '${String((message as { type?: string })?.type)}' failed: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		});
 
@@ -211,86 +289,172 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		this.disposables.push(
 			watcherPipe,
 			watcherPipe.onDidCreate((uri) => this.handleFileCreated(uri)),
-			watcherPipe.onDidDelete((uri) => this.handleFileDeleted(uri)),
 			watcherPipe.onDidChange((uri) => this.handleFileChanged(uri)),
 			watcherPipeJson,
 			watcherPipeJson.onDidCreate((uri) => this.handleFileCreated(uri)),
-			watcherPipeJson.onDidDelete((uri) => this.handleFileDeleted(uri)),
 			watcherPipeJson.onDidChange((uri) => this.handleFileChanged(uri))
 		);
 
-		// App discovery is .rrapp-driven, and the marker's adjacent
-		// package.json (appManifest block) verifies the binding — events on
-		// either can add/remove/rename an app. node_modules is excluded (its
-		// package.json churn is enormous and never a binding).
-		const watcherMarker = vscode.workspace.createFileSystemWatcher('**/*.rrapp');
-		const watcherPkg = vscode.workspace.createFileSystemWatcher('**/package.json');
-		// Debounced: installs and branch switches touch many binding files at
-		// once — one rescan after the burst settles.
-		const scheduleRescan = (): void => {
-			if (this.rescanTimer) clearTimeout(this.rescanTimer);
-			this.rescanTimer = setTimeout(() => {
-				this.rescanTimer = undefined;
-				void this.rescanApps();
-			}, 500);
-		};
-		const onBindingEvent = (uri: vscode.Uri): void => {
-			if (uri.fsPath.includes('node_modules')) return;
-			scheduleRescan();
-		};
-		this.disposables.push(
-			watcherMarker,
-			watcherMarker.onDidCreate(onBindingEvent),
-			watcherMarker.onDidDelete(onBindingEvent),
-			watcherMarker.onDidChange(onBindingEvent),
-			watcherPkg,
-			watcherPkg.onDidCreate(onBindingEvent),
-			watcherPkg.onDidDelete(onBindingEvent),
-			watcherPkg.onDidChange(onBindingEvent),
-			// Adding/removing a workspace folder fires no binding-file event, but
-			// scanWorkspaceApps only searches the CURRENT folder set — rescan so
-			// MY APPS never goes stale against a changed workspace.
-			vscode.workspace.onDidChangeWorkspaceFolders(() => scheduleRescan()),
-			{
-				dispose: () => { if (this.rescanTimer) clearTimeout(this.rescanTimer); },
-			}
-		);
+		// NO .rrapp / package.json watchers here: app-binding discovery is the
+		// webview AppDev controller's job (shared tools/appdev), watching
+		// through the generic workspace-FS service.
 	}
 
 	// =========================================================================
-	// APP BUILDER (MY APPS)
+	// DEV TOOLS (pinned tool tabs)
 	// =========================================================================
 
-	/** Re-scans the workspace for .rrapp-bound apps and pushes the fresh rows. */
-	private async rescanApps(): Promise<void> {
-		// Capture this run's sequence; a newer rescan supersedes it at every
-		// await point below.
-		const mine = ++this.rescanSeq;
-		const scanned = await scanWorkspaceApps();
-		if (mine !== this.rescanSeq) return;
-		this.scannedApps = scanned;
-		const rows = await this.buildAppRows();
-		if (mine !== this.rescanSeq) return;
-		this.appRows = rows;
-		if (this._view) {
-			this._view.webview.postMessage({ type: 'appsUpdate', apps: this.appRows });
+	/** Fetched tool icons as data: URIs, by source URL — immutable per URL. */
+	private toolIconCache = new Map<string, string>();
+
+	/**
+	 * Fetches an engine-served icon and inlines it as a data: URI — the same
+	 * CSP story as the MY APPS rows (data: URIs): the webview renders
+	 * instantly from the payload, with no cross-origin load to be blocked or
+	 * to arrive late (the tab is hidden until its icon is in hand).
+	 */
+	private async iconDataUri(url: string): Promise<string | undefined> {
+		const cached = this.toolIconCache.get(url);
+		if (cached) return cached;
+		// Time-boxed: this await chain sits inside the extras compose, and a
+		// hung engine must cost this one icon, not stall the whole update.
+		const abort = new AbortController();
+		const timer = setTimeout(() => abort.abort(), ICON_FETCH_TIMEOUT_MS);
+		try {
+			const res = await fetch(url, { signal: abort.signal });
+			if (!res.ok) return undefined;
+			const contentType = res.headers.get('content-type')?.split(';')[0] || 'image/svg+xml';
+			const dataUri = `data:${contentType};base64,${Buffer.from(await res.arrayBuffer()).toString('base64')}`;
+			this.toolIconCache.set(url, dataUri);
+			return dataUri;
+		} catch {
+			return undefined;
+		} finally {
+			clearTimeout(timer);
 		}
 	}
 
 	/**
-	 * Builds the MY APPS rows from the workspace scan alone: every row is a
-	 * .rrapp-bound working copy. The server catalog is deliberately not
-	 * consulted — the sidebar lists what is on disk, nothing else.
+	 * Builds the pinned-tool rows: the workspace's pinned ids resolved against
+	 * the connection's account apps (name, version, icon inlined as a data:
+	 * URI). A pinned id the account no longer carries still rows up by id so
+	 * the user can unpin it.
 	 */
-	private async buildAppRows(): Promise<AppRowDTO[]> {
-		const rows: AppRowDTO[] = [];
-		for (const app of this.scannedApps) {
-			rows.push({ id: app.id, name: app.name, folder: app.folder, iconUrl: await appIconDataUri(app.icon) });
+	private async buildToolRows(): Promise<ToolRowDTO[]> {
+		const pinned = this.devTools?.getAll() ?? [];
+		if (pinned.length === 0) return [];
+		const base = (this.connectionManager.getHttpUrl() || '').replace(/\/$/, '');
+		const apps = (this.connectionManager.getClient()?.getAccountInfo()?.apps ?? []) as Array<{ id: string; name?: string; icon?: string; version?: string; moduleId?: string; registryVersion?: number }>;
+		const byId = new Map(apps.filter((a) => a?.id).map((a) => [a.id, a]));
+		const cached = this.readToolMeta();
+		const rows = await Promise.all(pinned.map(async (id): Promise<ToolRowDTO> => {
+			const row = byId.get(id);
+			// Not in the account payload (disconnected, or genuinely gone):
+			// the last-known row keeps the tab stable; a never-seen id still
+			// rows up bare so the user can unpin it.
+			if (!row) return cached[id] ?? { id, name: id };
+			const icon = row.icon;
+			const iconUrl = icon ? (icon.startsWith('/') && base ? `${base}${icon}` : icon) : undefined;
+			return {
+				id,
+				name: row.name ?? id,
+				iconUrl: iconUrl ? await this.iconDataUri(iconUrl) : undefined,
+				version: row.version,
+				moduleId: row.moduleId,
+				registryVersion: row.registryVersion,
+			};
+		}));
+		// Persist the rows (fresh where resolved, last-known otherwise) keyed
+		// by pinned id — the next boot's strip seed renders from this cache
+		// before any connection exists. Unpinned ids fall out naturally.
+		const meta = Object.fromEntries(rows.map((r) => [r.id, r]));
+		if (JSON.stringify(meta) !== JSON.stringify(cached)) {
+			void this.context?.workspaceState.update(TOOL_META_KEY, meta);
 		}
-		// Scan order is marker-path order (a binding-priority detail); the
-		// list the user sees sorts by display name.
-		rows.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 		return rows;
+	}
+
+	/** The persisted last-known tool rows, by app id (see {@link TOOL_META_KEY}). */
+	private readToolMeta(): Record<string, ToolRowDTO> {
+		return this.context?.workspaceState.get<Record<string, ToolRowDTO>>(TOOL_META_KEY) ?? {};
+	}
+
+	/**
+	 * Posts the synchronous strip bootstrap: pinned tool rows from the
+	 * last-known cache, the persisted tab order, and the persisted mode. Sent
+	 * on `view:ready` BEFORE the full update, so the strip's first paint
+	 * already has its final tab set and order — late-resolving fresh rows
+	 * replace the cached ones in place instead of reshuffling the strip.
+	 */
+	private sendStripSeed(): void {
+		const pinned = this.devTools?.getAll() ?? [];
+		const cached = this.readToolMeta();
+		const tools = pinned.map((id): ToolRowDTO => cached[id] ?? { id, name: id });
+		void this._view?.webview.postMessage({ type: 'stripSeed', tools, tabOrder: this.tabOrder, sidebarMode: this.sidebarMode });
+	}
+
+	/**
+	 * Builds the full dev-tool catalog (the modules list): every account app
+	 * carrying the devTool category, installed or not, icons inlined.
+	 */
+	private async buildAvailableTools(): Promise<ToolRowDTO[]> {
+		if (!this.connectionManager.isConnected()) return [];
+		const base = (this.connectionManager.getHttpUrl() || '').replace(/\/$/, '');
+		const apps = (this.connectionManager.getClient()?.getAccountInfo()?.apps ?? []) as Array<{ id: string; name?: string; icon?: string; version?: string; description?: string; categories?: string[]; moduleId?: string; registryVersion?: number }>;
+		const rows = apps.filter((a) => a?.id && a.categories?.some((c) => c.toLowerCase() === 'devtool'));
+		const built = await Promise.all(rows.map(async (a) => {
+			const iconUrl = a.icon ? (a.icon.startsWith('/') && base ? `${base}${a.icon}` : a.icon) : undefined;
+			return {
+				id: a.id,
+				name: a.name ?? a.id,
+				iconUrl: iconUrl ? await this.iconDataUri(iconUrl) : undefined,
+				version: a.version,
+				description: a.description,
+				moduleId: a.moduleId,
+				registryVersion: a.registryVersion,
+			};
+		}));
+		return built.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	/**
+	 * Sets the sidebar mode FROM THE HOST (a tool panel gained focus) —
+	 * persists it and pushes a dedicated mode update (the full-update path
+	 * deliberately seeds the webview's mode only once).
+	 *
+	 * @param mode - The mode to select (e.g. `tool:<appId>`).
+	 */
+	public setModeExternal(mode: string): void {
+		this.sidebarMode = mode;
+		void this.context?.workspaceState.update(SIDEBAR_MODE_KEY, mode);
+		// Reveal the RocketRide sidebar (keeping keyboard focus where it is)
+		// so the tool's sidebar body is actually on screen, then switch its
+		// strip to the tool's tab.
+		this._view?.show?.(true);
+		void this._view?.webview.postMessage({ type: 'modeUpdate', mode });
+	}
+
+	/** The fronted tool document (replayed to a freshly booted webview). */
+	private activeToolDoc: { appId: string | null; docKey: string | null } = { appId: null, docKey: null };
+
+	/**
+	 * Relays the editor's fronted tool document to the sidebar webview — the
+	 * tool sidebar mounts follow it (highlight the fronted document, clear on
+	 * null).
+	 *
+	 * @param appId - The fronted tool's app id, or null for a non-tool tab.
+	 * @param docKey - The fronted tool document's key, or null.
+	 */
+	public notifyToolActiveDoc(appId: string | null, docKey: string | null): void {
+		this.activeToolDoc = { appId, docKey };
+		void this._view?.webview.postMessage({ type: 'devtool:activeDoc', appId, docKey });
+	}
+
+	/** Pushes the fresh tool rows + catalog to the webview (pin/unpin, account change). */
+	private pushToolsUpdate(): void {
+		void Promise.all([this.buildToolRows(), this.buildAvailableTools()]).then(([tools, available]) => {
+			this._view?.webview.postMessage({ type: 'toolsUpdate', tools, available });
+		});
 	}
 
 	/** Handles a newly created .pipe file — assigns a project_id if missing. */
@@ -308,7 +472,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					if (result && typeof result === 'object' && !Array.isArray(result)) {
 						const parsed = result as Record<string, unknown>;
 						if (Array.isArray(parsed.components)) {
-							const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
+							const existingIds = await this.collectProjectIds(uri.fsPath);
 							const projectId = typeof parsed.project_id === 'string' && parsed.project_id.trim() !== '' ? parsed.project_id : null;
 							const isDuplicate = projectId !== null && existingIds.has(projectId);
 							if (!projectId || isDuplicate) {
@@ -324,13 +488,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		} catch {
 			// File can't be read yet
 		}
-		await this.loadPipelineFiles();
-	}
-
-	/** Removes the deleted file from the parsed-files cache and updates the webview. */
-	private async handleFileDeleted(uri: vscode.Uri): Promise<void> {
-		this.parsedFiles.delete(uri.fsPath);
-		this.sendEntriesUpdate();
 	}
 
 	/** Re-parses a changed .pipe file, ensures project_id, and optionally restarts. */
@@ -350,12 +507,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						const root = result as Record<string, unknown>;
 						const target = root.pipeline && typeof root.pipeline === 'object' && !Array.isArray(root.pipeline) ? (root.pipeline as Record<string, unknown>) : root;
 						if (Array.isArray(target.components)) {
-							const existingIds = new Set(
-								[...this.parsedFiles.values()]
-									.filter((f) => f.filePath !== uri.fsPath)
-									.map((f) => f.projectId)
-									.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-							);
+							const existingIds = await this.collectProjectIds(uri.fsPath);
 							const projectId = typeof target.project_id === 'string' && target.project_id.trim() !== '' ? target.project_id : null;
 							const isDuplicate = projectId !== null && existingIds.has(projectId);
 							if (!projectId || isDuplicate) {
@@ -372,14 +524,49 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			// File can't be read
 		}
 
-		// Re-parse the changed file
-		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
-		this.parsedFiles.set(uri.fsPath, parsedFile);
-
-		this.sendEntriesUpdate();
+		// Re-parse the changed file for the restart decision only — the
+		// sidebar's entry list is the webview controller's business now.
+		const text = await this.readFileText(uri);
+		if (text === null) return;
+		const parsedFile = parsePipelineContent(text, uri.fsPath, this.getServiceClassInfoMap());
 
 		// Handle pipeline restart based on configuration
 		await this.handlePipelineRestart(uri, parsedFile);
+	}
+
+	/** Reads a file as UTF-8, or null when unreadable. */
+	private async readFileText(uri: vscode.Uri): Promise<string | null> {
+		try {
+			return Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * The project_ids of every OTHER pipeline file in the workspace — the
+	 * duplicate check behind project-id stamping. Collected on demand (this
+	 * provider keeps no parse cache anymore; stamping is its one remaining
+	 * .pipe concern — the always-on invariant).
+	 *
+	 * @param excludeFsPath - The file being stamped (its own id is not a duplicate).
+	 * @returns The set of ids in use.
+	 */
+	private async collectProjectIds(excludeFsPath: string): Promise<Set<string>> {
+		const ids = new Set<string>();
+		const files = await vscode.workspace.findFiles('{**/*.pipe,**/*.pipe.json}', '**/node_modules/**');
+		await Promise.all(files.filter((f) => f.fsPath !== excludeFsPath).map(async (file) => {
+			const text = await this.readFileText(file);
+			if (text === null) return;
+			try {
+				const parsed = JSON.parse(text) as Record<string, unknown>;
+				const body = (parsed.pipeline && typeof parsed.pipeline === 'object' ? parsed.pipeline : parsed) as Record<string, unknown>;
+				if (typeof body.project_id === 'string' && body.project_id.trim() !== '') ids.add(body.project_id);
+			} catch {
+				// Not valid JSON — carries no claimable id.
+			}
+		}));
+		return ids;
 	}
 
 	// =========================================================================
@@ -404,7 +591,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// the removed Rocket Ride: Console mirror — per-editor monitors
 				// subscribe to output themselves for the Log pane.
 				client.addMonitor({ token: '*' }, ['task']).catch((err) => {
-					console.error('[SidebarProvider] Failed to subscribe to task events:', err);
+					this.logger.error(`Sidebar task-event subscription failed: ${err instanceof Error ? err.message : String(err)}`);
 				});
 			}
 			// Teams come from ConnectResult — no fetch needed, just update the webview
@@ -426,10 +613,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		});
 
 		// Re-parse when service definitions arrive
-		const servicesUpdatedHandler = () => {
-			this.loadPipelineFiles();
-		};
-		this.connectionManager.on('shell:servicesUpdated', servicesUpdatedHandler);
 
 		// Re-fetch teams when cloud auth state changes (sign-in/sign-out)
 		const cloudAuth = CloudAuthProvider.getInstance();
@@ -458,7 +641,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			{ dispose: () => this.connectionManager.off('shell:disconnected', disconnectedHandler) },
 			{ dispose: () => this.connectionManager.off('shell:error', errorHandler) },
 			configChange,
-			{ dispose: () => this.connectionManager.off('shell:servicesUpdated', servicesUpdatedHandler) },
 			{ dispose: () => this.deployManager.off('shell:statusChange', deployConnStateHandler) },
 			{ dispose: () => this.deployManager.off('shell:connected', deployConnectedHandler) },
 			{ dispose: () => this.deployManager.off('shell:disconnected', deployDisconnectedHandler) },
@@ -466,14 +648,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		);
 
 		// Forward server events to webview
+		// NO apaevt_task forwarding: the webview folds task events from its
+		// OWN engine client now. Status updates still relay because they read
+		// the canvas editor's host-side diagnostics cache (migrates with it).
 		this.connectionManager.on('shell:event', (event: GenericEvent) => {
-			if (event?.event === 'apaevt_task') {
-				// Forward task event to webview for state tracking
-				this._view?.webview.postMessage({
-					type: 'taskEvent',
-					event: event.body,
-				});
-			} else if (event?.event === 'apaevt_status_update') {
+			if (event?.event === 'apaevt_status_update') {
 				// Forward status updates (errors/warnings) to webview.
 				// Deploy runs never touch the dev lists (THE one host-side
 				// classifier, shared with ProjectProvider's status cache) —
@@ -502,25 +681,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// DATA
 	// =========================================================================
 
-	/** Sends connection state + entries + user identity to the webview. */
-	private async sendFullUpdate(): Promise<void> {
+	/**
+	 * Sends connection state + entries + apps to the webview — the
+	 * SYNCHRONOUS local state only, posted with no awaits in front of it.
+	 * After a CSP reboot this message is the wiped page's one shot at its
+	 * rows, so nothing network-derived may sit between the call and the
+	 * post. The slow fields (user identity, tool rows, catalog, devToolHost)
+	 * follow out-of-band via {@link sendUpdateExtras}.
+	 */
+	private sendFullUpdate(): void {
 		if (!this._view) return;
+
+		// An engine-origin change invalidates the webview's CSP (the dev-tool
+		// sidebar mounts load remote chunks from the engine): re-render the
+		// HTML — the webview reboots and re-handshakes via view:ready.
+		if (this.htmlEngineOrigin !== this.engineOrigin()) {
+			this._view.webview.html = this.getHtmlForWebview(this._view.webview);
+			return;
+		}
 
 		const status = this.connectionManager.getConnectionStatus();
 		const config = this.configManager.getConfig();
-
-		// Resolve user identity from whichever connection is cloud-connected.
-		// Dev takes priority; local/docker/service connections don't have real user identity.
-		const devAccount = this.connectionManager.getClient()?.getAccountInfo();
-		const deployAccount = this.deployManager.getClient()?.getAccountInfo();
-		const account = (config.development.connectionMode === 'cloud' ? devAccount : null) ?? (config.deployment.connectionMode === 'cloud' ? deployAccount : null);
-
-		const cloudAuth = CloudAuthProvider.getInstance();
-		const cloudConnected = isCloudConnected();
-
-		const userName = account?.displayName || (cloudConnected ? await cloudAuth.getUserName() : undefined) || undefined;
-		const userEmail = account?.email || undefined;
-
 		const deployStatus = this.deployManager.getConnectionStatus();
 
 		this._view.webview.postMessage({
@@ -537,95 +718,79 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				deployProgressMessage: deployStatus.progressMessage,
 				deployProgressLogLine: deployStatus.progressLogLine,
 				// Shared
-				cloudConnected,
-				userName: userName || undefined,
-				userEmail: userEmail || undefined,
+				cloudConnected: isCloudConnected(),
 				// Subscription
 				isSubscribed: isSubscribed(this.connectionManager.getClient(), PIPE_BUILDER_APP_ID),
-				// Pipeline data
-				entries: this.buildEntries(),
-				unknownTasks: [],
-				// App Builder (MY APPS) — the cached rows; rescanApps refreshes
-				// them out-of-band so this update never awaits the catalog RPC
-				apps: this.appRows,
+				// NO entries/tasks: the webview's PIPELINES CONTROLLER discovers
+				// files itself and folds task events from its own client.
 				sidebarMode: this.sidebarMode,
+				tabOrder: this.tabOrder,
 			},
 		});
+
+		// The network-derived half rides behind, individually guarded — a
+		// hung icon fetch or a failed identity lookup must not cost the rows
+		// just posted.
+		void this.sendUpdateExtras();
 	}
 
-	/** Sends only updated entries. */
-	private sendEntriesUpdate(): void {
-		if (!this._view) return;
-		this._view.webview.postMessage({
-			type: 'entriesUpdate',
-			entries: this.buildEntries(),
-		});
-	}
+	/** Monotonic extras counter — a newer compose supersedes an in-flight one. */
+	private extrasSeq = 0;
 
-	// =========================================================================
-	// PIPELINE FILE LOADING
-	// =========================================================================
+	/**
+	 * Composes and posts the network-derived half of a full update: user
+	 * identity, pinned tool rows, the dev-tool catalog, and the devToolHost
+	 * connection facts. Every await is individually guarded so one bad
+	 * endpoint degrades its own field — the sync update this follows is on
+	 * screen either way.
+	 */
+	private async sendUpdateExtras(): Promise<void> {
+		const mine = ++this.extrasSeq;
+		const config = this.configManager.getConfig();
 
-	/** Scans the workspace for .pipe / .pipe.json files, parses them, and updates the webview. */
-	private async loadPipelineFiles(): Promise<void> {
-		const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
-		const files = [...pipeFiles, ...pipeJsonFiles];
-
-		this.parsedFiles.clear();
-
-		for (const uri of files) {
-			const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
-			this.parsedFiles.set(uri.fsPath, parsedFile);
+		// Resolve user identity from whichever connection is cloud-connected.
+		// Dev takes priority; local/docker/service connections don't have real
+		// user identity. The cloud-auth name is a fallback and optional.
+		const devAccount = this.connectionManager.getClient()?.getAccountInfo();
+		const deployAccount = this.deployManager.getClient()?.getAccountInfo();
+		const account = (config.development.connectionMode === 'cloud' ? devAccount : null) ?? (config.deployment.connectionMode === 'cloud' ? deployAccount : null);
+		let cloudName: string | undefined;
+		if (!account?.displayName && isCloudConnected()) {
+			try {
+				cloudName = await CloudAuthProvider.getInstance().getUserName();
+			} catch {
+				/* identity is cosmetic — never block the update on it */
+			}
 		}
+		const userName = account?.displayName || cloudName || undefined;
+		const userEmail = account?.email || undefined;
 
-		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', files.length === 0);
-		this.sendEntriesUpdate();
+		// Pinned tool rows: fall back to the last-known cache (the strip-seed
+		// source) rather than wiping the tabs — an empty list would also drop
+		// a selected tool mode back to Pipelines.
+		const tools = await this.buildToolRows().catch((): ToolRowDTO[] => {
+			const cached = this.readToolMeta();
+			return (this.devTools?.getAll() ?? []).map((id) => cached[id] ?? { id, name: id });
+		});
+		const availableTools = await this.buildAvailableTools().catch((): ToolRowDTO[] => []);
+		// Connection facts for the sidebar's devToolSidebar mounts (its own
+		// SDK connection + remote entry URLs).
+		const devToolHost = this.connectionManager.isConnected()
+			? {
+				engineHttpUrl: (this.connectionManager.getHttpUrl() || 'http://localhost:5565').replace(/\/$/, ''),
+				authToken: await this.connectionManager.resolveAuthCredential().catch(() => ''),
+			}
+			: null;
+
+		// Superseded by a newer full update, or the view died: drop silently.
+		if (mine !== this.extrasSeq || !this._view) return;
+		this._view.webview.postMessage({ type: 'extrasUpdate', userName, userEmail, tools, availableTools, devToolHost });
 	}
 
-	/** Returns the cached service class definitions (used to resolve source display names). */
+	/** Returns the cached service class definitions (restart-flow parsing). */
 	private getServiceClassInfoMap(): Record<string, ServiceClassInfo> | undefined {
 		const cached = this.connectionManager.getCachedServices();
 		return cached?.services as Record<string, ServiceClassInfo> | undefined;
-	}
-
-	// =========================================================================
-	// ENTRY BUILDER
-	// =========================================================================
-
-	/** Builds the flat ProjectEntry[] array for the webview. */
-	private buildEntries(): ProjectEntryDTO[] {
-		const services = this.connectionManager.getCachedServices()?.services ?? {};
-		const entries: ProjectEntryDTO[] = [];
-
-		for (const [fsPath, pf] of this.parsedFiles) {
-			const relativePath = vscode.workspace.asRelativePath(fsPath);
-
-			if (!pf.isValid) {
-				entries.push({ path: relativePath });
-				continue;
-			}
-
-			// Build sources with resolved display names
-			const sources = pf.sourceComponents
-				.map((sc) => {
-					const providerDef = sc.provider ? (services[sc.provider] as { title?: string } | undefined) : undefined;
-					return {
-						id: sc.id,
-						name: sc.name || providerDef?.title || sc.id,
-						provider: sc.provider,
-					};
-				})
-				.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-
-			entries.push({
-				path: relativePath,
-				projectId: pf.projectId,
-				sources,
-			});
-		}
-
-		entries.sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: 'base' }));
-		return entries;
 	}
 
 	// =========================================================================
@@ -778,6 +943,23 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
 
+			// Dev-tool sidebar mounts load the tool's remote FROM THE ENGINE:
+			// widen the CSP with the engine origin (scripts = remote chunks;
+			// styles = the remote's async CSS chunks; connect = MF fetches +
+			// the mount's SDK websocket). Computed at render time; an
+			// engine-origin change re-renders the HTML (see the statusChange
+			// listener).
+			const origin = this.engineOrigin();
+			this.htmlEngineOrigin = origin;
+			if (origin) {
+				const wsOrigin = origin.replace(/^http/, 'ws');
+				htmlContent = htmlContent
+					.replace(/script-src /, `script-src ${origin} `)
+					.replace(/style-src /, `style-src ${origin} `)
+					.replace(/connect-src /, `connect-src ${origin} ${wsOrigin} `)
+					.replace(/img-src /, `img-src ${origin} `);
+			}
+
 			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
 				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
 				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview', cleanPath));
@@ -785,6 +967,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			});
 		} catch (error) {
 			return `<html><body><p>Error loading sidebar: ${error}</p></body></html>`;
+		}
+	}
+
+	/**
+	 * The engine origin the webview CSP should carry. getHttpUrl() is total —
+	 * the live engine URI when connected, the configured hostUrl (or the
+	 * local default) otherwise — so the first render already bakes the origin
+	 * the connection will land on: the common startup (sidebar resolves while
+	 * connecting, engine lands seconds later) produces no CSP mismatch and no
+	 * webview reboot. A disconnect keeps the last expected origin for the
+	 * same reason; only a genuine engine switch changes it. '' only when the
+	 * URL is unparsable.
+	 */
+	private engineOrigin(): string {
+		try {
+			return new URL(this.connectionManager.getHttpUrl() || '').origin;
+		} catch {
+			return '';
 		}
 	}
 

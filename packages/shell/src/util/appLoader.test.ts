@@ -78,8 +78,17 @@ test('the hold applies only to the app the preview is locked to', () => {
 	assert.equal(isDevPreviewPending('org.other'), false);
 });
 
-test('a top-level page never holds', () => {
+test('a top-level rrdev tab holds too (URL-convention self-registration)', () => {
+	// Local-first dev: a top-level F5 tab (?appid&rrdev=1) self-registers
+	// its dev build from its own proxy origin, so its first load holds for
+	// that registration exactly like a framed preview.
 	stubPage('?appid=org.held&rrdev=1', false);
+	stubClock(1_000);
+	assert.equal(isDevPreviewPending('org.held'), true);
+});
+
+test('a page without the rrdev marker never holds', () => {
+	stubPage('?appid=org.held', false);
 	stubClock(1_000);
 	assert.equal(isDevPreviewPending('org.held'), false);
 });
@@ -98,7 +107,9 @@ test('the remaining hold time counts down to zero and is zero outside a dev prev
 	mock.restoreAll();
 	stubClock(31_000);
 	assert.equal(devPreviewHoldRemainingMs(), 0);
-	stubPage('?appid=org.held&rrdev=1', false);
+	// Outside a dev preview = no rrdev marker (a top-level rrdev tab is a
+	// dev preview now — it self-registers and holds like a framed one).
+	stubPage('?appid=org.held', false);
 	mock.restoreAll();
 	stubClock(1_000);
 	assert.equal(devPreviewHoldRemainingMs(), 0);

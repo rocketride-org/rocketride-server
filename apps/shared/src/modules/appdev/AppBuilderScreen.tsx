@@ -26,16 +26,18 @@
 
 /**
  * The App Builder's entire view surface: a top TabControl strip switching
- * the five activity views — DASHBOARD | DESIGN | PACKAGE | STORE | DEPLOY —
+ * the activity views — DASHBOARD | DESIGN | PACKAGE | STORE | DEPLOY —
  * with the app's `id · version` in the trailing slot (revised decision D1:
  * activity names, no coach bar, no artifact views). DASHBOARD is the
  * landing view; PACKAGE is the complete-app bar, STORE is commerce only.
+ * Code editing lives OUTSIDE this screen on every host (VSCode edits
+ * natively; the web edits through the workspace Explorer's file tabs).
  *
  * Hosts mount this ONE component in exactly one of two ways (decision D7):
  * rocket-ui direct-mounts it with an adapter over the live client; the
  * VSCode `page-app` webview mounts it with an adapter that bridges every
- * accessor/action over useMessaging to the extension host. The preview and
- * code surfaces are the only host-rendered pieces, passed in as slots.
+ * accessor/action over useMessaging to the extension host. The preview
+ * surface is the only host-rendered piece, passed in as a slot.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -60,8 +62,6 @@ export interface IAppBuilderScreenProps {
 	app: AppSummary;
 	/** Host-rendered live preview surface (iframe wrapper). */
 	previewPane?: React.ReactNode;
-	/** Host-rendered Code surface (web: file tree + Monaco). */
-	codePane?: React.ReactNode;
 	/** Initial activity view (defaults to 'dashboard'). */
 	initialStage?: AppBuilderStage;
 	/** Notified when the user switches views (hosts persist view state). */
@@ -119,7 +119,7 @@ const styles: Record<string, React.CSSProperties> = {
  * @param props - See {@link IAppBuilderScreenProps}.
  */
 export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
-	host, app, previewPane, codePane, initialStage, onStageChange,
+	host, app, previewPane, initialStage, onStageChange,
 }) => {
 	// ── Stage — the active activity view ─────────────────────────────────
 	const [stage, setStage] = useState<AppBuilderStage>(initialStage ?? 'dashboard');
@@ -136,8 +136,8 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 	}, [host]);
 	const namespaceMismatch = developerId !== null && app.id.split('.')[0] !== developerId;
 
-	// The five activity views, per the settled UI model — Dashboard lands
-	// first; Package is the complete-app bar, Store is commerce only.
+	// The activity views, per the settled UI model — Dashboard lands first;
+	// Package is the complete-app bar, Store is commerce only.
 	const viewMenu: ViewMenu = useMemo(() => ({
 		entries: [
 			{ id: 'dashboard', label: 'Dashboard' },
@@ -187,7 +187,7 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 					<DashboardView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />
 				)}
 				{stage === 'design' && (
-					<DesignView host={host} previewPane={previewPane} codePane={codePane} />
+					<DesignView host={host} previewPane={previewPane} />
 				)}
 				{/* Package edits LOCAL files (like DESIGN) — never namespace-gated. */}
 				{stage === 'package' && <PackageView host={host} app={app} />}

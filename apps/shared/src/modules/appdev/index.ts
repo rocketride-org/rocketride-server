@@ -47,6 +47,16 @@ export { LogList, LOG_LIST_CAP } from './LogList';
 export type { ILogListProps, LogListRow } from './LogList';
 export { renderTemplate, TEMPLATE_NAMES } from './templates';
 export type { FrameOptions, TemplateFile, TemplateName, TemplateVars } from './templates';
+export { toHistoryEntries, toRungPins, toVersionInfos, walkDeploymentHistory } from './wire';
+export type { WireHistoryRow, WirePin, WireRailEntry } from './wire';
+export { runListingPreflight } from './preflight';
+export type { PreflightIO } from './preflight';
+export { applyListing, projectListing } from './listing';
+export type { PackageJsonLike } from './listing';
+export { NewAppForm, deriveDisplayName } from './NewAppForm';
+export type { INewAppFormProps, NewAppIdentity } from './NewAppForm';
+export { probePackage } from './compatProbe';
+export type { CompatVerdict, ProbeOptions } from './compatProbe';
 export { ComponentGallery, KnobsPanel, GALLERY_ENTRIES, GALLERY_GROUPS } from './gallery';
 export type {
 	GalleryGroup,

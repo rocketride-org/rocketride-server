@@ -26,24 +26,28 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 
 import 'shell/themes/rocketride-default.css';
 import '../../../themes/rocketride-vscode.css';
+import './sidebar.css';
 
-import { SidebarView } from 'shared/modules/sidebar/SidebarView';
+import { SidebarChrome } from 'shared/tools/core/chrome/SidebarChrome';
+import { buildBuiltinSidebarItems } from './builtinTools';
 import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell';
 import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
 import { SidebarFooter } from 'shell';
 import type { SidebarFooterMenuItem } from 'shell';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, SidebarMode } from 'shared/modules/sidebar/types';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, SidebarMode, ToolTab } from 'shared/modules/sidebar/types';
 import { useMessaging } from '../hooks/useMessaging';
+import { ConnectionManager } from 'shell';
+import { startWorkspaceAppDiscovery } from 'shared/tools/appdev';
+import { startPipelineDiscovery } from 'shared/tools/pipelines';
+import type { IPipelineDiscovery, ServiceClassInfo } from 'shared/tools/pipelines';
+import type { IToolWorkspaceFs } from 'shared/tools/core';
+import { DevToolSidebarMount } from './DevToolSidebarMount';
+import type { DevToolHostInfo } from './DevToolSidebarMount';
+import { ToolPanel } from 'shared/tools/core/chrome/SidebarChrome';
 
 // =============================================================================
 // TYPES — messages between extension host and webview
 // =============================================================================
-
-interface HostProjectEntry {
-	path: string;
-	projectId?: string;
-	sources?: { id: string; name: string; provider?: string }[];
-}
 
 interface TaskEventBody {
 	action: 'begin' | 'end' | 'restart' | 'running';
@@ -56,7 +60,7 @@ interface TaskEventBody {
 	tasks?: { id: string; name: string; projectId: string; source: string; runKind?: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'openApp'; appId: string } | { type: 'setSidebarMode'; mode: SidebarMode };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'openApp'; appId: string } | { type: 'setSidebarMode'; mode: SidebarMode } | { type: 'openTool'; toolId: string } | { type: 'focusTool'; toolId: string } | { type: 'removeTool'; toolId: string } | { type: 'showToolReadme'; toolId: string } | { type: 'reorderTabs'; order: string[] } | { type: 'devtool:peer'; appId: string; payload: unknown } | { type: 'openToolDocument'; appId: string; docKey: string; title: string } | { type: 'closeToolDocument'; appId: string; docKey: string } | { type: 'svc:fs'; id: number; method: 'findFiles'; include: string; exclude?: string } | { type: 'svc:fs'; id: number; method: 'workspaceRoots' } | { type: 'svc:fs'; id: number; method: 'readText'; path: string } | { type: 'svc:fs'; id: number; method: 'readBase64'; path: string; maxBytes: number } | { type: 'svc:fs.watch'; id: number; globs: string[] } | { type: 'svc:fs.unwatch'; id: number };
 
 interface DashboardTaskDTO {
 	id: string;
@@ -85,22 +89,24 @@ type IncomingMessage =
 				deployProgressLogLine?: string;
 				// Shared auth
 				cloudConnected?: boolean;
-				userName?: string;
-				userEmail?: string;
-				// Pipeline data
-				entries: HostProjectEntry[];
-				unknownTasks: UnknownTask[];
-				// App Builder (MY APPS) — merged workspace ∪ server list
-				apps?: AppListItem[];
 				/** Host-persisted sidebar mode (workspaceState). */
 				sidebarMode?: SidebarMode;
+				/** Host-persisted strip tab order (workspaceState). */
+				tabOrder?: string[];
 			};
 	  }
-	| { type: 'entriesUpdate'; entries: HostProjectEntry[] }
-	| { type: 'appsUpdate'; apps: AppListItem[] }
-	| { type: 'taskEvent'; event: TaskEventBody }
-	| { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] }
-	| { type: 'dashboardSnapshot'; tasks: DashboardTaskDTO[] };
+	// The network-derived half of a full update: identity, pinned tool rows,
+	// the dev-tool catalog, and the devToolSidebar connection facts — posted
+	// separately so these slow lookups can never delay or drop the sync half.
+	| { type: 'extrasUpdate'; userName?: string; userEmail?: string; tools: ToolTab[]; availableTools: ToolTab[]; devToolHost: DevToolHostInfo | null }
+	| { type: 'toolsUpdate'; tools: ToolTab[]; available: ToolTab[] }
+	| { type: 'stripSeed'; tools: ToolTab[]; tabOrder: string[]; sidebarMode: SidebarMode }
+	| { type: 'devtool:activeDoc'; appId: string | null; docKey: string | null }
+	| { type: 'devtool:peer'; appId: string; payload: unknown }
+	| { type: 'svc:fs:result'; id: number; ok: boolean; result?: unknown; error?: string }
+	| { type: 'svc:fs:event'; id: number; path: string }
+	| { type: 'modeUpdate'; mode: SidebarMode }
+	| { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] };
 
 // =============================================================================
 // COMPONENT
@@ -126,8 +132,44 @@ const SidebarViewWebview: React.FC = () => {
 	const [unknownTasks, setUnknownTasks] = useState<UnknownTask[]>([]);
 
 	// ── App Builder (MY APPS) ───────────────────────────────────────────────
+	// Discovered by the AppDev CONTROLLER running in this webview (shared
+	// tools/appdev) over the host's generic workspace-FS service — the
+	// extension host no longer knows what an .rrapp binding is.
 	const [apps, setApps] = useState<AppListItem[]>([]);
+
+	// ── Tool-host service client (workspace FS) ─────────────────────────────
+	// Request/response correlation + watch fan-out for the svc:fs RPC. Refs,
+	// so the messaging callback below never re-subscribes.
+	const svcSeqRef = useRef(0);
+	const svcPendingRef = useRef(new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>());
+	const svcWatchRef = useRef(new Map<number, (path: string) => void>());
+	// ── Pinned dev tools (icon tabs on the mode strip) + the catalog ───────
+	const [tools, setTools] = useState<ToolTab[]>([]);
+	const [availableTools, setAvailableTools] = useState<ToolTab[]>([]);
+	// Persisted strip order (modes + tool tabs); seeded from the host, set
+	// optimistically on drag.
+	const [tabOrder, setTabOrder] = useState<string[]>([]);
+	const [devToolHost, setDevToolHost] = useState<DevToolHostInfo | null>(null);
+	// Peer subscribers per tool — host-relayed messages from the tool's frame
+	// panel fan out here; a ref so the message handler never re-subscribes.
+	const peerSubsRef = useRef(new Map<string, Set<(msg: unknown) => void>>());
+	// Peer messages that arrived for a tool with NO subscriber yet (its mount
+	// is still loading, or lazy activation hasn't mounted it at all) — held
+	// per tool and replayed to the first subscriber. Bounded; oldest evicted,
+	// so the latest state pushes always survive.
+	const peerPendingRef = useRef(new Map<string, unknown[]>());
+	// Stable peer channel objects per tool — identity matters downstream
+	// (mounted sidebars memoize their bridges on it).
+	const peersRef = useRef(new Map<string, { post: (message: unknown) => void; subscribe: (cb: (message: unknown) => void) => () => void }>());
 	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('apps');
+	// Tools whose sidebar mount has been ACTIVATED — a tool pane loads its
+	// remote only once its tab has been selected (user click, or host focus
+	// sync from its frame panel); never merely because the tool is pinned.
+	const [activatedTools, setActivatedTools] = useState<ReadonlySet<string>>(new Set());
+	// The editor's fronted tool document (host-tracked). undefined = no
+	// signal received yet (mounts fall back to their own state); appId null
+	// = a non-tool tab is fronted.
+	const [activeToolDoc, setActiveToolDoc] = useState<{ appId: string | null; docKey: string | null } | undefined>(undefined);
 	// The host-persisted mode seeds the strip ONCE: an `update` composed
 	// before the persist round trip completed carries the previous value and
 	// must not revert a selection the user just made.
@@ -198,10 +240,8 @@ const SidebarViewWebview: React.FC = () => {
 						state: msg.data.connectionState as ConnectionInfo['state'],
 						mode: msg.data.connectionMode,
 					});
-					setEntries(msg.data.entries);
-					if (msg.data.unknownTasks) setUnknownTasks(msg.data.unknownTasks);
-					if (msg.data.userName !== undefined) setUserName(msg.data.userName || undefined);
-					if (msg.data.userEmail !== undefined) setUserEmail(msg.data.userEmail || undefined);
+					// No entries here: the PIPELINES CONTROLLER in this webview
+					// discovers them (shared tools/pipelines over svc:fs).
 					// Shared auth
 					if (msg.data.cloudConnected !== undefined) setCloudSignedIn(msg.data.cloudConnected);
 
@@ -229,24 +269,83 @@ const SidebarViewWebview: React.FC = () => {
 					}
 					// Subscription status
 					if ((msg.data as any).isSubscribed !== undefined) setSubscribed((msg.data as any).isSubscribed);
-					// App Builder list + host-persisted mode (seed once — see ref)
-					if (msg.data.apps) setApps(msg.data.apps);
+					// Host-persisted mode (seed once — see ref) + strip order
+					if (msg.data.tabOrder) setTabOrder(msg.data.tabOrder);
 					if (msg.data.sidebarMode && !sidebarModeSeededRef.current) {
 						sidebarModeSeededRef.current = true;
 						setSidebarMode(msg.data.sidebarMode);
 					}
 					break;
 
-				case 'entriesUpdate':
-					setEntries(msg.entries);
+				case 'toolsUpdate':
+					setTools(msg.tools);
+					setAvailableTools(msg.available);
 					break;
 
-				case 'appsUpdate':
-					setApps(msg.apps);
+				case 'extrasUpdate':
+					// The slow half of a full update — the sync half (apps,
+					// entries, connection state) is already on screen.
+					if (msg.userName !== undefined) setUserName(msg.userName || undefined);
+					if (msg.userEmail !== undefined) setUserEmail(msg.userEmail || undefined);
+					setTools(msg.tools);
+					setAvailableTools(msg.availableTools);
+					setDevToolHost(msg.devToolHost);
 					break;
 
-				case 'taskEvent':
-					handleTaskEvent(msg.event);
+				case 'stripSeed':
+					// Synchronous strip bootstrap (first message after
+					// view:ready): pinned tools with their last-known icons,
+					// the persisted order, and the persisted mode — the strip
+					// paints its final shape at once instead of reshuffling as
+					// account data trickles in. The full update's fresh rows
+					// replace these in place.
+					setTools(msg.tools);
+					setTabOrder(msg.tabOrder);
+					if (!sidebarModeSeededRef.current) {
+						sidebarModeSeededRef.current = true;
+						setSidebarMode(msg.sidebarMode);
+					}
+					break;
+
+				case 'devtool:activeDoc':
+					setActiveToolDoc({ appId: msg.appId, docKey: msg.docKey });
+					break;
+
+				case 'svc:fs:result': {
+					const pending = svcPendingRef.current.get(msg.id);
+					if (pending) {
+						svcPendingRef.current.delete(msg.id);
+						if (msg.ok) pending.resolve(msg.result);
+						else pending.reject(new Error(msg.error ?? 'workspace-fs service error'));
+					}
+					break;
+				}
+
+				case 'svc:fs:event':
+					svcWatchRef.current.get(msg.id)?.(msg.path);
+					break;
+
+				case 'devtool:peer': {
+					// Frame → this tool's sidebar mount (opaque payload).
+					const subs = peerSubsRef.current.get(msg.appId);
+					if (!subs || subs.size === 0) {
+						// No subscriber yet (mount loading, or not activated):
+						// hold for replay — keep the LATEST 64, evicting oldest.
+						const pending = peerPendingRef.current.get(msg.appId) ?? [];
+						pending.push(msg.payload);
+						if (pending.length > 64) pending.shift();
+						peerPendingRef.current.set(msg.appId, pending);
+						break;
+					}
+					for (const cb of subs) cb(msg.payload);
+					break;
+				}
+
+				case 'modeUpdate':
+					// Host-driven selection (a tool panel gained focus) — unlike
+					// the full-update seed, this ALWAYS applies.
+					sidebarModeSeededRef.current = true;
+					setSidebarMode(msg.mode);
 					break;
 
 				case 'statusUpdate': {
@@ -262,37 +361,135 @@ const SidebarViewWebview: React.FC = () => {
 					break;
 				}
 
-				case 'dashboardSnapshot': {
-					// Seed active tasks + unknown tasks from dashboard (initial load)
-					const taskMap = new Map<string, ActiveTaskState>();
-					const unknown: UnknownTask[] = [];
-					for (const t of msg.tasks) {
-						if (t.completed) continue;
-						// Same classification the shared fold applies on every event
-						// path: deploy runs never seed the dev sidebar.
-						if (t.runKind === 'deploy') continue;
-						const k = `${t.projectId}.${t.source}`;
-						// Preserve accumulated diagnostics for a task that was
-						// already tracked — the snapshot confirms it is still
-						// running, it does not reset its indicators (same rule as
-						// the shared fold's bulk 'running' rebuild).
-						const prev = activeTasksRef.current.get(k);
-						taskMap.set(k, { running: true, errors: prev?.errors ?? [], warnings: prev?.warnings ?? [] });
-						if (!isKnownTask(t.projectId, t.source)) {
-							unknown.push({ projectId: t.projectId, sourceId: t.source, displayName: t.name || t.source, projectLabel: t.projectId.substring(0, 8) });
-						}
-					}
-					// Advance the sync refs FIRST (same rule as handleTaskEvent)
-					// so an event in the same tick folds from the seeded state.
-					activeTasksRef.current = taskMap;
-					unknownTasksRef.current = unknown;
-					setActiveTasks(taskMap);
-					setUnknownTasks(unknown);
-					break;
-				}
 			}
 		},
 	});
+
+	/** Seeds active + unknown tasks from a dashboard snapshot (initial load,
+	 *  fetched on THIS webview's own engine client). */
+	const seedFromDashboard = useCallback((tasks: DashboardTaskDTO[]): void => {
+		const taskMap = new Map<string, ActiveTaskState>();
+		const unknown: UnknownTask[] = [];
+		for (const t of tasks) {
+			if (t.completed) continue;
+			// Same classification the shared fold applies on every event
+			// path: deploy runs never seed the dev sidebar.
+			if (t.runKind === 'deploy') continue;
+			const k = `${t.projectId}.${t.source}`;
+			// Preserve accumulated diagnostics for a task that was already
+			// tracked — the snapshot confirms it is still running, it does
+			// not reset its indicators (same rule as the shared fold's bulk
+			// 'running' rebuild).
+			const prev = activeTasksRef.current.get(k);
+			taskMap.set(k, { running: true, errors: prev?.errors ?? [], warnings: prev?.warnings ?? [] });
+			if (!isKnownTask(t.projectId, t.source)) {
+				unknown.push({ projectId: t.projectId, sourceId: t.source, displayName: t.name || t.source, projectLabel: t.projectId.substring(0, 8) });
+			}
+		}
+		// Advance the sync refs FIRST (same rule as handleTaskEvent) so an
+		// event in the same tick folds from the seeded state.
+		activeTasksRef.current = taskMap;
+		unknownTasksRef.current = unknown;
+		setActiveTasks(taskMap);
+		setUnknownTasks(unknown);
+	}, [isKnownTask]);
+
+	// ── Workspace-FS capability + the AppDev controller ─────────────────────
+	// The IToolWorkspaceFs the shared tool code runs against: requests ride
+	// the message channel to the host's generic service; watch events fan out
+	// via the refs above. Stable identity — one standing discovery loop.
+	const workspaceFs = useMemo<IToolWorkspaceFs>(() => {
+		const request = (message: OutgoingMessage & { id: number }): Promise<unknown> =>
+			new Promise((resolve, reject) => {
+				svcPendingRef.current.set(message.id, { resolve, reject });
+				sendMessage(message);
+			});
+		return {
+			findFiles: (include, exclude) =>
+				request({ type: 'svc:fs', id: ++svcSeqRef.current, method: 'findFiles', include, ...(exclude !== undefined ? { exclude } : {}) }) as Promise<string[]>,
+			workspaceRoots: () =>
+				request({ type: 'svc:fs', id: ++svcSeqRef.current, method: 'workspaceRoots' }) as Promise<string[]>,
+			readTextFile: (path) =>
+				request({ type: 'svc:fs', id: ++svcSeqRef.current, method: 'readText', path }) as Promise<string>,
+			readFileBase64: (path, maxBytes) =>
+				request({ type: 'svc:fs', id: ++svcSeqRef.current, method: 'readBase64', path, maxBytes }) as Promise<string | null>,
+			watch: (globs, onEvent) => {
+				const id = ++svcSeqRef.current;
+				svcWatchRef.current.set(id, onEvent);
+				sendMessage({ type: 'svc:fs.watch', id, globs });
+				return () => {
+					svcWatchRef.current.delete(id);
+					sendMessage({ type: 'svc:fs.unwatch', id });
+				};
+			},
+		};
+	}, [sendMessage]);
+
+	// The AppDev controller's discovery loop runs HERE (shared tools/appdev):
+	// scan on boot, debounced rescan on binding-file events. The extension
+	// host serves globs and bytes; what an .rrapp binding IS lives in the
+	// tool.
+	useEffect(() => startWorkspaceAppDiscovery(workspaceFs, setApps), [workspaceFs]);
+
+	// ── This webview's OWN engine connection ────────────────────────────────
+	// The controllers talk to the engine directly (services catalog, task
+	// events, dashboard) — no extension-host relay. Connect the realm's
+	// shell singleton from the host-delivered facts; reconnects follow a
+	// changed engine URL automatically (initialize is idempotent per URI).
+	useEffect(() => {
+		if (!devToolHost) return;
+		const cm = ConnectionManager.getInstance();
+		cm.initialize({ uri: devToolHost.engineHttpUrl });
+		if (!cm.isConnected()) void cm.connect(devToolHost.authToken || undefined).catch(() => { /* retried on the next facts push */ });
+	}, [devToolHost]);
+
+	// ── The PIPELINES controller ────────────────────────────────────────────
+	// Discovery runs HERE (shared tools/pipelines over svc:fs); the service
+	// catalog comes from this realm's own client and re-derives source rows
+	// when it lands/changes (no file reread needed for that path).
+	const pipelinesRef = useRef<IPipelineDiscovery | null>(null);
+	useEffect(() => {
+		const cm = ConnectionManager.getInstance();
+		const discovery = startPipelineDiscovery(
+			workspaceFs,
+			{ getServices: () => cm.getCachedServices()?.services as Record<string, ServiceClassInfo> | undefined },
+			setEntries,
+		);
+		pipelinesRef.current = discovery;
+		const offServices = cm.on('shell:servicesUpdated', () => discovery.refresh({ reparse: false }));
+		return () => {
+			offServices();
+			pipelinesRef.current = null;
+			discovery.stop();
+		};
+	}, [workspaceFs]);
+
+	// ── Task feed on the controller's own client ────────────────────────────
+	// Dashboard seed + live apaevt_task folding, straight from the engine —
+	// the extension host no longer forwards either. (Per-task error/warning
+	// STATUS still arrives as host messages: it reads the canvas editor's
+	// diagnostics cache, which migrates with that feature.)
+	useEffect(() => {
+		const cm = ConnectionManager.getInstance();
+		const seed = (): void => {
+			const client = cm.getClient();
+			if (!client) return;
+			client.addMonitor({ token: '*' }, ['task']).catch(() => { /* feed degrades to dashboard-only */ });
+			client.getDashboard().then((dashboard: { tasks?: DashboardTaskDTO[] } | null) => {
+				if (dashboard?.tasks) seedFromDashboard(dashboard.tasks);
+			}).catch(() => { /* no snapshot — events still fold */ });
+		};
+		const offEvent = cm.on('shell:event', ({ event }) => {
+			const e = event as { event?: string; body?: unknown };
+			if (e?.event === 'apaevt_task' && e.body) handleTaskEvent(e.body as TaskEventBody);
+		});
+		const offConnected = cm.on('shell:connected', seed);
+		if (cm.isConnected()) seed();
+		return () => {
+			offEvent();
+			offConnected();
+		};
+	}, [handleTaskEvent, seedFromDashboard]);
 
 	// ── Callbacks for SidebarView ────────────────────────────────────────────
 
@@ -300,7 +497,6 @@ const SidebarViewWebview: React.FC = () => {
 		(target: string) => {
 			const commands: Record<string, string> = {
 				new: 'rocketride.sidebar.files.createFile',
-				monitor: 'rocketride.page.monitor.open',
 			};
 			const cmd = commands[target];
 			if (cmd) sendMessage({ type: 'command', command: cmd });
@@ -330,8 +526,8 @@ const SidebarViewWebview: React.FC = () => {
 	);
 
 	const onRefresh = useCallback(() => {
-		sendMessage({ type: 'refresh' });
-	}, [sendMessage]);
+		pipelinesRef.current?.refresh();
+	}, []);
 
 	const onOpenDocs = useCallback(() => {
 		sendMessage({ type: 'command', command: 'rocketride.sidebar.documentation.open' });
@@ -358,6 +554,118 @@ const SidebarViewWebview: React.FC = () => {
 		},
 		[sendMessage]
 	);
+
+	/** Introduction row → the embedded intro page panel (extension host). */
+	const onShowIntro = useCallback(
+		(mode: 'agent' | 'apps' | 'nodes' | 'pipelines') => {
+			sendMessage({ type: 'command', command: 'rocketride.page.intro.open', args: [mode] });
+		},
+		[sendMessage]
+	);
+
+	/** Tool tab → open/focus the tool's frame panel (extension host). */
+	const onOpenTool = useCallback((toolId: string) => {
+		sendMessage({ type: 'openTool', toolId });
+	}, [sendMessage]);
+
+	/** Strip tab selection → reveal an open window of the tool, create none. */
+	const onFocusTool = useCallback((toolId: string) => {
+		sendMessage({ type: 'focusTool', toolId });
+	}, [sendMessage]);
+
+	/** Tool panel Remove row → unpin (extension host persists). */
+	const onRemoveTool = useCallback((toolId: string) => {
+		sendMessage({ type: 'removeTool', toolId });
+	}, [sendMessage]);
+
+	/** Modules-list row → the tool's details page (README + Install/Remove). */
+	const onShowTool = useCallback((toolId: string) => {
+		sendMessage({ type: 'showToolReadme', toolId });
+	}, [sendMessage]);
+
+	/** Drag-reorder → apply optimistically, host persists to workspace state. */
+	const onReorderTabs = useCallback((orderedIds: string[]) => {
+		setTabOrder(orderedIds);
+		sendMessage({ type: 'reorderTabs', order: orderedIds });
+	}, [sendMessage]);
+
+	/** Stable peer channel for one tool's sidebar mount (host-relayed).
+	 *  ONE object per tool for the document's lifetime — mounted sidebars
+	 *  memoize their bridges on its identity. */
+	const getPeer = useCallback((appId: string) => {
+		const cached = peersRef.current.get(appId);
+		if (cached) return cached;
+		const peer = {
+			// Sidebar mounts post ONLY on user action (peer contract) — the host
+			// summons the tool's frame panel for a message to a closed one.
+			post: (message: unknown) => sendMessage({ type: 'devtool:peer', appId, payload: message }),
+			subscribe: (cb: (message: unknown) => void) => {
+				const subs = peerSubsRef.current.get(appId) ?? new Set<(msg: unknown) => void>();
+				subs.add(cb);
+				peerSubsRef.current.set(appId, subs);
+				// Replay frame pushes that arrived before this first subscriber
+				// (the host's retained replay lands at view:ready, long before
+				// any mount loads — and lazily-activated mounts load later still).
+				const pending = peerPendingRef.current.get(appId);
+				if (pending) {
+					peerPendingRef.current.delete(appId);
+					for (const payload of pending) cb(payload);
+				}
+				return () => { subs.delete(cb); };
+			},
+		};
+		peersRef.current.set(appId, peer);
+		return peer;
+	}, [sendMessage]);
+
+	// Lazy activation: a tool's sidebar mount loads only once its tab has been
+	// selected — by the user, or by the host syncing focus from the tool's
+	// frame panel (modeUpdate). Activation is sticky for the document's
+	// lifetime so TabPanel's keep-mounted semantics preserve its state.
+	useEffect(() => {
+		if (!sidebarMode.startsWith('tool:')) return;
+		const id = sidebarMode.slice('tool:'.length);
+		setActivatedTools((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+	}, [sidebarMode]);
+
+	/** Tool tab body — the tool's devToolSidebar mounted natively, falling
+	 *  back to the built-in card when the tool declares none. Tools never
+	 *  activated render just the card: pinning N tools must not boot N
+	 *  remotes (and their SDK connections) behind hidden tabs. */
+	/** Stable documents API for one tool's sidebar mount — opens/closes the
+	 *  tool's per-document editor panels (e.g. one per database connection)
+	 *  through the extension host. One object per tool, like getPeer. */
+	const documentsRef = useRef(new Map<string, { open: (docKey: string, title: string) => void; close: (docKey: string) => void }>());
+	const getDocumentsApi = useCallback((appId: string) => {
+		const cached = documentsRef.current.get(appId);
+		if (cached) return cached;
+		const api = {
+			open: (docKey: string, title: string) => sendMessage({ type: 'openToolDocument', appId, docKey, title }),
+			close: (docKey: string) => sendMessage({ type: 'closeToolDocument', appId, docKey }),
+		};
+		documentsRef.current.set(appId, api);
+		return api;
+	}, [sendMessage]);
+
+	const renderToolPanel = useCallback((id: string): React.ReactNode => {
+		const tool = tools.find((t) => t.id === id);
+		if (!tool) return null;
+		const card = <ToolPanel tool={tool} onOpen={onOpenTool} onRemove={onRemoveTool} />;
+		if (!activatedTools.has(id)) return card;
+		// Host-tracked selection for THIS tool: its fronted docKey, null when
+		// another tab is fronted, undefined before any signal arrived.
+		const activeDocKey = activeToolDoc === undefined ? undefined : (activeToolDoc.appId === id ? activeToolDoc.docKey : null);
+		return (
+			<DevToolSidebarMount
+				tool={tool}
+				host={devToolHost}
+				peer={getPeer(id)}
+				documents={getDocumentsApi(id)}
+				{...(activeDocKey !== undefined ? { activeDocKey } : {})}
+				fallback={card}
+			/>
+		);
+	}, [tools, devToolHost, activatedTools, activeToolDoc, getPeer, getDocumentsApi, onOpenTool, onRemoveTool]);
 
 	/** Mode strip selection — local state now, host persists via message. */
 	const onSidebarModeChange = useCallback(
@@ -476,7 +784,27 @@ const SidebarViewWebview: React.FC = () => {
 	// No headerSlot: the VS Code host has no home-app destination, so it injects no
 	// host-specific top nav. The "Home" button is a SaaS-shell concept owned by the
 	// web host (rocket-ui), intentionally absent from shared / this extension.
-	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} appBuilder={{ apps, onNewApp, onOpenApp }} sidebarMode={sidebarMode} onSidebarModeChange={onSidebarModeChange} />;
+	// The builtin tools come from the host's composition root (builtinTools)
+	// — this file stays plumbing; the chrome knows nothing about any tool.
+	const items = buildBuiltinSidebarItems({
+		appdev: { appBuilder: { apps, onNewApp, onOpenApp }, onShowIntro },
+		nodes: { onShowIntro },
+		pipelines: {
+			isConnected: connection.state === 'connected',
+			isSubscribed: subscribed,
+			entries,
+			activeTasks,
+			unknownTasks,
+			onNavigate,
+			onOpenFile,
+			onSourceAction,
+			onRefresh,
+			onOpenUnknownTask,
+			onShowIntro,
+		},
+	});
+
+	return <SidebarChrome items={items} fallbackId="pipelines" footerSlot={footerSlot} sidebarMode={sidebarMode} onSidebarModeChange={onSidebarModeChange} toolTabs={{ tools, available: availableTools, onOpenTool, onFocusTool, onShowTool, onRemoveTool, renderToolPanel }} tabOrder={tabOrder} onReorderTabs={onReorderTabs} />;
 };
 
 export default SidebarViewWebview;

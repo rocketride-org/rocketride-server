@@ -36,6 +36,7 @@ import { refreshSchema } from '../schema/schemaStore';
 import { useTableRecordRequest } from '../navigation';
 import { designUri, getDocs, nextQueryDoc, tableDataUri } from '../docs';
 import type { IQueryDocPayload } from '../docs';
+import { useSqlPageNav } from '../pageNav';
 import TableRecordPanel from '../components/TableRecordPanel';
 import { buildRelationGraph } from '../schema/relations';
 import { DatabaseIcon } from '../icons';
@@ -103,6 +104,9 @@ const styles = {
  * record drawer.
  */
 export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapshot, client }) => {
+	// In-workbench page navigation (null in legacy standalone documents).
+	const pageNav = useSqlPageNav();
+
 	// Open record drawers, outermost first. A drawer opened FROM a drawer
 	// (following an inbound foreign key) pushes onto this stack, and the
 	// shell's DetailPanel renders the back arrow and the peel-away sliver.
@@ -244,9 +248,10 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 								variant="ghost"
 								small
 								onClick={() => {
-									// Fresh create-table draft document for this connection.
-									const uri = designUri(endpoint.key, null);
-									getDocs()?.openStaticDocument(uri, 'New table', { endpoint, table: null });
+									// Fresh create-table draft — the DESIGN page in a
+									// connection workbench, a document standalone.
+									if (pageNav) pageNav.openDesign(null);
+									else getDocs()?.openStaticDocument(designUri(endpoint.key, null), 'New table', { endpoint, table: null });
 								}}
 							>
 								+ Create Table
@@ -280,22 +285,30 @@ export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ endpoint, snapsho
 					refreshedAt={snapshot.refreshedAt}
 					onOpenTable={(next) => setStack((current) => [...current.slice(0, depth + 1), next])}
 					onOpenQuery={(sql, label) => {
-						// Generated SQL always opens a NEW document and never
-						// runs; `origin` lets the query view say so on screen.
-						const { uri } = nextQueryDoc(endpoint.key);
-						const payload: IQueryDocPayload = { endpoint, label, initialSql: sql, origin: 'generated' };
-						getDocs()?.openStaticDocument(uri, label, payload);
+						// Generated SQL never runs by itself; `origin` lets the
+						// query surface say so on screen. Inside a connection
+						// workbench this is the QUERY page; standalone, a doc.
+						if (pageNav) {
+							pageNav.openQuery({ sql, label, origin: 'generated' });
+						} else {
+							const { uri } = nextQueryDoc(endpoint.key);
+							const payload: IQueryDocPayload = { endpoint, label, initialSql: sql, origin: 'generated' };
+							getDocs()?.openStaticDocument(uri, label, payload);
+						}
 						setStack([]);
 					}}
 					onBrowseData={() => {
-						// Open (or focus) the table's data-browser document; the
-						// endpoint + table ride as the static doc's content payload.
-						getDocs()?.openStaticDocument(tableDataUri(endpoint.key, name), `${name} - data`, { endpoint, table: name });
+						// The table's data browser — the DATA page in-workbench,
+						// a document standalone.
+						if (pageNav) pageNav.openTableData(name);
+						else getDocs()?.openStaticDocument(tableDataUri(endpoint.key, name), `${name} - data`, { endpoint, table: name });
 						setStack([]);
 					}}
 					onDesign={() => {
-						// Open (or focus) the table's designer document.
-						getDocs()?.openStaticDocument(designUri(endpoint.key, name), `${name} - design`, { endpoint, table: name });
+						// The table's designer — the DESIGN page in-workbench,
+						// a document standalone.
+						if (pageNav) pageNav.openDesign(name);
+						else getDocs()?.openStaticDocument(designUri(endpoint.key, name), `${name} - design`, { endpoint, table: name });
 						setStack([]);
 					}}
 				/>

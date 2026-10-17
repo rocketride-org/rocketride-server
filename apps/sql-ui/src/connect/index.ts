@@ -43,3 +43,10 @@ export { DATABASE_PROVIDERS, discoverSqlEndpoints } from './discovery';
 export { createSqlSession, probeSqlEndpoint } from './session';
 export { refreshEndpoints, useSqlEndpoints } from './endpointStore';
 export type { EndpointStatus, IEndpointState } from './endpointStore';
+export {
+	loadSavedConnections, resetSavedConnections, useSavedConnections, useSavedConnectionsStatus,
+	upsertSavedConnection, newConnectionId, deleteSavedConnection, getSavedConnection,
+	applySavedConnections, subscribeSavedConnections, getSavedConnections, getSavedConnectionsStatus,
+} from './savedConnections';
+export type { SavedSqlConnection, IPipelineBoundConnection, IDirectConnection, SavedConnectionsStatus } from './savedConnections';
+export { resolveEndpoint, endpointForConnection, releaseDirectEndpoint, endpointKeyForConnection, isDirectEndpointKey } from './resolver';

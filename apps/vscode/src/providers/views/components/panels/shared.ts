@@ -98,21 +98,16 @@ export const panelStyles = {
 		cursor: 'pointer',
 	} as CSSProperties,
 	splitButton: {
-		position: 'relative',
 		display: 'inline-flex',
 	} as CSSProperties,
+	// Dropdown chrome only — positioning (portal, clamp, anchor width) is
+	// AnchoredPopup's job.
 	splitDropdown: {
-		position: 'absolute',
-		top: '100%',
-		left: 0,
-		right: 0,
 		minWidth: 200,
-		marginTop: 2,
 		background: 'var(--vscode-dropdown-background)',
 		border: '1px solid var(--vscode-dropdown-border)',
 		borderRadius: 3,
 		boxShadow: '0 2px 8px rgba(0, 0, 0, 0.36)',
-		zIndex: 100,
 		maxHeight: 160,
 		overflowY: 'auto',
 		padding: '1px 0',
