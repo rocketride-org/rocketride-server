@@ -21,6 +21,12 @@
 	//
 	"path": "parse",
 	//
+	// Optional (for "node": "cpp"):
+	//		Further shared libraries the build leaves beside the node's own, shipped
+	//		with it when present. 7-Zip-JBinding is built on Linux only.
+	//
+	"libs": ["7-Zip-JBinding"],
+	//
 	// Required:
 	//		Class type of the node - what it does
 	//

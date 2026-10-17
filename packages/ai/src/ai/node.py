@@ -9,6 +9,37 @@ from typing import Optional, Tuple, Any
 if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or sys.path[0].endswith('ai/')):
     sys.path.pop(0)
 
+
+def _preload_system_libstdcxx() -> None:
+    """Safety net: make the system libstdc++ own its GNU-unique symbols before any JNI library loads.
+
+    Defense in depth, not the fix. The fix is the parse node's own build of
+    lib7-Zip-JBinding.so (vcpkg port sevenzipjbinding, engine toolchain, libc++), which
+    carries no C++ runtime of its own. This guard is for the next native library that
+    does. The jar's prebuilt binding did: a statically linked GCC 7 libstdc++, exported,
+    with 106 STB_GNU_UNIQUE symbols (all 40 locale facet ids among them) under the same
+    names libstdc++.so.6 defines. glibc binds a GNU-unique name process-wide to the
+    first copy looked up, RTLD_LOCAL or not, so loaded first such a library numbers the
+    shared facet ids with its own counter, and the first GCC-built stream that formats a
+    number (torch, on import) calls the wrong facet and dies at address 0x20. With
+    libstdc++.so.6 global beforehand, one runtime numbers the ids. Fails open: a host
+    without libstdc++.so.6 cannot load GCC-built code either, so there is nothing to guard.
+    """
+    if not sys.platform.startswith('linux'):
+        return
+    import ctypes
+    import os
+
+    try:
+        _system_stdcpp_library = 'libstdc++.so.6'
+        ctypes.CDLL(_system_stdcpp_library, os.RTLD_NOW | os.RTLD_GLOBAL)
+    except OSError as e:
+        # Not fatal: a task without Java never loads the binding.
+        print(f'warning: could not preload {_system_stdcpp_library}: {e}', file=sys.stderr)
+
+
+_preload_system_libstdcxx()
+
 # Make this task's /proc entries private before any pipeline code loads (see
 # ai.proc_privacy). A task that should be private and cannot be refuses to run.
 from ai.proc_privacy import make_process_private, should_make_private

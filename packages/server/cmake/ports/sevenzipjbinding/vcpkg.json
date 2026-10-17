@@ -1,0 +1,14 @@
+{
+  "name": "sevenzipjbinding",
+  "version-string": "23.01-2.2",
+  "description": "7-Zip-JBinding native library (lib7-Zip-JBinding.so) built from source against the engine's own C++ runtime. The prebuilt inside the Maven jar carries a statically linked GCC 7 libstdc++ whose GNU-unique locale ids collide with the system libstdc++.",
+  "homepage": "https://github.com/borisbrodski/sevenzipjbinding",
+  "license": "LGPL-2.1-only",
+  "supports": "linux",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    }
+  ]
+}

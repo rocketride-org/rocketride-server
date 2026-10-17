@@ -111,6 +111,7 @@ function makeSyncNodesAction() {
 async function syncNode(name, srcDir, stats) {
 	const distDir = path.join(DIST_DIR, name);
 	const libs = new Set();
+	const extraLibs = new Set();
 
 	await syncDir(srcDir, distDir, { mirror: false, package: true, ignore: IGNORE }, stats);
 
@@ -124,6 +125,7 @@ async function syncNode(name, srcDir, stats) {
 			throw new Error(`${path.join(srcDir, file)}: ` + 'a cpp service needs a library name in "path"');
 
 		libs.add(services.path);
+		for (const extra of services.libs || []) extraLibs.add(extra);
 	}
 
 	if (libs.size > 1) throw new Error(`The node ${name} names more than one library: ` + [...libs].join(', '));
@@ -131,7 +133,10 @@ async function syncNode(name, srcDir, stats) {
 	const [lib] = libs;
 	if (!lib) return;
 
-	for (const file of [getSharedName(lib), getSymName(lib)].filter(Boolean)) {
+	// The node's own library and its symbols, plus the extra libraries services.json
+	// declares ("libs"); one a platform does not build is simply absent.
+	const files = [getSharedName(lib), getSymName(lib), ...[...extraLibs].map(getSharedName)].filter(Boolean);
+	for (const file of files) {
 		const built = path.join(BUILD_NODES_DIR, name, file);
 		if (!(await exists(built))) continue;
 

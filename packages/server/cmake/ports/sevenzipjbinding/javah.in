@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# javah for a JDK that no longer has one (removed in JDK 10).
+#
+# sevenzipjbinding's CMake runs
+#   javah -jni -d <outdir> -classpath <jar> a.b.Class c.d.Other ...
+# javac -h writes the same a_b_Class.h files from the sources, which this
+# shim finds under the project's java source root. Configured by the port.
+set -euo pipefail
+javac="@JAVAC@"
+src="@SZJ_JAVA_SRC@"
+outdir=.
+cp=""
+classes=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -jni|-force|-verbose) shift ;;
+    -d) outdir="$2"; shift 2 ;;
+    -classpath|-cp) cp="$2"; shift 2 ;;
+    -*) echo "javah shim: unsupported option $1" >&2; exit 2 ;;
+    *) classes+=("$1"); shift ;;
+  esac
+done
+files=()
+for c in "${classes[@]}"; do
+  f="$src/${c//.//}.java"
+  [ -f "$f" ] || { echo "javah shim: no source for $c at $f" >&2; exit 2; }
+  files+=("$f")
+done
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+exec "$javac" -h "$outdir" -d "$tmp" ${cp:+-cp "$cp"} -sourcepath "$src" "${files[@]}"

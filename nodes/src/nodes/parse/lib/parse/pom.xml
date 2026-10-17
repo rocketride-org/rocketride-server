@@ -102,12 +102,12 @@
 		<dependency>
 			<groupId>net.sf.sevenzipjbinding</groupId>
 			<artifactId>sevenzipjbinding</artifactId>
-			<version>16.02-2.01</version>
+			<version>23.01-2.2</version>
 		</dependency>
 		<dependency>
 			<groupId>net.sf.sevenzipjbinding</groupId>
 			<artifactId>sevenzipjbinding-all-platforms</artifactId>
-			<version>16.02-2.01</version>
+			<version>23.01-2.2</version>
 		</dependency>
 		<!-- log4j jar's are excluded by tika-parser/pom.xml; include 
 			them here (see tika-app/pom.xml for log4j dependencies and tika-parent/pom.xml for versions) -->

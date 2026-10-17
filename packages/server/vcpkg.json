@@ -25,6 +25,10 @@
       "name": "crashpad",
       "platform": "linux | osx"
     },
+    {
+      "name": "sevenzipjbinding",
+      "platform": "linux"
+    },
     "catch2",
     "cpprestsdk",
     "date",

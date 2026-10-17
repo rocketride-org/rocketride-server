@@ -10,8 +10,11 @@ import com.rocketride.*;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.Writer;
+import java.io.FileNotFoundException;
 import java.io.PrintWriter;
 import java.lang.Runtime;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
@@ -334,13 +337,12 @@ public final class TikaApi {
 		logger.log(Level.INFO, "Aspose parsers available: " + asposeAvailable);
 
 		// Initialize 7-Zip-JBinding once for the JVM. Required by RarSevenZipParser;
-		// the call extracts the platform-specific native lib from the bundled jar
-		// and loads it. Failures are logged but not fatal: non-RAR parsing still
-		// works, and ConfigBuilder keeps Tika's RAR4 parser when this did not load.
+		// init7ZipNative() says where the native library comes from. Failures are
+		// logged but not fatal: non-RAR parsing still works, and ConfigBuilder keeps
+		// Tika's RAR4 parser when this did not load.
 		try {
 			if (!SevenZip.isInitializedSuccessfully()) {
-				SevenZip.initSevenZipFromPlatformJAR();
-				logger.log(Level.INFO, "7-Zip-JBinding initialized: " + SevenZip.getSevenZipVersion().version);
+				init7ZipNative();
 			}
 			sevenZipReady = true;
 		} catch (Exception | LinkageError t) {
@@ -363,6 +365,37 @@ public final class TikaApi {
 		// TemporaryResources [APPLAT-265]. This task will run every 5 minutes.
 		executor.scheduleWithFixedDelay(new DeleteTemporaryFilesTask(), 5, 5, TimeUnit.MINUTES);
 		initialized = true;
+	}
+
+	/**
+	 * Load 7-Zip-JBinding's native library.
+	 *
+	 * On Linux only the engine's own build of it is used (nodes/parse/lib7-Zip-JBinding.so,
+	 * vcpkg port sevenzipjbinding, linked against the engine's C++ runtime). The prebuilt
+	 * inside the jar is never loaded there: it carries a statically linked GCC 7 libstdc++
+	 * whose GNU-unique locale ids collide with the system libstdc++ that torch uses, and
+	 * the task dies at start. A missing file therefore disables RAR5 instead of falling
+	 * back. macOS and Windows have no such collision and keep the jar's prebuilt.
+	 */
+	private static void init7ZipNative() throws Exception {
+		if (!isLinux()) {
+			SevenZip.initSevenZipFromPlatformJAR();
+			logger.log(Level.INFO, "7-Zip-JBinding initialized: " + SevenZip.getSevenZipVersion().version);
+			return;
+		}
+		// java.home is <engine>/java/jdk; the node directory is <engine>/nodes/parse.
+		Path javaHome = Paths.get(System.getProperty("java.home")).toAbsolutePath().normalize();
+		Path engineRoot = javaHome.getParent() == null ? null : javaHome.getParent().getParent();
+		Path bundled = engineRoot == null ? null
+				: engineRoot.resolve("nodes").resolve("parse").resolve("lib7-Zip-JBinding.so");
+		if (bundled == null || !Files.isRegularFile(bundled)) {
+			throw new FileNotFoundException("7-Zip-JBinding native library not found at " + bundled
+					+ "; the prebuilt inside the jar is not used on Linux (its bundled libstdc++ crashes the task)");
+		}
+		System.load(bundled.toString());
+		SevenZip.initLoadedLibraries();
+		logger.log(Level.INFO, "7-Zip-JBinding initialized from " + bundled + ": "
+				+ SevenZip.getSevenZipVersion().version);
 	}
 
 	/**

@@ -37,6 +37,9 @@ Key dependencies and their licenses:
 
   Java:
     - Apache Tika (Apache-2.0) -- https://tika.apache.org/
+    - 7-Zip-JBinding (LGPL-2.1; the 7-Zip RAR code carries the unRAR restriction)
+      -- https://github.com/borisbrodski/sevenzipjbinding ; on Linux its native
+      library is built from source by the engine build (vcpkg port sevenzipjbinding)
 
   JavaScript/TypeScript (npm):
     - See package.json and pnpm-lock.yaml for the full list
