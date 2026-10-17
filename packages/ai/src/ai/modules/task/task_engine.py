@@ -56,7 +56,7 @@ from ai.constants import (
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
-from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
+from ai.common.rocketride_db import db_target, dsn_key, exposes_public_endpoint, is_db_provider, scrub_db_env
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
 from rocketride import (
@@ -387,6 +387,28 @@ def _is_saas_engine() -> bool:
         return 'saas' in (getattr(account, 'capabilities', None) or ())
     except Exception:
         return False
+
+
+# Account classes whose authorize_db_target was already named in the log.
+_LOGGED_DB_AUTHORIZERS: set = set()
+
+
+def _log_db_authorizer(account: Any) -> None:
+    """Name the loaded database authorizer in the log, once per process.
+
+    The default on ``AccountBase`` is the single-tenant one; seeing which class
+    actually answers is how an operator tells a hosted engine that loaded the
+    SaaS authorizer from one that did not.
+    """
+    name = f'{type(account).__module__}.{type(account).__qualname__}'
+    if name in _LOGGED_DB_AUTHORIZERS:
+        return
+    _LOGGED_DB_AUTHORIZERS.add(name)
+    authorizer = type(account).authorize_db_target
+    warning(
+        f'RocketRide DB authorizer: {name} (authorize_db_target defined in '
+        f'{getattr(authorizer, "__module__", "?")}.{getattr(authorizer, "__qualname__", "?")})'
+    )
 
 
 class Task(DAPBase):
@@ -734,10 +756,10 @@ class Task(DAPBase):
         components = pipeline.get('components') or []
         targets: List[Tuple[str, str]] = []
         for component in components:
-            if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
+            if not isinstance(component, dict) or not is_db_provider(component.get('provider')):
                 continue
             try:
-                pair = db_target(Config.getNodeConfig(component['provider'], component.get('config') or {}))
+                pair = db_target(Config.getNodeConfig(component['provider'].lower(), component.get('config') or {}))
             except ValueError as e:
                 raise ValueError(f'{component.get("id") or component["provider"]}: {e}') from e
             if pair not in targets:
@@ -768,6 +790,50 @@ class Task(DAPBase):
             'task_id': self.id,
         }
 
+    def _log_db_access(self, outcome: str, scope: str, owner: str, reason: str) -> None:
+        """Write the one server-side line that ties a database target to a task.
+
+        Task, caller (org / user / team), run classification, the database
+        (scope, owner) and the outcome, with a reason code. Never a DSN, a
+        password or a token. ``warning`` is the always-on log level; the
+        debug levels are opt-in and would hide these lines in production.
+        """
+        warning(
+            'RocketRide DB access '
+            + json.dumps(
+                {
+                    'task': self.id,
+                    'org': self.org_id or '',
+                    'user': self.client_id or '',
+                    'team': self.team_id or '',
+                    'run_kind': self._run_kind,
+                    'owner_kind': self._owner_kind,
+                    'scope': scope,
+                    'owner': owner,
+                    'outcome': outcome,
+                    'reason': str(reason)[:120],
+                },
+                sort_keys=True,
+            )
+        )
+
+    def _log_db_failure(
+        self,
+        databases: List[Tuple[str, str]],
+        failing: Optional[Tuple[str, str]],
+        outcome: str,
+        reason: str,
+        others_reason: str,
+    ) -> None:
+        """Log every database of this start once: ``failing`` with ``outcome``,
+        the others as ``aborted`` (the start fails as a whole, so none is issued).
+        """
+        for key in databases:
+            if key == failing:
+                self._log_db_access(outcome, key[0], key[1], reason)
+            else:
+                self._log_db_access('aborted', key[0], key[1], others_reason)
+
     async def _authorize_db_targets(
         self, targets: List[Tuple[str, str]], public_endpoint: bool
     ) -> List[Tuple[str, str, str]]:
@@ -775,6 +841,12 @@ class Task(DAPBase):
 
         Runs before anything is provisioned. The account layer reads
         membership live on every call; nothing is cached here.
+
+        On a hosted engine two things are required before the account layer
+        is asked anything: the account's ``authorize_db_target`` must be its
+        own (the default on ``AccountBase`` is the single-tenant one, which
+        allows the org database to anyone and checks no membership), and the
+        run must have an org.
 
         Args:
             targets, public_endpoint: from ``_db_access`` on the resolved
@@ -786,30 +858,87 @@ class Task(DAPBase):
             (``decision.owner_id``), never re-derived here.
 
         Raises:
-            PermissionError: a database was denied; carries the reason.
+            PermissionError: a database was denied, the hosted engine has no
+                real authorizer or the run has no org, or the account layer
+                did not name the approved database correctly; carries the reason.
         """
         from ai.account import account
+        from ai.account.base import AccountBase
 
         requested = [(scope, target, self._db_owner(scope, target)) for scope, target in targets]
+        databases = list(dict.fromkeys((scope, owner) for scope, _, owner in requested))
+        self._db_reasons: Dict[Tuple[str, str], str] = {}
+
+        _log_db_authorizer(account)
+        refusal = None
+        if _is_saas_engine():
+            if type(account).authorize_db_target is AccountBase.authorize_db_target:
+                refusal = (
+                    'single_tenant_authorizer_on_hosted_engine',
+                    'this RocketRide Cloud server is running the single-tenant database authorizer '
+                    '(AccountBase.authorize_db_target), which checks no org, team or user membership, so it '
+                    'cannot hand out cloud databases. Contact the server operator: the account extension '
+                    'that provides authorize_db_target is missing or too old',
+                )
+            elif not self.org_id:
+                refusal = (
+                    'no_org_on_hosted_engine',
+                    'this run has no organisation, so a RocketRide Cloud database cannot be authorized for it',
+                )
+        if refusal:
+            for scope, owner in databases:
+                self._log_db_access('denied', scope, owner, refusal[0])
+            raise PermissionError(refusal[1])
+
         identity = self._db_identity(public_endpoint)
         approved: Dict[Tuple[str, str], str] = {}
-        for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in requested):
+        for scope, owner in databases:
             request: Dict[str, Any] = {'scope': scope}
             if scope == 'team':
                 request['team_id'] = owner
             elif scope == 'user':
                 request['user_id'] = owner
-            decision = await account.authorize_db_target(identity, request)
-            if not decision.allowed:
-                named = f' {owner!r}' if owner else ''
-                raise PermissionError(
-                    f'this run may not use the RocketRide cloud {scope} database{named}: {decision.reason}'
+            try:
+                decision = await account.authorize_db_target(identity, request)
+            except Exception as e:
+                self._log_db_failure(
+                    databases,
+                    (scope, owner),
+                    'denied',
+                    f'authorizer_error:{type(e).__name__}',
+                    'another_database_denied',
                 )
-            approved[(scope, owner)] = decision.owner_id
+                raise
+            if not getattr(decision, 'allowed', False):
+                reason = getattr(decision, 'reason', '')
+                self._log_db_failure(databases, (scope, owner), 'denied', reason, 'another_database_denied')
+                named = f' {owner!r}' if owner else ''
+                raise PermissionError(f'this run may not use the RocketRide cloud {scope} database{named}: {reason}')
+            # Provision exactly the id the decision approved: '' for the org
+            # database, the team or user id otherwise. A decision that does not
+            # say so (an older account layer) is not trusted to guess.
+            owner_id = getattr(decision, 'owner_id', None)
+            if not isinstance(owner_id, str) or (scope == 'org') == bool(owner_id):
+                self._log_db_failure(
+                    databases,
+                    (scope, owner),
+                    'denied',
+                    'authorizer_returned_no_valid_owner_id',
+                    'another_database_denied',
+                )
+                raise PermissionError(
+                    f'the account layer allowed the {scope} database without naming it: authorize_db_target must '
+                    'return owner_id, empty for the org database and the team or user id otherwise'
+                )
+            self._db_reasons[(scope, owner)] = str(getattr(decision, 'reason', ''))
+            approved[(scope, owner)] = owner_id
         return [(scope, target, approved[(scope, owner)]) for scope, target, owner in requested]
 
     async def _resolve_db_dsns(self, wanted: List[Tuple[str, str, str]]) -> Dict[str, str]:
         """Resolve each authorized database once and key it for the nodes.
+
+        The task id goes to the broker as the request id, so its own log line
+        can be tied to this start.
 
         Returns:
             The ``ROCKETRIDE_DB_DSNS`` map: ``dsn_key(scope, target)`` -> DSN.
@@ -820,6 +949,7 @@ class Task(DAPBase):
         """
         from ai.account import account
 
+        databases = list(dict.fromkeys((scope, owner) for scope, _, owner in wanted))
         dsns: Dict[Tuple[str, str], str] = {}
         for scope, _, owner in wanted:
             if (scope, owner) in dsns:
@@ -829,16 +959,29 @@ class Task(DAPBase):
                     # Unchanged single-tenant call: the tenant is the ORG (a team
                     # deploy has client_id='', and an org switch must not re-point
                     # a user's nodes). client_id is the fallback with no orgs.
-                    dsns[(scope, owner)] = await account.resolve_db_dsn(self.org_id or self.client_id)
+                    dsns[(scope, owner)] = await account.resolve_db_dsn(
+                        self.org_id or self.client_id, request_id=self.id
+                    )
                 else:
-                    dsns[(scope, owner)] = await account.resolve_db_dsn(self.org_id, scope=scope, owner_id=owner)
-            except NotImplementedError:
+                    dsns[(scope, owner)] = await account.resolve_db_dsn(
+                        self.org_id, scope=scope, owner_id=owner, request_id=self.id
+                    )
+            except NotImplementedError as e:
+                self._log_db_failure(
+                    databases, (scope, owner), 'resolve_failed', type(e).__name__, 'another_database_failed'
+                )
                 raise
             except Exception as e:
+                self._log_db_failure(
+                    databases, (scope, owner), 'resolve_failed', type(e).__name__, 'another_database_failed'
+                )
                 # Every node in the run gets this one reason, so it names the
                 # database that failed, not the node that reports it.
                 named = f' {owner!r}' if owner else ''
                 raise RuntimeError(f'the {scope} database{named} failed to resolve: {str(e).strip() or repr(e)}') from e
+        reasons = getattr(self, '_db_reasons', {})
+        for scope, owner in databases:
+            self._log_db_access('issued', scope, owner, reasons.get((scope, owner), ''))
         return {dsn_key(scope, target): dsns[(scope, owner)] for scope, target, owner in wanted}
 
     async def _build_subprocess_env(self, db_access: Tuple[List[Tuple[str, str]], bool]) -> Dict[str, str]:
@@ -873,11 +1016,10 @@ class Task(DAPBase):
         """
         subprocess_env = filter_subprocess_env(os.environ)
 
-        subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
-        subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
-        subprocess_env.pop('ROCKETRIDE_DB_DSNS', None)
-        subprocess_env.pop('ROCKETRIDE_DB_DSN', None)
-        subprocess_env.pop('ROCKETRIDE_DB_RESOLVE_ERROR', None)
+        # Both broker tiers (RR_DB_BROKER_*, the legacy ROCKETRIDE_DB_BROKER_*),
+        # the DSN delivery names and the database TLS settings, in any case:
+        # RR_SUBPROCESS_ENV='*' or 'RR_*' would otherwise hand them over.
+        scrub_db_env(subprocess_env)
 
         # Authorize and resolve every database the DB nodes use, server-side
         # (the SaaS account context exists only in this process), and hand
