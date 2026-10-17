@@ -561,38 +561,62 @@ def test_sweeper_reaps_an_abandoned_session_without_further_traffic():
     assert out['rows'][0]['n'] == 0
 
 
+class _SlowRollback:
+    """Wraps a transaction so its rollback is slow and observable."""
+
+    def __init__(self, trans):
+        self._trans = trans
+        self.started = threading.Event()
+        self.done = []
+
+    def rollback(self):
+        self.started.set()
+        time.sleep(0.3)  # widen the window a loaded CI runner opens by chance
+        self._trans.rollback()
+        self.done.append(True)
+
+    def __getattr__(self, name):
+        return getattr(self._trans, name)
+
+
 def test_close_all_waits_for_an_in_flight_sweep_to_finish_its_rollback():
-    """A reaped session leaves _sessions before its rollback runs; close_all() must not return in that window."""
-    rollback_started = threading.Event()
-    rolled_back = []
-
-    class _SlowRollback:
-        def __init__(self, trans):
-            self._trans = trans
-
-        def rollback(self):
-            rollback_started.set()
-            time.sleep(0.3)  # widen the window a loaded CI runner opens by chance
-            self._trans.rollback()
-            rolled_back.append(True)
-
-        def __getattr__(self, name):
-            return getattr(self._trans, name)
-
+    """close_all() must not return while the sweeper is still rolling a reaped session back."""
     reg = TransactionRegistry(_engine_shared(), idle_timeout=0.05, max_rows=1000)
     try:
         sid = reg.begin()
         reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['abandoned'])
-        held = reg._sessions[sid]
-        held.trans = _SlowRollback(held.trans)
+        slow = reg._sessions[sid].trans = _SlowRollback(reg._sessions[sid].trans)
 
-        # The sweeper has taken the session out of the registry and is inside
-        # its rollback: exactly the window close_all() must wait out.
-        assert rollback_started.wait(timeout=5.0), 'sweeper did not reap the idle session'
-        assert sid not in reg._sessions
+        # The sweeper is inside its rollback: the window close_all() must wait out.
+        assert slow.started.wait(timeout=5.0), 'sweeper did not reap the idle session'
 
         reg.close_all()
-        assert rolled_back == [True]
+        assert slow.done == [True]
+        assert sid not in reg._sessions
+    finally:
+        reg.close_all()
+
+
+def test_close_all_waits_for_an_in_flight_rollback_on_another_thread():
+    """Same window as the sweeper, but from a caller's rollback(): the session stays
+    registered until its connection is closed, so close_all() waits on its lock.
+    """
+    reg = TransactionRegistry(_engine_shared(), max_rows=1000)
+    try:
+        sid = reg.begin()
+        reg.execute(sid, 'INSERT INTO t (v) VALUES ($1)', ['in flight'])
+        slow = reg._sessions[sid].trans = _SlowRollback(reg._sessions[sid].trans)
+
+        caller = threading.Thread(target=reg.rollback, args=(sid,))
+        caller.start()
+        assert slow.started.wait(timeout=5.0), 'rollback() never reached the transaction'
+        assert sid in reg._sessions  # still registered mid-rollback
+
+        reg.close_all()
+        assert slow.done == [True]
+        assert sid not in reg._sessions
+        caller.join(timeout=5.0)
+        assert not caller.is_alive()
     finally:
         reg.close_all()
 
