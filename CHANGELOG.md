@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — since 2026-10-16
 
+### Fixed
+- **nodes**: `llm_gemini` sends the profile's output limit to Google as `max_output_tokens`, and the Custom form's Output Tokens field saves as `modelOutputTokens`, so the value typed there is the limit used; it was saved as `outputTokens`, which nothing read. A pipeline saved with `outputTokens` keeps its old limit and now gets a warning naming `modelOutputTokens`. Profiles that declared more than Google's documented output limit now carry it, pinned in `sync_models.config.json`: Gemini 2.0 Flash and Flash Lite 8,192, Gemini 3.1 Flash Image Preview 32,768, Gemini 3.1 Flash Lite Image 4,096 (#2680)
+
 ## [3.5.0] - 2026-10-16
 
 ### Added

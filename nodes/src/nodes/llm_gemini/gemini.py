@@ -190,8 +190,13 @@ class Chat(ChatBase):
             This method assumes self._model is set by the parent class.
             The model should be a valid Gemini model identifier (e.g., 'gemini-pro').
         """
-        # Generate content using the configured model
-        response = self._client.models.generate_content(model=self._model, contents=prompt)
+        # Generate content using the configured model. Without max_output_tokens Google
+        # applies its own default, whatever the profile's output limit says.
+        response = self._client.models.generate_content(
+            model=self._model,
+            contents=prompt,
+            config={'max_output_tokens': self._modelOutputTokens},
+        )
 
         # Before the text check, deliberately: a response that carried no text
         # still burned tokens, and a safety block is exactly the run somebody

@@ -95,7 +95,7 @@
 				"model": "models/gemini-3.1-flash-image-preview",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072, // sync_models.config.json
-				"modelOutputTokens": 58982, // openrouter
+				"modelOutputTokens": 32768, // sync_models.config.json
 				"apikey": ""
 			},
 			"gemini-3_1-flash-lite-preview": {
@@ -185,7 +185,7 @@
 				"model": "models/gemini-2.0-flash",
 				"modelSource": "manual",
 				"modelTotalTokens": 1048576, // manual
-				"modelOutputTokens": 65535, // manual
+				"modelOutputTokens": 8192, // sync_models.config.json
 				"deprecated": true,
 				"migration": "Please use 'gemini-3.6-flash' instead",
 				"apikey": ""
@@ -194,7 +194,7 @@
 				"title": "Gemini 2.0 Flash Lite",
 				"model": "models/gemini-2.0-flash-lite",
 				"modelSource": "manual",
-				"modelOutputTokens": 65536, // manual
+				"modelOutputTokens": 8192, // sync_models.config.json
 				"deprecated": true,
 				"migration": "Please use 'gemini-3.5-flash-lite' instead",
 				"apikey": ""
@@ -274,7 +274,7 @@
 				"model": "models/gemini-3.1-flash-lite-image",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 65536, // openrouter
-				"modelOutputTokens": 58982, // openrouter
+				"modelOutputTokens": 4096, // sync_models.config.json
 				"apikey": ""
 			},
 			"models-gemini-3-5-flash": {
@@ -447,10 +447,12 @@
 			"title": "Total Tokens",
 			"description": "Maximum number of input + output tokens"
 		},
-		"gemini.outputTokens": {
-			"type": "number",
+		"gemini.modelOutputTokens": {
+			"type": "integer",
 			"title": "Output Tokens",
-			"description": "Maximum number of output tokens"
+			"description": "Most tokens the model may write in one reply (at least 1,024), sent to Google as max_output_tokens. Leave it empty to keep the custom default of 65,536. Thinking models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Total Tokens; a larger value is lowered to it.",
+			"minimum": 1024,
+			"optional": true
 		},
 		"gemini.apikey": {
 			"type": "string",
@@ -557,7 +559,7 @@
 			"properties": [
 				"gemini.model",
 				"gemini.modelTotalTokens",
-				"gemini.outputTokens",
+				"gemini.modelOutputTokens",
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
 			]
