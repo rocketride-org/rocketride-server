@@ -26,6 +26,17 @@
 > ```
 >
 > The extension auto-detects missing libraries on first run and offers a one-click install prompt. See [issue #989](https://github.com/rocketride-org/rocketride-server/issues/989) for background and troubleshooting.
+>
+> **App Builder prerequisites:** Building and previewing apps with the App Builder requires compatible **Node.js** and **pnpm** versions on your system `PATH`:
+>
+> - **Node.js 20:** use **pnpm 9 or 10** (e.g. `pnpm@10`)
+> - **Node.js 22+:** use **pnpm 10 or 11**
+>
+> ```bash
+> npm install -g pnpm@10
+> ```
+>
+> The App Builder runs on a pnpm workspace and requires `pnpm` on your `PATH`. Running `npm install` inside an app folder is not supported.
 
 ## What is RocketRide?
 

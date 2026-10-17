@@ -45,6 +45,8 @@ import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
+import { checkPnpmInstalled } from '../shared/util/pnpm';
+import { promptMissingPnpm } from '../appdev/pnpm';
 import type { NewAppIdentity, NewAppWebviewToHost } from './types/newAppTypes';
 
 // =============================================================================
@@ -99,6 +101,15 @@ export class NewAppProvider {
 
 	/** Opens (or reveals) the New App wizard panel. */
 	public show(): void {
+		// Proactively verify pnpm is installed when the wizard opens
+		void checkPnpmInstalled()
+			.then((hasPnpm) => {
+				if (!hasPnpm) {
+					void promptMissingPnpm();
+				}
+			})
+			.catch(() => {});
+
 		// Step 1: reveal existing panel if one is already open.
 		if (NewAppProvider.panel) {
 			NewAppProvider.panel.reveal(vscode.ViewColumn.One);
