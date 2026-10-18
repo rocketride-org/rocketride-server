@@ -26,7 +26,7 @@ The semantic diff engine for RocketRide ``.pipe`` pipeline files.
 This module is the pure, network-free core of ``rocketride diff``. It loads and
 validates pipeline JSON, then computes the semantic difference between two
 pipelines: added/removed/re-provisioned/reconfigured nodes, added/removed edges,
-version changes, and a coarse layout-changed flag. Nothing here touches the
+source and version changes, and a coarse layout-changed flag. Nothing here touches the
 RocketRide engine, a server, or the network — it is deliberately restricted to
 local file and in-memory JSON work.
 
@@ -239,13 +239,13 @@ def diff_pipes(old: dict, new: dict, *, include_layout: bool = False) -> PipeDif
     are compared independently; unmatched nodes become added/removed changes.
     Edges are compared as a set of directed ``(from, lane, to)`` triples drawn
     from every component's ``input[]`` and ``control[]`` wiring. The top-level
-    ``version`` change is always reported. Canvas layout (each ``ui`` block and
+    ``source`` and ``version`` changes are always reported. Canvas layout (each ``ui`` block and
     the ``viewport``) is summarised by ``layout_changed`` and, when
     ``include_layout`` is set, enumerated as ``ui.*`` field changes per node plus
     ``viewport.*`` changes on the diff itself.
 
-    Exactly three top-level keys are read -- ``components``, ``version``, and
-    ``viewport``. Every other top-level key a ``.pipe`` carries (``project_id``,
+    Exactly four top-level keys are read -- ``components``, ``source``,
+    ``version``, and ``viewport``. Every other top-level key a ``.pipe`` carries (``project_id``,
     ``isLocked``, and anything a later schema adds) is ignored, because it is
     editor/session metadata rather than pipeline behaviour; pinned by
     ``test_unknown_top_level_keys_are_ignored``.
@@ -261,7 +261,7 @@ def diff_pipes(old: dict, new: dict, *, include_layout: bool = False) -> PipeDif
             is computed either way.
 
     Returns:
-        A :class:`PipeDiff` describing every node, edge, version, and layout
+        A :class:`PipeDiff` describing every node, edge, source, version, and layout
         difference between ``old`` and ``new``.
     """
     old_components = _components_by_id(old)
@@ -329,6 +329,12 @@ def diff_pipes(old: dict, new: dict, *, include_layout: bool = False) -> PipeDif
     if not _json_equal(old_version, new_version):
         version_change = (old_version, new_version)
 
+    source_change: tuple[Any, Any] | None = None
+    old_source = old.get('source')
+    new_source = new.get('source')
+    if ('source' in old) != ('source' in new) or not _json_equal(old_source, new_source):
+        source_change = (old_source, new_source)
+
     layout_changed = _layout_changed(old, new, old_components, new_components, old_ids & new_ids)
 
     # The top-level viewport is layout, so it is enumerated only when the caller
@@ -348,6 +354,7 @@ def diff_pipes(old: dict, new: dict, *, include_layout: bool = False) -> PipeDif
         version_change=version_change,
         layout_changed=layout_changed,
         viewport_changes=viewport_changes,
+        source_change=source_change,
     )
 
 

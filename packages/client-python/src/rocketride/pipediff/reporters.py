@@ -159,6 +159,7 @@ def _organize(diff: 'PipeDiff') -> Dict[str, Any]:
             - ``edges_added``:   list of ``(from_id, lane, to_id)`` tuples, sorted
             - ``edges_removed``: list of ``(from_id, lane, to_id)`` tuples, sorted
             - ``version_change``: the ``(old, new)`` tuple or ``None``
+            - ``source_change``: the ``(old, new)`` tuple or ``None``
             - ``layout_changed``: bool
             - ``viewport_changes``: list of ``FieldChange`` for the top-level
               ``viewport`` (non-empty only when the caller opted layout in)
@@ -221,6 +222,7 @@ def _organize(diff: 'PipeDiff') -> Dict[str, Any]:
         'edges_added': sorted(edges_added),
         'edges_removed': sorted(edges_removed),
         'version_change': diff.version_change,
+        'source_change': diff.source_change,
         'layout_changed': bool(diff.layout_changed),
         'viewport_changes': sorted(
             getattr(diff, 'viewport_changes', None) or [],
@@ -239,6 +241,7 @@ def _any_output(org: Dict[str, Any]) -> bool:
         or org['edges_added']
         or org['edges_removed']
         or org['version_change']
+        or org['source_change'] is not None
         or org['layout_changed']
         or org['viewport_changes']
     )
@@ -303,15 +306,15 @@ def _summary_phrase(org: Dict[str, Any], fmt=_identity) -> str:
     """
     Build a one-line human summary such as ``2 nodes added, 1 edge removed``.
 
-    Only non-zero categories are included. Version, viewport, and layout changes
+    Only non-zero categories are included. Source, version, viewport, and layout changes
     are appended when present. When nothing changed the phrase is
     ``no semantic changes``.
 
     Args:
         org: The normalized diff produced by :func:`_organize`.
-        fmt: Formatter applied to the two version values — the only untrusted
+        fmt: Formatter applied to source and version values — the untrusted
             text this line interpolates. Markdown passes ``_md_code`` so a
-            crafted ``version`` cannot break out into headings or mentions in an
+            crafted value cannot break out into headings or mentions in an
             auto-posted PR comment; the human renderer passes ``_term_safe``.
             Defaults to no escaping for plain callers.
     """
@@ -334,6 +337,10 @@ def _summary_phrase(org: Dict[str, Any], fmt=_identity) -> str:
 
     if counts['viewport_changes']:
         parts.append(f'{_plural(counts["viewport_changes"], "viewport field")} changed')
+
+    source_change = org['source_change']
+    if source_change is not None:
+        parts.append(f'source {fmt(_fmt_value(source_change[0]))} → {fmt(_fmt_value(source_change[1]))}')
 
     version_change = org['version_change']
     if version_change:
@@ -381,7 +388,7 @@ def render_human(diff: 'PipeDiff', *, use_color: bool) -> str:
     removals, provider changes), ``Edges`` (added/removed wiring), ``Config``
     (per-node field changes), and ``Layout`` (the enumerated ``viewport.*``
     changes, present only when the diff was computed with ``include_layout``) —
-    followed by standalone ``Version`` and ``Layout: changed`` lines when
+    followed by standalone ``Source``, ``Version``, and ``Layout: changed`` lines when
     applicable. Change markers are ``+`` (added, green), ``-`` (removed, red),
     and ``~`` (changed, yellow). Empty sections are omitted. Every id, provider,
     lane, path, and value is escaped through :func:`_term_safe`, so a crafted
@@ -447,7 +454,13 @@ def render_human(diff: 'PipeDiff', *, use_color: bool) -> str:
             for field_change in entry['config_changes']:
                 lines.append(_human_field_line(field_change, palette))
 
-    # --- Version / Layout ---
+    # --- Source / Version / Layout ---
+    if org['source_change'] is not None:
+        old = _term_safe(_fmt_value(org['source_change'][0]))
+        new = _term_safe(_fmt_value(org['source_change'][1]))
+        lines.append('')
+        lines.append('Source: ' + f'{old} ' + palette.dim('->') + f' {new}')
+
     if org['version_change']:
         old = _term_safe(_fmt_value(org['version_change'][0]))
         new = _term_safe(_fmt_value(org['version_change'][1]))
@@ -462,7 +475,7 @@ def render_human(diff: 'PipeDiff', *, use_color: bool) -> str:
             lines.append(_human_field_line(field_change, palette))
 
     if org['layout_changed']:
-        if not org['version_change'] and not org['viewport_changes']:
+        if org['source_change'] is None and not org['version_change'] and not org['viewport_changes']:
             lines.append('')
         lines.append(palette.dim('Layout: changed (ui/viewport)'))
 
@@ -503,8 +516,8 @@ def render_json(diff: 'PipeDiff') -> Dict[str, Any]:
     ``{"from", "lane", "to"}``. ``viewport`` holds the top-level ``viewport.*``
     field changes in the same ``{"path", "kind", "old", "new"}`` shape and is
     empty unless the diff was computed with ``include_layout``. The ``summary``
-    block carries counts (including ``viewport_changes``), the version change (as
-    ``[old, new]`` or ``null``), the layout flag, and the overall
+    block carries counts (including ``viewport_changes``), the source and version
+    changes (as ``[old, new]`` or ``null``), the layout flag, and the overall
     ``has_semantic_changes`` boolean.
 
     Args:
@@ -536,10 +549,12 @@ def render_json(diff: 'PipeDiff') -> Dict[str, Any]:
 
     counts = _summary_counts(org)
     version_change = list(org['version_change']) if org['version_change'] else None
+    source_change = list(org['source_change']) if org['source_change'] is not None else None
 
     summary = {
         **counts,
         'version_change': version_change,
+        'source_change': source_change,
         'layout_changed': org['layout_changed'],
         'has_semantic_changes': org['has_semantic_changes'],
     }
@@ -646,7 +661,7 @@ def render_markdown(diff: 'PipeDiff', *, title: Optional[str] = None) -> str:
     and ``Edges`` as bullet lists, ``Config`` as a table (``Node | Field |
     Change``), and — only when the diff was computed with ``include_layout`` — a
     ``Layout`` table of the top-level ``viewport.*`` changes. All node ids,
-    providers, lanes, versions, values, and the title are wrapped in code spans;
+    providers, lanes, sources, versions, values, and the title are wrapped in code spans;
     table cells additionally escape ``|`` and newlines so untrusted config values
     cannot break the table or the surrounding comment. Ordering is deterministic,
     so re-running on unchanged input yields byte-identical output.
@@ -715,7 +730,13 @@ def render_markdown(diff: 'PipeDiff', *, title: Optional[str] = None) -> str:
                 change_cell = _md_cell(_md_field_change(field_change))
                 lines.append(f'| {node_cell} | {field_cell} | {change_cell} |')
 
-    # --- Version / Layout ---
+    # --- Source / Version / Layout ---
+    if org['source_change'] is not None:
+        old = _md_code(_fmt_value(org['source_change'][0]))
+        new = _md_code(_fmt_value(org['source_change'][1]))
+        lines.append('')
+        lines.append(f'**Source:** {old} → {new}')
+
     if org['version_change']:
         old = _md_code(_fmt_value(org['version_change'][0]))
         new = _md_code(_fmt_value(org['version_change'][1]))

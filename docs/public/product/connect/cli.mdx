@@ -241,13 +241,15 @@ is set); `1` — semantic changes were found; `2` — usage error, or an unreada
   removed edge plus an added edge.
 - **Version** changes (the top-level `version` field) are always reported and
   always count as a change — they are never hidden.
+- **Source** changes (the top-level `source` field that selects the starting
+  component) are reported when added, removed, or changed and always count.
 - **Layout** — each node's `ui` block and the `viewport` — is ignored by default
   and summarized as a single `Layout: changed` line. A pure canvas move is **not**
   a semantic change, so `diff` exits `0` on it. Pass `--include-layout` to
   enumerate the individual `ui.*` coordinates and `viewport.*` fields; with the
   flag they count as changes, so a canvas-only edit exits `1`.
 - **Everything else at the top level is ignored.** `diff` reads exactly
-  `components`, `version` and `viewport`; `project_id`, `isLocked`, and any key a
+  `components`, `source`, `version`, and `viewport`; `project_id`, `isLocked`, and any key a
   later schema adds are editor/session metadata, so editing one never reports a
   change.
 
@@ -297,11 +299,15 @@ for feeding another tool:
     "nodes_changed": 1,
     "nodes_removed": 0,
     "provider_changes": 0,
+    "source_change": null,
     "version_change": null,
     "viewport_changes": 0
   }
 }
 ```
+
+`summary.source_change` is `[old, new]` when the entry point changes and `null`
+otherwise; a missing `source` is represented as `null` in that pair.
 
 The top-level `viewport` array carries the same
 `{"path", "kind", "old", "new"}` shape as a config change and is populated only

@@ -121,12 +121,14 @@ difference is deliberate: `diff` produces a report, not a command result.
   removed edge plus an added edge.
 - **Version** — the top-level `version` field — is always reported and always
   counts as a change; it is never hidden by the layout rules.
+- **Source** — the top-level `source` field that selects the starting component —
+  is reported when added, removed, or changed and always counts as a change.
 - **Layout** — each node's `ui` block and the top-level `viewport` — is ignored by
   default and summarized as a single `Layout: changed` line, so a pure canvas move
   exits `0`. `--include-layout` enumerates the individual `ui.*` and `viewport.*`
   fields and makes them count, so a canvas-only edit then exits `1`.
 - **Everything else at the top level is ignored.** `diff` reads exactly
-  `components`, `version` and `viewport`; `project_id`, `isLocked`, and any key a
+  `components`, `source`, `version`, and `viewport`; `project_id`, `isLocked`, and any key a
   later schema adds are editor/session metadata rather than pipeline behavior, so
   editing one never reports a change (even under `--include-layout`).
 
@@ -174,12 +176,16 @@ Layout: changed (ui/viewport)
     "nodes_changed": 1,
     "nodes_removed": 0,
     "provider_changes": 0,
+    "source_change": null,
     "version_change": null,
     "viewport_changes": 0
   },
   "viewport": []
 }
 ```
+
+`summary.source_change` is `[old, new]` when the entry point changes and `null`
+otherwise; a missing `source` is represented as `null` in that pair.
 
 The top-level `viewport` array carries the same `{"path", "kind", "old", "new"}`
 shape as a config change and is populated only under `--include-layout`;
@@ -267,7 +273,7 @@ if diff.has_semantic_changes:
 
 | Type | Description |
 | --- | --- |
-| `PipeDiff` | The whole diff: `node_changes`, `edge_changes`, `version_change` (an `(old, new)` tuple or `None`), `layout_changed`, `viewport_changes`, and the `has_semantic_changes` property that decides the exit code. |
+| `PipeDiff` | The whole diff: `node_changes`, `edge_changes`, `source_change` and `version_change` (each an `(old, new)` tuple or `None`), `layout_changed`, `viewport_changes`, and the `has_semantic_changes` property that decides the exit code. |
 | `NodeChange` | One component change: `id`, `kind` (`added` / `removed` / `provider` / `config`), `provider_old`, `provider_new`, `field_changes`. A node whose provider *and* config changed yields two entries. |
 | `FieldChange` | One field-level change: `path` (e.g. `config.default.strlen`, `ui.position.x`), `kind` (`added` / `removed` / `changed`), `old`, `new`. |
 | `EdgeChange` | One wire: `from_id`, `lane` (the data `lane`, or the control `classType` such as `llm` / `tool` / `memory`), `to_id`, `kind` (`added` / `removed`). |

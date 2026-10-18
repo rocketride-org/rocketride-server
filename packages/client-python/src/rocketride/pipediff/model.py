@@ -148,7 +148,7 @@ class PipeDiff:
     The complete semantic difference between two ``.pipe`` pipelines.
 
     This is the single object handed to every reporter. It separates true
-    semantic change (nodes, edges, version) from cosmetic canvas churn
+    semantic change (nodes, edges, source, version) from cosmetic canvas churn
     (``layout_changed``), which is the entire point of ``rocketride diff``.
 
     Attributes:
@@ -158,6 +158,9 @@ class PipeDiff:
         version_change: ``(old_version, new_version)`` when the top-level
             ``version`` field differs, else ``None``. Always computed regardless
             of layout options, since a version bump is semantically meaningful.
+        source_change: ``(old_source, new_source)`` when the top-level ``source``
+            field is added, removed, or changed, else ``None``. Missing values
+            are represented as ``None`` in the tuple.
         layout_changed: ``True`` when the top-level ``viewport`` or any retained
             component's ``ui`` block differs. This is a coarse hint only; layout
             details are enumerated as ``ui.*`` field changes (per node) and
@@ -173,6 +176,7 @@ class PipeDiff:
     version_change: Optional[tuple[Any, Any]] = None
     layout_changed: bool = False
     viewport_changes: list[FieldChange] = field(default_factory=list)
+    source_change: Optional[tuple[Any, Any]] = None
 
     @property
     def has_semantic_changes(self) -> bool:
@@ -180,7 +184,7 @@ class PipeDiff:
         Whether this diff contains any change that should gate a non-zero exit.
 
         Returns ``True`` when there are node changes, edge changes, a version
-        change, or enumerated ``viewport_changes``. Pure layout churn
+        change, a source change, or enumerated ``viewport_changes``. Pure layout churn
         (``layout_changed`` with nothing enumerated) does **not** count, so a
         canvas-only move exits ``0`` unless the caller opted layout in with
         ``include_layout``.
@@ -188,4 +192,10 @@ class PipeDiff:
         Returns:
             ``True`` if any change that should gate the exit code is present.
         """
-        return bool(self.node_changes or self.edge_changes or self.version_change is not None or self.viewport_changes)
+        return bool(
+            self.node_changes
+            or self.edge_changes
+            or self.version_change is not None
+            or self.source_change is not None
+            or self.viewport_changes
+        )
