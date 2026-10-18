@@ -128,7 +128,7 @@ export const ConnectionsView: React.FC = () => {
 					<EmptyState
 						icon={<DatabaseIcon />}
 						title="No database nodes found"
-						description="Start a pipeline containing a database node (MySQL, PostgreSQL, or ClickHouse), then refresh."
+						description="Start a pipeline containing a database node (MySQL, PostgreSQL, ClickHouse, or RocketRide SQL), then refresh."
 						action={
 							<Button variant="primary" onClick={() => { if (client) void refreshEndpoints(client); }} disabled={!client}>
 								Refresh

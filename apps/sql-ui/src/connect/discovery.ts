@@ -47,6 +47,7 @@ export const DATABASE_PROVIDERS: ReadonlySet<string> = new Set([
 	'db_mysql',
 	'db_postgres',
 	'db_clickhouse',
+	'rocketride_sql',
 ]);
 
 // =============================================================================
