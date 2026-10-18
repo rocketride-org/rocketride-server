@@ -31,7 +31,7 @@ from types import SimpleNamespace
 import pytest
 
 from rocketlib import AVI_ACTION
-from rocketlib.decisions import record
+from rocketlib.decisions import record, record_decision
 
 from ai.common.decision import DecisionError, fingerprint, parse_rule
 
@@ -122,13 +122,13 @@ def test_missing_decision_on_a_media_lane_explains_the_text_only_writer(call):
     assert f'before this {lane} item arrived' in message and 'text lanes only' in message
 
 
-def test_missing_decision_on_the_json_lane_explains_the_text_only_writer():
+def test_missing_decision_on_the_json_lane_names_question_lane_and_fix():
     inst, _, _ = _gate(NOT_SPAM)
     with pytest.raises(DecisionError) as caught:
         inst.writeJson({'a': 1})
     message = str(caught.value)
-    assert '"is_spam"' in message and 'json lane' in message
-    assert 'before this json item arrived' in message and 'text lanes only' in message
+    assert '"is_spam"' in message and 'json lane' in message and 'downstream' in message
+    assert 'text lanes only' not in message
 
 
 def test_documents_are_filtered_per_document():
@@ -240,6 +240,23 @@ def test_media_checks_every_call_on_the_object_decision(lane):
     for action in (AVI_ACTION.BEGIN, AVI_ACTION.WRITE, AVI_ACTION.END):
         with pytest.raises(Blocked):
             getattr(inst, lane)(action, 'video/mp4', b'x')
+
+
+@pytest.mark.parametrize('lane', ['image', 'audio', 'video'])
+def test_media_uses_a_decision_recorded_on_its_own_lane_over_the_text_decision(lane):
+    """Any node can decide on media: a Gate on that lane reads the node's recordDecision(lane=...)."""
+    inst, _, _ = _gate(NOT_SPAM)
+    writer = SimpleNamespace(
+        instance=SimpleNamespace(currentObject=inst.instance.currentObject, pipeType={'id': 'vision_1'}),
+        IGlobal=SimpleNamespace(glb=SimpleNamespace(logicalType='vision')),
+    )
+    record_decision(writer, SPAM, {'is_spam': {'answer': 'yes'}}, lane='text')
+    record_decision(writer, SPAM, {'is_spam': {'answer': 'no'}}, lane=lane)
+    call = getattr(inst, f'write{lane.capitalize()}')
+    for action in (AVI_ACTION.BEGIN, AVI_ACTION.WRITE, AVI_ACTION.END):
+        assert call(action, 'x/y', b'x') is None
+    with pytest.raises(Blocked):
+        inst.writeText('hello')
 
 
 def test_questions_answers_and_json_use_object_level():

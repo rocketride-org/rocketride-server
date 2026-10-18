@@ -69,9 +69,9 @@ So use `does not equal` when you mean "anything but yes", including the cases wh
 
 ## Too long
 
-System One never answers from part of a text, document, table or answer. If an input is longer than the model can take:
+System One never answers from part of a text, document, table, answer or JSON item. If an input is longer than the model can take:
 
-- **Whole text or an answer:** the object fails with an error.
+- **Whole text, an answer or a JSON item:** the object fails with an error.
 - **A chunk or a table:** the item is marked `too_long`, with no answers, and a warning is logged. **Every Gate blocks it**, whatever its rule, including `does not equal` and `is uncertain`.
 - **A question** (on the questions lane) is the one exception: it is shortened to fit, a warning is logged, and the record is marked `truncated`. If the question and its context still don't fit after dropping history and documents, the object fails.
 
@@ -91,7 +91,7 @@ If two nodes on the same path answer a question with the same name at the same l
 
 A Gate can sit on any lane. It forwards each item on the lane it arrived on, so it works on text, documents, tables, questions, answers, JSON, images, audio and video. For images, audio and video it uses the decision for the whole object, so the whole stream passes or is blocked together.
 
-In this version the nodes that write decisions (System One on text lanes, anomaly_detector on documents) record nothing for images, audio, video or JSON. A Gate on one of those lanes therefore finds no decision to read and fails the object with a missing-decision error. Gates on those lanes are for future decision writers.
+In this version the nodes that write decisions (System One on text lanes and JSON, anomaly_detector on documents) record nothing for images, audio or video. A Gate on one of those lanes therefore finds no decision to read and fails the object with a missing-decision error. Gates on those lanes are for future decision writers.
 
 ## Seeing the decisions
 

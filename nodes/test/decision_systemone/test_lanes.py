@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""System One node v2: text (buffered), questions (truncate + warn) and answers lanes."""
+"""System One node v2: text (buffered), questions (truncate + warn), answers and json lanes."""
 
 from types import SimpleNamespace
 
@@ -155,6 +155,54 @@ def test_empty_answer_fails(node):
 def test_too_long_answer_fails(node):
     with pytest.raises(ValueError, match='never decides on part of an input'):
         node.inst.writeAnswers(Answer('x' * 2000))
+
+
+class _EngineJson:
+    """Stands in for the engine's IJson wrapper: ``str()`` is its compact JSON, ``None`` when null."""
+
+    def __init__(self, text):
+        self.text = text
+
+    def __str__(self):
+        return self.text
+
+
+def test_json_item_is_decided_recorded_and_forwarded_by_default(node):
+    assert node.inst.writeJson({'summary': 'urgent outage', 'ids': [1, 2]}) is None
+    assert node.client.states == [{'summary': 'urgent outage', 'ids': [1, 2]}]
+    item = group(node)['items'][0]
+    assert item['lane'] == 'json' and item['status'] == 'ok' and 'item' not in item
+    assert item['preview'] == '{"summary":"urgent outage","ids":[1,2]}'
+
+
+def test_json_text_is_decided_on_the_parsed_value(node):
+    node.inst.writeJson('{"summary": "urgent outage"}')
+    assert node.client.states == [{'summary': 'urgent outage'}]
+    assert group(node)['items'][0]['preview'] == '{"summary":"urgent outage"}'
+
+
+def test_non_json_text_is_decided_on_its_text(node):
+    node.inst.writeJson('the outage is urgent')
+    assert node.client.states == ['the outage is urgent']
+
+
+def test_engine_json_wrapper_is_read_through_its_text(node):
+    node.inst.writeJson(_EngineJson('[{"id":1},{"id":2}]'))
+    assert node.client.states == [[{'id': 1}, {'id': 2}]]
+    assert group(node)['items'][0]['lane'] == 'json'
+
+
+@pytest.mark.parametrize('data', [None, '', '   ', {}, [], 'null', '{}', '""', _EngineJson('None'), _EngineJson('{}')])
+def test_empty_json_item_fails(node, data):
+    with pytest.raises(ValueError, match=r'^decision_ollama_1: the JSON item is empty'):
+        node.inst.writeJson(data)
+    assert node.client.states == []
+
+
+def test_too_long_json_item_fails(node):
+    with pytest.raises(ValueError, match='the json input is too long.*never decides on part of an input'):
+        node.inst.writeJson({'body': 'x' * 2000})
+    assert 'decisions' not in node.inst.instance.currentObject.response
 
 
 def test_text_and_documents_on_one_node_write_separate_items(node):

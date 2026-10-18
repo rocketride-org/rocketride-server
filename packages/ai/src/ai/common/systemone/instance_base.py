@@ -28,12 +28,15 @@ answers with ``IInstanceBase.recordDecision``.
 
 from __future__ import annotations
 
+import json
 from typing import List
 
 from rocketlib import IInstanceBase, warning
 from rocketlib.decisions import component_id, preview
 
 from ai.common.schema import Answer, Doc, DocMetadata, Question
+
+from .limits import encode_json
 
 TEXT_DOC_TYPES = frozenset({'Document', 'Text'})
 NOT_TEXT = 'System One reads text; convert this content to text first (e.g. OCR or caption)'
@@ -47,6 +50,18 @@ def _size_text(size: dict) -> str:
     else:
         text = ', '.join(f'{key} {value}' for key, value in size.items())
     return text + (' (rejected by the backend)' if size.get('rejected_by') == 'backend' else '')
+
+
+def _json_value(data):
+    """Return a json-lane item as a plain Python value.
+
+    The engine passes an ``IJson`` wrapper. Read it through its compact JSON text, which covers
+    every JSON shape (``toDict()`` only returns a dict); ``str()`` gives ``None`` for a null value.
+    """
+    if data is None or isinstance(data, (str, dict, list, int, float, bool)):
+        return data
+    text = str(data)
+    return None if text == 'None' else json.loads(text)
 
 
 class SystemOneInstanceBase(IInstanceBase):
@@ -212,3 +227,16 @@ class SystemOneInstanceBase(IInstanceBase):
         if not text.strip() or state in (None, {}, []):
             raise ValueError(f'{component_id(self)}: the answer is empty; nothing to decide on')
         self._decide_whole('answers', preview(text), state)
+
+    def writeJson(self, data):
+        """Decide on one JSON item (parsed when it arrives as JSON text, else its text); forward it unchanged."""
+        state = _json_value(data)
+        if isinstance(state, str):
+            try:
+                state = json.loads(state)
+            except ValueError:
+                pass  # not JSON text: decide on the text
+        text = state if isinstance(state, str) else encode_json(state).decode('utf-8')
+        if state in (None, {}, []) or not text.strip():
+            raise ValueError(f'{component_id(self)}: the JSON item is empty; nothing to decide on')
+        self._decide_whole('json', preview(text), state)

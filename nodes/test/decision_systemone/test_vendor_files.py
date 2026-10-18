@@ -31,6 +31,8 @@ import pytest
 NODE = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'decision_systemone'
 CREDENTIALS = Path(__file__).parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'mcp' / 'credentials.json'
 LIMIT_KEYS = {'max_options', 'max_levels', 'max_questions', 'max_state_tokens'}
+# Every lane SystemOneInstanceBase decides on; each forwards to itself.
+LANES = ('text', 'documents', 'table', 'questions', 'answers', 'json')
 
 
 def _load(path: Path) -> dict:
@@ -62,6 +64,11 @@ def test_every_profile_has_model_serverbase_and_limits(name):
         ), (name, key)
         assert 'model' in profile, (name, key)
         assert LIMIT_KEYS <= set(profile['limits']), (name, key)
+
+
+@pytest.mark.parametrize('name', sorted(FILES))
+def test_every_file_declares_every_lane(name):
+    assert FILES[name]['lanes'] == {lane: [lane] for lane in LANES}
 
 
 @pytest.mark.parametrize('name', sorted(FILES))

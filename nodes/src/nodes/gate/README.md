@@ -59,7 +59,7 @@ A rule needs at least one condition. Values typed in the panel are text; when th
 - A decision that is missing fails the object with an error that names the question, the lane and a preview of the item. The same happens when the object has no `response.decisions`.
 - An item recorded with a status other than `ok`, such as `too_long`, is blocked by every Gate whatever the rule (including `does not equal` and `is uncertain`), and the Gate logs a warning that names the status.
 - **The Gate must sit downstream of the node that answers its questions, on the same path.** Branches that run in parallel execute in an order the canvas does not show, so a Gate on a sibling branch can run before the decision exists and fail with a missing-decision error.
-- In this version the decision writers are the System One nodes, which read text-based lanes, and anomaly_detector, which decides on the documents lane. Neither records a decision for an image, audio, video or json item, so a Gate on one of those lanes has no decision to read and fails the object with a missing-decision error. Gates on those lanes are for future decision writers, which must record an object-level decision before the item arrives.
+- In this version the decision writers are the System One nodes, which read the text-based lanes and json, and anomaly_detector, which decides on the documents lane. Neither records a decision for an image, audio or video item, so a Gate on one of those lanes has no decision to read and fails the object with a missing-decision error. Gates on those lanes are for future decision writers, which must record an object-level decision before the item arrives.
 
 ### Condition values are checked against the writer's answers
 

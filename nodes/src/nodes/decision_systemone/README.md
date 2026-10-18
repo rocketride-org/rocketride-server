@@ -13,11 +13,11 @@ served by several other backends, including Ollama.
 
 The node makes **one model call per item** (`POST /v1/systemone`) and sends all of its
 configured questions in that call. An item is the whole text of an object (buffered until
-the object's text ends), each document, each table, the question, or the answer. Several
+the object's text ends), each document, each table, the question, the answer, or the JSON item. Several
 lanes may be wired on one node, and every lane gets the same questions. The answers are
 recorded on the object at `response.decisions`, where a Gate node reads them to pass or
 block. Documents are forwarded with `metadata.decision_refs` pointing at their recorded
-answers; text, tables, questions and answers are forwarded unchanged. The node never
+answers; text, tables, questions, answers and JSON are forwarded unchanged. The node never
 decides on part of an input. Use it for cheap classification and gating ahead of costly
 steps; it does not generate text and is not an agent tool. The recorded format is
 described in [Decisions](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/development/nodes/decisions.md); routing on it is done by the Gate node.
@@ -31,9 +31,11 @@ described in [Decisions](https://github.com/rocketride-org/rocketride-server/blo
 | `table`     | `table`     | One item per table, recorded under its fingerprint; forwarded unchanged                       |
 | `questions` | `questions` | One item per question, with its history, context and documents; forwarded unchanged           |
 | `answers`   | `answers`   | One item per answer (its JSON when it is JSON, else its text); forwarded unchanged            |
+| `json`      | `json`      | One item per JSON value, sent as JSON (JSON text is parsed first); forwarded unchanged         |
 
 A document or table with empty content, a document that is not text, and an empty text,
-question or answer fail the object with an error that names the node.
+question, answer or JSON item (null, `{}`, `[]` or blank text) fail the object with an error
+that names the node.
 
 ## Profiles
 
@@ -218,11 +220,11 @@ and against the request body cap. If the backend still rejects the request as to
 (HTTP 413 or `max_tokens_exceeded`), the input counts as too long. The node never cuts an
 input to fit and never sends part of it. What happens depends on the lane:
 
-| Lane                 | When the input is too long                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| `text`, `answers`    | The object fails, with a message to split the input first (for example with a preprocessor, then a System One node on the `documents` lane). |
-| `documents`, `table` | The item is recorded with status `too_long`, which every Gate blocks, and the node logs a warning. The object continues. |
-| `questions`          | History is dropped oldest first, then documents last first, until it fits. The recorded item is marked `truncated` and the node logs a warning. If the question and its context still do not fit, the object fails. |
+| Lane                      | When the input is too long                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------ |
+| `text`, `answers`, `json` | The object fails, with a message to split the input first (for example with a preprocessor, then a System One node on the `documents` lane). |
+| `documents`, `table`      | The item is recorded with status `too_long`, which every Gate blocks, and the node logs a warning. The object continues. |
+| `questions`               | History is dropped oldest first, then documents last first, until it fits. The recorded item is marked `truncated` and the node logs a warning. If the question and its context still do not fit, the object fails. |
 
 ### Errors and retries
 
@@ -272,8 +274,8 @@ that is done.
 ### Clef and Clef Flash (Ollama)
 
 Ollama serves `clef` and `clef-flash`, and both are offered as profiles. They can also judge
-images, but a text-only state works, and that is all this node sends: it takes text on five
-lanes (text, documents, table, questions and answers); a non-text document fails the object with
+images, but a text-only state works, and that is all this node sends: it takes text on six
+lanes (text, documents, table, questions, answers and json); a non-text document fails the object with
 "System One reads text; convert this content to text first (e.g. OCR or caption)". They need
 Ollama 0.35.1 or later (the other Ollama profiles need 0.35.0). The input limit is 8,192 tokens, the
 same as Nimble; Ollama never truncates, so raise `num_ctx` on the server before relying on more.

@@ -180,7 +180,7 @@ Separately, if two different writers answer the same question name for the same 
 
 Per-item links for image, audio and video streams don't exist yet. Those lanes use the object-level decision.
 
-In v1 the decision writers (System One on text-based lanes, anomaly_detector on the documents lane) record nothing for image, audio, video or json items, so a Gate on one of those lanes has no decision to read and fails the object. Those lanes are for future writers that record an object-level decision before the item arrives.
+In v1 the decision writers (System One on the text-based lanes and json, anomaly_detector on the documents lane) record nothing for image, audio or video items, so a Gate on one of those lanes has no decision to read and fails the object. Those lanes are for future writers that record an object-level decision before the item arrives.
 
 ## How to write decisions
 
@@ -223,12 +223,12 @@ Rules:
 - **A group's questions are fixed by its first write.** Recording again on the same object with different questions raises. The group is your node's component id, so two nodes of the same type never share one.
 - **Record during the object.** Record from a lane method, or from `closing()`, which runs before `close()` while `currentObject` is still set. `recordDecision` keeps nothing on the instance, so it works whether or not your node defines `open()`.
 - **Don't remove or edit earlier items.** Item positions are the ids that `decision_refs` point to.
-- **Let unchanged data forward by default.** Recording a decision doesn't change the data. For lanes you pass on as they came (text, table, questions, answers), don't call `self.instance.write*`; the engine forwards the original. For documents, forward your stamped copies with `self.instance.writeDocuments(stamped)` and then `return self.preventDefault()`, so the unstamped originals aren't forwarded as well.
+- **Let unchanged data forward by default.** Recording a decision doesn't change the data. For lanes you pass on as they came (text, table, questions, answers, json), don't call `self.instance.write*`; the engine forwards the original. For documents, forward your stamped copies with `self.instance.writeDocuments(stamped)` and then `return self.preventDefault()`, so the unstamped originals aren't forwarded as well.
 - **Reading decisions** is the Gate's job. If a node must read them, use `ai.common.decision.snapshot(response)` for a plain copy. Never hold on to the live `response['decisions']` view.
 
 ## System One as a worked example
 
-The [System One node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/decision_systemone/README.md) asks typed questions (yes/no, pick-one, rubric) with a System One model. It writes one group per node, one item per text, document, table, question or answer it decides, stamps the documents it forwards, and records `too_long` items instead of answering from part of an input. It's one standalone class, `SystemOneInstanceBase`. It owns its lanes (buffering text until `closing()`, deciding and stamping each document, tables, questions and answers), asks its runner about each item, and records every answer with `self.recordDecision`. Its code is in `packages/ai/src/ai/common/systemone/`. Read it for a full writer, and read the [Gate node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/gate/README.md) for the reader.
+The [System One node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/decision_systemone/README.md) asks typed questions (yes/no, pick-one, rubric) with a System One model. It writes one group per node, one item per text, document, table, question, answer or JSON item it decides, stamps the documents it forwards, and records `too_long` items instead of answering from part of an input. It's one standalone class, `SystemOneInstanceBase`. It owns its lanes (buffering text until `closing()`, deciding and stamping each document, tables, questions, answers and JSON), asks its runner about each item, and records every answer with `self.recordDecision`. Its code is in `packages/ai/src/ai/common/systemone/`. Read it for a full writer, and read the [Gate node](https://github.com/rocketride-org/rocketride-server/blob/develop/nodes/src/nodes/gate/README.md) for the reader.
 
 For how users combine the two, see [Decisions and Gates](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/public/product/guides/decisions-and-gates.md).
 

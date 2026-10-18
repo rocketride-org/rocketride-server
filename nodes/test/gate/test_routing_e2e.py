@@ -350,6 +350,41 @@ async def test_no_detail_without_tracing():
     assert not any('detail' in (body.get('trace') or {}) for events in traces.values() for body in events)
 
 
+def json_pipeline(url: str) -> dict:
+    """Webhook (json) -> System One -> Gate (is_spam equals yes) -> json sink."""
+    return {
+        'project_id': str(uuid.uuid4()),
+        'source': 'webhook_1',
+        'components': [
+            WEBHOOK,
+            systemone('decision_systemone_1', source='webhook_1', lane='json', url=url),
+            gate(
+                'gate_spam',
+                [{'question': 'is_spam', 'op': 'equals', 'value': 'yes'}],
+                source='decision_systemone_1',
+                lane='json',
+            ),
+            sink('sink_spam', 'response_json', 'spam_json', source='gate_spam', lane='json'),
+        ],
+    }
+
+
+async def test_json_routing_decides_the_whole_item_and_forwards_it_unchanged():
+    spam = {'subject': 'You won', 'body': 'Claim your prize is_spam:yes', 'tags': ['promo']}
+    ham = {'subject': 'Lunch', 'body': 'Noon on Friday?', 'tags': []}
+    with FakeSystemOne() as fake:
+        sends = [(name, json.dumps(data), 'lane/json') for name, data in (('spam', spam), ('ham', ham))]
+        results, _, errors = await run_pipeline(json_pipeline(fake.url), sends)
+        states = [request['state'] for request in fake.requests]
+    assert not errors, errors
+    # The node's startup probe sends a text state first; every item after it is the parsed object, not its text.
+    assert states[-2:] == [spam, ham]
+    assert results['spam'].get('spam_json') == [spam]
+    assert not results['ham'].get('spam_json')
+    item = results['spam']['decisions']['decision_systemone_1']['items'][0]
+    assert item['lane'] == 'json' and item['status'] == 'ok'
+
+
 def anomaly_pipeline() -> dict:
     """Webhook (documents) -> anomaly_detector -> Gate (is_anomalous equals yes) -> documents sink."""
     return {

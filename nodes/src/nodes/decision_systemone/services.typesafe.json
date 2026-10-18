@@ -24,7 +24,8 @@
 		"documents": ["documents"],
 		"table": ["table"],
 		"questions": ["questions"],
-		"answers": ["answers"]
+		"answers": ["answers"],
+		"json": ["json"]
 	},
 	"preconfig": {
 		"default": "jev-latest",

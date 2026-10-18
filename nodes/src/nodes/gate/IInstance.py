@@ -46,7 +46,7 @@ def _refs(doc) -> dict | None:
     return dict(refs) if isinstance(refs, dict) else None
 
 
-_TEXT_ONLY_LANES = ('image', 'audio', 'video', 'json')
+_MEDIA_LANES = ('image', 'audio', 'video')
 
 # Most per-document entries one documents-lane trace detail carries (spec A4 §6.2).
 MAX_TRACE_ITEMS = 100
@@ -58,9 +58,9 @@ def _shown(value):
 
 
 def _missing_message(question: str, lane: str, text) -> str:
-    """Explain a missing decision; the media and json lanes get the text-only-writer hint."""
+    """Explain a missing decision; the media lanes get the text-only-writer hint."""
     head = f'Gate: no decision for "{question}" on the {lane} lane (item: "{preview(text)}"). '
-    if lane in _TEXT_ONLY_LANES:
+    if lane in _MEDIA_LANES:
         return (
             head + f'No decision was recorded for this object before this {lane} item arrived '
             "(System One decides on text lanes only; text decisions are made when the object's text ends)."
