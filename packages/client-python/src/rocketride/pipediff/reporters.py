@@ -573,8 +573,13 @@ def _md_code(text: str) -> str:
     links) in the auto-posted PR comment. Neutralizing them here — the single choke
     point every value passes through — covers bullets, table cells, and the version
     line at once.
+
+    Empty values need a visible token: an empty code span emits two adjacent
+    backticks, which can pair with the next value's fence.
     """
     text = str(text).replace('\r', ' ').replace('\n', ' ')
+    if not text:
+        text = '""'
     if '`' not in text:
         return f'`{text}`'
     longest = max(len(run) for run in re.findall(r'`+', text))

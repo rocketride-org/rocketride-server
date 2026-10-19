@@ -44,7 +44,7 @@ import unittest
 from typing import Optional, Tuple
 
 from rocketride.pipediff import EdgeChange, FieldChange, NodeChange, PipeDiff
-from rocketride.pipediff.reporters import _md_cell, render_human, render_json, render_markdown
+from rocketride.pipediff.reporters import _md_cell, _md_code, render_human, render_json, render_markdown
 
 # CI installs cmarkgfm into the engine interpreter from tests/requirements.txt
 # (the client-python:setup-test-deps step), so the renderer cross-check below
@@ -362,6 +362,37 @@ class TestRenderJson(unittest.TestCase):
 
 
 class TestRenderMarkdown(unittest.TestCase):
+    def test_empty_values_cannot_break_following_code_spans(self) -> None:
+        self.assertEqual(_md_code(''), '`""`')
+
+        payload = 'x` [click me](https://example.invalid/p) @octocat ![img](https://example.invalid/i.png) **Never**'
+        diffs = [
+            PipeDiff(
+                node_changes=[
+                    NodeChange(
+                        id='agent_1',
+                        kind='config',
+                        field_changes=[FieldChange(path='config.instructions', kind='changed', old='', new=payload)],
+                    ),
+                ],
+            ),
+            PipeDiff(node_changes=[NodeChange(id='agent_1', kind='provider', provider_old='', provider_new=payload)]),
+            PipeDiff(version_change=('', payload)),
+        ]
+
+        for diff in diffs:
+            with self.subTest(diff=diff):
+                markdown = render_markdown(diff)
+                self.assertIn('`""`', markdown)
+                if cmarkgfm is not None:
+                    rendered = cmarkgfm.github_flavored_markdown_to_html(
+                        markdown, options=CmarkOptions.CMARK_OPT_UNSAFE
+                    )
+                    self.assertIn('<code>""</code>', html_mod.unescape(rendered))
+                    self.assertNotIn('<a href="https://example.invalid/p">', rendered)
+                    self.assertNotIn('<img src="https://example.invalid/i.png"', rendered)
+                    self.assertNotIn('<strong>Never</strong>', rendered)
+
     def test_empty_diff_summary(self) -> None:
         out = render_markdown(PipeDiff())
         self.assertIn('no semantic changes', out)
