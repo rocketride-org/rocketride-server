@@ -132,6 +132,28 @@ async def test_on_execute_starts_task_with_resolved_org_id():
     assert response == {'type': 'response', 'body': {'token': 'tk_new'}}
 
 
+def _assert_says_how_to_set_a_dev_team(message: str) -> None:
+    """Keep the UI message short and point at the real profile control."""
+    assert message == 'No development team selected. Open Account > Profile and choose "Set as development team".'
+
+
+@pytest.mark.asyncio
+async def test_on_execute_refuses_without_a_dev_team():
+    """An empty devTeam denies the execute outright, before any permission check,
+    and the refusal says how to choose a development team.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(dev_team=''), server=server)
+
+    with pytest.raises(PermissionError) as excinfo:
+        await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
+
+    _assert_says_how_to_set_a_dev_team(str(excinfo.value))
+    conn.verify_team_permission.assert_not_called()
+    server.start_task.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_on_execute_requires_task_control_permission():
     """A PermissionError from the team permission check bubbles up after logging."""
@@ -319,6 +341,28 @@ async def test_on_execute_skips_plan_check_without_pipeline():
     conn.verify_plans.assert_not_called()
 
 
+@pytest.mark.parametrize('pipeline', ['x.pipe', ['a']], ids=['string', 'list'])
+@pytest.mark.asyncio
+async def test_on_execute_passes_a_non_object_pipeline_on_to_the_server_guard(pipeline):
+    """A pipeline that is not an object (a .pipe path or a list sent as
+    ``pipeline``) skips the plan check, which reads the object's keys, so the
+    request reaches start_task, whose guard says what to pass. Before, the
+    real plan check died first with ``'str' object has no attribute 'get'``.
+    """
+    from ai.modules.task.task_conn import TaskConn
+
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_plans = MethodType(TaskConn.verify_plans, conn)
+
+    request = {'arguments': {'pipeline': pipeline}}
+    await TaskCommands.on_execute(conn, request)
+
+    server.start_task.assert_awaited_once()
+    assert server.start_task.await_args.args[0] is request
+
+
 # ---------------------------------------------------------------------------
 # on_launch
 # ---------------------------------------------------------------------------
@@ -366,9 +410,10 @@ async def test_on_launch_refuses_without_a_dev_team():
     server.start_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(dev_team=''), server=server)
 
-    with pytest.raises(PermissionError, match='No development team'):
+    with pytest.raises(PermissionError, match='No development team') as excinfo:
         await TaskCommands.on_launch(conn, {'arguments': {}})
 
+    _assert_says_how_to_set_a_dev_team(str(excinfo.value))
     conn.verify_team_permission.assert_not_called()
     server.start_task.assert_not_awaited()
 

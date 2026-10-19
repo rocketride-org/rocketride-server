@@ -386,7 +386,9 @@ class DocumentStoreBase(ABC):
             for query in question.questions:
                 # Make sure we have the embeddings
                 if not query.embedding_model:
-                    raise Exception('You must run your question through an embedding filter')
+                    raise Exception(
+                        'Question has no embedding model name. Embed questions with the same model as the stored documents.'
+                    )
 
                 # Do a find operation
                 docs = self.searchSemantic(query, question.filter)
@@ -502,7 +504,10 @@ class DocumentStoreBase(ABC):
 
             # The collection should contain exactly one control document, otherwise it's corrupted
             if len(doc) != 1:
-                raise Exception(f'Collection does not have control document, found {len(doc)}')
+                raise Exception(
+                    f'Collection setup record is missing or invalid (found {len(doc)}, expected 1). '
+                    'Choose a new collection or table name.'
+                )
 
             # Extract and store the vector size and model name from the control document
             self.vectorSize = doc[0].metadata.vectorSize
@@ -543,7 +548,10 @@ class DocumentStoreBase(ABC):
                 # Collection already exists, validate documents against existing collection
                 for doc in documents:
                     if not doc.embedding_model:
-                        raise Exception('You must run your documents through an embedding filter')
+                        raise Exception(
+                            'Documents are missing an embedding model name. Check the embedding configuration '
+                            'or supply vectors with their model name.'
+                        )
                     if doc.embedding_model != self.modelName:
                         raise Exception(
                             f'The collection uses {self.modelName} but the document was encoded with {doc.embedding_model}'
@@ -608,7 +616,10 @@ class DocumentStoreBase(ABC):
             # Validate all provided documents against the newly created collection metadata
             for doc in documents:
                 if not doc.embedding_model:
-                    raise Exception('You must run your documents through an embedding filter')
+                    raise Exception(
+                        'Documents are missing an embedding model name. Check the embedding configuration '
+                        'or supply vectors with their model name.'
+                    )
                 if doc.embedding_model != modelName:
                     raise Exception(
                         f'The collection uses {modelName} but the document was encoded with {doc.embedding_model}'

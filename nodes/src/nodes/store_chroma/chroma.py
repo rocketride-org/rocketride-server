@@ -143,10 +143,13 @@ class Store(DocumentStoreBase):
 
         # check if the similarity matches qdrant configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'l2', 'ip']:
+        supported = ('cosine', 'l2', 'ip')
+        if similarity in supported:
             self.similarity = similarity
         else:
-            raise Exception('The metric you provided in the config.json does not match required chroma configurations')
+            raise Exception(
+                f'Chroma: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
+            )
 
         # The Chroma client connects eagerly (identity/tenant validation on construction),
         # so an incompatible/old server surfaces here as a cryptic error (e.g.

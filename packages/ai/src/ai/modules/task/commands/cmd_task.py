@@ -61,6 +61,12 @@ from rocketride import TASK_STATE
 if TYPE_CHECKING:
     from ..task_server import TaskServer
 
+# Shown when a development run (launch or execute) comes from an account with
+# no development team: the run would have no team to bill to. Says where the
+# team is chosen: Account > Profile in the sidebar of the IDE and of the cloud
+# shell. SDK alternatives are documented in the troubleshooting error table.
+_NO_DEV_TEAM_MESSAGE = 'No development team selected. Open Account > Profile and choose "Set as development team".'
+
 
 class TaskCommands(DAPConn):
     """
@@ -138,15 +144,18 @@ class TaskCommands(DAPConn):
             team_id = self._account_info.devTeam
             # Billing must never guess: no dev team = no dev run.
             if not team_id:
-                raise PermissionError('No development team is set — pick one in your profile before running pipelines')
+                raise PermissionError(_NO_DEV_TEAM_MESSAGE)
 
             # Verify task.control on the run team BEFORE any secret handling,
             # since the env merge below pulls that team's secrets.
             self.verify_team_permission(team_id, 'task.control')
 
-            # Verify required pipeline plans
+            # Verify required pipeline plans. The check reads the pipeline
+            # object's keys, so anything else (missing, or a .pipe path or list
+            # sent as `pipeline`) is left to start_task, whose guard says what
+            # to pass instead of failing here with an AttributeError.
             pipeline = args.get('pipeline')
-            if pipeline is not None:
+            if isinstance(pipeline, dict):
                 # Check that the pipeline's required plan is available for this account.
                 self.verify_plans(self._account_info, pipeline)
 
@@ -252,7 +261,7 @@ class TaskCommands(DAPConn):
             team_id = self._account_info.devTeam
             # Billing must never guess: no dev team = no dev run.
             if not team_id:
-                raise PermissionError('No development team is set — pick one in your profile before running pipelines')
+                raise PermissionError(_NO_DEV_TEAM_MESSAGE)
             requested_team = args.get('teamId')
             if requested_team and requested_team != team_id:
                 raise PermissionError('Tasks run in your assigned development team; change it in your profile')
