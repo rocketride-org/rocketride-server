@@ -167,18 +167,21 @@ class _ChatBedrock(ChatBedrock):
         return result
 
     def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+        # TODO(#2711): remove once a langchain-aws release that meters "length" is pinned.
         # langchain-aws (1.9.0 and before) reports a streamed Meta or Mistral reply's
-        # usage only when it stops with "stop". One that reaches the output limit stops
-        # with "length", and nothing is metered, though Bedrock sent the counts in the
-        # last chunk. When a stream ends with no usage but carried those counts, report
-        # them once. A release that fixes this sends the usage itself, and this adds nothing.
+        # usage only when it stops with "stop" (prepare_output_stream). One that reaches
+        # the output limit stops with "length", and nothing is metered, though Bedrock sent
+        # the counts in the last chunk. When a stream ends with no usage but carried those
+        # counts, report them once. A release that fixes this sends the usage itself, and
+        # this adds nothing.
         metered, metrics = False, None
         for chunk in super()._stream(messages, stop=stop, run_manager=run_manager, **kwargs):
             usage = getattr(chunk.message, 'usage_metadata', None)
             if not self.beta_use_converse_api:
                 _count_cache_as_input(usage)
             metered = metered or bool(usage)
-            raw = (getattr(chunk.message, 'response_metadata', None) or {}).get('amazon-bedrock-invocationMetrics')
+            metadata = getattr(chunk.message, 'response_metadata', None) or {}
+            raw = metadata.get('amazon-bedrock-invocationMetrics')
             if isinstance(raw, dict):
                 metrics = raw
             yield chunk
