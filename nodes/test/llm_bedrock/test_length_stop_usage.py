@@ -62,7 +62,7 @@ _METRICS = {
 }
 
 
-def _llama_stream(stop_reason: str) -> bytes:
+def _llama_stream(stop_reason: str, metrics: dict) -> bytes:
     events = [
         {
             'generation': 'The history of bridges',
@@ -76,18 +76,18 @@ def _llama_stream(stop_reason: str) -> bytes:
             'prompt_token_count': None,
             'generation_token_count': _OUTPUT,
             'stop_reason': stop_reason,
-            'amazon-bedrock-invocationMetrics': dict(_METRICS),
+            'amazon-bedrock-invocationMetrics': dict(metrics),
         },
     ]
     return b''.join(_event(e) for e in events)
 
 
-def _mistral_stream(stop_reason: str) -> bytes:
+def _mistral_stream(stop_reason: str, metrics: dict) -> bytes:
     events = [
         {'outputs': [{'text': 'The history of bridges', 'stop_reason': None}]},
         {
             'outputs': [{'text': ' begins with', 'stop_reason': stop_reason}],
-            'amazon-bedrock-invocationMetrics': dict(_METRICS),
+            'amazon-bedrock-invocationMetrics': dict(metrics),
         },
     ]
     return b''.join(_event(e) for e in events)
@@ -98,6 +98,7 @@ class _Bedrock(BaseHTTPRequestHandler):
 
     requests: list = []
     stop_reason = 'length'
+    metrics = _METRICS
 
     def log_message(self, *args):
         pass
@@ -106,7 +107,8 @@ class _Bedrock(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get('content-length') or 0)))
         _, _, model, action = unquote(self.path).split('/', 3)
         _Bedrock.requests.append({'action': action, 'model': model, 'body': body})
-        data = _mistral_stream(_Bedrock.stop_reason) if 'mistral' in model else _llama_stream(_Bedrock.stop_reason)
+        stream = _mistral_stream if 'mistral' in model else _llama_stream
+        data = stream(_Bedrock.stop_reason, _Bedrock.metrics)
         self.send_response(200)
         self.send_header('content-type', 'application/vnd.amazon.eventstream')
         self.send_header('content-length', str(len(data)))
@@ -117,6 +119,7 @@ class _Bedrock(BaseHTTPRequestHandler):
 @pytest.fixture
 def server(monkeypatch):
     _Bedrock.requests = []
+    _Bedrock.metrics = _METRICS
     httpd = ThreadingHTTPServer(('127.0.0.1', 0), _Bedrock)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -182,3 +185,26 @@ def test_exactly_one_chunk_carries_the_usage(monkeypatch, server, model, stop_re
 
     assert len(usages) == 1
     assert (usages[0]['input_tokens'], usages[0]['output_tokens']) == (_INPUT, _OUTPUT)
+
+
+def test_cached_tokens_in_the_counts_are_metered_once(monkeypatch, server):
+    """Bedrock's input count leaves the cached tokens out; the usage must hold them once."""
+    from langchain_core.messages import HumanMessage
+
+    server.stop_reason = 'length'
+    server.metrics = {**_METRICS, 'cacheReadInputTokenCount': 100, 'cacheWriteInputTokenCount': 20}
+    chunks = list(_chat(monkeypatch, _LLAMA)._llm._stream([HumanMessage(content='Write a long essay.')]))
+    usages = [chunk.message.usage_metadata for chunk in chunks if chunk.message.usage_metadata]
+
+    assert len(usages) == 1
+    assert usages[0]['input_tokens'] == _INPUT + 100 + 20
+    assert usages[0]['input_token_details'] == {'cache_read': 100, 'cache_creation': 20}
+
+    # The turn meter splits them back out: fresh input, cache read and write, once each.
+    usage = _streamed_usage(_chat(monkeypatch, _LLAMA))
+    assert (usage.get('input'), usage.get('cache_read'), usage.get('cache_creation'), usage.get('output')) == (
+        _INPUT,
+        100,
+        20,
+        _OUTPUT,
+    )
