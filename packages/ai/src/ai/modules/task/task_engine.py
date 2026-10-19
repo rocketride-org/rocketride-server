@@ -30,6 +30,7 @@ Global Resources:
 
 import os
 import asyncio
+import contextlib
 import sys
 import json
 import tempfile
@@ -1390,24 +1391,19 @@ class Task(DAPBase):
             raise RuntimeError('Task is terminating, cannot process data requests')
 
         if self._channel_signalled:
-            # Outside the lock: the dial that will set it runs under the lock
-            try:
+            # Outside the lock: the dial the signal started runs under the lock
+            with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(self._data_connected.wait(), CONST_CHANNEL_DATA_WAIT)
-            except asyncio.TimeoutError:
-                raise RuntimeError('The task has no data connection') from None
+
+        # No connection yet, or the signalled dial failed: dial here
+        async with self._data_lock:
+            if not self._data_client:
+                # No token: the run never started or was torn down while we waited for the lock
+                if not self._data_token:
+                    raise RuntimeError('Task is not running, cannot open the data channel')
+                self._data_client = await self._dial()
+                self._data_connected.set()
             client = self._data_client
-            if client is None:
-                raise RuntimeError('The task has no data connection')
-        else:
-            # Thread-safe data channel access
-            async with self._data_lock:
-                if not self._data_client:
-                    # No token: the run never started or was torn down while we waited for the lock
-                    if not self._data_token:
-                        raise RuntimeError('Task is not running, cannot open the data channel')
-                    self._data_client = await self._dial()
-                    self._data_connected.set()
-                client = self._data_client
 
         # Get the arguments
         args = data.get('arguments', {})
