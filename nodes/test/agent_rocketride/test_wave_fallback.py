@@ -247,3 +247,18 @@ def test_a_reply_cannot_remove_the_result_its_own_call_gets(wave, driver, monkey
 
     assert seen['cleared'] == []
     assert seen['waves'][0]['results'] == [READ]
+
+
+def test_a_model_error_whose_text_cannot_be_read_still_leaves_a_report(wave, driver):
+    """Logging the failure must not cost the user the report, even when str(exc) raises."""
+
+    class Unprintable(Exception):
+        def __str__(self):
+            raise RuntimeError('no text')
+
+    driver.reply = Unprintable()
+
+    answer = synthesize(wave, driver, [READ], scratch='KEEP-NOTES')
+
+    assert answer.startswith('I could not finish: the model call failed (Unprintable: ')
+    assert 'KEEP-NOTES' in answer
