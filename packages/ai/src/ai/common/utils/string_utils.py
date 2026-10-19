@@ -73,10 +73,19 @@ def error_text(exc: BaseException) -> str:
     Any other exception is ``str(exc)``. Never raises.
     """
     text = safe_str(exc)
-    if not getattr(exc, '__formatted', False):
+    # getattr's default covers only AttributeError: an object whose lookup raises
+    # anything else must not make this raise.
+    try:
+        formatted = bool(getattr(exc, '__formatted', False))
+    except Exception:
         return text
-    location = f' at ({safe_str(getattr(exc, "filename", ""))}:{safe_str(getattr(exc, "line", ""))})'
-    if text.endswith(location):
+    if not formatted:
+        return text
+    try:
+        location = f' at ({safe_str(getattr(exc, "filename", ""))}:{safe_str(getattr(exc, "line", ""))})'
+    except Exception:
+        location = None
+    if location and text.endswith(location):
         text = text[: -len(location)]
     else:
         text = _ENGINE_LOCATION.sub('', text)
