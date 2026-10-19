@@ -58,25 +58,3 @@ def test_an_exception_whose_str_raises_gives_an_empty_string():
             raise RuntimeError('no')
 
     assert error_text(Broken()) == ''
-
-
-def test_an_exception_whose_attribute_lookup_raises_gives_its_str():
-    """A lookup that raises something other than AttributeError must not escape."""
-
-    class Odd(Exception):
-        def __getattr__(self, name):
-            raise RuntimeError('no attributes here')
-
-    assert error_text(Odd('plain text')) == 'plain text'
-
-
-def test_an_engine_error_whose_location_cannot_be_read_still_drops_the_path():
-    class Engine(Exception):
-        @property
-        def filename(self):
-            raise RuntimeError('gone')
-
-    exc = Engine('Exception: Invalid API key. at (/opt/rocketride/ai/common/chat.py:412)')
-    setattr(exc, '__formatted', True)
-
-    assert error_text(exc) == 'Exception: Invalid API key.'

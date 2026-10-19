@@ -57,7 +57,7 @@ def synthesize(wave, driver, results, **kwargs):
     question = wave.rocketride_agent.Question()
     question.addQuestion('How many CSS rules does src/App.css have?')
     waves = [{'wave_num': 0, 'calls': [], 'results': results}]
-    return driver._synthesize(question=question, waves=waves, context=SimpleNamespace(), **kwargs)
+    return driver._synthesize(question=question, waves=waves, context=SimpleNamespace(run_id='run-1'), **kwargs)
 
 
 READ = {'tool': 'workspace.read', 'key': 'wave-0.r0', 'summary': 'dict(2 keys): path, content'}

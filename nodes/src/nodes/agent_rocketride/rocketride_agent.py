@@ -626,9 +626,7 @@ class RocketRideDriver(AgentBase):
             # The model cannot be reached for the answer either. Hand the user what
             # was gathered, as it stands, rather than only the error. The log keeps the
             # full text, with the engine location the report leaves out.
-            error(
-                f'rocketride wave synthesis failed run_id={getattr(context, "run_id", None)}: {type(exc).__name__}: {safe_str(exc)}'
-            )
+            error(f'rocketride wave synthesis failed run_id={context.run_id}: {type(exc).__name__}: {safe_str(exc)}')
             return _partial_report(f'the model call failed ({type(exc).__name__}: {error_text(exc)})', lines, scratch)
         if not safe_str(answer).strip():
             # An empty reply is no answer either; the gathered facts still are.

@@ -66,28 +66,13 @@ def error_text(exc: BaseException) -> str:
 
     An error raised inside the engine reaches Python as an Exception whose ``str()``
     is ``<code>: <message> at (<engine source path>:<line>)``; the engine marks it
-    ``__formatted`` and keeps the path and line in ``filename`` and ``line``
-    (engLib store/python/bindings.cpp). Answers are shown to customers, so they get
-    the same text without the location. The code stays: callers that tell an error
-    answer by its label (Discord) rely on it. Logs keep ``str()``.
-    Any other exception is ``str(exc)``. Never raises.
+    ``__formatted`` (engLib store/python/bindings.cpp). Answers are shown to customers,
+    so they get the same text without the location. The code stays: callers that tell
+    an error answer by its label (Discord) rely on it. Logs keep ``str()``.
+    Any other exception is ``str(exc)``.
     """
     text = safe_str(exc)
-    # getattr's default covers only AttributeError: an object whose lookup raises
-    # anything else must not make this raise.
-    try:
-        formatted = bool(getattr(exc, '__formatted', False))
-    except Exception:
+    if not getattr(exc, '__formatted', False):
         return text
-    if not formatted:
-        return text
-    try:
-        location = f' at ({safe_str(getattr(exc, "filename", ""))}:{safe_str(getattr(exc, "line", ""))})'
-    except Exception:
-        location = None
-    if location and text.endswith(location):
-        text = text[: -len(location)]
-    else:
-        text = _ENGINE_LOCATION.sub('', text)
     # An error with no message reads "<code>: " once the location is gone.
-    return text[:-2] if text.endswith(': ') else text
+    return _ENGINE_LOCATION.sub('', text).removesuffix(': ')
