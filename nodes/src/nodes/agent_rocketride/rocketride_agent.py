@@ -236,9 +236,10 @@ class RocketRideDriver(AgentBase):
                     verify_args=self._verify_args,
                 )
             except Exception as exc:
-                error(f'rocketride wave plan failed run_id={run_id}: {exc}')
+                error(f'rocketride wave plan failed run_id={run_id}: {safe_str(exc)}')
                 trace['stop_reason'] = 'error'
-                trace['error'] = f'{type(exc).__name__}: {exc}'
+                # The trace travels in the payload a parent agent gets: no engine source path.
+                trace['error'] = f'{type(exc).__name__}: {error_text(exc)}'
                 # A retry that failed after an unusable reply carries that reply's notes.
                 current_scratch = safe_str(getattr(exc, 'wave_scratch', '')) or current_scratch
                 if not waves and not current_scratch:

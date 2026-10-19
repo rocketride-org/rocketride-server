@@ -227,6 +227,45 @@ def test_a_planning_error_with_notes_still_gets_an_answer(wave, driver, monkeypa
     assert trace['error'] == 'RuntimeError: Rate limit exceeded.'
 
 
+def _planning_fails_with(wave, driver, monkeypatch, failure):
+    def plan_wave(**kw):
+        raise failure
+
+    monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', plan_wave)
+    driver._max_waves = 3
+    driver._synthesize = lambda **kw: f'answered from: {kw["scratch"]}'
+    context = wave.rocketride_agent.AgentContext(
+        invoker=None, llm=None, tools=None, memory=None, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+    )
+    return driver._run(context=context, question=None)
+
+
+def test_an_engine_error_in_planning_keeps_the_path_out_of_answer_and_trace(wave, driver, monkeypatch):
+    """The trace reaches a parent agent in the payload, so it gets the bare message too."""
+    failure = Exception('Exception: Invalid API key. at (/opt/rocketride/ai/common/chat.py:412)')
+    setattr(failure, '__formatted', True)
+    failure.message = 'Invalid API key.'
+
+    answer, trace = _planning_fails_with(wave, driver, monkeypatch, failure)
+
+    assert answer == 'LLM error: Invalid API key.'
+    assert trace['error'] == 'Exception: Invalid API key.'
+
+
+def test_a_planning_error_whose_text_cannot_be_read_still_gets_an_answer(wave, driver, monkeypatch):
+    class Unprintable(Exception):
+        def __str__(self):
+            raise RuntimeError('no text')
+
+    failure = Unprintable()
+    failure.wave_scratch = 'NOTES-KEPT'
+
+    answer, trace = _planning_fails_with(wave, driver, monkeypatch, failure)
+
+    assert answer == 'answered from: NOTES-KEPT'
+    assert trace['stop_reason'] == 'error'
+
+
 def test_a_reply_cannot_remove_the_result_its_own_call_gets(wave, driver, monkeypatch):
     """The reply's remove names the key its own call is about to get. Only earlier results can go.
 
