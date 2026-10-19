@@ -274,14 +274,21 @@ async def test_connection_refused_is_retried(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-async def test_send_data_waits_for_the_signalled_connection(monkeypatch):
+async def test_send_data_dials_itself_when_the_signalled_dial_never_connected(monkeypatch):
     monkeypatch.setattr(task_engine, 'CONST_CHANNEL_DATA_WAIT', 0.05)
+    client = _client('c1')
+    client.dap_request = AsyncMock(return_value={'success': True})
+    client.did_fail = MagicMock(return_value=False)
     t = _engine()
     t._channel_signalled = True
-    t._dial = AsyncMock()
-    with pytest.raises(RuntimeError, match='no data connection'):
-        await Task._send_data(t, {'command': 'x', 'arguments': {}})
-    t._dial.assert_not_awaited()
+    t._provider = None
+    t._dial = AsyncMock(return_value=client)
+
+    response = await Task._send_data(t, {'command': 'x', 'arguments': {}})
+
+    assert response == {'success': True}
+    t._dial.assert_awaited_once()
+    assert t._data_client is client
 
 
 async def test_send_data_uses_the_connection_the_signal_opened():
