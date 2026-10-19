@@ -15,6 +15,7 @@ large transfer.
 """
 
 import asyncio
+import concurrent.futures
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, BinaryIO, Dict, Optional
 
@@ -217,7 +218,12 @@ class TaskChannel:
         future = asyncio.run_coroutine_threadsafe(
             self.request(command, arguments, data=data, sink=sink, timeout=timeout), self._loop
         )
-        return future.result()
+        try:
+            # Bounded even if the loop never runs the request
+            return future.result(CONST_CHANNEL_CONNECT_TIMEOUT + timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise ChannelError(command, 'timeout') from None
 
     async def _exchange(
         self,
