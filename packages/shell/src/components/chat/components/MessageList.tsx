@@ -127,6 +127,8 @@ export interface MessageListProps {
 	emptyTitle?: string;
 	/** Description for the EmptyState shown when there are no messages. */
 	emptyDescription?: string;
+	/** Rich replacement for the stock EmptyState (e.g. example-prompt cards). */
+	emptySlot?: React.ReactNode;
 }
 
 /**
@@ -135,7 +137,7 @@ export interface MessageListProps {
  * @param props - {@link MessageListProps}.
  * @returns The thread element (or an EmptyState when empty).
  */
-export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, emptyTitle, emptyDescription }) => {
+export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, emptyTitle, emptyDescription, emptySlot }) => {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const endRef = useRef<HTMLDivElement>(null);
 	// Whether the user is pinned to the bottom (within 40px). Starts true so the
@@ -175,13 +177,10 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 		return out;
 	}, [messages]);
 
-	// A brand-new conversation shows the stock EmptyState instead of a blank area.
+	// A brand-new conversation shows the host's rich empty slot when provided,
+	// else the stock EmptyState — never a blank area.
 	if (messages.length === 0 && !isTyping) {
-		return (
-			<div style={styles.emptyWrap}>
-				<EmptyState title={emptyTitle ?? 'No messages yet'} description={emptyDescription ?? 'Start the conversation below.'} />
-			</div>
-		);
+		return <div style={styles.emptyWrap}>{emptySlot ?? <EmptyState title={emptyTitle ?? 'No messages yet'} description={emptyDescription ?? 'Start the conversation below.'} />}</div>;
 	}
 
 	return (

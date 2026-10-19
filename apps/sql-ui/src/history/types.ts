@@ -40,7 +40,7 @@ export type HistoryOutcome = 'rows' | 'affected' | 'error' | 'abandoned';
 export type HistoryKind = 'read' | 'write' | 'ddl' | 'tx' | 'other';
 
 /** One statement the user ran on one connection. */
-export interface IHistoryEntry {
+export interface HistoryEntry {
 	/** Stable identity within the connection's list. */
 	id: string;
 	/** The statement text as typed (possibly truncated — see `truncated`). */

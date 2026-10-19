@@ -34,11 +34,11 @@ import React, { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, Button, Card, CardDataGrid, EmptyState, StatusBadge, monoEl, mutedEl } from 'shell';
 import type { GridCellComponent, GridColumnDefinition } from 'shell';
-import type { ISqlEndpoint } from '../connect';
-import type { ISchemaState } from '../schema/schemaStore';
+import type { SqlEndpoint } from '../connect';
+import type { SchemaState } from '../schema/schemaStore';
 import { buildRelationGraph, orientation } from '../schema/relations';
 import { RULE_LABELS, runSchemaChecks } from '../schema/quality';
-import type { IFinding } from '../schema/quality';
+import type { Finding } from '../schema/quality';
 import { requestTableRecord } from '../navigation';
 import { DatabaseIcon } from '../icons';
 
@@ -47,15 +47,15 @@ import { DatabaseIcon } from '../icons';
 // =============================================================================
 
 /** Props for the {@link InsightsPanel} component. */
-export interface IInsightsPanelProps {
+export interface InsightsPanelProps {
 	/** The connection's endpoint. */
-	endpoint: ISqlEndpoint;
+	endpoint: SqlEndpoint;
 	/** The connection's schema snapshot. */
-	snapshot: ISchemaState;
+	snapshot: SchemaState;
 }
 
 /** One row of the findings grid. */
-interface IFindingRow extends Record<string, unknown> {
+interface FindingRow extends Record<string, unknown> {
 	/** Row identity. */
 	id: string;
 	/** Severity label (`warning` or `info`). */
@@ -131,10 +131,10 @@ const styles = {
  * The connection workbench's Insights page: how the schema is shaped, and
  * what the snapshot-only rules have to say about it.
  *
- * @param props - {@link IInsightsPanelProps}.
+ * @param props - {@link InsightsPanelProps}.
  * @returns The panel element.
  */
-export const InsightsPanel: React.FC<IInsightsPanelProps> = ({ endpoint, snapshot }) => {
+export const InsightsPanel: React.FC<InsightsPanelProps> = ({ endpoint, snapshot }) => {
 	const graph = useMemo(() => buildRelationGraph(snapshot.schema), [snapshot.schema]);
 	const shape = useMemo(() => orientation(graph), [graph]);
 	const findings = useMemo(
@@ -150,8 +150,8 @@ export const InsightsPanel: React.FC<IInsightsPanelProps> = ({ endpoint, snapsho
 		[findings],
 	);
 
-	const rows = useMemo<IFindingRow[]>(
-		() => findings.map((finding: IFinding, index) => ({
+	const rows = useMemo<FindingRow[]>(
+		() => findings.map((finding: Finding, index) => ({
 			id: `${finding.rule}-${finding.table}-${finding.column ?? ''}-${index}`,
 			severity: finding.severity,
 			rule: RULE_LABELS[finding.rule],
@@ -291,7 +291,7 @@ export const InsightsPanel: React.FC<IInsightsPanelProps> = ({ endpoint, snapsho
 			{/* What the rules found. */}
 			<div style={styles.gridFill}>
 				<Card noBodyPadding fill>
-					<CardDataGrid<IFindingRow>
+					<CardDataGrid<FindingRow>
 						title="Review"
 						actions={<StatusBadge variant={warningCount ? 'warning' : 'success'}>{`${warningCount} warnings · ${findings.length} findings`}</StatusBadge>}
 						columns={columns}

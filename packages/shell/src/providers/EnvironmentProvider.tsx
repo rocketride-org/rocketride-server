@@ -6,10 +6,10 @@
 /**
  * EnvironmentProvider — thin shell wrapper around shared EnvironmentView.
  *
- * Owns all DAP fetching and auth wiring. Passes pure data and async
- * callbacks down to the host-agnostic EnvironmentView. Unlike the VS Code
- * wrapper, this page has direct access to the RocketRide client — no
- * postMessage bridge required.
+ * Owns all env fetching and auth wiring. Passes pure data and async
+ * callbacks down to the host-agnostic EnvironmentView. Engine access is
+ * the brokered `client.account.getEnv/setEnv` bus ops, so the component is
+ * realm-agnostic (in-process at a framework root; bridged in a spoke).
  */
 
 import React, { useState, useCallback } from 'react';
@@ -17,6 +17,7 @@ import { EnvironmentView } from '../modules/environment';
 import type { EnvironmentSlotConfig, EnvironmentScope } from '../modules/environment';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser } from '../hooks/useAuthUser';
+import { ConnectionManager } from '../connection/connection';
 
 // =============================================================================
 // COMPONENT
@@ -32,7 +33,7 @@ import { useAuthUser } from '../hooks/useAuthUser';
  * of org/team scope cards its account backend would reject.
  */
 const EnvironmentProvider: React.FC = () => {
-	const { client, isConnected } = useShellConnection();
+	const { isConnected } = useShellConnection();
 	const authUser = useAuthUser();
 	const isSaas = (authUser?.capabilities ?? []).includes('saas');
 
@@ -82,11 +83,10 @@ const EnvironmentProvider: React.FC = () => {
 	 */
 	const handleLoadEnv = useCallback(
 		(slotId: string, scope: EnvironmentScope, scopeId?: string) => {
-			if (!client) return;
+			if (!isConnected) return;
 			const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
-			client.account
-				.getEnv(scope, scopeId)
-				.then((env: Record<string, string>) => {
+			(ConnectionManager.getInstance().request('client.account.getEnv', { scope, scopeId }) as Promise<Record<string, string>>)
+				.then((env) => {
 					setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
 					setError(null);
 				})
@@ -96,7 +96,7 @@ const EnvironmentProvider: React.FC = () => {
 					setError(err.message);
 				});
 		},
-		[client]
+		[isConnected]
 	);
 
 	// ── Save callback ───────────────────────────────────────────────────
@@ -110,12 +110,12 @@ const EnvironmentProvider: React.FC = () => {
 	 */
 	const handleSaveEnv = useCallback(
 		async (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => {
-			if (!client) return;
-			await client.account.setEnv(scope, env, scopeId);
+			if (!isConnected) return;
+			await ConnectionManager.getInstance().request('client.account.setEnv', { scope, env, scopeId });
 			const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
 			setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
 		},
-		[client]
+		[isConnected]
 	);
 
 	// ── Render ───────────────────────────────────────────────────────────

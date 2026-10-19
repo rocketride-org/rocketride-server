@@ -9,11 +9,6 @@ declare module '*.svg' {
 	export default Component;
 }
 
-declare module '*.svg?url' {
-	const url: string;
-	export default url;
-}
-
 declare module '*.png' {
 	const url: string;
 	export default url;

@@ -34,8 +34,9 @@
 //   link   — not handled here; video/audio viewers call fsGetUrl directly
 // =============================================================================
 
-import type { IVirtualFileSystem, RocketRideClient } from 'shell';
+import type { IVirtualFileSystem } from 'shell';
 import { getMediaInfo } from './mediaTypes';
+import type { IExplorerFs } from './fs';
 
 // =============================================================================
 // LOAD ERROR SENTINEL
@@ -50,6 +51,41 @@ import { getMediaInfo } from './mediaTypes';
 // "Loading...".  The sentinel is truthy, so it also stops the FilePane revert
 // effect from re-firing (that effect only reverts while content is empty).
 // =============================================================================
+
+// =============================================================================
+// MINTED BLOB URLS
+// =============================================================================
+
+/**
+ * Every blob: URL this SESSION created. Document content can outlive the
+ * session that minted it (the Documents store keeps content across reloads),
+ * but a blob: URL dies with its page — and a pre-media-table document may
+ * even carry raw text where a blob URL belongs. FilePane treats any blob-mode
+ * content NOT in this set as stale and re-reads it from the server.
+ */
+const mintedBlobUrls = new Set<string>();
+
+/**
+ * Type guard: true when the given content is a blob: URL minted by THIS
+ * session (i.e. still alive and safe to hand to a viewer).
+ *
+ * @param value - The document content to test.
+ * @returns True for a live, this-session blob URL.
+ */
+export function isLiveBlobUrl(value: unknown): value is string {
+	return typeof value === 'string' && mintedBlobUrls.has(value);
+}
+
+/**
+ * Drops a URL from the minted set — called when the last viewer releases it
+ * and the object URL is revoked, so a document still holding the string gets
+ * a fresh read instead of a dead reference.
+ *
+ * @param url - The revoked blob: URL.
+ */
+export function forgetBlobUrl(url: string): void {
+	mintedBlobUrls.delete(url);
+}
 
 /** Sentinel value stored as a document's content when a blob load failed. */
 export interface FileLoadError {
@@ -88,18 +124,15 @@ export function isFileLoadError(value: unknown): value is FileLoadError {
 /**
  * Creates an IVirtualFileSystem backed by the RocketRide server store.
  *
- * @param client - The connected RocketRideClient instance.
+ * @param fs - The explorer's store surface (local in the full app,
+ *             controller-routed in dev-tool frames — see fs.ts).
  * @returns A VFS that proxies all operations to the server.
  */
-export function createStoreVfs(client: RocketRideClient): IVirtualFileSystem {
+export function createStoreVfs(fs: IExplorerFs): IVirtualFileSystem {
 	return {
 		async list(dir: string) {
 			try {
-				const result = await client.fsListDir(dir);
-				return (result.entries ?? []).map((e: any) => ({
-					name: e.name,
-					type: e.type ?? 'file',
-				}));
+				return await fs.list(dir);
 			} catch {
 				return [];
 			}
@@ -112,17 +145,19 @@ export function createStoreVfs(client: RocketRideClient): IVirtualFileSystem {
 					// Link files (video/audio) store an empty string — their
 					// viewers call fsGetUrl directly for streaming URLs.
 					if (contentMode === 'link') return '';
-					return await client.fsReadString(path);
+					return await fs.readString(path);
 				}
 				// blob — get a presigned URL, fetch the data, return a blob: URL
-				const url = await client.fsGetUrl(path);
+				const url = await fs.getUrl(path);
 				const response = await fetch(url);
 				if (!response.ok) {
 					throw new Error(`Failed to fetch ${path}: ${response.status} ${response.statusText}`);
 				}
 				const data = await response.arrayBuffer();
 				const blob = new Blob([data], { type: mime });
-				return URL.createObjectURL(blob);
+				const blobUrl = URL.createObjectURL(blob);
+				mintedBlobUrls.add(blobUrl);
+				return blobUrl;
 			} catch (err) {
 				// Blob loads surface a typed error sentinel (not null/'') so the
 				// failure is distinguishable from "still loading" and carries a
@@ -138,25 +173,22 @@ export function createStoreVfs(client: RocketRideClient): IVirtualFileSystem {
 		async write(path: string, content: unknown) {
 			const { contentMode } = getMediaInfo(path);
 			if (typeof content === 'string' && contentMode === 'inline') {
-				await client.fsWriteString(path, content);
+				await fs.writeString(path, content);
 			}
 		},
 
 		async rename(oldPath: string, newPath: string) {
-			await client.fsRename(oldPath, newPath);
+			await fs.rename(oldPath, newPath);
 		},
 
 		async delete(path: string) {
-			const stat = await client.fsStat(path);
-			if (stat.type === 'dir') {
-				await client.fsRmdir(path, true);
-			} else {
-				await client.fsDelete(path);
-			}
+			// File-vs-directory branching lives behind the seam (and on the
+			// controller for remote frames).
+			await fs.remove(path);
 		},
 
 		async mkdir(path: string) {
-			await client.fsMkdir(path);
+			await fs.mkdir(path);
 		},
 	};
 }

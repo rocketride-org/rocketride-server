@@ -15,7 +15,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import cloudLogoDark from '../../../../../rocketride-dark-icon.png';
 import cloudLogoLight from '../../../../../rocketride-light-icon.png';
-import { settingsStyles as S } from '../../Settings/SettingsWebview';
+import { settingsStyles as S } from '../../settings/SettingsWebview';
 import { useTheme } from '../../hooks/useTheme';
 import { useStripeKey } from '../../hooks/useStripeKey';
 import { CheckoutUnavailableNotice } from '../CheckoutUnavailableNotice';

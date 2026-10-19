@@ -30,7 +30,7 @@
 // =============================================================================
 
 import type { IDataGridPageRequest } from 'shell';
-import type { ISqlSchemaTable, SqlDialect } from '../connect';
+import type { SqlSchemaTable, SqlDialect } from '../connect';
 
 // =============================================================================
 // QUOTING
@@ -62,7 +62,7 @@ export function quoteIdent(dialect: SqlDialect, name: string): string {
 const TEXT_TYPE = /char|text|string|uuid|enum/i;
 
 /** A WHERE clause plus the values its `$n` placeholders bind to. */
-interface IWhereClause {
+interface WhereClause {
 	/** The clause (with leading ' WHERE ') or ''. */
 	clause: string;
 	/** Bind values, in placeholder order. */
@@ -83,7 +83,7 @@ interface IWhereClause {
  * @param req - The grid's page request.
  * @returns The clause and its bind values.
  */
-function buildWhere(dialect: SqlDialect, table: ISqlSchemaTable, req: IDataGridPageRequest): IWhereClause {
+function buildWhere(dialect: SqlDialect, table: SqlSchemaTable, req: IDataGridPageRequest): WhereClause {
 	const clauses: string[] = [];
 	const params: unknown[] = [];
 
@@ -136,7 +136,7 @@ function buildWhere(dialect: SqlDialect, table: ISqlSchemaTable, req: IDataGridP
 // =============================================================================
 
 /** The page SELECT and its matching COUNT for one grid page request. */
-export interface IPageStatements {
+export interface PageStatements {
 	/** The page SELECT (LIMIT/OFFSET applied). */
 	select: string;
 	/** The COUNT(*) over the same WHERE (drives the pager total). */
@@ -149,7 +149,7 @@ export interface IPageStatements {
  * Build the SELECT + COUNT statements for one grid page request.
  *
  * Filter and search values are bound as positional `$1..$n` parameters and
- * passed to `ISqlSession.execute` alongside the statement; nothing the user
+ * passed to `SqlSession.execute` alongside the statement; nothing the user
  * typed is rendered into SQL text. Only identifiers (quoted) and the grid's
  * own page numbers reach the statement directly.
  *
@@ -169,9 +169,9 @@ export interface IPageStatements {
 export function buildPageStatements(
 	dialect: SqlDialect,
 	tableName: string,
-	table: ISqlSchemaTable,
+	table: SqlSchemaTable,
 	req: IDataGridPageRequest,
-): IPageStatements {
+): PageStatements {
 	const target = quoteIdent(dialect, tableName);
 	const { clause: where, params } = buildWhere(dialect, table, req);
 

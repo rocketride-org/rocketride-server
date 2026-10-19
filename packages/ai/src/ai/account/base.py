@@ -834,13 +834,14 @@ class AccountBase(ABC):
         The ``rrext_app`` marketplace surface (browse/install/admin/pricing)
         requires SaaS — OSS raises NotImplementedError. ``rrext_deploy_app`` is
         app deploy control on the shared deployments registry and works on both
-        editions, with three subcommands special on OSS: ``register_dev`` (the
-        per-user dev overlay — platform infrastructure so local app development
-        works without SaaS), ``developer_status`` (answered from the session's
-        org — OSS carries the fixed ``rocketride`` namespace), and the
-        remaining ``developer_*`` verbs (developer-account / Stripe
-        registration — SaaS only). The SaaS implementation overrides this
-        method entirely and delegates to ``app_handler.handle()``.
+        editions, with two subcommands special on OSS: ``developer_status``
+        (answered from the session's org — OSS carries the fixed
+        ``rocketride`` namespace) and the remaining ``developer_*`` verbs
+        (developer-account / Stripe registration — SaaS only). Dev previews
+        are LOCAL-FIRST: the dev server proxies the engine and preview pages
+        register the app client-side, so the server holds no dev state.
+        The SaaS implementation overrides this method entirely and delegates
+        to ``app_handler.handle()``.
 
         Args:
             conn:    ``TaskConn`` instance.
@@ -849,11 +850,6 @@ class AccountBase(ABC):
         command = request.get('command')
         sub = (request.get('arguments', {}) or {}).get('subcommand') or ''
         if command == 'rrext_deploy_app':
-            # Dev overlay: shared platform capability (not marketplace).
-            if sub == 'register_dev':
-                from ai.account.dev_overlay import handle_register_dev
-
-                return await handle_register_dev(conn, request)
             # Namespace status is readable on both editions — the session
             # already carries the org's developerId ('rocketride' on OSS), so
             # the App Builder's DEPLOY page can render without a SaaS lookup.

@@ -21,23 +21,26 @@
 // SOFTWARE.
 
 // =============================================================================
-// PROFILER VIEW — SnakeViz-style stacked layout
+// PROFILER VIEW — the profiler FRAME (viz + table; controls live in the sidebar)
 // =============================================================================
 //
-// Layout matches snakeviz:
-//   Controls → Viz Controls → Sunburst/Icicle → Call Stack → Stats Table
+// SnakeViz-style stack: Sunburst/Icicle → Call Stack → Stats Table. The
+// control entries (target, session, start/stop, viz knobs) moved to the
+// sidebar panel (2026-10-14): this frame owns ALL state and server calls,
+// publishes a ProfilerControlsState over its channel, and applies the
+// ProfilerActions the panel sends back (see profilerBridge.ts).
 //
-// No tabs — viz on top, table always visible below.
-// Style dropdown switches between sunburst and icicle.
-// Depth + Cutoff dropdowns filter client-side (not server params).
+// The profiled server is ALWAYS the host's connected engine (the shell
+// connection singleton) — per-connection host/port selection is gone.
 // Table row click and viz arc click both re-root the visualisation.
 // =============================================================================
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, getClient } from 'shell';
 import { commonStyles } from 'shell';
 import type { ProfileThreadInfo, ProfileThreadsResponse, ProfileTreeNode, ProfileTreeResponse, VizStyle } from './visualizations/types';
+import type { ProfilerAction, ProfilerControlsState, ProfilerFrameChannel } from '../profilerBridge';
+import type { ProfilerEngine } from '../ops';
 import ReportText from './visualizations/ReportText';
 import FlameGraph from './visualizations/FlameGraph';
 import SunburstChart from './visualizations/SunburstChart';
@@ -96,49 +99,7 @@ const styles = {
 		overflow: 'hidden',
 	} as CSSProperties,
 
-	/** Controls row — target selector, session name, buttons. */
-	controls: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-		flexWrap: 'wrap',
-	} as CSSProperties,
-
-	/** Target dropdown. */
-	select: {
-		padding: '6px 10px',
-		border: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-input)',
-		color: 'var(--rr-text-primary)',
-		borderRadius: 4,
-		fontSize: 13,
-		fontFamily: 'var(--rr-font-family)',
-		minWidth: 200,
-	} as CSSProperties,
-
-	/** Smaller dropdown for viz controls. */
-	smallSelect: {
-		padding: '4px 8px',
-		border: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-input)',
-		color: 'var(--rr-text-primary)',
-		borderRadius: 4,
-		fontSize: 12,
-		fontFamily: 'var(--rr-font-family)',
-	} as CSSProperties,
-
-	/** Session name text input. */
-	sessionInput: {
-		padding: '6px 10px',
-		border: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-input)',
-		color: 'var(--rr-text-primary)',
-		borderRadius: 4,
-		fontSize: 13,
-		fontFamily: 'var(--rr-font-family)',
-	} as CSSProperties,
-
-	/** Generic button base. */
+	/** Generic button base (the report modal's close button). */
 	button: {
 		padding: '6px 14px',
 		border: 'none',
@@ -149,66 +110,11 @@ const styles = {
 		fontFamily: 'var(--rr-font-family)',
 	} as CSSProperties,
 
-	/** Start profiling button colour. */
-	startButton: {
-		background: 'var(--rr-brand)',
-		color: '#fff',
-	} as CSSProperties,
-
-	/** Stop profiling button colour. */
-	stopButton: {
-		background: 'var(--rr-error, #f44747)',
-		color: '#fff',
-	} as CSSProperties,
-
-	/** Status bar below controls. */
-	statusBar: {
-		padding: '8px 12px',
-		borderRadius: 4,
-		fontSize: 13,
-		border: '1px solid var(--rr-border)',
-	} as CSSProperties,
-
-	/** Active-session status bar variant. */
-	statusActive: {
-		background: 'rgba(40, 167, 69, 0.15)',
-		borderColor: 'rgba(40, 167, 69, 0.4)',
-	} as CSSProperties,
-
-	/** Inactive/idle status bar variant. */
-	statusInactive: {
-		background: 'rgba(108, 117, 125, 0.1)',
-		borderColor: 'rgba(108, 117, 125, 0.3)',
-	} as CSSProperties,
-
-	/** Error text. */
-	error: {
-		color: 'var(--rr-error, #f44747)',
-		fontSize: 13,
-	} as CSSProperties,
-
-	/** Section title. */
-	sectionTitle: {
-		fontSize: 14,
-		fontWeight: 600,
-		margin: 0,
-	} as CSSProperties,
-
-	/** Disconnected state placeholder. */
-	disconnected: {
-		...commonStyles.columnFill,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		color: 'var(--rr-text-secondary)',
-		fontSize: 14,
-	} as CSSProperties,
-
 	// =========================================================================
 	// VIZ CONTROLS ROW
 	// =========================================================================
 
-	/** Viz controls bar — style, depth, cutoff, reset buttons. */
+	/** Viz controls bar — thread, style, depth, cutoff, reset. */
 	vizControls: {
 		display: 'flex',
 		alignItems: 'center',
@@ -225,7 +131,18 @@ const styles = {
 		gap: 4,
 	} as CSSProperties,
 
-	/** Small button for Reset Zoom / Reset Root. */
+	/** Smaller dropdown for viz controls. */
+	smallSelect: {
+		padding: '4px 8px',
+		border: '1px solid var(--rr-border)',
+		background: 'var(--rr-bg-input)',
+		color: 'var(--rr-text-primary)',
+		borderRadius: 4,
+		fontSize: 12,
+		fontFamily: 'var(--rr-font-family)',
+	} as CSSProperties,
+
+	/** Small button for Reset Root. */
 	smallButton: {
 		padding: '4px 10px',
 		border: '1px solid var(--rr-border)',
@@ -235,6 +152,16 @@ const styles = {
 		fontFamily: 'var(--rr-font-family)',
 		background: 'var(--rr-bg-input)',
 		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+
+	/** Disconnected state placeholder. */
+	disconnected: {
+		...commonStyles.columnFill,
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		color: 'var(--rr-text-secondary)',
+		fontSize: 14,
 	} as CSSProperties,
 
 	// =========================================================================
@@ -346,12 +273,17 @@ const styles = {
 // =============================================================================
 
 interface ProfilerViewProps {
-	/** Server hostname. */
-	host: string;
-	/** Server port. */
-	port: string;
-	/** Display name of this connection. */
-	name: string;
+	/**
+	 * The controls channel this frame publishes state to and receives panel
+	 * actions from — the in-document emitter in the full app, the peer-backed
+	 * face in a dev-tool mount.
+	 */
+	channel: ProfilerFrameChannel;
+	/**
+	 * The engine surface — local (the realm's client) in the full app,
+	 * controller-routed in dev-tool frames. The view never holds a client.
+	 */
+	engine: ProfilerEngine;
 }
 
 // =============================================================================
@@ -386,13 +318,14 @@ function threadLabel(thread: ProfileThreadInfo): string {
 // =============================================================================
 
 /**
- * SnakeViz-style profiler view for a single server connection.
+ * SnakeViz-style profiler frame against the host's connected engine.
  *
- * Stacked layout: controls → viz controls → sunburst/icicle → call stack → table.
- * No tabs — visualisation and table are always visible simultaneously.
+ * Stacked layout: sunburst/icicle → call stack → table (always visible
+ * simultaneously). All controls render in the sidebar panel and arrive here
+ * as channel actions.
  */
-const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
-	const { isConnected } = useShellConnection();
+const ProfilerView: React.FC<ProfilerViewProps> = ({ channel, engine }) => {
+	const isConnected = engine.ready;
 
 	// =========================================================================
 	// STATE
@@ -404,7 +337,6 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	const [report, setReport] = useState<string>('');
 	const [tasks, setTasks] = useState<TaskEntry[]>([]);
 	const [target, setTarget] = useState<string | null>(null);
-	const [sessionName, setSessionName] = useState<string>('');
 	const [error, setError] = useState<string>('');
 
 	// Viz state — snakeviz controls
@@ -457,17 +389,16 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 	/** Fetch profiling status for the selected target. */
 	const fetchStatus = useCallback(async () => {
-		const client = getClient();
-		if (!client || !client.isConnected()) return;
+		if (!engine.ready) return;
 		try {
 			const args: Record<string, unknown> = {};
 			if (target) args.target = target;
-			const result = await client.call<CProfileStatus>('rrext_cprofile_status', args);
+			const result = await engine.call<CProfileStatus>('rrext_cprofile_status', args);
 			setStatus(result);
 		} catch (err) {
 			console.log('[ProfilerView] Status fetch failed:', err);
 		}
-	}, [target]);
+	}, [engine, target]);
 
 	/** Start polling status when connected. */
 	useEffect(() => {
@@ -488,15 +419,14 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 	/** Fetch the list of running tasks/pipelines for the target dropdown. */
 	const fetchTasks = useCallback(async () => {
-		const client = getClient();
-		if (!client || !client.isConnected()) return;
+		if (!engine.ready) return;
 		try {
-			const result = await client.call<{ tasks: TaskEntry[] }>('rrext_get_tasks', {});
+			const result = await engine.call<{ tasks: TaskEntry[] }>('rrext_get_tasks', {});
 			setTasks(result.tasks || []);
 		} catch {
 			setTasks([]);
 		}
-	}, []);
+	}, [engine]);
 
 	/** Start polling task list when connected. */
 	useEffect(() => {
@@ -517,8 +447,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 	/** Fetch both the text report and structured tree data. */
 	const fetchReport = useCallback(async (systemCalls?: boolean) => {
-		const client = getClient();
-		if (!client) return;
+		if (!engine.ready) return;
 
 		// Increment fetch ID so stale responses from a previous target are ignored
 		const id = ++fetchIdRef.current;
@@ -528,7 +457,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 		// Fetch text report
 		try {
-			const textResult = await client.call<{ report: string }>('rrext_cprofile_report', args);
+			const textResult = await engine.call<{ report: string }>('rrext_cprofile_report', args);
 			if (fetchIdRef.current !== id) return; // stale response
 			setReport(textResult.report || 'No report available.');
 		} catch (err) {
@@ -541,7 +470,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 		// selector; everything else keeps working on all threads
 		let thread = selectedThread;
 		try {
-			const threadsResult = await client.call<ProfileThreadsResponse>('rrext_cprofile_threads', args);
+			const threadsResult = await engine.call<ProfileThreadsResponse>('rrext_cprofile_threads', args);
 			if (fetchIdRef.current !== id) return; // stale response
 			const threadList = threadsResult.threads || [];
 			setThreads(threadList);
@@ -564,7 +493,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 		treeArgs.include_system = includeSystem;
 		if (thread !== null) treeArgs.thread = thread;
 		try {
-			const treeResult = await client.call<ProfileTreeResponse>('rrext_cprofile_report_tree', treeArgs);
+			const treeResult = await engine.call<ProfileTreeResponse>('rrext_cprofile_report_tree', treeArgs);
 			if (fetchIdRef.current !== id) return; // stale response
 			setTreeData(treeResult);
 			// Set the original root and initial viz root
@@ -586,7 +515,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 			setVizRoot(null);
 			setCallStack([]);
 		}
-	}, [target, showSystemCalls, selectedThread]);
+	}, [engine, target, showSystemCalls, selectedThread]);
 
 	// Re-fetch tree when the system calls toggle or the thread changes (if we
 	// have data). The thread list counts as data: a thread whose tree failed
@@ -645,15 +574,14 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	// =========================================================================
 
 	/** Start a new profiling session on the selected target. */
-	const handleStart = async () => {
-		const client = getClient();
-		if (!client) return;
+	const handleStart = async (session: string) => {
+		if (!engine.ready) return;
 		try {
 			const args: Record<string, unknown> = {};
 			if (target) args.target = target;
-			if (sessionName.trim()) args.session = sessionName.trim();
+			if (session.trim()) args.session = session.trim();
 
-			const result = await client.call<{ status: string; message?: string }>('rrext_cprofile_start', args);
+			const result = await engine.call<{ status: string; message?: string }>('rrext_cprofile_start', args);
 			if (result.status === 'error') {
 				setError(result.message || 'Failed to start profiling');
 			} else {
@@ -679,13 +607,12 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 	/** Stop the active profiling session and fetch the report. */
 	const handleStop = async () => {
-		const client = getClient();
-		if (!client) return;
+		if (!engine.ready) return;
 		try {
 			const args: Record<string, unknown> = {};
 			if (target) args.target = target;
 
-			const result = await client.call<{ status: string; message?: string }>('rrext_cprofile_stop', args);
+			const result = await engine.call<{ status: string; message?: string }>('rrext_cprofile_stop', args);
 			if (result.status === 'error') {
 				setError(result.message || 'Failed to stop profiling');
 			} else {
@@ -707,90 +634,62 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	}, [originalRoot]);
 
 	// =========================================================================
-	// RENDER
+	// CONTROLS CHANNEL — publish state, apply panel actions
 	// =========================================================================
-
-	// Disconnected state
-	if (!isConnected) {
-		return <div style={styles.disconnected}>Connecting to {name} ({host}:{port})...</div>;
-	}
 
 	const isActive = status?.active === true;
 	const hasData = treeData?.tree != null;
+
+	// Publish the session-controls state on every relevant change. The channel
+	// replays the latest snapshot to a late-attaching panel.
+	useEffect(() => {
+		const statusLine = !status
+			? ''
+			: isActive
+				? `Profiling "${status.session}" (owned by ${status.owner}, ${status.runtime?.toFixed(1)}s)`
+				: `Idle${status.has_report ? ' (report available)' : ''}`;
+		const state: ProfilerControlsState = {
+			connected: isConnected,
+			active: isActive,
+			statusLine,
+			hasReport: status?.has_report === true,
+			error,
+			targets: tasks.map((t) => ({ token: t.token, label: `${t.name} (${t.status})` })),
+			target: target ?? '',
+		};
+		channel.publishState(state);
+	}, [channel, isConnected, isActive, status, error, tasks, target]);
+
+	// Apply panel actions. The subscription is stable per channel; the handler
+	// ref always sees the latest closures (start/stop/fetch bind live state).
+	const actionRef = useRef<(action: ProfilerAction) => void>(() => {});
+	actionRef.current = (action) => {
+		switch (action.op) {
+			case 'setTarget': setTarget(action.target || null); break;
+			case 'start': void handleStart(action.session); break;
+			case 'stop': void handleStop(); break;
+			case 'viewReport':
+				if (!report) void fetchReport();
+				setShowReportModal(true);
+				break;
+		}
+	};
+	useEffect(() => channel.subscribeActions((action) => actionRef.current(action)), [channel]);
+
+	// =========================================================================
+	// RENDER
+	// =========================================================================
+
+	// Disconnected state — the profiled server is the host's engine.
+	if (!isConnected) {
+		return <div style={styles.disconnected}>Waiting for the server connection...</div>;
+	}
+
 	const totalTime = treeData?.total_time ?? 0;
 
 	return (
 		<div style={styles.container}>
-			{/* Header */}
-			<h2 style={styles.sectionTitle}>Profiler: {name}</h2>
-
-			{/* Controls row */}
-			<div style={styles.controls}>
-				{/* Target selector */}
-				<select
-					style={styles.select}
-					value={target || ''}
-					onChange={(e) => setTarget(e.target.value || null)}
-					disabled={isActive}
-				>
-					<option value="">Server Process</option>
-					{tasks.map((t) => (
-						<option key={t.token} value={t.token}>
-							{t.name} ({t.status})
-						</option>
-					))}
-				</select>
-
-				{/* Session name input */}
-				<input
-					type="text"
-					placeholder="Session name (optional)"
-					value={sessionName}
-					onChange={(e) => setSessionName(e.target.value)}
-					style={styles.sessionInput}
-					disabled={isActive}
-				/>
-
-				{/* Start or Stop button */}
-				{!isActive ? (
-					<button style={{ ...styles.button, ...styles.startButton }} onClick={handleStart}>
-						Start Profiling
-					</button>
-				) : (
-					<button style={{ ...styles.button, ...styles.stopButton }} onClick={handleStop}>
-						Stop Profiling
-					</button>
-				)}
-
-				{/* View Report button — available whenever not actively profiling */}
-				<button
-					style={styles.button}
-					onClick={() => {
-						if (!report) fetchReport();
-						setShowReportModal(true);
-					}}
-					disabled={isActive}
-				>
-					View Report
-				</button>
-			</div>
-
-			{/* Error display */}
-			{error && <div style={styles.error}>{error}</div>}
-
-			{/* Status bar */}
-			{status && (
-				<div style={{ ...styles.statusBar, ...(isActive ? styles.statusActive : styles.statusInactive) }}>
-					<strong>Status:</strong>{' '}
-					{isActive
-						? `Profiling "${status.session}" (owned by ${status.owner}, ${status.runtime?.toFixed(1)}s)`
-						: 'Idle'
-					}
-					{!isActive && status.has_report && ' (report available)'}
-				</div>
-			)}
-
-			{/* Viz controls row — only shown when data is available */}
+			{/* Viz controls toolbar — only shown when data is available */}
 			{(hasData || threads.length > 0) && (
 				<div style={styles.vizControls}>
 					{/* Thread dropdown — all threads merged, or one alone */}
@@ -874,7 +773,9 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 			{/* Visualisation area */}
 			<div style={styles.vizArea}>
-				{vizStyle === 'sunburst' ? (
+				{/* No chart while a session is live — the stats table below
+				    carries the single empty-state message. */}
+				{!isActive && (vizStyle === 'sunburst' ? (
 					<SunburstChart
 						root={vizRoot}
 						totalTime={totalTime}
@@ -890,7 +791,7 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 						cutoff={vizCutoff}
 						onRootChange={handleRootChange}
 					/>
-				)}
+				))}
 			</div>
 
 			{/* Call stack — shows path from root to current viz root */}

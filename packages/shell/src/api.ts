@@ -73,6 +73,7 @@ import { useAppComponent } from './hooks/useAppComponent';
 
 // Shared hooks re-exported through shell for app convenience
 import { useClickOutside } from './hooks/useClickOutside';
+import { useLatest } from './hooks/useLatest';
 import { useFixedPopupPosition } from './hooks/useFixedPopupPosition';
 
 // Non-React client access + connection manager singleton
@@ -88,6 +89,23 @@ import { ConnectionState } from './types/connection';
 // implementation lives there; the shell surfaces it here as the frozen contract.
 import { usePrefs, PrefsProvider } from './components/contexts/PrefsContext';
 
+// Tool framework values — imported here so the shellApi aggregator can carry
+// them as lazy getters (the freeze fingerprints VALUE names off shellApi's
+// members; a standalone re-export is invisible to it).
+import { createToolChannel, asToolStateMessage, asToolEventMessage } from './components/workspace/toolChannel';
+import { createToolController, createToolOpServer, asToolCallMessage, asToolReplyMessage, DEFAULT_OP_TIMEOUT_MS } from './components/workspace/toolOps';
+import { typedToolChannel, useToolState, useConnectionReady, publishHostConnectionState, HOST_CONNECTION_TOPIC } from './components/workspace/toolProtocol';
+import { typedPrefs, scopedPrefs, createBridgedPrefsStore, usePref } from './components/workspace/prefsStore';
+import { ToolHostProvider, useToolHost, createLoopbackPeer } from './components/workspace/toolHost';
+import { createOpBus, typedBusOps, registerOpHandlers, BusNoHandlerError, DEFAULT_BUS_REQUEST_TIMEOUT_MS } from './ops/busOps';
+import { attachRealmToRoot, createBusRouter, createLocalEndpointPair, DEFAULT_SUMMON_TIMEOUT_MS } from './ops/busBridge';
+import { createRetainedRegistry, localRetainedPort } from './ops/retained';
+import { registerClientOps } from './ops/clientOps';
+import { useGridConfigAnswering } from './components/data-grid/gridConfigAnswering';
+import { hostConnectionPayload, TOOL_RELAY_BUFFER_LIMIT } from './components/workspace/toolRelay';
+import { createSidebarBusPeer, createFrameBusPeer } from './components/workspace/busPeer';
+import { toolDocUri, parseToolDocUri, activeDocKeyFor, TOOL_DOC_PREFIX } from './components/workspace/toolDocUri';
+
 // Auth providers
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 import { ApiKeyAuthProvider } from './auth/ApiKeyAuthProvider';
@@ -100,7 +118,10 @@ import { Documents } from './components/docs/Documents';
 // The no-op virtual filesystem — Documents' companion for apps that mount
 // document workspaces without a backing store (demonstrated third-party
 // need; entered the surface via the graduation pipeline).
-import { NOOP_VFS, Explorer } from './modules/explorer';
+import { NOOP_VFS, Explorer, CachedVfs } from './modules/explorer';
+// The caching VFS decorator's standalone types (entry inventory + overlay
+// producer contract) — append-only additions alongside IVirtualFileSystem.
+export type { VfsEntry, VfsOverlay, CachedVfsOptions } from './modules/explorer';
 // Explorer's contract types under their NATIVE names (the Doc* aliases the
 // document system exports remain; both names refer to the same types —
 // append-only). Standalone apps cannot bundle the library, so a
@@ -127,11 +148,14 @@ import { NavButton } from './components/layout/Sidebar';
 // message, destructive, confirmDisabled) — the layout-local dialog stays
 // shell-internal chrome.
 import { ConfirmDialog } from './components/modal/ConfirmDialog';
+import { showConfirmDialog } from './components/modal/confirmService';
 import { PopupRow } from './components/PopupRow';
+import { AnchoredPopup } from './components/AnchoredPopup';
 
 // Shell-owned overlay pages
 import AccountProvider from './providers/AccountProvider';
 import SettingsProvider from './providers/SettingsProvider';
+import { CheckoutFlow } from './components/layout/CheckoutFlow';
 
 // Icons — a DELIBERATE subset of ./icons/BoxIcon: only the glyphs shell chrome
 // itself renders are part of the frozen contract. Apps needing other icons take
@@ -154,12 +178,75 @@ import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxSt
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types
-export type { ShellAppProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+export type { ShellAppProps, AppDescriptor, DevToolProps, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+
+// Tool channel — the typed state/event surface between a tool's controller
+// (devToolSidebar) and its document views (devToolFrame). Hosts construct it
+// over the peer transport; tools receive it as DevToolProps.channel.
+export { createToolChannel, asToolStateMessage, asToolEventMessage } from './components/workspace/toolChannel';
+export type { ToolChannel, ToolChannelUnsubscribe, IToolStateMessage, IToolEventMessage } from './components/workspace/toolChannel';
+
+// Tool protocol — typed protocol maps over the tool channel (the ShellEventMap
+// pattern per tool): the host-owned base state map (`host:*` reserved), each
+// tool's private extension, the typed channel view, and the hooks tools read
+// system topics with.
+export { typedToolChannel, useToolState, useConnectionReady, publishHostConnectionState, HOST_CONNECTION_TOPIC } from './components/workspace/toolProtocol';
+export type { ToolStateMap, ToolEventMap, TypedToolChannel, IHostConnectionState } from './components/workspace/toolProtocol';
+
+// Tool ops — the correlated request/reply lane between a tool's frames and
+// its sidebar controller, typed by the tool's op map. The call/reply wire
+// guards are for host relays (calls are never retained, replies never
+// buffered or summoning).
+export { createToolController, createToolOpServer, asToolCallMessage, asToolReplyMessage, DEFAULT_OP_TIMEOUT_MS } from './components/workspace/toolOps';
+export type { ToolOpMap, ToolOpSpec, ToolOpParams, ToolOpResult, ToolControllerFn, IToolOpServer, IToolCallOptions, IToolCallMessage, IToolReplyMessage } from './components/workspace/toolOps';
+
+// Workspace prefs store — the host framework's persisted-preference seam:
+// the shell types its SYSTEM partition (ShellPrefsMap); each app privately
+// types its own keys and receives a pre-scoped partition (scopedPrefs) —
+// isolation by construction, no shared flat bag.
+export { useLatest } from './hooks/useLatest';
+// The shell's own confirmation dialog — realm UI, usable by any tool
+// without a host capability (ToolHostServices.confirm is deprecated).
+export { showConfirmDialog } from './components/modal/confirmService';
+export { typedPrefs, scopedPrefs, createBridgedPrefsStore, usePref } from './components/workspace/prefsStore';
+export { useGridConfigAnswering } from './components/data-grid/gridConfigAnswering';
+export type { PrefScope, PrefsStore, ShellPrefsMap, TypedPrefsStore } from './components/workspace/prefsStore';
+
+// Tool host — host-wide capabilities beside the per-mount DevToolProps:
+// provided once per realm, read by tools, absent capabilities degrade
+// (and FAIL SAFE). In-repo builtins extend ToolHostServices privately in
+// apps/shared, the same pattern as the protocol maps.
+export { ToolHostProvider, useToolHost, createLoopbackPeer } from './components/workspace/toolHost';
+export type { ToolHostServices, ToolWorkspaceFs } from './components/workspace/toolHost';
+
+// Tool relay — the ONE relay policy between a tool's two mounts (hosts wire
+// transport + scheduling; the relay decides retention/buffering/summon).
+export { hostConnectionPayload, TOOL_RELAY_BUFFER_LIMIT } from './components/workspace/toolRelay';
+export { createSidebarBusPeer, createFrameBusPeer } from './components/workspace/busPeer';
+
+// Tool document URIs — the `tool:<appId>[/<docKey>]` convention, spelled once.
+export { toolDocUri, parseToolDocUri, activeDocKeyFor, TOOL_DOC_PREFIX } from './components/workspace/toolDocUri';
+
+// Shell bus OPS — the addressed-operation lane (request/handle/emitOp) and
+// its cross-realm plumbing: hub-and-spoke with the framework root as the
+// router; hosts supply only transport endpoints. Registration is the
+// allowlist is the routing entry; summon wakes installed-but-dormant
+// owners and never installs.
+export { createOpBus, typedBusOps, registerOpHandlers, BusNoHandlerError, DEFAULT_BUS_REQUEST_TIMEOUT_MS } from './ops/busOps';
+export type { ShellOpMap, ShellOpSpec, ShellOpParams, ShellOpResult, IOpBus, IBusForwarder, IBusRequestOptions, ITypedBusOps, BusOpHandler, OpImplTable } from './ops/busOps';
+export { attachRealmToRoot, createBusRouter, createLocalEndpointPair, DEFAULT_SUMMON_TIMEOUT_MS } from './ops/busBridge';
+export { createRetainedRegistry, localRetainedPort } from './ops/retained';
+export type { IRetainedRegistry, IRetainedPort, RetainedSubscriber } from './ops/retained';
+export { registerClientOps } from './ops/clientOps';
+export type { ClientOpMap, ClientMonitorKey, IClientOpsSource, IClientOpsOptions } from './ops/clientOps';
+export type { IBusEndpoint, IBusRouter, IBusRouterOptions, SummonLookup, IRealmAttachment } from './ops/busBridge';
 
 // Top-level shell + sidebar component prop types
 export type { ShellProps } from './components/layout/Shell';
 export type { SidebarProps, NavButtonProps } from './components/layout/Sidebar';
 export type { IConfirmDialogProps as ConfirmDialogProps } from './components/modal/ConfirmDialog';
+export type { AnchoredPopupProps } from './components/AnchoredPopup';
+export type { FixedPopupOptions } from './hooks/useFixedPopupPosition';
 
 // Workspace context interface + provider props
 export type { IWorkspaceContext, IWorkspaceProviderProps } from './components/workspace/WorkspaceContext';
@@ -191,6 +278,8 @@ export type { AuthUser } from './hooks/useAuthUser';
 
 // Event map + connection status/mode/auth-provider types (from shared)
 export type { ShellConnectionEventMap as ShellEventMap } from './types/shell';
+// The shell:notify payload union (platform notification bus)
+export type { ShellNotification } from './types/shell';
 export type { ConnectionStatus, ConnectionMode, IAuthProvider } from './types/connection';
 
 // Iframe protocol message types
@@ -199,7 +288,7 @@ export type { ShellToIframeMsg, IframeToShellMsg, ShellInitMsg } from './util/if
 // Document component library standalone types.
 // `Documents` itself is captured as a constructor via `shellApi.Documents`;
 // these are its standalone helper/model types that apps import directly.
-export type { Editor, WorkspaceBinding, Document, EditorGroup, SplitOrientation, DocumentsState, LayoutNode, LayoutLeaf, LayoutSplit } from './components/docs/Documents';
+export type { Editor, WorkspaceBinding, Document, EditorGroup, SplitOrientation, SplitPosition, EditorDragSession, DocumentsState, LayoutNode, LayoutLeaf, LayoutSplit } from './components/docs/Documents';
 export type { DocTabsProps } from './components/docs/DocTabs';
 export type { DocSplitLayoutProps } from './components/docs/DocSplitLayout';
 export type { DocExplorerProps, DocExplorerConfig, DocEntry, DocEntryChild, DocEntryStatus } from './components/docs/DocExplorer';
@@ -246,10 +335,12 @@ import { DetailPanel } from './components/detail-panel/DetailPanel';
 import { PanelTabBody } from './components/detail-panel/PanelTabBody';
 import { TabControl } from './components/tab-control/TabControl';
 import { TabPanel } from './components/tab-panel/TabPanel';
-import { Modal, CLOSE_GLYPH } from './components/modal/Modal';
+import { Modal, CLOSE_GLYPH, acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from './components/modal/Modal';
 import { SaveFileDialog } from './components/save-file-dialog/SaveFileDialog';
 import { SidebarMenu } from './components/sidebar-menu/SidebarMenu';
 import { SidebarCollapsedProvider, SidebarCollapsedGate, useSidebarCollapsed } from './components/sidebar-menu/SidebarCollapsedContext';
+import { SidebarActiveViewProvider, useSidebarActiveView } from './components/sidebar-menu/SidebarActiveViewContext';
+import { viewsFromMenu, menuSectionEntries } from './components/sidebar-menu/viewsFromMenu';
 import { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
 import { DataGrid } from './components/data-grid/DataGrid';
 import { CardDataGrid } from './components/data-grid/CardDataGrid';
@@ -283,9 +374,19 @@ export {
 	ToggleGroup, Chip, ChipAdd, DropZone, Card, MiniCard, MiniContainer,
 	Section, LabelValue, ContentHeader, RocketRideMark,
 	DetailPanel, PanelTabBody, TabControl, TabPanel, Modal, CLOSE_GLYPH,
+	// The overlay-layer stack (Escape/scroll coordination across stacked
+	// overlays) — public so shared surfaces coordinate with shell modals
+	// through the barrel; the tgz's exports map closes every deep path.
+	acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer,
 	SaveFileDialog,
 	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
 	useSidebarCollapsed, SidebarFooter,
+	// Workbench sidebar modes ('vscode'/'cursor'): the active-view channel
+	// shared sidebar content reads when the shell rail owns the selection.
+	SidebarActiveViewProvider, useSidebarActiveView,
+	// Opt-in projection of a menu-shaped sidebar onto the activity rail
+	// (sections -> rail views); never applied automatically by the shell.
+	viewsFromMenu, menuSectionEntries,
 	DataGrid, CardDataGrid, FilterStrip, createActionsColumn, autoFormatter,
 	badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch,
 	createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET,
@@ -303,7 +404,7 @@ export {
 // concrete module paths (generated from the retired barrel's map).
 export type { IButtonProps, ButtonVariant } from './components/button/Button';
 export type { IStatusBadgeProps, IStatusDotProps, StatusVariant } from './components/status-badge/StatusBadge';
-export type { IChatViewProps, ChatMessage, UseChatMessagesOptions } from './components/chat/types';
+export type { IChatViewProps, ChatMessage, UseChatMessagesOptions, TextResult } from './components/chat/types';
 export type { IConnectionCardProps, IConnectionCardAddProps } from './components/connection-card/ConnectionCard';
 export type { IConnectionManagerViewProps, IConnectionCardDisplay, IConnectionFormField } from './components/connection-manager/ConnectionManagerView';
 export type { IEmptyStateProps } from './components/empty-state/EmptyState';
@@ -326,6 +427,10 @@ export type { IConfirmDialogProps } from './components/modal/ConfirmDialog';
 export type { ISaveFileDialogProps, ISaveFileType } from './components/save-file-dialog/SaveFileDialog';
 export type { ISidebarMenuProps } from './components/sidebar-menu/SidebarMenu';
 export type { ISidebarCollapsedProviderProps, ISidebarCollapsedGateProps } from './components/sidebar-menu/SidebarCollapsedContext';
+export type { SidebarActiveView, ISidebarActiveViewProviderProps } from './components/sidebar-menu/SidebarActiveViewContext';
+// Sidebar chrome declaration types (AppLayout's sidebarMode/sidebarViews).
+export type { ShellSidebarMode, SidebarViewContainer } from './types/sidebarChrome';
+export type { ViewsFromMenuOptions } from './components/sidebar-menu/viewsFromMenu';
 export type { SidebarFooterProps, SidebarFooterMenuItem } from './components/sidebar-footer/SidebarFooter';
 export type { IDataGridProps, IDataGridHandle, IDataGridPage, IDataGridPageRequest } from './components/data-grid/DataGrid';
 export type { ICardDataGridProps } from './components/data-grid/CardDataGrid';
@@ -334,7 +439,7 @@ export type { IGridFilterDef, IGridFilterOption, IFilterStripProps } from './com
 export type { IDataGridPersistence, DataGridLayout } from './components/data-grid/persistence';
 export type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail } from './components/data-grid/gridConfigChannel';
 export type { Announcement } from './hooks/useAnnouncements';
-export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from './modules/server';
+export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse, MonitorPageId } from './modules/server';
 // =============================================================================
 // PLATFORM VIEW MODULES — the shared partition's shell half, now in-package
 // =============================================================================
@@ -349,6 +454,7 @@ import MonitorView, { parseActivityEvent } from './modules/server';
 import { ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay } from './modules/server/components';
 import { formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime } from './modules/server/util';
 import AccountView from './modules/account';
+import { DesktopView } from './modules/desktop';
 import { EnvironmentView } from './modules/environment';
 import { CheckoutModal, PlanPicker } from './modules/checkout';
 import { UpgradeModal } from './modules/billing';
@@ -357,9 +463,13 @@ export {
 	MonitorView, parseActivityEvent,
 	ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay,
 	formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime,
-	AccountView, EnvironmentView,
+	AccountView, DesktopView, EnvironmentView,
 	CheckoutModal, PlanPicker, UpgradeModal,
 };
+
+// The shared desktop page's type surface (the component itself is exported
+// above and on shellApi; its default server adapter stays internal).
+export type { DesktopApp, DesktopViewProps, DesktopAdapter, DesktopQuote, DesktopVersionRow, DesktopVersionOverride } from './modules/desktop';
 
 export type { EventTone } from './modules/server/components';
 export type { CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './modules/checkout/types';
@@ -433,6 +543,8 @@ export const shellApi = {
 	get SidebarCollapsedProvider() { return SidebarCollapsedProvider; },
 	get SidebarCollapsedGate() { return SidebarCollapsedGate; },
 	get useSidebarCollapsed() { return useSidebarCollapsed; },
+	get SidebarActiveViewProvider() { return SidebarActiveViewProvider; },
+	get useSidebarActiveView() { return useSidebarActiveView; },
 	get SidebarFooter() { return SidebarFooter; },
 	get DataGrid() { return DataGrid; },
 	get CardDataGrid() { return CardDataGrid; },
@@ -461,6 +573,51 @@ export const shellApi = {
 	get useWorkspace() { return useWorkspace; },
 	get useClient() { return useClient; },
 	get useShellEvent() { return useShellEvent; },
+	get useLatest() { return useLatest; },
+	get showConfirmDialog() { return showConfirmDialog; },
+
+	// Tool framework — channel, protocol maps, ops, prefs store, tool host.
+	get createToolChannel() { return createToolChannel; },
+	get asToolStateMessage() { return asToolStateMessage; },
+	get asToolEventMessage() { return asToolEventMessage; },
+	get createToolController() { return createToolController; },
+	get createToolOpServer() { return createToolOpServer; },
+	get asToolCallMessage() { return asToolCallMessage; },
+	get asToolReplyMessage() { return asToolReplyMessage; },
+	get DEFAULT_OP_TIMEOUT_MS() { return DEFAULT_OP_TIMEOUT_MS; },
+	get typedToolChannel() { return typedToolChannel; },
+	get useToolState() { return useToolState; },
+	get useConnectionReady() { return useConnectionReady; },
+	get publishHostConnectionState() { return publishHostConnectionState; },
+	get HOST_CONNECTION_TOPIC() { return HOST_CONNECTION_TOPIC; },
+	get typedPrefs() { return typedPrefs; },
+	get scopedPrefs() { return scopedPrefs; },
+	get createBridgedPrefsStore() { return createBridgedPrefsStore; },
+	get usePref() { return usePref; },
+	get ToolHostProvider() { return ToolHostProvider; },
+	get useToolHost() { return useToolHost; },
+	get createLoopbackPeer() { return createLoopbackPeer; },
+	get useGridConfigAnswering() { return useGridConfigAnswering; },
+	get hostConnectionPayload() { return hostConnectionPayload; },
+	get TOOL_RELAY_BUFFER_LIMIT() { return TOOL_RELAY_BUFFER_LIMIT; },
+	get createSidebarBusPeer() { return createSidebarBusPeer; },
+	get createFrameBusPeer() { return createFrameBusPeer; },
+	get toolDocUri() { return toolDocUri; },
+	get parseToolDocUri() { return parseToolDocUri; },
+	get activeDocKeyFor() { return activeDocKeyFor; },
+	get TOOL_DOC_PREFIX() { return TOOL_DOC_PREFIX; },
+	get createOpBus() { return createOpBus; },
+	get typedBusOps() { return typedBusOps; },
+	get registerOpHandlers() { return registerOpHandlers; },
+	get BusNoHandlerError() { return BusNoHandlerError; },
+	get DEFAULT_BUS_REQUEST_TIMEOUT_MS() { return DEFAULT_BUS_REQUEST_TIMEOUT_MS; },
+	get attachRealmToRoot() { return attachRealmToRoot; },
+	get createBusRouter() { return createBusRouter; },
+	get createLocalEndpointPair() { return createLocalEndpointPair; },
+	get DEFAULT_SUMMON_TIMEOUT_MS() { return DEFAULT_SUMMON_TIMEOUT_MS; },
+	get createRetainedRegistry() { return createRetainedRegistry; },
+	get localRetainedPort() { return localRetainedPort; },
+	get registerClientOps() { return registerClientOps; },
 	get useIframeBridge() { return useIframeBridge; },
 	get useSubscriptions() { return useSubscriptions; },
 	get usePolling() { return usePolling; },
@@ -480,6 +637,7 @@ export const shellApi = {
 	get PrefsProvider() { return PrefsProvider; },
 	get Documents() { return Documents; },
 	get NOOP_VFS() { return NOOP_VFS; },
+	get CachedVfs() { return CachedVfs; },
 	get Explorer() { return Explorer; },
 	get DocTabs() { return DocTabs; },
 	get DocSplitLayout() { return DocSplitLayout; },
@@ -491,8 +649,10 @@ export const shellApi = {
 	get NavButton() { return NavButton; },
 	get ConfirmDialog() { return ConfirmDialog; },
 	get PopupRow() { return PopupRow; },
+	get AnchoredPopup() { return AnchoredPopup; },
 	get AccountProvider() { return AccountProvider; },
 	get SettingsProvider() { return SettingsProvider; },
+	get CheckoutFlow() { return CheckoutFlow; },
 	get BxPlus() { return BxPlus; },
 	get BxEditAlt() { return BxEditAlt; },
 	get BxTrash() { return BxTrash; },
@@ -512,6 +672,9 @@ export const shellApi = {
 	get BxChevronRight() { return BxChevronRight; },
 	get BxFolderOpen() { return BxFolderOpen; },
 	get AppLayout() { return AppLayout; },
+	// The shared desktop page (greeting + quote + app-card grid) — consumed
+	// by every launcher host (hello, home, rocket-ui's Desktop page).
+	get DesktopView() { return DesktopView; },
 	// Desktop version selector — session override read + apply/clear
 	get getAppVersionOverride() { return getAppVersionOverride; },
 	get applyAppVersionOverride() { return applyAppVersionOverride; },
@@ -545,13 +708,13 @@ export {
 	// Workspace provider + prefs provider
 	WorkspaceProvider, PrefsProvider,
 	// Document component library
-	Documents, NOOP_VFS, Explorer, DocTabs, DocSplitLayout, DocExplorer,
+	Documents, NOOP_VFS, CachedVfs, Explorer, DocTabs, DocSplitLayout, DocExplorer,
 	// Top-level shell frame + zone components
 	Shell, Sidebar, BottomPanel, DebugPanel,
 	// Layout building blocks
-	NavButton, ConfirmDialog, PopupRow,
-	// Shell-owned overlay pages
-	AccountProvider, SettingsProvider,
+	NavButton, ConfirmDialog, PopupRow, AnchoredPopup,
+	// Shell-owned overlay pages (framework pages in any host realm)
+	AccountProvider, SettingsProvider, CheckoutFlow,
 	// Icons
 	BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl,
 	BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket,

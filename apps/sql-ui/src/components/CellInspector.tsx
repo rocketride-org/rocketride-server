@@ -42,7 +42,7 @@ import { announce } from '../a11y/announce';
 // =============================================================================
 
 /** Props for the {@link CellInspector} component. */
-export interface ICellInspectorProps {
+export interface CellInspectorProps {
 	/** Whether the drawer is open. */
 	open: boolean;
 	/** The row to inspect (null renders nothing). */
@@ -132,10 +132,10 @@ function copy(text: string, what: string): void {
 /**
  * The row inspector drawer.
  *
- * @param props - {@link ICellInspectorProps}.
+ * @param props - {@link CellInspectorProps}.
  * @returns The drawer element, or null when there is no row.
  */
-export const CellInspector: React.FC<ICellInspectorProps> = ({ open, row, rowNumber, rowCount, subtitle, onClose }) => {
+export const CellInspector: React.FC<CellInspectorProps> = ({ open, row, rowNumber, rowCount, subtitle, onClose }) => {
 	if (!row) return null;
 	const columns = Object.keys(row);
 	return (

@@ -90,6 +90,7 @@ Need inspiration? Check out [awesome-rocketride](https://github.com/rocketride-o
 | ------------------------------------------ | -------------------------------- |
 | `RocketRide: Settings`                     | Open extension settings          |
 | `RocketRide: Server Monitor`               | View server and pipeline status  |
+| `RocketRide: Add Dev Tool`                 | Pin a server dev tool to the sidebar's tab strip |
 | `RocketRide Pipeline: Create New Pipeline` | Create a new `.pipe` file        |
 | `RocketRide Pipeline: Run`                 | Run the selected pipeline        |
 | `RocketRide Pipeline: Stop Pipeline`       | Stop a running pipeline          |

@@ -64,6 +64,32 @@ export interface ShellAppEntry {
 }
 
 // =============================================================================
+// PLATFORM NOTIFICATIONS
+// =============================================================================
+
+/**
+ * One platform notification (the `shell:notify` payload).
+ *
+ * A discriminated union — narrow on `kind`. New notification kinds are
+ * APPENDED as union members; existing members never change shape, so
+ * consumer narrowing stays valid (the same append-only rule as the event
+ * map itself).
+ *
+ * Today every producer is PAGE-LOCAL (the event never rides the wire); a
+ * server-pushed feed may later emit the same event, so consumers must not
+ * assume the producer shares their realm beyond what the payload carries.
+ */
+export type ShellNotification =
+	/**
+	 * A store-VFS file changed — any write through the app-dev VFS seam.
+	 * `uri` is the full store path; `origin` identifies the writer (a
+	 * dev-session id, or a verb like 'scaffold') so writers can skip their
+	 * own echo; `rev` is a page-monotonic write counter so a consumer
+	 * hearing one change over several transports can dedupe.
+	 */
+	{ kind: 'onFsChange'; uri: string; origin: string; rev: number };
+
+// =============================================================================
 // EVENT MAP
 // =============================================================================
 
@@ -163,6 +189,41 @@ export interface ShellConnectionEventMap {
 	 * Hosts cast to their concrete AppManifestEntry type.
 	 */
 	'shell:appsUpdated': { apps: ShellAppEntry[] };
+
+	// ── Platform notifications ───────────────────────────────────────────
+
+	/**
+	 * The general platform notification bus — a typed union; narrow on
+	 * `kind` (see {@link ShellNotification}). Page-local today: emitted by
+	 * in-page producers (the app-dev VFS seam), never by the server.
+	 */
+	'shell:notify': ShellNotification;
+
+	// ── Dev tools ────────────────────────────────────────────────────────
+
+	/**
+	 * A dev tool's sidebar tab was selected in the host's sidebar chrome.
+	 *
+	 * Fired on EVERY selection (no deduplication). What activation means is
+	 * the TOOL's decision, made in its devToolSidebar code: a single-pane
+	 * tool opens its pane (`documents.open('', name)`); a per-document tool
+	 * ignores the event. The FIRST selection is also what lazily mounts the
+	 * tool's sidebar, so it arrives before the subscription exists — a tool
+	 * that opens on activation therefore also opens on MOUNT (mounting IS
+	 * the first activation) and uses this event for re-activations only.
+	 */
+	'shell:toolSidebarActivated': { appId: string };
+
+	/**
+	 * A dev tool's sidebar tab stopped being the selected one — the user
+	 * selected a different tab (another tool's, or a fixed mode). Fired
+	 * before the successor's `shell:toolSidebarActivated`, and only on a
+	 * real change: re-selecting the same tab deactivates nothing, and a
+	 * sidebar reload or an externally synced highlight emits neither event.
+	 * Typical use: a controller pauses discretionary work (polling,
+	 * watchers) while its panel is out of view.
+	 */
+	'shell:toolSidebarDeactivated': { appId: string };
 
 	// ── Auth ─────────────────────────────────────────────────────────────
 

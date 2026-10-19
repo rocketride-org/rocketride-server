@@ -57,15 +57,17 @@ export default defineConfig({
 		include: ['./src/**/*', path.resolve(__dirname, '../../packages/shell')],
 		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
-			'page-sidebar': './src/providers/views/Sidebar/index.tsx',
-			'page-settings': './src/providers/views/Settings/index.tsx',
-			'page-project': './src/providers/views/Project/index.tsx',
-			'page-welcome': './src/providers/views/Welcome/index.tsx',
-			'page-monitor': './src/providers/views/Monitor/index.tsx',
-			'page-account': './src/providers/views/Account/index.tsx',
-			'page-environment': './src/providers/views/Environment/index.tsx',
-			'page-app': './src/providers/views/App/index.tsx',
-			'page-newapp': './src/providers/views/NewApp/index.tsx',
+			'page-sidebar': './src/providers/views/sidebar/index.tsx',
+			'page-pipeline': './src/providers/views/pipeline/index.tsx',
+			// The ONE bundle for all framework pages (account, environment, …):
+			// the host stamps the page name into the HTML; a compiled-in
+			// registry picks the component. Per-page entries are retired as
+			// their pages migrate onto it.
+			'page-frame': './src/providers/views/page-frame/index.tsx',
+			'page-app': './src/providers/views/app/index.tsx',
+			// NOTE: page-devtool is NOT here — it is a Module Federation host
+			// and needs a normal chunk graph, so it builds separately via
+			// rsbuild.devtool.config.mjs into webview/devtool/.
 		},
 	},
 

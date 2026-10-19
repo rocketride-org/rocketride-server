@@ -170,11 +170,6 @@ export class EngineInstaller {
 	// PUBLIC API
 	// =========================================================================
 
-	/** Returns true if an engine executable exists on disk. */
-	public isInstalled(): boolean {
-		return fs.existsSync(this.getExecutablePath());
-	}
-
 	/**
 	 * Reads version file from the engine directory.
 	 * Returns null if no engine is installed or the file is missing/corrupt.
@@ -831,7 +826,7 @@ export class EngineInstaller {
  * Checks if a process with the given PID is currently running.
  * Uses signal 0 which doesn't actually send a signal — just checks existence.
  */
-export function isPidAlive(pid: number): boolean {
+function isPidAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;

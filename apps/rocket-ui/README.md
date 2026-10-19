@@ -1,18 +1,18 @@
-# Pipeline Builder
+# Rocket Builder
 
 Design, run, and deploy AI pipelines visually — the RocketRide canvas that
 turns a folder of `.pipe` files into running, observable workflows without
 leaving your editor.
 
 <p align="center">
-  <img src="./assets/screenshot-ide.png" alt="RocketRide Pipeline Builder" width="900">
+  <img src="./assets/screenshot-ide.png" alt="RocketRide Rocket Builder" width="900">
 </p>
 
 ---
 
 ## What it does
 
-Pipeline Builder is the visual front end for RocketRide pipelines. Open a
+Rocket Builder is the visual front end for RocketRide pipelines. Open a
 project, drop nodes onto the canvas, wire their lanes, and press play: the
 pipeline runs against your connected engine and every node reports back live.
 
@@ -35,7 +35,7 @@ pipeline runs against your connected engine and every node reports back live.
 | **VS Code** | Ships inside the RocketRide extension — open any folder with `.pipe` files. |
 | **Browser** | Opens from the RocketRide shell on any engine — cloud or self-hosted. |
 
-Pipeline Builder is one app on the RocketRide platform. For the platform
+Rocket Builder is one app on the RocketRide platform. For the platform
 itself — engine, SDKs, cloud — see the
 [RocketRide repository](https://github.com/rocketride-org/rocketride-server)
 and [docs.rocketride.org](https://docs.rocketride.org/).

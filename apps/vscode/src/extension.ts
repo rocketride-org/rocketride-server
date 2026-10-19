@@ -33,7 +33,6 @@ import { getLogger } from './shared/util/output';
 import { icons } from './shared/util/icons';
 import { createCatalogueReporter } from './shared/util/catalogueDiagnostic';
 
-// import { registerDebugger } from './debugger/adapter'; // Disabled: debugger removed from package.json
 import { ConnectionManager, disconnectCloudConnections } from './connection/connection';
 import { DeployManager } from './connection/deploy-manager';
 import { ConfigManager } from './config';
@@ -42,25 +41,25 @@ import { EngineRegistry } from './engine';
 import { getUserConfigDir, getSystemInstallDir, migrateLocalEngine, migrateServiceConfig } from './engine/config/config-migration';
 
 import { SidebarProvider } from './providers/SidebarProvider';
-import { ProjectProvider } from './providers/ProjectProvider';
-import { SettingsProvider } from './providers/SettingsProvider';
-import { MonitorProvider } from './providers/MonitorProvider';
+import { PipelineProvider } from './providers/PipelineProvider';
+import { HtmlPageProvider } from './providers/HtmlPageProvider';
 // DeployProvider removed — Docker/Service operations now live in Settings panels
-import { StatusProvider } from './providers/StatusProvider';
 import { BarStatus } from './providers/BarStatusProvider';
-import { WelcomeProvider } from './providers/WelcomeProvider';
-import { AccountProvider } from './providers/AccountProvider';
-import { EnvironmentProvider } from './providers/EnvironmentProvider';
-import { NewAppProvider } from './providers/NewAppProvider';
+import { FrameworkProvider } from './providers/toolhost/frameworkProvider';
+import { DevToolStore } from './providers/DevToolStore';
+import { BusHost } from './providers/toolhost/busHost';
+import { registerVscodeOps } from './ops';
+import { registerVscodeDevToolOps } from './ops/devtoolOps';
+import { writePref } from './providers/PrefsBag';
+import { DevToolPanelProvider } from './providers/DevToolPanelProvider';
 // BillingProvider removed — billing is now a tab in AccountProvider
 // AuthProvider removed — auth failures now open the Settings page directly
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 import { AppScreenProvider } from './providers/AppScreenProvider';
-import { initWatchManager } from './appdev/watchManager';
+import { initDevSessionManager } from './appdev/devSessionManager';
 import { ensureShell, refreshVendoredPlatform } from './appdev/appTypes';
-import { debugApp } from './appdev/debug';
 
 // Extension context — set once in activate(), available via getExtensionContext()
 let extensionContext: vscode.ExtensionContext;
@@ -72,14 +71,11 @@ let configManager: ConfigManager | undefined;
 
 // Provider references
 let sidebar: SidebarProvider | undefined;
-let project: ProjectProvider | undefined;
-let settings: SettingsProvider | undefined;
-let _monitor: MonitorProvider | undefined;
+let pipeline: PipelineProvider | undefined;
+let _htmlPages: HtmlPageProvider | undefined;
 // deploy removed — functionality moved to Settings panels
-let status: StatusProvider | undefined;
 let appScreen: AppScreenProvider | undefined;
 let barStatus: BarStatus | undefined;
-let welcome: WelcomeProvider | undefined;
 
 /**
  * One-time migrations for settings/files that changed between extension versions.
@@ -198,6 +194,27 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 	// Old: %PROGRAMDATA%/RocketRide/config.json + engines/server-3.2.0--abc/
 	// New: %PROGRAMDATA%/RocketRide/engine/engine.exe + engine/version.json
 	migrateServiceConfig();
+
+	// Migration 6: Sidebar state into the generic prefs bag ('rr.prefs')
+	// under the ShellPrefsMap system keys — one spelling per concept across
+	// hosts. Workspace-scoped (each workspace migrates on its first open).
+	if (!context.workspaceState.get('sidebarPrefsMigrationDone')) {
+		const moves: Array<[string, string]> = [
+			['rr.devTools', 'devToolPins'],
+			['rr.sidebarTabOrder', 'sidebarTabOrder'],
+			['rr.disabledBuiltins', 'disabledBuiltins'],
+			['rr.sidebarMode', 'sidebarMode'],
+		];
+		for (const [oldKey, newKey] of moves) {
+			const value = context.workspaceState.get(oldKey);
+			if (value !== undefined) {
+				await writePref(context, newKey, value, 'workspace');
+				await context.workspaceState.update(oldKey, undefined);
+				logger.output(`${icons.info} Migrated ${oldKey} -> prefs.${newKey}`);
+			}
+		}
+		await context.workspaceState.update('sidebarPrefsMigrationDone', true);
+	}
 }
 
 /**
@@ -279,9 +296,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				logger.output(`${icons.info} Creating tree providers...`);
 				progress.report({ increment: 50, message: 'Creating tree providers...' });
 
-				// Register unified sidebar webview
-				sidebar = new SidebarProvider(context.extensionUri);
-				const sidebarWebviewProvider = vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebar);
+				// Pinned dev-tools store — created before the sidebar (which
+				// renders the tool tabs) and shared with the picker below —
+				const devTools = new DevToolStore(context);
+				const engineConnection = ConnectionManager.getInstance();
+
+				// SHELL BUS ROOT: this process owns the engine connection, so
+				// the bus router + client broker live here. Webview realms
+				// attach as spokes (SidebarProvider wires its webview on
+				// resolve) and reach the engine only through request() —
+				// named client.* ops, broker-owned monitors, mirrored state.
+				const busHost = new BusHost(engineConnection);
+				// Everything this host serves over the bus — monitor broker,
+				// client overrides, the shared client table, host.* ops, the
+				// settings/cloud/engine family — registers in dependency order
+				// in src/ops. The returned controller is the settings pages'
+				// panel-lifecycle seam (open args, polling, close semantics).
+				const settingsOps = registerVscodeOps(busHost, context);
+				busHost.startMirrors();
+				context.subscriptions.push({ dispose: () => busHost.dispose() });
+
+				// The HOST owns the tools' reachability topic: every frame's
+				// bus peer subscribes `host:connection` (retained — a late
+				// panel replays it first) so enablement is right even before
+				// any tool sidebar has mounted.
+				const pushHostConnection = (): void => busHost.retained.publish('host:connection', { connected: engineConnection.isConnected() });
+				pushHostConnection();
+				engineConnection.on('shell:statusChange', pushHostConnection);
+				context.subscriptions.push({ dispose: () => engineConnection.off('shell:statusChange', pushHostConnection) });
+
+				// Register unified sidebar webview. retainContextWhenHidden: the
+				// sidebar carries live state (dev-tool sidebar mounts, their SDK
+				// connections, task indicators) that must survive switching to
+				// another activity-bar container (Explorer, Git, ...).
+				sidebar = new SidebarProvider(context.extensionUri, context, devTools, busHost);
+				const sidebarWebviewProvider = vscode.window.registerWebviewViewProvider(SidebarProvider.viewType, sidebar, {
+					webviewOptions: { retainContextWhenHidden: true },
+				});
 
 				context.subscriptions.push(sidebarWebviewProvider);
 
@@ -291,44 +342,159 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				logger.output(`${icons.info} Creating webview providers...`);
 				progress.report({ increment: 60, message: 'Creating webview providers...' });
 
-				settings = new SettingsProvider(context.extensionUri);
-				_monitor = new MonitorProvider(context);
+				// Settings page: a framework page (page-frame + bus ops). The
+				// open command's positional args (focus section, auth-error
+				// banner) ride the settings controller's open-args seam.
+				const settingsPage = new FrameworkProvider(context, busHost, {
+					page: 'settings',
+					command: 'rocketride.page.settings.open',
+					viewType: 'rocketride.page.settings',
+					title: 'RocketRide Settings',
+					onOpen: (args) => {
+						settingsOps.setOpenArgs({
+							focus: typeof args[0] === 'string' ? args[0] : undefined,
+							authError: typeof args[1] === 'string' ? args[1] : undefined,
+						});
+						settingsOps.pageOpened('settings');
+					},
+					onClose: (userClosed) => settingsOps.pageClosed('settings', userClosed),
+				});
+				// Credential commands kept as thin aliases (contributed in
+				// package.json): setup/update open the page; clear is a
+				// host-side confirm + delete + disconnect.
+				context.subscriptions.push(
+					vscode.commands.registerCommand('rocketride.page.settings.setupCredentials', () => vscode.commands.executeCommand('rocketride.page.settings.open')),
+					vscode.commands.registerCommand('rocketride.page.settings.updateApiKey', () => vscode.commands.executeCommand('rocketride.page.settings.open')),
+					vscode.commands.registerCommand('rocketride.page.settings.clearApiKey', async () => {
+						const result = await vscode.window.showWarningMessage('Are you sure you want to clear the stored API key?', 'Yes', 'No');
+						if (result === 'Yes') {
+							await configManager?.deleteApiKey('development');
+							// Disconnect since credentials are now invalid
+							void connectionManager?.disconnect();
+						}
+					})
+				);
+				// Server Monitor is a DEV TOOL now — the old page command opens
+				// the tool's frame panel (palette compatibility).
+				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.monitor.open', () => {
+					void vscode.commands.executeCommand('rocketride.devtool.open', 'rocketride.monitor');
+				}));
+				// Embedded "Introduction to ..." pages (sidebar Introduction rows).
+				_htmlPages = new HtmlPageProvider(context);
 				// deploy removed — register redirect command so sidebar "Deploy" opens Settings
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
-				status = new StatusProvider(context);
 				// App Builder — a first-class DOCUMENT, .pipe-style: a custom
 				// editor over the app's real <name>.rrapp file (VSCode owns tab
 				// identity, dedupe, and restore-on-reload; double-clicking the
 				// file in the Explorer opens the App Builder), plus the
 				// watch-session manager driving the inner loop.
-				appScreen = new AppScreenProvider(context);
+				appScreen = new AppScreenProvider(context, busHost);
 				// The guard wrapper ships beside the bundle (staged by
 				// vscode:stage-files); every dev server spawns through it so
 				// it dies with this extension host.
-				const watchManager = initWatchManager(appScreen, context.asAbsolutePath('devServerGuard.cjs'));
+				const devSessions = initDevSessionManager(appScreen, context.asAbsolutePath('devServerGuard.cjs'));
 				context.subscriptions.push(
 					vscode.window.registerCustomEditorProvider('rocketride.appBuilder', appScreen, {
 						webviewOptions: { retainContextWhenHidden: true },
 						supportsMultipleEditorsPerDocument: false,
 					}),
 					appScreen,
-					{ dispose: () => watchManager.dispose() },
+					{ dispose: () => devSessions.dispose() },
 				);
 				// Tabs that predate this host ("Developer: Restart Extension
 				// Host" keeps them open but never re-resolves them) still need
 				// their dev servers — reconcile against the surviving tab list.
 				void appScreen.reconcileOpenTabs();
-				// File-less per-team deployment tabs (teams-as-environments)
-				welcome = new WelcomeProvider(context, context.extensionUri);
-				const account = new AccountProvider(context);
-				const environment = new EnvironmentProvider(context);
-				// New App wizard — registers rocketride.app.create itself
-				const newApp = new NewAppProvider(context);
-				context.subscriptions.push(account, environment, newApp);
+				// Framework pages: shell components in a webview, engine access
+				// over the bus — the host side is just command + panel + realm.
+				// Welcome: first-run onboarding. Closing it by ANY user exit
+				// counts as dismissal (the settings controller persists it);
+				// Save & Connect runs the first initialize+reconcile inside
+				// host.settings.save{connect} before the page retires itself.
+				const welcomePage = new FrameworkProvider(context, busHost, {
+					page: 'welcome',
+					command: 'rocketride.page.welcome.open',
+					viewType: 'rocketride.page.welcome',
+					title: 'Welcome to RocketRide',
+					onOpen: () => settingsOps.pageOpened('welcome'),
+					onClose: (userClosed) => settingsOps.pageClosed('welcome', userClosed),
+				});
+				const account = new FrameworkProvider(context, busHost, {
+					page: 'account',
+					command: 'rocketride.page.account.open',
+					viewType: 'rocketride.page.account',
+					title: 'Account',
+				});
+				// The Environment page's missing-keys prefill (the pre-run env
+				// gate): pull-based for open-with-args (the realm attaches
+				// after the command fires), push for an already-open page.
+				let envPrefillKeys: string[] = [];
+				busHost.rootBus.handle('env.getPrefill', async () => ({ keys: envPrefillKeys }));
+				const environment = new FrameworkProvider(context, busHost, {
+					page: 'environment',
+					command: 'rocketride.page.environment.open',
+					viewType: 'rocketride.page.environment',
+					title: 'Variables',
+					onOpen: (args) => {
+						const keys = Array.isArray(args[0]) ? (args[0] as string[]) : [];
+						if (keys.length > 0) {
+							envPrefillKeys = keys;
+							busHost.broadcastEmitOp('env.prefill', { keys });
+						}
+					},
+				});
+				// New App wizard — a framework page (shared NewAppForm over the
+				// host.appdev.* ops); the open command keeps its historic id.
+				const newApp = new FrameworkProvider(context, busHost, {
+					page: 'newapp',
+					command: 'rocketride.app.create',
+					viewType: 'rocketride.page.newApp',
+					title: 'New App',
+				});
+				// Dev tools: the tool panels (MF host webviews) + the modules
+				// flow's details page (README + Install/Remove — Remove also
+				// closes the tool's open panel). Each registers its own command.
+				const devToolPanels = new DevToolPanelProvider(context, busHost);
+				// Focusing a tool's editor tab highlights its tab on the
+				// sidebar strip (and shows its sidebar body).
+				devToolPanels.onPanelFocused = (appId) => sidebar?.setModeExternal(`tool:${appId}`);
+				// Tool sidebars follow the editor's fronted tab: the fronted
+				// tool document's key, or null when a non-tool tab is active.
+				devToolPanels.onActiveDocChange = (appId, docKey) => sidebar?.notifyToolActiveDoc(appId, docKey);
+				// The details page is a MULTI-INSTANCE framework page: one panel
+				// per tool, identity stamped as data-rr-args, title from the
+				// current catalog (best effort — the page itself stays correct
+				// off the mirror either way).
+				const devToolReadme = new FrameworkProvider(context, busHost, {
+					page: 'devtool-readme',
+					command: 'rocketride.devtool.readme',
+					viewType: 'rocketride.page.devToolReadme',
+					title: 'Dev Tool',
+					instanceKey: (args) => (typeof args[0] === 'string' ? args[0] : ''),
+					instanceTitle: (args) => {
+						const apps = (connectionManager?.getClient()?.getAccountInfo()?.apps ?? []) as Array<{ id: string; name?: string }>;
+						const name = apps.find((a) => a?.id === args[0])?.name ?? String(args[0]);
+						return `Dev Tool: ${name}`;
+					},
+					instanceArgs: (args) => ({ appId: String(args[0]) }),
+				});
+				// Install/Remove for the details pages — the pinned set is host
+				// state; changes push to every open surface.
+				registerVscodeDevToolOps(busHost.rootBus, {
+					context,
+					devTools,
+					closeToolPanel: (appId) => devToolPanels.close(appId),
+					// The RESET is owned by the sidebar provider (it reboots the
+					// sidebar's own page last) — resolved lazily: the sidebar is
+					// constructed after this registration.
+					refreshTools: async () => sidebar?.refreshDevTools(),
+					broadcast: (op, params) => busHost.broadcastEmitOp(op, params),
+				});
+				context.subscriptions.push(welcomePage, settingsPage, account, environment, newApp, devTools, devToolPanels, devToolReadme);
 
 				// Register unified project editor (canvas + status + trace)
-				project = new ProjectProvider(context);
-				const pageProjectRegistration = vscode.window.registerCustomEditorProvider('rocketride.PageProject', project, {
+				pipeline = new PipelineProvider(context, busHost);
+				const pipelineEditorRegistration = vscode.window.registerCustomEditorProvider('rocketride.page.project', pipeline, {
 					webviewOptions: {
 						retainContextWhenHidden: true,
 					},
@@ -343,9 +509,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				registerUtilityCommands(context);
 
 				//-------------------------------------
-				// Register debugger (disabled — see debugger/adapter.ts to re-enable)
 				//-------------------------------------
-				// registerDebugger(context);
 
 				//-------------------------------------
 				// Set up event handlers
@@ -355,14 +519,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				setupConnectionEventHandlers();
 
 				// Add all providers to context subscriptions for proper cleanup
-				context.subscriptions.push(pageProjectRegistration, settings, project, welcome!);
-
-				//-------------------------------------
-				// Update tree providers with initial data
-				//-------------------------------------
-				logger.output(`${icons.info} Refreshing providers...`);
-				progress.report({ increment: 100, message: 'Refreshing providers...' });
-				await refreshAllProviders();
+				context.subscriptions.push(pipelineEditorRegistration, pipeline);
 
 				//-------------------------------------
 				// Initialize connection / welcome flow
@@ -375,13 +532,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				barStatus.initializeConnectionManager();
 				context.subscriptions.push(barStatus);
 
-				const welcomeDismissed = welcome?.isDismissed() ?? true;
+				const welcomeDismissed = vscode.workspace.getConfiguration('rocketride').get<boolean>('welcomeDismissed', false);
 				if (!welcomeDismissed) {
-					// First run: show welcome page, don't auto-connect
+					// First run: show welcome page, don't auto-connect — NO
+					// engine/connection work happens until the user confirms
+					// (host.settings.save{connect} runs initialize+reconcile).
 					logger.output(`${icons.info} First run detected — showing welcome page`);
 					progress.report({ increment: 110, message: 'Showing welcome...' });
 					barStatus.setNeedsSetup();
-					welcome!.show();
+					FrameworkProvider.openPage('welcome');
 				} else {
 					// Normal flow: initialize CMs first so they validate credentials
 					// and set their connection mode. This must happen BEFORE reconcile
@@ -396,7 +555,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					// Reconcile kicks off engine downloads/starts. Engines emit 'ready'
 					// events which handleEngineStatus() picks up to connect the WebSocket.
 					engineRegistry.reconcile().catch((err) => {
-						console.error('[ROCKETRIDE] Initial engine reconcile failed:', err);
+						getLogger().error(`[ROCKETRIDE] Initial engine reconcile failed: ${String(err)}`);
 					});
 				}
 
@@ -430,7 +589,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 		logger.output(`${icons.success} RocketRide extension activated successfully`);
 	} catch (error) {
-		console.error('[ROCKETRIDE] Extension activation failed with error:', error);
+		getLogger().error(`[ROCKETRIDE] Extension activation failed with error: ${String(error)}`);
 		barStatus?.setError(String(error));
 		logger.output(`${icons.warning} Extension activation failed: ${error}`);
 
@@ -468,7 +627,7 @@ async function createUntitledPipeline(): Promise<void> {
 		// step: open a NAMELESS untitled document seeded with the empty-pipeline
 		// template (born dirty), then show it in the pipeline grid editor.
 		const doc = await vscode.workspace.openTextDocument({ language: 'json', content: JSON.stringify({ components: [] }, null, 2) });
-		await vscode.commands.executeCommand('vscode.openWith', doc.uri, 'rocketride.PageProject');
+		await vscode.commands.executeCommand('vscode.openWith', doc.uri, 'rocketride.page.project');
 	} catch (error) {
 		vscode.window.showErrorMessage(`Failed to create pipeline: ${error}`);
 	}
@@ -512,18 +671,16 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 				vscode.window.showErrorMessage(`RocketRide: failed to reconnect: ${msg}`);
 			}
 		}),
-		vscode.commands.registerCommand('rocketride.page.status.open', (projectId: string, sourceId: string, displayName: string) => {
-			status?.show(projectId, sourceId, displayName);
+		vscode.commands.registerCommand('rocketride.page.status.open', (projectId: string, sourceId: string) => {
+			// Readonly live-task viewer — the pipeline page served with a
+			// task: doc (the StatusProvider replacement).
+			pipeline?.openTaskStatus(projectId, sourceId);
 		}),
 		vscode.commands.registerCommand('rocketride.app.open', (appId: string) => {
 			// Fire-and-forget: a rejection has no other surface here — say it.
 			appScreen?.show(appId).catch((err) => vscode.window.showErrorMessage(`Failed to open app: ${err instanceof Error ? err.message : String(err)}`));
 		}),
-		vscode.commands.registerCommand('rocketride.app.debug', (appId: string) => {
-			debugApp(appId).catch((err) => vscode.window.showErrorMessage(`Failed to debug app: ${err instanceof Error ? err.message : String(err)}`));
-		}),
-		vscode.commands.registerCommand('rocketride.refresh', async () => {
-			await refreshAllProviders();
+		vscode.commands.registerCommand('rocketride.refresh', () => {
 			vscode.window.showInformationMessage('RocketRide views refreshed');
 		}),
 		vscode.commands.registerCommand('rocketride.agents.install', async () => {
@@ -572,7 +729,7 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		// directory) for untitled ones.
 		vscode.commands.registerCommand('rocketride.pipeline.save', async () => {
 			const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
-			if (!(input instanceof vscode.TabInputCustom) || input.viewType !== 'rocketride.PageProject') return;
+			if (!(input instanceof vscode.TabInputCustom) || input.viewType !== 'rocketride.page.project') return;
 			const document = vscode.workspace.textDocuments.find((d) => d.uri.toString() === input.uri.toString());
 			if (!document) return;
 			try {
@@ -627,13 +784,6 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			}
 		}),
 
-		// Stub commands — run/stop/open are handled via webview messages now,
-		// but package.json still declares them so they must be registered.
-		vscode.commands.registerCommand('rocketride.sidebar.files.openFile', () => {}),
-		vscode.commands.registerCommand('rocketride.sidebar.files.openStatus', () => {}),
-		vscode.commands.registerCommand('rocketride.sidebar.files.runPipeline', () => {}),
-		vscode.commands.registerCommand('rocketride.sidebar.files.stopPipeline', () => {}),
-		vscode.commands.registerCommand('rocketride.sidebar.files.revealErrorsSection', () => {}),
 	];
 
 	commands.forEach((command) => context.subscriptions.push(command));
@@ -694,22 +844,15 @@ function setupConnectionEventHandlers(): void {
 }
 
 /**
- * Refreshes all data providers
- */
-async function refreshAllProviders(): Promise<void> {
-	// SidebarProvider handles its own refresh via event listeners
-}
-
-/**
  * Extension deactivation cleanup
  */
 export async function deactivate(): Promise<void> {
-	if (_monitor) {
+	if (_htmlPages) {
 		try {
-			_monitor.dispose();
+			_htmlPages.dispose();
 		} catch (error: unknown) {
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error disposing monitor page:', error);
+				getLogger().error(`[ROCKETRIDE] Error disposing html pages: ${String(error)}`);
 			}
 		}
 	}
@@ -720,7 +863,7 @@ export async function deactivate(): Promise<void> {
 			await engineRegistry.disposeAll();
 		} catch (error: unknown) {
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error disposing engine registry:', error);
+				getLogger().error(`[ROCKETRIDE] Error disposing engine registry: ${String(error)}`);
 			}
 		}
 	}
@@ -732,7 +875,7 @@ export async function deactivate(): Promise<void> {
 		} catch (error: unknown) {
 			// Silently ignore cancellation errors during shutdown
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error disposing connection manager:', error);
+				getLogger().error(`[ROCKETRIDE] Error disposing connection manager: ${String(error)}`);
 			}
 		}
 	}
@@ -744,7 +887,7 @@ export async function deactivate(): Promise<void> {
 		} catch (error: unknown) {
 			// Silently ignore cancellation errors during shutdown
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error disposing config manager:', error);
+				getLogger().error(`[ROCKETRIDE] Error disposing config manager: ${String(error)}`);
 			}
 		}
 	}
@@ -763,11 +906,9 @@ export async function deactivate(): Promise<void> {
 // triggered the fetch.
 // =========================================================================
 
-/** Cached GitHub releases (engine binaries). Populated by ConnectionMessageHandler.fetchAndBroadcastVersions(). */
-export let cachedEngineVersions: Array<{ tag_name: string; prerelease: boolean }> = [];
-/** Replaces the cached engine version list. Called by ConnectionMessageHandler after a successful GitHub API fetch. */
-export const setCachedEngineVersions = (v: typeof cachedEngineVersions) => {
-	cachedEngineVersions = v;
+/** Cached GitHub releases (engine binaries). Written via setCachedEngineVersions; currently no reader (kept so the ops-side setter contract stays stable). */
+/** Replaces the cached engine version list. Called by settingsOps after a successful GitHub API fetch. */
+export const setCachedEngineVersions = (v: Array<{ tag_name: string; prerelease: boolean }>) => {
 };
 
 /** Cached GHCR container tags (Docker images). Populated by ConnectionMessageHandler.fetchAndBroadcastDockerTags(). */
@@ -781,10 +922,4 @@ export const setCachedDockerTags = (t: string[]) => {
 export const getExtensionContext = () => extensionContext;
 export const getConnectionManager = () => connectionManager;
 export const getEngineRegistry = () => engineRegistry;
-export const getSettingsProvider = () => settings;
-export const getConfigManager = () => configManager;
-export const getPipelineFilesTreeProvider = () => undefined;
-export const getConnectionTreeProvider = () => undefined;
-export const getProjectProvider = () => project;
-export const getBarStatus = () => barStatus;
-export const getWelcomeProvider = () => welcome;
+export const getPipelineProvider = () => pipeline;

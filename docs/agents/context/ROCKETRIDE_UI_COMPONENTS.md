@@ -50,17 +50,44 @@ import { Shell } from 'shell';
 
 ### Sidebar frame
 
-The shell-owned sidebar container: fixed Header (brand) and Footer (user
-card) around one scrolling app-content slot — the `sidebar` prop of the
-app's root `<AppLayout>`, filled with stock components (`SidebarMenu`,
-`Explorer`) plus custom sections. 260px expanded, 56px icon rail,
-drag-resizable. No `sidebar` prop = one-column app, no sidebar chrome.
-**Collapsed is still mounted** — on the icon rail the slot keeps rendering
-and components read `useSidebarCollapsed(): boolean` (false when no
-provider) to choose their icon form.
+The sidebar chrome follows the declaration. A plain `sidebar` prop on the
+app's root `<AppLayout>` — filled with stock components (`SidebarMenu`,
+`Explorer`) plus custom sections — renders the **classic single column**
+(it iconifies when collapsed). Declaring `sidebarViews` as well (one
+`SidebarViewContainer` per icon) unlocks the VS Code-style frame: a fixed
+**activity rail** (one icon per declared view, the account menu and a
+Documentation icon at its foot) beside a **resizable panel** holding your
+content. No `sidebar` prop = one-column app, no sidebar chrome.
 
-**Rule:** Apps never mount, fill, or restyle the Header and Footer. Memoize
-the sidebar node — an inline node re-registers every render.
+Each `SidebarViewContainer` is `{ id, title, icon, content?, badge?,
+order?, isDefault? }`: `id` is the selection/persistence key, `title` the
+rail tooltip (or tab label), `icon` the rail/tab glyph (20px reads well),
+`badge` an optional count/marker, `order` the rail position (declaration
+order when omitted), and `isDefault` the startup container (first when
+unset). A container WITHOUT its own `content` shares the registered
+`sidebar` node, which reads `useSidebarActiveView()` — `{ activeViewId,
+setActiveView }`, `null` outside the frame — to present the selected view
+(one data owner behind N rail icons).
+
+**In the rail frame, collapse closes the panel; the rail never
+disappears.** Clicking the active rail icon toggles the panel. Content is
+never asked to render an iconified form of itself: inside the frame
+`useSidebarCollapsed()` is always `false` (it still reports real collapse
+in the compact/mobile drawer). Project an existing `ViewMenu` onto the
+rail with `viewsFromMenu(menu)` — strictly opt-in, never applied
+automatically. `sidebarMode: 'cursor'` renders the same panel with the
+container switcher as a horizontal icon strip across the panel top instead
+of a vertical rail (closed, a slim reopen strip remains);
+`sidebarMode: 'rocketride'` opts a view-declaring app back
+into the classic column. The user's General > Sidebar setting
+(`rocketride.general.sidebar`) overrides `sidebarMode` when set to anything
+other than 'default'; on 'default' the app's declaration applies — but
+'vscode'/'cursor' only take effect on apps that declare `sidebarViews`;
+a classic sidebar always keeps the classic column.
+
+**Rule:** Apps never mount, fill, or restyle the rail, panel header, or
+footer. Memoize the sidebar node — an inline node re-registers every
+render.
 
 ```tsx
 import { useMemo, useState } from 'react';
@@ -192,8 +219,10 @@ import { Explorer, NOOP_VFS } from 'shell';
 ### SidebarMenu
 
 Standard vertical menu list on the shared `ViewMenu` entry shape — counts,
-severity badges, one-level accordion sections. Mount any number; it
-auto-iconifies when the sidebar collapses.
+severity badges, one-level accordion sections. Mount any number. (Its
+iconified form now appears only in the compact/mobile drawer — in the
+desktop frame the panel closes instead of iconifying. To promote a menu's
+sections to rail icons, pass `viewsFromMenu(menu)` as `sidebarViews`.)
 
 | Prop | Type | Dir | Note |
 | --- | --- | --- | --- |

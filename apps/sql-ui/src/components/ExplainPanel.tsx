@@ -37,10 +37,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, Button, DetailPanel, EmptyState, ToggleGroup, useShellConnection } from 'shell';
-import type { ISqlEndpoint, SqlDialect } from '../connect';
+import { Banner, Button, DetailPanel, EmptyState, ToggleGroup } from 'shell';
+import type { SqlEndpoint, SqlDialect } from '../connect';
 import { announce } from '../a11y/announce';
-import { getSession } from '../schema/schemaStore';
+import { useSqlEnv } from '../sqlEnv';
 import { ALLOW_EXECUTE_OFF_TEXT, DATABASE_SAID_LABEL, GENERIC_ERROR_TEXT, describeFailure, maxRowsText } from '../sql/failure';
 import type { PlanParseResult } from '../sql/explain';
 import { buildExplain, countPlanNodes, formatRawPlan, parseExplain } from '../sql/explain';
@@ -52,9 +52,9 @@ import { DatabaseIcon } from '../icons';
 // =============================================================================
 
 /** Props for the {@link ExplainPanel} component. */
-export interface IExplainPanelProps {
+export interface ExplainPanelProps {
 	/** The connection to explain against. */
-	endpoint: ISqlEndpoint;
+	endpoint: SqlEndpoint;
 	/** The connection's dialect (drives the EXPLAIN form and the empty state). */
 	dialect: SqlDialect;
 	/**
@@ -73,7 +73,7 @@ export interface IExplainPanelProps {
 type PlanView = 'raw' | 'interpreted';
 
 /** A finished EXPLAIN round trip. */
-interface IExplainResult {
+interface ExplainResult {
 	/** Wall-clock ms the result landed at. */
 	at: number;
 	/** Round-trip seconds, measured client-side. */
@@ -149,11 +149,11 @@ const VIEW_OPTIONS: { id: PlanView; label: string }[] = [
  * Every number the tree shows is a planner ESTIMATE: plain EXPLAIN does not run
  * the statement, so nothing here was measured.
  */
-export const ExplainPanel: React.FC<IExplainPanelProps> = ({ endpoint, dialect, sql, open, onClose }) => {
-	const { client } = useShellConnection();
+export const ExplainPanel: React.FC<ExplainPanelProps> = ({ endpoint, dialect, sql, open, onClose }) => {
+	const env = useSqlEnv();
 	const [view, setView] = useState<PlanView>('raw');
 	const [running, setRunning] = useState(false);
-	const [result, setResult] = useState<IExplainResult | null>(null);
+	const [result, setResult] = useState<ExplainResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	// The verbatim driver text starts collapsed on every run.
 	const [showVerbatim, setShowVerbatim] = useState(false);
@@ -168,14 +168,14 @@ export const ExplainPanel: React.FC<IExplainPanelProps> = ({ endpoint, dialect, 
 	 * @param signal - Set when the effect that started this call was torn down.
 	 */
 	const run = useCallback(async (signal: { cancelled: boolean }): Promise<void> => {
-		if (!client || !explainSql) return;
+		if (!env.ready || !explainSql) return;
 		setRunning(true);
 		setError(null);
 		setResult(null);
 		setShowVerbatim(false);
 		const started = Date.now();
 		try {
-			const session = getSession(client, endpoint);
+			const session = env.getSession(endpoint);
 			// Plain EXPLAIN only plans, so re-running it after a token refresh
 			// cannot change anything on the database.
 			const { rows } = await session.execute(explainSql, { idempotent: true });
@@ -197,7 +197,7 @@ export const ExplainPanel: React.FC<IExplainPanelProps> = ({ endpoint, dialect, 
 		} finally {
 			if (!signal.cancelled) setRunning(false);
 		}
-	}, [client, endpoint, dialect, explainSql]);
+	}, [env, endpoint, dialect, explainSql]);
 
 	// Opening the drawer (or changing the statement while it is open) explains.
 	useEffect(() => {
@@ -250,7 +250,7 @@ export const ExplainPanel: React.FC<IExplainPanelProps> = ({ endpoint, dialect, 
 				)}
 			</Banner>
 		);
-	} else if (!client) {
+	} else if (!env.ready) {
 		// `run` returns before sending anything when there is no client, so
 		// `running` never becomes true and `result` never arrives: the
 		// "Explaining…" state below would claim work that was never started.

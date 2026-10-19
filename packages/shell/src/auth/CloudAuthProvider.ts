@@ -40,7 +40,7 @@
 import type { IAuthProvider } from '../types/connection';
 import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import { LS_TOKEN, SS_PENDING_APP_ID } from '../constants';
-import { tokenStore } from '../util/devGate';
+import { tokenStore, sessionScopedStore } from '../util/devGate';
 
 // =============================================================================
 // CLASS
@@ -114,9 +114,11 @@ export class CloudAuthProvider implements IAuthProvider {
 			throw new Error('CloudAuthProvider not initialized — call initialize() first.');
 		}
 
-		// Store the target app ID so we can restore it after the redirect
+		// Store the target app ID so we can restore it after the redirect.
+		// Tab-session scoped: a FRAMED shell's pending app must never stamp
+		// the top shell's restore key (see sessionScopedStore).
 		if (appId) {
-			try { sessionStorage.setItem(SS_PENDING_APP_ID, appId); } catch (e) {
+			try { sessionScopedStore().setItem(SS_PENDING_APP_ID, appId); } catch (e) {
 				console.error('[CloudAuthProvider] Failed to store pending app ID:', e);
 			}
 		}

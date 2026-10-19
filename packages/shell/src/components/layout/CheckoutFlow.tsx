@@ -85,9 +85,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	// --- Listen for unsubscribe events ---------------------------------------
 	useEffect(() => {
 		return ConnectionManager.getInstance().on('shell:unsubscribe', ({ appId }: { appId: string }) => {
-			const client = ConnectionManager.getInstance().getClient();
-			if (client && orgId) {
-				client.billing.cancelSubscription(orgId, appId)
+			if (orgId) {
+				ConnectionManager.getInstance().request('client.billing.cancelSubscription', { orgId, appId })
 					.then(() => console.log('[unsubscribe] canceled', appId))
 					.catch((err) => console.error('[unsubscribe] error', err));
 			}
@@ -98,6 +97,8 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	if (!checkoutApp || !stripeKey || !orgId) return null;
 
 	// --- Render CheckoutModal ------------------------------------------------
+	// Engine access is the brokered billing ops, so this flow renders in any
+	// realm (cloud root in-process; a page webview over the bridge).
 	const cm = ConnectionManager.getInstance();
 
 	return (
@@ -108,34 +109,22 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 			preselectedPlan={presetPlan ?? undefined}
 			preselectedPromo={presetPromo ?? undefined}
 			onFetchPlans={async () => {
-				const c = cm.getClient();
-				if (!c) throw new Error('Not connected');
-				return c.billing.getProductPrices(checkoutApp.id);
+				return cm.request('client.billing.getProductPrices', { appId: checkoutApp.id }) as Promise<CheckoutPlan[]>;
 			}}
 			onCreateCheckout={async (priceId: string, promotionCode?: string) => {
-				const c = cm.getClient();
-				if (!c) throw new Error('Not connected');
-				return c.billing.createCheckoutSession(orgId, checkoutApp.id, priceId, promotionCode);
+				return cm.request('client.billing.createCheckoutSession', { orgId, appId: checkoutApp.id, priceId, promotionCode }) as Promise<{ clientSecret: string | null; subscriptionId: string; status: string }>;
 			}}
 			onValidatePromoCode={async (code: string, priceId?: string) => {
-				const c = cm.getClient();
-				if (!c) throw new Error('Not connected');
-				return c.billing.validatePromoCode(orgId, code, priceId);
+				return cm.request('client.billing.validatePromoCode', { orgId, code, priceId }) as Promise<PromoValidation>;
 			}}
 			onRedeemPromoCode={async (code: string) => {
-				const c = cm.getClient();
-				if (!c) throw new Error('Not connected');
-				return c.billing.redeemPromoCode(orgId, code);
+				return cm.request('client.billing.redeemPromoCode', { orgId, code }) as Promise<never>;
 			}}
 			onConfirmPending={async (subscriptionId: string, priceId: string) => {
-				const c = cm.getClient();
-				if (!c) return;
-				await (c as any).dapRequest('rrext_account_billing', {
-					subcommand: 'confirm_pending',
-					appId: checkoutApp.id,
-					subscriptionId,
-					priceId,
-				});
+				// The old direct-client path called a phantom `dapRequest` method
+				// that does not exist on the SDK — the named op wraps the real
+				// public client.call() at the broker.
+				await cm.request('client.billing.confirmPending', { appId: checkoutApp.id, subscriptionId, priceId });
 			}}
 			onSuccess={() => {
 				// New purchase complete: drop the user into the app they just bought

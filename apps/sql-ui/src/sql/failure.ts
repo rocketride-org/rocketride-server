@@ -59,7 +59,7 @@
 // =============================================================================
 
 /** What a failed execute means and what to show for it. */
-export interface IFailureNotice {
+export interface FailureNotice {
 	/** Banner headline: `Database reported: <first line>`. */
 	headline: string;
 	/** The full message, shown verbatim in the collapsible block. */
@@ -132,7 +132,7 @@ export function maxRowsText(cap: number): string {
  * @param message - The error text as it reached the app.
  * @returns What to show for it.
  */
-export function describeFailure(message: string): IFailureNotice {
+export function describeFailure(message: string): FailureNotice {
 	const verbatim = (message ?? '').trim();
 	const firstLine = verbatim.split('\n')[0]?.trim() ?? '';
 	// What the DATABASE said: the node's wrapper is not part of it, and the

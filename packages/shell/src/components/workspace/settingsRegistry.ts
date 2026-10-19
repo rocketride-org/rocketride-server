@@ -25,8 +25,9 @@
 // =============================================================================
 //
 // The registry is the single source of setting DECLARATIONS.  It is built by
-// flattening the `configuration` (VSCode contributes.configuration shape) of
-// every app on the user's desktop, and rebuilt whenever the manifest changes
+// flattening the shell's own configuration (the "General" section) followed by
+// the `configuration` (VSCode contributes.configuration shape) of every app on
+// the user's desktop, and rebuilt whenever the manifest changes
 // (connect + shell:accountUpdate → new appManifest → new registry).
 //
 // Values are a separate concern: `settings.json` stores per-user OVERRIDES
@@ -36,6 +37,40 @@
 // =============================================================================
 
 import type { AppManifestEntry, AppConfiguration, SettingSchema, SettingValue } from './types';
+
+// =============================================================================
+// SHELL SECTION — settings the shell itself contributes
+// =============================================================================
+
+/**
+ * Reserved pseudo-app id for the shell's own settings section.  Dotted like a
+ * real app id so section ids stay uniform; no manifest entry ever carries it.
+ */
+export const SHELL_SECTION_ID = 'rocketride.shell';
+
+/**
+ * The shell's own configuration — seeded into the registry ahead of every
+ * app so the "General" section always exists (independent of what is
+ * installed), tops the settings nav, and owns its keys (dedup is first-wins).
+ */
+const SHELL_CONFIGURATION: AppConfiguration = {
+	title: 'General',
+	properties: {
+		'rocketride.general.sidebar': {
+			type: 'string',
+			default: 'default',
+			enum: ['default', 'vscode', 'cursor', 'rocketride'],
+			enumDescriptions: [
+				'Let each app pick its own sidebar layout',
+				'Activity rail beside a resizable panel (VS Code style)',
+				'Panel with a horizontal tab strip across the top (Cursor style)',
+				'Classic single column that iconifies when collapsed',
+			],
+			description: 'Sidebar layout for every app. Any choice other than Default overrides what the app requests. VS Code and Cursor layouts apply only to apps that declare rail views; apps with a classic sidebar keep the classic column.',
+			order: 1,
+		},
+	},
+};
 
 // =============================================================================
 // TYPES
@@ -116,10 +151,12 @@ function configurationOf(app: AppManifestEntry): AppConfiguration | null {
 /**
  * Builds the settings registry from the current app manifest.
  *
- * Only apps on the user's desktop contribute — an uninstalled app's settings
- * never render.  Sections group by configuration title so app families that
- * declare a shared title (and shared keys) appear once; duplicate keys across
- * apps are deduplicated first-wins.
+ * The shell's own configuration seeds the registry first, so "General" always
+ * exists, tops the nav, and owns its keys.  Then only apps on the user's
+ * desktop contribute — an uninstalled app's settings never render.  Sections
+ * group by configuration title so app families that declare a shared title
+ * (and shared keys) appear once; duplicate keys across apps are deduplicated
+ * first-wins.
  *
  * @param appManifest - All app manifest entries (desktop + store).
  * @returns The flattened registry.
@@ -130,21 +167,17 @@ export function buildSettingsRegistry(appManifest: AppManifestEntry[]): Settings
 	const schemas = new Map<string, SettingSchema>();
 	const defaults: Record<string, SettingValue> = {};
 
-	for (const app of appManifest) {
-		// Only surface settings for apps the user has installed on their desktop
-		if (!app.onDesktop) continue;
-		const cfg = configurationOf(app);
-		if (!cfg) continue;
-
+	/** Folds one configuration into the registry (shared by shell and apps). */
+	const addConfiguration = (appId: string, cfg: AppConfiguration, fallbackTitle: string): void => {
 		// Resolve (or create) the section for this configuration title
-		const title = cfg.title || app.name;
+		const title = cfg.title || fallbackTitle;
 		let section = sectionByTitle.get(title);
 		if (!section) {
-			section = { id: app.id, title, appIds: [], entries: [] };
+			section = { id: appId, title, appIds: [], entries: [] };
 			sectionByTitle.set(title, section);
 			sections.push(section);
 		}
-		section.appIds.push(app.id);
+		section.appIds.push(appId);
 
 		// Add each declared property, deduplicating keys first-wins
 		for (const [key, schema] of Object.entries(cfg.properties)) {
@@ -153,6 +186,16 @@ export function buildSettingsRegistry(appManifest: AppManifestEntry[]): Settings
 			if (schema.default !== undefined) defaults[key] = schema.default;
 			section.entries.push({ key, schema });
 		}
+	};
+
+	// The shell contributes first — "General" precedes every app section
+	addConfiguration(SHELL_SECTION_ID, SHELL_CONFIGURATION, 'General');
+
+	for (const app of appManifest) {
+		// Only surface settings for apps the user has installed on their desktop
+		if (!app.onDesktop) continue;
+		const cfg = configurationOf(app);
+		if (cfg) addConfiguration(app.id, cfg, app.name);
 	}
 
 	// Order entries within each section: explicit `order` first, then as declared

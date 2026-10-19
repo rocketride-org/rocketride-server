@@ -49,7 +49,7 @@
 // looks like a key by name is never treated as one.
 // =============================================================================
 
-import type { ISqlSchemaColumn, ISqlSchemaResponse, SqlDialect } from '../connect';
+import type { SqlSchemaColumn, SqlSchemaResponse, SqlDialect } from '../connect';
 import { quoteIdent } from './paging';
 
 // =============================================================================
@@ -57,7 +57,7 @@ import { quoteIdent } from './paging';
 // =============================================================================
 
 /** One declared foreign key, flattened for join generation. */
-export interface IFkEdge {
+export interface FkEdge {
 	/** Table the key is declared on. */
 	fromTable: string;
 	/** Constrained columns, in order. */
@@ -69,7 +69,7 @@ export interface IFkEdge {
 }
 
 /** Everything the suggester needs from one schema snapshot. */
-export interface ICompletionModel {
+export interface CompletionModel {
 	/** Unix ms the snapshot was read. */
 	refreshedAt: number;
 	/** Database name, when the node reported one. */
@@ -77,9 +77,9 @@ export interface ICompletionModel {
 	/** Table names, in snapshot order. */
 	tables: string[];
 	/** Columns per table, keyed by table name. */
-	columnsByTable: Record<string, ISqlSchemaColumn[]>;
+	columnsByTable: Record<string, SqlSchemaColumn[]>;
 	/** Declared foreign keys across the whole snapshot. */
-	foreignKeys: IFkEdge[];
+	foreignKeys: FkEdge[];
 	/**
 	 * Documentation line naming when the snapshot was read — and saying what
 	 * Refresh can and cannot do about it. A node without the `refresh_schema`
@@ -93,7 +93,7 @@ export interface ICompletionModel {
 export type CompletionKind = 'table' | 'column' | 'snippet';
 
 /** One suggestion, in a Monaco-independent shape. */
-export interface ICompletionCandidate {
+export interface CompletionCandidate {
 	/** What kind of thing this is. */
 	kind: CompletionKind;
 	/** Text shown in the list. */
@@ -111,7 +111,7 @@ export interface ICompletionCandidate {
 }
 
 /** One table reference found in a buffer. */
-interface ISourceRef {
+interface SourceRef {
 	/** The table name, unquoted and without any schema prefix. */
 	table: string;
 	/** The alias it was given, when it has one. */
@@ -185,7 +185,7 @@ function ident(dialect: SqlDialect, name: string): string {
  * @param name - The name to look for.
  * @returns The table's name as the snapshot spells it, or undefined.
  */
-function findTable(model: ICompletionModel, name: string): string | undefined {
+function findTable(model: CompletionModel, name: string): string | undefined {
 	const wanted = name.toLowerCase();
 	return model.tables.find((table) => table.toLowerCase() === wanted);
 }
@@ -196,8 +196,8 @@ function findTable(model: ICompletionModel, name: string): string | undefined {
  * @param text - The SQL text to scan.
  * @returns The references found.
  */
-function scanSources(text: string): ISourceRef[] {
-	const out: ISourceRef[] = [];
+function scanSources(text: string): SourceRef[] {
+	const out: SourceRef[] = [];
 	SOURCE_REF.lastIndex = 0;
 	let match = SOURCE_REF.exec(text);
 	while (match) {
@@ -234,10 +234,10 @@ function clock(at: number): string {
  * @param refreshedAt - Unix ms the snapshot was read (defaults to now).
  * @returns The completion model (empty, but usable, for a null snapshot).
  */
-export function buildCompletionModel(schema: ISqlSchemaResponse | null | undefined, refreshedAt: number = Date.now()): ICompletionModel {
+export function buildCompletionModel(schema: SqlSchemaResponse | null | undefined, refreshedAt: number = Date.now()): CompletionModel {
 	const tables: string[] = [];
-	const columnsByTable: Record<string, ISqlSchemaColumn[]> = {};
-	const foreignKeys: IFkEdge[] = [];
+	const columnsByTable: Record<string, SqlSchemaColumn[]> = {};
+	const foreignKeys: FkEdge[] = [];
 
 	for (const [table, definition] of Object.entries(schema?.tables ?? {})) {
 		tables.push(table);
@@ -294,7 +294,7 @@ export function resolveAliases(text: string): Record<string, string> {
  * @param note - The snapshot note.
  * @returns The same array, with documentation on its first entry.
  */
-function documentFirst(candidates: ICompletionCandidate[], note: string): ICompletionCandidate[] {
+function documentFirst(candidates: CompletionCandidate[], note: string): CompletionCandidate[] {
 	if (candidates.length > 0) candidates[0].documentation = note;
 	return candidates;
 }
@@ -307,7 +307,7 @@ function documentFirst(candidates: ICompletionCandidate[], note: string): ICompl
  * @param prefix - The sort-text group prefix.
  * @returns One candidate per table.
  */
-function tableCandidates(model: ICompletionModel, dialect: SqlDialect, prefix: string): ICompletionCandidate[] {
+function tableCandidates(model: CompletionModel, dialect: SqlDialect, prefix: string): CompletionCandidate[] {
 	return documentFirst(model.tables.map((table, index) => ({
 		kind: 'table' as const,
 		label: table,
@@ -326,8 +326,8 @@ function tableCandidates(model: ICompletionModel, dialect: SqlDialect, prefix: s
  * @param prefix - The sort-text group prefix.
  * @returns One candidate per column.
  */
-function columnCandidates(model: ICompletionModel, tables: string[], dialect: SqlDialect, prefix: string): ICompletionCandidate[] {
-	const out: ICompletionCandidate[] = [];
+function columnCandidates(model: CompletionModel, tables: string[], dialect: SqlDialect, prefix: string): CompletionCandidate[] {
+	const out: CompletionCandidate[] = [];
 	for (const table of tables) {
 		for (const column of model.columnsByTable[table] ?? []) {
 			out.push({
@@ -370,8 +370,8 @@ function pickAlias(table: string, used: Set<string>): string {
  * @param dialect - The engine dialect (quoting).
  * @returns One candidate per usable foreign key, in both directions.
  */
-function fkJoinCandidates(model: ICompletionModel, sources: ISourceRef[], dialect: SqlDialect): ICompletionCandidate[] {
-	const out: ICompletionCandidate[] = [];
+function fkJoinCandidates(model: CompletionModel, sources: SourceRef[], dialect: SqlDialect): CompletionCandidate[] {
+	const out: CompletionCandidate[] = [];
 	if (sources.length === 0) return out;
 	const present = new Set(sources.map((source) => source.table.toLowerCase()));
 	const used = new Set<string>();
@@ -436,7 +436,7 @@ const SNIPPETS: { label: string; insertText: string }[] = [
  *
  * @returns One candidate per snippet.
  */
-function snippetCandidates(): ICompletionCandidate[] {
+function snippetCandidates(): CompletionCandidate[] {
 	return SNIPPETS.map((snippet, index) => ({
 		kind: 'snippet' as const,
 		label: snippet.label,
@@ -470,11 +470,11 @@ function snippetCandidates(): ICompletionCandidate[] {
  * @returns The candidates, unsorted (read `sortText`).
  */
 export function suggestAt(
-	model: ICompletionModel,
+	model: CompletionModel,
 	textBefore: string,
 	dialect: SqlDialect = 'unknown',
 	textAfter: string = '',
-): ICompletionCandidate[] {
+): CompletionCandidate[] {
 	const whole = `${textBefore} ${textAfter}`;
 	const sources = scanSources(whole).filter((source) => findTable(model, source.table));
 	const aliases = resolveAliases(whole);
@@ -488,7 +488,7 @@ export function suggestAt(
 		return columnCandidates(model, [table], dialect, '0_');
 	}
 
-	const out: ICompletionCandidate[] = [];
+	const out: CompletionCandidate[] = [];
 	const tablePosition = TABLE_POSITION.exec(textBefore);
 	if (tablePosition) {
 		const keyword = (tablePosition[1] ?? tablePosition[2] ?? '').toLowerCase();

@@ -40,6 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSPrope
 import type { ConnectResult } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
+import { registerClientOps } from '../../ops/clientOps';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
@@ -49,7 +50,7 @@ import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
-import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
+import { getHomeAppId } from '../../constants';
 import { registerAndMapApps, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
@@ -288,11 +289,25 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// (e.g. apps gated by requiredPermissions). Those need to be registered
 	// as MF remotes and merged into the app list so they can be launched.
 	const apps = useMemo(() => {
-		// Synthetic local entries first computed so both return paths merge them
+		// Local (dev) entries merge on both return paths. In dev the WORKSPACE
+		// manifest is the truth: a locally-registered id REPLACES the server's
+		// row wholesale — the registration IS the row (appStatus 'dev',
+		// onDesktop true, billing gating moot in dev). No field-by-field
+		// overlay to reason about; while the registration lives, the server's
+		// opinion of this app simply does not exist. Ids the server has never
+		// heard of append whole, exactly as before.
 		const withLocal = (list: typeof config.apps): typeof config.apps => {
-			const present = new Set(list.map((a) => a.id));
-			const locals = getLocalAppEntries().filter((e) => !present.has(e.id));
-			return locals.length > 0 ? [...list, ...locals] : list;
+			const locals = getLocalAppEntries();
+			if (locals.length === 0) return list;
+			// IDENTITY CONTINUITY: the registration replaces the server row
+			// wholesale, but where the dev metadata is SILENT about the icon
+			// (URL-convention self-registration posts no manifest), the app
+			// must not lose its face mid-session — inherit the registry's
+			// stable icon URL. Dev metadata still wins wherever it speaks.
+			const byId = new Map(list.map((a) => [a.id, a]));
+			const patched = locals.map((l) => (!l.icon && byId.get(l.id)?.icon ? { ...l, icon: byId.get(l.id)!.icon } : l));
+			const localIds = new Set(locals.map((e) => e.id));
+			return [...list.filter((a) => !localIds.has(a.id)), ...patched];
 		};
 		if (!identity?.apps?.length) return withLocal(config.apps);
 
@@ -348,9 +363,19 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				uri: config.serverUri || undefined,
 				clientName: 'Cloud Shell-UI',
 				authProvider,
-				zitadelUrl: RR_ZITADEL_URL,
-				zitadelClientId: RR_ZITADEL_CLIENT_ID,
 			});
+
+			// FRAMEWORK ROOT: this realm owns the engine connection, so the
+			// brokered client surface registers HERE — request('client.*')
+			// resolves in-process for this realm and for any attached spokes.
+			// Idempotent across remounts (already-registered ops are kept).
+			registerClientOps(cm.ops(), cm, {
+				// Stripe sends the browser back to the shell's own origin.
+				portalReturnUrl: () => `${window.location.origin}${window.location.pathname}`,
+			});
+			// host.* ops are NOT registered here: implementations belong to
+			// the HOST APP (apps/rocket-ui/src/ops in cloud; apps/vscode/src/
+			// ops in VS Code), declared in shared/ops/hostOps.ts.
 
 			// Run the optional init callback (e.g. theme initialisation)
 			config.onInit?.();
@@ -684,7 +709,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 							try { window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*'); } catch { /* parentless */ }
 							loginPopupTimerRef.current = window.setTimeout(() => {
 								loginPopupTimerRef.current = null;
-								window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
+								// VS Code webviews BLOCK window.open (null, no throw) —
+								// there the embedder's native sign-in above is the ONLY
+								// path, so surface the dead end instead of failing
+								// silently (the warning reaches the Console pane via
+								// the dev console forwarding).
+								const popup = window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
+								if (!popup) console.warn('[Shell] sign-in popup blocked by the embedder — waiting for the host to answer rrdev:loginRequest with a session (rrdev:auth)');
 							}, 1500);
 						}}
 					>Sign In</button>
@@ -815,7 +846,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				<WorkspaceProvider
 					apps={apps}
 					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}
+					startupAppId={activeAppId || sessionAppId || cm.getPendingAppId() || defaultAppId}
 					defaultAppId={defaultAppId}
 					themeOptions={config.themeConfig.options}
 					onThemeChange={config.themeConfig.onThemeChange}

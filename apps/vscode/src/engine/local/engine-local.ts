@@ -66,16 +66,6 @@ export class EngineLocal extends EngineBackend {
 	// PUBLIC API
 	// =========================================================================
 
-	/** The EngineInstaller (for version fetching in UI). */
-	getInstaller(): EngineInstaller {
-		return this.installer;
-	}
-
-	/** The port the engine is listening on (after start). */
-	getActualPort(): number | undefined {
-		return this.actualPort;
-	}
-
 	/** Returns installed engine version info, or null. */
 	getInfo(): EngineInfo | null {
 		const installed = this.installer.getInstalledVersion();

@@ -50,34 +50,52 @@ export interface IVirtualFileSystem {
 	read(path: string): Promise<unknown>;
 
 	/**
+	 * OPTIONAL batch read: many paths in one backend round trip (transports
+	 * with a native batch op implement it; decorators use it for cache
+	 * misses). Same per-path content contract as read(); unreadable paths
+	 * are omitted from the result rather than failing the batch.
+	 *
+	 * @param paths - Relative file paths.
+	 * @returns Map of path to content for every readable path.
+	 */
+	readMany?(paths: string[]): Promise<Map<string, unknown>>;
+
+	/**
 	 * Writes content to a file.  The content type matches what read() returns.
 	 *
 	 * @param path    - Relative file path.
 	 * @param content - The content to write.
+	 * @param origin  - The writer's identity (a dev-session id, or a verb
+	 *                  like 'user'/'agent'), carried into the backend's
+	 *                  change announcement so listeners can suppress their
+	 *                  own echoes. Backends choose their default when omitted.
 	 */
-	write(path: string, content: unknown): Promise<void>;
+	write(path: string, content: unknown, origin?: string): Promise<void>;
 
 	/**
 	 * Renames a file or directory.
 	 *
 	 * @param oldPath - Current relative path.
 	 * @param newPath - New relative path.
+	 * @param origin  - The writer's identity (see write()).
 	 */
-	rename(oldPath: string, newPath: string): Promise<void>;
+	rename(oldPath: string, newPath: string, origin?: string): Promise<void>;
 
 	/**
 	 * Deletes a file or directory.
 	 *
 	 * @param path - Relative path to delete.
+	 * @param origin - The writer's identity (see write()).
 	 */
-	delete(path: string): Promise<void>;
+	delete(path: string, origin?: string): Promise<void>;
 
 	/**
 	 * Creates a directory.
 	 *
 	 * @param path - Relative directory path to create.
+	 * @param origin - The writer's identity (see write()).
 	 */
-	mkdir(path: string): Promise<void>;
+	mkdir(path: string, origin?: string): Promise<void>;
 }
 
 /**
@@ -241,6 +259,23 @@ export interface IExplorerProps {
 
 	/** Currently active/open file path (for highlight). */
 	activeFilePath?: string;
+
+	/**
+	 * Paths with unsaved edits — rendered as a trailing accent dot on the
+	 * file row, rolled up onto collapsed ancestor directories. Distinct from
+	 * `statuses` by design: status dots are liveness (running NOW), the
+	 * modified dot is editor state; the two never share a glyph.
+	 */
+	modifiedPaths?: ReadonlySet<string>;
+
+	/**
+	 * Source-control change decorations, VS Code style: a trailing letter
+	 * badge (M/A/D) plus a tinted filename per changed path, with ancestor
+	 * directory names tinted so a change is visible inside a collapsed tree.
+	 * Distinct from `modifiedPaths` (unsaved editor buffers) by design —
+	 * saved-but-uncommitted is source-control state, dirty-in-editor is not.
+	 */
+	decorations?: ReadonlyMap<string, 'added' | 'modified' | 'deleted'>;
 
 	/** Called when the user clicks a file entry to open it. */
 	onOpenFile: (path: string) => void;

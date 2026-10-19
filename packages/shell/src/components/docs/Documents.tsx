@@ -98,6 +98,70 @@ export interface Editor {
 /** Split orientation for layout containers. */
 export type SplitOrientation = 'horizontal' | 'vertical';
 
+/** Where the new group lands relative to the one being split. */
+export type SplitPosition = 'before' | 'after';
+
+/**
+ * MIME type key for drag-and-drop editor transfers. Shared by the tab strip
+ * (drag source / tab-bar drop target) and the pane drop zones (edge-split
+ * drop target) so a dragged tab is recognised across both surfaces.
+ */
+export const EDITOR_DND_MIME = 'application/x-rr-editor';
+
+/**
+ * Transient descriptor of a tab drag in flight. Lives OUTSIDE DocumentsState
+ * on purpose: HTML5 drag-and-drop hides the transfer payload until drop, so
+ * hover-time validation (e.g. "don't offer an edge split to a group's only
+ * tab") needs a side channel — and it must never reach workspace persistence.
+ */
+export interface EditorDragSession {
+	/** The editor being dragged. */
+	editorId: string;
+	/** The group the drag started from. */
+	sourceGroupId: string;
+}
+
+/**
+ * In-flight tab drags keyed by Documents instance. Deliberately NOT methods
+ * on the class: `Public<Documents>` appears in contravariant (props) positions
+ * of the frozen shell-api contract, so adding required members to the class
+ * would break structural conformance for older contract versions. Keying by
+ * instance keeps parallel Documents instances from seeing each other's drags.
+ */
+const editorDragSessions = new WeakMap<object, EditorDragSession>();
+
+/**
+ * Marks a tab drag as in flight for a Documents instance. Called by the tab
+ * strip on dragstart so drop targets can validate the gesture during hover.
+ *
+ * @param docs          - The Documents instance the drag belongs to.
+ * @param editorId      - The editor being dragged.
+ * @param sourceGroupId - The group the drag started from.
+ */
+export function beginEditorDrag(docs: object, editorId: string, sourceGroupId: string): void {
+	editorDragSessions.set(docs, { editorId, sourceGroupId });
+}
+
+/**
+ * Clears the in-flight tab drag for a Documents instance. Called by the tab
+ * strip on dragend.
+ *
+ * @param docs - The Documents instance the drag belonged to.
+ */
+export function endEditorDrag(docs: object): void {
+	editorDragSessions.delete(docs);
+}
+
+/**
+ * Returns the in-flight tab drag for a Documents instance, or null.
+ *
+ * @param docs - The Documents instance to look up.
+ * @returns The current drag session descriptor, or null.
+ */
+export function getEditorDrag(docs: object): EditorDragSession | null {
+	return editorDragSessions.get(docs) ?? null;
+}
+
 /**
  * An editor group — a pane container that holds an ordered list of editors.
  */
@@ -898,9 +962,11 @@ export class Documents {
 	 *
 	 * @param groupId     - The group to split.
 	 * @param orientation - Split direction ('horizontal' = side-by-side, 'vertical' = stacked).
+	 * @param position    - Which side of the original the new group lands on
+	 *                      ('before' = left/top, 'after' = right/bottom). Defaults to 'after'.
 	 * @returns The new group's ID.
 	 */
-	splitGroup(groupId: string, orientation: SplitOrientation): string {
+	splitGroup(groupId: string, orientation: SplitOrientation, position: SplitPosition = 'after'): string {
 		const newGroupId = this._nextGroupId();
 		const splitNodeId = this._nextSplitId();
 		this._update((prev) => {
@@ -915,12 +981,13 @@ export class Documents {
 			const newGroup: EditorGroup = { id: newGroupId, editorIds: [], activeEditorIndex: -1 };
 			const newLeaf: LayoutLeaf = { type: 'leaf', id: newGroupId, groupId: newGroupId };
 
-			// Replace the original leaf with a split containing both
+			// Replace the original leaf with a split containing both, the new
+			// leaf on the side the position asks for
 			const splitNode: LayoutSplit = {
 				type: 'split',
 				id: splitNodeId,
 				orientation,
-				children: [leaf, newLeaf],
+				children: position === 'before' ? [newLeaf, leaf] : [leaf, newLeaf],
 			};
 
 			return {
@@ -1007,6 +1074,8 @@ export class Documents {
 
 	/**
 	 * Moves an editor from its current group to a different group.
+	 * If the move empties the source group, the group is auto-collapsed from
+	 * the layout tree (VS Code parity, same behavior as closeEditor).
 	 *
 	 * @param editorId      - The editor to move.
 	 * @param targetGroupId - The destination group.
@@ -1016,6 +1085,7 @@ export class Documents {
 			const editor = prev.editors[editorId];
 			if (!editor) return prev;
 			const newGroups = { ...prev.groups };
+			let emptiedGroupId: string | null = null;
 
 			// Remove from source group
 			for (const gid of Object.keys(newGroups)) {
@@ -1026,6 +1096,9 @@ export class Documents {
 					let newActive = group.activeEditorIndex;
 					if (newActive >= newIds.length) newActive = Math.max(0, newIds.length - 1);
 					newGroups[gid] = { ...group, editorIds: newIds, activeEditorIndex: newActive };
+					// Track an emptied source for auto-collapse — unless it IS
+					// the target (same-group move re-adds the editor below)
+					if (newIds.length === 0 && gid !== targetGroupId) emptiedGroupId = gid;
 					break;
 				}
 			}
@@ -1036,7 +1109,14 @@ export class Documents {
 			const newIds = [...target.editorIds, editorId];
 			newGroups[targetGroupId] = { ...target, editorIds: newIds, activeEditorIndex: newIds.length - 1 };
 
-			return { ...prev, groups: newGroups, activeGroupId: targetGroupId };
+			let state: DocumentsState = { ...prev, groups: newGroups, activeGroupId: targetGroupId };
+
+			// Auto-collapse the emptied source group (no-op if it's the root leaf)
+			if (emptiedGroupId) {
+				state = collapseEmptyGroup(state, emptiedGroupId);
+			}
+
+			return state;
 		});
 	}
 

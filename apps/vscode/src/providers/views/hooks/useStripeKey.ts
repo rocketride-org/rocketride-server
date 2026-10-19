@@ -5,28 +5,23 @@
 
 /**
  * useStripeKey — resolves the Stripe publishable key for the embedded
- * CheckoutModal from the extension host.
+ * CheckoutModal over the shell bus (`host.stripeKey`).
  *
  * The key is not baked into the webview bundle: it is server-specific
  * (pk_test vs pk_live) and must match the Stripe account of the server the
  * host's billing client is connected to. The host learns it from the
- * unauthenticated server probe (ServerInfoResult.stripePublishableKey) and
- * caches it per URI (see providers/shared/stripe-key.ts).
+ * unauthenticated server probe and serves it as the `host.stripeKey` op;
+ * every webview that mounts checkout UI is a bus realm.
  *
- * Call it from the component that renders a CheckoutModal. It requests
- * `checkout:getStripeKey` and returns the `checkout:stripeKey` reply, ''
- * until it arrives (consumers already gate checkout UI on a non-empty key).
- * A panel can mount before the server connection lands, so an empty reply is
- * retried with bounded backoff and re-requested the moment a connection
- * arrives — otherwise key==='' would strand checkout for the panel's whole
- * lifetime. Uses the auxiliary-bridge pattern (own window listener +
- * getVsCodeApi) so it composes with the webview's main useMessaging without
- * re-running the view:ready handshake.
+ * A panel can mount before the server connection lands, so an empty result
+ * is retried with bounded backoff and re-requested the moment the mirrored
+ * connection state changes — otherwise key === '' would strand checkout for
+ * the panel's whole lifetime.
  */
 
 import { useEffect, useState } from 'react';
-import { getVsCodeApi } from './useMessaging';
-import type { StripeKeyUnavailableReason } from '../../types/checkoutTypes';
+import { ConnectionManager } from 'shell';
+import type { StripeKeyReason as StripeKeyUnavailableReason } from 'shared/ops/hostOps';
 
 // =============================================================================
 // CONSTANTS
@@ -54,7 +49,7 @@ export interface StripeKeyState {
 }
 
 /**
- * Fetch the connected server's Stripe publishable key from the extension host.
+ * Fetch the connected server's Stripe publishable key from the host.
  *
  * @param enabled - Skip the request entirely when false (e.g. a CloudPanel
  *                  rendered without checkout callbacks never mounts a modal).
@@ -66,82 +61,67 @@ export function useStripeKey(enabled = true): StripeKeyState {
 
 	useEffect(() => {
 		if (!enabled) return;
-
+		const cm = ConnectionManager.getInstance();
+		let disposed = false;
 		// Once a non-empty key resolves it never changes for a server — settle
-		// and stop asking. Until then an empty reply schedules a bounded backoff
-		// retry, and a landed connection re-asks immediately (the first request
-		// commonly races ahead of the server connection).
+		// and stop asking. 'no-billing' is equally terminal (the OSS case).
 		let settled = false;
 		let attempt = 0;
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
-		// Monotonic request id: each request bumps it, and a reply is honored
-		// only if it echoes the CURRENT id. This drops a stale reply from a
-		// previous server (requested before a switch) that lands after the
-		// re-request — otherwise it would clobber the new server's key.
-		let requestId = 0;
 
 		const request = (): void => {
-			requestId += 1;
-			getVsCodeApi()?.postMessage({ type: 'checkout:getStripeKey', requestId });
+			void cm.request('host.stripeKey', {} as never).then(
+				(r) => apply(r as { key: string | null; reason?: StripeKeyUnavailableReason }),
+				() => apply({ key: null, reason: 'probe-failed' })
+			);
 		};
 
-		// Listen before asking so a fast host reply cannot be missed.
-		const onHostMessage = (event: MessageEvent): void => {
-			const message = event.data as { type?: string; key?: string; reason?: StripeKeyUnavailableReason; isConnected?: boolean; requestId?: number } | undefined;
-			if (!message) return;
-
-			if (message.type === 'checkout:stripeKey') {
-				// Ignore a reply that does not answer the current request — a
-				// stale key from a previous server would otherwise win a race.
-				if (message.requestId !== requestId) return;
-				// A real key settles the hook for good.
-				if (message.key) {
-					settled = true;
-					if (retryTimer) clearTimeout(retryTimer);
-					setState({ key: message.key });
-					return;
-				}
-				// The server answered and has no billing — terminal, retrying
-				// cannot change it (the OSS/standalone case). Settle empty so
-				// the panel stops asking, and keep the reason for the UI.
-				if (message.reason === 'no-billing') {
-					settled = true;
-					if (retryTimer) clearTimeout(retryTimer);
-				}
-				// Surface the reason (skip the render when nothing changed —
-				// each retry answers with the same empty state).
-				setState((prev) => (prev.key === '' && prev.reason === message.reason ? prev : { key: '', reason: message.reason }));
-				// Transient empty (no connection / probe failed) — retry with
-				// backoff until the budget runs out; a connection change
-				// refills it.
-				if (!settled && attempt < MAX_EMPTY_RETRIES) {
-					const delay = BASE_RETRY_MS * 2 ** attempt;
-					attempt += 1;
-					retryTimer = setTimeout(request, delay);
-				}
+		const apply = (info: { key: string | null; reason?: StripeKeyUnavailableReason }): void => {
+			if (disposed) return;
+			if (info.key) {
+				settled = true;
+				if (retryTimer) clearTimeout(retryTimer);
+				setState({ key: info.key });
 				return;
 			}
-
-			// EVERY connection change invalidates what we know: Stripe keys
-			// are server-specific, so a disconnect must drop the settled key
-			// (or the modal opens with the dead server's key) and orphan any
-			// in-flight request (bumping requestId drops its late reply). A
-			// connection landing additionally re-asks — it covers both the
-			// pre-connect mount and a server switch.
-			if (message.type === 'shell:connectionChange') {
-				settled = false;
-				attempt = 0;
-				requestId += 1;
+			// The server answered and has no billing — terminal, retrying
+			// cannot change it. Settle empty and keep the reason for the UI.
+			if (info.reason === 'no-billing') {
+				settled = true;
 				if (retryTimer) clearTimeout(retryTimer);
-				// The key AND the reason are unknown again — clear together.
-				setState({ key: '' });
-				if (message.isConnected) request();
+			}
+			// Skip the render when nothing changed — each retry answers with
+			// the same empty state.
+			setState((prev) => (prev.key === '' && prev.reason === info.reason ? prev : { key: '', reason: info.reason }));
+			// Transient empty (no connection / probe failed) — retry with
+			// backoff until the budget runs out; a connection change refills it.
+			if (!settled && attempt < MAX_EMPTY_RETRIES) {
+				const delay = BASE_RETRY_MS * 2 ** attempt;
+				attempt += 1;
+				retryTimer = setTimeout(request, delay);
 			}
 		};
-		window.addEventListener('message', onHostMessage);
+
+		// Every connection change invalidates what we know: Stripe keys are
+		// server-specific, so a disconnect must drop the settled key (or the
+		// modal opens with the dead server's key). The mirror feed re-emits
+		// shell:statusChange in every realm, so this covers both the
+		// pre-connect mount and a server switch.
+		const offStatus = cm.on('shell:statusChange', () => {
+			if (disposed) return;
+			settled = false;
+			attempt = 0;
+			if (retryTimer) clearTimeout(retryTimer);
+			// The key AND the reason are unknown again — clear together.
+			setState({ key: '' });
+			if (cm.isConnected()) request();
+		});
+
 		request();
+
 		return () => {
-			window.removeEventListener('message', onHostMessage);
+			disposed = true;
+			offStatus();
 			if (retryTimer) clearTimeout(retryTimer);
 		};
 	}, [enabled]);

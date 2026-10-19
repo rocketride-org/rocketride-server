@@ -30,10 +30,10 @@
 // listening — a run is never blocked by, or aware of, recording.
 // =============================================================================
 
-import type { IHistoryEntry } from './types';
+import type { HistoryEntry } from './types';
 
 /** A run listener: called once per finished statement. */
-type RunListener = (endpointKey: string, entry: IHistoryEntry) => void;
+type RunListener = (endpointKey: string, entry: HistoryEntry) => void;
 
 const listeners = new Set<RunListener>();
 
@@ -46,7 +46,7 @@ const listeners = new Set<RunListener>();
  * @param endpointKey - The connection's stable endpoint key.
  * @param entry - The finished statement's record.
  */
-export function emitRun(endpointKey: string, entry: IHistoryEntry): void {
+export function emitRun(endpointKey: string, entry: HistoryEntry): void {
 	listeners.forEach((listener) => {
 		try {
 			listener(endpointKey, entry);

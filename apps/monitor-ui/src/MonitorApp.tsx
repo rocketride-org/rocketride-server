@@ -31,21 +31,20 @@
 // MonitorPage.tsx.
 // =============================================================================
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell';
-import { useShellConnection, useDashboardData, usePolling, AppLayout } from 'shell';
+import type { DevToolProps, ShellAppProps } from 'shell';
+import { ConnectionManager, useShellConnection, useDashboardData, usePolling, AppLayout, createToolChannel, createToolController, typedToolChannel, useConnectionReady, useToolState } from 'shell';
 import { commonStyles } from 'shell';
 import { MonitorView } from 'shell';
-import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse } from 'shell';
+import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse, MonitorPageId } from 'shell';
+import type { IDashboardSnapshot, MonitorOps, MonitorStateMap } from './ops';
+import { MonitorSidebar } from './MonitorSidebar';
+import type { MonitorPeerMessage } from './MonitorSidebar';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
-// (header + account footer) present with an empty middle slot.
-const SIDEBAR_FRAME_ONLY = <></>;
 
 /** Grid refresh cadence (ms) — matches the dashboard hook's 3s poll. */
 const GRID_POLL_INTERVAL_MS = 3000;
@@ -76,8 +75,23 @@ const styles = {
  * sort, filter, and search server-side, and this host polls their combined
  * refetch every 3 seconds (the admin views' grid pattern).
  */
-const MonitorApp: React.FC<ShellAppProps> = (_props) => {
-	const { client, isConnected } = useShellConnection();
+/** Props for {@link MonitorSurface} — host-controlled page selection. */
+export interface IMonitorSurfaceProps {
+	/** The active page (the host's sidebar menu drives it). */
+	page: MonitorPageId;
+}
+
+/**
+ * The monitor surface — dashboard + grids, no app chrome and NO tab strip
+ * (navigation moved to the sidebar menu, 2026-10-14). Shared by the full app
+ * (inside its AppLayout) and the devToolFrame mount, where a host workbench
+ * renders it directly. All data flows through the shell connection
+ * singleton, which the host has connected before mounting.
+ */
+export const MonitorSurface: React.FC<IMonitorSurfaceProps> = ({ page }) => {
+	const { isConnected } = useShellConnection();
+	// Engine access rides the SHELL BUS (brokered client.* ops).
+	const cm = ConnectionManager.getInstance();
 
 	// Shared 3s dashboard snapshot + activity feed (module-level singleton hook,
 	// so data survives view switches without re-fetching).
@@ -92,9 +106,9 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	const listConnections = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardConnection>> => {
 		// No client yet (shell still connecting): an empty page — the
 		// connection-gated poll refetches as soon as the shell comes up.
-		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return client.listConnections(req);
-	}, [client]);
+		if (!cm.isConnected()) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return cm.request('client.listConnections', req) as Promise<ListPageResponse<DashboardConnection>>;
+	}, [cm]);
 
 	/**
 	 * Paged tasks fetcher for the shared Tasks grid (REMOTE mode).
@@ -104,9 +118,9 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	 */
 	const listTasks = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
 		// Same shell-connecting guard as listConnections.
-		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return client.listTasks(req);
-	}, [client]);
+		if (!cm.isConnected()) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return cm.request('client.listTasks', req) as Promise<ListPageResponse<DashboardTask>>;
+	}, [cm]);
 
 	// Combined remote-grid refetch handed up by MonitorView; polled at the
 	// same 3s cadence as the dashboard snapshot so the current page of each
@@ -127,19 +141,107 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	// =========================================================================
 
 	return (
-		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
-			<div style={styles.container}>
-				<MonitorView
-					data={data}
-					events={events}
-					isConnected={isConnected}
-					onRefresh={refresh}
-					listConnections={listConnections}
-					listTasks={listTasks}
-					onRefetchReady={handleRefetchReady}
-				/>
-			</div>
+		<div style={styles.container}>
+			<MonitorView
+				data={data}
+				events={events}
+				isConnected={isConnected}
+				onRefresh={refresh}
+				listConnections={listConnections}
+				listTasks={listTasks}
+				onRefetchReady={handleRefetchReady}
+				activePage={page}
+				hideTabs
+			/>
+		</div>
+	);
+};
+
+/**
+ * Server Monitor app — the monitor surface inside the app chrome, with the
+ * page menu in the sidebar (replacing the old top tab strip) and the status
+ * bar below.
+ */
+const MonitorApp: React.FC<ShellAppProps> = (_props) => {
+	const [page, setPage] = useState<MonitorPageId>('overview');
+	return (
+		<AppLayout sidebar={<MonitorSidebar activeId={page} onSelect={setPage} />} showStatus>
+			<MonitorSurface page={page} />
 		</AppLayout>
+	);
+};
+
+// =============================================================================
+// DEV-TOOL FRAME — the surface in a host workbench, page-synced over peer
+// =============================================================================
+
+/**
+ * The monitor surface as a host-mounted devToolFrame: page selections arrive
+ * from the tool's sidebar mount over the peer channel (user actions only —
+ * the two mounts may be isolated documents), and this frame PUSHES its page
+ * on mount and on every change; the host retains the last push so a
+ * reloaded sidebar highlights correctly without asking.
+ */
+export const MonitorDevToolFrame: React.FC<DevToolProps> = ({ peer, channel }) => {
+	const [page, setPage] = useState<MonitorPageId>('overview');
+
+	// Apply sidebar selections.
+	useEffect(
+		() =>
+			peer.subscribe((message) => {
+				const msg = message as MonitorPeerMessage;
+				if (msg && msg.op === 'page') setPage(msg.page);
+			}),
+		[peer]
+	);
+
+	// Push the current page — on mount and on every change.
+	useEffect(() => {
+		peer.post({ op: 'page', page } satisfies MonitorPeerMessage);
+	}, [peer, page]);
+
+	// THIS FRAME HOLDS NO ROCKETRIDE CLIENT. The controller (the tool's
+	// sidebar mount) polls the dashboard on its own connection and publishes
+	// the snapshot as the retained 'dashboard' topic; the two remote grids
+	// page through correlated controller ops; enablement is the host's
+	// `host:connection` system topic.
+	const toolChannel = useMemo(() => typedToolChannel<MonitorStateMap>(channel ?? createToolChannel(peer)), [channel, peer]);
+	const ready = useConnectionReady(toolChannel);
+	const dash = useToolState(toolChannel, 'dashboard') ?? { data: null, events: [] };
+
+	const call = useMemo(() => createToolController<MonitorOps>(peer), [peer]);
+	const listConnections = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardConnection>> => {
+		if (!ready) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return call('monitor.listConnections', req);
+	}, [call, ready]);
+	const listTasks = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
+		if (!ready) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return call('monitor.listTasks', req);
+	}, [call, ready]);
+	const refresh = useCallback(() => {
+		void call('monitor.refresh', {}).catch(() => undefined);
+	}, [call]);
+
+	// Same silent 3s page re-request the in-app surface runs.
+	const refetchRef = useRef<() => void>(() => {});
+	const handleRefetchReady = useCallback((refetch: () => void) => { refetchRef.current = refetch; }, []);
+	const pollGrids = useCallback(() => { refetchRef.current(); }, []);
+	usePolling(pollGrids, GRID_POLL_INTERVAL_MS);
+
+	return (
+		<div style={styles.container}>
+			<MonitorView
+				data={dash.data}
+				events={dash.events}
+				isConnected={ready}
+				onRefresh={refresh}
+				listConnections={listConnections}
+				listTasks={listTasks}
+				onRefetchReady={handleRefetchReady}
+				activePage={page}
+				hideTabs
+			/>
+		</div>
 	);
 };
 

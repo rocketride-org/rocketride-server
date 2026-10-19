@@ -107,11 +107,13 @@ let _fetchPromise: Promise<void> | null = null;
  */
 function _fetchDashboard(): Promise<void> {
 	if (_fetchPromise) return _fetchPromise;
-	const client = getClient();
-	if (!client || !client.isConnected()) return Promise.resolve();
+	// Over the shell bus: in-process at the framework root, bridged in spoke
+	// realms (liveness answers from mirror-primed state there).
+	const cm = ConnectionManager.getInstance();
+	if (!cm.isConnected()) return Promise.resolve();
 	_fetchPromise = (async () => {
 		try {
-			const dashboard = await client.getDashboard();
+			const dashboard = await cm.request('client.getDashboard', {}) as Awaited<ReturnType<NonNullable<ReturnType<typeof getClient>>['getDashboard']>>;
 			if (dashboard?.overview) {
 				_data = dashboard;
 				_error = null;

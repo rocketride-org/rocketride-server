@@ -23,8 +23,17 @@
 // =============================================================================
 // ACCOUNT VIEW — thin shell wrapper around shared AccountView.
 //
-// Owns all DAP fetching, shell auth, and event wiring. Passes pure data
+// Owns all account/billing data fetching and event wiring; passes pure data
 // and async callbacks down to the host-agnostic AccountView.
+//
+// REALM-AGNOSTIC BY CONSTRUCTION: every engine call is a brokered bus op
+// (`request('client.account.*' / 'client.billing.*')`) and every gate is
+// `isConnected` — never the client object. At a framework root the request
+// resolves in-process against the real client; in a socketless webview
+// realm it rides the bridge to the root broker. Identity falls back from
+// ShellIdentityContext (cloud Shell) to the realm's mirrored account info,
+// and the workspace manifest is optional, so the SAME component renders in
+// the cloud overlay and in a VS Code page webview unchanged.
 // =============================================================================
 
 import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
@@ -34,7 +43,7 @@ import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberReco
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../hooks/useAuthUser';
 import { ConnectionManager } from '../connection/connection';
-import { useWorkspace } from '../components/workspace/WorkspaceContext';
+import { useOptionalWorkspace } from '../components/workspace/WorkspaceContext';
 
 // =============================================================================
 // STYLES
@@ -49,21 +58,36 @@ const accountStyles = {
 };
 
 // =============================================================================
+// BUS FACADE
+// =============================================================================
+
+/** Typed request against the brokered client surface — works in any realm. */
+const req = <T,>(op: string, params?: unknown): Promise<T> => ConnectionManager.getInstance().request(op, params ?? {}) as Promise<T>;
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
+/** Optional host wiring. */
+export interface IAccountProviderProps {
+	/** Starts a subscription flow (e.g. emit shell:subscribe toward a mounted
+	 *  CheckoutFlow). Absent = no subscribe CTA, matching prior behavior. */
+	onSubscribe?: () => void;
+}
+
 /**
- * Cloud-UI AccountView wrapper.
+ * AccountView wrapper for any framework realm.
  *
- * Fetches account data via DAP commands (`rrext_account_*`) and delegates
- * all rendering to the shared AccountView. Listens for `shell:accountUpdate`
- * bus events to keep the profile in sync with server-pushed updates.
+ * Fetches account data via brokered `client.account.*` / `client.billing.*`
+ * bus ops and delegates all rendering to the shared AccountView. Listens for
+ * `shell:accountUpdate` events to keep the profile in sync with
+ * server-pushed updates (socket-fed at a root; mirror-fed in a spoke realm).
  */
-const AccountProvider: React.FC = () => {
-	const { client, isConnected } = useShellConnection();
-	const authUser = useAuthUser();
+const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe }) => {
+	const { isConnected } = useShellConnection();
+	const ctxUser = useAuthUser();
 	const logout = useLogout();
-	const { appManifest } = useWorkspace();
+	const appManifest = useOptionalWorkspace()?.appManifest ?? [];
 
 	// ── Navigation state ────────────────────────────────────────────────────
 	const [section, setSection] = useState<AccountSection>('profile');
@@ -76,6 +100,11 @@ const AccountProvider: React.FC = () => {
 	const [members, setMembers] = useState<MemberRecord[]>([]);
 	const [teams, setTeams] = useState<TeamRecord[]>([]);
 	const [teamDetail, setTeamDetail] = useState<TeamDetail | null>(null);
+
+	// Identity: the cloud Shell injects it via context; a page realm has no
+	// Shell in its tree, so fall back to the mirrored/cached account info.
+	const [mirrorUser, setMirrorUser] = useState<ConnectResult | null>(() => ConnectionManager.getInstance().getAccountInfo() ?? null);
+	const authUser = ctxUser ?? mirrorUser;
 
 	// ── Billing data ────────────────────────────────────────────────────────
 	const [subscriptions, setSubscriptions] = useState<BillingDetail[]>([]);
@@ -97,6 +126,7 @@ const AccountProvider: React.FC = () => {
 		() =>
 			ConnectionManager.getInstance().on('shell:accountUpdate', (data) => {
 				setProfile(data);
+				setMirrorUser(data);
 				setReloadCounter((n) => n + 1);
 			}),
 		[]
@@ -116,58 +146,58 @@ const AccountProvider: React.FC = () => {
 
 	/** Fetches the current user's profile from the server. */
 	const loadProfile = useCallback(async () => {
-		if (!client) return;
+		if (!isConnected) return;
 		try {
-			const body = await client.account.getProfile();
+			const body = await req<ConnectResult>('client.account.getProfile');
 			setProfile(body);
 		} catch (e) {
 			setSectionError(errMsg(e));
 		}
-	}, [client]);
+	}, [isConnected]);
 
 	/** Fetches the list of API keys owned by the current user. */
 	const loadKeys = useCallback(async () => {
-		if (!client) return;
+		if (!isConnected) return;
 		try {
-			const keys = await client.account.listKeys();
+			const keys = await req<ApiKeyRecord[]>('client.account.listKeys');
 			setKeys(keys);
 		} catch (e) {
 			setSectionError(errMsg(e));
 		}
-	}, [client]);
+	}, [isConnected]);
 
 	/** Fetches the organization detail. */
 	const loadOrg = useCallback(async () => {
-		if (!client || !orgId) return;
+		if (!isConnected || !orgId) return;
 		try {
-			const body = await client.account.getOrg(orgId);
+			const body = await req<OrgDetail>('client.account.getOrg', { orgId });
 			setOrg(body);
 		} catch (e) {
 			setSectionError(errMsg(e));
 		}
-	}, [client, orgId]);
+	}, [isConnected, orgId]);
 
 	/** Fetches the flat list of organization members. */
 	const loadMembers = useCallback(async () => {
-		if (!client || !orgId) return;
+		if (!isConnected || !orgId) return;
 		try {
-			const members = await client.account.listMembers(orgId);
+			const members = await req<MemberRecord[]>('client.account.listMembers', { orgId });
 			setMembers(members);
 		} catch (e) {
 			setSectionError(errMsg(e));
 		}
-	}, [client, orgId]);
+	}, [isConnected, orgId]);
 
 	/** Fetches the flat list of teams in the organization. */
 	const loadTeams = useCallback(async () => {
-		if (!client || !orgId) return;
+		if (!isConnected || !orgId) return;
 		try {
-			const teams = await client.account.listTeams(orgId);
+			const teams = await req<TeamRecord[]>('client.account.listTeams', { orgId });
 			setTeams(teams);
 		} catch (e) {
 			setSectionError(errMsg(e));
 		}
-	}, [client, orgId]);
+	}, [isConnected, orgId]);
 
 	/**
 	 * Fetches full detail (including member list) for a specific team.
@@ -175,38 +205,37 @@ const AccountProvider: React.FC = () => {
 	 */
 	const loadTeamDetail = useCallback(
 		async (teamId: string) => {
-			if (!client || !orgId) return;
+			if (!isConnected || !orgId) return;
 			try {
-				const body = await client.account.getTeamDetail(orgId, teamId);
+				const body = await req<TeamDetail>('client.account.getTeamDetail', { orgId, teamId });
 				setTeamDetail(body);
 			} catch (e) {
 				setSectionError(errMsg(e));
 			}
 		},
-		[client, orgId]
+		[isConnected, orgId]
 	);
 
 	// ── Load billing data ───────────────────────────────────────────────────
 
-	/** Fetches subscriptions, credit balance, and credit packs in parallel. */
 	/** Fetches all billing data in one shot: subscriptions, balance, plans, transactions, usage. */
 	const loadBilling = useCallback(async () => {
-		if (!client || !isConnected || !orgId) {
+		if (!isConnected || !orgId) {
 			setBillingLoading(false);
 			return;
 		}
 		setBillingError(null);
 		try {
 			const [subs, balance, plans, tx, byUser, byTeam] = await Promise.all([
-				client.billing.getDetails(orgId).catch((err: any) => {
+				req<BillingDetail[]>('client.billing.getDetails', { orgId }).catch((err: any) => {
 					setBillingError(err.message ?? 'Failed to load subscriptions');
 					return [] as BillingDetail[];
 				}),
-				client.billing.getCreditBalance(orgId).catch(() => null),
-				client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => []),
-				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
-				client.billing.getUsageByUser(orgId).catch(() => [] as UsageRollup[]),
-				client.billing.getUsageByTeam(orgId).catch(() => [] as UsageRollup[]),
+				req<CreditBalance | null>('client.billing.getCreditBalance', { orgId }).catch(() => null),
+				req<any[]>('client.billing.getProductPrices', { appId: 'rocketride.pipeBuilder' }).catch(() => []),
+				req<TransactionsResult | null>('client.billing.getTransactions', { orgId, options: { page: 1, pageSize: 20 } }).catch(() => null),
+				req<UsageRollup[]>('client.billing.getUsageByUser', { orgId }).catch(() => [] as UsageRollup[]),
+				req<UsageRollup[]>('client.billing.getUsageByTeam', { orgId }).catch(() => [] as UsageRollup[]),
 			]);
 			setSubscriptions(subs);
 			setCreditBalance(balance);
@@ -218,18 +247,18 @@ const AccountProvider: React.FC = () => {
 			setBillingLoading(false);
 			setDashboardLoading(false);
 		}
-	}, [client, isConnected, orgId]);
+	}, [isConnected, orgId]);
 
 	/** Fetches just the transactions page (legacy pagination callback). */
 	const handleTransactionPage = useCallback(
 		async (page: number) => {
-			if (!client || !orgId) return;
-			const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
+			if (!isConnected || !orgId) return;
+			const tx = await req<TransactionsResult | null>('client.billing.getTransactions', { orgId, options: { page, pageSize: 20 } }).catch(() => null);
 			if (tx) {
 				setTransactions(tx);
 			}
 		},
-		[client, orgId]
+		[isConnected, orgId]
 	);
 
 	/**
@@ -240,19 +269,20 @@ const AccountProvider: React.FC = () => {
 	 * failure resolves null and the grid keeps its prior rows.
 	 */
 	const fetchTransactions = useCallback(
-		async (req: IDataGridPageRequest): Promise<TransactionsResult | null> => {
-			if (!client || !orgId) return null;
-			return client.billing
-				.getTransactions(orgId, {
-					page: req.page,
-					pageSize: req.size,
-					sort: req.sort,
-					filters: req.filters,
-					search: req.search,
-				})
-				.catch(() => null);
+		async (reqst: IDataGridPageRequest): Promise<TransactionsResult | null> => {
+			if (!isConnected || !orgId) return null;
+			return req<TransactionsResult>('client.billing.getTransactions', {
+				orgId,
+				options: {
+					page: reqst.page,
+					pageSize: reqst.size,
+					sort: reqst.sort,
+					filters: reqst.filters,
+					search: reqst.search,
+				},
+			}).catch(() => null);
 		},
-		[client, orgId]
+		[isConnected, orgId]
 	);
 
 	/**
@@ -261,53 +291,54 @@ const AccountProvider: React.FC = () => {
 	 */
 	const fetchTransactionDistinct = useCallback(
 		async (field: string): Promise<(string | number | boolean)[]> => {
-			if (!client || !orgId) return [];
-			return client.billing.getTransactionDistinct(orgId, field).catch(() => []);
+			if (!isConnected || !orgId) return [];
+			return req<(string | number | boolean)[]>('client.billing.getTransactionDistinct', { orgId, field }).catch(() => []);
 		},
-		[client, orgId]
+		[isConnected, orgId]
 	);
 
 	/** Purchase a top-up pack by charging the card on file. */
 	const handlePurchaseTopup = useCallback(
 		async (plan: any) => {
-			if (!client || !orgId) throw new Error('Not connected');
-			const result = await client.billing.purchaseTopup(orgId, plan.stripePriceId);
+			if (!isConnected || !orgId) throw new Error('Not connected');
+			const result = await req<{ status: string; clientSecret?: string }>('client.billing.purchaseTopup', { orgId, priceId: plan.stripePriceId });
 			if (result.status === 'succeeded') {
 				// Re-fetch billing data to reflect the new balance
 				loadBilling();
 			}
 			return result;
 		},
-		[client, orgId, loadBilling]
+		[isConnected, orgId, loadBilling]
 	);
 
 	/** Upgrade or downgrade an existing subscription to a new plan. */
 	const handleUpgradeSubscription = useCallback(
 		async (appId: string, newPriceId: string) => {
-			if (!client || !orgId) throw new Error('Not connected');
-			await client.billing.upgradeSubscription(orgId, appId, newPriceId);
+			if (!isConnected || !orgId) throw new Error('Not connected');
+			await req('client.billing.upgradeSubscription', { orgId, appId, newPriceId });
 			// Re-fetch billing data to reflect the updated subscription
 			loadBilling();
 		},
-		[client, orgId, loadBilling]
+		[isConnected, orgId, loadBilling]
 	);
 
 	// ── Load ALL data upfront on connect (badges, counts, billing) ──────────
 	useEffect(() => {
-		if (!isConnected || !client) return;
+		if (!isConnected) return;
 		loadProfile();
 		loadKeys();
 		loadOrg();
 		loadMembers();
 		loadTeams();
 		loadBilling();
-	}, [isConnected, client]);
+	}, [isConnected, orgId]);
 
 	// ── Subscribe to billing events when billing tab is active ──────────────
 	useEffect(() => {
-		if (!client || !isConnected || section !== 'billing') return;
-		// Subscribe to billing ledger events via the wildcard monitor
-		client.addMonitor({ token: '*' }, ['billing']).catch(() => {});
+		if (!isConnected || section !== 'billing') return;
+		// Subscribe to billing ledger events via the wildcard monitor (the
+		// root broker refcounts across realms; only edges reach the engine).
+		req('client.addMonitor', { key: { token: '*' }, types: ['billing'] }).catch(() => {});
 		// Listen for billing update events via ConnectionManager and re-fetch
 		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }: any) => {
 			if (event?.event === 'apaext_billing_update') {
@@ -315,14 +346,14 @@ const AccountProvider: React.FC = () => {
 			}
 		});
 		return () => {
-			client.removeMonitor({ token: '*' }, ['billing']).catch(() => {});
+			req('client.removeMonitor', { key: { token: '*' }, types: ['billing'] }).catch(() => {});
 			unsub();
 		};
-	}, [section, client, isConnected]);
+	}, [section, isConnected]);
 
 	// ── Reload current section on refresh signal ─────────────────────────────
 	useEffect(() => {
-		if (!reloadCounter || !isConnected || !client) return;
+		if (!reloadCounter || !isConnected) return;
 		setSectionError(null);
 		if (section === 'profile') loadProfile();
 		else if (section === 'billing') loadBilling();
@@ -348,162 +379,162 @@ const AccountProvider: React.FC = () => {
 
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
-	/** Persists updated profile fields via the SDK. */
+	/** Persists updated profile fields. */
 	const handleSaveProfile = useCallback(
 		async (fields: ProfileUpdate) => {
-			if (!client) return;
-			await client.account.updateProfile(fields);
+			if (!isConnected) return;
+			await req('client.account.updateProfile', { fields });
 			// Server pushes an updated ConnectResult via shell:accountUpdate
 		},
-		[client]
+		[isConnected]
 	);
 
 	/** Sets the user's dev team (dev-run billing + env layer). */
 	const handleSetDevTeam = useCallback(
 		async (teamId: string) => {
-			if (!client) return;
-			await client.account.setDevTeam(teamId);
+			if (!isConnected) return;
+			await req('client.account.setDevTeam', { teamId });
 		},
-		[client]
+		[isConnected]
 	);
 
 	/** Switches the user's active organization. */
 	const handleSetDefaultOrg = useCallback(
 		async (orgId: string) => {
-			if (!client) return;
-			await client.account.setDefaultOrg(orgId);
+			if (!isConnected) return;
+			await req('client.account.setDefaultOrg', { orgId });
 		},
-		[client]
+		[isConnected]
 	);
 
 	/** Deletes the user account. */
 	const handleDeleteAccount = useCallback(async () => {
-		if (!client) return;
-		await client.account.deleteAccount();
-	}, [client]);
+		if (!isConnected) return;
+		await req('client.account.deleteAccount');
+	}, [isConnected]);
 
 	/** Persists an updated organization name. */
 	const handleSaveOrgName = useCallback(
 		async (name: string) => {
-			if (!client || !orgId) return;
-			await client.account.updateOrgName(orgId, name);
+			if (!isConnected || !orgId) return;
+			await req('client.account.updateOrgName', { orgId, name });
 			// Optimistically update the in-memory org record
 			setOrg((c) => (c ? { ...c, name } : c));
 		},
-		[client, orgId]
+		[isConnected, orgId]
 	);
 
 	/** Creates a new API key and returns the raw key string. */
 	const handleCreateKey = useCallback(
 		async (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => {
-			if (!client) throw new Error('Not connected');
+			if (!isConnected) throw new Error('Not connected');
 			// Forward the full params (incl. teamId) so a team-scoped key is created
 			// team-scoped rather than silently falling back to org-wide.
-			const { key } = await client.account.createKey(params);
+			const { key } = await req<{ key: string }>('client.account.createKey', { params });
 			await loadKeys();
 			return { key };
 		},
-		[client, loadKeys]
+		[isConnected, loadKeys]
 	);
 
 	/** Revokes an API key by ID. */
 	const handleRevokeKey = useCallback(
 		async (keyId: string) => {
-			if (!client) return;
-			await client.account.revokeKey(keyId);
+			if (!isConnected) return;
+			await req('client.account.revokeKey', { keyId });
 			await loadKeys();
 		},
-		[client, loadKeys]
+		[isConnected, loadKeys]
 	);
 
 	/** Sends an invitation to a new organization member. */
 	const handleInviteMember = useCallback(
 		async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => {
-			if (!client || !orgId) return;
-			await client.account.inviteMember(orgId, params);
+			if (!isConnected || !orgId) return;
+			await req('client.account.inviteMember', { orgId, params });
 			await loadMembers();
 		},
-		[client, orgId, loadMembers]
+		[isConnected, orgId, loadMembers]
 	);
 
 	/** Updates an organization member's role. */
 	const handleUpdateMemberRole = useCallback(
 		async (userId: string, role: string) => {
-			if (!client || !orgId) return;
-			await client.account.updateMemberRole(orgId, userId, role);
+			if (!isConnected || !orgId) return;
+			await req('client.account.updateMemberRole', { orgId, userId, role });
 			await loadMembers();
 		},
-		[client, orgId, loadMembers]
+		[isConnected, orgId, loadMembers]
 	);
 
 	/** Removes an organization member. */
 	const handleRemoveMember = useCallback(
 		async (userId: string) => {
-			if (!client || !orgId) return;
-			await client.account.removeMember(orgId, userId);
+			if (!isConnected || !orgId) return;
+			await req('client.account.removeMember', { orgId, userId });
 			await loadMembers();
 		},
-		[client, orgId, loadMembers]
+		[isConnected, orgId, loadMembers]
 	);
 
 	/** Resends the initialization email for a pending member. */
 	const handleResendInvite = useCallback(
 		async (userId: string) => {
-			if (!client || !orgId) return;
-			await client.account.resendInvite(orgId, userId);
+			if (!isConnected || !orgId) return;
+			await req('client.account.resendInvite', { orgId, userId });
 		},
-		[client, orgId]
+		[isConnected, orgId]
 	);
 
 	/** Creates a new team. */
 	const handleCreateTeam = useCallback(
 		async (name: string) => {
-			if (!client || !orgId) return;
-			await client.account.createTeam(orgId, name);
+			if (!isConnected || !orgId) return;
+			await req('client.account.createTeam', { orgId, name });
 			await loadTeams();
 		},
-		[client, orgId, loadTeams]
+		[isConnected, orgId, loadTeams]
 	);
 
 	/** Deletes a team. */
 	const handleDeleteTeam = useCallback(
 		async (teamId: string) => {
-			if (!client || !orgId) return;
-			await client.account.deleteTeam(orgId, teamId);
+			if (!isConnected || !orgId) return;
+			await req('client.account.deleteTeam', { orgId, teamId });
 			setActiveTeamId(null);
 			await loadTeams();
 		},
-		[client, orgId, loadTeams]
+		[isConnected, orgId, loadTeams]
 	);
 
 	/** Adds a member to a team with specified permissions. */
 	const handleAddTeamMember = useCallback(
 		async (params: { teamId: string; userId: string; permissions: string[] }) => {
-			if (!client || !orgId) return;
-			await client.account.addTeamMember(orgId, params);
+			if (!isConnected || !orgId) return;
+			await req('client.account.addTeamMember', { orgId, params });
 			await loadTeamDetail(params.teamId);
 		},
-		[client, orgId, loadTeamDetail]
+		[isConnected, orgId, loadTeamDetail]
 	);
 
 	/** Updates a team member's permissions. */
 	const handleEditTeamMemberPerms = useCallback(
 		async (params: { teamId: string; userId: string; permissions: string[] }) => {
-			if (!client || !orgId) return;
-			await client.account.updateTeamMemberPerms(orgId, params);
+			if (!isConnected || !orgId) return;
+			await req('client.account.updateTeamMemberPerms', { orgId, params });
 			await loadTeamDetail(params.teamId);
 		},
-		[client, orgId, loadTeamDetail]
+		[isConnected, orgId, loadTeamDetail]
 	);
 
 	/** Removes a member from a team. */
 	const handleRemoveTeamMember = useCallback(
 		async (params: { teamId: string; userId: string }) => {
-			if (!client || !orgId) return;
-			await client.account.removeTeamMember(orgId, params);
+			if (!isConnected || !orgId) return;
+			await req('client.account.removeTeamMember', { orgId, params });
 			await loadTeamDetail(params.teamId);
 		},
-		[client, orgId, loadTeamDetail]
+		[isConnected, orgId, loadTeamDetail]
 	);
 
 	/** Requests loading of full detail for a specific team. */
@@ -523,21 +554,22 @@ const AccountProvider: React.FC = () => {
 	 */
 	const handleCancelSubscription = useCallback(
 		async (appId: string) => {
-			if (!client || !orgId) return;
-			await client.billing.cancelSubscription(orgId, appId);
-			const updated = await client.billing.getDetails(orgId);
+			if (!isConnected || !orgId) return;
+			await req('client.billing.cancelSubscription', { orgId, appId });
+			const updated = await req<BillingDetail[]>('client.billing.getDetails', { orgId });
 			setSubscriptions(updated);
 		},
-		[client, orgId]
+		[isConnected, orgId]
 	);
 
-	/** Opens the Stripe customer portal for payment method management. */
+	/** Opens the Stripe customer portal for payment method management.
+	 *  The return URL is HOST POLICY (the broker fills it in), and the open
+	 *  itself is a host op — a webview realm cannot reach the real browser. */
 	const handleOpenPortal = useCallback(async () => {
-		if (!client || !orgId) return;
-		const returnUrl = `${window.location.origin}${window.location.pathname}`;
-		const { url } = await client.billing.createPortalSession(orgId, returnUrl);
-		window.open(url, '_blank', 'noopener');
-	}, [client, orgId]);
+		if (!isConnected || !orgId) return;
+		const { url } = await req<{ url: string }>('client.billing.createPortalSession', { orgId });
+		await req('host.openExternal', { url });
+	}, [isConnected, orgId]);
 
 	// ── Render ──────────────────────────────────────────────────────────────
 	return (
@@ -559,6 +591,7 @@ const AccountProvider: React.FC = () => {
 				apps={appManifest}
 				onCancelSubscription={handleCancelSubscription}
 				onOpenPortal={handleOpenPortal}
+				onSubscribe={onSubscribe}
 				transactions={transactions}
 				usageByUser={usageByUser}
 				usageByTeam={usageByTeam}

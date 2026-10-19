@@ -339,17 +339,6 @@ export class AgentManager {
 		await vscode.workspace.fs.writeFile(gitignoreUri, Buffer.from(newContent, 'utf8'));
 	}
 
-	/**
-	 * Detect which coding agents have configuration directories in the workspace.
-	 * Returns the matching installers.
-	 */
-	/**
-	 * Get the list of all supported agent names.
-	 */
-	get supportedAgents(): string[] {
-		return this.installers.map((i) => i.name);
-	}
-
 	private async runInstaller(installer: BaseAgentInstaller, workspaceRoot: vscode.Uri): Promise<boolean> {
 		const logger = getLogger();
 		try {

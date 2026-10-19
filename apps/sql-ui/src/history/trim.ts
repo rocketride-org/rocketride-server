@@ -32,14 +32,14 @@
 // Entry order is NEWEST FIRST throughout this module.
 // =============================================================================
 
-import type { IHistoryEntry } from './types';
+import type { HistoryEntry } from './types';
 
 // =============================================================================
 // LIMITS
 // =============================================================================
 
 /** The per-connection bounds applied before every persist. */
-export interface IHistoryLimits {
+export interface HistoryLimits {
 	/** Entries kept per connection, PINNED ENTRIES INCLUDED. */
 	maxEntries: number;
 	/** Longest statement text kept; longer text is cut and marked. */
@@ -49,7 +49,7 @@ export interface IHistoryLimits {
 }
 
 /** The approved bounds (08-approved-scope.md). */
-export const DEFAULT_HISTORY_LIMITS: IHistoryLimits = {
+export const DEFAULT_HISTORY_LIMITS: HistoryLimits = {
 	maxEntries: 100,
 	maxSqlChars: 8 * 1024,
 	maxErrorChars: 1024,
@@ -69,7 +69,7 @@ export const MAX_HISTORY_BAG_CHARS = 256 * 1024;
  * @param b - The older entry.
  * @returns True when the statements are identical.
  */
-function sameStatement(a: IHistoryEntry, b: IHistoryEntry): boolean {
+function sameStatement(a: HistoryEntry, b: HistoryEntry): boolean {
 	return a.sql === b.sql;
 }
 
@@ -85,8 +85,8 @@ function sameStatement(a: IHistoryEntry, b: IHistoryEntry): boolean {
  * @param older - The older entry it repeats.
  * @returns The merged entry.
  */
-function collapse(newer: IHistoryEntry, older: IHistoryEntry): IHistoryEntry {
-	const merged: IHistoryEntry = {
+function collapse(newer: HistoryEntry, older: HistoryEntry): HistoryEntry {
+	const merged: HistoryEntry = {
 		...older,
 		at: newer.at,
 		ms: newer.ms,
@@ -97,7 +97,7 @@ function collapse(newer: IHistoryEntry, older: IHistoryEntry): IHistoryEntry {
 	// Run facts are replaced wholesale, so a success after a failure does not
 	// keep the stale error (and vice versa). The row limit is one of them: a
 	// row count carried over from a run under a different limit would describe
-	// the merged entry wrongly in exactly the way IHistoryEntry.limit exists
+	// the merged entry wrongly in exactly the way HistoryEntry.limit exists
 	// to prevent.
 	delete merged.rows;
 	delete merged.affected;
@@ -123,12 +123,12 @@ function collapse(newer: IHistoryEntry, older: IHistoryEntry): IHistoryEntry {
  * @param limits - The bounds to apply.
  * @returns The bounded entry (the same object when nothing was over).
  */
-function boundEntry(entry: IHistoryEntry, limits: IHistoryLimits): IHistoryEntry {
+function boundEntry(entry: HistoryEntry, limits: HistoryLimits): HistoryEntry {
 	const sqlOver = entry.sql.length > limits.maxSqlChars;
 	const errorOver = (entry.error?.length ?? 0) > limits.maxErrorChars;
 	if (!sqlOver && !errorOver) return entry;
 
-	const bounded: IHistoryEntry = { ...entry };
+	const bounded: HistoryEntry = { ...entry };
 	if (sqlOver) {
 		bounded.sql = entry.sql.slice(0, limits.maxSqlChars);
 		bounded.truncated = true;
@@ -149,7 +149,7 @@ function boundEntry(entry: IHistoryEntry, limits: IHistoryLimits): IHistoryEntry
  *     is never collapsed at all (see the step itself);
  *  2. bound each entry's statement and error text — a single huge statement
  *     must not be able to consume the whole budget;
- *  3. cap the count at {@link IHistoryLimits.maxEntries}, PINS INCLUDED,
+ *  3. cap the count at {@link HistoryLimits.maxEntries}, PINS INCLUDED,
  *     dropping unpinned entries oldest-first and only then pinned ones. A pin
  *     buys priority, not immunity: an unbounded pinned list is the same
  *     problem under a nicer name.
@@ -159,9 +159,9 @@ function boundEntry(entry: IHistoryEntry, limits: IHistoryLimits): IHistoryEntry
  * @returns A new, bounded array (newest first).
  */
 export function trimHistory(
-	entries: IHistoryEntry[],
-	limits: IHistoryLimits = DEFAULT_HISTORY_LIMITS,
-): IHistoryEntry[] {
+	entries: HistoryEntry[],
+	limits: HistoryLimits = DEFAULT_HISTORY_LIMITS,
+): HistoryEntry[] {
 	// ── 1. Collapse consecutive repeats, on the UNTRUNCATED text ─────────────
 	//
 	// Only entries whose text is COMPLETE may be collapsed. Truncation happens
@@ -173,7 +173,7 @@ export function trimHistory(
 	// time the app is opened. A prefix cannot prove sameness, so a truncated
 	// entry is never merged: keeping a duplicate row costs one line, losing a
 	// distinct statement costs the user their history.
-	const deduped: IHistoryEntry[] = [];
+	const deduped: HistoryEntry[] = [];
 	for (const entry of entries) {
 		const previous = deduped[deduped.length - 1];
 		if (previous && !previous.truncated && !entry.truncated && sameStatement(previous, entry)) {
@@ -213,7 +213,7 @@ export function trimHistory(
 // =============================================================================
 
 /** History for every connection, keyed by endpoint key. */
-export type HistoryBag = Record<string, IHistoryEntry[]>;
+export type HistoryBag = Record<string, HistoryEntry[]>;
 
 /**
  * Serialised size of the bag, in characters of JSON — the same measure the
@@ -251,7 +251,7 @@ export function trimBag(bag: HistoryBag, maxChars: number = MAX_HISTORY_BAG_CHAR
 
 		for (const [key, entries] of Object.entries(next)) {
 			for (let i = 0; i < entries.length; i += 1) {
-				const entry = entries[i] as IHistoryEntry;
+				const entry = entries[i] as HistoryEntry;
 				const pinned = !!entry.pinned;
 				// An unpinned candidate always beats a pinned one; among equals,
 				// the older `at` wins.
@@ -267,8 +267,8 @@ export function trimBag(bag: HistoryBag, maxChars: number = MAX_HISTORY_BAG_CHAR
 
 		// Nothing left to drop — return what we have rather than spin.
 		if (victimKey === null || victimIndex < 0) break;
-		(next[victimKey] as IHistoryEntry[]).splice(victimIndex, 1);
-		if ((next[victimKey] as IHistoryEntry[]).length === 0) delete next[victimKey];
+		(next[victimKey] as HistoryEntry[]).splice(victimIndex, 1);
+		if ((next[victimKey] as HistoryEntry[]).length === 0) delete next[victimKey];
 	}
 
 	return next;

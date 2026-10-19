@@ -57,6 +57,11 @@ export function generatePkce(): PkceChallenge {
 /**
  * Build the Zitadel authorization URL for the PKCE flow.
  *
+ * NOTE: a line-for-line twin of shell/src/util/pkce.ts buildAuthUrl — a
+ * shared single home is blocked on that module's DOM types (sessionStorage
+ * in its browser-flow helpers fails the ext-host compile); unifying needs a
+ * pure-leaf split inside packages/shell first.
+ *
  * @param zitadelUrl  - Zitadel base URL (e.g. https://auth.rocketride.ai)
  * @param clientId    - Zitadel application client ID
  * @param redirectUri - Where Zitadel redirects after auth (vscode:// URI)

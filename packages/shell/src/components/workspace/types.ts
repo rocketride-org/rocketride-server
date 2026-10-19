@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 import type { ConnectResult } from 'rocketride';
+import type { ToolChannel } from './toolChannel';
 
 // =============================================================================
 // SHELL COMPONENT PROP CONTRACTS
@@ -231,6 +232,13 @@ export interface AppManifestEntry {
 	 * a deployed pin's appVersion. Absent when the server sent none.
 	 */
 	version?: string;
+	/**
+	 * Registry version number the entry resolves to (the scope-walk winner) —
+	 * present for published store apps; absent for built-ins and dev overlays.
+	 * The desktop's version drop list matches on this (the wire identity),
+	 * never the display semver.
+	 */
+	registryVersion?: number;
 	/** True when the entry is a dev-overlay override (live watch build). */
 	dev?: boolean;
 	/**
@@ -302,6 +310,105 @@ export interface AppDescriptor {
 	components?: {
 		[key: string]: React.ComponentType<any> | undefined;
 	};
+	/**
+	 * Dev-tool main surface — mounted DIRECTLY by a host workbench (the VS
+	 * Code extension's tool panel, rocket-ui's tool document) instead of
+	 * booting the full `app`. Declared by apps carrying the `devTool`
+	 * manifest category. Must style exclusively via `var(--rr-*)` tokens —
+	 * theming is the ambient CSS custom properties of the mounting document.
+	 */
+	devToolFrame?: React.ComponentType<DevToolProps>;
+	/**
+	 * Dev-tool sidebar — the tool's CONTROLLER, mounted by the host workbench
+	 * in ITS sidebar (behind the tool's tab) while `devToolFrame` runs in the
+	 * main surface. The two mounts may live in isolated documents (VS Code
+	 * webviews). The controller realm owns the tool's single engine
+	 * connection; frames hold none — every frame↔engine interaction is a
+	 * correlated operation to the controller over the tool channel, and
+	 * ephemeral UI coordination rides `peer`.
+	 */
+	devToolSidebar?: React.ComponentType<DevToolProps>;
+}
+
+// =============================================================================
+// DEV TOOL CONTRACT — host-mounted tool components
+// =============================================================================
+
+/**
+ * Props every dev-tool component receives from its host workbench.
+ *
+ * NO client member: dev-tool mounts never receive an engine connection.
+ * The tool's sidebar CONTROLLER realm owns one (established by that realm
+ * itself, not through these props), and frames reach the engine solely via
+ * correlated operations over the tool channel (tools/core opCall).
+ *
+ * No theme member: tools are themed by the ambient `--rr-*` CSS custom
+ * properties of the document they mount into (the shell's active theme
+ * in-browser; the VS Code webview's editor-variable mapping in the editor).
+ */
+export interface DevToolProps {
+	/**
+	 * Ephemeral coordination channel to this tool's OTHER mount (frame ↔
+	 * sidebar). Message payloads are opaque to the host. In-shell hosts relay
+	 * in-memory; the VS Code extension relays across its webviews.
+	 */
+	peer: {
+		/**
+		 * Send a message to the other mount (buffered briefly while it opens).
+		 *
+		 * Direction discipline: a sidebar mount posts ONLY in response to a
+		 * user action (a post to a closed frame summons it — a tree click is
+		 * an implicit "open the tool"); the frame PUSHES its state whenever
+		 * it changes, and the host retains the last frame→sidebar message so
+		 * a (re)mounted sidebar renders without asking. Mount-time handshakes
+		 * from the sidebar side are a bug: every pinned tool's sidebar mount
+		 * boots with the host sidebar, and an ask-on-mount would summon every
+		 * tool's frame.
+		 */
+		post(message: unknown): void;
+		/** Subscribe to messages from the other mount; returns unsubscribe. */
+		subscribe(cb: (message: unknown) => void): () => void;
+	};
+	/**
+	 * Host documents — present on hosts that give one tool MULTIPLE top-level
+	 * documents (e.g. one tab per database connection). `open` opens or
+	 * focuses the tool document for `docKey` with the given tab title,
+	 * mounting `devToolFrame` with that key in {@link DevToolProps.docKey};
+	 * `close` closes it. Hosts without the capability omit the member — the
+	 * tool falls back to its single-frame behavior (peer summon).
+	 */
+	documents?: {
+		/** Opens (or focuses) the tool document for one key. */
+		open(docKey: string, title: string): void;
+		/** Closes the tool document for one key (open elsewhere = no-op). */
+		close(docKey: string): void;
+	};
+	/**
+	 * The document key this FRAME mount serves — set when the host opened it
+	 * through `documents.open`. Absent on sidebar mounts and on a tool's
+	 * single/default frame.
+	 */
+	docKey?: string;
+	/**
+	 * For SIDEBAR mounts on hosts with `documents`: the key of this tool's
+	 * document currently fronted in the host's editor area, or null when the
+	 * active editor is NOT one of this tool's documents (another tool, a
+	 * text file). Hosts keep it live across tab switches, so a sidebar can
+	 * follow the selection — highlight the fronted document's row, clear
+	 * highlight and dependent panels on null. Omitted (undefined) by hosts
+	 * that cannot tell and on frame mounts; a sidebar then falls back to its
+	 * own signals (e.g. frame pushes over `peer`).
+	 */
+	activeDocKey?: string | null;
+	/**
+	 * The typed state/event channel between this tool's controller (the
+	 * sidebar mount) and its document views — the PREFERRED surface over the
+	 * raw `peer`: state snapshots are retained per topic (late subscribers
+	 * replay), events are buffered, and a state publish never summons a
+	 * window. Rides the same transport as `peer`; both work side by side
+	 * while tools migrate. See `createToolChannel` / ToolChannel.
+	 */
+	channel?: ToolChannel;
 }
 
 // =============================================================================
