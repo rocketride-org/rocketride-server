@@ -93,6 +93,7 @@ def _build_stubs() -> dict:
 
     mod_utils = types.ModuleType('ai.common.utils')
     mod_utils.safe_str = str
+    mod_utils.error_text = str
 
     return {
         'rocketlib': mod_rocketlib,

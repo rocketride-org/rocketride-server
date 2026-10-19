@@ -241,15 +241,15 @@ def _planning_fails_with(wave, driver, monkeypatch, failure):
 
 
 def test_an_engine_error_in_planning_keeps_the_path_out_of_answer_and_trace(wave, driver, monkeypatch):
-    """The trace reaches a parent agent in the payload, so it gets the bare message too."""
+    """The trace reaches a parent agent in the payload, so it loses the path too."""
     failure = Exception('Exception: Invalid API key. at (/opt/rocketride/ai/common/chat.py:412)')
     setattr(failure, '__formatted', True)
     failure.message = 'Invalid API key.'
 
     answer, trace = _planning_fails_with(wave, driver, monkeypatch, failure)
 
-    assert answer == 'LLM error: Invalid API key.'
-    assert trace['error'] == 'Exception: Invalid API key.'
+    assert answer == 'LLM error: Exception: Invalid API key.'
+    assert trace['error'] == 'Exception: Exception: Invalid API key.'
 
 
 def test_a_planning_error_whose_text_cannot_be_read_still_gets_an_answer(wave, driver, monkeypatch):
@@ -301,3 +301,24 @@ def test_a_model_error_whose_text_cannot_be_read_still_leaves_a_report(wave, dri
 
     assert answer.startswith('I could not finish: the model call failed (Unprintable: ')
     assert 'KEEP-NOTES' in answer
+
+
+def test_a_tool_that_fails_inside_the_engine_keeps_the_path_out_of_its_result(wave):
+    """The result reaches the planner, a parent agent and a partial report."""
+    failure = Exception('Exception: Tool not found. at (/opt/rocketride/ai/common/agent/agent.py:470)')
+    setattr(failure, '__formatted', True)
+    failure.message = 'Tool not found.'
+    failure.filename = '/opt/rocketride/ai/common/agent/agent.py'
+    failure.line = 470
+
+    def call_tool(context, tool, args):
+        raise failure
+
+    results = wave.executor.execute_wave(
+        [{'tool': 'workspace.write', 'args': {'path': 'a.css'}}],
+        agent_base=SimpleNamespace(call_tool=call_tool),
+        context=SimpleNamespace(memory=None),
+        wave_name='wave-1',
+    )
+
+    assert results[0]['error'] == 'Exception: Exception: Tool not found.'

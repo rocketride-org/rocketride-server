@@ -31,7 +31,7 @@ from typing import Any, List
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
-from ai.common.utils import safe_str
+from ai.common.utils import error_text, safe_str
 
 # The agent's LLM invocation channel returns plain text synchronously, so we drive
 # LlamaIndex's ReAct loop by hand (call_llm/call_tool) rather than its async agents.
@@ -122,7 +122,7 @@ class LlamaIndexDriver(AgentBase):
             try:
                 observation = self.call_tool(context, step.action, step.action_input or {})
             except Exception as e:
-                observation = {'tool': step.action, 'error': str(e), 'type': type(e).__name__}
+                observation = {'tool': step.action, 'error': error_text(e), 'type': type(e).__name__}
 
             obs_text = safe_str(
                 json.dumps(observation, default=str) if isinstance(observation, (dict, list)) else observation
