@@ -70,4 +70,6 @@ def error_text(exc: BaseException) -> str:
         message = safe_str(getattr(exc, 'message', ''))
         if message:
             return message
+        # No message: keep the error's code text, never the location after it.
+        return safe_str(exc).rsplit(' at (', 1)[0].rstrip(': ')
     return safe_str(exc)

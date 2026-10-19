@@ -28,9 +28,9 @@ def test_an_engine_error_gives_the_bare_message():
     assert error_text(_engine_error('Invalid API key.')) == 'Invalid API key.'
 
 
-def test_an_engine_error_with_no_message_falls_back_to_str():
+def test_an_engine_error_with_no_message_keeps_its_code_without_the_path():
     exc = _engine_error('')
-    assert error_text(exc) == str(exc)
+    assert error_text(exc) == 'Exception'
 
 
 def test_any_other_exception_is_its_str():
