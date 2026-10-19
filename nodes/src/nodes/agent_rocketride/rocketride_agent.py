@@ -40,7 +40,7 @@ from ai.common.agent.types import AgentRunResult
 from ai.common.config import Config
 from ai.common.schema import Question
 
-from ai.common.utils import safe_str
+from ai.common.utils import error_text, safe_str
 
 from .planner import plan as plan_wave
 from .executor import execute_wave, resolve_answer_refs
@@ -245,7 +245,7 @@ class RocketRideDriver(AgentBase):
                     # Nothing was gathered, so there is nothing to save; the cause
                     # (a bad key, a rate limit, an unreadable reply) is the useful part.
                     self.sendSSE(context, 'thinking', message='Planning failed.', stop_reason='error')
-                    return f'LLM error: {exc}', trace
+                    return f'LLM error: {error_text(exc)}', trace
                 # Work was gathered: answer from it instead of discarding it.
                 self.sendSSE(
                     context,
@@ -624,7 +624,7 @@ class RocketRideDriver(AgentBase):
         except Exception as exc:
             # The model cannot be reached for the answer either. Hand the user what
             # was gathered, as it stands, rather than only the error.
-            return _partial_report(f'the model call failed ({type(exc).__name__}: {exc})', lines, scratch)
+            return _partial_report(f'the model call failed ({type(exc).__name__}: {error_text(exc)})', lines, scratch)
         if not safe_str(answer).strip():
             # An empty reply is no answer either; the gathered facts still are.
             return _partial_report('the model returned no text', lines, scratch)

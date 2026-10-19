@@ -55,3 +55,19 @@ def safe_str(value: Any) -> str:
         return str(value)
     except Exception:
         return ''
+
+
+def error_text(exc: BaseException) -> str:
+    """The message of an exception, for text a user reads: no engine source location.
+
+    An error raised inside the engine reaches Python as an Exception whose ``str()``
+    ends in `` at (<engine source path>:<line>)``; the engine marks it ``__formatted``
+    and keeps the bare message in ``message`` (engLib store/python/bindings.cpp).
+    Answers are shown to customers, so they get the bare message; logs keep ``str()``.
+    Any other exception is ``str(exc)``. Never raises.
+    """
+    if getattr(exc, '__formatted', False):
+        message = safe_str(getattr(exc, 'message', ''))
+        if message:
+            return message
+    return safe_str(exc)
