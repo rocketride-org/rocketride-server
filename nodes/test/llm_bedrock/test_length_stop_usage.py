@@ -33,6 +33,7 @@ pytest.importorskip('langchain_aws')
 from ai.common.config import Config  # noqa: E402
 from ai.common.llm_adapter import turn_usage  # noqa: E402
 from ai.common.schema import Question  # noqa: E402
+from langchain_core.messages import HumanMessage  # noqa: E402
 
 _MOD_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src', 'nodes', 'llm_bedrock', 'bedrock.py'
@@ -177,8 +178,6 @@ def test_a_reply_that_stops_normally_is_metered_once(monkeypatch, server, model)
 @pytest.mark.parametrize('stop_reason', ['length', 'stop'])
 def test_exactly_one_chunk_carries_the_usage(monkeypatch, server, model, stop_reason):
     """The turn total takes the larger of repeated counts, so it cannot show a usage sent twice; the chunks can."""
-    from langchain_core.messages import HumanMessage
-
     server.stop_reason = stop_reason
     chunks = list(_chat(monkeypatch, model)._llm._stream([HumanMessage(content='Write a long essay.')]))
     usages = [chunk.message.usage_metadata for chunk in chunks if chunk.message.usage_metadata]
@@ -189,8 +188,6 @@ def test_exactly_one_chunk_carries_the_usage(monkeypatch, server, model, stop_re
 
 def test_cached_tokens_in_the_counts_are_metered_once(monkeypatch, server):
     """Bedrock's input count leaves the cached tokens out; the usage must hold them once."""
-    from langchain_core.messages import HumanMessage
-
     server.stop_reason = 'length'
     server.metrics = {**_METRICS, 'cacheReadInputTokenCount': 100, 'cacheWriteInputTokenCount': 20}
     chunks = list(_chat(monkeypatch, _LLAMA)._llm._stream([HumanMessage(content='Write a long essay.')]))
