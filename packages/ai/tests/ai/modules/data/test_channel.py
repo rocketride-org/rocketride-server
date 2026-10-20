@@ -18,12 +18,15 @@ import time
 import urllib.error
 import urllib.request
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import ai.account
+from ai.account.base import OutOfCreditsError
 from ai.common.dap import TransportWebSocket
 from ai.modules.data import channel as channel_module
+from ai.modules.data import data_server
 from ai.modules.data.channel import ChannelError, ChannelUnavailable, TaskChannel, task_channel
 from ai.modules.data.data_conn import DataConn
 from ai.modules.task import task_channel as registry
@@ -594,6 +597,30 @@ async def test_new_connection_during_the_old_ones_drain_serves_requests(task_sid
     assert task_channel._conn is not None
     with pytest.raises(Exception):
         await slow
+    await client.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# The credit check a hosted task's pipe gate asks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('refusal', [None, 'Out of credits'], ids=['allowed', 'refused'])
+async def test_the_pipe_gate_asks_eaas_for_the_tasks_own_org(task_side, monkeypatch, refusal):
+    check = AsyncMock(return_value=refusal)
+    monkeypatch.setattr(ai.account.account, 'check_spend', check)
+    monkeypatch.setattr(data_server, '_allowed_until', 0.0)
+    task = _engine_task(task_side.port)
+    task.org_id = 'org-1'
+    task, client = await _connect(task_side, task)
+
+    if refusal:
+        with pytest.raises(OutOfCreditsError, match=refusal):
+            await asyncio.to_thread(data_server.require_credit)
+    else:
+        await asyncio.to_thread(data_server.require_credit)
+
+    check.assert_awaited_once_with('org-1')
     await client.disconnect()
 
 
