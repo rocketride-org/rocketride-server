@@ -87,9 +87,9 @@ The engine binds to `localhost` by default:
   the engine keeps and replaces on every start; the pipeline's process is given
   only a hash of it. The engine connects as soon as the process reports its
   listener, and over that connection the process may ask the engine only for
-  the commands the engine registered for it — today one, `node.fetch`, which
-  hands it the nodes its pipeline names. Its HTTP endpoint (`/status`)
-  accepts that token and nothing else.
+  the commands the engine registered for it — today one, `spend.check`, which
+  asks whether the run's own organization may open a pipe. Its `/status`
+  endpoint accepts only that token.
 
 Only the source-node HTTP port needs to be accessible to external callers when
 you're using a webhook-based source. Port 5565 is a management interface;
