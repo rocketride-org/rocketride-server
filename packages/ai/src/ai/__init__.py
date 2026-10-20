@@ -15,6 +15,7 @@ These warnings are suppressed:
 - transformers deprecation warnings - upstream, not our code
 """
 
+import importlib.util
 import os
 import sys
 import warnings
@@ -107,3 +108,13 @@ CONST_AI_NODE_SCRIPT = join(CONST_AI_ROOT, 'node.py')
 CONST_AI_REQUIREMENTS = join(CONST_AI_ROOT, 'requirements.txt')
 
 depends(CONST_AI_REQUIREMENTS)
+
+
+def install_node_baseline() -> None:
+    """Install the baseline every node assumes (numpy, requests, ...) from each `nodes` root."""
+    spec = importlib.util.find_spec('nodes')
+    for root in spec.submodule_search_locations if spec else ():
+        depends(join(root, 'requirements.txt'))
+
+
+install_node_baseline()
