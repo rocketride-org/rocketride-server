@@ -198,3 +198,6 @@ CONST_SCALE_UP_DELAY_S = 15  # ...sustained for this long before acting (seconds
 CONST_SCALE_DOWN_DRAIN_TIME_S = 2  # scale down if drain time below this (seconds)
 CONST_SCALE_DOWN_DELAY_S = 300  # ...sustained for this long (5 min)
 CONST_REPLICA_MANAGER_INTERVAL_S = 10  # seconds between auto-scaling checks
+
+# The node index format this engine reads (nodes/scripts/tasks.js NODES_CONTRACT)
+CONST_NODES_CONTRACT = 1
