@@ -13,13 +13,17 @@ import java.io.StringWriter;
 
 import javax.imageio.ImageIO;
 
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.PDInlineImage;
 import org.apache.tika.extractor.EmbeddedDocumentExtractor;
 import org.apache.tika.io.TikaInputStream;
 import org.apache.tika.metadata.Metadata;
@@ -71,13 +75,29 @@ class TestMediaSkipFlags {
         }
     }
 
-    /** One page of text drawn over IMAGES distinct images. */
-    private static byte[] pdfWithImages() throws Exception {
+    /**
+     * One page of text drawn over IMAGES distinct images: image XObjects, or
+     * inline images (BI/ID/EI in the content stream, the kind the slow PDFs
+     * hold by the tens of thousands) when inline is set.
+     */
+    private static byte[] pdfWithImages(boolean inline) throws Exception {
         try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             PDPage page = new PDPage();
+            page.setResources(new PDResources());
             doc.addPage(page);
             try (PDPageContentStream content = new PDPageContentStream(doc, page)) {
                 for (int i = 0; i < IMAGES; i++) {
+                    if (inline) {
+                        COSDictionary dict = new COSDictionary();
+                        dict.setInt(COSName.W, 2);
+                        dict.setInt(COSName.H, 2);
+                        dict.setInt(COSName.BPC, 8);
+                        dict.setItem(COSName.CS, COSName.RGB);
+                        byte[] rgb = new byte[2 * 2 * 3];
+                        rgb[0] = (byte) (40 * (i + 1));
+                        content.drawImage(new PDInlineImage(dict, rgb, page.getResources()), 72 + i * 20, 600);
+                        continue;
+                    }
                     BufferedImage image = new BufferedImage(8, 8, BufferedImage.TYPE_INT_RGB);
                     image.setRGB(i, i, 0xffffff);
                     PDImageXObject xobject = LosslessFactory.createFromImage(doc, image);
@@ -141,8 +161,15 @@ class TestMediaSkipFlags {
 
     @Test
     void skippedImagesAreNotExtractedAndTextIsUnchanged() throws Exception {
-        byte[] pdf = pdfWithImages();
+        assertSkipRule(pdfWithImages(false));
+    }
 
+    @Test
+    void inlineImagesFollowTheSameRule() throws Exception {
+        assertSkipRule(pdfWithImages(true));
+    }
+
+    private static void assertSkipRule(byte[] pdf) throws Exception {
         CountingExtractor all = new CountingExtractor();
         String withImages = parse(pdf, 0, all);
         assertEquals(IMAGES, all.count, "every distinct image is extracted when the image lane is wanted");
@@ -163,8 +190,9 @@ class TestMediaSkipFlags {
         ImageIO.write(image, "png", png);
         byte[] bytes = png.toByteArray();
 
-        // No native handle: had the media been wanted, sending it would reach native code.
-        // Skipped, it returns after detection, which resets the stream to its start.
+        // A native handle of 0 is the bridge's test mode (the send is a no-op). Had the
+        // media been wanted, the stream would have been copied in full; skipped, the
+        // processor returns right after detection, which resets the stream to its start.
         EmbeddedContentProcessor processor =
                 new EmbeddedContentProcessor(0, "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         TikaApi.SKIP_IMAGES);

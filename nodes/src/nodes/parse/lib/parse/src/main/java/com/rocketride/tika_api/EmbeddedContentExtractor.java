@@ -70,6 +70,12 @@ public class EmbeddedContentExtractor {
 
         public void processEmbeddedMediaStream(InputStream stream, String mimeType, byte[] beginPayload)
                 throws IOException {
+            // Nothing listens for this kind of media: the native side would drop
+            // every buffer. parseEmbedded returns earlier still; this also covers
+            // parsers that call in directly, such as the Aspose PDF parser.
+            if (!TikaApi.wantsMedia(flags, mimeType))
+                return;
+
             try {
                 // Determine which native callback to invoke
                 // Based on MIME type, choose the corresponding function.

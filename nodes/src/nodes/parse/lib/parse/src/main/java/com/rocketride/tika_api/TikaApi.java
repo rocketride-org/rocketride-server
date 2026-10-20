@@ -472,6 +472,17 @@ public final class TikaApi {
 	}
 
 	/**
+	 * The configuration with every media lane wanted. Kept for parsers compiled
+	 * against the previous signature, such as the Aspose PDF parser, which are
+	 * loaded by reflection and not built with this library.
+	 *
+	 * @return a PDFParserConfig object with custom configuration options.
+	 */
+	public static PDFParserConfig getPdfConfig() {
+		return getPdfConfig(0);
+	}
+
+	/**
 	 * This function uses Apache Tika to extract information from the provided input
 	 * stream of documents and writes it to the specified writer. If documents
 	 * contain images and/or the input stream is an image itself, then it invokes
@@ -638,7 +649,7 @@ public final class TikaApi {
 	 *                     to be real, but the file extension is passed to assist
 	 *                     tika in recognizing the file
 	 * @param metadata     Sends/receives the tika metadata
-	 * @param flags        OCR/MAGICK enabled or not
+	 * @param flags        OCR/MAGICK enabled or not, and the SKIP_* media lanes
 	 * @param nativeHandle The handle to the context in the native interface
 	 */
 	private static boolean extractTextForNative(TikaInputStream stream, String extractPath, Metadata metadata,
@@ -654,7 +665,7 @@ public final class TikaApi {
 	 * Extract text by file path (invoked from main)
 	 * 
 	 * @param extractPath  The actual pathname to extract from
-	 * @param flags        OCR/MAGICK enabled or not
+	 * @param flags        OCR/MAGICK enabled or not, and the SKIP_* media lanes
 	 * @param nativeHandle The handle to the context in the native interface
 	 */
 	public static boolean extractTextFromPath(String extractPath, long flags, long nativeHandle) throws Exception {
@@ -675,7 +686,7 @@ public final class TikaApi {
 	 *                     to be real, but the file extension is passed to assist
 	 *                     tika in recognizing the file
 	 * @param length       The overall length of the stream (if unknown, set to 0)
-	 * @param flags        OCR/MAGICK enabled or not
+	 * @param flags        OCR/MAGICK enabled or not, and the SKIP_* media lanes
 	 * @param nativeHandle The handle to the context in the native interface
 	 * @throws Exception
 	 */

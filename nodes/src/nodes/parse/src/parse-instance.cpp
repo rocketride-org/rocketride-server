@@ -264,10 +264,17 @@ Error IFilterInstance::onDocumentComplete() noexcept {
 ///		The flags to pass to tika
 //-------------------------------------------------------------------------
 uint32_t IFilterInstance::tikaFlags(uint32_t entryFlags) noexcept {
-    auto flags = entryFlags;
+    // Only the listener check decides the skip bits: an entry carries
+    // whatever its JSON said, so drop anything it already had there
+    auto flags = entryFlags & ~Tika::SKIP_MEDIA;
     if (!binder.hasListener("image")) flags |= Tika::SKIP_IMAGES;
     if (!binder.hasListener("audio")) flags |= Tika::SKIP_AUDIO;
     if (!binder.hasListener("video")) flags |= Tika::SKIP_VIDEO;
+    if (flags & Tika::SKIP_MEDIA)
+        LOGT("Tika will not extract media for lanes without a listener:",
+             (flags & Tika::SKIP_IMAGES) ? "image" : "",
+             (flags & Tika::SKIP_AUDIO) ? "audio" : "",
+             (flags & Tika::SKIP_VIDEO) ? "video" : "");
     return flags;
 }
 
