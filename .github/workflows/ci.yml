@@ -281,6 +281,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint:scripts
+      - name: Test node packaging
+        run: node --test nodes/scripts/tasks.test.js
 
   # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream
