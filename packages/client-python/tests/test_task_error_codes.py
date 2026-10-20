@@ -89,3 +89,24 @@ def test_exception_code_and_hint_default_to_none():
 
     assert e.code is None
     assert e.hint is None
+
+
+async def test_a_refused_command_keeps_the_servers_code():
+    """call() raises a CommandException carrying the code, still a RuntimeError."""
+    from rocketride import RocketRideClient
+    from rocketride.core.exceptions import CommandException
+
+    client = RocketRideClient(uri='http://localhost:1', auth='key')
+    refused = {'success': False, 'message': 'acme.echo is not published to you', 'code': 'NODE_NOT_ENTITLED'}
+
+    async def request(message, timeout=None):
+        return refused
+
+    client.request = request
+    try:
+        await client.call('execute', pipeline={})
+    except CommandException as e:
+        assert isinstance(e, RuntimeError)
+        assert e.code == 'NODE_NOT_ENTITLED' and str(e) == 'acme.echo is not published to you'
+    else:
+        raise AssertionError('call() did not raise')
