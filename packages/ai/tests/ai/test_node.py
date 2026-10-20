@@ -32,6 +32,7 @@ satisfy:
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import threading
 import time
@@ -706,8 +707,9 @@ def test_channel_signal_goes_through_the_monitor(monkeypatch):
 
 def test_announce_sends_ready_then_startup_over_only_with_a_listener(monkeypatch):
     calls = _capture_signals(monkeypatch)
+    monkeypatch.setattr(node, '_fetch_pipeline_nodes', lambda: calls.append('fetch nodes'))
     node._announce_channel(SimpleNamespace(server=SimpleNamespace(started=True)))
-    assert calls == [('CHN', '1'), ('CHN', '2')]
+    assert calls == [('CHN', '1'), 'fetch nodes', ('CHN', '2')]
 
     calls.clear()
     node._announce_channel(SimpleNamespace(server=SimpleNamespace(started=False)))
@@ -749,3 +751,70 @@ def test_setup_installs_the_authenticator_and_the_close_signal(monkeypatch):
     config = server.use.call_args.args[1]
     config['on_closed']('0123abcd')
     assert calls == [('CHN', '1*0123abcd')]
+
+
+def _task_file(tmp_path, monkeypatch, pipeline):
+    task_file = tmp_path / 'task.json'
+    task_file.write_text(json.dumps({'config': {'pipeline': pipeline}}))
+    monkeypatch.setattr(sys, 'argv', ['node.py', str(task_file)])
+
+
+def test_the_task_ensures_each_node_its_pipeline_names_once(monkeypatch, tmp_path):
+    from ai.common import node_packages
+
+    _task_file(
+        tmp_path, monkeypatch, {'components': [{'provider': 'webhook'}, {'provider': 'llm_x'}, {'provider': 'llm_x'}]}
+    )
+    served, ensured = [], []
+    monkeypatch.setattr(node_packages, 'serve', served.append)
+    monkeypatch.setattr(node_packages, 'ensure', ensured.append)
+
+    node._fetch_pipeline_nodes()
+
+    assert served == [node._fetch_from_eaas]
+    assert sorted(ensured) == ['llm_x', 'webhook']
+
+
+@pytest.mark.parametrize('served', [True, False])
+def test_eaas_answers_with_the_package_or_with_nothing(monkeypatch, served):
+    from ai.constants import CONST_CHANNEL_HANDLER_TIMEOUT
+    from ai.modules.data import channel
+
+    body = {'name': 'llm_x', 'sha256': 'x', 'services': {'services.json': {'protocol': 'llm_x://'}}} if served else {}
+    reply = channel.ChannelReply(body=body, data=b'zip' if served else None)
+    asked = []
+    monkeypatch.setattr(
+        channel.task_channel, 'request_sync', lambda *args, **kwargs: asked.append((args, kwargs)) or reply
+    )
+
+    package = node._fetch_from_eaas('llm_x')
+
+    assert asked == [(('node.fetch', {'name': 'llm_x'}), {'timeout': CONST_CHANNEL_HANDLER_TIMEOUT})]
+    assert package == (('llm_x', b'zip', 'x', {'services.json': {'protocol': 'llm_x://'}}) if served else None)
+
+
+@pytest.mark.parametrize('broken', ['package', 'task file'])
+def test_a_task_that_cannot_get_its_nodes_stops_with_the_reason(monkeypatch, tmp_path, broken):
+    from ai.common import node_packages
+    from ai.common.node_packages import NodePackageInvalid
+
+    if broken == 'package':
+        _task_file(tmp_path, monkeypatch, {'components': [{'provider': 'llm_x'}]})
+    else:
+        monkeypatch.setattr(sys, 'argv', ['node.py', str(tmp_path / 'missing.json')])
+    monkeypatch.setattr(node_packages, 'serve', lambda source: None)
+
+    def refuse(name):
+        raise NodePackageInvalid('The package of llm_x does not match its digest')
+
+    monkeypatch.setattr(node_packages, 'ensure', refuse)
+    warned = []
+    monkeypatch.setattr(node, 'warning', warned.append)
+
+    with pytest.raises(node.TaskNodesError):
+        node._fetch_pipeline_nodes()
+
+    (message,) = warned
+    assert message.startswith("Refusing to run: could not get the pipeline's nodes (")
+    if broken == 'package':
+        assert 'does not match its digest' in message
