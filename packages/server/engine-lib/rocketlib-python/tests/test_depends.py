@@ -447,9 +447,7 @@ class TestSatisfiedVerdict:
         assert len(env.resolves) == 1
 
 
-class TestHostedRefusesTorch:
-    """A hosted engine never installs torch, even as another package's dependency (#2681)."""
-
+class TestPreinstallHooks:
     @pytest.fixture
     def plan(self, exe_dir, monkeypatch):
         """A requirements file whose resolved plan is whatever the test sets."""
@@ -466,22 +464,72 @@ class TestHostedRefusesTorch:
             pending=pending,
         )
 
-    def test_hosted_task_refuses_a_plan_that_pulls_torch(self, plan, monkeypatch):
-        monkeypatch.setattr(depends.sys, 'argv', ['engine', 'node.py', '--hosted'])
+    def test_finds_hooks_anywhere_the_globs_reach(self, exe_dir):
+        _write(exe_dir / '_depends_hooks.py', 'def excludes(packages): pass\n')
+        _write(exe_dir / 'nodes' / 'demo' / '_depends_hooks.py', 'def excludes(packages): pass\n')
+        _write(exe_dir / 'ai' / 'common' / 'torch' / '_depends_hooks.py', 'def excludes(packages): pass\n')
+        _write(exe_dir / 'ai' / 'common' / 'torch' / 'requirements.txt')  # not a hook: wrong name, ignored
+
+        found = {os.path.relpath(f, exe_dir) for f in depends._find_hook_files()}
+
+        assert found == {
+            '_depends_hooks.py',
+            os.path.join('nodes', 'demo', '_depends_hooks.py'),
+            os.path.join('ai', 'common', 'torch', '_depends_hooks.py'),
+        }
+
+    def test_a_hook_that_refuses_blocks_before_anything_is_installed(self, plan, monkeypatch):
+        """The hook lives under ai/, unrelated to the requirements file's own nodes/demo/ directory."""
+        _write(
+            plan.req.parents[2] / 'ai' / 'common' / 'torch' / '_depends_hooks.py',
+            'def excludes(packages):\n'
+            '    if "torch" in packages:\n'
+            '        raise RuntimeError("never installed on a hosted engine")\n',
+        )
         monkeypatch.setattr(depends.subprocess, 'Popen', lambda *a, **k: pytest.fail('nothing may be installed'))
         plan.pending[:] = ['sentence-transformers', 'torch', 'nvidia-cublas-cu12']
 
-        with pytest.raises(RuntimeError, match='never installed on RocketRide Cloud'):
+        with pytest.raises(RuntimeError, match='never installed on a hosted engine'):
             depends._install_requirements(str(plan.req), str(plan.constraints))
 
-    def test_names_are_normalised(self, monkeypatch):
-        monkeypatch.setattr(depends.sys, 'argv', ['engine', 'node.py', '--hosted'])
-        assert depends._hosted_refusal(['TorchVision', 'numpy']) is not None
-        assert depends._hosted_refusal(['requests', 'numpy']) is None
+    def test_excludes_from_multiple_hooks_are_merged_into_the_real_install(self, plan, monkeypatch):
+        """The dry run is not the install: excludes a hook returns bind the real uv call too.
 
-    def test_hosted_install_excludes_torch_even_if_the_plan_changed(self, plan, monkeypatch):
-        """The dry run is not the install: the real uv call excludes torch itself."""
-        monkeypatch.setattr(depends.sys, 'argv', ['engine', 'node.py', '--hosted'])
+        The two hooks live in unrelated directories — neither is an ancestor
+        of the requirements file being installed, nor of each other.
+        """
+        monkeypatch.setattr(depends, '_uv_abs_path', lambda: 'uv')
+        _write(plan.req.parents[1] / '_depends_hooks.py', 'def excludes(packages): return ["torch"]\n')
+        _write(
+            plan.req.parents[2] / 'ai' / 'common' / 'torch' / '_depends_hooks.py',
+            'def excludes(packages): return ["torchvision", "torchaudio"]\n',
+        )
+        plan.pending[:] = ['numpy']
+        calls = []
+
+        class FakeInstall:
+            returncode = 0
+            stdout = iter(())
+
+            def __init__(self, args, **kwargs):
+                calls.append(args)
+
+            def wait(self):
+                return 0
+
+        monkeypatch.setattr(depends.subprocess, 'Popen', FakeInstall)
+
+        depends._install_requirements(str(plan.req), str(plan.constraints))
+
+        (args,) = calls
+        excludes = [args[i + 1] for i, a in enumerate(args) if a == '--excludes']
+        hook_excludes = [x for x in excludes if x.endswith('excludes-combined.txt')]
+        assert hook_excludes, f'no hook excludes in {args}'
+        path = os.path.join(depends._get_executable_dir(), hook_excludes[0])
+        with open(path, encoding='utf-8') as f:
+            assert set(f.read().split()) == {'torch', 'torchvision', 'torchaudio'}
+
+    def test_no_hooks_means_no_extra_excludes(self, plan, monkeypatch):
         monkeypatch.setattr(depends, '_uv_abs_path', lambda: 'uv')
         plan.pending[:] = ['numpy']
         calls = []
@@ -502,19 +550,7 @@ class TestHostedRefusesTorch:
 
         (args,) = calls
         excludes = [args[i + 1] for i, a in enumerate(args) if a == '--excludes']
-        hosted = [x for x in excludes if x.endswith('hosted-excludes.txt')]
-        assert hosted, f'no hosted excludes in {args}'
-        path = os.path.join(depends._get_executable_dir(), hosted[0])
-        with open(path, encoding='utf-8') as f:
-            assert set(f.read().split()) == {'torch', 'torchvision', 'torchaudio'}
-
-    def test_local_install_has_no_hosted_excludes(self, monkeypatch):
-        monkeypatch.setattr(depends.sys, 'argv', ['engine', 'node.py'])
-        assert depends._hosted_exclude_args('.') == []
-
-    def test_local_engine_may_install_torch(self, monkeypatch):
-        monkeypatch.setattr(depends.sys, 'argv', ['engine', 'node.py'])
-        assert depends._hosted_refusal(['torch']) is None
+        assert not [x for x in excludes if x.endswith('excludes-combined.txt')]
 
 
 class TestDepends:

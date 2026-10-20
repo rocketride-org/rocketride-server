@@ -72,6 +72,15 @@ OVERRIDES_GLOBS = [
     'ai/**/overrides.txt',
 ]
 
+# Hook files: discovered the same way, so one can live wherever its policy is
+# actually owned (e.g. ai/common/torch/) rather than only at a shared ancestor
+# of every requirements file. See the "Hook files" section below.
+HOOKS_GLOBS = [
+    '_depends_hooks.py',
+    'nodes/**/_depends_hooks.py',
+    'ai/**/_depends_hooks.py',
+]
+
 # Bootstrap tools install outside any constraint, so pin them or they float to 'latest' and a
 # later install downgrades them. Lockstep with packages/server/scripts/tasks.js.
 _BOOTSTRAP_TOOL_VERSIONS: dict[str, str] = {
@@ -1015,40 +1024,67 @@ def _save_verdict(requirements_path: str, constraints_path: str):
         debug(f'  Could not record the satisfied verdict ({e}); the next process will resolve again')
 
 
-# A hosted engine's tasks carry --hosted (ai task_engine CONST_HOSTED_CHILD_FLAG).
-# There GPU inference runs on the model server and torch is never installed:
-# not by a model loader (ai.common.models.gpu_guard refuses those first) and not
-# as a dependency of some other package, which only the resolved plan shows.
-_HOSTED_FLAG = '--hosted'
-_HOSTED_REFUSED = frozenset({'torch', 'torchvision', 'torchaudio'})
+# ---------------------------------------------------------------------------
+# Hook files
+# ---------------------------------------------------------------------------
 
 
-def _hosted_refusal(packages: list[str]) -> Optional[str]:
-    """Why a hosted engine must refuse this install plan, or None if it may proceed."""
-    if _HOSTED_FLAG not in sys.argv:
-        return None
-    refused = sorted({p for p in packages if p.lower().replace('_', '-') in _HOSTED_REFUSED})
-    if not refused:
-        return None
-    return (
-        f'{", ".join(refused)} would be installed, and torch is never installed on RocketRide Cloud: '
-        f'GPU inference runs on the model server.'
-    )
+def _find_hook_files() -> list[str]:
+    """Every `_depends_hooks.py` matching HOOKS_GLOBS, same root as requirement files."""
+    executable_dir = _get_executable_dir()
+    found = []
+    for pattern in HOOKS_GLOBS:
+        full_pattern = os.path.join(executable_dir, pattern)
+        for path in glob(full_pattern, recursive=True):
+            abs_path = os.path.abspath(path)
+            if os.path.isfile(abs_path) and abs_path not in found:
+                found.append(abs_path)
+    return found
 
 
-def _hosted_exclude_args(exe_dir: str) -> list[str]:
-    """Under --hosted, ``--excludes`` args that keep torch out of the install itself.
+def _load_hook_module(path: str):
+    """Import a hook file by path, under a name unique to that path."""
+    import importlib.util
 
-    The dry-run check refuses with a clear message; this binds the real install,
-    whose resolution can differ from the dry run's (an index or metadata refresh in
-    between). Excluded, not constrained: a constraint no release meets makes uv fall
-    back to an old release of the requiring package, an exclusion just drops torch.
+    name = f'_rocketride_depends_hook_{hashlib.md5(path.encode("utf-8")).hexdigest()}'
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_exclude_hooks(packages: list[str]) -> list[str]:
+    """Call every discovered hook's `excludes` once, merging the names it returns.
+
+    A hook computes its excludes dynamically — that's the reason it's a .py
+    file and not a static excludes.txt — so refusing outright, when no valid
+    exclude list exists for this install, is a legitimate terminal case of
+    that computation: a hook raises, and that propagates to the caller
+    wrapped in a RuntimeError, so every refusal reads the same way regardless
+    of the exception type the hook used.
     """
-    if _HOSTED_FLAG not in sys.argv:
+    excludes: set[str] = set()
+    for path in _find_hook_files():
+        hook = _load_hook_module(path)
+        hook_excludes = getattr(hook, 'excludes', None)
+        if hook_excludes is None:
+            continue
+        try:
+            result = hook_excludes(packages)
+        except Exception as e:
+            raise RuntimeError(str(e)) from e
+        if result:
+            excludes.update(result)
+    return sorted(excludes)
+
+
+def _write_excludes_args(names: list[str], exe_dir: str) -> list[str]:
+    """``--excludes`` args for an arbitrary name list, or [] when there is none."""
+    if not names:
         return []
-    path = os.path.join(engine_cache_dir(create=True), 'hosted-excludes.txt')
+    path = os.path.join(engine_cache_dir(create=True), 'excludes-combined.txt')
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(''.join(f'{name}\n' for name in sorted(_HOSTED_REFUSED)))
+        f.write(''.join(f'{name}\n' for name in names))
     # Relative to cwd (exe_dir) — uv splits the value on whitespace (#1256).
     return ['--excludes', os.path.relpath(path, exe_dir)]
 
@@ -1162,11 +1198,14 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     packages = _install_dry_run(requirements_path, constraints_path)
     debug(f'Dry-run found {len(packages)} packages to install: {packages}')
 
-    # Refuse before anything is fetched, so nothing lands in site-packages
-    refusal = _hosted_refusal(packages)
-    if refusal:
-        error(f'Refusing {requirements_path}: {refusal}')
-        raise RuntimeError(refusal)
+    # A hook may refuse before anything is fetched, so nothing lands in
+    # site-packages; it may also ask for extra excludes, reused below for the
+    # real install (whose own resolution can differ from this dry run).
+    try:
+        hook_excludes = _run_exclude_hooks(packages)
+    except RuntimeError as e:
+        error(f'Refusing {requirements_path}: {e}')
+        raise
 
     # If dry-run returned empty list, all packages are satisfied
     if len(packages) == 0:
@@ -1200,7 +1239,7 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     uv_args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
     uv_args.extend(_constraints_args(constraints_path, exe_dir))
-    uv_args.extend(_hosted_exclude_args(exe_dir))
+    uv_args.extend(_write_excludes_args(hook_excludes, exe_dir))
     uv_args.extend(_override_args(exe_dir))
 
     # Run uv and stream output (heartbeat is already running from the caller)
