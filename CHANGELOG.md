@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — since 2026-10-16
 
+### Fixed
+- **ai**: a bare port in `--modelserver` (`--modelserver=5590`) reaches the model server on this host; the Python client read the digits as a hostname and connected to `ws://5590:5565/models` (#2679)
+
 ## [3.5.0] - 2026-10-16
 
 ### Added
