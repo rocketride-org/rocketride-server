@@ -40,7 +40,7 @@ from ai.common.agent.types import AgentRunResult
 from ai.common.config import Config
 from ai.common.schema import Question
 
-from ai.common.utils import safe_str
+from ai.common.utils import error_text, safe_str
 
 from .planner import plan as plan_wave
 from .executor import execute_wave, resolve_answer_refs
@@ -234,16 +234,17 @@ class RocketRideDriver(AgentBase):
                     verify_args=self._verify_args,
                 )
             except Exception as exc:
-                error(f'rocketride wave plan failed run_id={run_id}: {exc}')
+                error(f'rocketride wave plan failed run_id={run_id}: {safe_str(exc)}')
                 trace['stop_reason'] = 'error'
-                trace['error'] = f'{type(exc).__name__}: {exc}'
+                # The trace travels in the payload a parent agent gets: no engine source path.
+                trace['error'] = f'{type(exc).__name__}: {error_text(exc)}'
                 # A retry that failed after an unusable reply carries that reply's notes.
                 current_scratch = safe_str(getattr(exc, 'wave_scratch', '')) or current_scratch
                 if not waves and not current_scratch:
                     # Nothing was gathered, so there is nothing to save; the cause
                     # (a bad key, a rate limit, an unreadable reply) is the useful part.
                     self.sendSSE(context, 'thinking', message='Planning failed.', stop_reason='error')
-                    return f'LLM error: {exc}', trace
+                    return f'LLM error: {error_text(exc)}', trace
                 # Work was gathered: answer from it instead of discarding it.
                 self.sendSSE(
                     context,
@@ -621,8 +622,10 @@ class RocketRideDriver(AgentBase):
             answer = self.call_llm(context, q)
         except Exception as exc:
             # The model cannot be reached for the answer either. Hand the user what
-            # was gathered, as it stands, rather than only the error.
-            return _partial_report(f'the model call failed ({type(exc).__name__}: {exc})', lines, scratch)
+            # was gathered, as it stands, rather than only the error. The log keeps the
+            # full text, with the engine location the report leaves out.
+            error(f'rocketride wave synthesis failed run_id={context.run_id}: {type(exc).__name__}: {safe_str(exc)}')
+            return _partial_report(f'the model call failed ({type(exc).__name__}: {error_text(exc)})', lines, scratch)
         if not safe_str(answer).strip():
             # An empty reply is no answer either; the gathered facts still are.
             return _partial_report('the model returned no text', lines, scratch)

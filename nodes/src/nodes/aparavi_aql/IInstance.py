@@ -38,6 +38,7 @@ from typing import Any, Dict
 from rocketlib import IInstanceBase, tool_function
 from rocketlib.types import IInvokeLLM
 from ai.common.schema import Question
+from ai.common.utils import error_text
 
 from .IGlobal import IGlobal
 from .aql_schema import get_schema_dict, get_schema_prompt_text
@@ -160,7 +161,8 @@ class IInstance(IInstanceBase):
             try:
                 aql = self._generate_aql(question_text, previous_aql=previous_aql, error=last_error)
             except Exception as exc:
-                last_error = str(exc)
+                # Returned to the calling agent: no engine source path.
+                last_error = error_text(exc)
                 previous_aql = None
                 continue
 

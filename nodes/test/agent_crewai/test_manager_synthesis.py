@@ -115,6 +115,7 @@ def _build_stubs() -> dict:
 
     mod_utils = types.ModuleType('ai.common.utils')
     mod_utils.safe_str = lambda v: '' if v is None else str(v)
+    mod_utils.error_text = str
 
     mod_config = types.ModuleType('ai.common.config')
     mod_config.Config = type('Config', (), {'getNodeConfig': staticmethod(lambda *a, **k: {})})

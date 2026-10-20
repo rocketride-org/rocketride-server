@@ -163,6 +163,7 @@ def _build_import_stubs() -> dict:
     ai_common.__path__ = []
     ai_utils = types.ModuleType('ai.common.utils')
     ai_utils.normalize_tool_input = _stub_normalize
+    ai_utils.error_text = str
     ai_config = types.ModuleType('ai.common.config')
     ai_config.Config = SimpleNamespace(getNodeConfig=lambda *_a, **_k: {})
     ai_schema = types.ModuleType('ai.common.schema')

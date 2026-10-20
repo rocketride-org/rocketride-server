@@ -57,7 +57,7 @@ def synthesize(wave, driver, results, **kwargs):
     question = wave.rocketride_agent.Question()
     question.addQuestion('How many CSS rules does src/App.css have?')
     waves = [{'wave_num': 0, 'calls': [], 'results': results}]
-    return driver._synthesize(question=question, waves=waves, context=SimpleNamespace(), **kwargs)
+    return driver._synthesize(question=question, waves=waves, context=SimpleNamespace(run_id='run-1'), **kwargs)
 
 
 READ = {'tool': 'workspace.read', 'key': 'wave-0.r0', 'summary': 'dict(2 keys): path, content'}
@@ -227,6 +227,48 @@ def test_a_planning_error_with_notes_still_gets_an_answer(wave, driver, monkeypa
     assert trace['error'] == 'RuntimeError: Rate limit exceeded.'
 
 
+def _planning_fails_with(wave, driver, monkeypatch, failure):
+    def plan_wave(**kw):
+        raise failure
+
+    monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', plan_wave)
+    driver._max_waves = 3
+    driver._synthesize = lambda **kw: f'answered from: {kw["scratch"]}'
+    context = wave.rocketride_agent.AgentContext(
+        invoker=None, llm=None, tools=None, memory=None, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+    )
+    return driver._run(context=context, question=None)
+
+
+def test_an_engine_error_in_planning_keeps_the_path_out_of_answer_and_trace(wave, driver, monkeypatch):
+    """The trace reaches a parent agent in the payload, so it loses the path too."""
+    failure = Exception('Exception: Invalid API key. at (/opt/rocketride/ai/common/chat.py:412)')
+    setattr(failure, '__formatted', True)
+    failure.message = 'Invalid API key.'
+
+    answer, trace = _planning_fails_with(wave, driver, monkeypatch, failure)
+
+    assert answer == 'LLM error: Exception: Invalid API key.'
+    assert trace['error'] == 'Exception: Exception: Invalid API key.'
+
+
+class Unprintable(Exception):
+    """An exception whose text cannot be read: str() raises."""
+
+    def __str__(self):
+        raise RuntimeError('no text')
+
+
+def test_a_planning_error_whose_text_cannot_be_read_still_gets_an_answer(wave, driver, monkeypatch):
+    failure = Unprintable()
+    failure.wave_scratch = 'NOTES-KEPT'
+
+    answer, trace = _planning_fails_with(wave, driver, monkeypatch, failure)
+
+    assert answer == 'answered from: NOTES-KEPT'
+    assert trace['stop_reason'] == 'error'
+
+
 def test_a_reply_cannot_remove_the_result_its_own_call_gets(wave, driver, monkeypatch):
     """The reply's remove names the key its own call is about to get. Only earlier results can go.
 
@@ -247,3 +289,34 @@ def test_a_reply_cannot_remove_the_result_its_own_call_gets(wave, driver, monkey
 
     assert seen['cleared'] == []
     assert seen['waves'][0]['results'] == [READ]
+
+
+def test_a_model_error_whose_text_cannot_be_read_still_leaves_a_report(wave, driver):
+    """Logging the failure must not cost the user the report, even when str(exc) raises."""
+    driver.reply = Unprintable()
+
+    answer = synthesize(wave, driver, [READ], scratch='KEEP-NOTES')
+
+    assert answer.startswith('I could not finish: the model call failed (Unprintable: ')
+    assert 'KEEP-NOTES' in answer
+
+
+def test_a_tool_that_fails_inside_the_engine_keeps_the_path_out_of_its_result(wave):
+    """The result reaches the planner, a parent agent and a partial report."""
+    failure = Exception('Exception: Tool not found. at (/opt/rocketride/ai/common/agent/agent.py:470)')
+    setattr(failure, '__formatted', True)
+    failure.message = 'Tool not found.'
+    failure.filename = '/opt/rocketride/ai/common/agent/agent.py'
+    failure.line = 470
+
+    def call_tool(context, tool, args):
+        raise failure
+
+    results = wave.executor.execute_wave(
+        [{'tool': 'workspace.write', 'args': {'path': 'a.css'}}],
+        agent_base=SimpleNamespace(call_tool=call_tool),
+        context=SimpleNamespace(memory=None),
+        wave_name='wave-1',
+    )
+
+    assert results[0]['error'] == 'Exception: Exception: Tool not found.'

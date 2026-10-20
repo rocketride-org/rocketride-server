@@ -7,6 +7,7 @@ from rocketlib import IInstanceBase, invoke_function, warning
 from ai.common.schema import Question, Answer
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
+from ai.common.utils import error_text
 
 
 class LLMBase(IInstanceBase):
@@ -92,7 +93,8 @@ class LLMBase(IInstanceBase):
                     on_reasoning_chunk=on_reasoning_chunk,
                 )
             except Exception as e:
-                err_msg = f'**LLM error** — {type(e).__name__}: {e}'
+                # The answer is shown to the user: no engine source path. The log keeps it.
+                err_msg = f'**LLM error** — {type(e).__name__}: {error_text(e)}'
                 warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
                 answer = Answer()
                 answer.setAnswer(err_msg)

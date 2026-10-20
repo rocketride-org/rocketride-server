@@ -40,7 +40,7 @@ from rocketlib import ToolDescriptor
 
 from ai.common.agent import AgentBase, AgentContext
 
-from ai.common.utils import safe_str
+from ai.common.utils import error_text, safe_str
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ def _patch_crewai_delegation() -> None:
                 return await selected.aexecute_task(t, context)
             except Exception as e:
                 return I18N_DEFAULT.errors('agent_tool_execution_error').format(
-                    agent_role=self.sanitize_agent_name(selected.role), error=str(e)
+                    agent_role=self.sanitize_agent_name(selected.role), error=error_text(e)
                 )
 
         async def _delegate_arun(self, task, context, coworker=None, **kwargs):  # type: ignore[override]
@@ -442,7 +442,7 @@ class CrewBase(AgentBase):
                 try:
                     out = outer_self.call_tool(outer_context, self.name, framework_args)
                 except Exception as e:
-                    out = {'error': str(e), 'type': type(e).__name__}
+                    out = {'error': error_text(e), 'type': type(e).__name__}
 
                 try:
                     return json.dumps(out, default=str) if isinstance(out, (dict, list)) else safe_str(out)

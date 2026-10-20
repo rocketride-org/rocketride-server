@@ -32,7 +32,11 @@ copy anywhere else in the codebase.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+# The end of an engine error's text: " at (<engine source path>:<line>)".
+_ENGINE_LOCATION = re.compile(r' at \([^()]*:\d+\)$')
 
 
 def safe_str(value: Any) -> str:
@@ -55,3 +59,20 @@ def safe_str(value: Any) -> str:
         return str(value)
     except Exception:
         return ''
+
+
+def error_text(exc: BaseException) -> str:
+    """The text of an exception, for text a user reads: no engine source location.
+
+    An error raised inside the engine reaches Python as an Exception whose ``str()``
+    is ``<code>: <message> at (<engine source path>:<line>)``; the engine marks it
+    ``__formatted`` (engLib store/python/bindings.cpp). Answers are shown to customers,
+    so they get the same text without the location. The code stays: callers that tell
+    an error answer by its label (Discord) rely on it. Logs keep ``str()``.
+    Any other exception is ``str(exc)``.
+    """
+    text = safe_str(exc)
+    if not getattr(exc, '__formatted', False):
+        return text
+    # An error with no message reads "<code>: " once the location is gone.
+    return _ENGINE_LOCATION.sub('', text).removesuffix(': ')

@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import pytest
 
+import ai.common.agent.agent as agent_module
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.llm_adapter import report_llm_tokens
 from ai.common.utils import parse_bool
@@ -211,6 +212,32 @@ def test_guard_answer_is_emitted_on_the_answers_lane():
 
     # Even a tripped guard still emits exactly one answer downstream.
     assert len(ii.instance.written) == 1
+
+
+# ---------------------------------------------------------------------------
+# An engine error's source path stays out of the answer
+# ---------------------------------------------------------------------------
+
+ENGINE_LOCATION = '/opt/rocketride/ai/common/chat.py:412'
+
+
+def _raise_engine_error(_driver: AgentBase, _context: AgentContext, _question: Any) -> Tuple[str, Any]:
+    """Like a driver whose model call failed inside the engine."""
+    exc = Exception(f'Exception: Invalid API key. at ({ENGINE_LOCATION})')
+    setattr(exc, '__formatted', True)
+    raise exc
+
+
+def test_an_engine_error_answer_drops_the_path_and_the_log_keeps_it(monkeypatch):
+    logged: List[str] = []
+    monkeypatch.setattr(agent_module, 'error', logged.append)
+
+    payload = _make_driver(_raise_engine_error, require_tool_call=False).run_agent(
+        _FakeIInstance(), _FakeQuestion(), emit_answers_lane=False
+    )
+
+    assert payload['content'] == 'Exception: Invalid API key.'
+    assert any(ENGINE_LOCATION in line for line in logged), 'the log lost the engine location'
 
 
 # ---------------------------------------------------------------------------

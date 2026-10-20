@@ -41,6 +41,7 @@ import jmespath
 from rocketlib import debug, error
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.utils import error_text, safe_str
 from ai.common.schema import Question
 
 from .formatters import format_data
@@ -1394,7 +1395,7 @@ def _execute_wave_calls(
             try:
                 outcome = _store_and_preview(tool, key, raw, context, None)
             except Exception as exc:
-                outcome = {'tool': tool, 'key': key, 'error': f'{type(exc).__name__}: {exc}'}
+                outcome = {'tool': tool, 'key': key, 'error': f'{type(exc).__name__}: {error_text(exc)}'}
             else:
                 if seen_results is not None and not _is_check_call(tool, asked, check_tool, check_args):
                     # A check that passes again is news, not a repeat.
@@ -1502,8 +1503,9 @@ def _execute_wave_calls(
             return _Unstored(agent_base.call_tool(context, tool, args))
 
         except Exception as exc:
-            err_msg = f'{type(exc).__name__}: {exc}'
-            error(f'rocketride wave execute tool={tool!r} error={err_msg}')
+            error(f'rocketride wave execute tool={tool!r} error={type(exc).__name__}: {safe_str(exc)}')
+            # The result reaches the planner, a parent agent and a partial report: no engine source path.
+            err_msg = f'{type(exc).__name__}: {error_text(exc)}'
             # Return an error dict rather than propagating — the LLM sees the
             # error in the next prompt and can decide how to recover.
             return {'tool': tool, 'key': key, 'error': err_msg}
@@ -1605,7 +1607,7 @@ def _execute_wave_calls(
                 except Exception as exc:
                     # future.result() should not raise since _run_one catches all
                     # exceptions internally, but handle defensively just in case.
-                    results[idx] = _gave_up(idx, f'{type(exc).__name__}: {exc}')
+                    results[idx] = _gave_up(idx, f'{type(exc).__name__}: {error_text(exc)}')
 
             now = time.monotonic()
             for future in list(pending):

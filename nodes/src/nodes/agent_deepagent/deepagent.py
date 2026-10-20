@@ -31,14 +31,14 @@ import re
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import ToolDescriptor, error
+from rocketlib import ToolDescriptor, debug, error
 
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
 
 from ai.common.utils import langchain_messages_to_transcript, normalize_bound_tools
-from ai.common.utils import safe_str
+from ai.common.utils import error_text, safe_str
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ def _build_deepagent_tools(
             try:
                 out = agent_base.call_tool(context, tool_name, framework_args)
             except Exception as e:
-                out = {'error': str(e), 'type': type(e).__name__}
+                out = {'error': error_text(e), 'type': type(e).__name__}
 
             try:
                 return json.dumps(out, default=str) if isinstance(out, (dict, list)) else safe_str(out)
@@ -384,7 +384,9 @@ class DeepAgentDriver(AgentBase):
                 )
             )
         except Exception as e:
-            raise RuntimeError(f'Deep agent {stage} failed: {type(e).__name__}: {safe_str(e)}') from e
+            debug(f'deepagent {stage} failed: {type(e).__name__}: {safe_str(e)}')
+            # This text becomes the answer: no engine source path (the log above keeps it).
+            raise RuntimeError(f'Deep agent {stage} failed: {type(e).__name__}: {error_text(e)}') from e
 
         final_text = ''
         try:

@@ -28,14 +28,14 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import ToolDescriptor
+from rocketlib import ToolDescriptor, debug
 
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
 
 from ai.common.utils import langchain_messages_to_transcript, normalize_bound_tools
-from ai.common.utils import safe_str
+from ai.common.utils import error_text, safe_str
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ def _build_langchain_tools(
             try:
                 out = agent_base.call_tool(context, tool_name, framework_args)
             except Exception as e:
-                out = {'error': str(e), 'type': type(e).__name__}
+                out = {'error': error_text(e), 'type': type(e).__name__}
 
             try:
                 return json.dumps(out, default=str) if isinstance(out, (dict, list)) else safe_str(out)
@@ -258,7 +258,7 @@ class LangChainDriver(AgentBase):
                 self._send_sse('thinking', message='Tool complete')
 
             def on_tool_error(self, error: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', message=f'Tool error: {safe_str(error)}')
+                self._send_sse('thinking', message=f'Tool error: {error_text(error)}')
 
             def on_agent_action(self, action: Any, **kwargs: Any) -> None:
                 self._send_sse('thinking', message='Agent thinking...')
@@ -276,7 +276,7 @@ class LangChainDriver(AgentBase):
                 self._send_sse('thinking', message='LLM call completed')
 
             def on_llm_error(self, error: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', message=f'LLM error: {safe_str(error)}')
+                self._send_sse('thinking', message=f'LLM error: {error_text(error)}')
 
         tool_descriptors = context.tools.list
         llm = _build_langchain_llm(self, context)
@@ -298,7 +298,11 @@ class LangChainDriver(AgentBase):
                 config={'callbacks': [_SSECallbackHandler(_send_sse)]},
             )
         except Exception as e:
-            raise RuntimeError('LangChain agent {} failed: {}: {}'.format(stage, type(e).__name__, safe_str(e))) from e
+            debug(f'langchain agent {stage} failed: {type(e).__name__}: {safe_str(e)}')
+            # This text becomes the answer: no engine source path (the log above keeps it).
+            raise RuntimeError(
+                'LangChain agent {} failed: {}: {}'.format(stage, type(e).__name__, error_text(e))
+            ) from e
 
         final_text = ''
         try:
