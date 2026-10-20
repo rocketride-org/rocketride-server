@@ -4,8 +4,6 @@ module:server:
       - all-globs-to-any-file: ["packages/server/**", "!**/scripts/**", "!**/docs/**"]
   - changed-files:
       - all-globs-to-any-file: ["packages/vcpkg/**", "!**/scripts/**", "!**/docs/**"]
-  - changed-files:
-      - all-globs-to-any-file: ["packages/tika/**", "!**/scripts/**", "!**/docs/**"]
 
 module:nodes:
   - changed-files:
