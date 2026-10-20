@@ -53,7 +53,7 @@ _source: Optional[Source] = None
 
 
 class NodePackageInvalid(RuntimeError):
-    """A package whose digest is not the one it was announced with."""
+    """A package whose digest is not the one it was announced with, or one the rail refuses."""
 
     code = 'NODE_PACKAGE_INVALID'
 
@@ -68,6 +68,40 @@ def _sweep(cache: str) -> None:
         with contextlib.suppress(OSError):
             if time.time() - os.path.getmtime(path) > 3600:
                 shutil.rmtree(path, ignore_errors=True)
+
+
+class NodeNotFound(RuntimeError):
+    """No node by that name is published anywhere the caller can see."""
+
+    code = 'NODE_NOT_FOUND'
+
+
+class NodeNotEntitled(RuntimeError):
+    """The node exists, but not on any rung the caller is on."""
+
+    code = 'NODE_NOT_ENTITLED'
+
+
+class NodeRegistryUnavailable(RuntimeError):
+    """The rail could not be read, so a published node cannot be resolved."""
+
+    code = 'NODE_REGISTRY_UNAVAILABLE'
+
+
+class NodeVersionMismatch(RuntimeError):
+    """A package or index built for a node contract this engine does not speak."""
+
+    code = 'NODE_VERSION_MISMATCH'
+
+
+def module_of(node_id: str) -> str:
+    """The Python module name of a node: acme.my_node imports as nodes.acme__my_node."""
+    return node_id.replace('.', '__')
+
+
+def node_of(module: str) -> str:
+    """The node id a module name stands for; the inverse of module_of."""
+    return module.replace('__', '.', 1)
 
 
 def unpack(name: str, data: bytes, sha256: str) -> str:

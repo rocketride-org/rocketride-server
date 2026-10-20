@@ -198,6 +198,20 @@ def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, A
     raise ValueError(f'Pipeline source component "{source}" not found in components list')
 
 
+async def _resolve_nodes(
+    pipeline: Dict[str, Any], control: 'TASK_CONTROL', conn: Optional['TaskConn']
+) -> Dict[str, Dict[str, Any]]:
+    """The publish row of each published node the pipeline names, for the caller who runs it."""
+    from ai.account.app_deploy import _team_ids_of
+    from ai.account.node_deploy import resolve_nodes
+
+    providers = [component.get('provider', '') for component in pipeline.get('components', [])]
+    if not any('.' in provider for provider in providers):
+        return {}
+    team_ids = list(_team_ids_of(conn).values()) if getattr(conn, '_account_info', None) else [control.teamId]
+    return await resolve_nodes(control.orgId or 'local', control.client_id, team_ids, providers)
+
+
 class TaskServer(DAPBase):
     """
     Central task management server orchestrating computational task lifecycles.
@@ -1480,6 +1494,9 @@ class TaskServer(DAPBase):
             self._task_control.pop(control.token, None)
             self.debug_message(f'Replaced completed task "{control.id}"...')
 
+        # The published nodes this run may use, fixed now; a node the caller cannot run refuses the launch
+        node_versions = await _resolve_nodes(control.pipeline, control, conn)
+
         try:
             # Create new Task instance with complete configuration
             control.task = Task(
@@ -1501,6 +1518,7 @@ class TaskServer(DAPBase):
                 run_kind=run_kind,
                 owner_kind=control.owner_kind,
                 trigger=trigger,
+                node_versions=node_versions,
             )
 
             # Register task in central registry
@@ -1660,6 +1678,9 @@ class TaskServer(DAPBase):
             # restart would leave the task stopped, the new pipeline already stored
             # by Task.restart_task, and control.pipeline still naming the old one.
             pipeline = _apply_source_defaults(pipeline, control.source)
+
+            # The new pipeline's published nodes, resolved before anything is restarted
+            control.task.node_versions = await _resolve_nodes(pipeline, control, conn)
 
             # Call the Task's restart method to restart the engine process
             # This preserves all statistics and monitoring while restarting the subprocess

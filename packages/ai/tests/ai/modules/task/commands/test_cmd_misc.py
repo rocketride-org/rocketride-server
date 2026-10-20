@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ai.common.node_packages import NodeNotEntitled
 from ai.modules.task.commands import cmd_misc
 from ai.modules.task.commands.cmd_misc import MiscCommands
 
@@ -193,6 +194,58 @@ async def test_on_rrext_services_no_service_returns_summary(monkeypatch):
     conn = _make_conn()
     result = await MiscCommands.on_rrext_services(conn, {})
     assert result['body'] == summary
+
+
+@pytest.fixture
+def published(monkeypatch):
+    """The caller reaches acme.echo; acme.other is published to someone else."""
+
+    async def visible_nodes(conn):
+        return {'acme.echo': {}}
+
+    registered = []
+    monkeypatch.setattr(cmd_misc.node_deploy, 'visible_nodes', visible_nodes)
+    monkeypatch.setattr(cmd_misc.node_store, 'register_published', registered.append)
+    return registered
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_services_shows_only_the_published_nodes_the_caller_reaches(monkeypatch, published):
+    async def fake_get_summary():
+        return {'services': {'webhook': {}, 'acme.echo': {}, 'acme.other': {}}, 'version': 7}
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_summary', fake_get_summary)
+
+    result = await MiscCommands.on_rrext_services(_make_conn(), {})
+
+    assert sorted(result['body']['services']) == ['acme.echo', 'webhook']
+    assert published == [{'acme.echo': {}}]
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_services_does_not_describe_a_node_published_to_someone_else(monkeypatch, published):
+    async def fake_get_service(name):
+        return {'name': name}
+
+    monkeypatch.setattr(cmd_misc.services_catalog, 'get_service', fake_get_service)
+
+    with pytest.raises(ValueError, match="Service 'acme.other' not found"):
+        await MiscCommands.on_rrext_services(_make_conn(), {'arguments': {'service': 'acme.other'}})
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_refuses_a_node_the_caller_cannot_run(monkeypatch):
+    async def nodes_for(conn, components):
+        raise NodeNotEntitled('acme.other is not published to you or any of your teams')
+
+    validated = []
+    monkeypatch.setattr(cmd_misc.node_deploy, 'nodes_for', nodes_for)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validated.append)
+    request = {'arguments': {'pipeline': {'components': [{'id': 'x', 'provider': 'acme.other'}]}}}
+
+    with pytest.raises(NodeNotEntitled):
+        await MiscCommands.on_rrext_validate(_make_conn(), request)
+    assert validated == []
 
 
 # ---------------------------------------------------------------------------

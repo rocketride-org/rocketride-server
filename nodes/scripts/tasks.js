@@ -200,7 +200,7 @@ async function packageNode(name, srcDir) {
 		services[file] = text;
 		if (icon) icons[icon] = await fs.promises.readFile(path.join(srcDir, icon), 'utf8');
 	}
-	add(`${name}/.rrnode`, Buffer.from(JSON.stringify({ name })));
+	add(`${name}/.rrnode`, Buffer.from(JSON.stringify({ name, contract: NODES_CONTRACT })));
 
 	const data = zip.toBuffer();
 	const sha256 = crypto.createHash('sha256').update(data).digest('hex');

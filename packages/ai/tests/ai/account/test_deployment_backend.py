@@ -605,3 +605,42 @@ class TestIterEnabled:
         # scheduler feed — iter_enabled swallows the StorageError and yields
         # nothing instead of raising.
         assert [d async for d in backend.iter_enabled()] == []
+
+
+# ============================================================================
+# Publishes — apps and nodes on the same rail
+# ============================================================================
+
+ME = {'type': 'user', 'id': 'user-1'}
+
+
+class TestPublishKinds:
+    @pytest.mark.parametrize(
+        'call',
+        [
+            lambda b: b.publish_set('org-1', 'pipe', 'proj-1', ME, 1, {}, ACTOR),
+            lambda b: b.publish_get('org-1', 'pipe', 'proj-1', ME),
+            lambda b: b.publish_of_app('org-1', 'pipe', 'proj-1'),
+            lambda b: b.publish_list('org-1', 'pipe', [ME]),
+            lambda b: b.publish_set_state('org-1', 'pipe', 'proj-1', ME, 'disabled', ACTOR),
+        ],
+        ids=['publish_set', 'publish_get', 'publish_of_app', 'publish_list', 'publish_set_state'],
+    )
+    async def test_a_pipe_is_not_published(self, backend, call):
+        with pytest.raises(ValueError, match="unsupported kind 'pipe'"):
+            await call(backend)
+
+    async def test_app_and_node_rows_never_mix(self, backend):
+        await backend.publish('org-1', 'acme.app', {'kind': 'app'}, ACTOR)
+        await backend.publish('org-1', 'acme.node', {'kind': 'node'}, ACTOR)
+        await backend.publish_set('org-1', 'app', 'acme.app', ME, 1, {}, ACTOR)
+        await backend.publish_set('org-1', 'node', 'acme.node', ME, 1, {}, ACTOR)
+
+        assert [r['appId'] for r in await backend.publish_list('org-1', 'app', [ME])] == ['acme.app']
+        assert [r['appId'] for r in await backend.publish_list('org-1', 'node', [ME])] == ['acme.node']
+
+    async def test_a_version_is_published_only_as_its_own_kind(self, backend):
+        await backend.publish('org-1', 'acme.app', {'kind': 'app'}, ACTOR)
+
+        with pytest.raises(StorageError, match='not a node version'):
+            await backend.publish_set('org-1', 'node', 'acme.app', ME, 1, {}, ACTOR)

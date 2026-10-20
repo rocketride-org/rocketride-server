@@ -10,11 +10,14 @@ import os
 import sys
 
 import pytest
+from types import SimpleNamespace
 
 from ai.constants import CONST_NODES_CONTRACT
 from ai.modules.task import node_store
 
 ON_DISK = {'protocol': 'webhook://', 'icon': 'webhook.svg'}
+# A run that resolved no published node
+RUN = SimpleNamespace(node_versions={}, org_id='local')
 PACKAGED = {'protocol': 'provider_x://', 'icon': 'x.svg', 'maximum': 1.0}
 
 
@@ -96,7 +99,7 @@ def test_an_index_it_cannot_use_registers_nothing(server, monkeypatch, broken):
 async def test_a_task_gets_a_package_by_node_or_provider_name(server, asked):
     node_store.start()
 
-    reply = await node_store._fetch(None, {'name': asked}, None)
+    reply = await node_store._fetch(RUN, {'name': asked}, None)
 
     assert reply.body == {'name': 'llm_x', 'sha256': 'x', 'services': {'services.json': PACKAGED}}
     assert reply.data == b'llm_x:x'
@@ -106,7 +109,7 @@ async def test_a_task_gets_a_package_by_node_or_provider_name(server, asked):
 async def test_a_name_this_server_does_not_serve_gets_an_empty_answer(server):
     node_store.start()
 
-    reply = await node_store._fetch(None, {'name': 'filesys'}, None)
+    reply = await node_store._fetch(RUN, {'name': 'filesys'}, None)
 
     assert reply.body == {} and reply.data is None
 
@@ -117,6 +120,8 @@ def test_the_source_serves_a_node_by_node_or_provider_name_and_nothing_else(serv
     assert node_store._package('provider_x') == ('llm_x', b'llm_x:x', 'x', {'services.json': PACKAGED})
     assert node_store._package('llm_x') == node_store._package('provider_x')
     assert node_store._package('filesys') is None
+    # A published node is served only to the run it was resolved for, never from here
+    assert node_store._package('acme.echo') is None and node_store._package('acme__echo') is None
 
 
 def test_a_provider_two_nodes_claim_is_served_by_the_first_and_warned_about(server, monkeypatch):

@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ai.account import node_deploy
+from ai.common.node_packages import NodeNotEntitled
 from ai.modules.task.task_server import TaskServer, TASK_CONTROL
 
 
@@ -236,3 +238,45 @@ async def test_a_restart_cannot_change_the_source():
         await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': other_source}}, conn=conn)
 
     control.task.restart_task.assert_not_awaited()
+
+
+def _with_published_node(pipeline):
+    """The pipeline with one more component, a published node."""
+    return {**pipeline, 'components': pipeline['components'] + [{'id': 'pub', 'provider': 'acme.echo', 'config': {}}]}
+
+
+async def _not_entitled(org_id, user_id, team_ids, names):
+    raise NodeNotEntitled('acme.echo is not published to you or any of your teams')
+
+
+@pytest.mark.asyncio
+async def test_a_launch_naming_a_node_the_caller_cannot_run_starts_nothing(monkeypatch):
+    monkeypatch.setattr(node_deploy, 'resolve_nodes', _not_entitled)
+    ts = _make_server()
+    conn = MagicMock()
+    conn._account_info = None
+    request = {'command': 'launch', 'arguments': {'token': 'tk_new', 'pipeline': _with_published_node(_pipeline())}}
+
+    with pytest.raises(NodeNotEntitled):
+        await ts.start_task(request, conn=conn)
+    assert ts._task_control == {}
+
+
+@pytest.mark.asyncio
+async def test_a_restart_to_a_node_the_caller_cannot_run_keeps_the_running_pipeline(monkeypatch):
+    monkeypatch.setattr(node_deploy, 'resolve_nodes', _not_entitled)
+    ts = _make_server()
+    control = _running(_pipeline())
+    control.teamId = ''
+    ts.get_task_control = lambda token: control
+    control.task.restart_task = AsyncMock()
+    control.task.has_attached_debugger.return_value = False
+    conn = MagicMock()
+    conn._account_info = None
+
+    with pytest.raises(NodeNotEntitled):
+        await ts.restart_task(
+            {'arguments': {'token': 'tk_test', 'pipeline': _with_published_node(_pipeline())}}, conn=conn
+        )
+    control.task.restart_task.assert_not_awaited()
+    assert control.pipeline == _pipeline()

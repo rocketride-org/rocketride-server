@@ -582,6 +582,7 @@ class Task(DAPBase):
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = 'manual',
+        node_versions: Optional[Dict[str, Dict[str, Any]]] = None,
         **kwargs,
     ) -> None:
         """
@@ -603,6 +604,8 @@ class Task(DAPBase):
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
+            node_versions: Published node id -> the publish row resolved for
+                this run at launch; node.fetch serves exactly these
             **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication
@@ -614,6 +617,7 @@ class Task(DAPBase):
         self.client_id = client_id
         self.team_id = team_id
         self.org_id = org_id
+        self.node_versions = node_versions or {}
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds

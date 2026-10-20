@@ -88,3 +88,11 @@ class AppCommands(DAPConn):
     async def on_rrext_deploy_app(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Delegate ``rrext_deploy_app`` (app publish control) to the app handler."""
         return await account.handle_app(self, request)
+
+    # ── rrext_deploy_node ────────────────────────────────────────────────────
+
+    async def on_rrext_deploy_node(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Node publish control on the deployments registry: versions, publish, unpublish."""
+        from ai.account.node_deploy import handle_deploy_node
+
+        return await handle_deploy_node(self, request)
