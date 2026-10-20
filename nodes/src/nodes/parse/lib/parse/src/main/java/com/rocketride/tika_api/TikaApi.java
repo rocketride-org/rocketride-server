@@ -26,11 +26,14 @@ import java.util.logging.ConsoleHandler;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import javax.xml.parsers.ParserConfigurationException;
+import org.xml.sax.SAXException;
 
 import org.apache.tika.parser.Parser;
 import org.apache.tika.mime.MediaType;
 import org.apache.tika.detect.Detector;
 import org.apache.tika.config.TikaConfig;
+import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.io.TikaInputStream;
 import org.apache.tika.parser.ParseContext;
@@ -383,6 +386,22 @@ public final class TikaApi {
 	 */
 	public static boolean isSevenZipReady() {
 		return sevenZipReady;
+	}
+
+	/**
+	 * The Tika configuration init() built, shared by every document and every
+	 * embedded object in it. Building one re-reads tika-config.xml and launches
+	 * the external tools it probes for, which costs more than parsing a small
+	 * embedded image, so embedded objects never rebuild it.
+	 *
+	 * @return the shared configuration, or a new one when init() has not run
+	 */
+	static TikaConfig getTikaConfig() throws TikaException, ParserConfigurationException, SAXException, IOException {
+		// initialized is volatile and set after tikaConfig, so reading it first
+		// makes tikaConfig visible to the calling thread
+		if (initialized)
+			return tikaConfig;
+		return ConfigBuilder.getConfig();
 	}
 
 	/**

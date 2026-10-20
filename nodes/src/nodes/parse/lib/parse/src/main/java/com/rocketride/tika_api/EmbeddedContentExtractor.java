@@ -49,7 +49,6 @@ public class EmbeddedContentExtractor {
         private final long nativeHandle;
         private final String mimeType;
         private final long flags;
-        private static TikaConfig tikaConfig;
 
         public EmbeddedContentProcessor(long nativeHandle, String mimeType) {
             this(nativeHandle, mimeType, 0);
@@ -140,7 +139,7 @@ public class EmbeddedContentExtractor {
         private void processStream(InputStream stream, ContentHandler handler, Metadata metadata,
                 boolean outputHtml) throws SAXException, IOException, ParserConfigurationException {
             try {
-                tikaConfig = ConfigBuilder.getConfig();
+                TikaConfig tikaConfig = TikaApi.getTikaConfig();
                 AutoDetectParser parser = new AutoDetectParser(tikaConfig);
                 Detector detector = parser.getDetector();
                 MediaType mediaType = detector.detect(stream, metadata);
@@ -176,7 +175,7 @@ public class EmbeddedContentExtractor {
         public void parseEmbedded(InputStream stream, ContentHandler handler, Metadata metadata,
                 boolean outputHtml) throws SAXException, IOException {
             try {
-                tikaConfig = ConfigBuilder.getConfig();
+                TikaConfig tikaConfig = TikaApi.getTikaConfig();
                 AutoDetectParser parser = new AutoDetectParser(tikaConfig);
                 Detector detector = parser.getDetector();
 			    MediaType mediaType = detector.detect(stream, metadata);
