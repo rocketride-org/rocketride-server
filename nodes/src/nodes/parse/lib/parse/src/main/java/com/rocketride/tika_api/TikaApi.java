@@ -59,6 +59,15 @@ public final class TikaApi {
 	public static final int MAGICK = 1 << 3; // Use MagicK image enhancement
 	public static final int SIGNING = 1 << 6; // Sign the file
 
+	/**
+	 * Added to the entry flags by the parse node, per document, for each media
+	 * lane it has no listener on. The node drops whatever reaches such a lane,
+	 * so that kind of media is not extracted at all. These sit above the entry
+	 * flags (apLib/entry.hpp) and match the parse node's tika.hpp.
+	 */
+	public static final int SKIP_IMAGES = 1 << 24; // No listener on the image lane
+	public static final int SKIP_AUDIO = 1 << 25; // No listener on the audio lane
+	public static final int SKIP_VIDEO = 1 << 26; // No listener on the video lane
 
 	/**
 	 * Common MIME type string constants used throughout TikaApi.
@@ -395,18 +404,39 @@ public final class TikaApi {
 	}
 
 	/**
+	 * Whether media of a given type is wanted for this document.
+	 *
+	 * @param flags    the flags the engine passed for the document
+	 * @param mimeType the detected MIME type of the media
+	 * @return false when the parse node has no listener for that kind of media
+	 */
+	public static boolean wantsMedia(long flags, String mimeType) {
+		if (mimeType.startsWith(MIME_TYPE_IMAGE))
+			return (flags & SKIP_IMAGES) == 0;
+		if (mimeType.startsWith(MIME_TYPE_AUDIO))
+			return (flags & SKIP_AUDIO) == 0;
+		if (mimeType.startsWith(MIME_TYPE_VIDEO))
+			return (flags & SKIP_VIDEO) == 0;
+		return true;
+	}
+
+	/**
 	 * Returns a PDFParserConfig object with customized configuration options.
-	 * 
+	 *
 	 * The returned configuration object has been modified to disable the use of
-	 * Tesseract OCR and set the maximum memory usage to 512Mb.
-	 * 
+	 * Tesseract OCR and set the maximum memory usage to 512Mb. Inline images are
+	 * extracted only when the image lane is wanted.
+	 *
+	 * @param flags the flags the engine passed for the document
 	 * @return a PDFParserConfig object with custom configuration options.
 	 */
-	public static PDFParserConfig getPdfConfig() {
-		// We're not going to use Tesseract OCR, so we disable the options for inline
-		// image extraction and OCR strategy in PDFParserConfig.
+	public static PDFParserConfig getPdfConfig(long flags) {
 		PDFParserConfig config = new PDFParserConfig();
-		config.setExtractInlineImages(true);
+
+		// Every inline image is decoded, re-encoded and parsed on its own, and
+		// some PDFs draw their pages as tens of thousands of tiny ones, so only
+		// extract them when something listens on the image lane
+		config.setExtractInlineImages(wantsMedia(flags, MIME_TYPE_IMAGE));
 		config.setExtractUniqueInlineImagesOnly(true);
 
 		// Maximum usage is 512Mb
@@ -437,7 +467,7 @@ public final class TikaApi {
 	 *                    in recognizing the file
 	 * @param writer      tika will output to this SAX writer
 	 * @param metadata    Sends/receives the tika metadata
-	 * @param flags       OCR/MAGICK enabled or not
+	 * @param flags       OCR/MAGICK enabled or not, and the SKIP_* media lanes
 	 * @throws Exception
 	 */
 
@@ -491,7 +521,7 @@ public final class TikaApi {
 
 			} else if (asposeAvailable && mimeType.startsWith(MIME_TYPE_PDF)) {
 				// Use Aspose PDFParser via reflection
-				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, MIME_TYPE_IMAGE);
+				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, MIME_TYPE_IMAGE, flags);
 				Parser docParser = createAsposePDFParser(extractor, extractPath, mediaType);
 				context.set(Parser.class, docParser);
 				docParser.parse(stream, filter, metadata, context);
@@ -528,9 +558,9 @@ public final class TikaApi {
 			} else {
 				// Configure the parse context and encoding config
 				context.set(Parser.class, parser);
-				context.set(PDFParserConfig.class, getPdfConfig());
+				context.set(PDFParserConfig.class, getPdfConfig(flags));
 
-				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType);
+				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType, flags);
 				context.set(EmbeddedDocumentExtractor.class, extractor);
 
 				logger.log(Level.INFO, "\nInvoke parse() method (on doc type)\n");

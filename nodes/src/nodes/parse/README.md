@@ -34,5 +34,12 @@ exact source cell, such as financial-table or regulatory extraction. For
 structure-preserving parsing that retains table HTML plus page and coordinate
 data, use the `datalab_parse` node instead.
 
+**Embedded media is extracted only for connected lanes.** Images, audio and
+video inside a document are pulled out only when something is connected to the
+`image`, `audio` or `video` lane. A pipeline that uses only `text` or `table`
+skips them, which keeps PDFs that draw their pages as thousands of small images
+as fast to parse as any other. Connect the `image` lane, for example to an OCR
+node, to receive them.
+
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

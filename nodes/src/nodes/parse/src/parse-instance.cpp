@@ -254,6 +254,25 @@ Error IFilterInstance::onDocumentComplete() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Builds the flags passed to tika: the entry flags plus a skip bit
+///		for each media lane with no listener. onImage, onAudio and onVideo
+///		drop everything sent to such a lane, so tika is told not to
+///		extract that media at all
+///	@param[in] entryFlags
+///		The flags of the entry being parsed
+///	@returns
+///		The flags to pass to tika
+//-------------------------------------------------------------------------
+uint32_t IFilterInstance::tikaFlags(uint32_t entryFlags) noexcept {
+    auto flags = entryFlags;
+    if (!binder.hasListener("image")) flags |= Tika::SKIP_IMAGES;
+    if (!binder.hasListener("audio")) flags |= Tika::SKIP_AUDIO;
+    if (!binder.hasListener("video")) flags |= Tika::SKIP_VIDEO;
+    return flags;
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Tika thread procedure. Starts tika, sends incoming enties to tika,
 /// 	ends tika when pipe completed.
 //-------------------------------------------------------------------------
@@ -289,7 +308,7 @@ Error IFilterInstance::tikaThreadProc() noexcept {
 
             // Extract the text
             auto ccode = m_tika.extractTextFromBuffer(
-                filename, m_buffer, currentEntry->flags(), context);
+                filename, m_buffer, tikaFlags(currentEntry->flags()), context);
 
             // Push error code to callback queue always to process in instance
             // thread

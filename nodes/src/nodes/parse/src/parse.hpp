@@ -146,6 +146,7 @@ private:
     Error onVideo(const AVI_ACTION action, Text &mimeType,
                   const std::vector<uint8_t> &binaryData) noexcept;
     Error onDocumentComplete() noexcept;
+    uint32_t tikaFlags(uint32_t entryFlags) noexcept;
     Error tikaThreadProc() noexcept;
     Error pumpTikaCallbacks() noexcept;
 
