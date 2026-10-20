@@ -57,7 +57,7 @@ node scripts/build.js docs:check                     # export drift gate (CI-enf
 - **Store apps**: pipelines bundled in an app for the public store use
   catalog nodes only (the nodes that ship with the engine; see 'Catalog
   nodes only' in `docs/agents/context/ROCKETRIDE_APPS.md`). `scaffold_node`
-  and `local_nodes` are for self-hosted engines and for nodes contributed
+  and custom nodes are for self-hosted engines and for nodes contributed
   to the catalog, never for a store app.
 - **VS Code extension only**: log through `getLogger()` from
   `src/shared/util/output.ts` (the Output-channel logger — never

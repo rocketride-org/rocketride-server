@@ -16,9 +16,9 @@ services:
     volumes:
       # Hot-reload Python nodes during development.
       # Host path: <repo-root>/nodes/src/nodes
-      # Container path: /opt/rocketride/ai/nodes (matches WORKDIR /opt/rocketride + engine loads ./ai/nodes)
-      # Requires a prior `dist/server/` build; the bind mount shadows the built artifact at this path.
-      - ../nodes/src/nodes:/opt/rocketride/ai/nodes:ro
+      # Container path: /opt/rocketride/nodes (WORKDIR /opt/rocketride; the engine scans ./nodes)
+      # Requires a prior `dist/server/` build; the bind mount shadows the server's nodes/ with every node.
+      - ../nodes/src/nodes:/opt/rocketride/nodes:ro
 
   etcd:
     ports:
