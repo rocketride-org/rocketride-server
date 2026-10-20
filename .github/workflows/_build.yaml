@@ -351,6 +351,18 @@ jobs:
             ${{ github.workspace }}/dist/artifacts/*.json
           if-no-files-found: error
 
+      # One platform only: every node package must match the one index.json
+      - name: Upload node packages
+        if: inputs.package && matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-artifacts-nodes
+          retention-days: ${{ inputs.retention_days }}
+          path: |
+            ${{ github.workspace }}/dist/nodes/*.rrnode
+            ${{ github.workspace }}/dist/nodes/index.json
+          if-no-files-found: error
+
       - name: Upload VS Code extension
         if: inputs.package && matrix.platform == 'ubuntu'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
