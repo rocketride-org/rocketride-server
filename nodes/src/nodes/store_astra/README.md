@@ -32,7 +32,7 @@ Pipeline agents address the functions below as `<node id>.<function>`. The confi
 | `search` | Search the collection for matching documents. |
 | `objdir` | Lists the distinct parent paths of active documents in the collection as a map of parent path to one object ID each; accepts optional `parent`, `offset`, and `limit` (default and cap 1000). Documents that share a parent path appear as one entry. |
 | `get` | Returns up to `limit` chunks (default and cap 100) of one document by `object_id`, ordered by chunk ID, with `total`, `has_more`, and `truncated`; an object ID the store does not hold, or one in the trash, returns a failure object. |
-| `stats` | Returns the collection's count as this store reports it, `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
+| `stats` | Returns the collection's row count (including trashed chunks and the control row), `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
 | `upsert` | Add or update documents in the collection. |
 | `delete` | Remove documents by object ID. |
 | `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash, keeping their chunks; the reply echoes the distinct IDs, and `matched_chunks` is null on this store. |
@@ -96,6 +96,14 @@ Set **API Endpoint** to the Astra Data API endpoint and **Application Token** to
 Keyword search uses Astra's native lexical sort and supports the requested offset and limit. Semantic search uses the question embedding, includes a similarity score, and uses the requested result limit. Both paths apply the standard document filters for node, parent, permissions, object, table, and chunk selection. By default they also require `meta.isDeleted` to be false, so marked-deleted content stays hidden unless a caller explicitly requests it.
 
 The two search modes are selected by the incoming question rather than by a second connection setting. Use a semantic question when the vocabulary may differ from the stored text, and use keyword search when exact words, paging, or the lexical index are more important. A semantic query with no collection returns an empty set; a document with no embedding is rejected at ingestion rather than being converted to keyword-only content.
+
+### Directory listing and counts
+
+`objdir` reads active chunks with `chunkId` 0, groups them by non-empty parent path, and returns paths in alphabetical order. When documents share a path, the lowest object ID represents that path. `parent` is an exact filter; `offset` and `limit` apply after grouping, so they count paths. Documents without a chunk numbered 0 do not appear.
+
+Astra has no collection aggregation method in the supported SDK. Each directory request follows the SDK cursor through all matching chunks, fetching only parent and object-ID metadata, then groups and pages locally. Large collections therefore take more work even when requesting a small page.
+
+`stats.count` uses the bounded count API first. If the caller or server counting limit is exceeded, it follows a cursor fetching only row IDs to count all rows. It never substitutes an estimate or the limit for the count. This fallback can be slower on large collections. Cursor scans are not snapshots: concurrent writes can change counts or directory pages between requests.
 
 ### Ingestion, replacement, and deletion
 

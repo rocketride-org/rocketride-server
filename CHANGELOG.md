@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **nodes**: vector-store trash operations preserve Qdrant metadata and update every matching Weaviate chunk; on Qdrant they set only the nested flag (`set_payload` with `key='meta'`), which needs a Qdrant server of 1.8 or newer. `objdir` excludes soft-deleted documents on Atlas, Chroma, Milvus, Pinecone and Weaviate, and now returns paths on Chroma and Weaviate: Chroma filtered on a `chunk` key the store never writes, so it returned nothing, and given a parent it sent a two-field `where` (with the parent JSON-encoded) that the client rejects; Weaviate subscripted a `DocMetadata` and failed (#2587)
+- **nodes**: Astra directory listing uses the supported SDK cursor, groups active chunk-zero headers before paging, and orders paths consistently; collection counts pass the required SDK bound and fall back to scanning row IDs when a counting limit is reached (#2587).
 
 ## [3.5.0] - 2026-10-16
 

@@ -33,13 +33,17 @@ import re
 
 from astrapy import DataAPIClient, Database
 from astrapy.data_types import DataAPIVector
+from astrapy.exceptions import TooManyDocumentsToCountException
 from astrapy.info import CollectionDefinition, CollectionVectorOptions, CollectionLexicalOptions
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
 from ai.common.config import Config
 
 from rocketlib import warning
+
+# A bounded count is the fast path; larger collections are counted by cursor.
+_COUNT_UPPER_BOUND = 10_000
 
 
 class Store(DocumentStoreBase):
@@ -244,8 +248,12 @@ class Store(DocumentStoreBase):
         # Get the collection
         collection = self.database.get_collection(self.collection_name)
 
-        # Return the document count
-        return collection.count_documents({})
+        try:
+            return collection.count_documents({}, upper_bound=_COUNT_UPPER_BOUND)
+        except TooManyDocumentsToCountException:
+            # The API may also impose a lower server ceiling. Do not report the
+            # ceiling or an estimate as an exact count; stream only row IDs.
+            return sum(1 for _ in collection.find(filter={}, projection={'_id': True}))
 
     def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """
@@ -317,7 +325,11 @@ class Store(DocumentStoreBase):
 
     def getPaths(self, parent: str | None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]:
         """
-        More efficient implementation using aggregation to get distinct parent paths.
+        List distinct active parent paths, ordered by path, then paged locally.
+
+        Astra collections have no aggregation API. An unsorted cursor follows
+        every server page; a server-side sort or limit could truncate the input
+        before paths are grouped. Only chunk-zero parent/object metadata is read.
         """
         if not self._doesCollectionExist():
             return {}
@@ -328,32 +340,28 @@ class Store(DocumentStoreBase):
         if parent is not None:
             match_filter['meta.parent'] = parent
 
-        # Use aggregation pipeline
-        pipeline = [
-            {'$match': match_filter},
-            {
-                '$group': {
-                    '_id': '$meta.parent',
-                    'objectId': {'$first': '$meta.objectId'},
-                }
-            },
-            {'$skip': offset},
-            {'$limit': limit},
-        ]
-
-        # Execute aggregation
         collection = self.database.get_collection(self.collection_name)
-        results = collection.aggregate(pipeline)
+        results = collection.find(
+            filter=match_filter, projection={'meta.parent': True, 'meta.objectId': True, '_id': False}
+        )
 
-        # Build paths dictionary
+        # Choose the lowest object ID for each path so result order does not
+        # change page boundaries when Astra returns chunks in a different order.
         paths: Dict[str, str] = {}
         for result in results:
-            parent_path = result['_id']
-            object_id = result['objectId']
-            if parent_path and object_id:
+            metadata = result.get('meta') or {}
+            if not isinstance(metadata, dict):
+                continue
+            parent_path = metadata.get('parent')
+            object_id = metadata.get('objectId')
+            if not isinstance(parent_path, str) or not parent_path:
+                continue
+            if not isinstance(object_id, str) or not object_id or object_id == CONTROL_OBJECT_ID:
+                continue
+            if parent_path not in paths or object_id < paths[parent_path]:
                 paths[parent_path] = object_id
 
-        return paths
+        return dict(sorted(paths.items())[offset : offset + limit])
 
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
