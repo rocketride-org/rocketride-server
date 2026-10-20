@@ -18,6 +18,7 @@ Designed for integration with a FastAPI application and built on top of the ai.w
 """
 
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING, Callable, Optional
 import hashlib
@@ -281,17 +282,21 @@ class DataServer(DAPBase):
 # Until when the last "allowed" answer stands, so a job asks once per window, not per object
 _allowed_until = 0.0
 
+# One question at a time: the threads that open pipes together wait for its answer
+_asking = threading.Lock()
+
 
 def require_credit() -> None:
     """Engine pipe gate: raise OutOfCreditsError if this task's org may not open a pipe."""
     global _allowed_until
-    if time.monotonic() < _allowed_until:
-        return
-    try:
-        reply = task_channel.request_sync('spend.check', timeout=CONST_SPEND_CHECK_TIMEOUT)
-    except (ChannelUnavailable, ChannelError) as e:
-        # No answer, no pipe
-        raise RuntimeError(f'No credit check answered: {getattr(e, "message", e)}') from None
-    if reply.body.get('refusal'):
-        raise OutOfCreditsError(reply.body['refusal'])
-    _allowed_until = time.monotonic() + CONST_SPEND_ALLOW_SECONDS
+    with _asking:
+        if time.monotonic() < _allowed_until:
+            return
+        try:
+            reply = task_channel.request_sync('spend.check', timeout=CONST_SPEND_CHECK_TIMEOUT)
+        except (ChannelUnavailable, ChannelError) as e:
+            # No answer, no pipe
+            raise RuntimeError(f'No credit check answered: {getattr(e, "message", e)}') from None
+        if reply.body.get('refusal'):
+            raise OutOfCreditsError(reply.body['refusal'])
+        _allowed_until = time.monotonic() + CONST_SPEND_ALLOW_SECONDS

@@ -23,6 +23,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, TYPE_CHECKING
+from starlette.websockets import WebSocketDisconnect
 from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
@@ -243,7 +244,11 @@ class DataConn(DAPConn):
         future = asyncio.get_running_loop().create_future()
         self._pending[request['seq']] = future
         try:
-            await self.send(request)
+            try:
+                await self.send(request)
+            except (RuntimeError, WebSocketDisconnect) as e:
+                # The socket closed under the send
+                raise ConnectionError(f'the engine connection closed: {e}') from e
             return await asyncio.wait_for(future, timeout)
         finally:
             self._pending.pop(request['seq'], None)

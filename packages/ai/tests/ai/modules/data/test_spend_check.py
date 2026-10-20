@@ -12,6 +12,8 @@ OutOfCreditsError; an allowed answer stands for CONST_SPEND_ALLOW_SECONDS.
 
 from __future__ import annotations
 
+import threading
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -116,3 +118,23 @@ def test_a_refusal_is_asked_again_every_time(channel):
             data_server.require_credit()
 
     assert len(channel.asked) == 2
+
+
+def test_pipes_opened_together_ask_once_and_all_wait_for_the_answer(channel):
+    answered = threading.Event()
+    real = channel.request_sync
+
+    def slow(command, arguments=None, *, timeout):
+        time.sleep(0.05)
+        reply = real(command, arguments, timeout=timeout)
+        answered.set()
+        return reply
+
+    channel.request_sync = slow
+    threads = [threading.Thread(target=data_server.require_credit) for _ in range(12)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+
+    assert answered.is_set() and len(channel.asked) == 1

@@ -61,6 +61,7 @@ from ai.constants import (
     CONST_CHANNEL_DIAL_LIMIT,
     CONST_CHANNEL_DIAL_WINDOW,
     CONST_CHANNEL_MAX_INFLIGHT,
+    CONST_CHANNEL_REDIAL_DELAY,
 )
 from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
@@ -1248,7 +1249,8 @@ class Task(DAPBase):
         while self._dial_times and self._dial_times[0] < now - CONST_CHANNEL_DIAL_WINDOW:
             self._dial_times.popleft()
         if len(self._dial_times) >= CONST_CHANNEL_DIAL_LIMIT:
-            self.debug_message(f'WARNING: data channel dial limit reached for task {self.id}; ignoring the signal')
+            self.debug_message(f'WARNING: data channel dial limit reached for task {self.id}; trying again later')
+            self._redial_later(CONST_CHANNEL_DIAL_WINDOW)
             return
         self._dial_times.append(now)
         self._dial_task = asyncio.create_task(self._open_data_channel(stale=client))
@@ -1263,6 +1265,13 @@ class Task(DAPBase):
         pending, self._dial_pending = self._dial_pending, None
         if pending is not None and not self._is_terminating:
             self._on_channel_signal('1', pending[0])
+        elif self._data_client is None and not self._is_terminating:
+            # Nothing else asks again, and a hosted run's credit checks need the channel
+            self._redial_later(CONST_CHANNEL_REDIAL_DELAY)
+
+    def _redial_later(self, delay: float) -> None:
+        """Ask for a connection again after ``delay`` seconds, through the same dial rule."""
+        asyncio.get_running_loop().call_later(delay, self._on_channel_signal, '1', None)
 
     async def _open_data_channel(self, stale: Optional['Task.TaskData']) -> None:
         """Replace ``stale`` (if any) with a fresh connection to the task.
@@ -1292,8 +1301,8 @@ class Task(DAPBase):
     def _dial_refused(error: BaseException) -> bool:
         """Tell whether a connect error is the task refusing the handshake (HTTP 403).
 
-        The SDK re-raises the handshake failure as a ``ConnectionError`` with
-        the library's text, so the status is read off the message.
+        The SDK re-raises the handshake failure as a ``ConnectionError``; the
+        status is on the library's exception it wraps, else in its text.
 
         Args:
             error: The exception ``connect()`` raised.
@@ -1301,7 +1310,8 @@ class Task(DAPBase):
         Returns:
             bool: True for a refusal, which a retry cannot fix.
         """
-        return 'HTTP 403' in str(error)
+        wrapped = error.__cause__ or error.__context__
+        return getattr(getattr(wrapped, 'response', None), 'status_code', None) == 403 or 'HTTP 403' in str(error)
 
     async def _dial(self) -> 'Task.TaskData':
         """Open a connection to the task's ``/task/data``, retrying a refused connect.
