@@ -142,6 +142,46 @@ async def test_dials_are_rate_limited(monkeypatch):
     assert any('WARNING' in str(call) for call in t.debug_message.call_args_list)
 
 
+async def test_a_dial_that_fails_is_tried_again(monkeypatch):
+    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_REDIAL_DELAY', 0.01)
+    t = _engine()
+    t._open_data_channel = AsyncMock()  # never connects
+
+    Task._on_channel_signal(t, '1', None)
+    await asyncio.sleep(0.1)
+
+    assert t._open_data_channel.await_count > 1
+
+
+async def test_a_dial_held_back_by_the_limit_is_tried_once_the_window_passes(monkeypatch):
+    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_DIAL_LIMIT', 1)
+    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_DIAL_WINDOW', 0.05)
+    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_REDIAL_DELAY', 60)
+    t = _engine()
+    t._open_data_channel = AsyncMock()
+    Task._on_channel_signal(t, '1', None)
+    await _settle()
+
+    Task._on_channel_signal(t, '1', None)
+    await asyncio.sleep(0.2)
+
+    assert t._open_data_channel.await_count == 2
+
+
+def test_a_refused_handshake_is_read_off_the_status_not_the_wording():
+    try:
+        try:
+            raise RuntimeError('server rejected WebSocket connection')
+        except RuntimeError as handshake:
+            handshake.response = SimpleNamespace(status_code=403)
+            raise ConnectionError(str(handshake))
+    except ConnectionError as wrapped:
+        refused = wrapped
+
+    assert Task._dial_refused(refused)
+    assert not Task._dial_refused(ConnectionError('Connection refused'))
+
+
 # ---------------------------------------------------------------------------
 # The phase
 # ---------------------------------------------------------------------------

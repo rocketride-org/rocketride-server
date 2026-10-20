@@ -668,3 +668,13 @@ async def test_dataconn_fails_pending_requests():
     with pytest.raises(ConnectionError, match='gone'):
         await future
     assert conn._pending == {}
+
+
+async def test_dataconn_reports_a_socket_closed_under_the_send_as_a_lost_connection():
+    conn = _conn()
+    conn.build_request = lambda command, arguments: {'seq': 1, 'command': command, 'arguments': arguments}
+    conn.send = AsyncMock(side_effect=RuntimeError('WebSocket is not connected. Need to call "accept" first.'))
+
+    with pytest.raises(ConnectionError, match='closed'):
+        await conn.send_request('spend.check', {}, timeout=1)
+    assert conn._pending == {}

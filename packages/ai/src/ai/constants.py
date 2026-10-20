@@ -151,7 +151,7 @@ CONST_DEFAULT_SIGNING_KEY = '<your signing key here -- replace in production>'
 # =============================================================================
 CONST_DATA_PIPE_TIMEOUT = 60.0  # seconds of inactivity before pipe is considered zombie
 CONST_DATA_SHUTDOWN_TIMEOUT = 30.0  # seconds to wait for data connection shutdown
-CONST_SPEND_CHECK_TIMEOUT = 10.0  # seconds a task waits for EaaS to connect, and again for its answer
+CONST_SPEND_CHECK_TIMEOUT = 10.0  # seconds a task waits for EaaS's answer, once connected
 CONST_BILLING_UNAVAILABLE = 'Billing is unavailable right now; try again shortly'
 CONST_SPEND_ALLOW_SECONDS = 5.0  # seconds a task trusts an "allowed" answer before asking again
 CONST_DATA_OPEN_TARGET_WAIT = 5.0  # seconds `_open` waits for source to bind `state.target`
@@ -169,6 +169,7 @@ CONST_CHANNEL_MAX_INFLIGHT = 8  # task requests in flight per connection
 CONST_CHANNEL_DATA_WAIT = 5.0  # seconds _send_data waits for the signalled connection
 CONST_CHANNEL_DIAL_LIMIT = 10  # dials per task per CONST_CHANNEL_DIAL_WINDOW
 CONST_CHANNEL_DIAL_WINDOW = 60.0  # seconds
+CONST_CHANNEL_REDIAL_DELAY = 5.0  # seconds before dialling again after a dial that failed
 
 # =============================================================================
 # HTTP/Stream Configuration
