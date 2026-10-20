@@ -230,8 +230,8 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
         'provider': name,
         'files': files,
         'next_steps': [
-            'Write these files under the workspace passed as --node_path.',
-            'A local node runs only on an engine started with --node_path: RocketRide Cloud loads none, '
+            "Write these files under the engine's nodes/ directory (nodes/src/nodes in a source tree).",
+            'A node written there runs only on that engine: RocketRide Cloud loads none, '
             'and store review rejects pipelines that use one, so an app for the store stays on catalog nodes.',
             f'Reference the node in a .pipe as "provider": "{name}", since the provider is the protocol.',
             'Restart the engine: node manifests are read once at startup.',
@@ -245,7 +245,7 @@ def register(registry: ToolRegistry) -> None:
         'scaffold_node',
         'Emit a local node skeleton that loads on the first try, with the manifest keys and file '
         'layout the engine actually requires. Returns files to write; it writes nothing itself. '
-        'Local nodes run only on an engine started with --node_path (RocketRide Cloud loads none), '
+        'A local node runs only on the engine whose nodes/ directory holds it (RocketRide Cloud loads none), '
         'so never scaffold one for an app headed for the store: store apps use catalog nodes only.',
         {
             'type': 'object',
