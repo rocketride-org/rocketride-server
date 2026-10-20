@@ -32,12 +32,17 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const crypto = require('crypto');
+const AdmZip = require('adm-zip');
+const { stripComments } = require('jsonc-parser');
 const {
 	syncDir,
 	syncFile,
 	formatSyncStats,
 	isDirectory,
 	removeDir,
+	setState,
+	readDirSafe,
 	PROJECT_ROOT,
 	DIST_ROOT,
 	OVERLAY_ROOT,
@@ -55,7 +60,7 @@ const {
 	isLinux,
 	loadPackageJson,
 } = require('../../scripts/lib');
-const { stageNodeLibrary, makeNodeModule } = require('./node-build');
+const { nodeLibrary, stageNodeLibrary, makeNodeModule } = require('./node-build');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 
@@ -70,6 +75,22 @@ const SRC_NODE_DIRS = new Map(
 );
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'nodes');
+
+// Each Python node ships on its own, as <name>.rrnode beside one index.json
+const PACKAGES_DIR = path.join(DIST_ROOT, 'nodes');
+
+// A packaged node's requirement files stay in the server, without its code, for the
+// constraints solve and the image's wheel cache; the dash keeps it from importing
+const REQUIREMENTS_DIR = path.join(DIST_DIR, 'node-requirements');
+
+// The index format the engine reads; bump it when that format changes
+const NODES_CONTRACT = 1;
+
+// The nodes the engine itself needs stay in the server; so do the C++ ones
+const SERVER_NODES = new Set(['core', 'autopipe']);
+
+// Fixed entry times keep a package's digest the same from build to build
+const ZIP_TIME = new Date(1980, 0, 1);
 
 // Build inputs or runtime files - none of it belongs in dist.
 const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**', '**/__pycache__/**'];
@@ -103,17 +124,79 @@ function makeSyncNodesAction() {
 			task.output = 'Scanning for changes...';
 
 			const stats = {};
+			const packages = {};
 
 			for (const [name, srcDir] of SRC_NODE_DIRS) {
 				const src = path.join(srcDir, name);
 
-				if (await isDirectory(src)) await syncNode(name, src, stats);
-				else await syncFile(src, path.join(DIST_DIR, name), { package: true }, stats);
+				if (!(await isDirectory(src))) {
+					await syncFile(src, path.join(DIST_DIR, name), { package: true }, stats);
+					continue;
+				}
+
+				const lib = await nodeLibrary(name, src);
+				if (lib || SERVER_NODES.has(name)) {
+					await syncNode(name, src, stats);
+					continue;
+				}
+
+				const { data, entry } = await packageNode(name, src);
+				await fs.promises.mkdir(PACKAGES_DIR, { recursive: true });
+				await fs.promises.writeFile(path.join(PACKAGES_DIR, `${name}.rrnode`), data);
+				packages[name] = entry;
+
+				// It no longer ships inside the server archive, but its requirements do
+				await removeDir(path.join(DIST_DIR, name));
+				await setState(['package', src], null);
+				for (const file of await readDirSafe(src)) {
+					if (!/^(requirement.*\.txt|overrides\.txt)$/.test(file)) continue;
+					const dest = path.join(REQUIREMENTS_DIR, name, file);
+					await syncFile(path.join(src, file), dest, { package: true }, stats);
+				}
 			}
 
-			task.output = formatSyncStats(stats);
+			// Drop what an older build left behind, such as a nodes/__init__.py
+			for (const name of await readDirSafe(DIST_DIR)) {
+				if (SRC_NODE_DIRS.has(name) || name === path.basename(REQUIREMENTS_DIR)) continue;
+				await fs.promises.rm(path.join(DIST_DIR, name), { recursive: true, force: true });
+				await setState(['package', path.join(PACKAGE_DIR, 'src', 'nodes', name)], null);
+			}
+
+			const index = { contract: NODES_CONTRACT, nodes: packages };
+			await fs.promises.writeFile(path.join(PACKAGES_DIR, 'index.json'), JSON.stringify(index));
+
+			task.output = `${formatSyncStats(stats)}, ${Object.keys(packages).length} packages`;
 		},
 	};
+}
+
+// Zip a node as <name>/... with its .rrnode marker; return the zip and its index entry
+async function packageNode(name, srcDir) {
+	const { glob } = require('glob');
+	const zip = new AdmZip();
+	const add = (entry, data) => {
+		zip.addFile(entry, data);
+		zip.getEntry(entry).header.time = ZIP_TIME;
+	};
+
+	// Definitions travel as text so Python reads 1.0 as a float; JSON.parse checks they are plain JSON
+	const services = {};
+	const icons = {};
+	for (const file of (await glob('**', { cwd: srcDir, nodir: true, ignore: IGNORE })).sort()) {
+		const data = await fs.promises.readFile(path.join(srcDir, file));
+		add(`${name}/${file.split(path.sep).join('/')}`, data);
+		if (!/^services.*\.json$/.test(file)) continue;
+
+		const text = stripComments(data.toString('utf8'));
+		const { icon } = JSON.parse(text);
+		services[file] = text;
+		if (icon) icons[icon] = await fs.promises.readFile(path.join(srcDir, icon), 'utf8');
+	}
+	add(`${name}/.rrnode`, Buffer.from(JSON.stringify({ name })));
+
+	const data = zip.toBuffer();
+	const sha256 = crypto.createHash('sha256').update(data).digest('hex');
+	return { data, entry: { sha256, services, icons } };
 }
 
 function makeStartTestServerAction(options = {}) {
@@ -543,6 +626,7 @@ module.exports = {
 				description: 'Cleaning nodes',
 				run: async (ctx, task) => {
 					await removeDir(DIST_DIR);
+					await removeDir(PACKAGES_DIR);
 					task.output = 'Cleaned nodes';
 				},
 			}),
@@ -556,3 +640,4 @@ module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
 // Export paths for external use
 module.exports.DIST_DIR = DIST_DIR;
 module.exports.TEST_DIR = TEST_DIR;
+module.exports.packageNode = packageNode;
