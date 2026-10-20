@@ -150,6 +150,9 @@ Examples:
         help='Enable SaaS account implementation (requires extension overlay)',
     )
 
+    # No longer read; accepted so a launcher that still passes it starts
+    parser.add_argument('--node_path', help=argparse.SUPPRESS)
+
     return parser
 
 
@@ -176,6 +179,8 @@ async def run(config: Dict[str, Any] = None) -> None:
         config['modelserver'] = args.modelserver
         config['base_port'] = args.base_port
         config['verbose'] = args.verbose
+        if args.node_path:
+            warning("--node_path is no longer read: put a custom node in the engine's nodes/ directory")
 
     if config.get('modelserver'):
         print(f'  Model Server: {config["modelserver"]}')

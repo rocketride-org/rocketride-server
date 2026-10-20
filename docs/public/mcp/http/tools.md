@@ -132,7 +132,7 @@ nothing itself.
 - **Notable:** lanes and `class_type` are validated against the connected
   engine's live catalog, so the allowed sets never drift from what is actually
   in service.
-- **Scope:** a local node runs only on an engine started with `--node_path`.
+- **Scope:** a local node runs only on the engine whose `nodes/` directory holds it.
   RocketRide Cloud loads none, and store review rejects pipelines that use
   one, so an app headed for the store stays on catalog nodes.
 

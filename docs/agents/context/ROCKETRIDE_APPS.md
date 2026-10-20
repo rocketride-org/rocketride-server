@@ -908,8 +908,8 @@ before authoring the `.pipe` content itself, and
 
 **Catalog nodes only.** A store app's pipelines may use only catalog nodes:
 the nodes that ship with the engine (`nodes/src/nodes` in the server repo;
-the node catalog on the docs site). A custom node (`local_nodes`, loaded
-with `--node_path`) exists only on the engine that loads it. RocketRide
+the node catalog on the docs site). A custom node (written into an
+engine's `nodes/` directory) exists only on that engine. RocketRide
 Cloud loads none, and also refuses the few catalog nodes marked `nosaas`,
 so being in the catalog is necessary, not sufficient. Store reviewers
 reject a submission whose pipelines reference a provider outside the
@@ -917,7 +917,7 @@ catalog, and nothing before review checks it: the Package and Store
 preflights do not read `.pipe` providers, and
 `.rocketride/services-catalog.json` mirrors whichever engine the workspace
 last synced from, local nodes included, so on a self-hosted engine with
-`--node_path` that file is not the catalog. Decide this before building.
+custom nodes that file is not the catalog. Decide this before building.
 If the catalog has no node for a step, keep that logic in the app (the app
 already sends documents, controls pipes and makes decisions), or give an
 agent step bounded Python through `tool_python` (sandboxed: allowlisted
