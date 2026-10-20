@@ -172,9 +172,6 @@ class DataConn(DAPConn):
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
 
-        # Requests this connection sent to EaaS, by seq, waiting for its response
-        self._asked: Dict[int, asyncio.Future] = {}
-
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
 
@@ -210,8 +207,7 @@ class DataConn(DAPConn):
             message: The parsed DAP message.
         """
         if message is not None and message.get('type') == 'response':
-            seq = message.get('request_seq')
-            future = self._pending.pop(seq, None) or self._asked.pop(seq, None)
+            future = self._pending.pop(message.get('request_seq'), None)
             if future is not None and not future.done():
                 future.set_result(message)
             return
@@ -298,28 +294,6 @@ class DataConn(DAPConn):
     def _target(self) -> Optional['IServiceEndpoint']:
         """Read the source target lazily — never snapshot at connection time."""
         return self._server._target
-
-    async def on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
-        """Fail the questions still waiting for EaaS: no answer will come on this connection."""
-        for answer in self._asked.values():
-            if not answer.done():
-                answer.set_exception(ConnectionError(reason or 'EaaS disconnected'))
-        self._asked.clear()
-        await super().on_disconnected(reason, has_error)
-
-    async def ask_spend(self) -> Optional[str]:
-        """Ask EaaS whether this task's org may open a pipe: None, or the refusal."""
-        request = self.build_request('rrext_check_spend')
-        answer = asyncio.get_running_loop().create_future()
-        self._asked[request['seq']] = answer
-        try:
-            await self.send(request)
-            response = await answer
-        finally:
-            self._asked.pop(request['seq'], None)
-        if self.did_fail(response):
-            raise RuntimeError(response.get('message'))
-        return response['body']['refusal']
 
     def _require_target(self) -> 'IServiceEndpoint':
         """Return the registered source target, or raise a controlled error.

@@ -17,9 +17,7 @@ Primary Responsibilities:
 Designed for integration with a FastAPI application and built on top of the ai.web debug server stack.
 """
 
-import asyncio
 import sys
-import threading
 import time
 from typing import TYPE_CHECKING, Callable, Optional
 import hashlib
@@ -32,7 +30,7 @@ from rocketlib import IEndpointBase
 from ai.common.dap import DAPBase, TransportWebSocketHooked
 from ai.account.base import OutOfCreditsError
 from ai.constants import CONST_SPEND_ALLOW_SECONDS, CONST_SPEND_CHECK_TIMEOUT
-from .channel import task_channel
+from .channel import ChannelError, ChannelUnavailable, task_channel
 from .data_conn import DataConn
 
 if TYPE_CHECKING:
@@ -250,18 +248,9 @@ class DataServer(DAPBase):
             # Signal we are connected
             await self._dapbase_on_connected(conn)
 
-            # EaaS is the only peer of /task/data: its connection answers credit checks
-            global _eaas
-            _eaas = (conn, asyncio.get_running_loop())
-            _eaas_connected.set()
-
             # Accept the connection and start servicing it. This will not
             # return until the connection is closed
             await transport.accept(websocket=websocket)
-
-            if _eaas and _eaas[0] is conn:
-                _eaas = None
-                _eaas_connected.clear()
 
             # Signal we are disconnected
             await self._dapbase_on_disconnected(conn)
@@ -289,37 +278,20 @@ class DataServer(DAPBase):
             self._on_closed(channel_id)
 
 
-# The EaaS data connection and the loop it runs on, while EaaS is connected
-_eaas: 'tuple[DataConn, asyncio.AbstractEventLoop] | None' = None
-_eaas_connected = threading.Event()
-
 # Until when the last "allowed" answer stands, so a job asks once per window, not per object
 _allowed_until = 0.0
 
 
 def require_credit() -> None:
-    """
-    Engine pipe gate: raise OutOfCreditsError if this task's org may not open a pipe.
-
-    It trusts the peer by position: whoever holds /task/data (loopback, the
-    run's token) answers, and only EaaS opens it.
-    """
+    """Engine pipe gate: raise OutOfCreditsError if this task's org may not open a pipe."""
     global _allowed_until
     if time.monotonic() < _allowed_until:
         return
-    # EaaS connects once the task is up and again after a drop; no answer, no pipe
-    _eaas_connected.wait(CONST_SPEND_CHECK_TIMEOUT)
-    peer = _eaas
-    if peer is None:
-        raise RuntimeError('No credit check answered: EaaS is not connected to the task')
-    conn, loop = peer
-    asking = asyncio.run_coroutine_threadsafe(conn.ask_spend(), loop)
     try:
-        refusal = asking.result(CONST_SPEND_CHECK_TIMEOUT)
-    except TimeoutError:
-        raise TimeoutError('No credit check answered: EaaS did not answer in time') from None
-    finally:
-        asking.cancel()  # no-op once answered; drops a question EaaS never answered
-    if refusal:
-        raise OutOfCreditsError(refusal)
+        reply = task_channel.request_sync('spend.check', timeout=CONST_SPEND_CHECK_TIMEOUT)
+    except (ChannelUnavailable, ChannelError) as e:
+        # No answer, no pipe
+        raise RuntimeError(f'No credit check answered: {getattr(e, "message", e)}') from None
+    if reply.body.get('refusal'):
+        raise OutOfCreditsError(reply.body['refusal'])
     _allowed_until = time.monotonic() + CONST_SPEND_ALLOW_SECONDS

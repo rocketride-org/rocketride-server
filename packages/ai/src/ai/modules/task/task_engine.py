@@ -68,7 +68,13 @@ from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
-from ai.modules.task.task_channel import ChannelStreams, handle as handle_channel_request
+from ai.modules.task.task_channel import (
+    ChannelRefused,
+    ChannelReply,
+    ChannelStreams,
+    handle as handle_channel_request,
+    register_channel_command,
+)
 from rocketride import (
     TASK_STATUS,
     TASK_STATUS_FLOW,
@@ -399,6 +405,22 @@ def _is_saas_engine() -> bool:
         return False
 
 
+async def _check_spend(task: 'Task', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
+    """Answer a task's credit check: no refusal, or why its org may not open a pipe."""
+    from ai.account import account
+
+    try:
+        refusal = await account.check_spend(task.org_id)
+    except Exception as e:
+        # The ledger's error stays in the server log; the task gets a fixed one
+        warning(f'Credit check failed for org {task.org_id}: {e}')
+        raise ChannelRefused(CONST_BILLING_UNAVAILABLE) from None
+    return ChannelReply(body={'refusal': refusal})
+
+
+register_channel_command('spend.check', _check_spend)
+
+
 class Task(DAPBase):
     """
     Pipeline task execution and lifecycle management system.
@@ -507,29 +529,12 @@ class Task(DAPBase):
             if message.get('type') != 'request':
                 await super().on_receive(message)
                 return
-            if message.get('command') == 'rrext_check_spend':
-                await self._answer_spend(message)
-                return
             if len(self._handlers) >= CONST_CHANNEL_MAX_INFLIGHT:
                 await self._send(self.build_error(message, 'busy'))
                 return
             handler = asyncio.create_task(self._parent_task._on_channel_request(self, message))
             self._handlers.add(handler)
             handler.add_done_callback(self._handlers.discard)
-
-        async def _answer_spend(self, message: Dict[str, Any]) -> None:
-            """Answer the task's credit check before it opens a pipe."""
-            from ai.account import account
-
-            org_id = self._parent_task.org_id
-            try:
-                refusal = await account.check_spend(org_id)
-            except Exception as e:
-                # The ledger's error stays in the server log; the client gets a fixed one
-                warning(f'Credit check failed for org {org_id}: {e}')
-                await self._send(self.build_exception(message, RuntimeError(CONST_BILLING_UNAVAILABLE)))
-                return
-            await self._send(self.build_response(message, body={'refusal': refusal}))
 
         def cancel_handlers(self) -> None:
             """Cancel the handlers still answering the task and drop its streams."""
