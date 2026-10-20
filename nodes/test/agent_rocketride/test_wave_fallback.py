@@ -252,11 +252,14 @@ def test_an_engine_error_in_planning_keeps_the_path_out_of_answer_and_trace(wave
     assert trace['error'] == 'Exception: Exception: Invalid API key.'
 
 
-def test_a_planning_error_whose_text_cannot_be_read_still_gets_an_answer(wave, driver, monkeypatch):
-    class Unprintable(Exception):
-        def __str__(self):
-            raise RuntimeError('no text')
+class Unprintable(Exception):
+    """An exception whose text cannot be read: str() raises."""
 
+    def __str__(self):
+        raise RuntimeError('no text')
+
+
+def test_a_planning_error_whose_text_cannot_be_read_still_gets_an_answer(wave, driver, monkeypatch):
     failure = Unprintable()
     failure.wave_scratch = 'NOTES-KEPT'
 
@@ -290,11 +293,6 @@ def test_a_reply_cannot_remove_the_result_its_own_call_gets(wave, driver, monkey
 
 def test_a_model_error_whose_text_cannot_be_read_still_leaves_a_report(wave, driver):
     """Logging the failure must not cost the user the report, even when str(exc) raises."""
-
-    class Unprintable(Exception):
-        def __str__(self):
-            raise RuntimeError('no text')
-
     driver.reply = Unprintable()
 
     answer = synthesize(wave, driver, [READ], scratch='KEEP-NOTES')

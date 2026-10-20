@@ -25,6 +25,7 @@ from typing import Any, Callable, List
 from rocketride import Answer
 
 import ai.common.llm_adapter as _adapter
+import ai.common.llm_base as _llm_base
 from ai.common.llm_adapter import report_llm_tokens
 from ai.common.llm_base import LLMBase
 from ai.web.metrics.metrics import metrics
@@ -139,6 +140,25 @@ def test_write_questions_error_answer_still_carries_the_burnt_tokens():
     written = node.instance.written[0]
     assert 'RuntimeError' in written.getText()
     assert written.tokens == {'input': 10, 'output': 4, 'cache_read': 0, 'cache_creation': 0, 'model': 'm1'}
+
+
+def test_write_questions_error_answer_drops_the_engine_path(monkeypatch):
+    """Every plain LLM node answers a failed call here; the user must not see the server's path."""
+    location = '/opt/rocketride/ai/common/chat.py:412'
+
+    def _engine_error(_question, **_kwargs) -> Answer:
+        exc = Exception(f'Exception: Invalid API key. at ({location})')
+        setattr(exc, '__formatted', True)
+        raise exc
+
+    logged: List[str] = []
+    monkeypatch.setattr(_llm_base, 'warning', logged.append)
+    node = _make_node(_engine_error)
+
+    node.writeQuestions(_FakeQuestion())
+
+    assert node.instance.written[0].getText() == '**LLM error** — Exception: Exception: Invalid API key.'
+    assert any(location in line for line in logged), 'the log lost the engine location'
 
 
 def test_write_questions_error_answer_has_no_tokens_when_nothing_was_called():
