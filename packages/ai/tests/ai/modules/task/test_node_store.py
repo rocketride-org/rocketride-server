@@ -64,16 +64,26 @@ def test_only_the_nodes_not_on_disk_are_registered_with_their_icons(server):
     assert server['commands'] == ['node.fetch'] and server['served'] == [node_store._package]
 
 
-@pytest.mark.parametrize('broken', ['contract', 'unavailable'])
+@pytest.mark.parametrize('broken', ['contract', 'unavailable', 'malformed', 'refused'])
 def test_an_index_it_cannot_use_registers_nothing(server, monkeypatch, broken):
     if broken == 'contract':
         monkeypatch.setattr(node_store.account, 'node_index', lambda: _index(CONST_NODES_CONTRACT + 1))
-    else:
+    elif broken == 'unavailable':
 
         def unavailable():
             raise OSError('offline')
 
         monkeypatch.setattr(node_store.account, 'node_index', unavailable)
+    elif broken == 'malformed':
+        index = _index()
+        del index['nodes']['llm_x']['services']
+        monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    else:
+
+        def refuse(definitions):
+            raise RuntimeError('Protocol missing or invalid')
+
+        monkeypatch.setattr(node_store.engLib, 'registerServices', refuse, raising=False)
 
     node_store.start()
 
@@ -107,3 +117,14 @@ def test_the_source_serves_a_node_by_node_or_provider_name_and_nothing_else(serv
     assert node_store._package('provider_x') == ('llm_x', b'llm_x:x', 'x', {'services.json': PACKAGED})
     assert node_store._package('llm_x') == node_store._package('provider_x')
     assert node_store._package('filesys') is None
+
+
+def test_a_provider_two_nodes_claim_is_served_by_the_first_and_warned_about(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_y'] = {**index['nodes']['llm_x'], 'sha256': 'y'}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+
+    node_store.start()
+
+    assert node_store._providers['provider_x'] == 'llm_x'
+    assert len(server['warnings']) == 1 and 'provider_x' in server['warnings'][0]
