@@ -889,6 +889,14 @@
 			// // Google Gemini
 			// "gemini-2.5-pro": 65536,
 			// "gemini-2.5-flash": 65536,
+			// Google Gemini (llm_gemini) — output limits from Google's model pages
+			// (https://ai.google.dev/gemini-api/docs/models) where OpenRouter reports
+			// more. llm_gemini sends the limit as max_output_tokens, so a value above
+			// the model's maximum fails the request.
+			"models/gemini-3.1-flash-lite-image": 4096,
+			"models/gemini-3.1-flash-image-preview": 32768,
+			"models/gemini-2.0-flash": 8192,
+			"models/gemini-2.0-flash-lite": 8192,
 			// // Baidu Qianfan
 			"ernie-4.5-turbo-128k": 4096,
 			"ernie-4.5-turbo-32k": 4096,
