@@ -66,3 +66,34 @@ engLib.registerServices([(node('rail_a', titleA), tempfile.mkdtemp() + '/service
     REQUIRE_NO_ERROR(def);
     REQUIRE((*def)->title == "Rail A, again");
 }
+
+TEST_CASE("store::registerServices leaves no definition half done when one fails") {
+    const auto python = localfcn()->Error {
+        py::exec(R"(
+import engLib, tempfile
+def node(name):
+    return {'register': 'filter', 'node': 'python', 'classType': ['text'], 'capabilities': [],
+            'lanes': {'text': ['text']}, 'fields': {}, 'shape': [], 'title': name,
+            'protocol': name + '://', 'path': 'nodes.' + name, 'prefix': name}
+def refused(batch):
+    try:
+        engLib.registerServices(batch)
+    except Exception:
+        return True
+    return False
+def at(definition):
+    return (definition, tempfile.mkdtemp() + '/services.json')
+# Refused while registering: what came before it is registered and resolved
+assert refused([at(node('rail_c')), at(dict(node('rail_d'), capabilities=['nonsense']))])
+# Malformed: nothing of the batch is registered
+assert refused([at(node('rail_e')), (node('rail_f'), None)])
+)");
+        return {};
+    };
+    REQUIRE_NO_ERROR(callPython(python));
+
+    auto registered = IServices::getServiceDefinition("rail_c");
+    REQUIRE_NO_ERROR(registered);
+    REQUIRE((*registered)->isResolved);
+    REQUIRE_FALSE(IServices::getServiceDefinition("rail_e"));
+}
