@@ -28,7 +28,7 @@ import engLib
 from hosting import is_hosted
 from starlette.websockets import WebSocketState
 from rocketlib import IEndpointBase
-from ai.common.dap import DAPBase, TransportWebSocketHooked
+from ai.common.dap import DAPBase, TransportWebSocket
 from ai.account.base import OutOfCreditsError
 from ai.constants import CONST_SPEND_ALLOW_SECONDS, CONST_SPEND_CHECK_TIMEOUT
 from .channel import ChannelError, ChannelUnavailable, task_channel
@@ -239,12 +239,10 @@ class DataServer(DAPBase):
         channel_id = websocket.headers.get(CONST_CHANNEL_ID_HEADER)
 
         try:
-            # Create the transport and accept the connection; `conn` is bound
-            # on the next line, long before the hook can fire
-            transport = TransportWebSocketHooked(on_closing=lambda: self._closing(conn, channel_id))
-
             # Allocate a new connection
+            transport = TransportWebSocket()
             conn = DataConn(server=self, transport=transport)
+            conn.channel_id = channel_id
 
             # Signal we are connected
             await self._dapbase_on_connected(conn)

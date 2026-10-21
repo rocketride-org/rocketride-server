@@ -162,6 +162,8 @@ class DataConn(DAPConn):
         # `self._server` must be set before reading `self._target` — the
         # property delegates to `self._server._target`.
         self._server = server
+        # The engine's name for this connection, from the handshake
+        self.channel_id: Optional[str] = None
 
         # Deferred to first `_open` via `_ensure_pipe_sem` — `state.target`
         self._thread_count: Optional[int] = None
@@ -200,6 +202,10 @@ class DataConn(DAPConn):
         from .channel import task_channel
 
         task_channel.attach(self)
+
+    async def on_closing(self) -> None:
+        """Fail this task's pending requests and ask the engine to reconnect, before handlers are drained."""
+        await self._server._closing(self, self.channel_id)
 
     async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
         """Resolve a response to one of this task's requests; route anything else as before.
