@@ -516,7 +516,7 @@ async def test_create_carries_the_isolation_and_limits():
 
 
 async def test_command_line_inside_the_container():
-    """The subprocess runtime's argv minus --hosted, the port fixed, the model server rewritten."""
+    """The subprocess runtime's argv, the port fixed, the model server rewritten."""
     cli = FakeCli()
     await _launcher(cli).start(_spec())
     args = cli.call('create').args
@@ -530,12 +530,12 @@ async def test_command_line_inside_the_container():
         '--data_port=5570',
         '--data_host=0.0.0.0',
         f'--data_token_sha256={TOKEN_SHA}',
+        '--hosted',
         '--modelserver=host.docker.internal:5590',
         '--threads=2',
         '--dumps',
         '--trace=debugOut',
     ]
-    assert '--hosted' not in args
 
 
 async def test_environment_goes_in_as_names_only():
