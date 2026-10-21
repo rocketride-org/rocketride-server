@@ -157,3 +157,58 @@ def test_a_node_that_cannot_be_fetched_fails_the_import_as_an_import_error(cache
 
     with pytest.raises(ImportError, match='does not match its digest'):
         importlib.import_module('nodes.railnode')
+
+
+def test_the_nodes_a_pipeline_names_are_registered_together(cache, monkeypatch):
+    _, calls = cache
+    monkeypatch.setattr(node_packages, 'getServiceDefinition', lambda name: None)
+
+    def source(name):
+        data, sha256 = _package(name)
+        return name, data, sha256, {'services.json': {'protocol': f'{name}://'}}
+
+    node_packages.serve(source)
+
+    node_packages.ensure('railnode', 'othernode')
+
+    (batch,) = calls['registered']
+    assert sorted(definition['protocol'] for definition, _ in batch) == ['othernode://', 'railnode://']
+
+
+def test_a_rename_that_fails_for_another_reason_is_reported(cache, monkeypatch):
+    data, sha256 = _package()
+
+    def locked(src, dst):
+        raise PermissionError('in use by another process')
+
+    monkeypatch.setattr(node_packages.os, 'replace', locked)
+
+    with pytest.raises(PermissionError):
+        node_packages.unpack('railnode', data, sha256)
+
+
+def test_an_unpack_that_was_killed_is_swept_once_it_is_old(cache):
+    tmp, _ = cache
+    old = tmp / 'staging-abandoned'
+    fresh = tmp / 'staging-in-progress'
+    old.mkdir()
+    fresh.mkdir()
+    os.utime(old, (0, 0))
+    data, sha256 = _package()
+
+    node_packages.unpack('railnode', data, sha256)
+
+    assert not old.exists() and fresh.exists()
+
+
+def test_a_package_with_files_outside_its_node_is_refused(cache):
+    tmp, _ = cache
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as package:
+        package.writestr('railnode/__init__.py', '')
+        package.writestr('core/__init__.py', 'SHADOWED = True')
+    data = buffer.getvalue()
+
+    with pytest.raises(NodePackageInvalid, match='outside railnode/'):
+        node_packages.unpack('railnode', data, hashlib.sha256(data).hexdigest())
+    assert not os.path.exists(os.path.join(tmp, 'node-packages'))

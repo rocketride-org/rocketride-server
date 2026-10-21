@@ -705,7 +705,7 @@ def test_channel_signal_goes_through_the_monitor(monkeypatch):
     assert calls == [('CHN', '1'), ('CHN', '1*abcd'), ('CHN', '2')]
 
 
-def test_announce_sends_ready_then_startup_over_only_with_a_listener(monkeypatch):
+def test_announce_signals_only_with_a_listener_and_fetches_nodes_either_way(monkeypatch):
     calls = _capture_signals(monkeypatch)
     monkeypatch.setattr(node, '_fetch_pipeline_nodes', lambda: calls.append('fetch nodes'))
     node._announce_channel(SimpleNamespace(server=SimpleNamespace(started=True)))
@@ -714,7 +714,7 @@ def test_announce_sends_ready_then_startup_over_only_with_a_listener(monkeypatch
     calls.clear()
     node._announce_channel(SimpleNamespace(server=SimpleNamespace(started=False)))
     node._announce_channel(None)
-    assert calls == []
+    assert calls == ['fetch nodes', 'fetch nodes']
 
 
 async def test_http_authenticator_accepts_only_the_channel_token():
@@ -767,12 +767,12 @@ def test_the_task_ensures_each_node_its_pipeline_names_once(monkeypatch, tmp_pat
     )
     served, ensured = [], []
     monkeypatch.setattr(node_packages, 'serve', served.append)
-    monkeypatch.setattr(node_packages, 'ensure', ensured.append)
+    monkeypatch.setattr(node_packages, 'ensure', lambda *names: ensured.append(sorted(names)))
 
     node._fetch_pipeline_nodes()
 
     assert served == [node._fetch_from_eaas]
-    assert sorted(ensured) == ['llm_x', 'webhook']
+    assert ensured == [['llm_x', 'webhook']]
 
 
 @pytest.mark.parametrize('served', [True, False])
@@ -804,7 +804,7 @@ def test_a_task_that_cannot_get_its_nodes_stops_with_the_reason(monkeypatch, tmp
         monkeypatch.setattr(sys, 'argv', ['node.py', str(tmp_path / 'missing.json')])
     monkeypatch.setattr(node_packages, 'serve', lambda source: None)
 
-    def refuse(name):
+    def refuse(*names):
         raise NodePackageInvalid('The package of llm_x does not match its digest')
 
     monkeypatch.setattr(node_packages, 'ensure', refuse)
