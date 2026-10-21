@@ -284,48 +284,52 @@ class TransportWebSocket(TransportBase):
         so recv() does not block disconnect() from closing the socket.
 
         Exceptions propagate to the caller (accept or _run_receive_task)
-        which owns cleanup.
+        which owns cleanup; on the way out it reports ``on_closing``.
         """
-        while self._connected:
-            if self._is_fastapi_websocket():
-                # FastAPI WebSocket receiving
-                message = await self._websocket.receive()
+        try:
+            while self._connected:
+                if self._is_fastapi_websocket():
+                    # FastAPI WebSocket receiving
+                    message = await self._websocket.receive()
 
-                if message['type'] == 'websocket.disconnect':
-                    if fastapi and WebSocketDisconnect:
-                        raise WebSocketDisconnect('Connection closed')
-                    else:
-                        raise ConnectionError('Connection closed')
+                    if message['type'] == 'websocket.disconnect':
+                        if fastapi and WebSocketDisconnect:
+                            raise WebSocketDisconnect('Connection closed')
+                        else:
+                            raise ConnectionError('Connection closed')
 
-                elif message['type'] == 'websocket.ping':
-                    await self._websocket.pong(message.get('bytes', b''))
-                    self._debug_message('Responded to client ping')
-                    continue
-
-                elif message['type'] == 'websocket.pong':
-                    self._debug_message('Received pong from client')
-                    continue
-
-                elif message['type'] == 'websocket.receive':
-                    if 'text' in message:
-                        data = message['text']
-                    elif 'bytes' in message:
-                        data = message['bytes']
-                    else:
+                    elif message['type'] == 'websocket.ping':
+                        await self._websocket.pong(message.get('bytes', b''))
+                        self._debug_message('Responded to client ping')
                         continue
 
-            else:
-                # websockets library receiving
-                data = await self._websocket.recv()
+                    elif message['type'] == 'websocket.pong':
+                        self._debug_message('Received pong from client')
+                        continue
 
-            # While draining, discard incoming packets — don't create new tasks
-            if self._draining:
-                continue
+                    elif message['type'] == 'websocket.receive':
+                        if 'text' in message:
+                            data = message['text']
+                        elif 'bytes' in message:
+                            data = message['bytes']
+                        else:
+                            continue
 
-            # Dispatch each message in its own task for concurrent processing
-            task = asyncio.create_task(self._receive_data(data))
-            self._message_tasks.add(task)
-            task.add_done_callback(self._on_message_task_done)
+                else:
+                    # websockets library receiving
+                    data = await self._websocket.recv()
+
+                # While draining, discard incoming packets — don't create new tasks
+                if self._draining:
+                    continue
+
+                # Dispatch each message in its own task for concurrent processing
+                task = asyncio.create_task(self._receive_data(data))
+                self._message_tasks.add(task)
+                task.add_done_callback(self._on_message_task_done)
+        finally:
+            # Before the caller drains in-flight handlers, which can take as long as they run
+            await self._transport_closing()
 
     async def _run_receive_task(self) -> None:
         """
