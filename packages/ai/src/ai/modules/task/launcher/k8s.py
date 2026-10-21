@@ -62,6 +62,7 @@ from rocketlib import debug
 from ai.constants import CONST_SUBPROCESS_BUFFER_LIMIT
 
 from .base import Launch, Launcher, LaunchSpec
+from .subprocess import CONST_HOSTED_CHILD_FLAG
 from .docker import (
     CONST_CLI_TIMEOUT,
     CONST_CONTAINER_DATA_PATH,
@@ -1175,10 +1176,12 @@ class K8sLauncher(Launcher):
         """
         The engine's command line inside the pod: the docker runtime's.
 
-        No ``--hosted`` (the pod is the boundary) and no inherited
+        ``--hosted`` as under spawn: a hosted task's pipes ask EaaS for credit
+        and it never installs torch, wherever it runs. No inherited
         ``--node_path`` (the nodes are in the image; a host path means nothing
-        there). The data port is fixed and bound on every interface of the
-        pod's own network namespace.
+        there), and no ``--dumps``: a task in a pod writes no crash dump. The
+        data port is fixed and bound on every interface of the pod's own
+        network namespace.
 
         Args:
             spec: What to launch.
@@ -1199,6 +1202,8 @@ class K8sLauncher(Launcher):
             '--data_host=0.0.0.0',
             f'--data_token_sha256={spec.token_sha256}',
         ]
+        if spec.hosted:
+            args.append(CONST_HOSTED_CHILD_FLAG)
         if spec.modelserver:
             args.append(f'--modelserver={self.host_address(spec.modelserver, "--modelserver")}')
         args.extend(spec.pipeline_args)

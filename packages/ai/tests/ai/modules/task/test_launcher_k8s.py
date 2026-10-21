@@ -329,6 +329,7 @@ def _spec(**overrides):
         hosted=True,
         trace_arg='--trace=debugOut',
         node_path_arg='--node_path=/ws/nodes',
+        dumps_arg='--dumps',
     )
     values.update(overrides)
     return LaunchSpec(**values)
@@ -674,7 +675,7 @@ def test_bootstrap_unpacks_privately_and_gives_the_engine_the_images_umask():
 
 
 async def test_command_is_the_bootstrap_then_the_engine():
-    """The docker runtime's argv after the bootstrap's own: no --hosted, no --node_path, the port fixed."""
+    """The docker runtime's argv after the bootstrap's own: --hosted, no --node_path, the port fixed."""
     cli = FakeKubectl()
     await _launcher(cli, start_timeout='90').start(_spec())
     command = cli.container()['command']
@@ -690,17 +691,20 @@ async def test_command_is_the_bootstrap_then_the_engine():
         '--data_port=5570',
         '--data_host=0.0.0.0',
         f'--data_token_sha256={TOKEN_SHA}',
+        '--hosted',
         '--modelserver=eas-host:5590',
         '--threads=2',
         '--trace=debugOut',
     ]
-    assert '--hosted' not in command
     assert not any(element.startswith('--node_path') for element in command)
+    assert not any(element.startswith('--dumps') for element in command)
 
 
-def test_engine_arguments_are_the_docker_runtimes():
-    spec = _spec(modelserver='model.rocketride.dev:443')
+@pytest.mark.parametrize('hosted', [True, False])
+def test_engine_arguments_are_the_docker_runtimes(hosted):
+    spec = _spec(modelserver='model.rocketride.dev:443', hosted=hosted)
     assert _launcher().task_args(spec) == DockerLauncher.task_args(spec)
+    assert ('--hosted' in _launcher().task_args(spec)) is hosted
 
 
 async def test_every_dollar_in_the_command_is_doubled():
