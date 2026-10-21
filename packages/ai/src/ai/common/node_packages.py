@@ -21,7 +21,8 @@
 # SOFTWARE.
 
 """
-Node packages: a node shipped on its own as <name>.rrnode, a zip rooted at
+Node packages: a node shipped on its own as <name>.rrnode, or
+<name>-<platform>.rrnode for a C++ node with its library, a zip rooted at
 <name>/. A package is unpacked once under the engine cache, in a folder named by
 its digest, and that folder joins the `nodes` package; a process that serves
 packages (EaaS) or fetches them (a task) installs a source with serve().

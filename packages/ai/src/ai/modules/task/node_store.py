@@ -120,7 +120,7 @@ def _package(name: str) -> Optional[Tuple[str, bytes, str, Dict[str, Dict[str, A
     entry = _nodes.get(name)
     if entry is None:
         return None
-    return name, account.node_package(name, entry['sha256']), entry['sha256'], entry['services']
+    return name, account.node_package(entry['file'], entry['sha256']), entry['sha256'], entry['services']
 
 
 async def _fetch(task, arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:

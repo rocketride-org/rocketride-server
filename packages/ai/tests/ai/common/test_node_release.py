@@ -52,7 +52,7 @@ def test_a_prerelease_package_is_found_under_its_own_tag(layout):
     _, release, asked = layout
     release[f'{node_release.RELEASES}/server-v1.2.3-prerelease/llm_x.rrnode'] = ZIP
 
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
+    assert node_release.read_package('llm_x.rrnode', ZIP_SHA) == ZIP
     assert [url.rsplit('/', 2)[1] for url in asked] == ['server-v1.2.3', 'server-v1.2.3-prerelease']
 
 
@@ -62,16 +62,24 @@ def test_the_release_the_extension_installed_is_asked_first_and_a_containers_nev
     (tmp / 'version.local.json').write_text('{"tag": "server-v1.2.3-workshop", "publishedAt": "x"}')
     release[f'{node_release.RELEASES}/server-v1.2.3-workshop/llm_x.rrnode'] = ZIP
 
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
+    assert node_release.read_package('llm_x.rrnode', ZIP_SHA) == ZIP
     assert [url.rsplit('/', 2)[1] for url in asked] == ['server-v1.2.3-workshop']
+
+
+def test_a_cpp_package_is_asked_for_by_the_file_the_index_names(layout):
+    _, release, asked = layout
+    release[f'{node_release.RELEASES}/server-v1.2.3/parse-linux-x64.rrnode'] = ZIP
+
+    assert node_release.read_package('parse-linux-x64.rrnode', ZIP_SHA) == ZIP
+    assert asked[-1].endswith('/parse-linux-x64.rrnode')
 
 
 def test_a_package_is_downloaded_once_per_digest(layout):
     _, release, asked = layout
     release[f'{node_release.RELEASES}/server-v1.2.3/llm_x.rrnode'] = ZIP
 
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
+    assert node_release.read_package('llm_x.rrnode', ZIP_SHA) == ZIP
+    assert node_release.read_package('llm_x.rrnode', ZIP_SHA) == ZIP
     assert len(asked) == 1
 
 
@@ -80,7 +88,7 @@ def test_a_damaged_cached_package_is_downloaded_again(layout):
     release[f'{node_release.RELEASES}/server-v1.2.3/llm_x.rrnode'] = ZIP
     node_release.save(os.path.join(tmp, 'server', 'cache', 'nodes', f'{ZIP_SHA}.rrnode'), b'zi')
 
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
+    assert node_release.read_package('llm_x.rrnode', ZIP_SHA) == ZIP
     assert len(asked) == 1
 
 
@@ -89,7 +97,7 @@ def test_a_release_asset_that_does_not_match_the_index_is_not_cached(layout):
     release[f'{node_release.RELEASES}/server-v1.2.3/llm_x.rrnode'] = b'other'
 
     with pytest.raises(ValueError, match='does not match the index'):
-        node_release.read_package('llm_x', ZIP_SHA)
+        node_release.read_package('llm_x.rrnode', ZIP_SHA)
     assert not os.path.exists(os.path.join(tmp, 'server', 'cache', 'nodes', f'{ZIP_SHA}.rrnode'))
 
 

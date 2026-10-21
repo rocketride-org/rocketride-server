@@ -30,6 +30,7 @@
 const path = require('path');
 const os = require('os');
 const { glob } = require('glob');
+const AdmZip = require('adm-zip');
 const {
 	getState,
 	setState,
@@ -542,6 +543,16 @@ function makeDownloadAction(options = {}) {
 			// only the manifest says. Goes when the nodes get a distribution
 			// of their own and carry it themselves
 			for (const [name, node] of Object.entries(matchedManifest?.nodes ?? {})) {
+				// A C++ node's library ships in its own package, not in the server
+				const packageFile = `${name}-${process.platform}-${process.arch}.rrnode`;
+				const packagePath = await downloadGitHubFile(matchedTag, packageFile, task);
+				if (!packagePath) {
+					task.output = `Node package ${packageFile} not found in ${matchedTag} — will compile`;
+					await setState('server.downloadHash', null);
+					return;
+				}
+				new AdmZip(packagePath).extractAllTo(path.join(DIST_DIR, 'nodes'), true);
+
 				await setState(`nodes.${name}.buildHash`, node.buildHash);
 				await setState(`nodes.${name}.buildType`, node.buildType);
 				await setState(`nodes.${name}.from`, 'release');

@@ -363,6 +363,16 @@ jobs:
             ${{ github.workspace }}/dist/nodes/index.json
           if-no-files-found: error
 
+      # The C++ nodes of the other platforms, each built with its own library
+      - name: Upload platform node packages
+        if: inputs.package && matrix.platform != 'ubuntu'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-artifacts-nodes-${{ matrix.platform }}
+          retention-days: ${{ inputs.retention_days }}
+          path: ${{ github.workspace }}/dist/nodes/*-${{ matrix.platform == 'windows' && 'win32' || 'darwin' }}-*.rrnode
+          if-no-files-found: error
+
       - name: Upload VS Code extension
         if: inputs.package && matrix.platform == 'ubuntu'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
