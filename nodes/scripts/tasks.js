@@ -163,10 +163,15 @@ function makeSyncNodesAction() {
 			}
 
 			const index = { contract: NODES_CONTRACT, nodes: packages };
-			// The server carries its own copy, so an engine reads the index of the build that made it
-			for (const dir of [PACKAGES_DIR, DIST_DIR]) {
-				await fs.promises.writeFile(path.join(dir, 'index.json'), JSON.stringify(index));
-			}
+			await fs.promises.mkdir(PACKAGES_DIR, { recursive: true });
+			await fs.promises.writeFile(path.join(PACKAGES_DIR, 'index.json'), JSON.stringify(index));
+			// The server archive carries its own copy, so an engine reads the index of the build that made it
+			await syncFile(
+				path.join(PACKAGES_DIR, 'index.json'),
+				path.join(DIST_DIR, 'index.json'),
+				{ package: true },
+				stats
+			);
 
 			task.output = `${formatSyncStats(stats)}, ${Object.keys(packages).length} packages`;
 		},
