@@ -31,6 +31,13 @@ Download a release build, no build toolchain required.
 3. Extract it. The folder is your **runtime directory**: it contains the `engine`
    binary and its `ai/` runtime.
 
+The archive carries the engine and the nodes it needs itself. The other nodes
+are separate `.rrnode` files on the same release: a run downloads the ones its
+pipeline names the first time it uses them, and keeps them. Without internet
+access, download them with the archive and put them in a `nodes/` folder beside
+the runtime directory (`rocketride-engine/../nodes/`); the engine looks there
+first.
+
 ```bash
 mkdir rocketride-engine && tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine
 cd rocketride-engine

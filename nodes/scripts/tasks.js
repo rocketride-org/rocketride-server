@@ -163,7 +163,10 @@ function makeSyncNodesAction() {
 			}
 
 			const index = { contract: NODES_CONTRACT, nodes: packages };
-			await fs.promises.writeFile(path.join(PACKAGES_DIR, 'index.json'), JSON.stringify(index));
+			// The server carries its own copy, so an engine reads the index of the build that made it
+			for (const dir of [PACKAGES_DIR, DIST_DIR]) {
+				await fs.promises.writeFile(path.join(dir, 'index.json'), JSON.stringify(index));
+			}
 
 			task.output = `${formatSyncStats(stats)}, ${Object.keys(packages).length} packages`;
 		},
