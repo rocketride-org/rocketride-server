@@ -960,7 +960,7 @@ class DockerLauncher(Launcher):
         """
         The command line inside the container: the task's argv with the container's paths.
 
-        No hosting flags: the container is the boundary. The data port is fixed
+        No ``--shared-host``: the container is the boundary. The data port is fixed
         and bound on every interface of the container's own network namespace.
 
         Args:
@@ -973,7 +973,7 @@ class DockerLauncher(Launcher):
         return [
             CONST_CONTAINER_ENGINE,
             *task_argv(
-                replace(spec, hosted=False, shared_host=False),
+                replace(spec, shared_host=False),
                 CONST_CONTAINER_NODE_SCRIPT,
                 f'{CONST_CONTAINER_DATA_PATH}/task.json',
                 CONST_TASK_DATA_PORT_CONTAINER,
