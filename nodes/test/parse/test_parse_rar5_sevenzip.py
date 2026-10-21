@@ -40,8 +40,12 @@ in the response.
 from __future__ import annotations
 
 import json
+import platform
+import sys
 import uuid
 import zlib
+
+import pytest
 
 RAR5_SIGNATURE = b'Rar!\x1a\x07\x01\x00'
 MARKER = 'rar5-through-sevenzipjbinding-' + uuid.uuid4().hex
@@ -109,6 +113,10 @@ def test_rar5_archive_builder_is_well_formed():
     assert b'hello.txt' in blob and blob.endswith(_header(5, 0, _vint(0)))
 
 
+@pytest.mark.skipif(
+    sys.platform == 'darwin' and platform.machine() == 'arm64',
+    reason='sevenzipjbinding 16.02-2.01 ships a Mac-x86_64 binding only, so 7-Zip is off on Apple Silicon until #2734',
+)
 async def test_parse_extracts_text_from_a_rar5_archive(client):
     """
     A RAR5 archive's content must come out of parse: 7-Zip-JBinding loaded and used by Tika.
