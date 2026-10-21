@@ -23,6 +23,12 @@ class DocumentStoreBase(ABC):
     are implemented here but can be overridden
     """
 
+    _NO_DOC_EMBEDDING_MESSAGE = 'Documents have no embedding vectors. Configure embeddings before writing to the store.'
+    _NO_DOC_MODEL_MESSAGE = (
+        'Documents are missing an embedding model name. Check the embedding configuration '
+        'or supply vectors with their model name.'
+    )
+
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
         Define the default constructor.
@@ -385,6 +391,10 @@ class DocumentStoreBase(ABC):
             # For each question
             for query in question.questions:
                 # Make sure we have the embeddings
+                if query.embedding is None:
+                    raise Exception(
+                        'Question has no embedding vector. Embed questions with the same model as the stored documents.'
+                    )
                 if not query.embedding_model:
                     raise Exception(
                         'Question has no embedding model name. Embed questions with the same model as the stored documents.'
@@ -531,6 +541,14 @@ class DocumentStoreBase(ABC):
         with self.collectionLock:
             return self._checkCollectionExists()
 
+    @classmethod
+    def _checkDocumentEmbedding(cls, doc: Doc) -> None:
+        """Refuse a document that has no embedding vector, or a vector without its model name."""
+        if doc.embedding is None:
+            raise Exception(cls._NO_DOC_EMBEDDING_MESSAGE)
+        if not doc.embedding_model:
+            raise Exception(cls._NO_DOC_MODEL_MESSAGE)
+
     def createCollection(self, documents: List[Doc]):
         """
         Create a new collection if it does not already exist.
@@ -547,11 +565,7 @@ class DocumentStoreBase(ABC):
             if self._checkCollectionExists():
                 # Collection already exists, validate documents against existing collection
                 for doc in documents:
-                    if not doc.embedding_model:
-                        raise Exception(
-                            'Documents are missing an embedding model name. Check the embedding configuration '
-                            'or supply vectors with their model name.'
-                        )
+                    self._checkDocumentEmbedding(doc)
                     if doc.embedding_model != self.modelName:
                         raise Exception(
                             f'The collection uses {self.modelName} but the document was encoded with {doc.embedding_model}'
@@ -565,6 +579,11 @@ class DocumentStoreBase(ABC):
             # If no documents are provided, exit early
             if not len(documents):
                 return True
+
+            # Validate the entire batch before creating the collection or writing
+            # its setup record, which persists the first document's model name.
+            for doc in documents:
+                self._checkDocumentEmbedding(doc)
 
             # Use the first document as a reference for embedding model and vector size
             modelName = documents[0].embedding_model
@@ -615,11 +634,6 @@ class DocumentStoreBase(ABC):
 
             # Validate all provided documents against the newly created collection metadata
             for doc in documents:
-                if not doc.embedding_model:
-                    raise Exception(
-                        'Documents are missing an embedding model name. Check the embedding configuration '
-                        'or supply vectors with their model name.'
-                    )
                 if doc.embedding_model != modelName:
                     raise Exception(
                         f'The collection uses {modelName} but the document was encoded with {doc.embedding_model}'
