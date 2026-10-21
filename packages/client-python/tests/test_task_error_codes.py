@@ -110,3 +110,37 @@ async def test_a_refused_command_keeps_the_servers_code():
         assert e.code == 'NODE_NOT_ENTITLED' and str(e) == 'acme.echo is not published to you'
     else:
         raise AssertionError('call() did not raise')
+
+
+def _refusing_client(code='NODE_NOT_ENTITLED', message='acme.echo is not published to you'):
+    from rocketride import RocketRideClient
+
+    client = RocketRideClient(uri='http://localhost:1', auth='key')
+
+    async def request(message_, timeout=None):
+        return {'success': False, 'message': message, 'code': code}
+
+    client.request = request
+    return client
+
+
+async def test_a_refused_validation_keeps_the_code():
+    from rocketride.core.exceptions import CommandException
+
+    try:
+        await _refusing_client().validate({'components': []})
+    except CommandException as e:
+        assert e.code == 'NODE_NOT_ENTITLED' and str(e).startswith('Pipeline validation failed: ')
+    else:
+        raise AssertionError('validate() did not raise')
+
+
+async def test_a_refused_restart_keeps_the_code():
+    from rocketride.core.exceptions import CommandException
+
+    try:
+        await _refusing_client().restart(token='tk', project_id='p', source='s', pipeline={})
+    except CommandException as e:
+        assert e.code == 'NODE_NOT_ENTITLED' and isinstance(e, RuntimeError)
+    else:
+        raise AssertionError('restart() did not raise')

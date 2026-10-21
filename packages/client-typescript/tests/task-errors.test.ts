@@ -163,3 +163,32 @@ describe('RocketRideClient.call() failure', () => {
 		expect((caught as CommandException).message).toBe('acme.echo is not published to you');
 	});
 });
+
+describe('RocketRideClient.validate() and restart() failure', () => {
+	const notEntitled = { success: false, message: 'acme.echo is not published to you', code: 'NODE_NOT_ENTITLED' };
+
+	function refusingClient(): RocketRideClient {
+		const client = new RocketRideClient({ env: {} });
+		(client as unknown as Record<string, unknown>).request = async () => notEntitled;
+		return client;
+	}
+
+	it('validate() keeps the server code', async () => {
+		const caught = await refusingClient()
+			.validate({ pipeline: { components: [] } })
+			.catch((e: unknown) => e);
+
+		expect(caught).toBeInstanceOf(CommandException);
+		expect((caught as CommandException).code).toBe('NODE_NOT_ENTITLED');
+		expect((caught as CommandException).message).toBe('Pipeline validation failed: acme.echo is not published to you');
+	});
+
+	it('restart() keeps the server code', async () => {
+		const caught = await refusingClient()
+			.restart({ token: 'tk', projectId: 'p', source: 's', pipeline: {} })
+			.catch((e: unknown) => e);
+
+		expect(caught).toBeInstanceOf(CommandException);
+		expect((caught as CommandException).code).toBe('NODE_NOT_ENTITLED');
+	});
+});

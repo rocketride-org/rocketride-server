@@ -1334,7 +1334,10 @@ export class RocketRideClient extends DAPClient {
 			// never need null guards on a passing validation.
 			return { ...result, errors: result?.errors ?? [], warnings: result?.warnings ?? [] };
 		} catch (err) {
-			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
+			const message = `Pipeline validation failed: ${err instanceof Error ? err.message : err}`;
+			// Keep the server's code with the message
+			if (err instanceof CommandException) throw new CommandException({ ...err.dapResult, message });
+			throw new Error(message);
 		}
 	}
 
@@ -1550,6 +1553,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline restart failed: ${errorMsg}`);
+			if (err instanceof CommandException) throw err;
 			throw new Error(errorMsg);
 		}
 	}
