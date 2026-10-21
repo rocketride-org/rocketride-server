@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.logging.Handler;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
@@ -253,12 +254,17 @@ class TestMediaSkipFlags {
         config.setAccessible(true);
         Object previous = config.get(null);
         config.set(null, ConfigBuilder.getConfig());
+        // The copy and the sends log at INFO; a process that runs this logger at
+        // WARNING would drop them before the recorder sees them, so pin the level
         Logger log = Logger.getLogger("TikaApi");
+        Level previousLevel = log.getLevel();
+        log.setLevel(Level.ALL);
         log.addHandler(recorder);
         try (TikaInputStream stream = TikaInputStream.get(bytes)) {
             TikaApi.extractInformation(0, stream, "image.png", new StringWriter(), metadata, flags, false);
         } finally {
             log.removeHandler(recorder);
+            log.setLevel(previousLevel);
             config.set(null, previous);
         }
         return messages;
