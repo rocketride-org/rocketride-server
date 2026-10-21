@@ -689,7 +689,7 @@ def test_bootstrap_unpacks_privately_and_gives_the_engine_the_images_umask():
 
 
 async def test_command_is_the_bootstrap_then_the_engine():
-    """The docker runtime's argv after the bootstrap's own: no --hosted, the port fixed."""
+    """The docker runtime's argv after the bootstrap's own: --hosted, the port fixed."""
     cli = FakeKubectl()
     await _launcher(cli, start_timeout='90').start(_spec())
     command = cli.container()['command']
@@ -705,12 +705,12 @@ async def test_command_is_the_bootstrap_then_the_engine():
         '--data_port=5570',
         '--data_host=0.0.0.0',
         f'--data_token_sha256={TOKEN_SHA}',
+        '--hosted',
         '--modelserver=eas-host:5590',
         '--threads=2',
         '--dumps',
         '--trace=debugOut',
     ]
-    assert '--hosted' not in command
 
 
 async def test_every_dollar_in_the_command_is_doubled():
