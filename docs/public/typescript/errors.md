@@ -77,7 +77,10 @@ context (mirroring Python's `dap_result`), plus two optional fields:
   live task — never started, terminated, replaced, or the engine restarted),
   `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`; a refused pipe throws
   `PipeException` with `OUT_OF_CREDITS` (the org is out of credit; clears when
-  it tops up). **Classify on `code`, not
+  it tops up); a refused pipeline start, restart or validation raises `CommandException` with a
+  node code: `NODE_NOT_FOUND`, `NODE_NOT_ENTITLED`, `NODE_REGISTRY_UNAVAILABLE`,
+  `NODE_VERSION_MISMATCH`, `NODE_PACKAGE_INVALID` (meanings in the
+  [WebSocket code table](/connect/websocket#responses)). **Classify on `code`, not
   on `message`**, which is written for people and may be reworded.
 - `hint` — troubleshooting text the SDK attached for a developer, absent when
   there is none. Kept out of `message` so an application can show the message

@@ -112,4 +112,36 @@ request (registry ints ONLY — semver is display).
 
 Full signatures: [API reference](/clients/typescript/reference#app-publish-ladder).
 
+## Node publishing
+
+A Python node is published the way an app is: upload its `.rrnode`, then bind a
+version to `@me` or a team. A published node's id is `<developerId>.<name>`: it
+is the provider a pipeline names, and the `protocol` in its `services.json`
+(`<developerId>.<name>://`). Its folder and module are `<developerId>__<name>`, so
+its `path` is `nodes.<developerId>__<name>`. The `.rrnode` is a zip of that one
+folder with a `.rrnode` marker holding `{"name", "contract"}`.
+
+```typescript
+const added = await client.deploy.add({ kind: 'node', data: await readFile('acme__echo.rrnode') });
+await client.call('rrext_deploy_node', {
+	subcommand: 'publish',
+	nodeId: 'acme.echo',
+	version: added.artifact?.version,
+	target: '@team/research',
+});
+```
+
+`rrext_deploy_node` also takes `versions`, and `unpublish` with a `target`. A
+node belongs to whoever uploaded its first version: only they can add a version,
+publish it or unpublish it. A node cannot be published to `@public` yet. An upload is refused with
+`NODE_PACKAGE_INVALID`, the message naming the rule, for a C++ node, an id
+outside your developer namespace, a symlink, a path outside the zip, an icon
+outside the node, or a requirement line with an index, a URL or a local path.
+
+A run gets, when it is launched, the version bound to the caller's own rung,
+else a team's, and keeps it until it ends. The catalogue and validation show the
+node only to callers it is published to; a caller who cannot run it gets a
+`CommandException` with `NODE_NOT_ENTITLED`, or `NODE_NOT_FOUND` when no one in
+the org uploaded it.
+
 See the [Shell API guide](/guides/apps) for the app model itself.
