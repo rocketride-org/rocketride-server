@@ -113,6 +113,13 @@ installed by hand — but on a tree whose engine was **downloaded**, the first
 node build pays for the packages, which is long when the binary cache has
 nothing to offer.
 
+A node that compiles needs the build tools the engine's compile sets up: the
+same compiler, which is also what lets the binary cache serve those packages,
+and on Linux the tools vcpkg builds ports with. A downloaded engine set up none
+of them, so before it compiles, the node build runs `server:setup-tools` (with
+`--autoinstall` it installs what is missing). A node that is up to date needs no
+compiler.
+
 Changing anything under `packages/server` gives the engine a new build hash, and
 since a node's library records the engine it was built against, every node
 rebuilds with it. The reverse is not true: changing one node rebuilds that node

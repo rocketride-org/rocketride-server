@@ -45,6 +45,7 @@ const {
 	execCommand,
 	getBuildBaseEnv,
 	formatSyncStats,
+	whenNot,
 	PROJECT_ROOT,
 	BUILD_ROOT,
 	DIST_ROOT,
@@ -92,12 +93,18 @@ function makeNodeModule({ name, srcDir, description, extraSteps = [] }) {
 			// Public actions (have descriptions)
 			{
 				name: `${name}:build`,
-				action: () => ({
+				action: (options = {}) => ({
 					description: `Build node ${name}`,
 					steps: [
 						'vcpkg:submodule-build',
 						'java:setup-jdk',
 						'server:build-core',
+						// A downloaded engine skips the build tools setup a compile needs
+						whenNot({
+							name: 'built',
+							condition: async () => (await compileStatus({ name, srcDir }, options)).upToDate,
+							then: ['server:setup-tools'],
+						}),
 						`${name}:compile`,
 						`${name}:stage`,
 						...extraSteps,
@@ -125,13 +132,10 @@ function makeCompileNodeAction(node, options = {}) {
 			const cmakeConfig = options.cmakeConfig || 'Release';
 			const nodeBuildDir = path.join(BUILD_NODES_DIR, name);
 
-			const triplet = vcpkg.getVcpkgTriplet(options);
-
 			task.output = `Computing ${name} source hash...`;
-			const srcHash = await nodeSourceHash(name, nodeDir, triplet);
-			const configured = await isNodeConfigured(nodeBuildDir, cmakeConfig, triplet);
+			const { srcHash, configured, upToDate } = await compileStatus(node, options);
 
-			if (!options.force && (await builtAlready(name, nodeDir, srcHash, cmakeConfig, configured))) {
+			if (upToDate) {
 				task.output = 'Up to date';
 				return;
 			}
@@ -251,6 +255,22 @@ async function nodeSourceHash(name, nodeDir, triplet) {
 	]);
 
 	return crypto.createHash('sha256').update(`${nodeHash}:${cmakeHash}:${engineHash}:${triplet}`).digest('hex');
+}
+
+/**
+ * Whether a node's library needs compiling, with what decided it. `<node>:build`
+ * asks before its compile too, to set up the build tools only when it does.
+ */
+async function compileStatus({ name, srcDir }, options = {}) {
+	const nodeDir = path.join(srcDir, name);
+	const cmakeConfig = options.cmakeConfig || 'Release';
+	const triplet = vcpkg.getVcpkgTriplet(options);
+
+	const srcHash = await nodeSourceHash(name, nodeDir, triplet);
+	const configured = await isNodeConfigured(path.join(BUILD_NODES_DIR, name), cmakeConfig, triplet);
+	const upToDate = !options.force && (await builtAlready(name, nodeDir, srcHash, cmakeConfig, configured));
+
+	return { srcHash, configured, upToDate };
 }
 
 /**

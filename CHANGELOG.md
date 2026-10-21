@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — since 2026-10-16
 
+### Fixed
+- **builder**: a C++ node compiled against a downloaded engine sets up the build tools first, so a PR that changes a node builds on Linux and Windows again (#2747)
+
 ## [3.5.0] - 2026-10-16
 
 ### Added
