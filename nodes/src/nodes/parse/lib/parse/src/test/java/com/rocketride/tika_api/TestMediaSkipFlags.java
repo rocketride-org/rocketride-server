@@ -189,13 +189,21 @@ class TestMediaSkipFlags {
         ByteArrayOutputStream png = new ByteArrayOutputStream();
         ImageIO.write(image, "png", png);
         byte[] bytes = png.toByteArray();
+        String docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-        // A native handle of 0 is the bridge's test mode (the send is a no-op). Had the
-        // media been wanted, the stream would have been copied in full; skipped, the
-        // processor returns right after detection, which resets the stream to its start.
-        EmbeddedContentProcessor processor =
-                new EmbeddedContentProcessor(0, "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        TikaApi.SKIP_IMAGES);
+        // A native handle of 0 is the bridge's test mode (the send is a no-op).
+        // Positive control first: wanted, the image is detected, copied in full and
+        // sent, so the stream is read to its end. parseEmbedded swallows every
+        // exception, so without this a processor that failed before reaching the skip
+        // would also leave the stream unread and the check below would pass anyway.
+        EmbeddedContentProcessor wanted = new EmbeddedContentProcessor(0, docx, 0);
+        ByteArrayInputStream wantedStream = new ByteArrayInputStream(bytes);
+        assertDoesNotThrow(() -> wanted.parseEmbedded(wantedStream, new BodyContentHandler(), new Metadata(), false));
+        assertEquals(0, wantedStream.available(), "a wanted image is copied in full");
+
+        // Skipped, the processor returns right after detection, which resets the
+        // stream to its start
+        EmbeddedContentProcessor processor = new EmbeddedContentProcessor(0, docx, TikaApi.SKIP_IMAGES);
         ByteArrayInputStream stream = new ByteArrayInputStream(bytes);
         assertDoesNotThrow(() -> processor.parseEmbedded(stream, new BodyContentHandler(), new Metadata(), false));
         assertEquals(bytes.length, stream.available(), "a skipped image is neither copied nor parsed");
