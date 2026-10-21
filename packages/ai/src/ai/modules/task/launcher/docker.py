@@ -54,6 +54,7 @@ from rocketlib import debug
 from ai.constants import CONST_SUBPROCESS_BUFFER_LIMIT
 
 from .base import Launch, Launcher, LaunchSpec
+from .subprocess import CONST_HOSTED_CHILD_FLAG
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -890,7 +891,8 @@ class DockerLauncher(Launcher):
         """
         The command line inside the container: the subprocess runtime's, minus what does not apply.
 
-        No ``--hosted`` (the container is the boundary) and no inherited
+        ``--hosted`` as under spawn: a hosted task's pipes ask EaaS for credit
+        and it never installs torch, wherever it runs. No inherited
         ``--node_path`` (the nodes are in the image; a host path means nothing
         there). The data port is fixed and bound on every interface of the
         container's own network namespace.
@@ -911,6 +913,8 @@ class DockerLauncher(Launcher):
             '--data_host=0.0.0.0',
             f'--data_token_sha256={spec.token_sha256}',
         ]
+        if spec.hosted:
+            args.append(CONST_HOSTED_CHILD_FLAG)
         if spec.modelserver:
             args.append(f'--modelserver={rewrite_loopback(spec.modelserver)}')
         args.extend(spec.pipeline_args)
