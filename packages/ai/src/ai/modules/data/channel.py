@@ -15,7 +15,7 @@ large transfer.
 """
 
 import asyncio
-import concurrent.futures
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, BinaryIO, Dict, Optional
 
@@ -215,15 +215,18 @@ class TaskChannel:
         if asyncio._get_running_loop() is self._loop:
             raise RuntimeError('request_sync on the data server loop would deadlock; await request() instead')
 
-        future = asyncio.run_coroutine_threadsafe(
-            self.request(command, arguments, data=data, sink=sink, timeout=timeout), self._loop
-        )
-        try:
-            # Bounded even if the loop never runs the request
-            return future.result(CONST_CHANNEL_CONNECT_TIMEOUT + timeout)
-        except concurrent.futures.TimeoutError:
+        started = threading.Event()
+
+        async def run() -> ChannelReply:
+            started.set()
+            return await self.request(command, arguments, data=data, sink=sink, timeout=timeout)
+
+        future = asyncio.run_coroutine_threadsafe(run(), self._loop)
+        # The request bounds each of its own waits; only a loop that never starts it needs a limit here
+        if not started.wait(CONST_CHANNEL_CONNECT_TIMEOUT):
             future.cancel()
-            raise ChannelError(command, 'timeout') from None
+            raise ChannelError(command, 'timeout')
+        return future.result()
 
     async def _exchange(
         self,

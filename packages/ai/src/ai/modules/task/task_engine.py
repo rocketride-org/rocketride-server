@@ -1258,6 +1258,8 @@ class Task(DAPBase):
         self._dial_pending: Optional[Tuple[Optional[str]]] = None
         # Dial times inside the rate-limit window
         self._dial_times: Deque[float] = deque()
+        # The one dial waiting for its delay
+        self._redial: Optional[asyncio.TimerHandle] = None
 
     def _data_uri(self) -> str:
         """The address of this run's ``/task/data``; the runtime decides it, never the task.
@@ -1321,8 +1323,18 @@ class Task(DAPBase):
             self._redial_later(CONST_CHANNEL_REDIAL_DELAY)
 
     def _redial_later(self, delay: float) -> None:
-        """Ask for a connection again after ``delay`` seconds, through the same dial rule."""
-        asyncio.get_running_loop().call_later(delay, self._on_channel_signal, '1', None)
+        """Ask for a connection again after ``delay`` seconds, through the same dial rule; one pending, the earliest."""
+        loop = asyncio.get_running_loop()
+        if self._redial is not None:
+            if self._redial.when() <= loop.time() + delay:
+                return
+            self._redial.cancel()
+
+        def redial() -> None:
+            self._redial = None
+            self._on_channel_signal('1', None)
+
+        self._redial = loop.call_later(delay, redial)
 
     async def _open_data_channel(self, stale: Optional['Task.TaskData']) -> None:
         """Replace ``stale`` (if any) with a fresh connection to the task.
@@ -1424,9 +1436,16 @@ class Task(DAPBase):
         if self._is_terminating:
             response = client.build_error(message, 'closed')
         else:
-            response = await handle_channel_request(
-                self, client, client.streams, message, startup_open=self._channel_startup_open
-            )
+            try:
+                response = await handle_channel_request(
+                    self, client, client.streams, message, startup_open=self._channel_startup_open
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                # A reply that cannot be read (a stream, a file): answer now, not at the task's timeout
+                self.debug_message(f'Channel request {message.get("command")} failed: {e}')
+                response = client.build_error(message, 'internal error')
         try:
             await client._send(response)
         except Exception as e:

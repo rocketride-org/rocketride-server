@@ -135,10 +135,19 @@ def test_pipes_opened_together_ask_once_and_all_wait_for_the_answer(channel):
         return reply
 
     channel.request_sync = slow
-    threads = [threading.Thread(target=data_server.require_credit) for _ in range(12)]
+    errors = []
+
+    def check():
+        try:
+            data_server.require_credit()
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=check) for _ in range(12)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join(5)
 
+    assert not any(thread.is_alive() for thread in threads) and errors == []
     assert answered.is_set() and len(channel.asked) == 1

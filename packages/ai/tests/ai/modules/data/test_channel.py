@@ -472,6 +472,42 @@ async def test_engine_request_completes_while_a_transfer_is_running(task_side, c
     await client.disconnect()
 
 
+async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_on_time(
+    task_side, commands, monkeypatch
+):
+    monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.2)
+
+    async def trickle():
+        for _ in range(4):
+            await asyncio.sleep(0.15)
+            yield b'z' * CHUNK
+
+    async def handler(task, arguments, data):
+        return ChannelReply(data=trickle())
+
+    commands('big', handler)
+    task, client = await _connect(task_side)
+
+    sink = io.BytesIO()
+    await ask('big', sink=sink, timeout=0.3)
+    assert len(sink.getvalue()) == 4 * CHUNK
+    await client.disconnect()
+
+
+async def test_a_reply_that_cannot_be_read_is_refused_at_once(task_side, commands, tmp_path):
+    async def handler(task, arguments, data):
+        return ChannelReply(data=str(tmp_path / 'gone.bin'))
+
+    commands('gone', handler)
+    task, client = await _connect(task_side)
+
+    started = time.monotonic()
+    with pytest.raises(ChannelError, match='internal error'):
+        await ask('gone', timeout=10)
+    assert time.monotonic() - started < 5
+    await client.disconnect()
+
+
 async def test_unknown_or_foreign_stream_is_refused(task_side, commands):
     async def handler(task, arguments, data):
         return ChannelReply(data=PAYLOAD)

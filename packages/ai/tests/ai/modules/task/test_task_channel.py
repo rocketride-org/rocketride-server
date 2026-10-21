@@ -168,6 +168,25 @@ async def test_a_dial_held_back_by_the_limit_is_tried_once_the_window_passes(mon
     assert t._open_data_channel.await_count == 2
 
 
+async def test_signals_held_back_by_the_limit_leave_one_pending_dial(monkeypatch):
+    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_DIAL_LIMIT', 1)
+    loop = asyncio.get_running_loop()
+    scheduled = []
+    real = loop.call_later
+    monkeypatch.setattr(loop, 'call_later', lambda *args: scheduled.append(real(*args)) or scheduled[-1])
+    t = _engine()
+    t._open_data_channel = AsyncMock()
+    Task._on_channel_signal(t, '1', None)
+    await _settle()
+    t._data_client = None  # the dial never connected
+
+    for _ in range(5):
+        Task._on_channel_signal(t, '1', None)
+
+    assert len(scheduled) == 1
+    scheduled[0].cancel()
+
+
 def test_a_refused_handshake_is_read_off_the_status_not_the_wording():
     try:
         try:
