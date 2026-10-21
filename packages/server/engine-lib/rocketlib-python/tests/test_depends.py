@@ -28,21 +28,27 @@ def _write(path, text='x\n'):
 
 
 class TestFindRequirementFiles:
-    def test_matches_root_nodes_and_ai_globs_only(self, exe_dir):
+    def test_matches_only_the_servers_own_files(self, exe_dir):
         _write(exe_dir / 'requirements.txt')
-        _write(exe_dir / 'nodes' / 'a' / 'requirements.txt')
-        _write(exe_dir / 'nodes' / 'a' / 'requirements_gpu.txt')
-        _write(exe_dir / 'ai' / 'x' / 'y' / 'requirements.txt')
+        _write(exe_dir / 'nodes' / 'requirements.txt')
+        _write(exe_dir / 'nodes' / 'core' / 'x' / 'requirements.txt')
+        _write(exe_dir / 'nodes' / 'a' / 'requirements.txt')  # a node's own: only its runs
+        _write(exe_dir / 'ai' / 'web' / 'requirements.txt')
+        _write(exe_dir / 'ai' / 'account' / 'store_providers' / 's3' / 'requirements.txt')
+        _write(exe_dir / 'ai' / 'common' / 'requirements.txt')
+        _write(exe_dir / 'ai' / 'common' / 'models' / 'ocr' / 'requirements_surya.txt')  # when a node loads it
         _write(exe_dir / 'other' / 'requirements.txt')  # outside every glob
-        _write(exe_dir / 'nodes' / 'a' / 'notes.txt')  # wrong name
+        _write(exe_dir / 'nodes' / 'notes.txt')  # wrong name
 
         found = {os.path.relpath(f, exe_dir) for f in depends._find_requirement_files()}
 
         assert found == {
             'requirements.txt',
-            os.path.join('nodes', 'a', 'requirements.txt'),
-            os.path.join('nodes', 'a', 'requirements_gpu.txt'),
-            os.path.join('ai', 'x', 'y', 'requirements.txt'),
+            os.path.join('nodes', 'requirements.txt'),
+            os.path.join('nodes', 'core', 'x', 'requirements.txt'),
+            os.path.join('ai', 'web', 'requirements.txt'),
+            os.path.join('ai', 'account', 'store_providers', 's3', 'requirements.txt'),
+            os.path.join('ai', 'common', 'requirements.txt'),
         }
 
     def test_returns_absolute_paths_without_duplicates(self, exe_dir):
@@ -559,3 +565,104 @@ class TestDepends:
         monkeypatch.setattr(depends, 'ensure_constraints', lambda: pytest.fail('constraints must not run'))
 
         depends.depends(str(tmp_path / 'does-not-exist.txt'))
+
+
+class TestRunConstraints:
+    """A run solves the requirements of the nodes it names, and only those, around the server's pins."""
+
+    @pytest.fixture
+    def solver(self, exe_dir, monkeypatch):
+        """A uv compile that refuses two pins of one package, held ones included, and emits its index like uv."""
+        seen = []
+
+        def pins(path):
+            return [
+                line
+                for line in open(path, encoding='utf-8').read().splitlines()
+                if '==' in line and not line.startswith('#')
+            ]
+
+        def fake_compile(constraints_path, combined_path=None, pinned=None):
+            combined = combined_path or depends._get_combined_path()
+            seen.append(open(combined, encoding='utf-8').read())
+            solved, held = pins(combined), pins(pinned) if pinned else []
+            if len({pin.split('==')[0] for pin in solved + held}) != len(set(solved + held)):
+                raise RuntimeError('Failed to compile constraints: Because shared==1 and shared==2 conflict')
+            with open(constraints_path, 'w', encoding='utf-8') as f:
+                f.write('--index-url https://pypi.org/simple\n' + '\n'.join(solved) + '\n')
+
+        monkeypatch.setattr(depends, '_compile_constraints', fake_compile)
+        monkeypatch.setattr(depends, 'bootstrap', lambda: None)
+        monkeypatch.setattr(depends, 'updateProgress', lambda message: None)
+        monkeypatch.setattr(depends, '_run_state', None)
+        _write(exe_dir / 'requirements.txt', 'base==1\n')
+        return seen
+
+    def _node(self, exe_dir, name, text):
+        _write(exe_dir / 'cache' / 'node-packages' / name / 'requirements.txt', text)
+        return str(exe_dir / 'cache' / 'node-packages' / name)
+
+    def test_a_run_solves_only_its_nodes_and_keeps_the_servers_pins(self, exe_dir, solver):
+        a = self._node(exe_dir, 'llm_a', 'alpha==1\n')
+
+        constraints = depends.ensure_run_constraints([a])
+
+        assert 'base==1' not in solver[-1]  # the server's files are not solved again
+        assert open(constraints).read() == '--index-url https://pypi.org/simple\nalpha==1\n\nbase==1\n'
+        assert depends._run_state[0] == constraints
+
+    def test_the_same_nodes_are_solved_once(self, exe_dir, solver):
+        a = self._node(exe_dir, 'llm_a', 'alpha==1\n')
+        depends.ensure_run_constraints([a])
+        depends._run_state = None
+
+        depends.ensure_run_constraints([a])
+
+        assert len(solver) == 2  # the server's own, then this run's
+
+    def test_two_nodes_that_pin_one_package_differently_fail_only_together(self, exe_dir, solver):
+        a = self._node(exe_dir, 'store_a', 'shared==1\n')
+        b = self._node(exe_dir, 'store_b', 'shared==2\n')
+
+        depends.ensure_run_constraints([a])
+        depends.ensure_run_constraints([b])
+        with pytest.raises(
+            depends.RequirementsConflict, match='store_a and store_b cannot be installed together: Because'
+        ):
+            depends.ensure_run_constraints([a, b])
+        assert depends._run_state is None
+
+    def test_a_node_that_cannot_be_installed_with_the_server_is_named(self, exe_dir, solver):
+        bad = self._node(exe_dir, 'llm_bad', 'base==2\n')
+
+        with pytest.raises(depends.RequirementsConflict, match='llm_bad cannot be installed with the server'):
+            depends.ensure_run_constraints([bad])
+
+    def test_installs_after_the_solve_use_the_runs_constraints_and_overrides(self, exe_dir, solver, monkeypatch):
+        a = self._node(exe_dir, 'llm_a', 'alpha==1\n')
+        _write(exe_dir / 'cache' / 'node-packages' / 'llm_a' / 'overrides.txt', 'beta==3\n')
+        installs = []
+        monkeypatch.setattr(depends, '_install_requirements', lambda path, constraints: installs.append(constraints))
+        monkeypatch.setattr(depends, '_apply_pywin32_hack', lambda: None)
+        constraints = depends.ensure_run_constraints([a])
+
+        depends.depends(str(exe_dir / 'cache' / 'node-packages' / 'llm_a' / 'requirements.txt'))
+
+        assert installs == [constraints]
+        assert open(depends._active_overrides_path()).read().endswith('beta==3\n\n')
+
+    def test_a_run_with_no_python_node_files_keeps_the_servers_constraints(self, exe_dir, solver):
+        assert depends.ensure_run_constraints([]) == depends._get_constraints_path()
+        assert depends._run_state is None
+
+
+def test_uvs_reason_is_given_whole_without_its_tree_glyphs():
+    stderr = (
+        '  × No solution found when resolving dependencies:\n'
+        '  ╰─▶ Because you require six==1.16.0 and six==1.15.0, we can conclude that\n'
+        '      your requirements are unsatisfiable.\n'
+    )
+
+    assert depends._reason(stderr) == (
+        'Because you require six==1.16.0 and six==1.15.0, we can conclude that your requirements are unsatisfiable.'
+    )

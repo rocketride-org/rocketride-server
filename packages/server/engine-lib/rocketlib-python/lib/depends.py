@@ -56,10 +56,17 @@ from engLib import debug, monitorStatus, error
 # Configuration
 # ---------------------------------------------------------------------------
 
+# What the engine needs to start and serve, solved together for every install.
+# A node's own files join only the runs that name it (ensure_run_constraints);
+# the model helpers under ai/common install when a node loads one.
 REQUIREMENTS_GLOBS = [
     'requirement*.txt',
-    'nodes/**/requirement*.txt',
-    'ai/**/requirement*.txt',
+    'nodes/requirement*.txt',
+    'nodes/core/**/requirement*.txt',
+    'ai/requirement*.txt',
+    'ai/web/**/requirement*.txt',
+    'ai/account/**/requirement*.txt',
+    'ai/common/requirement*.txt',
 ]
 
 # Override files: unlike constraints, uv overrides REPLACE what packages
@@ -68,7 +75,8 @@ REQUIREMENTS_GLOBS = [
 # ('requirement*.txt') never sweeps them into the combined requirements.
 OVERRIDES_GLOBS = [
     'overrides.txt',
-    'nodes/**/overrides.txt',
+    'nodes/overrides.txt',
+    'nodes/core/**/overrides.txt',
     'ai/**/overrides.txt',
 ]
 
@@ -98,6 +106,13 @@ def _tool_spec(name: str) -> str:
 
 # Track processed requirements to avoid redundant installs in same session
 _processed: set[str] = set()
+
+# (constraints, overrides) of this run, once ensure_run_constraints solved them
+_run_state: Optional[tuple[str, str]] = None
+
+
+class RequirementsConflict(RuntimeError):
+    """The nodes a run names cannot be installed together."""
 
 
 # ---------------------------------------------------------------------------
@@ -356,12 +371,17 @@ def _get_overrides_path() -> str:
     return os.path.join(engine_cache_dir(), 'overrides-combined.txt')
 
 
+def _active_overrides_path() -> str:
+    """The overrides installs apply: this run's, else the server's."""
+    return _run_state[1] if _run_state else _get_overrides_path()
+
+
 def _override_args(exe_dir: str) -> list[str]:
     """Return uv ``--override`` args if the combined overrides file is non-empty, else ``[]``.
 
     Relative to exe_dir (the subprocess cwd) — uv splits the value on whitespace.
     """
-    overrides_path = _get_overrides_path()
+    overrides_path = _active_overrides_path()
     if os.path.exists(overrides_path) and os.path.getsize(overrides_path) > 0:
         return ['--override', os.path.relpath(overrides_path, exe_dir)]
     return []
@@ -733,8 +753,8 @@ def _combine_requirements(file_paths: list[str], output_path: str):
             out.write('\n')
 
 
-def _compile_constraints(constraints_path: str):
-    """Use uv pip compile to generate constraints file."""
+def _compile_constraints(constraints_path: str, combined_path: Optional[str] = None, pinned: Optional[str] = None):
+    """Use uv pip compile to generate constraints file, holding what ``pinned`` fixes."""
     if not _uv_available():
         raise RuntimeError('uv executable not found')
 
@@ -745,9 +765,9 @@ def _compile_constraints(constraints_path: str):
         _uv_abs_path(),
         'pip',
         'compile',
-        _get_combined_path(),
+        combined_path or _get_combined_path(),
         '--output-file',
-        _get_constraints_path(),
+        constraints_path,
         '--python',
         sys.executable,  # Explicitly specify Python version to avoid mismatch
         '--index-strategy',
@@ -756,6 +776,8 @@ def _compile_constraints(constraints_path: str):
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
     args.extend(_override_args(exe_dir))
+    if pinned:
+        args.extend(['-c', os.path.relpath(pinned, exe_dir)])
     debug(f'Compile: {args}')
     result = subprocess.run(
         args,
@@ -770,9 +792,17 @@ def _compile_constraints(constraints_path: str):
 
     if result.returncode != 0:
         error(f'Failed to compile constraints: {result.stderr}')
-        raise RuntimeError('Failed to compile constraints')
+        raise RuntimeError(f'Failed to compile constraints: {_reason(result.stderr)}')
 
     debug(f'Constraints compiled: {constraints_path}')
+
+
+def _reason(stderr: str) -> str:
+    """The account uv gives of why a resolve failed, in one line."""
+    # uv wraps its explanation over lines behind tree glyphs; it starts at "Because"
+    text = ' '.join(line.strip(' ╰─▶×│') for line in stderr.splitlines() if line.strip())
+    start = text.find('Because')
+    return text[start:] if start >= 0 else text or 'no reason given'
 
 
 def ensure_constraints() -> str:
@@ -835,6 +865,94 @@ def ensure_constraints() -> str:
 # ---------------------------------------------------------------------------
 # Installation
 # ---------------------------------------------------------------------------
+
+
+def _node_files(node_dirs: list[str], name: str) -> list[str]:
+    """The files called ``name`` (a glob) at the top of each node folder."""
+    return sorted(path for node_dir in node_dirs for path in glob(os.path.join(node_dir, name)) if os.path.isfile(path))
+
+
+def _content_hash(file_paths: list[str]) -> str:
+    """A digest of the files' contents, in order."""
+    hasher = hashlib.sha256()
+    for path in file_paths:
+        with open(path, 'rb') as f:
+            hasher.update(path.encode() + b'\0' + f.read() + b'\0')
+    return hasher.hexdigest()
+
+
+def ensure_run_constraints(node_dirs: list[str]) -> str:
+    """
+    Solve the requirements of the nodes a run names around what the server installed, and install with that from now on.
+
+    Two nodes whose pins cannot coexist fail only a run naming both: the error names them.
+
+    Args:
+        node_dirs: The folders of the run's Python nodes.
+
+    Returns:
+        str: The run's constraints file.
+
+    Raises:
+        RequirementsConflict: The nodes cannot be installed together.
+    """
+    global _run_state
+    with FileLock(os.path.join(engine_cache_dir(), 'install.lock')):
+        bootstrap()
+        baseline = ensure_constraints()
+        requirements = _node_files(node_dirs, 'requirement*.txt')
+        overrides = _node_files(node_dirs, 'overrides.txt')
+        if not requirements and not overrides:
+            return baseline
+        key = _content_hash([baseline] + requirements + _find_override_files() + overrides)
+        root = os.path.join(engine_cache_dir(), 'runs', key)
+        constraints, overrides_path = os.path.join(root, 'constraints.txt'), os.path.join(root, 'overrides.txt')
+        if not os.path.exists(constraints):
+            os.makedirs(root, exist_ok=True)
+            _combine_requirements(_find_override_files() + overrides, overrides_path)
+            _run_state = (constraints, overrides_path)
+            try:
+                _solve(requirements, constraints, root, baseline)
+            except RuntimeError:
+                _run_state = None
+                raise RequirementsConflict(_conflict(requirements, root, baseline)) from None
+        _run_state = (constraints, overrides_path)
+        return constraints
+
+
+def _solve(sources: list[str], constraints: str, root: str, baseline: str) -> None:
+    """Compile ``sources`` into ``constraints`` holding the server's pins, which the result keeps for later installs."""
+    combined = os.path.join(root, 'combined.txt')
+    _combine_requirements(sources, combined)
+    _compile_constraints(constraints, combined, pinned=baseline)
+    # Its pins only: the index options are the run's own already
+    with open(baseline, encoding='utf-8') as server, open(constraints, 'a', encoding='utf-8') as run:
+        run.writelines(['\n'] + [line for line in server if not line.startswith('-')])
+
+
+def _conflict(requirements: list[str], root: str, baseline: str) -> str:
+    """Say which node, or which two, cannot be installed with the rest."""
+
+    def node(path: str) -> str:
+        return os.path.basename(os.path.dirname(path))
+
+    def fails(files: list[str]) -> Optional[str]:
+        try:
+            _solve(files, os.path.join(root, 'probe.txt'), root, baseline)
+        except RuntimeError as e:
+            return str(e).removeprefix('Failed to compile constraints: ')
+        return None
+
+    for path in requirements:
+        reason = fails([path])
+        if reason:
+            return f'{node(path)} cannot be installed with the server: {reason}'
+    for i, first in enumerate(requirements):
+        for second in requirements[i + 1 :]:
+            reason = fails([first, second])
+            if reason and node(first) != node(second):
+                return f'{node(first)} and {node(second)} cannot be installed together: {reason}'
+    return f'the nodes {", ".join(sorted({node(path) for path in requirements}))} cannot be installed together'
 
 
 def _excludes_content() -> str:
@@ -977,7 +1095,7 @@ def _verdict_key(requirements_path: str, constraints_path: str) -> Optional[str]
     parts.extend(
         [
             _file_digest(constraints_path),
-            _file_digest(_get_overrides_path()),
+            _file_digest(_active_overrides_path()),
             _excludes_content(),
             installed,
         ]
@@ -1321,8 +1439,8 @@ def depends(requirements: Optional[str] = None):
         # Phase 1: Bootstrap
         bootstrap()
 
-        # Phase 2: Ensure constraints
-        constraints_path = ensure_constraints()
+        # Phase 2: Ensure constraints (this run's, once solved)
+        constraints_path = _run_state[0] if _run_state else ensure_constraints()
 
         # Phase 3: Install if requirements provided
         if requirements:
