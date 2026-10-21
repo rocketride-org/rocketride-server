@@ -85,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **task**: report a missing cloud database instead of ROCKETRIDE_CLIENT_ID (#2578)
 - **tools**: stamp reasoning for models stored under a prefixed ID (#2447)
 - **tools**: ignore OpenRouter routing variants during discovery (#2480)
+- **server**: claim the GNU C++ runtime at engine startup, so a task that runs `parse` and then a node importing torch no longer crashes (#2720)
+- **nodes**: langchain-text-splitters 1.1.3, so General Text stops loading torch (#2674)
+- **agent_rocketride**: log the wait for timed-out calls as a warning (#2714)
+- **ai, nodes**: cut remaining ClickHouse echoes, keep other dialects' error text whole, fix ClickHouse session docs (#2713)
+- **agent**: report the stop reason when a run fails early or its answer is refused (#2688)
+- **ai, nodes**: name the missing variable when a key is an unfilled placeholder (#2690)
+- **pipediff**: harden numbers, nesting, and Markdown reports (#2695)
 
 ### Maintenance
 
