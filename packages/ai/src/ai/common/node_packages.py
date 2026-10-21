@@ -27,6 +27,8 @@ its digest, and that folder joins the `nodes` package; a process that serves
 packages (EaaS) or fetches them (a task) installs a source with serve().
 """
 
+import contextlib
+import glob
 import hashlib
 import importlib
 import importlib.abc
@@ -36,8 +38,9 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import zipfile
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import engLib
 from depends import engine_cache_dir
@@ -55,6 +58,18 @@ class NodePackageInvalid(RuntimeError):
     code = 'NODE_PACKAGE_INVALID'
 
 
+# Prefix of the folders a package is unpacked into before it takes its digest's name
+_STAGING = 'staging-'
+
+
+def _sweep(cache: str) -> None:
+    """Drop the staging folders an unpack that was killed left behind an hour ago or more."""
+    for path in glob.glob(os.path.join(cache, f'{_STAGING}*')):
+        with contextlib.suppress(OSError):
+            if time.time() - os.path.getmtime(path) > 3600:
+                shutil.rmtree(path, ignore_errors=True)
+
+
 def unpack(name: str, data: bytes, sha256: str) -> str:
     """Unpack a package once, make it importable, and return the node's folder."""
     cache = engine_cache_dir(create=True)
@@ -62,39 +77,47 @@ def unpack(name: str, data: bytes, sha256: str) -> str:
     if not os.path.isdir(root):
         if hashlib.sha256(data).hexdigest() != sha256:
             raise NodePackageInvalid(f'The package of {name} does not match its digest')
-        staging = tempfile.mkdtemp(dir=cache)
+        _sweep(cache)
+        staging = tempfile.mkdtemp(prefix=_STAGING, dir=cache)
         with zipfile.ZipFile(io.BytesIO(data)) as package:
+            # Its root goes first on sys.path: a stray folder would shadow another node
+            if any(not entry.startswith(f'{name}/') for entry in package.namelist()):
+                shutil.rmtree(staging, ignore_errors=True)
+                raise NodePackageInvalid(f'The package of {name} holds files outside {name}/')
             package.extractall(os.path.join(staging, 'nodes'))
         os.makedirs(os.path.dirname(root), exist_ok=True)
         try:
             os.replace(staging, root)
         except OSError:
-            # Another process unpacked the same digest first
             shutil.rmtree(staging, ignore_errors=True)
+            # Only another process unpacking the same digest first is not a failure
+            if not os.path.isdir(root):
+                raise
     if root not in sys.path:
         sys.path.insert(0, root)
         importlib.invalidate_caches()
     return os.path.join(root, 'nodes', name)
 
 
-def fetch(name: str, register: bool) -> bool:
-    """Get a node from the source and unpack it; register its definitions when the engine needs them."""
+def fetch(name: str) -> Optional[List[Tuple[Dict[str, Any], str]]]:
+    """Get a node from the source and unpack it; its (definition, path) pairs, or None when there is no such node."""
     package = _source(name) if _source else None
     if package is None:
-        return False
+        return None
     node, data, sha256, definitions = package
     node_dir = unpack(node, data, sha256)
-    if register:
-        engLib.registerServices(
-            [(definition, os.path.join(node_dir, file)) for file, definition in definitions.items()]
-        )
-    return True
+    return [(definition, os.path.join(node_dir, file)) for file, definition in definitions.items()]
 
 
-def ensure(name: str) -> None:
-    """Make sure the engine knows a node or provider before it is used."""
-    if getServiceDefinition(name) is None:
-        fetch(name, register=True)
+def ensure(*names: str) -> None:
+    """Make sure the engine knows these nodes or providers, registering the missing ones in one batch."""
+    batch = []
+    for name in names:
+        if getServiceDefinition(name) is None:
+            batch += fetch(name) or []
+    if batch:
+        # Together, so a definition that lists other services sees all of them
+        engLib.registerServices(batch)
 
 
 def serve(source: Source) -> None:
@@ -113,7 +136,7 @@ class NodeFinder(importlib.abc.MetaPathFinder):
         if parent != 'nodes' or '.' in name:
             return None
         try:
-            found = fetch(name, register=False)
+            found = fetch(name) is not None
         except Exception as e:
             # Code that catches ImportError for an optional node keeps working
             raise ImportError(f'Could not fetch {fullname}: {e}', name=fullname) from e

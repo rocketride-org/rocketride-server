@@ -8,6 +8,7 @@
 import hashlib
 import io
 import os
+import threading
 import urllib.error
 
 import pytest
@@ -34,46 +35,35 @@ def layout(tmp_path, monkeypatch):
     return tmp_path, release, asked
 
 
-def test_a_build_reads_dist_nodes_and_downloads_nothing(layout):
-    tmp, _, asked = layout
-    os.makedirs(tmp / 'nodes')
-    (tmp / 'nodes' / 'index.json').write_bytes(b'{"local": true}')
+ZIP = b'zip'
+ZIP_SHA = hashlib.sha256(ZIP).hexdigest()
 
-    assert node_release.read_index() == b'{"local": true}'
+
+def test_the_index_is_the_one_the_server_was_built_with(layout):
+    tmp, _, asked = layout
+    os.makedirs(tmp / 'server' / 'nodes')
+    (tmp / 'server' / 'nodes' / 'index.json').write_bytes(b'{"built": true}')
+
+    assert node_release.read_index() == b'{"built": true}'
     assert asked == []
 
 
-def test_a_prerelease_is_found_under_its_own_tag(layout):
+def test_a_prerelease_package_is_found_under_its_own_tag(layout):
     _, release, asked = layout
-    release[f'{node_release.RELEASES}/server-v1.2.3-prerelease/index.json'] = b'{}'
+    release[f'{node_release.RELEASES}/server-v1.2.3-prerelease/llm_x.rrnode'] = ZIP
 
-    assert node_release.read_index() == b'{}'
+    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
     assert [url.rsplit('/', 2)[1] for url in asked] == ['server-v1.2.3', 'server-v1.2.3-prerelease']
 
 
-def test_the_release_the_extension_installed_is_asked_first(layout):
+def test_the_release_the_extension_installed_is_asked_first_and_a_containers_never(layout):
     tmp, release, asked = layout
+    (tmp / 'version.docker.json').write_text('{"tag": "server-v9.9.9", "publishedAt": "x"}')
     (tmp / 'version.local.json').write_text('{"tag": "server-v1.2.3-workshop", "publishedAt": "x"}')
-    release[f'{node_release.RELEASES}/server-v1.2.3-workshop/index.json'] = b'{}'
+    release[f'{node_release.RELEASES}/server-v1.2.3-workshop/llm_x.rrnode'] = ZIP
 
-    assert node_release.read_index() == b'{}'
+    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
     assert [url.rsplit('/', 2)[1] for url in asked] == ['server-v1.2.3-workshop']
-
-
-def test_offline_the_last_index_downloaded_is_used(layout, monkeypatch):
-    _, release, _ = layout
-    release[f'{node_release.RELEASES}/server-v1.2.3/index.json'] = b'{"v": 1}'
-    node_release.read_index()
-
-    def offline(url, timeout):
-        raise urllib.error.URLError('offline')
-
-    monkeypatch.setattr(node_release.urllib.request, 'urlopen', offline)
-    assert node_release.read_index() == b'{"v": 1}'
-
-
-ZIP = b'zip'
-ZIP_SHA = hashlib.sha256(ZIP).hexdigest()
 
 
 def test_a_package_is_downloaded_once_per_digest(layout):
@@ -101,3 +91,24 @@ def test_a_release_asset_that_does_not_match_the_index_is_not_cached(layout):
     with pytest.raises(ValueError, match='does not match the index'):
         node_release.read_package('llm_x', ZIP_SHA)
     assert not os.path.exists(os.path.join(tmp, 'server', 'cache', 'nodes', f'{ZIP_SHA}.rrnode'))
+
+
+def test_threads_saving_the_same_file_each_leave_it_whole(tmp_path):
+    path = str(tmp_path / 'cache' / 'abc.rrnode')
+    errors = []
+
+    def write():
+        try:
+            node_release.save(path, b'x' * 100_000)
+        except Exception as e:
+            errors.append(e)
+
+    for _ in range(20):
+        threads = [threading.Thread(target=write) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert errors == [] and open(path, 'rb').read() == b'x' * 100_000
+    assert os.listdir(tmp_path / 'cache') == ['abc.rrnode']

@@ -27,11 +27,11 @@ the engine cache by digest.
 """
 
 import contextlib
-import glob
 import hashlib
 import json
 import os
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -58,9 +58,10 @@ def _cached(file: str) -> str:
 def _tags() -> list:
     """The release the VS Code extension installed this engine from, then the usual tags."""
     installed = []
-    for path in glob.glob(_beside('version*.json')):
+    # The files an install of this engine writes beside it; version.docker.json is a container's
+    for name in ('version.json', 'version.local.json', 'version.service.json'):
         with contextlib.suppress(OSError, ValueError, KeyError):
-            installed.append(json.loads(_read(path))['tag'])
+            installed.append(json.loads(_read(_beside(name)))['tag'])
     version = getVersion()['version']
     return [*installed, f'server-v{version}', f'server-v{version}-prerelease']
 
@@ -79,12 +80,16 @@ def _download(file: str) -> bytes:
 
 
 def save(path: str, data: bytes) -> bytes:
-    """Write a file whole or not at all: another process may be reading it."""
+    """Write a file whole or not at all: another process or thread may be reading or writing it."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    staging = f'{path}.{os.getpid()}.tmp'
-    with open(staging, 'wb') as file:
+    handle, staging = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(handle, 'wb') as file:
         file.write(data)
-    os.replace(staging, path)
+    try:
+        os.replace(staging, path)
+    except PermissionError:
+        # Windows refuses to replace a file a reader holds open; that reader keeps a whole copy
+        os.remove(staging)
     return data
 
 
@@ -94,15 +99,8 @@ def _read(path: str) -> bytes:
 
 
 def read_index() -> bytes:
-    """index.json: the local one, else the release's, else the last one downloaded."""
-    if os.path.exists(_local('index.json')):
-        return _read(_local('index.json'))
-    try:
-        return save(_cached('index.json'), _download('index.json'))
-    except OSError:
-        if os.path.exists(_cached('index.json')):
-            return _read(_cached('index.json'))
-        raise
+    """The server's nodes/index.json: written by the build that made this engine, so it lists its nodes."""
+    return _read(os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'nodes', 'index.json'))
 
 
 def read_package(name: str, sha256: str) -> bytes:
