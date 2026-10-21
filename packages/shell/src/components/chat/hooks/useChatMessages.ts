@@ -6,6 +6,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { Question, QuestionType, type PIPELINE_RESULT } from 'rocketride';
 import type { ChatMessage, TextResult, UseChatMessagesOptions } from '../types';
+import { makeStatusSink, statusRow } from './statusRows';
 
 // Module-level monotonic counter — guarantees unique IDs even when multiple
 // messages are created within the same millisecond (e.g. batched SSE updates).
@@ -104,16 +105,8 @@ export function useChatMessages({ welcomeMessage, initialMessages, request }: Us
 				onSSE: async (type: string, data: Record<string, unknown>) => {
 					const text = typeof data.message === 'string' ? data.message : undefined;
 					if (text) {
-						updateMessages((prev) => [
-							...prev,
-							{
-								id: nextId(),
-								text,
-								sender: 'status',
-								sseType: type,
-								timestamp: ts(),
-							},
-						]);
+						const row = statusRow(nextId(), type, text, ts());
+						updateMessages((prev) => [...prev, row]);
 					}
 				},
 			});
@@ -133,8 +126,10 @@ export function useChatMessages({ welcomeMessage, initialMessages, request }: Us
 
 			try {
 				// step: an injected transport (agent sessions, tests) replaces the
-				// built-in chat API wholesale — same answer shape either way
-				const answers = request ? await request(text) : await sendMessageToAPI(text, client, authToken);
+				// built-in chat API wholesale — same answer shape either way. Its
+				// status sink appends live rows while the request is pending.
+				const onStatus = makeStatusSink((row) => updateMessages((prev) => [...prev, row]), nextId, ts);
+				const answers = request ? await request(text, onStatus) : await sendMessageToAPI(text, client, authToken);
 				const botMsgs: ChatMessage[] = answers.map((a) => ({
 					id: nextId(),
 					text: a.text,

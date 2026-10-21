@@ -61,6 +61,8 @@ import { ToolGlyph } from './surfaces/devtools/ToolGlyph';
 import { useDevToolPins } from './surfaces/devtools/devToolPins';
 import { CodiconExtensions } from 'shared/components/icons/Codicon';
 import { AgentSession } from 'shared/modules/agent/agent';
+import { setAgentHost } from 'shared/modules/agent/host';
+import { createRocketAgentHost } from './agent/agentHost';
 import { registerRocketHostOps } from './ops/hostOps';
 import { registerRocketFsOps } from './ops/fsOps';
 
@@ -266,6 +268,8 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		void (async () => {
 		const ws = await createWorkspace({ hostAppId: activeAppId, autoCommit: autoCommitRef.current, scope: workspaceScope });
 		if (cancelled) return;
+		// step: hand the agent this workspace's view, guides, scaffold, packer and dev sessions
+		setAgentHost(createRocketAgentHost(client));
 		// step: restored pending changes refuse auto mode — prompt the user
 		if (ws.pendingBlocksAuto) setModeSwitchBlocked(true);
 

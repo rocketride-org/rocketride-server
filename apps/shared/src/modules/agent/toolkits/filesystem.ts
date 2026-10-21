@@ -38,16 +38,19 @@
  * This file knows NOTHING about any particular workspace layout. What it
  * provides: whole-and-partial reads served from the cache, anchored
  * edit_file updates, dirty-overlay protection (reads see unsaved editor
- * buffers; mutations refuse paths the user holds dirty), content search,
- * and generic path hygiene (traversal and store-illegal characters are
- * refused here with LLM-readable errors — backends still validate again).
+ * buffers; mutations refuse paths the user holds dirty), read-before-edit
+ * (an edit or overwrite is refused unless the file was read this run and has
+ * not changed since), content search, and generic path hygiene (traversal
+ * and store-illegal characters are refused here with LLM-readable errors —
+ * backends still validate again).
  *
  * Tool results are strings fed straight back to the LLM; structured
  * results are JSON.
  */
 
-import type { IWorkspaceFileSystem } from '../vfs/vfsTypes';
-import { AgentTool, AgentToolkit } from './tools';
+import { sha256Hex } from '../../vfs/hash';
+import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
+import { AgentTool, AgentToolkit } from '../tools';
 
 // =============================================================================
 // CONSTANTS — caps and hygiene
@@ -60,10 +63,15 @@ const READ_MAX_BYTES = 4 * 1024 * 1024;
 /** Hard write cap in bytes — one whole-file write per call. */
 const WRITE_MAX_BYTES = 4 * 1024 * 1024;
 
+/** The writer identity every agent mutation carries, so the host can tell agent changes from the user's. */
+export const AGENT_ORIGIN = 'agent';
+
 /** search_files: most files visited per search. */
 const SEARCH_MAX_FILES = 2000;
 /** search_files: per-file content ceiling (longer content is skipped). */
 const SEARCH_MAX_FILE_CHARS = 256 * 1024;
+/** search_files: files fetched per batched read. */
+const SEARCH_READ_BATCH = 50;
 /** search_files: default and hard caps on returned matches. */
 const SEARCH_DEFAULT_RESULTS = 50;
 const SEARCH_MAX_RESULTS = 200;
@@ -97,7 +105,7 @@ function hasInvalidPathChar(p: string): boolean {
 
 /** The default group instructions — generic file-tool doctrine only. */
 const FILESYSTEM_INSTRUCTIONS = `File tools operate on the workspace virtual filesystem. Paths are workspace-relative and always use forward slashes.
-- Always read a file before editing or overwriting it.
+- Read a file before editing or overwriting it. edit_file and write_file refuse a file you have not read, or one that changed since you read it; read it again, then redo the edit.
 - Prefer edit_file (exact-anchor find/replace) for changes; write_file replaces a whole file.
 - Reads see the user's unsaved editor buffers; mutations are refused while the user has unsaved changes to the file - relay that to the user instead of retrying.
 - Truncated reads are always labeled; use offset/limit to window large files cheaply.`;
@@ -116,7 +124,7 @@ const FILESYSTEM_INSTRUCTIONS = `File tools operate on the workspace virtual fil
  * @param allowRoot - Whether '' (the tree root) is acceptable.
  * @returns The canonical path ('' only when allowRoot).
  */
-function normalizePath(raw: unknown, allowRoot = false): string {
+export function normalizePath(raw: unknown, allowRoot = false): string {
 	// step: normalize separators and trim the edges
 	const cleaned = String(raw ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 	if (!cleaned) {
@@ -150,6 +158,12 @@ export class FilesystemTools extends AgentToolkit {
 	/** The host's virtual tree — all I/O goes through it. */
 	private readonly vfs: IWorkspaceFileSystem;
 
+	/** SHA-256 of each file's full content as this run last read or wrote it, by path. */
+	private readonly readHashes = new Map<string, string>();
+
+	/** The host's after-save hook, if any. */
+	private readonly afterSave?: (path: string) => Promise<string>;
+
 	/**
 	 * Builds the toolkit for one agent.
 	 *
@@ -159,10 +173,15 @@ export class FilesystemTools extends AgentToolkit {
 	 * @param instructions - Host guidance for the LLM: what the tree
 	 *   contains, layout conventions, entity anatomy. Appended to the
 	 *   generic file-tool doctrine.
+	 * @param afterSave - Optional host hook, called with the canonical path
+	 *   after each write_file or edit_file save that worked; the text it
+	 *   returns is appended to the tool result. What it does with the path is
+	 *   the host's business: this toolkit stays layout-agnostic.
 	 */
-	constructor(vfs: IWorkspaceFileSystem, instructions = '') {
+	constructor(vfs: IWorkspaceFileSystem, instructions = '', afterSave?: (path: string) => Promise<string>) {
 		super();
 		this.vfs = vfs;
+		this.afterSave = afterSave;
 		// step: mechanics first, then the host's map of its own tree
 		this.instructions = instructions.trim().length > 0
 			? `${FILESYSTEM_INSTRUCTIONS}\n\n${instructions.trim()}`
@@ -173,14 +192,36 @@ export class FilesystemTools extends AgentToolkit {
 
 	/**
 	 * Refuses mutations against a path the user holds dirty in an editor —
-	 * the agent must never silently clobber unsaved work.
+	 * the agent must never silently clobber unsaved work. A tree guard: the
+	 * path itself or any dirty file under it (a directory move or delete
+	 * takes its files along) refuses the call.
 	 *
 	 * @param path - Canonical path.
 	 * @param op - Tool name for the refusal message.
 	 */
 	private guardDirty(path: string, op: string): void {
-		if (this.vfs.isDirty(path)) {
-			throw new Error(`${op} refused: ${path} has unsaved editor changes. Ask the user to save or discard them first.`);
+		const dirtyPath = this.vfs.isDirty(path) ? path : [...this.vfs.dirtyPaths()].find((p) => p.startsWith(`${path}/`));
+		if (dirtyPath !== undefined) {
+			throw new Error(`${op} refused: ${dirtyPath} has unsaved editor changes. Ask the user to save or discard them first.`);
+		}
+	}
+
+	/**
+	 * Refuses an edit or overwrite of a file the agent has not read this run,
+	 * or one whose content differs from what it read — the edit would start
+	 * from text the agent never saw.
+	 *
+	 * @param path - Canonical path.
+	 * @param op - Tool name for the refusal message.
+	 * @param current - The file's current full content.
+	 */
+	private async guardRead(path: string, op: string, current: string): Promise<void> {
+		const seen = this.readHashes.get(path);
+		if (seen === undefined) {
+			throw new Error(`${op} refused: read ${path} first — edits must start from its current content.`);
+		}
+		if (seen !== (await sha256Hex(current))) {
+			throw new Error(`${op} refused: ${path} changed since you read it. Read it again, then redo the edit.`);
 		}
 	}
 
@@ -196,6 +237,22 @@ export class FilesystemTools extends AgentToolkit {
 		// the backend when the cached inventory can't; entryType() alone only
 		// reads the cache, which scoped/staged views don't promise to fill
 		return this.vfs.stat(path);
+	}
+
+	/**
+	 * The host's note for a save that worked. A hook that throws adds
+	 * nothing: the save already happened, so it must never fail the save.
+	 *
+	 * @param path - Canonical path of the saved file.
+	 * @returns The text to append to the save's result ('' without a hook).
+	 */
+	private async noteAfterSave(path: string): Promise<string> {
+		if (!this.afterSave) return '';
+		try {
+			return await this.afterSave(path);
+		} catch {
+			return '';
+		}
 	}
 
 	/**
@@ -238,6 +295,8 @@ export class FilesystemTools extends AgentToolkit {
 		const path = normalizePath(rawPath);
 		const cap = Math.min(Math.max(1, maxBytes ?? READ_DEFAULT_BYTES), READ_MAX_BYTES);
 		let text = String(await this.vfs.read(path));
+		// step: record the whole file's hash, windowed or not — it is what edits are checked against
+		this.readHashes.set(path, await sha256Hex(text));
 
 		// step: line window first — the usual partial-read path
 		let header = '';
@@ -259,7 +318,8 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/**
-	 * write_file: whole-file replacement through the VFS.
+	 * write_file: whole-file replacement through the VFS. A new file needs no
+	 * read; replacing an existing one follows the read-before-edit rule.
 	 *
 	 * @param rawPath - Agent-supplied path.
 	 * @param content - The complete new file content.
@@ -272,14 +332,18 @@ export class FilesystemTools extends AgentToolkit {
 			throw new Error(`write_file caps at ${WRITE_MAX_BYTES} bytes per file (got ${size}).`);
 		}
 		this.guardDirty(path, 'write_file');
-		await this.vfs.write(path, content);
-		return `Wrote ${size} bytes to ${path}.`;
+		// step: a new file needs no read; replacing an existing one must start from what was read
+		if ((await this.entryType(path)) === 'file') await this.guardRead(path, 'write_file', String(await this.vfs.read(path)));
+		await this.vfs.write(path, content, AGENT_ORIGIN);
+		this.readHashes.set(path, await sha256Hex(content));
+		return `Wrote ${size} bytes to ${path}.${await this.noteAfterSave(path)}`;
 	}
 
 	/**
 	 * edit_file: anchored find/replace against the cached content — the
-	 * partial-update surface. Refused when the anchor is missing or
-	 * ambiguous, with recovery guidance in the error.
+	 * partial-update surface. Refused when the file was not read this run or
+	 * changed since, and when the anchor is missing or ambiguous, with
+	 * recovery guidance in the error.
 	 *
 	 * @param rawPath - Agent-supplied path.
 	 * @param oldString - Exact text to replace.
@@ -291,7 +355,9 @@ export class FilesystemTools extends AgentToolkit {
 		const path = normalizePath(rawPath);
 		if (!oldString) throw new Error('edit_file needs a non-empty oldString anchor.');
 		if (oldString === newString) throw new Error('oldString and newString are identical — nothing to change.');
+		this.guardDirty(path, 'edit_file');
 		const text = String(await this.vfs.read(path));
+		await this.guardRead(path, 'edit_file', text);
 
 		// step: count anchors — zero is a miss, several without replaceAll is ambiguous
 		const occurrences = text.split(oldString).length - 1;
@@ -302,14 +368,15 @@ export class FilesystemTools extends AgentToolkit {
 			throw new Error(`edit_file: oldString matches ${occurrences} places in ${path}. Extend the anchor to make it unique, or pass replaceAll: true.`);
 		}
 
-		const updated = replaceAll ? text.split(oldString).join(newString) : text.replace(oldString, newString);
+		// step: a replacer function keeps '$&' and '$$' in newString literal
+		const updated = replaceAll ? text.split(oldString).join(newString) : text.replace(oldString, () => newString);
 		const size = new TextEncoder().encode(updated).length;
 		if (size > WRITE_MAX_BYTES) {
 			throw new Error(`edit_file result exceeds the ${WRITE_MAX_BYTES}-byte file cap.`);
 		}
-		this.guardDirty(path, 'edit_file');
-		await this.vfs.write(path, updated);
-		return `Replaced ${occurrences} occurrence(s) in ${path}.`;
+		await this.vfs.write(path, updated, AGENT_ORIGIN);
+		this.readHashes.set(path, await sha256Hex(updated));
+		return `Replaced ${occurrences} occurrence(s) in ${path}.${await this.noteAfterSave(path)}`;
 	}
 
 	/**
@@ -368,18 +435,20 @@ export class FilesystemTools extends AgentToolkit {
 		const files: string[] = [];
 		await this.collectSearchFiles(normalizePath(rawPath ?? '', true), files);
 		const matches: string[] = [];
-		for (const file of files) {
-			if (matches.length >= cap) break;
-			let content: string;
-			try {
-				content = String(await this.vfs.read(file));
-			} catch {
-				continue;
-			}
-			if (content.length > SEARCH_MAX_FILE_CHARS) continue;
-			const lines = content.split('\n');
-			for (let n = 0; n < lines.length && matches.length < cap; n++) {
-				if (matcher(lines[n])) matches.push(`${file}:${n + 1}: ${lines[n].trim().slice(0, 200)}`);
+		for (let i = 0; i < files.length && matches.length < cap; i += SEARCH_READ_BATCH) {
+			// step: one batched read per chunk — unreadable files come back omitted
+			const batch = files.slice(i, i + SEARCH_READ_BATCH);
+			const contents = await this.vfs.readMany(batch);
+			for (const file of batch) {
+				if (matches.length >= cap) break;
+				const raw = contents.get(file);
+				if (raw === undefined) continue;
+				const content = String(raw);
+				if (content.length > SEARCH_MAX_FILE_CHARS) continue;
+				const lines = content.split('\n');
+				for (let n = 0; n < lines.length && matches.length < cap; n++) {
+					if (matcher(lines[n])) matches.push(`${file}:${n + 1}: ${lines[n].trim().slice(0, 200)}`);
+				}
 			}
 		}
 
@@ -401,8 +470,10 @@ export class FilesystemTools extends AgentToolkit {
 	private async rename(rawOld: unknown, rawNew: unknown): Promise<string> {
 		const oldPath = normalizePath(rawOld);
 		const newPath = normalizePath(rawNew);
+		// step: both ends — the target's dirty buffer would be overwritten too
 		this.guardDirty(oldPath, 'rename');
-		await this.vfs.rename(oldPath, newPath);
+		this.guardDirty(newPath, 'rename');
+		await this.vfs.rename(oldPath, newPath, AGENT_ORIGIN);
 		return `Renamed ${oldPath} to ${newPath}.`;
 	}
 
@@ -414,7 +485,7 @@ export class FilesystemTools extends AgentToolkit {
 	 */
 	private async createDirectory(rawPath: unknown): Promise<string> {
 		const path = normalizePath(rawPath);
-		await this.vfs.mkdir(path);
+		await this.vfs.mkdir(path, AGENT_ORIGIN);
 		return `Created directory ${path}.`;
 	}
 
@@ -435,7 +506,7 @@ export class FilesystemTools extends AgentToolkit {
 			throw new Error(`${path} is a directory — pass recursive: true to delete it and its contents.`);
 		}
 		this.guardDirty(path, 'delete_file');
-		await this.vfs.delete(path);
+		await this.vfs.delete(path, AGENT_ORIGIN);
 		return `Deleted ${path}.`;
 	}
 
@@ -509,7 +580,7 @@ export class FilesystemTools extends AgentToolkit {
 			}),
 			new AgentTool({
 				name: 'edit_file',
-				description: 'PREFERRED way to change an existing file: replace an exact text anchor. oldString must match the file exactly (including whitespace) and be unique unless replaceAll is true — read the file first. Refused when the user has unsaved editor changes to the file.',
+				description: 'PREFERRED way to change an existing file: replace an exact text anchor. oldString must match the file exactly (including whitespace) and be unique unless replaceAll is true. Refused unless you read the file this run and it has not changed since (the error says to read it again), and when the user has unsaved editor changes to it.',
 				parameters: {
 					type: 'object',
 					properties: {
@@ -525,7 +596,7 @@ export class FilesystemTools extends AgentToolkit {
 			}),
 			new AgentTool({
 				name: 'write_file',
-				description: `Create a file or replace one COMPLETELY with new UTF-8 content (for targeted changes use edit_file instead). Creates missing parent directories. Cap ${WRITE_MAX_BYTES} bytes. Refused when the user has unsaved editor changes to the file.`,
+				description: `Create a file or replace one COMPLETELY with new UTF-8 content (for targeted changes use edit_file instead). Creates missing parent directories. Cap ${WRITE_MAX_BYTES} bytes. Replacing an existing file is refused unless you read it this run and it has not changed since; a new file needs no read. Also refused when the user has unsaved editor changes to the file.`,
 				parameters: {
 					type: 'object',
 					properties: {

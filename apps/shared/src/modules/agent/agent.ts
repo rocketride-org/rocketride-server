@@ -36,9 +36,16 @@
  * per conversation tab, and drive it through execute()/save().
  */
 
+import { getClient } from 'shell';
 import type { ChatMessage, TextResult } from 'shell';
+import { getAgentHost } from './host';
+import { BUILDER_PROMPTS } from './prompts';
+import { runAgent } from './run';
 import { configureSessions, deleteSession as deleteStoredSession, getAgentSessions, getContext, isNotFound, saveSession } from './sessions';
 import type { AgentSessionFile, AgentSessionMeta } from './sessions';
+// TEMPORARY (spec §11): delete when Rod's wiring lands
+import { StandinPipelines } from './standin';
+import type { AppPrompts } from './wave/plan';
 
 export type { AgentSessionFile, AgentSessionMeta } from './sessions';
 export { AGENTS_DIR } from './sessions';
@@ -50,15 +57,68 @@ export { AGENTS_DIR } from './sessions';
 /** Streaming callback: one (type, content) pair per agent output chunk. */
 export type AgentCallback = (type: string, content: string) => void;
 
+/** What one agent request is run with. Every part has a default. */
+export interface AgentOptions {
+	/** The conversation before this request, as the chat renders it. */
+	history?: ChatMessage[];
+	/** The mounting app's workspace map and guide router (default: the pipe builder's). */
+	prompts?: AppPrompts;
+	/** The token of a running LLM pipeline (default: the stand-in pipeline, TEMPORARY). */
+	token?: string;
+	/** The conversation the request belongs to; names its stand-in pipeline (TEMPORARY). */
+	conversationId?: string;
+}
+
+// TEMPORARY (spec §11): delete when Rod's wiring lands
+/** The stand-in model pipelines, one per conversation. */
+const standin = new StandinPipelines(getClient);
+
 /**
- * The low-level agent transport — the seam the real backend call replaces.
- * The stub answers every request with a single content chunk.
+ * The agent transport: one request, run to its answer. Progress and the
+ * answer stream to the callback.
  *
- * @param _request - The user's request text (unused by the stub).
+ * @param request - The user's request text.
  * @param callback - Receives each output chunk as (type, content).
+ * @param options - The conversation so far, the app's prompts, and the model pipeline.
  */
-export async function agent(_request: string, callback: AgentCallback): Promise<void> {
-	callback('content', 'TO DO');
+export async function agent(request: string, callback: AgentCallback, options: AgentOptions = {}): Promise<void> {
+	const { history = [], prompts = BUILDER_PROMPTS, token: given, conversationId = crypto.randomUUID() } = options;
+	// TEMPORARY (spec §11): delete when Rod's wiring lands
+	// step: a given token is used as is; without one, the conversation's stand-in pipeline answers (and restarts on a failure)
+	const token = given ? async () => given : () => standin.token(conversationId);
+	const onPipelineError = given
+		? undefined
+		: async () => {
+				await standin.restart(conversationId);
+			};
+	await runAgent(request, callback, { history, prompts, token, onPipelineError }, { host: getAgentHost(), client: getClient });
+}
+
+// =============================================================================
+// CHUNKS — where a run's streamed chunks go
+// =============================================================================
+
+/**
+ * A run streams `thinking` chunks (one per wave) and `content` chunks (the
+ * answer). The chat shows thinking live when it hands the session a status
+ * sink; without one, every chunk is collected and returned when the run ends.
+ */
+
+/**
+ * Makes the callback a run streams its chunks to, and the list the chunks
+ * that are not sent live collect in.
+ *
+ * @param onStatus - The chat's live status sink. With it, each `thinking` chunk goes there as it arrives and is not collected; without it, every chunk is collected.
+ * @returns The callback to run with, and the collected rows (`content` has an empty key, any other type keeps its own).
+ */
+function routeChunks(onStatus?: AgentCallback): { callback: AgentCallback; results: TextResult[] } {
+	const results: TextResult[] = [];
+	const callback: AgentCallback = (type, content) => {
+		// step: a thinking chunk goes straight to the live sink when there is one
+		if (onStatus && type === 'thinking') onStatus(type, content);
+		else results.push({ text: content, key: type === 'content' ? '' : type });
+	};
+	return { callback, results };
 }
 
 // =============================================================================
@@ -182,18 +242,19 @@ export class AgentSession {
 	 * TextResult as a bot message (and owns the user-message append).
 	 *
 	 * @param text - The user's request.
-	 * @returns One TextResult per agent output chunk.
+	 * @param onStatus - The chat's live status sink (the hook's second `request` argument). With it, each `thinking` chunk goes to it as it arrives and is not returned; without it, every chunk is returned.
+	 * @returns One TextResult per agent output chunk that was not sent to the sink.
 	 */
-	async execute(text: string): Promise<TextResult[]> {
+	async execute(text: string, onStatus?: AgentCallback): Promise<TextResult[]> {
 		// step: the first request names the session for the catalog row
 		if (this.title === UNTITLED) {
 			this.title = text.length > TITLE_MAX ? `${text.slice(0, TITLE_MAX - 1)}…` : text;
 		}
-		// step: collect the transport's streamed chunks into renderable rows
-		const results: TextResult[] = [];
-		await agent(text, (type, content) => {
-			results.push({ text: content, key: type === 'content' ? '' : type });
-		});
+		// step: thinking streams live to the sink; the rest is collected into renderable rows
+		const { callback, results } = routeChunks(onStatus);
+		// TEMPORARY (spec §11): delete when Rod's wiring lands
+		// this.messages is the conversation as last saved: it holds the turns before this request
+		await agent(text, callback, { history: this.messages, conversationId: this.sessionId });
 		return results;
 	}
 

@@ -9,7 +9,7 @@
  * Four shapes, all coloured from --rr-* tokens so they track every theme:
  *   - error   → an in-thread error Banner (isError messages)
  *   - user    → a filled brand bubble, right-aligned
- *   - status  → a compact dotted "thinking" row
+ *   - status  → a compact dotted "thinking" row (line breaks in its text show)
  *   - bot/sys → a bordered assistant bubble with sanitized markdown, left-aligned
  *               (chart-bearing answers break out of the bubble to full width)
  */
@@ -129,6 +129,21 @@ const styles = {
 		fontStyle: 'italic',
 	} as CSSProperties,
 
+	// A multi-line status row (a sentence, then a list of what ran): the line
+	// breaks show, and the dot sits level with the first line instead of the
+	// middle of the block. Single-line rows keep the styles above unchanged.
+	statusRowMulti: {
+		alignItems: 'flex-start',
+	} as CSSProperties,
+
+	statusDotMulti: {
+		marginTop: 4,
+	} as CSSProperties,
+
+	statusTextMulti: {
+		whiteSpace: 'pre-wrap',
+	} as CSSProperties,
+
 	resultKey: {
 		fontSize: 10,
 		color: 'var(--rr-text-caption)',
@@ -161,12 +176,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 		);
 	}
 
-	// Status / thinking messages render as a compact dotted row.
+	// Status / thinking messages render as a compact dotted row. A row whose
+	// text has line breaks keeps them (pre-wrap).
 	if (message.sender === 'status') {
+		const multi = message.text.includes('\n');
 		return (
-			<div style={styles.statusRow}>
-				<span style={styles.statusDot} />
-				<span style={styles.statusText}>{message.text}</span>
+			<div style={multi ? { ...styles.statusRow, ...styles.statusRowMulti } : styles.statusRow}>
+				<span style={multi ? { ...styles.statusDot, ...styles.statusDotMulti } : styles.statusDot} />
+				<span style={multi ? { ...styles.statusText, ...styles.statusTextMulti } : styles.statusText}>{message.text}</span>
 			</div>
 		);
 	}
