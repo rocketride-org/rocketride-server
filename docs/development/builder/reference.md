@@ -118,7 +118,8 @@ same compiler, which is also what lets the binary cache serve those packages,
 and on Linux the tools vcpkg builds ports with. A downloaded engine set up none
 of them, so before it compiles, the node build runs `server:setup-tools` (with
 `--autoinstall` it installs what is missing). A node that is up to date needs no
-compiler.
+compiler; `--compile-nodes` compiles it anyway, against the engine in
+`dist/server`, which is how CI checks the node build when a PR changes it.
 
 Changing anything under `packages/server` gives the engine a new build hash, and
 since a node's library records the engine it was built against, every node
@@ -158,6 +159,7 @@ only.
 ./builder build --autoinstall               # Install missing tools automatically
 ./builder build --arch=arm                  # Target architecture (macOS cross-compile)
 ./builder build --suffix=cpp-nodes          # Take the server from the server-v<version>-cpp-nodes release
+./builder nodes:submodule-build --compile-nodes  # Compile every C++ node, even an up-to-date one
 
 # Show help
 ./builder --help

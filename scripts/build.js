@@ -154,6 +154,10 @@ function parseArgs(args) {
 			options.simulateGpus = parseInt(arg.split('=')[1], 10);
 		} else if (arg === '--nodownload') {
 			options.nodownload = true;
+		} else if (arg === '--compile-nodes') {
+			// The c++ nodes compile even when up to date; unlike --force,
+			// the engine is still downloaded and CMake skips what is current
+			options.compileNodes = true;
 		} else if (arg.startsWith('--suffix=')) {
 			options.suffix = arg.substring('--suffix='.length);
 		} else if (arg.startsWith('--arch=')) {
@@ -275,6 +279,7 @@ Options:
   --arch=arm|intel    Target architecture (macOS cross-compile)
   --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
+  --compile-nodes     Compile the C++ nodes even when up to date (CMake skips what is current)
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message

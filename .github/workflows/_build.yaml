@@ -52,7 +52,7 @@ on:
         type: boolean
         default: false
       node_build_test:
-        description: Compile one C++ node against the engine after the build
+        description: Compile the C++ nodes against the engine after the build
         required: false
         type: boolean
         default: false
@@ -173,14 +173,13 @@ jobs:
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }} --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       # With a downloaded engine no node compiles unless the PR changes one, so
-      # a builder change could break the node build unseen (#2747). Drop the
-      # shipped library of the smallest node: it compiles against this engine.
-      - name: Build a C++ node against the engine
+      # a builder change could break the node build unseen (#2747). Compile
+      # every C++ node against this engine; after an engine compile they are
+      # current and CMake has nothing to do.
+      - name: Build the C++ nodes against the engine
         if: inputs.node_build_test
         shell: bash
-        run: |
-          rm -f dist/server/nodes/hash/{libhash.so,libhash.dylib,hash.dll}
-          ${{ matrix.builder_cmd }} hash:build --verbose --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }}
+        run: ${{ matrix.builder_cmd }} nodes:submodule-build --compile-nodes --verbose --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }}
 
       # The node image, built from the dist/server just built and checked as a
       # run gets it. Before the tests, which install into dist/server (the image

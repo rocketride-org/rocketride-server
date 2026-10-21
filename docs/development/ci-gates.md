@@ -41,7 +41,7 @@ The `changes` job (`dorny/paths-filter`) computes three booleans:
 `code == false` skips `build` (a `build-skip` job reports success under the same
 check names so branch protection stays satisfied) and skips `shell-contract`.
 `container` gates the node container image test inside `build`, and `node_build`
-the C++ node compile that follows the build step (see below).
+the C++ node compiles that follow the build step (see below).
 
 `helm-changes` is a separate filter on `deploy/helm/**` gating `helm-lint`.
 
@@ -109,8 +109,8 @@ starts MinIO, Azurite, and Postgres (pgvector + Apache AGE, on `:55432`/`:55433`
 for the storage and database node tests.
 
 With a downloaded engine no C++ node compiles unless the PR changes one. A PR
-that changes how a node is built (`node_build`) therefore also removes the
-shipped `hash` library and runs `./builder hash:build`, so the node compiles
+that changes how a node is built (`node_build`) therefore also runs
+`./builder nodes:submodule-build --compile-nodes`, so every C++ node compiles
 against that engine on all three platforms.
 
 Per-module equivalents when you only touched one area:

@@ -268,7 +268,10 @@ async function compileStatus({ name, srcDir }, options = {}) {
 
 	const srcHash = await nodeSourceHash(name, nodeDir, triplet);
 	const configured = await isNodeConfigured(path.join(BUILD_NODES_DIR, name), cmakeConfig, triplet);
-	const upToDate = !options.force && (await builtAlready(name, nodeDir, srcHash, cmakeConfig, configured));
+	const upToDate =
+		!options.force &&
+		!options.compileNodes &&
+		(await builtAlready(name, nodeDir, srcHash, cmakeConfig, configured));
 
 	return { srcHash, configured, upToDate };
 }
