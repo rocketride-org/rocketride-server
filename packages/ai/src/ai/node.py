@@ -314,16 +314,18 @@ def _announce_channel(server: Optional[Any]) -> None:
 
     Startup-only requests to the engine belong between the two signals:
     that is where the task fetches the nodes its pipeline names. A server
-    that never bound gets no signal: the engine would dial a port nobody holds.
+    that never bound gets no signal: the engine would dial a port nobody holds,
+    and a pipeline that needs a node the server does not carry refuses to run.
 
     Args:
         server: The WebServer from ``_setup_shared_web_server``, or ``None``.
     """
-    if not _is_listening(server):
-        return
-    _channel_signal('1')
+    listening = _is_listening(server)
+    if listening:
+        _channel_signal('1')
     _fetch_pipeline_nodes()
-    _channel_signal('2')
+    if listening:
+        _channel_signal('2')
 
 
 def _fetch_pipeline_nodes() -> None:
@@ -334,8 +336,7 @@ def _fetch_pipeline_nodes() -> None:
         with open(sys.argv[1], encoding='utf-8') as file:
             components = json.load(file)['config']['pipeline'].get('components', [])
         node_packages.serve(_fetch_from_eaas)
-        for provider in {component['provider'] for component in components}:
-            node_packages.ensure(provider)
+        node_packages.ensure(*{component['provider'] for component in components})
     except Exception as e:
         message = f"Refusing to run: could not get the pipeline's nodes ({e})"
         warning(message)
