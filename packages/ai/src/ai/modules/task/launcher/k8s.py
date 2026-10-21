@@ -55,7 +55,6 @@ import stat
 import tarfile
 import time
 import uuid
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from rocketlib import debug
@@ -1500,8 +1499,7 @@ class K8sLauncher(Launcher):
         self.check_store(spec)
         # The docker runtime's command line, with this host by the name pods reach it by
         task_args = DockerLauncher.task_args(
-            replace(spec, hosted=False),
-            spec.modelserver and self.host_address(spec.modelserver, '--modelserver'),
+            spec, spec.modelserver and self.host_address(spec.modelserver, '--modelserver')
         )
         directories, overrides = self.mounted_directories(spec)
         payload = await asyncio.to_thread(payload_tar, spec.task_file, self.task_env(spec, overrides), directories)
