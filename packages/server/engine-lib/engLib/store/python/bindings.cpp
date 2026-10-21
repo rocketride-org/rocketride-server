@@ -314,13 +314,20 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		services file's place in the unpacked node; it anchors the icon.
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(registerServices, [](py::list nodes) {
+        // Convert the whole batch first: a malformed entry registers nothing
+        std::vector<std::pair<json::Value, file::Path>> batch;
         for (auto node : nodes) {
             auto pair = node.cast<py::tuple>();
-            auto json = engine::python::pyjson::dictToJson(pair[0]);
-            auto path = file::Path(pair[1].cast<std::string>());
+            batch.emplace_back(engine::python::pyjson::dictToJson(pair[0]),
+                               file::Path(pair[1].cast<std::string>()));
+        }
+        for (auto &[json, path] : batch) {
             if (auto ccode = engine::store::IServices::registerDefinition(
-                    _mv(json), path, /*replace=*/true))
+                    _mv(json), path, /*replace=*/true)) {
+                // Resolve what the batch registered before this one, so nothing is left half done
+                (void)engine::store::IServices::refreshDefinitions();
                 throw ccode;
+            }
         }
         if (auto ccode = engine::store::IServices::refreshDefinitions())
             throw ccode;
