@@ -8,7 +8,9 @@ cannot reach a method of the connection object by naming it.
 
 A command has a phase: ``startup`` commands are answered only until the
 task reports that it is about to load its pipeline (``>CHN*2``); ``run``
-commands for the whole run, such as the credit check (``spend.check``).
+commands for the whole run, such as the credit check (``spend.check``) and
+node delivery (``node.fetch``): the task fetches its pipeline's nodes before
+>CHN*2, and a node autopipe inserts or the pipeline imports later while it runs.
 
 A handler may return bytes, a file path or an async iterator of bytes. A
 payload larger than one chunk is not sent at once: the reply names a
