@@ -430,6 +430,8 @@ public final class TikaApi {
 	 * @return false when the parse node has no listener for that kind of media
 	 */
 	public static boolean wantsMedia(long flags, String mimeType) {
+		if (mimeType == null)
+			return true;
 		if (mimeType.startsWith(MIME_TYPE_IMAGE))
 			return (flags & SKIP_IMAGES) == 0;
 		if (mimeType.startsWith(MIME_TYPE_AUDIO))
@@ -497,7 +499,7 @@ public final class TikaApi {
 	 *                    in recognizing the file
 	 * @param writer      tika will output to this SAX writer
 	 * @param metadata    Sends/receives the tika metadata
-	 * @param flags       OCR/MAGICK enabled or not, and the SKIP_* media lanes
+	 * @param flags       The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
 	 * @throws Exception
 	 */
 
@@ -556,6 +558,19 @@ public final class TikaApi {
 				context.set(Parser.class, docParser);
 				docParser.parse(stream, filter, metadata, context);
 
+			} else if (!wantsMedia(flags, mimeType)) {
+				// A standalone image, audio or video file (wantsMedia is false only for
+				// those) whose lane has no listener: the native side would drop every
+				// buffer, so parse it for its metadata straight from the stream, without
+				// the copy to the heap and the send. Best-effort, as below.
+				logger.log(Level.INFO, "No listener for standalone " + mimeType + ": metadata only");
+				try {
+					parser.parse(stream, filter, metadata, context);
+				} catch (Exception e) {
+					logger.log(Level.WARNING, "Metadata extraction failed for standalone " + mimeType + ": "
+							+ e.getMessage());
+				}
+
 			} else if (mimeType.startsWith(MIME_TYPE_IMAGE) || mimeType.startsWith(MIME_TYPE_AUDIO) || mimeType.startsWith(MIME_TYPE_VIDEO)) {
 				logger.log(Level.INFO, "Current processing media type is : " + mimeType);
 				// Wrap with duplicator to safely reuse the stream
@@ -579,7 +594,7 @@ public final class TikaApi {
 							+ " (continuing to stream media): " + e.getMessage());
 				}
 
-				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType);
+				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType, flags);
 				// Standalone media: the dropped file IS the source (origin=ingested); the
 				// BEGIN carries the descriptor enrichment (source_mime + media detail).
 				byte[] beginPayload = EmbeddedContentExtractor.buildMediaDescriptorPayload(metadata, "ingested", mimeType, null);
@@ -649,7 +664,7 @@ public final class TikaApi {
 	 *                     to be real, but the file extension is passed to assist
 	 *                     tika in recognizing the file
 	 * @param metadata     Sends/receives the tika metadata
-	 * @param flags        OCR/MAGICK enabled or not, and the SKIP_* media lanes
+	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 */
 	private static boolean extractTextForNative(TikaInputStream stream, String extractPath, Metadata metadata,
@@ -665,7 +680,7 @@ public final class TikaApi {
 	 * Extract text by file path (invoked from main)
 	 * 
 	 * @param extractPath  The actual pathname to extract from
-	 * @param flags        OCR/MAGICK enabled or not, and the SKIP_* media lanes
+	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 */
 	public static boolean extractTextFromPath(String extractPath, long flags, long nativeHandle) throws Exception {
@@ -686,7 +701,7 @@ public final class TikaApi {
 	 *                     to be real, but the file extension is passed to assist
 	 *                     tika in recognizing the file
 	 * @param length       The overall length of the stream (if unknown, set to 0)
-	 * @param flags        OCR/MAGICK enabled or not, and the SKIP_* media lanes
+	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 * @throws Exception
 	 */
