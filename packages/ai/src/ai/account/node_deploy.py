@@ -34,7 +34,9 @@ import io
 import os
 import re
 import stat
+import time
 import zipfile
+from xml.etree import ElementTree
 from typing import Any, Dict, List, Optional
 
 import json5
@@ -57,12 +59,41 @@ from .deployment_backend import artifact_content_dir
 PACKAGE_FILE = 'package.rrnode'
 
 # A requirement line that names an index, a URL or a local path, instead of a package
-_UNSAFE_REQUIREMENT = re.compile(r'^\s*-|://|^\s*[./~\\]|\bfile:', re.IGNORECASE)
+_UNSAFE_REQUIREMENT = re.compile(r'^\s*-|://|^\s*[./~\\]|\bfile:|^\s*[a-z]:[\\/]', re.IGNORECASE)
 
-# What a browser could run from an icon the canvas inlines: a script, foreign HTML, a handler, a javascript: URL
-_UNSAFE_SVG = re.compile(r'<\s*(script|foreignObject)\b|\son[a-z]+\s*=|javascript:', re.IGNORECASE)
+# The drawing an icon may hold; the canvas inlines it, so nothing that runs, loads or styles the page
+_SVG_ELEMENTS = {
+    'svg',
+    'g',
+    'defs',
+    'symbol',
+    'use',
+    'title',
+    'desc',
+    'path',
+    'rect',
+    'circle',
+    'ellipse',
+    'line',
+    'polyline',
+    'polygon',
+    'text',
+    'tspan',
+    'lineargradient',
+    'radialgradient',
+    'stop',
+    'clippath',
+    'mask',
+    'pattern',
+    'image',
+}
+_ICON_IMAGE = re.compile(r'data:image/(png|jpeg|gif|webp);base64,', re.IGNORECASE)
 
 _RUNG_RANK = {'team': 1, 'user': 2}
+
+# The catalogue's answer per caller, kept a moment: each one reads the whole rail
+_CATALOGUE_SECONDS = 10.0
+_catalogue: Dict[tuple, tuple] = {}
 
 
 def rail_enabled() -> bool:
@@ -104,6 +135,9 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
     entries = archive.infolist()
     if any(stat.S_ISLNK(entry.external_attr >> 16) for entry in entries):
         raise NodePackageInvalid('The package holds a symlink')
+    # A drive letter or backslash would reach outside the node on Windows
+    if any(':' in entry.filename or '\\' in entry.filename for entry in entries):
+        raise NodePackageInvalid('The package holds a path with ":" or "\\"')
     roots = {entry.filename.split('/')[0] for entry in entries}
     if len(roots) != 1:
         raise NodePackageInvalid('The package must hold one folder, the node')
@@ -115,15 +149,14 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
     if not module.isidentifier() or module_of(node_id) != module or not node_id.startswith(f'{developer_id}.'):
         raise NodePackageInvalid(f'The node id {node_id!r} must be {developer_id}.<name>')
 
-    try:
-        marker = json5.loads(archive.read(f'{module}/.rrnode'))
-    except KeyError:
-        raise NodePackageInvalid('The package has no .rrnode marker') from None
+    files = {entry.filename[len(module) + 1 :]: entry for entry in entries if not entry.is_dir()}
+    if '.rrnode' not in files:
+        raise NodePackageInvalid('The package has no .rrnode marker')
+    marker = _object(archive, files['.rrnode'], '.rrnode')
     if marker.get('contract') != CONST_NODES_CONTRACT:
         raise NodeVersionMismatch(f'The package was built for node contract {marker.get("contract")!r}')
 
-    files = {entry.filename[len(module) + 1 :]: entry for entry in entries if not entry.is_dir()}
-    services = {name: json5.loads(archive.read(entry)) for name, entry in files.items() if _is_services(name)}
+    services = {name: _object(archive, entry, name) for name, entry in files.items() if _is_services(name)}
     if not services:
         raise NodePackageInvalid('The package has no services.json')
 
@@ -134,13 +167,12 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
         if icon:
             if icon not in files:
                 raise NodePackageInvalid(f'{name}: icon {icon!r} is not in the package')
-            icons[icon] = archive.read(files[icon]).decode('utf-8')
-            if _UNSAFE_SVG.search(icons[icon]):
-                raise NodePackageInvalid(f'{name}: icon {icon!r} carries script')
+            icons[icon] = _text(archive, files[icon], icon)
+            _check_icon(f'{name}: icon {icon!r}', icons[icon])
 
     for name, entry in files.items():
-        if re.fullmatch(r'requirement[^/]*\.txt', name):
-            for line in archive.read(entry).decode('utf-8').splitlines():
+        if re.fullmatch(r'requirement[^/]*\.txt', name, re.IGNORECASE):
+            for line in _text(archive, entry, name).splitlines():
                 if line.strip() and not line.lstrip().startswith('#') and _UNSAFE_REQUIREMENT.search(line):
                     raise NodePackageInvalid(f'{name}: {line.strip()!r} is not a package name')
 
@@ -153,9 +185,54 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
     }
 
 
+def _text(archive: zipfile.ZipFile, entry: zipfile.ZipInfo, name: str) -> str:
+    """A file of the package as UTF-8 text."""
+    try:
+        return archive.read(entry).decode('utf-8')
+    except UnicodeDecodeError:
+        raise NodePackageInvalid(f'{name} is not UTF-8 text') from None
+
+
+def _object(archive: zipfile.ZipFile, entry: zipfile.ZipInfo, name: str) -> Dict[str, Any]:
+    """A JSON object file of the package; comments are allowed, as in services.json."""
+    try:
+        value = json5.loads(_text(archive, entry, name))
+    except ValueError as e:
+        raise NodePackageInvalid(f'{name} is not valid JSON ({e})') from None
+    if not isinstance(value, dict):
+        raise NodePackageInvalid(f'{name} is not a JSON object')
+    return value
+
+
 def _is_services(name: str) -> bool:
     """A services*.json at the top of the node folder."""
     return '/' not in name and re.fullmatch(r'services.*\.json', name) is not None
+
+
+def _check_icon(what: str, svg: str) -> None:
+    """An icon is a plain drawing: listed elements, links inside itself, no handler, no script or outside URL."""
+    body = re.sub(r'^\s*<\?xml[^>]*\?>', '', svg)
+    # What the canvas's HTML parsing could turn into markup: a processing instruction, a DTD, CDATA
+    if re.search(r'<\?|<!DOCTYPE|<!ENTITY|<!\[CDATA\[', body, re.IGNORECASE):
+        raise NodePackageInvalid(f'{what} holds markup other than SVG elements')
+    try:
+        root = ElementTree.fromstring(body)
+    except ElementTree.ParseError as e:
+        raise NodePackageInvalid(f'{what} is not SVG ({e})') from None
+    for element in root.iter():
+        tag = element.tag.rsplit('}', 1)[-1].lower()
+        if tag not in _SVG_ELEMENTS:
+            raise NodePackageInvalid(f'{what} holds <{tag}>, which an icon may not')
+        for attribute, value in element.attrib.items():
+            local = attribute.rsplit('}', 1)[-1].lower()
+            inside = value.startswith('#') or (tag == 'image' and _ICON_IMAGE.match(value))
+            if (
+                local.startswith('on')
+                or (local == 'href' and not inside)
+                or 'javascript:' in value.lower()
+                or re.search(r'url\(\s*[\'"]?(?!#)', value)
+            ):
+                raise NodePackageInvalid(f'{what} sets {local}="{value[:40]}", which an icon may not')
 
 
 def _check_definition(name: str, definition: Dict[str, Any], node_id: str, module: str) -> None:
@@ -270,6 +347,7 @@ async def handle_deploy_node(conn: Any, request: Dict[str, Any]) -> Dict[str, An
 
     if sub == 'unpublish':
         row = await account.publish_set_state(org_id, 'node', node_id, audience, 'removed', _actor_of(conn))
+        _catalogue.clear()
         return conn.build_response(request, body={'publish': row})
 
     version = args.get('version')
@@ -281,6 +359,7 @@ async def handle_deploy_node(conn: Any, request: Dict[str, Any]) -> Dict[str, An
     node = entry['metadata']['node']
     snapshot = {key: node[key] for key in ('module', 'sha256', 'services', 'icons')}
     row = await account.publish_set(org_id, 'node', node_id, audience, version, snapshot, _actor_of(conn))
+    _catalogue.clear()
     return conn.build_response(request, body={'publish': row})
 
 
@@ -358,11 +437,18 @@ async def visible_nodes(conn: Any) -> Dict[str, Dict[str, Any]]:
     """The published nodes the catalogue shows this caller; none when the rail does not answer."""
     if not getattr(conn, '_account_info', None):
         return {}
+    org_id, user_id, team_ids = _identity(conn)
+    key = (org_id, user_id, tuple(sorted(team_ids)))
+    cached = _catalogue.get(key)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
     try:
-        return await entitled_nodes(*_identity(conn))
+        rows = await entitled_nodes(org_id, user_id, team_ids)
     except NodeRegistryUnavailable as e:
         warning(f'NODE_REGISTRY_UNAVAILABLE: {e}; the catalogue shows only the release nodes')
         return {}
+    _catalogue[key] = (time.monotonic() + _CATALOGUE_SECONDS, rows)
+    return rows
 
 
 async def nodes_for(conn: Any, components: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:

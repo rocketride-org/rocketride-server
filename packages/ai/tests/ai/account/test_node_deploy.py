@@ -33,6 +33,9 @@ from ai.common.node_packages import (
 
 TEAM = {'id': 't1', 'name': 'research'}
 
+# HTML parsing turns the instruction into a comment and lets the img out of the svg
+PI_BREAKOUT = '<svg xmlns="http://www.w3.org/2000/svg"><?x ><img/src/onerror=alert(document.domain)>?></svg>'
+
 
 class _Conn:
     """A connection with an account: the response builders and the identity the handlers read."""
@@ -83,6 +86,7 @@ def rail(monkeypatch, tmp_path):
     monkeypatch.delenv('RR_NODE_RAIL_ENABLED', raising=False)
     Store.reset()
     monkeypatch.setattr(account, '_deployments_backend', None)
+    monkeypatch.setattr(node_deploy, '_catalogue', {})
     yield
     Store.reset()
 
@@ -142,10 +146,18 @@ async def test_a_package_is_added_as_a_private_node_version_with_its_bytes_store
         (lambda: _package(files={'services.json': None}), 'no services.json'),
         (lambda: _package(services={'icon': '../../icon.svg'}), 'must be a file inside the node'),
         (lambda: _package(services={'icon': 'missing.svg'}), 'is not in the package'),
-        (lambda: _package(files={'echo.svg': '<svg><script>alert(1)</script></svg>'}), 'carries script'),
-        (lambda: _package(files={'echo.svg': '<svg><image href="x" onerror="alert(1)"/></svg>'}), 'carries script'),
-        (lambda: _package(files={'echo.svg': '<svg><foreignObject><div/></foreignObject></svg>'}), 'carries script'),
-        (lambda: _package(files={'echo.svg': '<svg><a href="javascript:alert(1)"/></svg>'}), 'carries script'),
+        (lambda: _package(files={'echo.svg': '<svg><script>alert(1)</script></svg>'}), 'holds <script>'),
+        (lambda: _package(files={'echo.svg': '<svg><image href="#x" onerror="alert(1)"/></svg>'}), 'sets onerror'),
+        (
+            lambda: _package(files={'echo.svg': '<svg><foreignObject><div/></foreignObject></svg>'}),
+            'holds <foreignobject>',
+        ),
+        (lambda: _package(files={'echo.svg': '<svg><use href="javascript:alert(1)"/></svg>'}), 'sets href'),
+        (lambda: _package(files={'echo.svg': PI_BREAKOUT}), 'other than SVG elements'),
+        (lambda: _package(files={'echo.svg': '<svg><style>body{display:none}</style></svg>'}), 'holds <style>'),
+        (lambda: _package(files={'echo.svg': '<svg><rect fill="url(https://evil.example/x)"/></svg>'}), 'sets fill'),
+        (lambda: _package(files={'echo.svg': '<!DOCTYPE svg [<!ENTITY a "a">]><svg/>'}), 'other than SVG elements'),
+        (lambda: _package(files={'echo.svg': '<svg><image href="https://evil.example/x.png"/></svg>'}), 'sets href'),
         (
             lambda: _package(files={'requirements.txt': '-i https://evil.example/simple\nrequests'}),
             'not a package name',
@@ -153,6 +165,14 @@ async def test_a_package_is_added_as_a_private_node_version_with_its_bytes_store
         (lambda: _package(files={'requirements.txt': 'pkg @ https://evil.example/pkg.whl'}), 'not a package name'),
         (lambda: _package(files={'requirements.txt': './vendor/pkg'}), 'not a package name'),
         (lambda: _package(files={'requirements.txt': 'pkg @ file:/tmp/pkg'}), 'not a package name'),
+        (lambda: _package(files={'REQUIREMENTS.TXT': '--index-url https://evil.example/simple'}), 'not a package name'),
+        (lambda: _package(files={'requirements.txt': 'C:\\wheels\\pkg.whl'}), 'not a package name'),
+        (lambda: _package(files={'services.json': '{"protocol": '}), 'is not valid JSON'),
+        (lambda: _package(marker=['not', 'an', 'object']), 'is not a JSON object'),
+        (
+            lambda: _package(files={'echo.svg': None, 'C:evil.svg': '<svg/>'}, services={'icon': 'C:evil.svg'}),
+            'path with',
+        ),
     ],
     ids=[
         'cpp',
@@ -171,10 +191,20 @@ async def test_a_package_is_added_as_a_private_node_version_with_its_bytes_store
         'icon-handler',
         'icon-foreign-object',
         'icon-javascript-url',
+        'icon-processing-instruction',
+        'icon-style',
+        'icon-outside-url',
+        'icon-doctype',
+        'icon-outside-image',
         'requirement-index',
         'requirement-url',
         'requirement-local-path',
         'requirement-file',
+        'requirement-uppercase-file',
+        'requirement-windows-path',
+        'services-not-json',
+        'marker-not-object',
+        'windows-drive-entry',
     ],
 )
 @pytest.mark.asyncio
@@ -196,6 +226,19 @@ async def test_a_connection_without_a_user_can_neither_upload_nor_publish(rail):
 
     assert not published['success'] and 'developer namespace' in published['message']
     assert await account.deployments_versions('org1', 'acme.echo') == []
+
+
+def test_an_icon_that_is_only_a_drawing_is_kept():
+    svg = (
+        '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+        '<defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs>'
+        '<rect fill="url(#g)" style="opacity:.5"/><use xlink:href="#g"/>'
+        '<image href="data:image/png;base64,iVBORw0KGgo="/></svg>'
+    )
+
+    node = node_deploy.inspect_package(_package(files={'echo.svg': svg}), 'acme')
+
+    assert node['icons'] == {'echo.svg': svg}
 
 
 @pytest.mark.asyncio
@@ -403,7 +446,9 @@ async def test_a_stored_package_that_no_longer_matches_its_digest_is_refused(rai
 def _control(*providers, user_id='u1'):
     """The launch request start_task resolves nodes from."""
     components = [{'id': f'c{i}', 'provider': p} for i, p in enumerate(providers)]
-    return SimpleNamespace(pipeline={'components': components}, orgId='org1', client_id=user_id, teamId='')
+    return SimpleNamespace(
+        pipeline={'components': components}, orgId='org1', client_id=user_id, teamId='', owner_kind=''
+    )
 
 
 @pytest.mark.asyncio
@@ -481,3 +526,73 @@ def test_the_catalogue_shows_a_published_node_only_where_it_is_published():
 
     assert _visible('webhook', {}) and _visible('acme.echo', {'acme.echo': {}})
     assert not _visible('acme.echo', {})
+
+
+@pytest.mark.asyncio
+async def test_an_icon_that_is_not_text_is_refused(rail):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr('acme__echo/.rrnode', json.dumps({'name': 'acme__echo', 'contract': 1}))
+        archive.writestr(
+            'acme__echo/services.json',
+            json.dumps({'protocol': 'acme.echo://', 'path': 'nodes.acme__echo', 'icon': 'echo.svg'}),
+        )
+        archive.writestr('acme__echo/echo.svg', b'\xff\xfe not utf-8')
+
+    with pytest.raises(NodePackageInvalid, match='is not UTF-8 text'):
+        await _add(_Conn(), buffer.getvalue())
+
+
+@pytest.mark.asyncio
+async def test_the_catalogue_reads_the_rail_once_a_moment_and_again_after_a_publish(rail, monkeypatch):
+    reads = []
+    real = account.publish_list
+
+    async def counted(*args):
+        reads.append(args)
+        return await real(*args)
+
+    monkeypatch.setattr(account, 'publish_list', counted)
+    conn = _Conn()
+    await _add(conn, _package())
+
+    await node_deploy.visible_nodes(conn)
+    assert await node_deploy.visible_nodes(conn) == {} and len(reads) == 1
+
+    await _deploy(conn, subcommand='publish', version=1, target='@me')
+    assert list(await node_deploy.visible_nodes(conn)) == ['acme.echo'] and len(reads) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_restart_takes_the_restarters_reach_not_the_launchers(rail):
+    from ai.modules.task.task_server import _resolve_nodes
+
+    await _published('@me')
+    control = _control('acme.echo')
+
+    with pytest.raises(NodeNotEntitled):
+        await _resolve_nodes(control.pipeline, control, _Conn(user_id='u2', teams=()))
+
+
+@pytest.mark.asyncio
+async def test_a_team_run_uses_only_what_is_published_to_the_team(rail):
+    from ai.modules.task.task_server import _resolve_nodes
+
+    await _published('@me')
+    control = _control('acme.echo')
+    control.owner_kind, control.teamId = 'team', TEAM['id']
+
+    with pytest.raises(NodeNotEntitled):
+        await _resolve_nodes(control.pipeline, control, _Conn())
+
+
+@pytest.mark.asyncio
+async def test_a_run_is_not_served_a_published_node_it_was_not_launched_with(rail):
+    from ai.modules.task import node_store
+
+    await _published('@me')
+    run = SimpleNamespace(node_versions={}, org_id='org1', client_id='u1')
+
+    reply = await node_store._fetch(run, {'name': 'acme.echo'}, None)
+
+    assert reply.body == {} and reply.data is None

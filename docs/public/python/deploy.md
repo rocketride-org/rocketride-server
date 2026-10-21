@@ -133,7 +133,10 @@ node belongs to whoever uploaded its first version: only they can add a version,
 publish it or unpublish it. A node cannot be published to `@public` yet. An upload is refused with
 `NODE_PACKAGE_INVALID`, the message naming the rule, for a C++ node, an id
 outside your developer namespace, a symlink, a path outside the zip, an icon
-outside the node, or a requirement line with an index, a URL or a local path.
+outside the node or one that carries anything but a drawing, or a requirement
+line with an index, a URL or a local path. Those rules check what a package
+declares; its code runs inside the runs of everyone it is published to, with
+their keys, so publish a node only to people who trust it.
 
 A run gets, when it is launched, the version bound to the caller's own rung,
 else a team's, and keeps it until it ends. The catalogue and validation show the

@@ -644,3 +644,17 @@ class TestPublishKinds:
 
         with pytest.raises(StorageError, match='not a node version'):
             await backend.publish_set('org-1', 'node', 'acme.app', ME, 1, {}, ACTOR)
+
+    async def test_a_project_holds_versions_of_one_kind(self, backend):
+        await backend.publish('org-1', 'acme.node', {'kind': 'node'}, ACTOR)
+
+        with pytest.raises(StorageError, match='holds node versions, not app'):
+            await backend.publish('org-1', 'acme.node', {'kind': 'app'}, ACTOR)
+
+    async def test_an_app_call_cannot_change_a_node_binding(self, backend):
+        await backend.publish('org-1', 'acme.node', {'kind': 'node'}, ACTOR)
+        await backend.publish_set('org-1', 'node', 'acme.node', ME, 1, {}, ACTOR)
+
+        with pytest.raises(StorageError, match='no app publish'):
+            await backend.publish_set_state('org-1', 'app', 'acme.node', ME, 'removed', ACTOR)
+        assert (await backend.publish_get('org-1', 'node', 'acme.node', ME))['state'] == 'enabled'

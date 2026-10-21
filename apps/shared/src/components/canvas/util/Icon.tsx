@@ -88,6 +88,14 @@ function processSvg(text: string): string | null {
 
 	// step: strip scripting-capable elements and attributes
 	doc.querySelectorAll('script, foreignObject').forEach((el) => el.remove());
+	// step: drop what is not an element; inlined as HTML, a processing instruction turns into markup
+	const walker = doc.createTreeWalker(
+		root,
+		NodeFilter.SHOW_PROCESSING_INSTRUCTION | NodeFilter.SHOW_COMMENT | NodeFilter.SHOW_CDATA_SECTION,
+	);
+	const stray: Node[] = [];
+	while (walker.nextNode()) stray.push(walker.currentNode);
+	stray.forEach((node) => node.parentNode?.removeChild(node));
 	const all = [root, ...Array.from(root.querySelectorAll('*'))];
 	for (const el of all) {
 		for (const attr of Array.from(el.attributes)) {

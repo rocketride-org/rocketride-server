@@ -350,6 +350,10 @@ class FileDeploymentBackend:
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             """Allocate the next version and append the registry entry."""
+            # One kind per project: a binding is read as its version's kind
+            kinds = {_kind_of(v) for v in meta['versions']}
+            if kinds and kinds != {kind}:
+                raise StorageError(f'{project_id} holds {kinds.pop()} versions, not {kind}')
             version = 1 + max((v['version'] for v in meta['versions']), default=0)
             entry = {
                 'version': version,
@@ -964,8 +968,8 @@ class FileDeploymentBackend:
             """Update the binding's state in place."""
             publishes = self._publishes_of(meta)
             row = publishes.get(key)
-            if not row:
-                raise StorageError(f'{app_id}: no publish for that audience')
+            if not row or _kind_of(self._artifact_entry_of(meta, row.get('version', 0))) != kind:
+                raise StorageError(f'{app_id}: no {kind} publish for that audience')
             now = time.time()
             row['state'] = state
             row['updatedAt'] = now

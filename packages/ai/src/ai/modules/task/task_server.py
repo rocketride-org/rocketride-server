@@ -208,8 +208,16 @@ async def _resolve_nodes(
     providers = [component.get('provider', '') for component in pipeline.get('components', [])]
     if not any('.' in provider for provider in providers):
         return {}
-    team_ids = list(_team_ids_of(conn).values()) if getattr(conn, '_account_info', None) else [control.teamId]
-    return await resolve_nodes(control.orgId or 'local', control.client_id, team_ids, providers)
+    info = getattr(conn, '_account_info', None)
+    if control.owner_kind == 'team':
+        # A team's run uses what is published to the team, whoever started it
+        user_id, team_ids = '', [control.teamId]
+    elif info:
+        # Whoever runs it now: a restart takes the restarter's reach, not the launcher's
+        user_id, team_ids = info.userId, list(_team_ids_of(conn).values())
+    else:
+        user_id, team_ids = control.client_id, [control.teamId]
+    return await resolve_nodes(control.orgId or 'local', user_id, team_ids, providers)
 
 
 class TaskServer(DAPBase):
