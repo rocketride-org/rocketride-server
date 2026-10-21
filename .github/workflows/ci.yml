@@ -62,6 +62,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       container: ${{ steps.filter.outputs.container }}
+      node_build: ${{ steps.filter.outputs.node_build }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
@@ -88,6 +89,14 @@ jobs:
               - 'packages/ai/**/overrides.txt'
               - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
               - 'packages/server/scripts/tasks.js'
+              - '.github/workflows/_build.yaml'
+            # How a C++ node is built against the engine
+            node_build:
+              - 'builder'
+              - 'builder.cmd'
+              - 'scripts/**'
+              - 'nodes/scripts/**'
+              - 'packages/*/scripts/**'
               - '.github/workflows/_build.yaml'
 
   # ---------------------------------------------------------------------------
@@ -161,6 +170,7 @@ jobs:
                 || startsWith(github.event.pull_request.base.ref, 'release/')
                 || contains(github.event.pull_request.labels.*.name, 'ci:test') }}
       container_test: ${{ github.event_name != 'pull_request' || needs.changes.outputs.container == 'true' }}
+      node_build_test: ${{ github.event_name == 'pull_request' && needs.changes.outputs.node_build == 'true' }}
     secrets: inherit
 
   # ---------------------------------------------------------------------------

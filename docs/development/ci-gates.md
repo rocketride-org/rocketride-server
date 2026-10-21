@@ -30,14 +30,18 @@ this workflow; findings land in the Security tab.
 
 ## What decides which jobs run
 
-The `changes` job (`dorny/paths-filter`) computes a single boolean:
+The `changes` job (`dorny/paths-filter`) computes three booleans:
 
 | Filter | Paths |
 | --- | --- |
 | `code` | `packages/**`, `nodes/**`, `apps/**`, `scripts/**`, `builder`, `builder.cmd`, `.github/workflows/**`, `package.json` |
+| `container` | `docker/**`, the node and AI `requirement*.txt` and `overrides.txt`, the engine's `depends.py`, `nodes/scripts/tasks.js`, `packages/server/scripts/tasks.js`, `.github/workflows/_build.yaml` |
+| `node_build` | `builder`, `builder.cmd`, `scripts/**`, `nodes/scripts/**`, `packages/*/scripts/**`, `.github/workflows/_build.yaml` |
 
 `code == false` skips `build` (a `build-skip` job reports success under the same
 check names so branch protection stays satisfied) and skips `shell-contract`.
+`container` gates the node container image test inside `build`, and `node_build`
+the C++ node compile that follows the build step (see below).
 
 `helm-changes` is a separate filter on `deploy/helm/**` gating `helm-lint`.
 
@@ -103,6 +107,11 @@ connects a test client, so both sides need a matching `ROCKETRIDE_APIKEY` — CI
 uses the literal `MYAPIKEY`, the same placeholder as `.env.template`. Ubuntu also
 starts MinIO, Azurite, and Postgres (pgvector + Apache AGE, on `:55432`/`:55433`)
 for the storage and database node tests.
+
+With a downloaded engine no C++ node compiles unless the PR changes one. A PR
+that changes how a node is built (`node_build`) therefore also removes the
+shipped `hash` library and runs `./builder hash:build`, so the node compiles
+against that engine on all three platforms.
 
 Per-module equivalents when you only touched one area:
 
