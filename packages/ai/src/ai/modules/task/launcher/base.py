@@ -53,7 +53,7 @@ class LaunchSpec:
     pipeline_args: List[str] = field(default_factory=list)
     # The model server address EAS was started with, if any
     modelserver: Optional[str] = None
-    # The engine is hosted (--saas): the subprocess runtime passes --hosted
+    # The engine is hosted (--saas): every runtime passes --hosted to the task
     hosted: bool = False
     # The task shares the engine's host: the subprocess runtime passes --shared-host
     shared_host: bool = False
