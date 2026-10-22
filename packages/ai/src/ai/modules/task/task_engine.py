@@ -70,7 +70,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .pipeline import resolve_pipeline_env
+from .pipeline import references_env, resolve_pipeline_env
 from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
@@ -727,15 +727,28 @@ class Task(DAPBase):
 
         self._env_source = env_source
 
+        # Values a restart loaded before stopping the old process, for the next start only
+        self._restart_env: Optional[Dict[str, str]] = None
+
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
+
+    async def _load_env(self, pipeline: Dict[str, Any]) -> Dict[str, str]:
+        """Load the values for the pipeline's placeholders; nothing is loaded when it has none."""
+        if not references_env(pipeline):
+            return {}
+        return await self._env_source()
 
     async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """Replace ``${KEY}`` placeholders using freshly loaded environment values.
 
-        Delegates to :func:`pipeline.resolve_pipeline_env`.
+        Uses the values a restart already loaded, if any. Delegates to
+        :func:`pipeline.resolve_pipeline_env`.
         """
-        return resolve_pipeline_env(pipeline, await self._env_source())
+        env, self._restart_env = self._restart_env, None
+        if env is None:
+            env = await self._load_env(pipeline)
+        return resolve_pipeline_env(pipeline, env)
 
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
@@ -2400,6 +2413,10 @@ class Task(DAPBase):
             if self.has_attached_debugger():
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
 
+            # Load the new run's values while the old process still runs and
+            # nothing has changed yet: a failed load leaves the task as it was
+            self._restart_env = await self._load_env(pipeline)
+
             # Set the restart flag to inhibit termination/start events
             self._is_restarting = True
 
@@ -2441,8 +2458,9 @@ class Task(DAPBase):
             raise RuntimeError(f'Failed to restart task: {str(e)}')
 
         finally:
-            # Always reset this
+            # Always reset these
             self._is_restarting = False
+            self._restart_env = None
 
     async def start_task(self) -> None:
         """

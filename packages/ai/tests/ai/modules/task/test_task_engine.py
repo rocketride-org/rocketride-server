@@ -1216,6 +1216,7 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
     t = _env_task(pipeline={'components': components})
     t.source = 'src'
     t._env_source = AsyncMock(return_value=env)
+    t._restart_env = None
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
     t._is_restarting = False
     t._launch_args = {}
@@ -1575,6 +1576,77 @@ def test_task_rejects_unknown_run_classifications():
         Task(**common, run_kind='prod')
     with pytest.raises(ValueError, match='trigger'):
         Task(**common, trigger='cron')
+
+
+@pytest.mark.asyncio
+async def test_task_loads_nothing_for_a_pipeline_without_placeholders():
+    """No ROCKETRIDE_* placeholder, no load: other ${...} are redacted anyway."""
+    from unittest.mock import MagicMock
+
+    source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline={},
+        env_source=source,
+    )
+
+    assert (await task._resolve_pipeline({'config': 'plain', 'other': '${HOME}'})) == {
+        'config': 'plain',
+        'other': '<REDACTED>',
+    }
+    source.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_fails():
+    """A restart loads its values while the old process still runs. If the load
+    fails, nothing is stopped or changed; if it works, the next start uses
+    those values once instead of loading again.
+    """
+    from unittest.mock import MagicMock
+
+    old = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
+    new = {'components': [], 'config': '${ROCKETRIDE_KEY}!'}
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline=old,
+        env_source=AsyncMock(side_effect=RuntimeError('db down')),
+    )
+    task.has_attached_debugger = lambda: False
+    task.stop_task = AsyncMock()
+    task.start_task = AsyncMock()
+
+    with pytest.raises(RuntimeError, match='db down'):
+        await task.restart_task(new, 'p-1', 's-1', 'tools')
+    task.stop_task.assert_not_awaited()
+    assert task._pipeline is old
+    assert task._restart_env is None
+
+    source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v2'})
+    task._env_source = source
+    task.is_task_complete = lambda: True
+    task._reset_status = lambda: None
+    seen = []
+
+    async def start():
+        seen.append(await task._resolve_pipeline(task._pipeline))
+
+    task.start_task = start
+    await task.restart_task(new, 'p-1', 's-1', 'tools')
+
+    assert seen[0]['config'] == 'v2!'
+    assert source.await_count == 1
+    assert task._restart_env is None
 
 
 @pytest.mark.asyncio
