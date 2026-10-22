@@ -1619,12 +1619,6 @@ void IServices::resolveDescriptions(json::Value &node) noexcept {
 ///		The service definition carrying "node": "cpp"
 //-------------------------------------------------------------------------
 Error IServices::declareNode(const ServiceDefinition &def) noexcept {
-    // The library base name is required - without it there is nothing to load
-    if (!def.nodePath)
-        return APERR(Ec::InvalidParam,
-                     "A cpp node requires a path to its shared library in",
-                     def.definitionPath);
-
     // The node directory is the one holding the definition we just read.
     // Kept as a named local rather than chaining .fileName() off the
     // parent() temporary directly.
@@ -1659,6 +1653,23 @@ Error IServices::declareNode(const ServiceDefinition &def) noexcept {
 ///	@param[in]	batch
 ///		The definitions, each with the path of the services file it is from
 //-------------------------------------------------------------------------
+namespace {
+// Puts a map back as it was, in place: what is kept stays at the same address,
+// since definitions and fields are referenced by address
+template <typename Map>
+void restore(Map &now, const Map &before) noexcept {
+    for (auto it = now.begin(); it != now.end();) {
+        auto kept = before.find(it->first);
+        if (kept == before.end()) {
+            it = now.erase(it);
+            continue;
+        }
+        it->second = kept->second;
+        ++it;
+    }
+}
+}  // namespace
+
 Error IServices::registerDefinitions(
     std::vector<std::pair<json::Value, Path>> batch) noexcept {
     const auto services = m_services;
@@ -1667,16 +1678,24 @@ Error IServices::registerDefinitions(
     Error ccode;
     for (auto &[serviceInfo, definitionPath] : batch) {
         if ((ccode = registerDefinition(_mv(serviceInfo), definitionPath,
-                                        /*replace=*/true)))
+                                        /*replace=*/true,
+                                        /*factories=*/false)))
             break;
     }
     if (!ccode) ccode = refreshDefinitions();
 
     if (ccode) {
-        m_services = services;
-        m_fields = fields;
+        restore(m_services, services);
+        restore(m_fields, fields);
+        return ccode;
     }
-    return ccode;
+
+    // Only a batch that registered and resolved whole puts factories in place
+    for (auto &[logicalType, def] : m_services) {
+        if (services.find(logicalType) != services.end()) continue;
+        if (auto failed = registerFactories(def)) return failed;
+    }
+    return {};
 }
 
 //-------------------------------------------------------------------------
@@ -1694,11 +1713,15 @@ Error IServices::registerDefinitions(
 ///		errors
 ///	@param[in]	replace
 ///		Whether a definition already in the map may be overwritten. The
-///		factories of an existing logical type are never registered twice
+///		factories of an existing logical type are never registered twice,
+///		so a replacement must ask for the same ones
+///	@param[in]	factories
+///		Whether to put the factories in place now; a batch does it once
+///		the whole batch has registered and resolved
 //-------------------------------------------------------------------------
 Error IServices::registerDefinition(json::Value serviceInfo,
                                     const file::Path &definitionPath,
-                                    bool replace) noexcept {
+                                    bool replace, bool factories) noexcept {
     // The directory the definition lives in: the icon is relative to it, and
     // so is a C++ node's library
     const auto path = definitionPath.parent();
@@ -1986,68 +2009,73 @@ Error IServices::registerDefinition(json::Value serviceInfo,
         return {};
     }
 
+    // A C++ node is loaded from its library: without one there is nothing to load
+    if (isCppNode && !def.nodePath)
+        return APERR(Ec::InvalidParam,
+                     "A cpp node requires a path to its shared library in",
+                     definitionPath);
+
+    // A replacement keeps the factories in place, so it must ask for the same ones
+    if (known) {
+        const auto &kept = m_services[logicalType];
+        if (kept.physicalType != def.physicalType ||
+            kept.serviceDefinition.lookup<iText>("register") != registerType)
+            return APERR(Ec::InvalidParam,
+                         "A replacement cannot change the kind of node in",
+                         definitionPath);
+    }
+
     // Save it
     m_services[logicalType] = _mv(def);
 
     // Factories are registered against the logical type, so the ones an
-    // earlier definition put in place already serve this one. Registering
-    // them twice is what we are avoiding here, not re-registering a
-    // definition
+    // earlier definition put in place already serve this one
     if (known) {
         LOG(Services, "    Replaced, factories kept");
         return {};
     }
+    if (!factories) return {};
+    return registerFactories(m_services[logicalType]);
+}
 
-    // A C++ node brings its own factories, so it is only declared
-    // here - the "register" field does not apply
-    if (isCppNode) {
-        if (auto ccode = declareNode(m_services[logicalType]))
-            return ccode;
-        return {};
-    }
+//-------------------------------------------------------------------------
+/// @details
+///		Puts in place the factories a definition's "register" asks for; a
+///		C++ node brings its own, so it is only declared
+///	@param[in]	def
+///		The registered definition
+//-------------------------------------------------------------------------
+Error IServices::registerFactories(const ServiceDefinition &def) noexcept {
+    if (def.serviceDefinition.lookup<iText>("node") == "cpp")
+        return declareNode(def);
 
-    // Register the factories if needed
+    const auto registerType = def.serviceDefinition.lookup<iText>("register");
     if (registerType == "filter") {
         LOG(Services, "    Register      : Filter");
         auto factoryGlobal = Factory::makeFactory<
             engine::store::filter::python::IFilterGlobal,
-            engine::store::pythonBase::IPythonGlobalBase>(
-            m_services[logicalType].logicalType);
-
+            engine::store::pythonBase::IPythonGlobalBase>(def.logicalType);
         Factory::registerFactory(factoryGlobal);
-
         auto factoryInstance = Factory::makeFactory<
             engine::store::filter::python::IFilterInstance,
-            engine::store::pythonBase::IPythonInstanceBase>(
-            m_services[logicalType].logicalType);
-
+            engine::store::pythonBase::IPythonInstanceBase>(def.logicalType);
         Factory::registerFactory(factoryInstance);
     }
-
     if (registerType == "endpoint") {
         LOG(Services, "    Register      : Endpoint");
         auto factoryEndpoint = Factory::makeFactory<
             engine::store::filter::python::IFilterEndpoint,
-            engine::store::pythonBase::IPythonEndpointBase>(
-            m_services[logicalType].logicalType);
-
+            engine::store::pythonBase::IPythonEndpointBase>(def.logicalType);
         Factory::registerFactory(factoryEndpoint);
-
         auto factoryGlobal = Factory::makeFactory<
             engine::store::filter::python::IFilterGlobal,
-            engine::store::pythonBase::IPythonGlobalBase>(
-            m_services[logicalType].logicalType);
-
+            engine::store::pythonBase::IPythonGlobalBase>(def.logicalType);
         Factory::registerFactory(factoryGlobal);
-
         auto factoryInstance = Factory::makeFactory<
             engine::store::filter::python::IFilterInstance,
-            engine::store::pythonBase::IPythonInstanceBase>(
-            m_services[logicalType].logicalType);
-
+            engine::store::pythonBase::IPythonInstanceBase>(def.logicalType);
         Factory::registerFactory(factoryInstance);
     }
-
     return {};
 }
 

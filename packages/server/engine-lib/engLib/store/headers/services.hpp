@@ -177,7 +177,8 @@ public:
     //-----------------------------------------------------------------
     static Error registerDefinition(json::Value serviceInfo,
                                     const Path &definitionPath,
-                                    bool replace = false) noexcept;
+                                    bool replace = false,
+                                    bool factories = true) noexcept;
 
     //-----------------------------------------------------------------
     ///	@details
@@ -264,6 +265,7 @@ private:
     static ErrorOr<IServices::ServiceSchema> getFields(
         ServiceContext &context, json::Value &section) noexcept;
     static Error updateDefinitions() noexcept;
+    static Error registerFactories(const ServiceDefinition &def) noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
     static std::list<Text> getFieldNames(const ServiceSchema &schema) noexcept;
