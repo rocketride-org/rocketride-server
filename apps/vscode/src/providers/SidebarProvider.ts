@@ -257,7 +257,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		const outsideNodeModules =
 			(handle: (uri: vscode.Uri) => void) =>
 			(uri: vscode.Uri): void => {
-				if (isUnderNodeModules(uri.fsPath)) return;
+				// Relative to the workspace folder, the way findFiles applies its exclude.
+				if (isUnderNodeModules(vscode.workspace.asRelativePath(uri, false))) return;
 				handle(uri);
 			};
 
