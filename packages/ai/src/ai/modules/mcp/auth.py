@@ -337,7 +337,9 @@ def authorize(scope: Dict[str, Any], *, bind_host: str, dev_bypass: bool = False
             # Audience is verified below against the full list rather than by
             # PyJWT, so the failure can be reported distinctly from a bad
             # signature — the two mean very different things operationally.
-            options={'verify_aud': False},
+            # PyJWT checks exp only when the token has one, so a token without
+            # an expiry would never expire: require it, and iat and iss too.
+            options={'verify_aud': False, 'require': ['exp', 'iat', 'iss']},
         )
     except Exception as exc:  # noqa: BLE001 - any verification failure is a 401
         logger.warning('rejected /mcp token: %s', exc)
