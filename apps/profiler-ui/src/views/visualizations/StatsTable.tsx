@@ -209,18 +209,37 @@ function rowsFromFunctions(functions: ProfileFunctionStats[], tree: ProfileTreeN
 		queue.push(...node.children);
 	}
 
-	return functions.map((f) => ({
-		name: f.name,
-		file: f.file,
-		line: f.line,
-		ncalls: f.ncalls,
-		tottime: f.tottime,
-		cumtime: f.cumtime,
-		percall: f.ncalls > 0 ? f.tottime / f.ncalls : 0,
-		cumpercall: f.ncalls > 0 ? f.cumtime / f.ncalls : 0,
-		location: `${f.file}:${f.line}(${f.name})`,
-		refNode: nodes.get(functionKey(f)) ?? null,
-	}));
+	// Entries the server cannot tell apart share one row: paths outside the
+	// project and stdlib all read './<system>', so two such functions on the
+	// same line with the same name arrive as separate entries with one key
+	const rows = new Map<string, FlatRow>();
+	for (const f of functions) {
+		const key = functionKey(f);
+		const row = rows.get(key);
+		if (row) {
+			row.ncalls += f.ncalls;
+			row.tottime += f.tottime;
+			row.cumtime += f.cumtime;
+		} else {
+			rows.set(key, {
+				name: f.name,
+				file: f.file,
+				line: f.line,
+				ncalls: f.ncalls,
+				tottime: f.tottime,
+				cumtime: f.cumtime,
+				percall: 0,
+				cumpercall: 0,
+				location: `${f.file}:${f.line}(${f.name})`,
+				refNode: nodes.get(key) ?? null,
+			});
+		}
+	}
+	for (const row of rows.values()) {
+		row.percall = row.ncalls > 0 ? row.tottime / row.ncalls : 0;
+		row.cumpercall = row.ncalls > 0 ? row.cumtime / row.ncalls : 0;
+	}
+	return Array.from(rows.values());
 }
 
 /**
