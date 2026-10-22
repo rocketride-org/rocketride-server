@@ -230,7 +230,7 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
         'provider': name,
         'files': files,
         'next_steps': [
-            "Write these files under the engine's nodes/ directory (nodes/src/nodes in a source tree).",
+            "Write these paths relative to the folder that holds the engine's nodes/ (nodes/src in a source tree).",
             'A node written there runs only on that engine: RocketRide Cloud loads none, '
             'and store review rejects pipelines that use one, so an app for the store stays on catalog nodes.',
             f'Reference the node in a .pipe as "provider": "{name}", since the provider is the protocol.',
