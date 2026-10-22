@@ -185,6 +185,15 @@ public:
     //-----------------------------------------------------------------
     static Error refreshDefinitions() noexcept;
 
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Registers and resolves a batch of definitions, all or none:
+    ///		a failure leaves the services and global fields as they were.
+    ///		Called before any pipeline runs; nothing guards concurrent reads
+    //-----------------------------------------------------------------
+    static Error registerDefinitions(
+        std::vector<std::pair<json::Value, Path>> batch) noexcept;
+
 private:
     //-----------------------------------------------------------------
     ///	@details
