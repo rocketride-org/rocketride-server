@@ -67,7 +67,7 @@ engLib.registerServices([(node('rail_a', titleA), tempfile.mkdtemp() + '/service
     REQUIRE((*def)->title == "Rail A, again");
 }
 
-TEST_CASE("store::registerServices leaves no definition half done when one fails") {
+TEST_CASE("store::registerServices registers a batch all or none") {
     const auto python = localfcn()->Error {
         py::exec(R"(
 import engLib, tempfile
@@ -83,8 +83,11 @@ def refused(batch):
     return False
 def at(definition):
     return (definition, tempfile.mkdtemp() + '/services.json')
-# Refused while registering: what came before it is registered and resolved
+engLib.registerServices([at(dict(node('rail_g'), title='Rail G'))])
+# Refused while registering: nothing of the batch stays, not even what came before
 assert refused([at(node('rail_c')), at(dict(node('rail_d'), capabilities=['nonsense']))])
+# Refused while resolving: a protocol that is not a URL; a definition it replaced is back
+assert refused([at(dict(node('rail_g'), title='Rail G, again')), at(dict(node('rail_h'), protocol='rail_h'))])
 # Malformed: nothing of the batch is registered
 assert refused([at(node('rail_e')), (node('rail_f'), None)])
 )");
@@ -92,8 +95,9 @@ assert refused([at(node('rail_e')), (node('rail_f'), None)])
     };
     REQUIRE_NO_ERROR(callPython(python));
 
-    auto registered = IServices::getServiceDefinition("rail_c");
-    REQUIRE_NO_ERROR(registered);
-    REQUIRE((*registered)->isResolved);
-    REQUIRE_FALSE(IServices::getServiceDefinition("rail_e"));
+    for (auto name : {"rail_c", "rail_d", "rail_e", "rail_h"})
+        REQUIRE_FALSE(IServices::getServiceDefinition(name));
+    auto kept = IServices::getServiceDefinition("rail_g");
+    REQUIRE_NO_ERROR(kept);
+    REQUIRE((*kept)->title == "Rail G");
 }

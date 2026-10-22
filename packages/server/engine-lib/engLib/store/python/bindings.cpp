@@ -321,15 +321,8 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
             batch.emplace_back(engine::python::pyjson::dictToJson(pair[0]),
                                file::Path(pair[1].cast<std::string>()));
         }
-        for (auto &[json, path] : batch) {
-            if (auto ccode = engine::store::IServices::registerDefinition(
-                    _mv(json), path, /*replace=*/true)) {
-                // Resolve what the batch registered before this one, so nothing is left half done
-                (void)engine::store::IServices::refreshDefinitions();
-                throw ccode;
-            }
-        }
-        if (auto ccode = engine::store::IServices::refreshDefinitions())
+        if (auto ccode =
+                engine::store::IServices::registerDefinitions(_mv(batch)))
             throw ccode;
     });
 

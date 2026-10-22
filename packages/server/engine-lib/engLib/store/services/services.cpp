@@ -1654,6 +1654,33 @@ Error IServices::declareNode(const ServiceDefinition &def) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Registers and resolves a batch of definitions; on any failure the
+///		services and global fields go back to what they were
+///	@param[in]	batch
+///		The definitions, each with the path of the services file it is from
+//-------------------------------------------------------------------------
+Error IServices::registerDefinitions(
+    std::vector<std::pair<json::Value, Path>> batch) noexcept {
+    const auto services = m_services;
+    const auto fields = m_fields;
+
+    Error ccode;
+    for (auto &[serviceInfo, definitionPath] : batch) {
+        if ((ccode = registerDefinition(_mv(serviceInfo), definitionPath,
+                                        /*replace=*/true)))
+            break;
+    }
+    if (!ccode) ccode = refreshDefinitions();
+
+    if (ccode) {
+        m_services = services;
+        m_fields = fields;
+    }
+    return ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Registers one service definition into the service map. This is the
 ///		body the directory walk used to run inline: everything from the
 ///		parsed json to the factories, with no file reading of its own, so a
