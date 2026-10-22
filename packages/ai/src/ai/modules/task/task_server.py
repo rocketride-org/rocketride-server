@@ -74,7 +74,7 @@ import uuid
 from typing import List
 from fastapi import WebSocket
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, Set
+from typing import Awaitable, Callable, Dict, Any, Optional, Set
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
@@ -1235,6 +1235,7 @@ class TaskServer(DAPBase):
         team_id: str = '',
         org_id: str = '',
         env: Dict[str, str] | None = None,
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = '',
@@ -1251,6 +1252,7 @@ class TaskServer(DAPBase):
                 - arguments: Task configuration including Optional(token), pipeline
                 - command: Launch type (launch/execute) determining task behavior
             conn (TaskConn, optional): Connection to associate with task for monitoring
+            env_source: Loads the values for ${...} placeholders at each (re)start (see Task)
 
         Returns:
             str: Unique task token for subsequent operations
@@ -1498,6 +1500,7 @@ class TaskServer(DAPBase):
                 team_id=control.teamId,
                 org_id=control.orgId,
                 env=env or {},
+                env_source=env_source,
                 run_kind=run_kind,
                 owner_kind=control.owner_kind,
                 trigger=trigger,

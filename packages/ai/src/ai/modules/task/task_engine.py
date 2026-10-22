@@ -38,7 +38,7 @@ import socket
 import hashlib
 import shlex
 import shutil
-from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
@@ -535,6 +535,7 @@ class Task(DAPBase):
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = 'manual',
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
         **kwargs,
     ) -> None:
         """
@@ -550,6 +551,9 @@ class Task(DAPBase):
             client_id: Account identifier for store access scoping
             team_id: Owning team id (rides the task file as trusted identity)
             org_id: Owning org id (rides the task file as trusted identity)
+            env: Fixed values for ${...} placeholders, used when no env_source is given
+            env_source: Returns the values for ${...} placeholders. Called at every
+                start and restart, so the values live only while the pipeline is resolved
             run_kind: Run classification ('dev' | 'deploy') — picks the
                 run-log continuum; only the trusted dispatch sets 'deploy'
             trigger: What fired the run ('' | 'manual' | 'schedule');
@@ -712,17 +716,26 @@ class Task(DAPBase):
         self._launch_args = launch_args
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
-        self._env: Dict[str, str] = env or {}
+        # Where ${...} placeholders resolve from. The values are loaded at each
+        # (re)start and dropped once the task file is written, so decrypted
+        # variables are not held for the task's lifetime.
+        if env_source is None:
+            fixed_env = dict(env or {})
+
+            async def env_source() -> Dict[str, str]:
+                return dict(fixed_env)
+
+        self._env_source = env_source
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
-    def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
-        """Replace ``${KEY}`` placeholders using the merged environment dict.
+    async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace ``${KEY}`` placeholders using freshly loaded environment values.
 
         Delegates to :func:`pipeline.resolve_pipeline_env`.
         """
-        return resolve_pipeline_env(pipeline, self._env)
+        return resolve_pipeline_env(pipeline, await self._env_source())
 
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
@@ -2471,7 +2484,7 @@ class Task(DAPBase):
 
             # Resolve ${...} placeholders into a local variable — never stored on self
             # so secrets are not retained in memory beyond the temp file write.
-            resolved = self._resolve_pipeline(self._pipeline)
+            resolved = await self._resolve_pipeline(self._pipeline)
 
             # Check it - throws on error
             self._check_pipeline(resolved)

@@ -1215,7 +1215,7 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
     calls = _fake_db_account(monkeypatch)
     t = _env_task(pipeline={'components': components})
     t.source = 'src'
-    t._env = env
+    t._env_source = AsyncMock(return_value=env)
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
     t._is_restarting = False
     t._launch_args = {}
@@ -1575,6 +1575,29 @@ def test_task_rejects_unknown_run_classifications():
         Task(**common, run_kind='prod')
     with pytest.raises(ValueError, match='trigger'):
         Task(**common, trigger='cron')
+
+
+@pytest.mark.asyncio
+async def test_task_loads_placeholder_values_at_each_resolve():
+    """A Task given an env_source calls it every time it resolves the pipeline
+    and keeps no copy of the values; a plain env dict still works.
+    """
+    from unittest.mock import MagicMock
+
+    common = dict(
+        server=MagicMock(), id='t-1', project_id='p-1', source='s-1', token='tk', public_auth='pk', pipeline={}
+    )
+    source = AsyncMock(side_effect=[{'ROCKETRIDE_KEY': 'v1'}, {'ROCKETRIDE_KEY': 'v2'}])
+    task = Task(**common, env_source=source)
+    pipeline = {'config': '${ROCKETRIDE_KEY}'}
+
+    assert (await task._resolve_pipeline(pipeline))['config'] == 'v1'
+    assert (await task._resolve_pipeline(pipeline))['config'] == 'v2'
+    assert source.await_count == 2
+    assert not hasattr(task, '_env')
+
+    fixed = Task(**common, env={'ROCKETRIDE_KEY': 'fixed'})
+    assert (await fixed._resolve_pipeline(pipeline))['config'] == 'fixed'
 
 
 def test_cap_trace_payload_passes_small_payloads_through():
