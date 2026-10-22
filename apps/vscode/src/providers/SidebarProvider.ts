@@ -289,7 +289,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			}, 500);
 		};
 		const onBindingEvent = (uri: vscode.Uri): void => {
-			if (isUnderNodeModules(uri.fsPath)) return;
+			// Workspace-relative, the way the app scan applies its exclude.
+			if (isUnderNodeModules(vscode.workspace.asRelativePath(uri, false))) return;
 			scheduleRescan();
 		};
 		this.disposables.push(
@@ -388,6 +389,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Removes the deleted file from the parsed-files cache and updates the webview. */
 	private async handleFileDeleted(uri: vscode.Uri): Promise<void> {
+		if (this.disposed) return;
 		this.cacheParsedFile(uri.fsPath, null);
 		this.sendEntriesUpdate();
 	}
@@ -395,9 +397,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	/** Re-parses a changed .pipe file, ensures project_id, and optionally restarts. */
 	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
 		await this.reconcileProjectId(uri, 'changed');
+		// dispose() can land during the settle wait inside reconcileProjectId.
+		if (this.disposed) return;
 
-		// Re-parse the changed file
-		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
+		// Re-parse the changed file. Deleted meanwhile (a checkout, a temporary
+		// file): the delete handler already dropped it, and a parse of a missing
+		// path must not put it back as an invalid entry.
+		const text = await this.readPipeText(uri);
+		if (this.disposed) return;
+		if (text === undefined) {
+			this.cacheParsedFile(uri.fsPath, null);
+			this.sendEntriesUpdate();
+			return;
+		}
+		const parsedFile = PipelineFileParser.parseContent(text, uri.fsPath, this.getServiceClassInfoMap());
 		this.cacheParsedFile(uri.fsPath, parsedFile);
 
 		this.sendEntriesUpdate();
