@@ -20,6 +20,7 @@ import type { ShellApiV2 } from '../contract/versions/v2';
 import type { ShellApiV3 } from '../contract/versions/v3';
 import type { ShellApiV4 } from '../contract/versions/v4';
 import type { ShellApiV5 } from '../contract/versions/v5';
+import type { ShellApiV6 } from '../contract/versions/v6';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -616,6 +617,8 @@ import type { LogStreamEntry as Frozen_LogStreamEntry } from '../contract/versio
 import type { LogStreamEntry as Current_LogStreamEntry } from './api';
 import type { LogStreamsResult as Frozen_LogStreamsResult } from '../contract/versions/v5';
 import type { LogStreamsResult as Current_LogStreamsResult } from './api';
+import type { CProfileFunctionStats as Frozen_CProfileFunctionStats } from '../contract/versions/v6';
+import type { CProfileFunctionStats as Current_CProfileFunctionStats } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -630,6 +633,8 @@ const _floor_v4: ShellApiV4 = {} as ShellApiShape;
 void _floor_v4;
 const _floor_v5: ShellApiV5 = {} as ShellApiShape;
 void _floor_v5;
+const _floor_v6: ShellApiV6 = {} as ShellApiShape;
+void _floor_v6;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1230,3 +1235,5 @@ const _t_LogStreamEntry: Frozen_LogStreamEntry = {} as Current_LogStreamEntry;
 void _t_LogStreamEntry;
 const _t_LogStreamsResult: Frozen_LogStreamsResult = {} as Current_LogStreamsResult;
 void _t_LogStreamsResult;
+const _t_CProfileFunctionStats: Frozen_CProfileFunctionStats = {} as Current_CProfileFunctionStats;
+void _t_CProfileFunctionStats;
