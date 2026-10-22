@@ -237,6 +237,21 @@ async def test_signals_held_back_by_the_limit_leave_one_pending_dial(monkeypatch
     assert len(clock.pending) == 1
 
 
+async def test_a_pending_redial_does_not_reach_the_next_run(monkeypatch):
+    clock = _Clock(monkeypatch)
+    t = _engine()
+    t._open_data_channel = AsyncMock()  # never connects
+    Task._on_channel_signal(t, '1', None)
+    await _settle()
+
+    Task._reset_channel_state(t)  # restart_task
+    clock.advance(task_engine.CONST_CHANNEL_REDIAL_DELAY)
+    await _settle()
+
+    assert t._open_data_channel.await_count == 1
+    assert t._channel_signalled is False
+
+
 def test_a_refused_handshake_is_read_off_the_status_not_the_wording():
     try:
         try:

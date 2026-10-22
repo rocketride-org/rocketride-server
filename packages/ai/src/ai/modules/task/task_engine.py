@@ -1247,6 +1247,9 @@ class Task(DAPBase):
 
     def _reset_channel_state(self) -> None:
         """Forget the previous run's channel: ``restart_task`` reuses this object."""
+        # A redial still pending would dial the next run before its task reports a listener
+        if getattr(self, '_redial', None) is not None:
+            self._redial.cancel()
         # Set once the task has reported its listener; from then on the engine dials only on its signal
         self._channel_signalled = False
         # Startup-only commands are answered until the task reports it is loading the pipeline
