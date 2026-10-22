@@ -204,7 +204,7 @@ async def test_round_trip_with_body_and_bytes_both_ways(task_side, commands):
 async def test_request_before_the_engine_connects_waits_for_it(task_side, commands):
     commands('echo', echo)
     pending = asyncio.ensure_future(ask('echo', {'n': 2}))
-    await asyncio.sleep(0.05)  # it must still be waiting: there is nothing to signal
+    await until(lambda: task_channel._connected._waiters)  # the request waits for the connection
     assert not pending.done()
 
     task, client = await _connect(task_side)
@@ -491,8 +491,8 @@ async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_o
     monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.05)
 
     async def trickle():
-        for _ in range(3):
-            await asyncio.sleep(0.06)
+        for _ in range(4):
+            await asyncio.sleep(0.04)
             yield b'z' * CHUNK
 
     async def handler(task, arguments, data):
@@ -502,8 +502,8 @@ async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_o
     task, client = await _connect(task_side)
 
     sink = io.BytesIO()
-    await ask('big', sink=sink, timeout=0.1)  # 0.18 s in all, past the old 0.15 s bound
-    assert len(sink.getvalue()) == 3 * CHUNK
+    await ask('big', sink=sink, timeout=0.1)  # 0.16 s in all, past the old 0.15 s bound
+    assert len(sink.getvalue()) == 4 * CHUNK
     await client.disconnect()
 
 
@@ -599,7 +599,7 @@ async def test_long_handler_in_the_task_does_not_delay_the_signal(task_side, com
     client._transport.disconnect()
     await until(lambda: task_side.closed)  # while the handler still runs
     assert task_side.closed == [client.channel_id]
-    release.set()
+    task_side.loop.call_soon_threadsafe(release.set)
     with pytest.raises(Exception):
         await engine_request
 
@@ -645,7 +645,7 @@ async def test_new_connection_during_the_old_ones_drain_serves_requests(task_sid
     task, client = await _connect(task_side)
     assert task_channel._conn is not old_conn
     assert (await ask('echo', {'new': 1})).body['echo'] == {'new': 1}
-    release.set()
+    task_side.loop.call_soon_threadsafe(release.set)
     await until(returned.is_set)
     await asyncio.sleep(0.05)  # the old connection's drain ends; it must not detach the new one
     assert task_channel._conn is not None
