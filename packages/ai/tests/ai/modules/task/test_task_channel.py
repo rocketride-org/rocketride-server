@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import tenacity
 
 from ai.modules.task import task_engine
 from ai.modules.task.task_engine import Task
@@ -55,6 +56,53 @@ async def _settle():
     """Let tasks created by the signal run."""
     for _ in range(3):
         await asyncio.sleep(0)
+
+
+class _Timer:
+    """A pending ``call_later`` that runs only when the test's clock reaches it."""
+
+    def __init__(self, due, callback, args):
+        """Hold the callback until ``due``."""
+        self.due, self.callback, self.args, self.cancelled = due, callback, args, False
+
+    def when(self):
+        """When it is due, on the test's clock."""
+        return self.due
+
+    def cancel(self):
+        """Drop it."""
+        self.cancelled = True
+
+
+class _Clock:
+    """The engine's clock and timers, moved only by the test: no test waits out a window."""
+
+    def __init__(self, monkeypatch):
+        """Replace ``task_engine``'s clock and the running loop's timers."""
+        self.now = 0.0
+        self.timers = []
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(task_engine, 'time', SimpleNamespace(monotonic=lambda: self.now))
+        monkeypatch.setattr(loop, 'time', lambda: self.now)
+        monkeypatch.setattr(loop, 'call_later', self._call_later)
+
+    def _call_later(self, delay, callback, *args):
+        timer = _Timer(self.now + delay, callback, args)
+        self.timers.append(timer)
+        return timer
+
+    @property
+    def pending(self):
+        """The timers not cancelled nor run."""
+        return [timer for timer in self.timers if not timer.cancelled]
+
+    def advance(self, seconds):
+        """Move the clock and run every timer that falls due."""
+        self.now += seconds
+        for timer in self.pending:
+            if timer.due <= self.now:
+                self.timers.remove(timer)
+                timer.callback(*timer.args)
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +181,7 @@ async def test_signals_during_a_dial_coalesce_and_are_rechecked_after_it():
 
 async def test_dials_are_rate_limited(monkeypatch):
     monkeypatch.setattr(task_engine, 'CONST_CHANNEL_DIAL_LIMIT', 3)
+    _Clock(monkeypatch)
     t = _engine()
     t._open_data_channel = AsyncMock()
     for _ in range(4):
@@ -143,37 +192,39 @@ async def test_dials_are_rate_limited(monkeypatch):
 
 
 async def test_a_dial_that_fails_is_tried_again(monkeypatch):
-    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_REDIAL_DELAY', 0.01)
+    clock = _Clock(monkeypatch)
     t = _engine()
     t._open_data_channel = AsyncMock()  # never connects
-
     Task._on_channel_signal(t, '1', None)
-    await asyncio.sleep(0.1)
+    await _settle()
 
-    assert t._open_data_channel.await_count > 1
+    clock.advance(task_engine.CONST_CHANNEL_REDIAL_DELAY)
+    await _settle()
+
+    assert t._open_data_channel.await_count == 2
 
 
 async def test_a_dial_held_back_by_the_limit_is_tried_once_the_window_passes(monkeypatch):
     monkeypatch.setattr(task_engine, 'CONST_CHANNEL_DIAL_LIMIT', 1)
-    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_DIAL_WINDOW', 0.05)
-    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_REDIAL_DELAY', 60)
+    monkeypatch.setattr(task_engine, 'CONST_CHANNEL_REDIAL_DELAY', 600)  # only the window brings it back
+    clock = _Clock(monkeypatch)
     t = _engine()
     t._open_data_channel = AsyncMock()
     Task._on_channel_signal(t, '1', None)
     await _settle()
-
     Task._on_channel_signal(t, '1', None)
-    await asyncio.sleep(0.2)
+    await _settle()
+    assert t._open_data_channel.await_count == 1
+
+    clock.advance(task_engine.CONST_CHANNEL_DIAL_WINDOW + 0.001)
+    await _settle()
 
     assert t._open_data_channel.await_count == 2
 
 
 async def test_signals_held_back_by_the_limit_leave_one_pending_dial(monkeypatch):
     monkeypatch.setattr(task_engine, 'CONST_CHANNEL_DIAL_LIMIT', 1)
-    loop = asyncio.get_running_loop()
-    scheduled = []
-    real = loop.call_later
-    monkeypatch.setattr(loop, 'call_later', lambda *args: scheduled.append(real(*args)) or scheduled[-1])
+    clock = _Clock(monkeypatch)
     t = _engine()
     t._open_data_channel = AsyncMock()
     Task._on_channel_signal(t, '1', None)
@@ -183,8 +234,7 @@ async def test_signals_held_back_by_the_limit_leave_one_pending_dial(monkeypatch
     for _ in range(5):
         Task._on_channel_signal(t, '1', None)
 
-    assert len(scheduled) == 1
-    scheduled[0].cancel()
+    assert len(clock.pending) == 1
 
 
 def test_a_refused_handshake_is_read_off_the_status_not_the_wording():
@@ -321,6 +371,7 @@ async def test_a_refused_handshake_is_not_retried(monkeypatch):
 
 
 async def test_connection_refused_is_retried(monkeypatch):
+    monkeypatch.setattr(task_engine, 'wait_fixed', lambda seconds: tenacity.wait_none())
     attempts = _failing_dial(monkeypatch, '[Errno 111] Connection refused')
     with pytest.raises(ConnectionError, match='refused'):
         await Task._dial(_engine())
@@ -374,7 +425,7 @@ async def test_send_data_waiting_during_a_reconnect_gets_the_new_client():
     client.did_fail = MagicMock(return_value=False)
 
     async def connect_later():
-        await asyncio.sleep(0.05)
+        await _settle()  # _send_data is waiting by now
         async with t._data_lock:
             t._data_client = client
             t._data_connected.set()
