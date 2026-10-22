@@ -172,6 +172,14 @@ async def echo(task, arguments, data):
     return ChannelReply(body={'echo': arguments, 'task': task.id}, data=data)
 
 
+async def until(condition, timeout=5):
+    """Wait for ``condition()`` to hold, polling, never for a fixed delay."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, 'the condition never held'
+        await asyncio.sleep(0.01)
+
+
 def ask(*args, **kwargs):
     """Call ``task_channel.request_sync`` from a worker thread, as a node would."""
     return asyncio.to_thread(task_channel.request_sync, *args, **kwargs)
@@ -196,7 +204,7 @@ async def test_round_trip_with_body_and_bytes_both_ways(task_side, commands):
 async def test_request_before_the_engine_connects_waits_for_it(task_side, commands):
     commands('echo', echo)
     pending = asyncio.ensure_future(ask('echo', {'n': 2}))
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(0.05)  # it must still be waiting: there is nothing to signal
     assert not pending.done()
 
     task, client = await _connect(task_side)
@@ -321,9 +329,10 @@ async def test_hung_handler_is_cut_by_the_timeout(task_side, commands, monkeypat
 
 async def test_requests_over_the_in_flight_cap_get_busy(task_side, commands, monkeypatch):
     monkeypatch.setattr(task_engine, 'CONST_CHANNEL_MAX_INFLIGHT', 1)
-    release = asyncio.Event()
+    entered, release = threading.Event(), asyncio.Event()
 
     async def handler(task, arguments, data):
+        entered.set()
         await release.wait()
         return ChannelReply(body={'ok': True})
 
@@ -331,7 +340,7 @@ async def test_requests_over_the_in_flight_cap_get_busy(task_side, commands, mon
     task, client = await _connect(task_side)
 
     first = asyncio.ensure_future(ask('hold'))
-    await asyncio.sleep(0.2)
+    await until(entered.is_set)
     with pytest.raises(ChannelError, match='busy'):
         await ask('hold')
     release.set()
@@ -450,10 +459,13 @@ async def test_reply_too_large_for_memory_needs_a_sink(task_side, commands, monk
 
 
 async def test_engine_request_completes_while_a_transfer_is_running(task_side, commands):
+    flowing, gate = threading.Event(), asyncio.Event()
+
     async def trickle():
-        for _ in range(6):
-            await asyncio.sleep(0.1)
-            yield b'z' * (CHUNK // 2)
+        yield b'z' * CHUNK
+        flowing.set()
+        await gate.wait()
+        yield b'z' * CHUNK
 
     async def handler(task, arguments, data):
         return ChannelReply(data=trickle())
@@ -462,12 +474,13 @@ async def test_engine_request_completes_while_a_transfer_is_running(task_side, c
     task, client = await _connect(task_side)
 
     transfer = asyncio.ensure_future(ask('big', sink=io.BytesIO()))
-    await asyncio.sleep(0.15)
+    await until(flowing.is_set)
     started = time.monotonic()
     response = await client.dap_request('rrext_whoami', {})
     assert response['success'] is True
     assert time.monotonic() - started < 0.3
     assert not transfer.done()
+    gate.set()
     await transfer
     await client.disconnect()
 
@@ -475,11 +488,11 @@ async def test_engine_request_completes_while_a_transfer_is_running(task_side, c
 async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_on_time(
     task_side, commands, monkeypatch
 ):
-    monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.2)
+    monkeypatch.setattr(channel_module, 'CONST_CHANNEL_CONNECT_TIMEOUT', 0.05)
 
     async def trickle():
-        for _ in range(4):
-            await asyncio.sleep(0.15)
+        for _ in range(3):
+            await asyncio.sleep(0.06)
             yield b'z' * CHUNK
 
     async def handler(task, arguments, data):
@@ -489,8 +502,8 @@ async def test_a_transfer_longer_than_one_timeout_completes_when_each_chunk_is_o
     task, client = await _connect(task_side)
 
     sink = io.BytesIO()
-    await ask('big', sink=sink, timeout=0.3)
-    assert len(sink.getvalue()) == 4 * CHUNK
+    await ask('big', sink=sink, timeout=0.1)  # 0.18 s in all, past the old 0.15 s bound
+    assert len(sink.getvalue()) == 3 * CHUNK
     await client.disconnect()
 
 
@@ -527,7 +540,7 @@ async def test_unknown_or_foreign_stream_is_refused(task_side, commands):
     opened = await task_side.run(conn.send_request('big', {}, timeout=5))
     stream = opened['body']['stream']
     await client.disconnect()
-    await asyncio.sleep(0.2)
+    await until(lambda: task_channel._conn is None)
     task, client = await _connect(task_side)
     conn = task_channel._conn
     response = await task_side.run(read(stream))
@@ -541,9 +554,10 @@ async def test_unknown_or_foreign_stream_is_refused(task_side, commands):
 
 
 async def test_closed_connection_is_signalled_by_id_and_pending_requests_fail(task_side, commands):
-    release = asyncio.Event()
+    entered, release = threading.Event(), asyncio.Event()
 
     async def handler(task, arguments, data):
+        entered.set()
         await release.wait()
         return ChannelReply()
 
@@ -551,12 +565,12 @@ async def test_closed_connection_is_signalled_by_id_and_pending_requests_fail(ta
     task, client = await _connect(task_side)
 
     pending = asyncio.ensure_future(ask('hold'))
-    await asyncio.sleep(0.2)
+    await until(entered.is_set)
     await client.disconnect()
 
     with pytest.raises(ChannelUnavailable):
         await pending
-    await asyncio.sleep(0.1)
+    await until(lambda: task_side.closed)
     assert task_side.closed == [client.channel_id]
     release.set()
 
@@ -571,18 +585,19 @@ async def test_long_handler_in_the_task_does_not_delay_the_signal(task_side, com
     """The engine's own request is still running when the socket closes; the signal must not wait for it."""
     task, client = await _connect(task_side)
     conn = task_channel._conn
-    release = asyncio.Event()
+    entered, release = threading.Event(), asyncio.Event()
 
     async def on_rrext_slow(message):
+        entered.set()
         await release.wait()
         return conn.build_response(message)
 
     conn.on_rrext_slow = on_rrext_slow
     engine_request = asyncio.ensure_future(client.dap_request('rrext_slow', {}))
-    await asyncio.sleep(0.1)
+    await until(entered.is_set)
 
     client._transport.disconnect()
-    await asyncio.sleep(0.3)
+    await until(lambda: task_side.closed)  # while the handler still runs
     assert task_side.closed == [client.channel_id]
     release.set()
     with pytest.raises(Exception):
@@ -596,7 +611,7 @@ async def test_refused_handshakes_do_not_signal(task_side):
     task, client = await _connect(task_side)
     with pytest.raises(ConnectionError):
         await _connect(task_side, task)  # busy
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.05)  # no signal must follow: there is nothing to wait for
     assert task_side.closed == []
     await client.disconnect()
 
@@ -605,7 +620,7 @@ async def test_a_stopping_server_does_not_signal(task_side):
     task, client = await _connect(task_side)
     task_side.server.server.should_exit = True
     await client.disconnect()
-    await asyncio.sleep(0.2)
+    await until(lambda: task_channel._conn is None)  # the task saw the close
     assert task_side.closed == []
 
 
@@ -613,23 +628,26 @@ async def test_new_connection_during_the_old_ones_drain_serves_requests(task_sid
     commands('echo', echo)
     task, client = await _connect(task_side)
     old_conn = task_channel._conn
-    release = asyncio.Event()
+    entered, returned, release = threading.Event(), threading.Event(), asyncio.Event()
 
     async def on_rrext_slow(message):
+        entered.set()
         await release.wait()
+        returned.set()
         return old_conn.build_response(message)
 
     old_conn.on_rrext_slow = on_rrext_slow
     slow = asyncio.ensure_future(client.dap_request('rrext_slow', {}))
-    await asyncio.sleep(0.1)
+    await until(entered.is_set)
     client._transport.disconnect()
-    await asyncio.sleep(0.2)
+    await until(lambda: task_side.closed)
 
     task, client = await _connect(task_side)
     assert task_channel._conn is not old_conn
     assert (await ask('echo', {'new': 1})).body['echo'] == {'new': 1}
     release.set()
-    await asyncio.sleep(0.2)
+    await until(returned.is_set)
+    await asyncio.sleep(0.05)  # the old connection's drain ends; it must not detach the new one
     assert task_channel._conn is not None
     with pytest.raises(Exception):
         await slow
