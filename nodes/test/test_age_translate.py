@@ -437,6 +437,93 @@ class TestCapabilities:
 
 
 # ---------------------------------------------------------------------------
+# capabilities: AGE 1.6.0
+# ---------------------------------------------------------------------------
+
+_ALICE_BOB = "MATCH (a:P {name: 'alice'}), (b:P {name: 'bob'}) "
+
+# Each row writes its own MERGE-created entity: lost on AGE 1.5.0, stored on 1.6.0.
+_WRITES_EACH_ROW = [
+    'UNWIND $rows AS row MERGE (n:Item {id: row.id}) SET n.name = row.name',
+    'UNWIND $rows AS row WITH row.id AS k, row.name AS v MERGE (n:Item {id: k}) SET n.name = v',
+    'MATCH (p:P) MERGE (q:Q {name: p.name}) SET q.seen = true',
+    'MERGE (a:X {id: 1}) MERGE (b:Y {id: 2}) SET b.x = 1',
+    'MERGE (a:N {id: 1})-[:K]->(b:N {id: 2}) SET b.x = 1',
+    _ALICE_BOB + 'MERGE (a)-[r:K]->(b) SET r.since = 2024',
+    _ALICE_BOB + 'MERGE (a)-[r:K {since: 1}]->(b) REMOVE r.since',
+    _ALICE_BOB + 'MERGE (a)-[r:K]->(b) DELETE r',
+    "MATCH (p:P) MATCH (b:P {name: 'bob'}) MERGE (p)-[r:K]->(b) SET r.w = 1",
+]
+
+# One MERGE-created entity written from several rows: AGE 1.6.0 keeps one write.
+_WRITES_SAME_ENTITY_PER_ROW = [
+    'MERGE (n:C {id: 1}) WITH n UNWIND [1, 2, 3] AS i SET n.c = i',
+    'MERGE (n:C {id: 1}) WITH n MATCH (p:P) SET n.c = coalesce(n.c, 0) + 1',
+    'MERGE (n:C {id: 1}) WITH n AS m UNWIND [1, 2] AS i SET m.c = i',
+    "MERGE (p:P {name: 'alice'}) WITH p UNWIND [1, 2, 3] AS i SET p.c = i",
+    _ALICE_BOB + 'MERGE (a)-[r:K]->(b) WITH r UNWIND [1, 2, 3] AS i SET r.c = i',
+    'MERGE (n:C {id: 1}) WITH n UNWIND [{a: 1}, {b: 2}] AS m SET n += m',
+    # The MERGE pattern uses no per-row value: the same entity on every row.
+    'UNWIND $events AS e MERGE (s:Stats {id: 1}) SET s.n = coalesce(s.n, 0) + 1',
+    'MATCH (p:P) MERGE (c:Company {name: "acme"}) SET c.people = coalesce(c.people, 0) + 1',
+]
+
+
+def _params(query):
+    return {name: [] for name in ('rows', 'events') if f'${name}' in query} or None
+
+
+class TestCapabilitiesAge160:
+    @pytest.mark.parametrize('query', _WRITES_EACH_ROW)
+    def test_write_to_each_rows_own_merge_entity_accepted(self, query):
+        # Rejected on 1.5.0 (only the first created entity keeps a write)...
+        with pytest.raises(age.AgeUnsupportedFeature, match='AGE 1.5.0'):
+            age.translate(query, params=_params(query), mode=RAW, graph_name='g', age_version='1.5.0')
+        # ...accepted on 1.6.0, which applies a write to every entity a MERGE creates.
+        plan = age.translate(query, params=_params(query), mode=RAW, graph_name='g', age_version='1.6.0')
+        assert any(query in stmt for stmt in plan.statements)
+
+    @pytest.mark.parametrize('query', _WRITES_SAME_ENTITY_PER_ROW)
+    def test_same_merge_entity_written_from_several_rows_rejected(self, query):
+        with pytest.raises(age.AgeUnsupportedFeature, match='AGE 1.6.0 keeps only one'):
+            age.translate(query, params=_params(query), mode=RAW, graph_name='g', age_version='1.6.0')
+
+    def test_writes_without_merge_keep_their_behaviour(self):
+        # The rule covers writes after a MERGE only, on both versions.
+        query = "MATCH (p:P {name: 'alice'}) SET p.seen = true"
+        for version in ('1.5.0', '1.6.0'):
+            assert age.translate(query, mode=RAW, graph_name='g', age_version=version).statements
+
+    @pytest.mark.parametrize('version', ['1.6.1', '1.7.0', '1.4.0', '', 'unknown'])
+    def test_unknown_version_gets_the_strict_rules(self, version):
+        # A newer table relaxes rules an older or unknown engine may still need.
+        query = _WRITES_EACH_ROW[0]
+        with pytest.raises(age.AgeUnsupportedFeature, match='AGE 1.5.0'):
+            age.translate(query, params=_params(query), mode=RAW, graph_name='g', age_version=version)
+
+    def test_other_gaps_are_unchanged_on_1_6_0(self):
+        table_150 = age.CAPABILITY_TABLES['1.5.0']
+        table_160 = age.CAPABILITY_TABLES['1.6.0']
+        assert set(table_160) == set(table_150)
+        for feature in set(table_150) - {'merge_write'}:
+            assert table_160[feature] is table_150[feature]
+        assert table_160['merge_write'].status is age.CellStatus.REJECT
+        # Still broken on 1.6.0: the empty-list rewrite and the syntax gaps stay.
+        plan = age.translate('MATCH (n) WHERE n.id IN [] RETURN n.id', graph_name='g', age_version='1.6.0')
+        assert 'WHERE false' in plan.statements[plan.result_index]
+        with pytest.raises(age.AgeUnsupportedFeature, match='merge_on_set'):
+            age.translate('MERGE (n:P {k: 1}) ON CREATE SET n.v = 1', mode=RAW, graph_name='g', age_version='1.6.0')
+
+    def test_facts_carry_both_checks(self):
+        facts = age.analyze('UNWIND $rows AS row MERGE (n:Item {id: row.id}) SET n.x = row.x')
+        assert facts.has_unsafe_write_after_merge is True
+        assert facts.has_repeated_merge_write is False
+        facts = age.analyze('MERGE (n:C {id: 1}) WITH n UNWIND [1, 2] AS i SET n.c = i')
+        assert facts.has_unsafe_write_after_merge is True
+        assert facts.has_repeated_merge_write is True
+
+
+# ---------------------------------------------------------------------------
 # emit
 # ---------------------------------------------------------------------------
 

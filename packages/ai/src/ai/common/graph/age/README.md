@@ -5,7 +5,7 @@ envelope, a synthesized result-column list, prepared-statement parameter
 binding, and agtype result decoding — plus a firewall and a dialect gate for
 the version gaps. This package is that translation, as a **pure transform**
 (no database access), so graph nodes targeting the RocketRide cloud data-core
-(PG16 + AGE 1.5.0) can speak Cypher end to end.
+(PG16 + AGE 1.5.0 or 1.6.0) can speak Cypher end to end.
 
 ## Pipeline
 
@@ -23,7 +23,8 @@ the version gaps. This package is that translation, as a **pure transform**
    `TranslatedQuery.prepared_name`); semantic
    read-only rules (no writes, no CALL) on the **safe** path only.
 3. **Dialect** ([capabilities.py](capabilities.py)) — capability table keyed
-   by AGE version: `SUPPORTED` / `EMULATE` (same-meaning rewrite, re-analyzed
+   by AGE version (`1.5.0`, `1.6.0`; any other version gets the strictest,
+   `1.5.0`): `SUPPORTED` / `EMULATE` (same-meaning rewrite, re-analyzed
    before emit) / `REJECT` (fail loud pre-flight) / `TBD` (unverified: passes through,
    AGE's own error surfaces via EXPLAIN/execute). Verify TBD cells against
    the live instance and promote them.
@@ -86,9 +87,35 @@ Probed against a container on the live pin (PG 16.14 + AGE 1.5.0 + pgvector
   when rows repeat a key (MERGE does not see nodes created earlier in the
   same statement): de-duplicate the list before binding it.
 
-Both gaps above have canary tests in `nodes/test/test_rocketride_graph_full.py`
-that run the shape on AGE directly: when a canary fails after an AGE upgrade,
-the gap is fixed upstream and its capability cell can go.
+## Verified AGE 1.6.0 mechanics
+
+Probed against the datacore image built for 1.6.0 (PG 16.15 + AGE 1.6.0,
+rocketride-saas#814) and `apache/age:release_PG16_1.6.0`:
+
+- Writes after a `MERGE` reach every entity it creates: later `UNWIND` /
+  `MATCH` rows, a second MERGE, the nodes and edge of a path MERGE, `REMOVE`
+  and `DELETE`. `UNWIND ... MERGE` with repeated keys no longer duplicates.
+- When one entity receives several writes in one statement — a
+  `MATCH`/`UNWIND`/`CALL` after it repeats the write once per row, or two rows
+  reach it — AGE keeps only one of them (usually the first; standard Cypher
+  keeps the last). The same holds on 1.5.0, and for entities bound by `MATCH`
+  or `CREATE`. → capability REJECT (`merge_write` in the 1.6.0 table) for the
+  shapes the query text shows: a `MATCH`/`UNWIND`/`CALL` between a MERGE and a
+  write to what it introduced, or a MERGE whose pattern uses no per-row value
+  after rows were multiplied. Repeated keys in the data cannot be seen in the
+  text: keep keys unique within one batch.
+- Unchanged from 1.5.0: `x IN []`, `ORDER BY` an alias, `datetime()`, and the
+  syntax gaps (`ON CREATE SET`, `WHERE n:Label`, multi-label, `shortestPath`).
+  AGE's PG16 branch fixes `x IN []` and `ORDER BY` an alias after 1.6.0, in no
+  release yet.
+- A database opened by the 1.6.0 library keeps reporting `1.5.0` in
+  `pg_extension.extversion` until `ALTER EXTENSION age UPDATE TO '1.6.0'` runs,
+  although it already behaves as 1.6.0. The node reads `extversion`, so such a
+  database keeps the strict 1.5.0 rules until the update.
+
+The canary tests in `nodes/test/test_rocketride_graph_full.py` run each shape
+on AGE directly and record what each version stores: when one fails after an
+AGE upgrade, the engine changed and its capability cell needs a look.
 
 ## Vendored code
 

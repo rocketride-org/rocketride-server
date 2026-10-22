@@ -204,23 +204,50 @@ AGE_1_5_0: Dict[str, Capability] = {
     )
 }
 
+# ---------------------------------------------------------------------------
+# AGE 1.6.0 — verified 2026-10-13 / 2026-10-19 against the datacore image built
+# for it (PG 16.15 + AGE 1.6.0, rocketride-saas#814). SET/REMOVE/DELETE now reach
+# every entity a MERGE creates, but when one entity receives several writes in a
+# statement only one of them is kept — on 1.5.0 as well, and also for entities
+# bound by MATCH or CREATE. Everything else behaves as on 1.5.0.
+# ---------------------------------------------------------------------------
+
+AGE_1_6_0: Dict[str, Capability] = {
+    **AGE_1_5_0,
+    'merge_write': Capability(
+        feature='merge_write',
+        status=CellStatus.REJECT,
+        detect=lambda facts: facts.has_repeated_merge_write,
+        detail=(
+            'AGE 1.6.0 keeps only one of several SET/REMOVE/DELETE writes that one entity a '
+            'MERGE created receives in a statement: here the same entity is written from '
+            'several rows (a MATCH/UNWIND/CALL after the MERGE, or a MERGE whose pattern '
+            'uses no per-row value). Make each row write its own entity, compute the value '
+            'once (aggregate first), or run the write as a separate execute call '
+            '(MATCH (n:L {key: ...}) SET n.prop = ...)'
+        ),
+    ),
+}
+
 #: Capability tables keyed by AGE version string.
 CAPABILITY_TABLES: Dict[str, Dict[str, Capability]] = {
     '1.5.0': AGE_1_5_0,
+    '1.6.0': AGE_1_6_0,
 }
 
+#: The strictest table: used for the default and for any version not listed.
 DEFAULT_AGE_VERSION = '1.5.0'
 
 
 def apply_capabilities(facts: CypherFacts, age_version: str = DEFAULT_AGE_VERSION) -> CypherFacts:
     """Run the dialect gate: REJECT cells raise; EMULATE cells rewrite.
 
-    Unknown versions fall back to the newest known table (closest behaviour
-    beats no gate at all). TBD and SUPPORTED cells pass through unchanged.
+    A version without its own table gets the strictest one
+    (``DEFAULT_AGE_VERSION``): a newer table relaxes rules that an older or
+    unknown engine may still need. TBD and SUPPORTED cells pass through
+    unchanged.
     """
-    table = CAPABILITY_TABLES.get(age_version)
-    if table is None:
-        table = CAPABILITY_TABLES[sorted(CAPABILITY_TABLES)[-1]]
+    table = CAPABILITY_TABLES.get(age_version) or CAPABILITY_TABLES[DEFAULT_AGE_VERSION]
 
     for cap in table.values():
         if not cap.detect(facts):

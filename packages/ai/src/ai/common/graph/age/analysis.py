@@ -92,6 +92,10 @@ class CypherFacts:
     # the change on (capability: merge_write — AGE applies it only to the first
     # entity a MERGE creates, while RETURN still shows the new value).
     has_unsafe_write_after_merge: bool = False
+    # The same check for AGE 1.6.0 (capability: merge_write in the 1.6.0 table):
+    # a write after a MERGE may reach one MERGE-created entity from several rows,
+    # and AGE keeps only one of those writes.
+    has_repeated_merge_write: bool = False
     # Character spans (start, stop inclusive) of '<expr> IN <empty list>'
     # (capability: empty_list_in — AGE 1.5.0 matches every row, or fails with
     # 'cache lookup failed for type 0' under NOT / AND / RETURN).
@@ -321,32 +325,77 @@ _ROW_MULTIPLYING_CLAUSES = (
 )
 
 
-def _unsafe_write_after_merge(single_query) -> bool:
-    """True when a SET/REMOVE/DELETE after a MERGE changes something AGE 1.5.0 may drop.
+def _referenced_variables(ctx) -> Set[str]:
+    """Every variable name used under ``ctx``: pattern nodes, property values, and so on."""
+    names: Set[str] = set()
 
-    AGE 1.5.0 applies these changes only to the first entity a MERGE creates
-    in a statement. Changes to every other entity a MERGE creates — on later
-    rows, by a second MERGE, the far node or the edge of a path MERGE — are
-    dropped while RETURN shows them. Whether a MERGE matches or creates, and
-    how many rows reach it, are unknown before execution, so after the first
-    MERGE a write may only target:
+    def visit(node) -> None:
+        if isinstance(node, CypherParser.OC_VariableContext):
+            names.add(_strip_backticks(node.getText()))
 
-    - a variable bound before that MERGE (a rename through WITH keeps it), or
-    - the node of a single-node MERGE that opens the query (one row, so it is
-      the first entity created), until a MATCH/UNWIND/CALL multiplies rows.
+    _walk(ctx, visit)
+    return names
 
-    A target that cannot be named counts as unsafe.
+
+def _project_row_variables(items_ctx, row_vars: Set[str]) -> Set[str]:
+    """Per-row variables after a WITH: names whose expression uses a per-row variable.
+
+    ``WITH *`` keeps them all; ``WITH row.id AS k`` makes ``k`` per-row when
+    ``row`` is.
+    """
+    star = items_ctx.getChild(0).getText() == '*'
+    out = set(row_vars) if star else set()
+    for item in items_ctx.oC_ProjectionItem():
+        alias = item.oC_Variable()
+        name = _strip_backticks(alias.getText()) if alias is not None else _bare_variable(item.oC_Expression())
+        if name is None:
+            continue
+        if _referenced_variables(item.oC_Expression()) & row_vars:
+            out.add(name)
+        else:
+            out.discard(name)
+    return out
+
+
+def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = False) -> bool:
+    """True when a SET/REMOVE/DELETE after a MERGE changes something AGE may drop.
+
+    Two engine behaviours, picked by ``writes_reach_every_merge``:
+
+    - ``False`` (AGE 1.5.0): changes reach only the first entity a MERGE
+      creates in a statement. Changes to every other entity a MERGE creates —
+      on later rows, by a second MERGE, the far node or the edge of a path
+      MERGE — are dropped while RETURN shows them. After the first MERGE a
+      write may only target a variable bound before it, or the node of a
+      single-node MERGE that opens the query (one row, so it is the first
+      entity created).
+    - ``True`` (AGE 1.6.0): changes reach every entity a MERGE creates, but
+      when one entity receives several writes in a statement, AGE keeps only
+      one of them. A write may target a variable a MERGE introduced when every
+      row writes its own entity: the MERGE runs before any MATCH/UNWIND/CALL,
+      or its pattern uses a variable that differs from row to row. A MERGE
+      whose pattern uses no per-row variable after rows were multiplied
+      matches the same entity on every row, so writes to it are unsafe.
+
+    In both modes a MATCH/UNWIND/CALL between the MERGE and the write repeats
+    the write once per row on the same entity, so it makes the target unsafe;
+    a target that cannot be named counts as unsafe too. Repeated keys in the
+    data (one entity reached from two rows) cannot be seen in the query text.
     """
     bound: Set[str] = set()
     # None until the first MERGE; then the variables bound before it.
     safe: Optional[Set[str]] = None
-    # Node of a single-node MERGE that opens the query, while still one row.
-    opening: Set[str] = set()
+    # Variables a MERGE introduced that each row still writes once.
+    fresh: Set[str] = set()
+    # Variables whose value can differ from row to row, and whether rows have
+    # been multiplied yet (both used in the 1.6.0 mode only).
+    row_vars: Set[str] = set()
+    multiplied = False
     for index, clause in enumerate(_clauses(single_query)):
         if isinstance(clause, _WRITE_CLAUSES):
             if safe is None:
                 continue
-            if any(t is None or (t not in safe and t not in opening) for t in _write_targets(clause)):
+            if any(t is None or (t not in safe and t not in fresh) for t in _write_targets(clause)):
                 return True
             continue
         if isinstance(clause, CypherParser.OC_MergeContext):
@@ -354,24 +403,37 @@ def _unsafe_write_after_merge(single_query) -> bool:
             introduced = _pattern_variables(part) - bound
             if safe is None:
                 safe = set(bound)
-                if index == 0 and not _has_relationship(part):
-                    opening = introduced
+                if not writes_reach_every_merge and index == 0 and not _has_relationship(part):
+                    fresh = introduced
+            if writes_reach_every_merge and (not multiplied or (_referenced_variables(part) - introduced) & row_vars):
+                fresh |= introduced
+                if multiplied:
+                    row_vars |= introduced
             bound |= introduced
             continue
         if isinstance(clause, _ROW_MULTIPLYING_CLAUSES):
-            opening = set()
+            fresh = set()
+            multiplied = True
         if isinstance(clause, (CypherParser.OC_MatchContext, CypherParser.OC_CreateContext)):
-            bound |= _pattern_variables(clause.oC_Pattern())
+            variables = _pattern_variables(clause.oC_Pattern())
+            bound |= variables
+            if multiplied:
+                row_vars |= variables
         elif isinstance(clause, CypherParser.OC_UnwindContext):
-            bound.add(_strip_backticks(clause.oC_Variable().getText()))
+            variable = _strip_backticks(clause.oC_Variable().getText())
+            bound.add(variable)
+            row_vars.add(variable)
         elif isinstance(clause, CypherParser.OC_InQueryCallContext) and clause.oC_YieldItems() is not None:
-            bound |= {_strip_backticks(y.oC_Variable().getText()) for y in clause.oC_YieldItems().oC_YieldItem()}
+            yielded = {_strip_backticks(y.oC_Variable().getText()) for y in clause.oC_YieldItems().oC_YieldItem()}
+            bound |= yielded
+            row_vars |= yielded
         elif isinstance(clause, CypherParser.OC_WithContext):
             items = clause.oC_ProjectionBody().oC_ProjectionItems()
+            row_vars = _project_row_variables(items, row_vars)
             if safe is None:
                 bound, _ = _project(items, bound, [])
             else:
-                bound, (safe, opening) = _project(items, bound, [safe, opening])
+                bound, (safe, fresh) = _project(items, bound, [safe, fresh])
     return False
 
 
@@ -474,6 +536,9 @@ def analyze(query: str) -> CypherFacts:
     try:
         _walk(tree, visit)
         facts.has_unsafe_write_after_merge = any(_unsafe_write_after_merge(q) for q in single_queries)
+        facts.has_repeated_merge_write = any(
+            _unsafe_write_after_merge(q, writes_reach_every_merge=True) for q in single_queries
+        )
     except RecursionError:
         raise AgeTranslationError(
             'Cypher expression is nested too deeply to analyze (reduce parenthesis/expression nesting)'

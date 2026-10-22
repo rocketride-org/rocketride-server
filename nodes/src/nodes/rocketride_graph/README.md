@@ -50,16 +50,26 @@ execute bypasses the read-only gate but still passes Cypher through the AGE
 translation and resource limits; it raises if direct execution is disabled or
 the input is invalid, and otherwise returns {rows, affected_rows}.
 
-The translator also guards two AGE 1.5.0 gaps that would otherwise return wrong
-data without an error. An empty-list test such as `x IN []` is rewritten to
-`false`, its standard Cypher value. AGE applies SET, REMOVE and DELETE only to
-the first node or edge a MERGE creates in a statement, so after a MERGE these
-are rejected unless they change a variable bound before that MERGE, or the node
-of a single-node MERGE that starts the query. For a bulk upsert, run the MERGE,
-then the SET as a separate execute call, for example
+The translator also guards AGE gaps that would otherwise return wrong data
+without an error, with rules for the AGE version the database reports (1.5.0 or
+1.6.0; any other version gets the 1.5.0 rules). An empty-list test such as
+`x IN []` is rewritten to `false`, its standard Cypher value.
+
+After a MERGE, SET, REMOVE and DELETE are checked. AGE 1.5.0 applies them only
+to the first node or edge a MERGE creates in a statement, so they are rejected
+unless they change a variable bound before that MERGE, or the node of a
+single-node MERGE that starts the query; for a bulk upsert, run the MERGE, then
+the SET as a separate execute call, for example
 `UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name`.
-Properties written inside the MERGE pattern are stored, but MERGE matches on
-them: with different values it creates a second node or edge.
+AGE 1.6.0 applies them to every entity a MERGE creates, so the one-call form
+`UNWIND $rows AS row MERGE (n:Item {id: row.id}) SET n.name = row.name` works.
+It is still rejected when one MERGE-created entity would be written from several
+rows, because AGE keeps only one of those writes.
+
+On both versions, keep keys unique within one call: when two rows reach the same
+node or edge, AGE keeps only one of their writes. Properties written inside the
+MERGE pattern are stored, but MERGE matches on them: with different values it
+creates a second node or edge.
 
 ## Configuration
 

@@ -25,9 +25,10 @@
 
 """Integration tests for rocketride_graph against a real Postgres + Apache AGE.
 
-Runs the node end-to-end on the live pin (PG16 + AGE 1.5.0) through the real
-seam (the DSN delivered in ``ROCKETRIDE_DB_DSNS``, as the task engine does).
-Container:
+Runs the node end-to-end on PG16 + Apache AGE (1.5.0 or 1.6.0, the versions
+with their own Cypher rules) through the real seam (the DSN delivered in
+``ROCKETRIDE_DB_DSNS``, as the task engine does). Expectations that differ by
+engine version follow the version the test database reports. Container:
 
     docker run -d --name rr-pg-phase2 -p 55433:5432 \
         -e POSTGRES_PASSWORD=rrpass -e POSTGRES_USER=rruser -e POSTGRES_DB=rrtenant \
@@ -89,6 +90,35 @@ if _DB_TESTS_REQUIRED and not _db_reachable():
     pytest.fail(f'RR_REQUIRE_DB_TESTS is set but the AGE test database is not reachable at {TEST_DSN}', pytrace=False)
 
 pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide AGE test database not reachable at {TEST_DSN}')
+
+
+def _server_age_version() -> str | None:
+    """The AGE version the test database reports, or None when it has no AGE."""
+    try:
+        conn = psycopg2.connect(TEST_DSN, connect_timeout=3)
+    except Exception:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT extversion FROM pg_extension WHERE extname = 'age'")
+            row = cur.fetchone()
+            return row[0] if row else None
+    finally:
+        conn.close()
+
+
+SERVER_AGE_VERSION = _server_age_version()
+
+# The node picks its Cypher rules by AGE version; any version without its own
+# rules gets the strict 1.5.0 ones.
+RULES_VERSION = SERVER_AGE_VERSION if SERVER_AGE_VERSION in ('1.5.0', '1.6.0') else '1.5.0'
+
+
+def _by_version(expected: dict):
+    """The recorded result for the AGE version under test; skip when none is recorded."""
+    if SERVER_AGE_VERSION not in expected:
+        pytest.skip(f'no recorded AGE behaviour for version {SERVER_AGE_VERSION}')
+    return expected[SERVER_AGE_VERSION]
 
 
 def _load_from_path(name: str, path: Path, *, is_package: bool = False):
@@ -217,7 +247,7 @@ class TestLifecycle:
     def test_begin_global_connects_and_reflects(self, rr_env, age_graph):
         glb = _begin(rr_env)
         try:
-            assert glb.age_version == '1.5.0'
+            assert glb.age_version == SERVER_AGE_VERSION
             assert glb.graph_name == GRAPH
             assert set(glb.graph_schema['nodes']) == {'Person', 'Company'}
             props = dict(glb.graph_schema['nodes']['Person'])
@@ -409,9 +439,9 @@ class TestExecuteParams:
         finally:
             glb.endGlobal()
 
-    def test_canary_age_unwind_merge_duplicates_repeated_keys(self, rr_env, age_graph):
-        # AGE 1.5.0 gap documented in the READMEs: MERGE does not see nodes
-        # created earlier in the same UNWIND. When this fails, the pin fixed it.
+    def test_canary_unwind_merge_with_repeated_keys(self, rr_env, age_graph):
+        # AGE 1.5.0: MERGE does not see nodes created earlier in the same
+        # UNWIND, so a repeated key makes a duplicate. AGE 1.6.0 fixed it.
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
@@ -422,7 +452,8 @@ class TestExecuteParams:
                     'params': {'rows': [{'id': 1}, {'id': 1}, {'id': 2}]},
                 }
             )
-            assert glb._run_query('MATCH (u:U) RETURN count(u) AS n') == [{'n': 3}]
+            nodes = _by_version({'1.5.0': 3, '1.6.0': 2})
+            assert glb._run_query('MATCH (u:U) RETURN count(u) AS n') == [{'n': nodes}]
         finally:
             glb.endGlobal()
 
@@ -487,14 +518,15 @@ def _raw_cypher(conn, body: str, columns: str = 'v agtype') -> list:
 
 
 class TestAgeDataGaps:
-    """AGE 1.5.0 shapes that report success while storing or returning wrong data.
+    """AGE shapes that report success while storing or returning wrong data.
 
-    Each gap has a canary that runs the shape on AGE directly and pins the
-    wrong behaviour (when it starts failing, the AGE pin has fixed the gap and
-    its capability cell can go), plus tests that the node path is correct.
+    Each gap has a canary that runs the shape on AGE directly and pins what the
+    engine stores, per AGE version (when one starts failing, the engine changed
+    and its capability cell needs a look), plus tests that the node path is
+    correct for the version the database reports.
     """
 
-    def test_canary_age_drops_set_on_merged_relationship(self, rr_env, age_graph):
+    def test_canary_set_on_merged_relationship(self, rr_env, age_graph):
         returned = _raw_cypher(
             age_graph,
             "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
@@ -503,21 +535,30 @@ class TestAgeDataGaps:
         )
         assert returned == [('2024',)]
         stored = _raw_cypher(age_graph, 'MATCH ()-[r:MENTORS]->() RETURN r.since', 'since agtype')
-        assert stored == [(None,)]
+        assert stored == _by_version({'1.5.0': [(None,)], '1.6.0': [('2024',)]})
 
-    def test_canary_age_drops_set_on_new_end_node_of_path_merge(self, rr_env, age_graph):
+    def test_canary_set_on_new_end_node_of_path_merge(self, rr_env, age_graph):
         _raw_cypher(age_graph, "MERGE (a:Person {name:'erin'})-[:KNOWS]->(b:Person {name:'fay'}) SET b.age = 7")
         stored = _raw_cypher(age_graph, "MATCH (b:Person {name:'fay'}) RETURN b.age", 'age agtype')
-        assert stored == [(None,)]
+        assert stored == _by_version({'1.5.0': [(None,)], '1.6.0': [('7',)]})
 
-    def test_canary_age_drops_remove_on_merged_relationship(self, rr_env, age_graph):
+    def test_canary_remove_on_merged_relationship(self, rr_env, age_graph):
         _raw_cypher(
             age_graph,
             "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
             'MERGE (a)-[r:MENTORS {since: 2024}]->(c) REMOVE r.since',
         )
         stored = _raw_cypher(age_graph, 'MATCH ()-[r:MENTORS]->() RETURN r.since', 'since agtype')
-        assert stored == [('2024',)]
+        assert stored == _by_version({'1.5.0': [('2024',)], '1.6.0': [(None,)]})
+
+    def test_canary_several_writes_to_one_entity_keep_one(self, rr_env, age_graph):
+        # Both versions: when one entity receives a write from every row, AGE
+        # keeps one of them — for a MERGE-created node and, without any MERGE,
+        # for a matched one (standard Cypher keeps the last: 3).
+        _raw_cypher(age_graph, 'MERGE (n:U {id: 1}) WITH n UNWIND [1, 2, 3] AS i SET n.c = i')
+        assert _raw_cypher(age_graph, 'MATCH (n:U {id: 1}) RETURN n.c', 'c agtype') == [('1',)]
+        _raw_cypher(age_graph, "MATCH (p:Person {name:'alice'}) UNWIND [1, 2, 3] AS i SET p.c = i")
+        assert _raw_cypher(age_graph, "MATCH (p:Person {name:'alice'}) RETURN p.c", 'c agtype') == [('1',)]
 
     def test_canary_merge_with_other_pattern_properties_adds_an_edge(self, rr_env, age_graph):
         # Why the rejection message leads with a separate SET call: MERGE
@@ -535,25 +576,50 @@ class TestAgeDataGaps:
         assert len(rows) == 3
 
     @pytest.mark.parametrize(
-        'query',
+        ('query', 'read_back', 'stored_on_1_6_0'),
         [
-            "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) MERGE (a)-[r:MENTORS]->(c) SET r.since = 2024",
-            "MERGE (a:Person {name:'erin'})-[:MENTORS]->(b:Person {name:'fay'}) SET b.age = 7",
-            "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
-            'MERGE (a)-[r:MENTORS]->(c) WITH r AS e SET e.since = 2024',
-            "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) MERGE (a)-[r:MENTORS]->(c) SET (r).since = 2024",
-            "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
-            'MERGE (a)-[r:MENTORS {since: 2024}]->(c) REMOVE r.since',
+            (
+                "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) MERGE (a)-[r:MENTORS]->(c) SET r.since = 2024",
+                'MATCH ()-[r:MENTORS]->() RETURN r.since',
+                [('2024',)],
+            ),
+            (
+                "MERGE (a:Person {name:'erin'})-[:MENTORS]->(b:Person {name:'fay'}) SET b.age = 7",
+                "MATCH (:Person {name:'erin'})-[:MENTORS]->(b:Person {name:'fay'}) RETURN b.age",
+                [('7',)],
+            ),
+            (
+                "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
+                'MERGE (a)-[r:MENTORS]->(c) WITH r AS e SET e.since = 2024',
+                'MATCH ()-[r:MENTORS]->() RETURN r.since',
+                [('2024',)],
+            ),
+            (
+                "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) MERGE (a)-[r:MENTORS]->(c) SET (r).since = 2024",
+                'MATCH ()-[r:MENTORS]->() RETURN r.since',
+                [('2024',)],
+            ),
+            (
+                "MATCH (a:Person {name:'alice'}), (c:Person {name:'carol'}) "
+                'MERGE (a)-[r:MENTORS {since: 2024}]->(c) REMOVE r.since',
+                'MATCH ()-[r:MENTORS]->() RETURN r.since',
+                [(None,)],
+            ),
         ],
     )
-    def test_write_after_relationship_merge_rejected_before_db(self, rr_env, age_graph, query):
+    def test_write_after_relationship_merge(self, rr_env, age_graph, query, read_back, stored_on_1_6_0):
+        """1.5.0 rules: rejected before the database. 1.6.0 rules: run and stored."""
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
         try:
-            with pytest.raises(Exception, match='separate execute call'):
+            if RULES_VERSION == '1.6.0':
                 inst.execute({'query': query})
-            assert _raw_cypher(age_graph, 'MATCH ()-[r:MENTORS]->() RETURN count(r)', 'n agtype') == [('0',)]
+                assert _raw_cypher(age_graph, read_back, 'v agtype') == stored_on_1_6_0
+            else:
+                with pytest.raises(Exception, match='separate execute call'):
+                    inst.execute({'query': query})
+                assert _raw_cypher(age_graph, 'MATCH ()-[r:MENTORS]->() RETURN count(r)', 'n agtype') == [('0',)]
         finally:
             glb.endGlobal()
 
@@ -572,44 +638,105 @@ class TestAgeDataGaps:
         finally:
             glb.endGlobal()
 
-    def test_canary_age_keeps_set_only_on_first_node_a_merge_creates(self, rr_env, age_graph):
+    def test_canary_set_on_every_node_merge_creates(self, rr_env, age_graph):
         _raw_cypher(
             age_graph,
             "UNWIND [{id: 1, x: 'a'}, {id: 2, x: 'b'}, {id: 3, x: 'c'}] AS row "
             'MERGE (n:U {id: row.id}) SET n.x = row.x',
         )
         stored = _raw_cypher(age_graph, 'MATCH (n:U) RETURN n.id, n.x ORDER BY n.id', 'id agtype, x agtype')
-        assert stored == [('1', '"a"'), ('2', None), ('3', None)]
+        assert stored == _by_version(
+            {
+                '1.5.0': [('1', '"a"'), ('2', None), ('3', None)],
+                '1.6.0': [('1', '"a"'), ('2', '"b"'), ('3', '"c"')],
+            }
+        )
 
-    def test_canary_age_drops_set_on_second_merge(self, rr_env, age_graph):
+    def test_canary_set_on_second_merge(self, rr_env, age_graph):
         _raw_cypher(age_graph, 'MERGE (a:X {id: 1}) MERGE (b:Y {id: 2}) SET a.v = 1, b.v = 1')
-        assert _raw_cypher(age_graph, 'MATCH (a:X), (b:Y) RETURN a.v, b.v', 'a agtype, b agtype') == [('1', None)]
+        stored = _raw_cypher(age_graph, 'MATCH (a:X), (b:Y) RETURN a.v, b.v', 'a agtype, b agtype')
+        assert stored == _by_version({'1.5.0': [('1', None)], '1.6.0': [('1', '1')]})
 
-    def test_canary_age_drops_delete_on_merged_relationship(self, rr_env, age_graph):
+    def test_canary_delete_on_merged_relationship(self, rr_env, age_graph):
         _raw_cypher(
             age_graph, "MATCH (a:Person {name:'alice'}), (b:Person {name:'carol'}) MERGE (a)-[r:MENTORS]->(b) DELETE r"
         )
-        assert _raw_cypher(age_graph, 'MATCH ()-[r:MENTORS]->() RETURN count(r)', 'n agtype') == [('1',)]
+        left = _raw_cypher(age_graph, 'MATCH ()-[r:MENTORS]->() RETURN count(r)', 'n agtype')
+        assert left == _by_version({'1.5.0': [('1',)], '1.6.0': [('0',)]})
+
+    @pytest.mark.parametrize(
+        ('query', 'read_back', 'stored_on_1_6_0'),
+        [
+            (
+                "UNWIND [{id: 1, x: 'a'}, {id: 2, x: 'b'}] AS row MERGE (n:U {id: row.id}) SET n.x = row.x",
+                'MATCH (n:U) WITH n ORDER BY n.id RETURN collect(n.x)',
+                [('["a", "b"]',)],
+            ),
+            (
+                'MERGE (a:X {id: 1}) MERGE (b:Y {id: 2}) SET b.v = 1',
+                'MATCH (b:Y) RETURN b.v',
+                [('1',)],
+            ),
+            (
+                "MATCH (a:Person {name:'alice'}), (b:Person {name:'carol'}) MERGE (a)-[r:MENTORS]->(b) DELETE r",
+                'MATCH ()-[r:MENTORS]->() RETURN count(r)',
+                [('0',)],
+            ),
+        ],
+    )
+    def test_write_after_node_merge(self, rr_env, age_graph, query, read_back, stored_on_1_6_0):
+        """1.5.0 rules: rejected before the database. 1.6.0 rules: run and stored."""
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            if RULES_VERSION == '1.6.0':
+                inst.execute({'query': query})
+                assert _raw_cypher(age_graph, read_back, 'v agtype') == stored_on_1_6_0
+            else:
+                with pytest.raises(Exception, match='separate execute call'):
+                    inst.execute({'query': query})
+                # Nothing reached the database. (AGE has no 'WHERE n:Label',
+                # so each label is counted on its own.)
+                for pattern in ('(n:U)', '(n:X)', '(n:Y)', '()-[n:MENTORS]->()'):
+                    assert _raw_cypher(age_graph, f'MATCH {pattern} RETURN count(n)', 'n agtype') == [('0',)]
+        finally:
+            glb.endGlobal()
 
     @pytest.mark.parametrize(
         'query',
         [
-            "UNWIND [{id: 1, x: 'a'}, {id: 2, x: 'b'}] AS row MERGE (n:U {id: row.id}) SET n.x = row.x",
-            'MERGE (a:X {id: 1}) MERGE (b:Y {id: 2}) SET b.v = 1',
-            "MATCH (a:Person {name:'alice'}), (b:Person {name:'carol'}) MERGE (a)-[r:MENTORS]->(b) DELETE r",
+            'MERGE (n:U {id: 1}) WITH n UNWIND [1, 2, 3] AS i SET n.x = i',
+            'MERGE (n:U {id: 1}) WITH n MATCH (p:Person) SET n.x = p.name',
+            'UNWIND [1, 2, 3] AS i MERGE (n:U {id: 1}) SET n.x = coalesce(n.x, 0) + 1',
         ],
     )
-    def test_unsafe_write_after_merge_rejected_before_db(self, rr_env, age_graph, query):
+    def test_same_merge_entity_written_from_several_rows_rejected_before_db(self, rr_env, age_graph, query):
+        """Rejected on every AGE version: the engine keeps one of the writes."""
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
         try:
             with pytest.raises(Exception, match='separate execute call'):
                 inst.execute({'query': query})
-            # Nothing reached the database. (AGE 1.5.0 has no 'WHERE n:Label',
-            # so each label is counted on its own.)
-            for pattern in ('(n:U)', '(n:X)', '(n:Y)', '()-[n:MENTORS]->()'):
-                assert _raw_cypher(age_graph, f'MATCH {pattern} RETURN count(n)', 'n agtype') == [('0',)]
+            assert _raw_cypher(age_graph, 'MATCH (n:U) RETURN count(n)', 'n agtype') == [('0',)]
+        finally:
+            glb.endGlobal()
+
+    def test_bulk_upsert_in_one_call_with_params(self, rr_env, age_graph):
+        """1.6.0 rules: UNWIND + MERGE + SET stores every row in one call."""
+        if RULES_VERSION != '1.6.0':
+            pytest.skip('one-call bulk upsert is rejected on the AGE 1.5.0 rules')
+        rows = [{'id': i, 'x': f'v{i}'} for i in range(1, 6)]
+        glb = _begin(rr_env, {'allow_execute': True})
+        inst = rr_env.iinstance_cls()
+        inst.IGlobal = glb
+        try:
+            inst.execute(
+                {'query': 'UNWIND $rows AS row MERGE (n:U {id: row.id}) SET n.x = row.x', 'params': {'rows': rows}}
+            )
+            stored = glb._run_query('MATCH (n:U) RETURN n.id AS id, n.x AS x ORDER BY n.id')
+            assert stored == rows
         finally:
             glb.endGlobal()
 

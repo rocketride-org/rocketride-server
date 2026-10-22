@@ -680,21 +680,26 @@ an agent can control a graph store as a tool instead.
 
 **Writing to a graph store** goes through its `execute` tool (node config
 `allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. On `rocketride_graph`
-(Apache AGE 1.5.0):
+the rules follow the Apache AGE version of the database (1.5.0 or 1.6.0):
 
 - Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
   Cypher text: no escaping, and bound values do not count toward the 10,000-character query
   limit. `graph_neo4j` accepts `params` too; `graph_falkordb` rejects them.
-- A bulk upsert is TWO calls. AGE applies SET / REMOVE / DELETE only to the first node or edge a
-  MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is rejected:
+- On AGE 1.5.0 a bulk upsert is TWO calls. AGE 1.5.0 applies SET / REMOVE / DELETE only to the
+  first node or edge a MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is
+  rejected:
 
   ```text
   call 1:  UNWIND $rows AS row MERGE (:Item {id: row.id})
   call 2:  UNWIND $rows AS row MATCH (n:Item {id: row.id}) SET n.name = row.name
   ```
 
-- Remove repeated keys from `$rows` before the MERGE call: `UNWIND ... MERGE` creates one node
-  per row even when keys repeat.
+  On AGE 1.6.0 the one-call form `UNWIND $rows AS row MERGE (n:Item {id: row.id}) SET n.name =
+  row.name` works. It is still rejected when a MATCH / UNWIND / CALL after the MERGE would write
+  the same node once per row. The two-call form works on both versions.
+- Keep keys unique within `$rows`: when two rows reach the same node or edge, AGE keeps only one of
+  their writes (both versions), and on AGE 1.5.0 `UNWIND ... MERGE` also creates one node per row
+  for a repeated key.
 
 ### Pattern 15: Memory options
 
