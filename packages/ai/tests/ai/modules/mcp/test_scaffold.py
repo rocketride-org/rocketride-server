@@ -82,6 +82,15 @@ async def test_the_provider_is_the_protocol(catalog_engine):
 
 
 @pytest.mark.asyncio
+async def test_the_files_are_written_from_the_folder_that_holds_nodes(catalog_engine):
+    """Every path starts with nodes/, so writing it inside nodes/ would nest it in nodes/nodes/."""
+    result = await _scaffold(catalog_engine, name='my_node')
+
+    assert all(path.startswith('nodes/my_node/') for path in result['files'])
+    assert any("relative to the folder that holds the engine's nodes/" in step for step in result['next_steps'])
+
+
+@pytest.mark.asyncio
 async def test_the_parent_carries_no_package_marker(catalog_engine):
     """`nodes` is a namespace package: an __init__.py there would close it.
 

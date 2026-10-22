@@ -5,6 +5,7 @@
 
 """Every `nodes` root gets its baseline installed: `nodes` is a namespace package."""
 
+import os
 from types import SimpleNamespace
 
 import ai
@@ -18,7 +19,7 @@ def test_each_nodes_root_installs_its_baseline(monkeypatch):
 
     ai.install_node_baseline()
 
-    assert installed == ['/server/nodes/requirements.txt', '/run/nodes/requirements.txt']
+    assert installed == [os.path.join(root, 'requirements.txt') for root in ('/server/nodes', '/run/nodes')]
 
 
 def test_no_nodes_package_installs_nothing(monkeypatch):
