@@ -1,0 +1,23 @@
+{
+	"title": "Source",
+	"protocol": "fx_source://",
+	"classType": [
+		"source"
+	],
+	"capabilities": [],
+	"register": "endpoint",
+	"node": "python",
+	"path": "nodes.fx_source",
+	"prefix": "fx_source",
+	"description": [
+		"Test fixture: source."
+	],
+	"lanes": {
+		"_source": [
+			"tags",
+			"text"
+		]
+	},
+	"fields": {},
+	"shape": []
+}

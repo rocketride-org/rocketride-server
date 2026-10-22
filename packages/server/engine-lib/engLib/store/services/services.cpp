@@ -248,6 +248,9 @@ static application::Opt NodePath{"--node_path"};
 //          If it is only passing through data on other lanes, it should
 //          not be included.
 //
+//          {"*": ["*"]} accepts any lane and forwards it; {"*": []} accepts
+//          any lane and forwards nothing. See buildConnections.
+//
 //      "render":
 //          Array of strings that define the fields within the configuration
 //          information which should be rendered to a summmary title. They
@@ -1654,387 +1657,416 @@ Error IServices::declareNode(const ServiceDefinition &def) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Loads all the service definitions
+///		Registers every services*.json under a directory, walking into
+///		subdirectories; resolving them is the caller's
+///	@param[in]	path
+///		The directory
+///	@param[in]	mask
+///		The entries to look at
 //-------------------------------------------------------------------------
-Error IServices::init() noexcept {
-    // Lambda to walk the paths
-    const std::function<Error(const Path &, const Text &)> loadServices =
-        localfcn(const Path &path, const Text &mask)->Error {
-        // Get the scanner
-        file::FileScanner scanner(path / mask);
+Error IServices::loadServices(const Path &path, const Text &mask) noexcept {
+    // Get the scanner
+    file::FileScanner scanner(path / mask);
 
-        // Start the scan - if nothing found, it's okay
-        if (auto ccode = scanner.open()) return {};
+    // Start the scan - if nothing found, it's okay
+    if (auto ccode = scanner.open()) return {};
 
-        // While we have entries
-        _forever() {
-            // Get the next file
-            auto entry = scanner.next();
-            if (!entry) return {};
+    // While we have entries
+    _forever() {
+        // Get the next file
+        auto entry = scanner.next();
+        if (!entry) return {};
 
-            // If this is a directory, walk into it
-            if (entry->second.isDir) {
-                auto newPath = path / entry->first;
-                if (auto ccode = loadServices(newPath, (Text) "services.*json"))
-                    return ccode;
-                continue;
-            }
+        // If this is a directory, walk into it
+        if (entry->second.isDir) {
+            auto newPath = path / entry->first;
+            if (auto ccode = loadServices(newPath, (Text) "services.*json"))
+                return ccode;
+            continue;
+        }
 
-            // If this is not a services file, skip it
-            if (!entry->first.startsWith("services.")) continue;
+        // If this is not a services file, skip it
+        if (!entry->first.startsWith("services.")) continue;
 
-            // If this is not a json file, skip it
-            if (!entry->first.endsWith(".json")) continue;
+        // If this is not a json file, skip it
+        if (!entry->first.endsWith(".json")) continue;
 
-            // Get the path
-            const auto definitionPath = path / entry->first;
+        // Get the path
+        const auto definitionPath = path / entry->first;
 
-            LOG(Services, "Loading", definitionPath);
+        LOG(Services, "Loading", definitionPath);
 
-            // Get the service info
-            auto contents = file::fetch<TextChr>(definitionPath);
-            if (!contents) continue;
+        // Get the service info
+        auto contents = file::fetch<TextChr>(definitionPath);
+        if (!contents) continue;
 
-            // Parse it into json
-            auto serviceJson = json::parse(*contents);
-            if (!serviceJson)
-                return APERR(Ec::InvalidJson, serviceJson.ccode().message(),
-                             " in", definitionPath);
+        // Parse it into json
+        auto serviceJson = json::parse(*contents);
+        if (!serviceJson)
+            return APERR(Ec::InvalidJson, serviceJson.ccode().message(),
+                         " in", definitionPath);
 
-            // Get
-            auto serviceInfo = *serviceJson;
+        // Get
+        auto serviceInfo = *serviceJson;
 
-            // Get the type
-            iText protocol = serviceInfo.lookup<iText>("protocol");
-            if (!protocol) {
-                LOG(Services, "    Define global fields");
+        // Get the type
+        iText protocol = serviceInfo.lookup<iText>("protocol");
+        if (!protocol) {
+            LOG(Services, "    Define global fields");
 
-                // This is not a specific service, so load any
-                // global fields it defines
-                loadGlobalFields(serviceInfo);
-                continue;
-            }
+            // This is not a specific service, so load any
+            // global fields it defines
+            loadGlobalFields(serviceInfo);
+            continue;
+        }
 
-            // Resolve all the descriptions fields
-            resolveDescriptions(serviceInfo);
+        // Resolve all the descriptions fields
+        resolveDescriptions(serviceInfo);
 
-            // Resolve the icon reference to its absolute file location.
-            // The icon field in a services.json is relative to the file's
-            // own directory, and only the loader knows where that is. The
-            // resolved path is consumed SERVER-SIDE (the Python service
-            // catalog reads the file to inline its content) and must never
-            // be returned to clients.
-            if (auto iconName = serviceInfo.lookup<Text>("icon")) {
-                const auto iconPath = (path / iconName).resolve();
-                if (!file::exists(iconPath))
-                    LOG(Services, "    Icon          : **** MISSING",
-                        iconPath, "****");
-                serviceInfo["icon"] = static_cast<const Utf8Chr *>(iconPath);
-            }
+        // Resolve the icon reference to its absolute file location.
+        // The icon field in a services.json is relative to the file's
+        // own directory, and only the loader knows where that is. The
+        // resolved path is consumed SERVER-SIDE (the Python service
+        // catalog reads the file to inline its content) and must never
+        // be returned to clients.
+        if (auto iconName = serviceInfo.lookup<Text>("icon")) {
+            const auto iconPath = (path / iconName).resolve();
+            if (!file::exists(iconPath))
+                LOG(Services, "    Icon          : **** MISSING",
+                    iconPath, "****");
+            serviceInfo["icon"] = static_cast<const Utf8Chr *>(iconPath);
+        }
 
-            // Declare our definition
-            IServices::ServiceDefinition def;
+        // Declare our definition
+        IServices::ServiceDefinition def;
 
-            // Show the title
-            def.title = serviceInfo.lookup<iText>("title", def.logicalType);
-            LOG(Services, "    Title         :", def.title);
+        // Show the title
+        def.title = serviceInfo.lookup<iText>("title", def.logicalType);
+        LOG(Services, "    Title         :", def.title);
 
-            // Parse off the ://
-            iTextVector parsed = protocol.split(':');
+        // Parse off the ://
+        iTextVector parsed = protocol.split(':');
 
-            // Save the bare logical type (filesys, ms-onedrive, etc)
-            def.logicalType = _mv(parsed[0]);
-            LOG(Services, "    Logical type  :", def.logicalType);
+        // Save the bare logical type (filesys, ms-onedrive, etc)
+        def.logicalType = _mv(parsed[0]);
+        LOG(Services, "    Logical type  :", def.logicalType);
 
-            // Get the physical type (filesys, python, etc)
-            def.physicalType = serviceInfo.lookup<iText>("node");
+        // Get the physical type (filesys, python, etc)
+        def.physicalType = serviceInfo.lookup<iText>("node");
 
-            // A C++ node names no factory - it registers its own under the
-            // logical type, so that is the physical type too
-            const bool isCppNode = def.physicalType == "cpp";
-            if (!def.physicalType || isCppNode)
-                def.physicalType = def.logicalType;
+        // A C++ node names no factory - it registers its own under the
+        // logical type, so that is the physical type too
+        const bool isCppNode = def.physicalType == "cpp";
+        if (!def.physicalType || isCppNode)
+            def.physicalType = def.logicalType;
 
-            LOG(Services, "    Pyhsical type :", def.physicalType);
+        LOG(Services, "    Pyhsical type :", def.physicalType);
 
-            // Output description
-            if (serviceInfo.isMember("description")) {
-                auto msg = serviceInfo["description"].asString();
-                if (msg.size() > 60) msg = msg.substr(0, 57) + "...";
+        // Output description
+        if (serviceInfo.isMember("description")) {
+            auto msg = serviceInfo["description"].asString();
+            if (msg.size() > 60) msg = msg.substr(0, 57) + "...";
 
-                LOG(Services, "    Description   :", msg);
-            } else {
-                LOG(Services,
-                    "    Description   : **** MISSING description ****");
-            }
+            LOG(Services, "    Description   :", msg);
+        } else {
+            LOG(Services,
+                "    Description   : **** MISSING description ****");
+        }
 
-            def.classType = serviceInfo.lookup("classType");
-            if (!def.classType) def.classType = json::arrayValue;
+        def.classType = serviceInfo.lookup("classType");
+        if (!def.classType) def.classType = json::arrayValue;
 
-            // Get the optional node path
-            def.nodePath = serviceInfo.lookup<Text>("path");
-            if (def.nodePath) {
-                LOG(Services, "    node path:", def.nodePath);
-            }
+        // Get the optional node path
+        def.nodePath = serviceInfo.lookup<Text>("path");
+        if (def.nodePath) {
+            LOG(Services, "    node path:", def.nodePath);
+        }
 
-            // Save the service definition path to the file
-            def.definitionPath = _mv(definitionPath);
+        // Save the service definition path to the file
+        def.definitionPath = _mv(definitionPath);
 
-            // Get the optional node path
-            def.prefix = serviceInfo.lookup<Text>("prefix");
+        // Get the optional node path
+        def.prefix = serviceInfo.lookup<Text>("prefix");
 
-            // Get the required plans
-            if (serviceInfo.isMember("plans")) {
-                auto plans = serviceInfo["plans"];
-                if (plans.isArray()) def.plans = plans;
-            }
+        // Get the required plans
+        if (serviceInfo.isMember("plans")) {
+            auto plans = serviceInfo["plans"];
+            if (plans.isArray()) def.plans = plans;
+        }
 
-            // Get the node type field - used to figure out factory registration
-            const auto registerType = serviceInfo.lookup<iText>("register");
+        // Get the node type field - used to figure out factory registration
+        const auto registerType = serviceInfo.lookup<iText>("register");
 
-            // Build a path on the prefix so we can count the number of
-            // components
-            Path prefixPath{def.prefix};
-            def.prefixComponents = prefixPath.count();
+        // Build a path on the prefix so we can count the number of
+        // components
+        Path prefixPath{def.prefix};
+        def.prefixComponents = prefixPath.count();
 
-            // Get the capabilities flags
-            iTextVector caps = serviceInfo.lookup<iTextVector>("capabilities");
+        // Get the capabilities flags
+        iTextVector caps = serviceInfo.lookup<iTextVector>("capabilities");
 
-            bool debugMode = false;
+        bool debugMode = false;
 
-            // We now default to remoting enabled. It is cleared by specifying
-            // noremote in the capabilities list
-            def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::REMOTING;
+        // We now default to remoting enabled. It is cleared by specifying
+        // noremote in the capabilities list
+        def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::REMOTING;
 
-            // Parse the capabilities
-            for (auto &cap : caps) {
-                if (cap == "security")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::SECURITY;
-                else if (cap == "filesystem")
-                    def.capabilities |=
-                        url::UrlConfig::PROTOCOL_CAPS::FILESYSTEM;
-                else if (cap == "substream")
-                    def.capabilities |=
-                        url::UrlConfig::PROTOCOL_CAPS::SUBSTREAM;
-                else if (cap == "network")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::NETWORK;
-                else if (cap == "datanet")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::DATANET;
-                else if (cap == "sync")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::SYNC;
-                else if (cap == "internal")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::INTERNAL;
-                else if (cap == "catalog")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::CATALOG;
-                else if (cap == "nomonitor")
-                    def.capabilities |=
-                        url::UrlConfig::PROTOCOL_CAPS::NOMONITOR;
-                else if (cap == "noinclude")
-                    def.capabilities |=
-                        url::UrlConfig::PROTOCOL_CAPS::NOINCLUDE;
-                else if (cap == "invoke")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::INVOKE;
-                else if (cap == "gpu")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::GPU;
-                else if (cap == "nosaas")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::NOSAAS;
-                else if (cap == "focus")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::FOCUS;
-                else if (cap == "debug")
-                    debugMode = true;
-                else if (cap == "noremote")
-                    def.capabilities &=
-                        ~url::UrlConfig::PROTOCOL_CAPS::REMOTING;
-                else if (cap == "deprecated")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::DEPRECATED;
-                else if (cap == "experimental")
-                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL;
-                else
-                    return APERR(Ec::InvalidParam, "Invalid cap setting", cap,
-                                 "in", definitionPath);
-            }
+        // Parse the capabilities
+        for (auto &cap : caps) {
+            if (cap == "security")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::SECURITY;
+            else if (cap == "filesystem")
+                def.capabilities |=
+                    url::UrlConfig::PROTOCOL_CAPS::FILESYSTEM;
+            else if (cap == "substream")
+                def.capabilities |=
+                    url::UrlConfig::PROTOCOL_CAPS::SUBSTREAM;
+            else if (cap == "network")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::NETWORK;
+            else if (cap == "datanet")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::DATANET;
+            else if (cap == "sync")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::SYNC;
+            else if (cap == "internal")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::INTERNAL;
+            else if (cap == "catalog")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::CATALOG;
+            else if (cap == "nomonitor")
+                def.capabilities |=
+                    url::UrlConfig::PROTOCOL_CAPS::NOMONITOR;
+            else if (cap == "noinclude")
+                def.capabilities |=
+                    url::UrlConfig::PROTOCOL_CAPS::NOINCLUDE;
+            else if (cap == "invoke")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::INVOKE;
+            else if (cap == "gpu")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::GPU;
+            else if (cap == "nosaas")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::NOSAAS;
+            else if (cap == "focus")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::FOCUS;
+            else if (cap == "debug")
+                debugMode = true;
+            else if (cap == "noremote")
+                def.capabilities &=
+                    ~url::UrlConfig::PROTOCOL_CAPS::REMOTING;
+            else if (cap == "deprecated")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::DEPRECATED;
+            else if (cap == "experimental")
+                def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL;
+            else
+                return APERR(Ec::InvalidParam, "Invalid cap setting", cap,
+                             "in", definitionPath);
+        }
 
-            if (debugMode) {
+        if (debugMode) {
 #ifdef NDEBUG
-                continue;
+            continue;
 #endif  // NDEBUG
-            }
+        }
 
-            // Get the capabilities flags
-            iTextVector actions = serviceInfo.lookup<iTextVector>("actions");
+        // Get the capabilities flags
+        iTextVector actions = serviceInfo.lookup<iTextVector>("actions");
 
-            // Parse the supported actions
-            for (auto &action : actions) {
-                if (action == "delete") {
-                    LOG(Services, "    Action        : Delete");
-                    def.supportedActions |= SUPPORTED_ACTIONS::DELETION;
-                } else if (action == "export") {
-                    LOG(Services, "    Action        : Export");
-                    def.supportedActions |= SUPPORTED_ACTIONS::EXPORT;
-                } else if (action == "download") {
-                    LOG(Services, "    Action        : Download");
-                    def.supportedActions |= SUPPORTED_ACTIONS::DOWNLOAD;
-                } else
-                    return APERR(Ec::InvalidParam, "Invalid action setting",
-                                 action, "in", definitionPath);
-            }
+        // Parse the supported actions
+        for (auto &action : actions) {
+            if (action == "delete") {
+                LOG(Services, "    Action        : Delete");
+                def.supportedActions |= SUPPORTED_ACTIONS::DELETION;
+            } else if (action == "export") {
+                LOG(Services, "    Action        : Export");
+                def.supportedActions |= SUPPORTED_ACTIONS::EXPORT;
+            } else if (action == "download") {
+                LOG(Services, "    Action        : Download");
+                def.supportedActions |= SUPPORTED_ACTIONS::DOWNLOAD;
+            } else
+                return APERR(Ec::InvalidParam, "Invalid action setting",
+                             action, "in", definitionPath);
+        }
 
-            if (serviceInfo.isMember("config"))
-                return APERR(Ec::InvalidParam, "Unexpected config section in",
-                             definitionPath);
+        if (serviceInfo.isMember("config"))
+            return APERR(Ec::InvalidParam, "Unexpected config section in",
+                         definitionPath);
 
-            // Output the lane info
-            if (serviceInfo.isMember("lanes")) {
-                // Get the lanes array
-                const auto &lanes = serviceInfo["lanes"];
+        // Output the lane info
+        if (serviceInfo.isMember("lanes")) {
+            // Get the lanes array
+            const auto &lanes = serviceInfo["lanes"];
 
-                // Iterate through each lane
-                for (const auto &laneId : lanes.getMemberNames()) {
-                    // Get the lane
-                    auto lane = lanes[laneId];
+            if (auto ccode = IServices::validateLanesShape(
+                    lanes, std::string((Text)protocol)))
+                return ccode;
 
-                    // Get the lane's source
-                    std::string fmt = "";
-                    for (const auto &dst : lane) {
-                        if (!fmt.empty()) fmt += ", ";
-                        fmt += dst.asString();
-                    }
+            // Iterate through each lane
+            for (const auto &laneId : lanes.getMemberNames()) {
+                // Get the lane
+                auto lane = lanes[laneId];
 
-                    fmt = "[" + fmt + "]";
-
-                    // Output the lane and its targets
-                    LOG(Services, "    Lane          :", laneId, " -> ", fmt);
+                // Get the lane's source
+                std::string fmt = "";
+                for (const auto &dst : lane) {
+                    if (!fmt.empty()) fmt += ", ";
+                    fmt += dst.asString();
                 }
-            }
 
-            // Output the lane info
-            if (serviceInfo.isMember("input")) {
-                // Get the lanes array
-                const auto &inputs = serviceInfo["input"];
+                fmt = "[" + fmt + "]";
 
-                // Iterate through each lane
-                for (const auto &input : inputs) {
-                    // Get the laneId and what it outputs
-                    auto inputLaneId = input["lane"].asString();
-                    auto outputs = input["output"];
-
-                    // If no description, flag it
-                    if (!input.isMember("description"))
-                        inputLaneId += " (no description)";
-
-                    // Get the lane's source
-                    std::string fmt = "";
-                    for (const auto &output : outputs) {
-                        auto outputLaneIds = output["lane"].asString();
-
-                        // If no description, flag it
-                        if (!output.isMember("description"))
-                            outputLaneIds += " (no description)";
-
-                        if (!fmt.empty()) fmt += ", ";
-
-                        fmt += outputLaneIds;
-                    }
-
-                    fmt = "[" + fmt + "]";
-
-                    // Output the lane and its targets
-                    LOG(Services, "    Input         :", inputLaneId, " -> ",
-                        fmt);
-                }
-            } else {
-                LOG(Services, "    Input param   : **** MISSING input ****");
-            }
-
-            // Output the tile info
-            if (serviceInfo.isMember("tile")) {
-                const auto &params = serviceInfo["tile"];
-
-                // Show all parameters
-                for (const auto &param : params) {
-                    // Output the lane and its targets
-                    LOG(Services, "    Tile param    :", param.asString());
-                }
-            } else {
-                LOG(Services, "    Tile param    : **** MISSING tile  ****");
-            }
-
-            // Output the icon info
-            if (serviceInfo.isMember("icon")) {
-                const auto &params = serviceInfo["icon"];
-
-                // Show all parameters
-                for (const auto &param : params) {
-                    // Output the icon and its path
-                    LOG(Services, "    Icon param    :", param.asString());
-                }
-            } else {
-                LOG(Services, "    Icon param    : **** MISSING icon ****");
-            }
-
-            // Save our service definition info
-            def.serviceDefinition = _mv(serviceInfo);
-
-            // Get the logical type
-            auto logicalType = def.logicalType;
-
-            // Save it
-            m_services[logicalType] = _mv(def);
-
-            // A C++ node brings its own factories, so it is only declared
-            // here - the "register" field does not apply
-            if (isCppNode) {
-                if (auto ccode = declareNode(m_services[logicalType]))
-                    return ccode;
-                continue;
-            }
-
-            // Register the factories if needed
-            if (registerType == "filter") {
-                LOG(Services, "    Register      : Filter");
-                auto factoryGlobal = Factory::makeFactory<
-                    engine::store::filter::python::IFilterGlobal,
-                    engine::store::pythonBase::IPythonGlobalBase>(
-                    m_services[logicalType].logicalType);
-
-                Factory::registerFactory(factoryGlobal);
-
-                auto factoryInstance = Factory::makeFactory<
-                    engine::store::filter::python::IFilterInstance,
-                    engine::store::pythonBase::IPythonInstanceBase>(
-                    m_services[logicalType].logicalType);
-
-                Factory::registerFactory(factoryInstance);
-            }
-
-            if (registerType == "endpoint") {
-                LOG(Services, "    Register      : Endpoint");
-                auto factoryEndpoint = Factory::makeFactory<
-                    engine::store::filter::python::IFilterEndpoint,
-                    engine::store::pythonBase::IPythonEndpointBase>(
-                    m_services[logicalType].logicalType);
-
-                Factory::registerFactory(factoryEndpoint);
-
-                auto factoryGlobal = Factory::makeFactory<
-                    engine::store::filter::python::IFilterGlobal,
-                    engine::store::pythonBase::IPythonGlobalBase>(
-                    m_services[logicalType].logicalType);
-
-                Factory::registerFactory(factoryGlobal);
-
-                auto factoryInstance = Factory::makeFactory<
-                    engine::store::filter::python::IFilterInstance,
-                    engine::store::pythonBase::IPythonInstanceBase>(
-                    m_services[logicalType].logicalType);
-
-                Factory::registerFactory(factoryInstance);
+                // Output the lane and its targets
+                LOG(Services, "    Lane          :", laneId, " -> ", fmt);
             }
         }
 
-        return {};
-    };
+        // Output the lane info
+        if (serviceInfo.isMember("input")) {
+            // Get the lanes array
+            const auto &inputs = serviceInfo["input"];
 
+            // Iterate through each lane
+            for (const auto &input : inputs) {
+                // Get the laneId and what it outputs
+                auto inputLaneId = input["lane"].asString();
+                auto outputs = input["output"];
+
+                // If no description, flag it
+                if (!input.isMember("description"))
+                    inputLaneId += " (no description)";
+
+                // Get the lane's source
+                std::string fmt = "";
+                for (const auto &output : outputs) {
+                    auto outputLaneIds = output["lane"].asString();
+
+                    // If no description, flag it
+                    if (!output.isMember("description"))
+                        outputLaneIds += " (no description)";
+
+                    if (!fmt.empty()) fmt += ", ";
+
+                    fmt += outputLaneIds;
+                }
+
+                fmt = "[" + fmt + "]";
+
+                // Output the lane and its targets
+                LOG(Services, "    Input         :", inputLaneId, " -> ",
+                    fmt);
+            }
+        } else {
+            LOG(Services, "    Input param   : **** MISSING input ****");
+        }
+
+        // Output the tile info
+        if (serviceInfo.isMember("tile")) {
+            const auto &params = serviceInfo["tile"];
+
+            // Show all parameters
+            for (const auto &param : params) {
+                // Output the lane and its targets
+                LOG(Services, "    Tile param    :", param.asString());
+            }
+        } else {
+            LOG(Services, "    Tile param    : **** MISSING tile  ****");
+        }
+
+        // Output the icon info
+        if (serviceInfo.isMember("icon")) {
+            const auto &params = serviceInfo["icon"];
+
+            // Show all parameters
+            for (const auto &param : params) {
+                // Output the icon and its path
+                LOG(Services, "    Icon param    :", param.asString());
+            }
+        } else {
+            LOG(Services, "    Icon param    : **** MISSING icon ****");
+        }
+
+        // Save our service definition info
+        def.serviceDefinition = _mv(serviceInfo);
+
+        // Get the logical type
+        auto logicalType = def.logicalType;
+
+        // Save it
+        m_services[logicalType] = _mv(def);
+
+        // A C++ node brings its own factories, so it is only declared
+        // here - the "register" field does not apply
+        if (isCppNode) {
+            if (auto ccode = declareNode(m_services[logicalType]))
+                return ccode;
+            continue;
+        }
+
+        // Register the factories if needed
+        if (registerType == "filter") {
+            LOG(Services, "    Register      : Filter");
+            auto factoryGlobal = Factory::makeFactory<
+                engine::store::filter::python::IFilterGlobal,
+                engine::store::pythonBase::IPythonGlobalBase>(
+                m_services[logicalType].logicalType);
+
+            Factory::registerFactory(factoryGlobal);
+
+            auto factoryInstance = Factory::makeFactory<
+                engine::store::filter::python::IFilterInstance,
+                engine::store::pythonBase::IPythonInstanceBase>(
+                m_services[logicalType].logicalType);
+
+            Factory::registerFactory(factoryInstance);
+        }
+
+        if (registerType == "endpoint") {
+            LOG(Services, "    Register      : Endpoint");
+            auto factoryEndpoint = Factory::makeFactory<
+                engine::store::filter::python::IFilterEndpoint,
+                engine::store::pythonBase::IPythonEndpointBase>(
+                m_services[logicalType].logicalType);
+
+            Factory::registerFactory(factoryEndpoint);
+
+            auto factoryGlobal = Factory::makeFactory<
+                engine::store::filter::python::IFilterGlobal,
+                engine::store::pythonBase::IPythonGlobalBase>(
+                m_services[logicalType].logicalType);
+
+            Factory::registerFactory(factoryGlobal);
+
+            auto factoryInstance = Factory::makeFactory<
+                engine::store::filter::python::IFilterInstance,
+                engine::store::pythonBase::IPythonInstanceBase>(
+                m_services[logicalType].logicalType);
+
+            Factory::registerFactory(factoryInstance);
+        }
+    }
+
+    return {};
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Loads every services*.json under a directory and resolves what it
+///		added
+///	@param[in]	root
+///		The directory to walk
+//-------------------------------------------------------------------------
+Error IServices::loadDirectory(const Path &root) noexcept {
+    if (auto ccode = loadServices(root, (Text) "*")) return ccode;
+
+    // Update all the fields
+    if (auto ccode = updateDefinitions()) return ccode;
+
+    // Declare any mappers that we not specifically registered
+    // with the physical endpoint driver
+    return declareDefaultUrlMappers();
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Loads all the service definitions
+//-------------------------------------------------------------------------
+Error IServices::init() noexcept {
     // The sources path if the engine/engtest is running in the dev mode
     auto rootPath = application::projectDir() ? application::projectDir() / "nodes/src/nodes" : "";
     if (!rootPath || !file::exists(rootPath) || !file::isDir(rootPath))
@@ -2067,11 +2099,7 @@ Error IServices::init() noexcept {
 
     // Declare any mappers that we not specifically registered
     // with the physical endpoint driver
-    if (auto ccode = declareDefaultUrlMappers()) return ccode;
-
-    // And done
-
-    return {};
+    return declareDefaultUrlMappers();
 }
 
 //-------------------------------------------------------------------------
@@ -2211,6 +2239,40 @@ ErrorOr<json::Value> IServices::getServiceSchemas() noexcept {
 
     // Return the schemas of the services
     return _mv(res);
+}
+
+//-----------------------------------------------------------------------------
+/// @brief Refuses a `lanes` map that buildConnections cannot bind: "*" beside
+///        named lanes, anything under "*" but ["*"] or [], or "*" as the
+///        output of a named lane.
+//-----------------------------------------------------------------------------
+Error IServices::validateLanesShape(const json::Value &lanes,
+                                    const std::string &logicalType) noexcept {
+    if (!lanes.isObject()) return {};
+
+    for (const auto &key : lanes.getMemberNames()) {
+        if (key == "*") continue;
+        if (lanes.isMember("*"))
+            return APERR(Ec::InvalidParam, "Service", logicalType,
+                         "declares the \"*\" lane beside the named lane", key,
+                         "- a service that accepts any lane declares only "
+                         "\"*\"");
+        for (const auto &output : lanes[key])
+            if (output.isString() && output.asString() == "*")
+                return APERR(Ec::InvalidParam, "Service", logicalType,
+                             "outputs \"*\" on the lane", key,
+                             "- only a service that accepts any lane forwards it");
+    }
+
+    if (!lanes.isMember("*")) return {};
+    const auto &outputs = lanes["*"];
+    bool forwards = outputs.isArray() && outputs.size() == 1 &&
+                    outputs[0].isString() && outputs[0].asString() == "*";
+    if (!outputs.isArray() || !(outputs.empty() || forwards))
+        return APERR(Ec::InvalidParam, "Service", logicalType,
+                     "lanes[\"*\"] must be [\"*\"] (forward on the lane that "
+                     "arrived) or [] (forward nothing)");
+    return {};
 }
 
 }  // namespace engine::store

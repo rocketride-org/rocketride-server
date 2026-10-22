@@ -1,0 +1,22 @@
+{
+	"title": "Any",
+	"protocol": "fx_any://",
+	"classType": [
+		"text"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.fx_any",
+	"prefix": "fx_any",
+	"description": [
+		"Test fixture: any."
+	],
+	"lanes": {
+		"*": [
+			"*"
+		]
+	},
+	"fields": {},
+	"shape": []
+}

@@ -1,0 +1,20 @@
+{
+	"title": "Any sink",
+	"protocol": "fx_any_sink://",
+	"classType": [
+		"text"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.fx_any_sink",
+	"prefix": "fx_any_sink",
+	"description": [
+		"Test fixture: any sink."
+	],
+	"lanes": {
+		"*": []
+	},
+	"fields": {},
+	"shape": []
+}

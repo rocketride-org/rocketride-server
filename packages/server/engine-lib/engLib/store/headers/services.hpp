@@ -161,9 +161,16 @@ public:
     ///	Public API
     //-----------------------------------------------------------------
     static Error init() noexcept;
+    static Error loadDirectory(const Path &root) noexcept;
     static Error deinit() noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr> getServiceDefinition(
         const Text &type) noexcept;
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Refuses a `lanes` map that puts "*" beside named lanes.
+    //-----------------------------------------------------------------
+    static Error validateLanesShape(const json::Value &lanes,
+                                    const std::string &logicalType) noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr>
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
@@ -238,6 +245,7 @@ private:
     static ErrorOr<IServices::ServiceSchema> getFields(
         ServiceContext &context, json::Value &section) noexcept;
     static Error updateDefinitions() noexcept;
+    static Error loadServices(const Path &path, const Text &mask) noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
     static std::list<Text> getFieldNames(const ServiceSchema &schema) noexcept;
