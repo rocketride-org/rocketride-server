@@ -28,6 +28,15 @@
 
 namespace py = pybind11;
 
+namespace {
+// Whether a factory of this type is registered under this name
+bool hasFactory(const char *type, const char *name) {
+    const auto names = Factory::getFactories(type);
+    return std::find(names.begin(), names.end(), iTextView{name}) !=
+           names.end();
+}
+}  // namespace
+
 //-----------------------------------------------------------------------------
 // registerServices adds definitions that never came from a scan and resolves
 // them together; registering a logical type again replaces it.
@@ -59,6 +68,7 @@ engLib.registerServices([(node('rail_a', titleA), tempfile.mkdtemp() + '/service
         auto def = IServices::getServiceDefinition(name);
         REQUIRE_NO_ERROR(def);
         REQUIRE((*def)->isResolved);
+        REQUIRE(hasFactory("iFilterGlobal", name));
     }
 
     registerRail("Rail A, again");
@@ -68,7 +78,7 @@ engLib.registerServices([(node('rail_a', titleA), tempfile.mkdtemp() + '/service
 }
 
 TEST_CASE("store::registerServices registers a batch all or none") {
-    const auto python = localfcn()->Error {
+    const auto setUp = localfcn()->Error {
         py::exec(R"(
 import engLib, tempfile
 def node(name):
@@ -84,6 +94,24 @@ def refused(batch):
 def at(definition):
     return (definition, tempfile.mkdtemp() + '/services.json')
 engLib.registerServices([at(dict(node('rail_g'), title='Rail G'))])
+)");
+        return {};
+    };
+    REQUIRE_NO_ERROR(callPython(setUp));
+
+    // A definition the engine holds, referenced by address as pipes do
+    auto held = IServices::getServiceDefinition("rail_g");
+    REQUIRE_NO_ERROR(held);
+    const auto *heldDefinition = *held;
+    // A factory is named by a view into its definition: counted, not looked up
+    const auto factories = Factory::getFactories("iFilterGlobal").size();
+
+    const auto python = localfcn()->Error {
+        py::exec(R"(
+# A replacement that changes the kind of node keeps the factories it would need
+assert refused([at(dict(node('rail_g'), register='endpoint'))])
+# A C++ node without a library, refused before it is registered
+assert refused([at(node('rail_m')), at(dict(node('rail_n'), node='cpp', path=''))])
 # Refused while registering: nothing of the batch stays, not even what came before
 assert refused([at(node('rail_c')), at(dict(node('rail_d'), capabilities=['nonsense']))])
 # Refused while resolving: a protocol that is not a URL; a definition it replaced is back
@@ -95,9 +123,15 @@ assert refused([at(node('rail_e')), (node('rail_f'), None)])
     };
     REQUIRE_NO_ERROR(callPython(python));
 
-    for (auto name : {"rail_c", "rail_d", "rail_e", "rail_h"})
+    for (auto name : {"rail_c", "rail_d", "rail_e", "rail_h", "rail_m", "rail_n"}) {
         REQUIRE_FALSE(IServices::getServiceDefinition(name));
-    auto kept = IServices::getServiceDefinition("rail_g");
-    REQUIRE_NO_ERROR(kept);
-    REQUIRE((*kept)->title == "Rail G");
+        REQUIRE_FALSE(hasFactory("iFilterGlobal", name));
+    }
+    REQUIRE(Factory::getFactories("iFilterGlobal").size() == factories);
+    REQUIRE(hasFactory("iFilterGlobal", "rail_g"));
+
+    // Put back in place: the definition held by address is still rail_g's, unchanged
+    REQUIRE(heldDefinition->logicalType == "rail_g");
+    REQUIRE(heldDefinition->title == "Rail G");
+    REQUIRE(heldDefinition->serviceDefinition.lookup<iText>("register") == "filter");
 }
