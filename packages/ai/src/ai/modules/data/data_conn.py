@@ -1205,7 +1205,7 @@ class DataConn(DAPConn):
                   all threads when omitted
 
         Returns:
-            Dict[str, Any]: DAP response with tree, total_time, total_calls
+            Dict[str, Any]: DAP response with tree, functions, total_time, total_calls
         """
         args = request.get('arguments', {})
         max_depth = args.get('max_depth', 50)

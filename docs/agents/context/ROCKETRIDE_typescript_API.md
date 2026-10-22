@@ -1164,7 +1164,9 @@ const tree = await client.cprofileReportTree(token);    // call tree
   completed session.
 - `cprofileReportTree(target?, maxDepth?, minPct?, includeSystem?, thread?)` —
   the call tree (defaults: depth 50, 0.1% cumtime threshold) with
-  `total_time` and `total_calls`; raise `minPct` or lower `maxDepth` to
+  `total_time`, `total_calls` and `functions` (exact per-function totals, as
+  the text report prints them; a function under several callers splits its
+  numbers between its copies in the tree); raise `minPct` or lower `maxDepth` to
   shrink it. Read it top-down: the widest cumulative-time branch under the
   run loop is the slow pipeline component. Pass `thread` to get one thread's
   tree instead of all threads merged.

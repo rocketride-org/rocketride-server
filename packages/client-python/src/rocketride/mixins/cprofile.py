@@ -179,7 +179,8 @@ class CProfileMixin(DAPClient):
                 tree alone, or None (default) for all threads merged.
 
         Returns:
-            Dict with 'tree' (root node), 'total_time', and 'total_calls'.
+            Dict with 'tree' (root node), 'functions' (exact per-function
+            totals; absent from older servers), 'total_time', and 'total_calls'.
 
         Example:
             result = await client.cprofile_report_tree(max_depth=30, min_pct=0.5)

@@ -3112,7 +3112,8 @@ export class RocketRideClient extends DAPClient {
 	 * @param includeSystem - Keep stdlib/system functions in the tree (server default true).
 	 * @param thread   - Thread id from cprofileThreads() for that thread alone;
 	 *                   all threads merged when omitted.
-	 * @returns Object containing the tree root, total_time, and total_calls.
+	 * @returns Object containing the tree root, functions (exact per-function
+	 *          totals; absent from older servers), total_time, and total_calls.
 	 */
 	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean, thread?: number | null): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};

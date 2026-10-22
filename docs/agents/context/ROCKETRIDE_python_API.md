@@ -1166,8 +1166,11 @@ tree = await client.cprofile_report_tree(target=token)  # call tree
 - `cprofile_report(target=None)` — the full pstats text report of the last
   completed session.
 - `cprofile_report_tree(target=None, max_depth=50, min_pct=0.1,
-  include_system=True, thread=None)` — the call tree with `total_time` and
-  `total_calls`; raise `min_pct` or lower `max_depth` to shrink it. Read the
+  include_system=True, thread=None)` — the call tree with `total_time`,
+  `total_calls` and `functions` (exact per-function totals, as the text
+  report prints them; a function under several callers splits its numbers
+  between its copies in the tree); raise `min_pct` or lower `max_depth` to
+  shrink it. Read the
   tree top-down: the widest cumulative-time branch under the run loop is
   the slow pipeline component. Pass `thread` to get one thread's tree
   instead of all threads merged.

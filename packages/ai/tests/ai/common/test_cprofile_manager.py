@@ -965,3 +965,211 @@ def test_report_tree_total_is_thread_time():
     assert profiler.report_tree()['total_time'] == 8.0
     assert profiler.report_tree(thread=0)['total_time'] == 5.0
     assert profiler.report_tree(thread=1)['total_time'] == 3.0
+
+
+# ---------------------------------------------------------------------------
+# Call-tree numbers: a function reached from several callers
+# ---------------------------------------------------------------------------
+#
+# yappi records caller -> callee totals, not paths.  These check that each copy
+# of a function in the tree carries its share of its callees, not all of them.
+
+
+def _entry(
+    name: str, ncall: int, ttot: float, tsub: float, children: dict | None = None, module='./ai/fake.py'
+) -> dict:
+    """One stats entry; children maps callee -> (edge calls, edge ttot, edge tsub)."""
+    return {
+        'key': (module, 1, name),
+        'ncall': ncall,
+        'ttot': ttot,
+        'tsub': tsub,
+        'builtin': False,
+        'children': [
+            {'key': ('./ai/fake.py', 1, callee), 'ncall': n, 'ttot': t, 'tsub': s}
+            for callee, (n, t, s) in (children or {}).items()
+        ],
+    }
+
+
+def _node(tree: dict, *names: str) -> dict:
+    """The node at the end of a path of function names below the root."""
+    node = tree
+    for name in names:
+        node = next(child for child in node['children'] if child['name'] == name)
+    return node
+
+
+def _copies(tree: dict, name: str) -> list[dict]:
+    """Every node of a function in a built tree."""
+    found = [tree] if tree['name'] == name else []
+    return found + [n for child in tree['children'] for n in _copies(child, name)]
+
+
+def test_tree_splits_a_shared_callee_between_its_callers():
+    """A calls C once, B 99 times; every C call takes 1 s in D.
+
+    Before the split both copies of C carried all 100 calls of D, so the A
+    branch showed 100 s below a 1 s parent and the table summed D to 200 s.
+    """
+    data = [
+        _entry('A', 1, 1.0, 0.0, {'C': (1, 1.0, 0.0)}),
+        _entry('B', 1, 99.0, 0.0, {'C': (99, 99.0, 0.0)}),
+        _entry('C', 100, 100.0, 0.0, {'D': (100, 100.0, 100.0)}),
+        _entry('D', 100, 100.0, 100.0),
+    ]
+
+    tree = CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=100.0)['tree']
+
+    via_a, via_b = _node(tree, 'A', 'C', 'D'), _node(tree, 'B', 'C', 'D')
+    assert (via_a['ncalls'], via_a['cumtime'], via_a['tottime']) == (1, 1.0, 1.0)
+    assert (via_b['ncalls'], via_b['cumtime'], via_b['tottime']) == (99, 99.0, 99.0)
+
+
+def test_tree_copies_add_up_and_never_outweigh_their_parent():
+    """The shape of a slow OSS login: one read path hot, another rare.
+
+    Measured: under artifact > _read_meta (48 calls, 0.31 s) the tree showed
+    read_file with all 6,843 calls and 40.78 s.
+    """
+    data = [
+        _entry('publish_list', 3, 41.0, 0.0, {'_read_meta': (6795, 41.0, 0.16)}),
+        _entry('artifact', 48, 0.31, 0.0, {'_read_meta': (48, 0.31, 0.0)}),
+        _entry('_read_meta', 6843, 41.31, 0.16, {'read_file': (6843, 40.78, 0.21)}),
+        _entry('read_file', 6843, 40.78, 0.21),
+    ]
+
+    tree = CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=45.0)['tree']
+
+    reads = _copies(tree, 'read_file')
+    assert len(reads) == 2
+    assert sum(n['ncalls'] for n in reads) == 6843
+    assert sum(n['cumtime'] for n in reads) == pytest.approx(40.78, abs=1e-5)
+    rare = _node(tree, 'artifact', '_read_meta')
+    assert _node(rare, 'read_file')['cumtime'] <= rare['cumtime']
+
+
+def test_tree_splits_by_calls_while_a_frame_is_still_running():
+    """X's call of f never returned: f booked 1 s, its callee 10 s.
+
+    Split by time, X's copy (0 s) would get nothing and the work below it
+    would vanish; split by calls each copy keeps half and they add up.
+    """
+    data = [
+        _entry('X', 1, 0.0, 0.0, {'f': (1, 0.0, 0.0)}),
+        _entry('Y', 1, 1.0, 0.0, {'f': (1, 1.0, 0.0)}),
+        _entry('f', 2, 1.0, 0.0, {'work': (2, 10.0, 10.0)}),
+        _entry('work', 2, 10.0, 10.0),
+    ]
+
+    tree = CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=10.0)['tree']
+
+    works = [_node(tree, caller, 'f', 'work') for caller in ('X', 'Y')]
+    assert [(n['ncalls'], n['cumtime']) for n in works] == [(1, 5.0), (1, 5.0)]
+
+
+def test_tree_keeps_calls_whose_caller_was_already_on_the_stack():
+    """A worker thread registered mid-session: its loop frames were on the stack, unseen.
+
+    Measured: _WorkItem.run had 60 calls, only 14 of them under a caller yappi
+    recorded; split between callers, writeImage below it showed 1 call of 24.
+    The unseen callers' share becomes a root of its own.
+    """
+    data = [
+        _entry('run', 1, 2.5, 0.0, {'work_item': (1, 2.5, 0.0)}),
+        _entry('work_item', 4, 10.0, 0.0, {'job': (4, 10.0, 10.0)}),
+        _entry('job', 4, 10.0, 10.0),
+    ]
+
+    tree = CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=12.5)['tree']
+
+    jobs = _copies(tree, 'job')
+    assert sum(n['ncalls'] for n in jobs) == 4
+    assert sum(n['cumtime'] for n in jobs) == pytest.approx(10.0)
+    orphan = _node(tree, 'work_item')
+    assert (orphan['ncalls'], orphan['cumtime']) == (3, 7.5)
+
+
+def test_report_tree_keeps_threads_apart():
+    """All threads is each thread's tree summed, never one built from the merged stats.
+
+    Both threads call f; merged stats give f one set of callees, so a tree built
+    from them hands thread 2's work to thread 1's caller. Measured: OCR workers
+    showed BERT layers (yappi names a shared torch method after the first class
+    each thread saw) and copies summed to 2.2x the function's total.
+    """
+    one = [
+        _entry('run1', 1, 1.0, 0.0, {'f': (1, 1.0, 0.0)}),
+        _entry('f', 1, 1.0, 0.0, {'work1': (1, 1.0, 1.0)}),
+        _entry('work1', 1, 1.0, 1.0),
+    ]
+    two = [
+        _entry('run2', 1, 2.0, 0.0, {'f': (1, 2.0, 0.0)}),
+        _entry('f', 1, 2.0, 0.0, {'work2': (1, 2.0, 2.0)}),
+        _entry('work2', 1, 2.0, 2.0),
+    ]
+    profiler._last_stats_data = [
+        one[0],
+        two[0],
+        _entry('f', 2, 3.0, 0.0, {'work1': (1, 1.0, 1.0), 'work2': (1, 2.0, 2.0)}),
+        one[2],
+        two[2],
+    ]
+    profiler._last_thread_data = [
+        {'id': 0, 'name': 'first', 'tid': 1, 'ttot': 1.0, 'sched_count': 1, 'stats': one},
+        {'id': 1, 'name': 'second', 'tid': 2, 'ttot': 2.0, 'sched_count': 1, 'stats': two},
+    ]
+
+    tree = profiler.report_tree(min_pct=0)['tree']
+
+    assert [c['name'] for c in _node(tree, 'run1', 'f')['children']] == ['work1']
+    assert [c['name'] for c in _node(tree, 'run2', 'f')['children']] == ['work2']
+    assert _node(tree, 'run2', 'f', 'work2')['cumtime'] == 2.0
+
+
+def test_report_tree_sums_the_same_path_across_threads():
+    """Two workers running the same code merge into one branch with both threads' numbers."""
+    worker = [
+        _entry('run', 1, 2.0, 0.0, {'job': (2, 2.0, 2.0)}),
+        _entry('job', 2, 2.0, 2.0),
+    ]
+    profiler._last_stats_data = [_entry('run', 2, 4.0, 0.0, {'job': (4, 4.0, 4.0)}), _entry('job', 4, 4.0, 4.0)]
+    profiler._last_thread_data = [
+        {'id': 0, 'name': 'w0', 'tid': 1, 'ttot': 2.0, 'sched_count': 1, 'stats': worker},
+        {'id': 1, 'name': 'w1', 'tid': 2, 'ttot': 2.0, 'sched_count': 1, 'stats': worker},
+    ]
+
+    job = _node(profiler.report_tree(min_pct=0)['tree'], 'run', 'job')
+
+    assert (job['ncalls'], job['cumtime']) == (4, 4.0)
+
+
+def test_report_tree_lists_the_exact_function_totals():
+    """'functions' are the per-function totals, filtered like the tree, never summed copies."""
+    one = [
+        _entry('main', 1, 4.0, 1.0, {'work': (1, 3.0, 3.0)}),
+        _entry('work', 1, 3.0, 3.0),
+        _entry('select', 1, 2.0, 2.0, module='./Lib/selectors.py'),
+    ]
+    profiler._last_stats_data = one
+    profiler._last_thread_data = [{'id': 0, 'name': 'main', 'tid': 1, 'ttot': 6.0, 'sched_count': 1, 'stats': one}]
+
+    every = {f['name']: f for f in profiler.report_tree()['functions']}
+    assert every['work'] == {
+        'name': 'work',
+        'file': './ai/fake.py',
+        'line': 1,
+        'ncalls': 1,
+        'tottime': 3.0,
+        'cumtime': 3.0,
+    }
+    assert set(every) == {'main', 'work', 'select'}
+
+    project = profiler.report_tree(include_system=False)['functions']
+    assert {f['name'] for f in project} == {'main', 'work'}
+    assert profiler.report_tree(thread=0)['functions'] == profiler.report_tree()['functions']
+
+
+def test_report_tree_without_data_has_no_functions():
+    """The error result keeps the key, so a client can read it unconditionally."""
+    assert profiler.report_tree()['functions'] == []

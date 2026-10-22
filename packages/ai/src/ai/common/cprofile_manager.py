@@ -149,7 +149,12 @@ def _thread_name() -> Optional[str]:
 
 def _no_tree(message: str) -> Dict[str, Any]:
     """Build the report_tree() result that carries no tree, only an error."""
-    return {'tree': None, 'total_time': 0, 'total_calls': 0, 'error': message}
+    return {'tree': None, 'functions': [], 'total_time': 0, 'total_calls': 0, 'error': message}
+
+
+def _whole_calls(ncall: float) -> int:
+    """A tree node's share of a call count, as a count: at least 1 when any call came this way."""
+    return max(1, round(ncall)) if ncall > 0 else 0
 
 
 # Text report column layout.  Numeric widths and the two-space gap are yappi's
@@ -508,7 +513,10 @@ class CProfileManager:
         Build a hierarchical call-tree from the last completed profiling session.
 
         Uses yappi's callee data to produce a parent→children tree suitable
-        for flame graph / sunburst / icicle visualisations.
+        for flame graph / sunburst / icicle visualisations.  yappi records
+        caller → callee pairs, not whole paths, so below the first level a
+        node's numbers are its share of the pair's totals (see _build_tree);
+        'functions' carries the exact per-function totals.
 
         Args:
             max_depth: Maximum tree depth before pruning (default 50).
@@ -522,9 +530,11 @@ class CProfileManager:
                     alone, or None (default) for all threads merged.
 
         Returns:
-            Dict with 'tree' (root node), 'total_time' (how long the selected
-            thread ran, or all threads summed), and 'total_calls', or an error
-            message if no stats data is available or the thread is unknown.
+            Dict with 'tree' (root node), 'functions' (per-function totals,
+            filtered like the tree by include_system, never pruned),
+            'total_time' (how long the selected thread ran, or all threads
+            summed), and 'total_calls', or an error message if no stats data
+            is available or the thread is unknown.
         """
         # Validate thread — unlike the knobs below, a bad one must not fall
         # back silently: the caller would get all threads, labelled as one
@@ -561,22 +571,37 @@ class CProfileManager:
             # stats cannot give it without counting nested calls again
             if thread is None:
                 stats_data = list(self._last_stats_data)
-                total_time = sum(t['ttot'] for t in self._last_thread_data or ())
+                thread_data = list(self._last_thread_data or ())
+                total_time = sum(t['ttot'] for t in thread_data)
             else:
                 found = next((t for t in self._last_thread_data or () if t['id'] == thread), None)
                 if found is None:
                     return _no_tree(f'Thread {thread} not found in the last session')
                 stats_data = list(found['stats'])
+                thread_data = []
                 total_time = found['ttot']
 
         # Build the tree outside the lock (read-only on stats_data); a zero
-        # total means no thread data, so fall back to the self times
-        result = self._build_tree(stats_data, max_depth, min_pct, total_time or None)
+        # total means no thread data, so fall back to the self times.  All
+        # threads is each thread's tree summed: the merged stats join the
+        # threads at every function they share, handing one thread's callees
+        # to another's callers, and yappi names a shared method after the
+        # first class each thread saw, so a recursion hides behind two names
+        if thread_data and total_time:
+            trees = [self._build_tree(t['stats'], max_depth, min_pct, total_time)['tree'] for t in thread_data]
+            result = {
+                'tree': self._merge_trees(trees, total_time, sum(e['ncall'] for e in stats_data)),
+                'total_time': round(total_time, 6),
+                'total_calls': sum(e['ncall'] for e in stats_data),
+            }
+        else:
+            result = self._build_tree(stats_data, max_depth, min_pct, total_time or None)
 
         # Filter out system calls if requested
         if not include_system and result.get('tree'):
             result['tree'] = self._filter_system_calls(result['tree'])
 
+        result['functions'] = self._flat_functions(stats_data, include_system)
         return result
 
     def threads(self) -> Dict[str, Any]:
@@ -647,6 +672,89 @@ class CProfileManager:
         filtered = dict(node)
         filtered['children'] = collect_project_children(node)
         return filtered
+
+    @staticmethod
+    def _merge_trees(trees: List[Dict[str, Any]], total_time: float, total_calls: int) -> Dict[str, Any]:
+        """
+        Sum trees node by node: the same function on the same path adds up.
+
+        Args:
+            trees: Root nodes from _build_tree(), one per thread.
+            total_time: Time all the threads ran — the merged root's cumtime.
+            total_calls: Calls recorded on all the threads.
+
+        Returns:
+            One root node over the summed children.
+        """
+
+        def merge(into: Dict[Tuple[str, int, str], Dict[str, Any]], nodes: List[Dict[str, Any]]) -> None:
+            """Add nodes into a level keyed by function, recursing into children."""
+            for node in nodes:
+                key = (node['file'], node['line'], node['name'])
+                have = into.get(key)
+                if have is None:
+                    have = into[key] = {**node, 'children': {}}
+                else:
+                    have['ncalls'] += node['ncalls']
+                    have['tottime'] += node['tottime']
+                    have['cumtime'] += node['cumtime']
+                merge(have['children'], node['children'])
+
+        def finish(level: Dict[Tuple[str, int, str], Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """Turn a keyed level back into a list, heaviest first."""
+            nodes = []
+            for node in level.values():
+                node['tottime'] = round(node['tottime'], 6)
+                node['cumtime'] = round(node['cumtime'], 6)
+                node['children'] = finish(node['children'])
+                nodes.append(node)
+            nodes.sort(key=lambda n: n['cumtime'], reverse=True)
+            return nodes
+
+        merged: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+        for tree in trees:
+            merge(merged, tree['children'])
+        return {
+            'name': '<root>',
+            'file': '',
+            'line': 0,
+            'ncalls': total_calls,
+            'tottime': 0.0,
+            'cumtime': round(total_time, 6),
+            'children': finish(merged),
+        }
+
+    @staticmethod
+    def _flat_functions(stats_data: List[Dict], include_system: bool) -> List[Dict[str, Any]]:
+        """
+        Per-function totals of a session: the numbers the text report prints.
+
+        The tree holds a function once per path that reaches it, so its nodes
+        do not add up to the function's totals; these are those totals.  Not
+        pruned, so a table still finds a function the tree's threshold dropped.
+
+        Args:
+            stats_data: List of stat dicts from _capture_stats_data().
+            include_system: If False, only project code (as the tree filters).
+
+        Returns:
+            List of dicts with name, file, line, ncalls, tottime, and cumtime.
+        """
+        functions = []
+        for entry in stats_data:
+            module, lineno, name = entry['key']
+            if include_system or _is_project_code(module):
+                functions.append(
+                    {
+                        'name': name,
+                        'file': module,
+                        'line': lineno,
+                        'ncalls': entry['ncall'],
+                        'tottime': round(entry['tsub'], 6),
+                        'cumtime': round(entry['ttot'], 6),
+                    }
+                )
+        return functions
 
     def release(self, owner_id: str) -> None:
         """
@@ -860,7 +968,12 @@ class CProfileManager:
         Transform captured yappi stats into a JSON-serializable call tree.
 
         Uses the children (callee) relationships directly provided by yappi
-        to build a top-down tree.
+        to build a top-down tree.  Those are caller → callee totals, not
+        paths: a function reached from several callers has one set of callee
+        totals for all of them.  Each copy of the function in the tree gets
+        its share of them, so the copies add up to the totals and a child
+        never outweighs its parent.  Exact when the function's calls cost
+        alike; an estimate otherwise.
 
         Args:
             stats_data: List of stat dicts from _capture_stats_data().
@@ -905,6 +1018,30 @@ class CProfileManager:
                     reach[key] = best
                     changed = True
 
+        # How a function's callee totals are split between its copies in the
+        # tree.  By time when every call returned: the callers' times then add
+        # up to the function's own.  A frame still running at stop() has
+        # booked no time while its callees have, which shows as callees
+        # outweighing the function; such a function is split by calls
+        split_by_time = {
+            key: entry['ttot'] > 0
+            and sum(child['ttot'] for child in entry['children']) <= entry['ttot'] * (1 + 1e-6) + 1e-9
+            for key, entry in lookup.items()
+        }
+
+        def share_of(func_key: Tuple[str, int, str], ncall: float, ttot: float) -> float:
+            """Fraction of the function's calls and time that one tree node stands for."""
+            entry = lookup.get(func_key)
+            if entry is None:
+                return 1.0
+            if split_by_time[func_key]:
+                share = ttot / entry['ttot']
+            elif entry['ncall'] > 0:
+                share = ncall / entry['ncall']
+            else:
+                share = 1.0
+            return min(max(share, 0.0), 1.0)
+
         # Step 3: Identify root nodes — functions not appearing as anyone's child
         all_child_keys: set = set()
         for entry in stats_data:
@@ -913,29 +1050,32 @@ class CProfileManager:
 
         root_keys = [e['key'] for e in stats_data if e['key'] not in all_child_keys]
 
-        # When profiling a running process, all functions may have callers
-        # because the calling functions were on the stack when profiling started.
-        # Always promote phantom-caller children (not just when root_keys is
-        # empty), otherwise phantom-rooted branches are silently dropped.
-        all_keys = set(lookup.keys())
-        phantom_parent_keys = all_child_keys - all_keys
-        if phantom_parent_keys:
-            promoted: set = set()
-            for entry in stats_data:
-                for child in entry['children']:
-                    if entry['key'] not in all_keys:
-                        promoted.add(child['key'])
-            root_keys = list(set(root_keys) | promoted)
+        # Calls no recorded caller made: a frame already on the stack at
+        # start() (a worker loop, a thread's run) made them, so yappi has no
+        # edge for them.  They become a root of their own; otherwise the
+        # callers' shares fall short of the function's totals and the rest
+        # vanishes from the tree
+        called: Dict[Tuple[str, int, str], List[float]] = {}
+        for entry in stats_data:
+            for child in entry['children']:
+                calls_and_time = called.setdefault(child['key'], [0, 0.0])
+                calls_and_time[0] += child['ncall']
+                calls_and_time[1] += child['ttot']
+        orphans = {
+            key: (lookup[key]['ncall'] - ncall, max(lookup[key]['ttot'] - ttot, 0.0))
+            for key, (ncall, ttot) in called.items()
+            if key in lookup and lookup[key]['ncall'] - ncall >= 1
+        }
 
         # Last resort — pick highest cumtime functions
-        if not root_keys:
+        if not root_keys and not orphans:
             sorted_entries = sorted(stats_data, key=lambda e: e['ttot'], reverse=True)
             root_keys = [e['key'] for e in sorted_entries[:5]]
 
         # Step 4: Recursively build tree with cycle detection
         def build_node(
             func_key: Tuple[str, int, str],
-            ncall: int,
+            ncall: float,
             ttot: float,
             tsub: float,
             depth: int,
@@ -946,17 +1086,19 @@ class CProfileManager:
 
             Args:
                 func_key: (module, lineno, name) tuple.
-                ncall: Number of calls from the parent context.
-                ttot: Cumulative time from the parent context.
-                tsub: Self time from the parent context.
+                ncall: Calls from the parent context — this node's share of them.
+                ttot: Cumulative time from the parent context, likewise.
+                tsub: Self time from the parent context, likewise.
                 depth: Current recursion depth.
                 ancestors: Set of func_keys on the current path (cycle detection).
 
             Returns:
                 A dict representing the node, or None if pruned.
             """
+            share = share_of(func_key, ncall, ttot)
+
             # Prune below minimum time threshold — unless real work hangs below
-            if depth > 1 and max(ttot, reach.get(func_key, 0.0)) < min_time:
+            if depth > 1 and max(ttot, reach.get(func_key, 0.0) * share) < min_time:
                 return None
 
             module, lineno, name = func_key
@@ -971,7 +1113,7 @@ class CProfileManager:
                     'name': f'{name} [cycle]',
                     'file': module,
                     'line': lineno,
-                    'ncalls': ncall,
+                    'ncalls': _whole_calls(ncall),
                     'tottime': round(tsub, 6),
                     'cumtime': round(ttot, 6),
                     'children': [],
@@ -980,15 +1122,15 @@ class CProfileManager:
             # Add to ancestor path
             path = ancestors | {func_key}
 
-            # Build children from the lookup
+            # Build children from the lookup, each scaled to this node's share
             children: List[Dict[str, Any]] = []
             if depth < max_depth and func_key in lookup:
                 for child_info in lookup[func_key]['children']:
                     child_node = build_node(
                         child_info['key'],
-                        child_info['ncall'],
-                        child_info['ttot'],
-                        child_info['tsub'],
+                        child_info['ncall'] * share,
+                        child_info['ttot'] * share,
+                        child_info['tsub'] * share,
                         depth + 1,
                         path,
                     )
@@ -1002,7 +1144,7 @@ class CProfileManager:
                 'name': name,
                 'file': module,
                 'line': lineno,
-                'ncalls': ncall,
+                'ncalls': _whole_calls(ncall),
                 'tottime': round(tsub, 6),
                 'cumtime': round(ttot, 6),
                 'children': children,
@@ -1016,6 +1158,15 @@ class CProfileManager:
                 node = build_node(rk, entry['ncall'], entry['ttot'], entry['tsub'], depth=0)
                 if node is not None:
                     root_children.append(node)
+
+        # Orphan calls, pruned like any node unless real work hangs below
+        for key, (ncall, ttot) in orphans.items():
+            share = share_of(key, ncall, ttot)
+            if max(ttot, reach.get(key, 0.0) * share) < min_time:
+                continue
+            node = build_node(key, ncall, ttot, lookup[key]['tsub'] * share, depth=0)
+            if node is not None:
+                root_children.append(node)
 
         # Sort by cumulative time descending
         root_children.sort(key=lambda n: n['cumtime'], reverse=True)
