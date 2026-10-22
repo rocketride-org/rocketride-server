@@ -35,17 +35,20 @@ _NODE_REQUIREMENTS = _REPO / 'nodes' / 'src' / 'nodes' / 'audio_transcribe' / 'r
 
 
 @pytest.fixture
-def fresh_probe(monkeypatch):
+def fresh_probe(monkeypatch, tmp_path):
     """Every test starts with the probe un-run and leaves it that way.
 
-    A fake ``faster_whisper`` keeps the parent's weight prefetch off the network
-    on hosts that have the real package; tests of the prefetch install their own.
+    A fake ``faster_whisper`` reports a complete cached copy of the probe weights,
+    so the parent never starts the weight-fetch child: that child cannot see this
+    fake and would reach the hub on hosts that have the real package. Tests of
+    the prefetch install their own.
     """
     monkeypatch.setattr(WhisperLoader, '_gpu_compatible', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_reason', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_inference_skipped', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_fetch_timeouts', 0)
-    monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=lambda *a, **k: None))
+    cached = str(_weights(tmp_path / 'fixture', complete=True))
+    monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=lambda *a, **k: cached))
     # The guard shortcut imports ai.common.torch, whose load_depends installs torch on a bare host.
     no_cuda = types.SimpleNamespace(torch=types.SimpleNamespace(version=types.SimpleNamespace(cuda=None)))
     monkeypatch.setitem(sys.modules, 'ai.common.torch', no_cuda)
