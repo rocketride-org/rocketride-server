@@ -47,6 +47,7 @@ def fresh_probe(monkeypatch, tmp_path):
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_reason', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_inference_skipped', None)
     monkeypatch.setattr(WhisperLoader, '_gpu_probe_fetch_timeouts', 0)
+    monkeypatch.setattr(WhisperLoader, '_gpu_probe_out_of_memory', 0)
     cached = str(_weights(tmp_path / 'fixture', complete=True))
     monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(download_model=lambda *a, **k: cached))
     # The guard shortcut imports ai.common.torch, whose load_depends installs torch on a bare host.
@@ -123,6 +124,8 @@ def download_model(name, *_args, **kwargs):
         raise PermissionError("cache directory is not readable")
     if cached == "type":
         raise TypeError("expected str, bytes or os.PathLike object, not int")
+    if cached == "non-ascii":
+        raise PermissionError(13, "Permission denied", "/home/J\\u00fcrgen/models/tiny")
     if os.environ.get("PROBE_TINY_DIR"):
         return os.environ["PROBE_TINY_DIR"]  # a real snapshot directory, complete or not
     # The fake cache root is a marker the tests assert literally; it is never touched
@@ -200,6 +203,16 @@ def test_probe_script_forwards_device_index_and_looks_in_the_callers_cache(stub_
     assert 'stub compute types queried for device 2' in result.stdout  # not GPU 0 by default
 
 
+def test_probe_script_takes_a_path_as_the_download_root(stub_stack):
+    """A direct caller may pass a pathlib.Path; embedded as PosixPath(...) it would be a NameError in the child."""
+    root = Path('/models')
+    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo'}, download_root=root)
+
+    assert result.returncode == 0, result.stderr
+    assert any(line.startswith('probe: inference ok') for line in _probe_lines(result))
+    assert f'probe model {os.fspath(root)}' in result.stdout  # the caller's cache reached the lookup
+
+
 def test_probe_script_skips_inference_when_the_weights_are_not_local(stub_stack):
     """No weights in the cache: the verdict stops at the storage view and nothing is downloaded."""
     result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_CACHED': '0'})
@@ -213,15 +226,19 @@ def test_probe_script_skips_inference_when_the_weights_are_not_local(stub_stack)
 
 
 @pytest.mark.parametrize(
-    'cached, error',
+    'cached, env, error',
     [
-        ('error', 'PermissionError: cache directory is not readable'),  # a download_root the engine user cannot read
-        ('type', 'TypeError: expected str'),  # a non-string value in loader_options
+        # A download_root the engine user cannot read, and a non-string value in loader_options.
+        ('error', {}, 'PermissionError: cache directory is not readable'),
+        ('type', {}, 'TypeError: expected str'),
+        # An OSError carries its path, and the engine writes the child's stdout as ASCII (it ignores
+        # PYTHONIOENCODING; a plain Python honours it): a non-ASCII path must not crash the print.
+        ('non-ascii', {'PYTHONIOENCODING': 'ascii'}, "PermissionError: [Errno 13] Permission denied: '/home/J"),
     ],
 )
-def test_probe_script_skips_inference_when_the_cache_cannot_be_read(stub_stack, cached, error):
+def test_probe_script_skips_inference_when_the_weights_cannot_be_looked_up(stub_stack, cached, env, error):
     """A cache this caller cannot use says nothing about the GPU stack: the stage is skipped and the error named."""
-    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_CACHED': cached})
+    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_CACHED': cached, **env})
 
     assert result.returncode == 0, result.stderr
     lines = _probe_lines(result)
@@ -350,12 +367,16 @@ def test_check_gpu_compatible_names_the_stage_and_exit_code_on_failure(stub_stac
     real = _gpu_probe_script
     monkeypatch.setattr(whispermod, '_gpu_probe_script', lambda **kw: prefix + real(**kw))
     monkeypatch.setenv('PROBE_FAIL_STAGE', 'load')
+    monkeypatch.setattr(
+        WhisperLoader, '_gpu_probe_inference_skipped', 'probe: inference skipped: GPU 0 ran out of memory'
+    )
 
     assert WhisperLoader._check_gpu_compatible() is False
 
     reason = WhisperLoader._gpu_probe_reason
     assert 'exit 1 after "probe: storage view ok"' in reason
     assert 'libcudnn_ops' in reason
+    assert WhisperLoader._gpu_probe_inference_skipped is None  # reset at the start of every probe
 
 
 def _completed(returncode, stdout='', stderr=''):
@@ -431,33 +452,13 @@ def test_an_out_of_memory_before_the_storage_view_is_reported_but_not_a_verdict(
 
     monkeypatch.setattr(subprocess, 'run', _run)
 
-    assert WhisperLoader._check_gpu_compatible(device_index=1) is False
+    assert WhisperLoader._check_gpu_compatible(device_index=1, placed_by_allocator=True) is False
     assert 'out of memory' in WhisperLoader._gpu_probe_reason
     assert 'not a verdict' in WhisperLoader._gpu_probe_reason
     assert WhisperLoader._gpu_compatible is None
-    assert WhisperLoader._check_gpu_compatible(device_index=1) is False
+    assert WhisperLoader._check_gpu_compatible(device_index=1, placed_by_allocator=True) is False
     assert len(calls) == 2
-
-
-def test_an_out_of_memory_after_the_storage_view_is_a_storage_view_pass_for_this_load(monkeypatch, fresh_probe, caplog):
-    """No room for the probe's own model, but the stack passed the storage view: like missing weights, not cached."""
-    calls = []
-
-    def _run(*a, **k):
-        calls.append(1)
-        return _completed(1, stdout='probe: storage view ok\n', stderr='CUDA failed with error out of memory')
-
-    monkeypatch.setattr(subprocess, 'run', _run)
-
-    with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
-        assert WhisperLoader._check_gpu_compatible(device_index=1) is True
-
-    assert WhisperLoader._gpu_probe_reason is None
-    assert WhisperLoader._gpu_probe_inference_skipped == 'probe: inference skipped: GPU 1 ran out of memory'
-    assert WhisperLoader._gpu_compatible is None  # not a verdict
-    assert any('GPU 1 ran out of memory' in record.getMessage() for record in caplog.records)
-    assert WhisperLoader._check_gpu_compatible(device_index=1) is True
-    assert len(calls) == 2  # the next load probes again
+    assert WhisperLoader._gpu_probe_out_of_memory == 0  # only a result after the storage view counts
 
 
 def test_local_files_only_skips_the_weight_fetch(monkeypatch, fresh_probe):
@@ -736,7 +737,10 @@ def test_the_fetch_child_uses_the_os_trust_store_when_it_can(monkeypatch, fresh_
 
     assert result.returncode == 0, result.stderr
     assert 'fetched tiny None' in result.stdout
-    assert ('trust store injected' in result.stdout) is (truststore == 'present')
+    if truststore == 'present':
+        assert result.stdout.index('trust store injected') < result.stdout.index('fetched')
+    else:
+        assert 'trust store injected' not in result.stdout
 
 
 # U+2501 (a progress bar) is E2 94 81 in UTF-8; a lone 0x81 is defined neither in cp1252 nor in UTF-8.
@@ -821,10 +825,12 @@ def _probe_says(monkeypatch, verdict, reason=None):
     calls = []
 
     @classmethod
-    def _fake(cls, device_index=0, download_root=None, local_files_only=False):
+    def _fake(cls, device_index=0, download_root=None, local_files_only=False, placed_by_allocator=False):
         record = {'device_index': device_index, 'download_root': download_root}
         if local_files_only:
             record['local_files_only'] = True
+        if placed_by_allocator:
+            record['placed_by_allocator'] = True
         calls.append(record)
         cls._gpu_compatible = verdict
         cls._gpu_probe_reason = reason
@@ -859,7 +865,7 @@ def test_server_mode_uses_the_gpu_when_the_probe_passes(model_stack, monkeypatch
     assert (gpu_index, metadata['device']) == (1, 'cuda:1')
     assert 'device_fallback' not in metadata
     assert bundle['model'].device_index == 1
-    assert calls == [{'device_index': 0, 'download_root': '/models'}]
+    assert calls == [{'device_index': 0, 'download_root': '/models', 'placed_by_allocator': True}]
 
 
 def test_server_mode_probes_a_gpu_the_allocator_may_hand_out(model_stack, monkeypatch):
@@ -870,8 +876,8 @@ def test_server_mode_probes_a_gpu_the_allocator_may_hand_out(model_stack, monkey
     assert calls[0]['device_index'] == 1
 
 
-def test_a_cached_verdict_does_not_pick_a_probe_gpu_again(model_stack, monkeypatch):
-    """Choosing the probe GPU opens a CUDA context on every candidate; once the verdict is cached the index is unused."""
+def test_the_probe_gpu_is_picked_only_while_a_probe_can_use_it(model_stack, monkeypatch):
+    """Choosing the probe GPU opens a CUDA context on every candidate: not once the verdict is cached, nor without CUDA."""
     _probe_says(monkeypatch, True)
     picks = []
     monkeypatch.setattr(
@@ -880,8 +886,80 @@ def test_a_cached_verdict_does_not_pick_a_probe_gpu_again(model_stack, monkeypat
 
     WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (0, 'cuda:0'))
     WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (0, 'cuda:0'))
-
     assert len(picks) == 1
+
+    # Without CUDA the probe never runs, so no verdict is ever cached: the pick must not run on every load.
+    model_stack.cuda.is_available = lambda: False
+    monkeypatch.setattr(WhisperLoader, '_gpu_compatible', None)
+    WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (0, 'cuda:0'))
+    WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (0, 'cuda:0'))
+    assert len(picks) == 1
+
+
+def _a_full_gpu(monkeypatch, tmp_path):
+    """Probe children that run out of GPU memory after the storage view, with the probe weights cached in full."""
+    weights = str(_weights(tmp_path))
+    monkeypatch.setitem(
+        sys.modules,
+        'faster_whisper',
+        types.SimpleNamespace(WhisperModel=_FakeWhisperModel, download_model=lambda *a, **k: weights),
+    )
+    children = []
+
+    def _run(*a, **k):
+        children.append(a)
+        return _completed(1, stdout='probe: storage view ok\n', stderr='CUDA failed with error out of memory')
+
+    monkeypatch.setattr(subprocess, 'run', _run)
+    return children
+
+
+def test_an_out_of_memory_after_the_storage_view_keeps_the_gpu_in_server_mode(
+    model_stack, monkeypatch, tmp_path, caplog
+):
+    """allocate_gpu places the model, as before #2498. The first result is not cached; the second caches the
+    storage-view verdict, so a GPU that stays full does not cost every load a probe child.
+    """
+    children = _a_full_gpu(monkeypatch, tmp_path)
+
+    def allocate(mem, ex):
+        return 1, 'cuda:1'
+
+    with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
+        _bundle, metadata, gpu_index = WhisperLoader.load('tiny', allocate_gpu=allocate)
+
+    assert (gpu_index, metadata['device']) == (1, 'cuda:1')
+    assert 'device_fallback' not in metadata
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert any('the next load probes again' in record.getMessage() for record in caplog.records)
+    assert WhisperLoader._gpu_probe_reason is None
+    assert WhisperLoader._gpu_probe_inference_skipped == 'probe: inference skipped: GPU 0 ran out of memory'
+    assert WhisperLoader._gpu_compatible is None  # the first is not a verdict: the next load probes again
+
+    assert WhisperLoader.load('tiny', allocate_gpu=allocate)[2] == 1  # still full: the storage-view verdict is cached
+    assert WhisperLoader._gpu_compatible is True and len(children) == 2
+    assert WhisperLoader.load('tiny', allocate_gpu=allocate)[2] == 1
+    assert len(children) == 2  # no third child
+
+
+@pytest.mark.parametrize('device', [None, 'cuda:1'])
+def test_an_out_of_memory_after_the_storage_view_runs_a_local_load_on_the_cpu(
+    model_stack, monkeypatch, tmp_path, caplog, device
+):
+    """Without an allocator the load would need the room the probe did not find: the CPU, the reason, nothing cached."""
+    children = _a_full_gpu(monkeypatch, tmp_path)
+
+    with caplog.at_level(logging.ERROR, logger='rocketlib.models.whisper'):
+        _bundle, metadata, gpu_index = WhisperLoader.load('tiny', device=device)
+
+    assert (gpu_index, metadata['device']) == (-1, 'cpu')
+    assert 'ran out of memory' in metadata['device_fallback'] and 'not a verdict' in metadata['device_fallback']
+    assert len([record for record in caplog.records if record.levelno == logging.ERROR]) == 1
+    assert WhisperLoader._gpu_compatible is None
+    WhisperLoader.load('tiny', device=device)
+    WhisperLoader.load('tiny', device=device)
+    assert len(children) == 3  # every load probes again, as before this change
+    assert WhisperLoader._gpu_probe_out_of_memory == 0  # local results never count toward a cached verdict
 
 
 def test_local_mode_without_a_device_falls_back_and_says_why(model_stack, monkeypatch, caplog):

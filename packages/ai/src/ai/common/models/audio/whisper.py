@@ -91,8 +91,13 @@ def _gpu_probe_script(
     Returns:
         Python source for ``python -c``.
     """
+    # A pathlib.Path would be embedded as PosixPath(...), a NameError in the child.
+    if isinstance(download_root, os.PathLike):
+        download_root = os.fspath(download_root)
     return (
         'import sys\n'
+        '# stdout is ASCII under the engine (the ANSI code page on Windows): a non-ASCII path in a message is escaped.\n'
+        'sys.stdout.reconfigure(errors="backslashreplace")\n'
         'import torch\n'
         'import ctranslate2\n'
         'try:\n'
@@ -217,47 +222,66 @@ class WhisperLoader(BaseLoader):
     # the reason the fallback messages and metadata carry.
     _gpu_compatible: Optional[bool] = None
     _gpu_probe_reason: Optional[str] = None
-    # Set when the verdict rests on the storage view alone (the probe weights were not local).
+    # Set when the last probe's result rests on the storage view alone: the probe
+    # weights were not local or could not be looked up, or the GPU ran out of
+    # memory in the inference stage. Reset at the start of every probe.
     _gpu_probe_inference_skipped: Optional[str] = None
     # Weight fetches that ran out of time in this process. After the first, a
     # storage-view-only verdict is provisional (the next load fetches again).
     _gpu_probe_fetch_timeouts: int = 0
+    # Server-mode probes that ran out of GPU memory after the storage view. After
+    # the first, the storage-view verdict is cached (the GPU may stay full).
+    _gpu_probe_out_of_memory: int = 0
     _gpu_probe_lock = threading.Lock()
 
     @classmethod
     def _check_gpu_compatible(
-        cls, device_index: int = 0, download_root: Optional[str] = None, local_files_only: bool = False
+        cls,
+        device_index: int = 0,
+        download_root: Optional[str] = None,
+        local_files_only: bool = False,
+        placed_by_allocator: bool = False,
     ) -> bool:
         """Return True if ctranslate2 GPU inference works on this machine.
 
         Runs the probe in ``_gpu_probe_script`` in a subprocess so a native
         crash does not kill the caller. A verdict is cached, so the probe runs
-        at most once per process, on the first device asked for (hosts are
-        assumed homogeneous). The probe weights are fetched here, best effort;
-        the child only reads the local cache and skips the inference stage when
-        they are absent or cannot be read, so no download or cache problem ever
-        becomes a CPU verdict. The fetch is skipped when the caller asked for
-        local files only, or when the installed versions would stop the child at
-        the guard anyway. A timeout is a failure like any other and is cached. A
-        child that ran out of GPU memory is not cached, since a full GPU says
-        nothing about the CUDA stack: after the storage view it is a
-        storage-view pass for this load, as with missing weights, so
-        ``allocate_gpu`` places the model as it did before #2498; before the
-        storage view it is reported as a failure for this load. On failure
-        ``_gpu_probe_reason`` names the stage, the exit code and the child's
-        last output lines.
+        once per process, on the first device asked for (hosts are assumed
+        homogeneous), unless a result is not a verdict (an out-of-memory, or a
+        first weight fetch that ran out of time): then the next load probes
+        again, on the device it asks for. The probe weights are fetched here,
+        best effort; the child only reads the local cache and skips the
+        inference stage when they are absent or cannot be read, so no download
+        or cache problem ever becomes a CPU verdict. The fetch is skipped when
+        the caller asked for local files only, or when the installed versions
+        would stop the child at the guard anyway. A timeout is a failure like
+        any other and is cached. A child that ran out of GPU memory says nothing
+        about the CUDA stack. Before the storage view, or without an allocator
+        (local mode, where the load would need the room the probe did not
+        find), it is reported, nothing is cached and this load goes to the CPU.
+        After the storage view with ``placed_by_allocator``, this load keeps the
+        GPU and ``allocate_gpu`` places the model as it did before #2498; the
+        first such result is not cached, the second is cached as the
+        storage-view verdict, so a GPU that stays full does not cost every load
+        a probe. On failure ``_gpu_probe_reason`` names the stage, the exit code
+        and the child's last output lines.
 
         Args:
             device_index: CUDA device to probe.
             download_root: faster-whisper download root for the probe's weights.
             local_files_only: the loader option of the same name; no network at all.
+            placed_by_allocator: server mode, where ``allocate_gpu`` places the
+                model after the probe.
 
         Returns:
-            True when every stage passed and the child exited cleanly.
+            True when the child passed every stage it ran (the inference stage
+            may be skipped), or, with ``placed_by_allocator``, ran out of GPU
+            memory after the storage view.
         """
         with cls._gpu_probe_lock:
             if cls._gpu_compatible is not None:
                 return cls._gpu_compatible
+            cls._gpu_probe_inference_skipped = None
 
             import subprocess
             import sys
@@ -328,16 +352,29 @@ class WhisperLoader(BaseLoader):
                 reason = f'exit {result.returncode} after "{stage}"' + (f'; stderr: {tail}' if tail else '')
                 if 'out of memory' in ((result.stderr or '') + (result.stdout or '')).lower():
                     # A full GPU says nothing about the CUDA stack (the CUDA and
-                    # CTranslate2 wording is "out of memory"): do not cache, and let
-                    # the next load probe again. Past the storage view the stack
-                    # passed what the probe checked before #2498, so, as with missing
-                    # weights, this load keeps the GPU and allocate_gpu places the
-                    # model; before it, this load goes to the CPU with the reason.
-                    if 'probe: storage view ok' in lines:
+                    # CTranslate2 wording is "out of memory"). Past the storage view
+                    # the stack passed what the probe checked before #2498; in server
+                    # mode allocate_gpu then places the model, so this load keeps the
+                    # GPU. The first such result is not cached, so the next load can
+                    # run the inference stage; the second caches the storage-view
+                    # verdict. Before the storage view, or in local mode (no
+                    # allocator, and the load needs the room the probe did not find),
+                    # this load goes to the CPU with the reason and nothing is cached.
+                    if placed_by_allocator and 'probe: storage view ok' in lines:
+                        cls._gpu_probe_out_of_memory += 1
                         cls._gpu_probe_reason = None
                         cls._gpu_probe_inference_skipped = (
                             f'probe: inference skipped: GPU {device_index} ran out of memory'
                         )
+                        if cls._gpu_probe_out_of_memory > 1:
+                            cls._gpu_compatible = True
+                            logger.warning(
+                                'Whisper GPU probe passed on the storage view only: GPU %s ran out of memory in the '
+                                'inference stage again (%s); the storage-view verdict is kept.',
+                                device_index,
+                                reason,
+                            )
+                            return True
                         logger.warning(
                             'Whisper GPU probe passed on the storage view only: GPU %s ran out of memory in the '
                             'inference stage (%s); the next load probes again.',
@@ -570,18 +607,25 @@ class WhisperLoader(BaseLoader):
             logger.debug(f'Estimated memory: {memory_gb:.2f} GB')
 
             # Probe GPU compatibility before allocating: the probe runs a real
-            # transcription in a child process (when the tiny weights are local),
-            # so a native crash or missing CUDA library is found here, not on the
-            # first request.
-            # Choosing the probe GPU reads free memory through torch, which opens a CUDA context (a few
-            # hundred MB, kept until exit) on every candidate GPU. A cached verdict ignores the index, so
-            # it is chosen only while none is cached; reading the memory through NVML, as
-            # probe_cuda_memory in ai.common.utils.hardware does, needs no context and is the fuller fix.
+            # transcription in a child process (when the tiny weights can be read
+            # and the GPU has room for them), so a native crash or missing CUDA
+            # library is found here, not on the first request. allocate_gpu
+            # places the model, so a probe that ran out of memory after the
+            # storage view keeps the GPU (placed_by_allocator).
+            # Choosing the probe GPU reads free memory through torch, which opens
+            # a CUDA context (a few hundred MB, kept until exit) on every
+            # candidate GPU. A cached verdict ignores the index, so it is chosen
+            # only while none is cached and CUDA is available; reading the memory
+            # through NVML, as probe_cuda_memory in ai.common.utils.hardware
+            # does, needs no context and is the fuller fix.
             probe_index = 0
-            if WhisperLoader._gpu_compatible is None:
+            if torch.cuda.is_available() and WhisperLoader._gpu_compatible is None:
                 probe_index = WhisperLoader._first_candidate_gpu(exclude_gpus, torch)
             if torch.cuda.is_available() and WhisperLoader._check_gpu_compatible(
-                device_index=probe_index, download_root=download_root, local_files_only=local_files_only
+                device_index=probe_index,
+                download_root=download_root,
+                local_files_only=local_files_only,
+                placed_by_allocator=True,
             ):
                 gpu_index, torch_device = allocate_gpu(memory_gb, exclude_gpus)
                 logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for Whisper {model_name}')
