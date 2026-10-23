@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — since 2026-10-16
 
+### Added
+
+- **nodes**: add store_lancedb, an embedded vector store whose tables live in a local directory or on S3, GCS or Azure Blob storage, with semantic, keyword and hybrid search, soft delete, an automatic vector index once a table grows, and the shared vector store tools (#2804)
+
 ### Fixed
 
 - **parse**: RAR4 and RAR5 archives extracted nothing since #2440, silently and on every platform: the move of the Tika code into the parse node left `RarSevenZipParser` behind in the unbuilt `packages/tika`, so `ConfigBuilder` replaced Tika's RAR parser with a class that was not on the classpath. The class now lives in the parse node library, the swap checks that the class resolves before it removes Tika's own parser, and a RAR5 archive yields its member text again (#2678)
