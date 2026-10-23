@@ -63,10 +63,12 @@ second of audio with the `tiny` model when those weights are present (fetching
 them first if it can, waiting at most 30 seconds and retrying the download
 once, on the next load, if that was not enough; without them, or when the
 cache cannot be read, the check rests on handing a CUDA tensor to CTranslate2,
-a lighter check that can still fail). A GPU with no memory left for `tiny` is
-not a clear answer: with a model server the load keeps the GPU on the lighter
-check (and the second time keeps that answer); without one it runs on the CPU
-and the next load checks again. If the check fails, the node logs an error
+a lighter check that can still fail). A GPU with room for the CUDA tensor but
+not for `tiny` is not a clear answer: with a model server the load keeps the
+GPU on the lighter check (and the second time keeps that answer); without one
+it runs on the CPU and the next load checks again. A GPU without room even for
+the tensor sends the load to the CPU and the next load checks again, with or
+without a model server. If the check fails, the node logs an error
 naming the cause, reports the reason as `device_fallback` in the model
 metadata, and runs on the CPU, where `float16` becomes `int8`.
 

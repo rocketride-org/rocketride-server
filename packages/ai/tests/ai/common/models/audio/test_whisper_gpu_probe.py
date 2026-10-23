@@ -896,7 +896,7 @@ def test_the_probe_gpu_is_picked_only_while_a_probe_can_use_it(model_stack, monk
     assert len(picks) == 1
 
 
-def _a_full_gpu(monkeypatch, tmp_path):
+def _a_full_gpu(monkeypatch, tmp_path, stderr='CUDA failed with error out of memory'):
     """Probe children that run out of GPU memory after the storage view, with the probe weights cached in full."""
     weights = str(_weights(tmp_path))
     monkeypatch.setitem(
@@ -908,7 +908,7 @@ def _a_full_gpu(monkeypatch, tmp_path):
 
     def _run(*a, **k):
         children.append(a)
-        return _completed(1, stdout='probe: storage view ok\n', stderr='CUDA failed with error out of memory')
+        return _completed(1, stdout='probe: storage view ok\n', stderr=stderr)
 
     monkeypatch.setattr(subprocess, 'run', _run)
     return children
@@ -940,6 +940,22 @@ def test_an_out_of_memory_after_the_storage_view_keeps_the_gpu_in_server_mode(
     assert WhisperLoader._gpu_compatible is True and len(children) == 2
     assert WhisperLoader.load('tiny', allocate_gpu=allocate)[2] == 1
     assert len(children) == 2  # no third child
+
+
+@pytest.mark.parametrize(
+    'stderr',
+    ['cuBLAS failed with status CUBLAS_STATUS_ALLOC_FAILED', 'cuDNN failed with status CUDNN_STATUS_ALLOC_FAILED'],
+)
+def test_a_library_allocation_failure_after_the_storage_view_is_out_of_memory(
+    model_stack, monkeypatch, tmp_path, stderr
+):
+    """A failed allocation inside cuBLAS or cuDNN is reported by status name, not as "out of memory"."""
+    children = _a_full_gpu(monkeypatch, tmp_path, stderr=stderr)
+
+    _bundle, metadata, gpu_index = WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (1, 'cuda:1'))
+
+    assert (gpu_index, metadata['device']) == (1, 'cuda:1') and 'device_fallback' not in metadata
+    assert WhisperLoader._gpu_compatible is None and len(children) == 1  # not a verdict, as for "out of memory"
 
 
 @pytest.mark.parametrize('device', [None, 'cuda:1'])

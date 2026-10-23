@@ -24,7 +24,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
@@ -62,10 +62,15 @@ _GPU_PROBE_TIMEOUT_S = 120
 # (minutes), must not stall every Whisper load in the process. A fetch that runs
 # out of time is killed; the download resumes from its partial files next time.
 _GPU_PROBE_PREFETCH_TIMEOUT_S = 30
+# What a full GPU prints: the CUDA and CTranslate2 wording, and the status cuBLAS and
+# cuDNN return when an allocation inside the library fails. Matched on lowercased output.
+_GPU_OUT_OF_MEMORY_MARKERS = ('out of memory', 'cublas_status_alloc_failed', 'cudnn_status_alloc_failed')
 
 
 def _gpu_probe_script(
-    device_index: int = 0, model_name: str = _GPU_PROBE_MODEL, download_root: Optional[str] = None
+    device_index: int = 0,
+    model_name: str = _GPU_PROBE_MODEL,
+    download_root: Optional[Union[str, 'os.PathLike[str]']] = None,
 ) -> str:
     """Return the source of the GPU probe child process.
 
@@ -229,8 +234,9 @@ class WhisperLoader(BaseLoader):
     # Weight fetches that ran out of time in this process. After the first, a
     # storage-view-only verdict is provisional (the next load fetches again).
     _gpu_probe_fetch_timeouts: int = 0
-    # Server-mode probes that ran out of GPU memory after the storage view. After
-    # the first, the storage-view verdict is cached (the GPU may stay full).
+    # Server-mode probes that ran out of GPU memory after the storage view. The
+    # first is not cached; the second caches the storage-view verdict (the GPU
+    # may stay full).
     _gpu_probe_out_of_memory: int = 0
     _gpu_probe_lock = threading.Lock()
 
@@ -238,7 +244,7 @@ class WhisperLoader(BaseLoader):
     def _check_gpu_compatible(
         cls,
         device_index: int = 0,
-        download_root: Optional[str] = None,
+        download_root: Optional[Union[str, 'os.PathLike[str]']] = None,
         local_files_only: bool = False,
         placed_by_allocator: bool = False,
     ) -> bool:
@@ -350,7 +356,8 @@ class WhisperLoader(BaseLoader):
                 stage = lines[-1] if lines else 'no output'
                 tail = ' | '.join((result.stderr or '').strip().splitlines()[-3:])
                 reason = f'exit {result.returncode} after "{stage}"' + (f'; stderr: {tail}' if tail else '')
-                if 'out of memory' in ((result.stderr or '') + (result.stdout or '')).lower():
+                output = ((result.stderr or '') + (result.stdout or '')).lower()
+                if any(marker in output for marker in _GPU_OUT_OF_MEMORY_MARKERS):
                     # A full GPU says nothing about the CUDA stack (the CUDA and
                     # CTranslate2 wording is "out of memory"). Past the storage view
                     # the stack passed what the probe checked before #2498; in server
@@ -415,7 +422,7 @@ class WhisperLoader(BaseLoader):
         return None
 
     @staticmethod
-    def _probe_weights_cached(download_model: Any, download_root: Optional[str]) -> bool:
+    def _probe_weights_cached(download_model: Any, download_root: Optional[Union[str, 'os.PathLike[str]']]) -> bool:
         """Whether a complete copy of the probe weights is in the local cache (no network call)."""
         try:
             path = download_model(_GPU_PROBE_MODEL, cache_dir=download_root, local_files_only=True)
@@ -428,7 +435,7 @@ class WhisperLoader(BaseLoader):
         return bool(path) and os.path.isfile(os.path.join(str(path), 'model.bin'))
 
     @classmethod
-    def _prefetch_probe_weights(cls, download_root: Optional[str]) -> Optional[bool]:
+    def _prefetch_probe_weights(cls, download_root: Optional[Union[str, 'os.PathLike[str]']]) -> Optional[bool]:
         """Fetch the probe model's weights into the cache the child reads, best effort.
 
         This is the only place the probe may touch the network, and only when a
