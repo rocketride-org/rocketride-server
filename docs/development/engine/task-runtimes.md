@@ -451,8 +451,9 @@ kubectl -n rocketride-tasks delete jobs -l rocketride.task           # every eng
 ```
 
 A finished Job nobody removed is deleted by the cluster after `RR_K8S_TTL`
-seconds. Of the `kubectl` processes a killed server leaves, the watch ends by
-itself within five minutes; end a leftover `port-forward` yourself. Under
+seconds. Of the `kubectl` processes a killed server leaves, the API server ends
+the watch after its own watch timeout (30 to 60 minutes by default); end it,
+and a leftover `port-forward`, yourself. Under
 spawn a killed server leaves the files of the tasks it was running
 (`task-*.json` in the temp directory); they hold a pipeline's resolved
 settings, secrets included, so delete them.
