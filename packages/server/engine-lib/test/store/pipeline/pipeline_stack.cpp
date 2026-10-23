@@ -99,9 +99,34 @@ std::set<std::string> wires(const Endpoint &endpoint) {
     return result;
 }
 
+// The control table as "from>to:classType"
+template <typename Endpoint>
+std::set<std::string> controlsOf(const Endpoint &endpoint) {
+    std::set<std::string> result;
+    for (const auto &[from, to, classType] : endpoint->controls)
+        result.insert(idOf(endpoint, from) + ">" + idOf(endpoint, to) + ":" + classType);
+    return result;
+}
+
 }  // namespace
 
-TEST_CASE("store::generatePipelineStack any lane") {
+TEST_CASE("store::generatePipelineStack") {
+    SECTION("named lanes are wired as declared") {
+        auto endpoint = stackOf(components({component("relay", "fx_relay", {{"text", "src"}}),
+                                          component("out", "fx_sink", {{"text", "relay"}})}).c_str());
+        REQUIRE_NO_ERROR(endpoint);
+        REQUIRE(wires(*endpoint) == std::set<std::string>{"src>relay:text", "relay>out:text"});
+    }
+
+    SECTION("a control wire lands in the control table, not as a lane") {
+        auto endpoint = stackOf(components({component("agent", "fx_relay", {{"text", "src"}}),
+                                          component("out", "fx_sink", {{"text", "agent"}}),
+                                          component("tool", "fx_sink", {}, "agent")}).c_str());
+        REQUIRE_NO_ERROR(endpoint);
+        REQUIRE(controlsOf(*endpoint) == std::set<std::string>{"agent>tool:tool"});
+        REQUIRE(wires(*endpoint) == std::set<std::string>{"src>agent:text", "agent>out:text"});
+    }
+
     SECTION("a \"*\" node is bound on what the nodes after it ask for") {
         auto endpoint = stackOf(components({component("any", "fx_any", {{"*", "src"}}),
                                           component("out", "fx_sink", {{"text", "any"}})}).c_str());
@@ -145,29 +170,22 @@ TEST_CASE("store::generatePipelineStack any lane") {
     }
 }
 
-TEST_CASE("store::validateLanesShape") {
-    auto shape = [](const char *lanes) {
-        return IServices::validateLanesShape(*json::parse(lanes), "fx");
+// The services/ fixtures load, so the accepted lane shapes are covered there;
+// each services_bad/ directory holds one definition the loader refuses
+TEST_CASE("store::loadDirectory lanes shape") {
+    auto load = [](const char *name) {
+        return IServices::loadDirectory(file::Path(__FILE__).parent() / "services_bad" / name);
     };
 
-    SECTION("the two any-lane shapes and plain named lanes are accepted") {
-        REQUIRE_NO_ERROR(shape(R"({"*": ["*"]})"));
-        REQUIRE_NO_ERROR(shape(R"({"*": []})"));
-        REQUIRE_NO_ERROR(shape(R"({"_source": ["text"], "text": ["documents"]})"));
-    }
-
-    SECTION("any lane in, named lanes out is rejected") {
-        REQUIRE_ERROR(shape(R"({"*": ["text"]})"), Ec::InvalidParam, "must be [\"*\"]");
-        REQUIRE_ERROR(shape(R"({"*": ["*", "text"]})"), Ec::InvalidParam, "must be [\"*\"]");
-        REQUIRE_ERROR(shape(R"({"*": "*"})"), Ec::InvalidParam, "must be [\"*\"]");
-    }
-
     SECTION("\"*\" beside a named lane is rejected") {
-        REQUIRE_ERROR(shape(R"({"*": ["*"], "text": []})"), Ec::InvalidParam, "beside the named lane");
+        REQUIRE_ERROR(load("beside_named"), Ec::InvalidParam, "beside the named lane");
     }
 
     SECTION("\"*\" as the output of a named lane is rejected") {
-        REQUIRE_ERROR(shape(R"({"text": ["*"]})"), Ec::InvalidParam, "outputs \"*\" on the lane");
-        REQUIRE_ERROR(shape(R"({"_source": ["*"]})"), Ec::InvalidParam, "outputs \"*\" on the lane");
+        REQUIRE_ERROR(load("named_outputs_any"), Ec::InvalidParam, "outputs \"*\" on the lane");
+    }
+
+    SECTION("any lane in, a named lane out is rejected") {
+        REQUIRE_ERROR(load("any_outputs_named"), Ec::InvalidParam, "must be [\"*\"]");
     }
 }

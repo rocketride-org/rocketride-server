@@ -1893,9 +1893,40 @@ Error IServices::loadServices(const Path &path, const Text &mask) noexcept {
             // Get the lanes array
             const auto &lanes = serviceInfo["lanes"];
 
-            if (auto ccode = IServices::validateLanesShape(
-                    lanes, std::string((Text)protocol)))
-                return ccode;
+            // buildConnections binds "*" only as the sole input lane, and
+            // forwards it only as ["*"] (same lane) or [] (nothing)
+            if (lanes.isObject()) {
+                for (const auto &key : lanes.getMemberNames()) {
+                    if (key == "*") continue;
+                    if (lanes.isMember("*"))
+                        return APERR(Ec::InvalidParam, "Service",
+                                     def.logicalType,
+                                     "declares the \"*\" lane beside the "
+                                     "named lane",
+                                     key,
+                                     "- a service that accepts any lane "
+                                     "declares only \"*\"");
+                    for (const auto &output : lanes[key])
+                        if (output.isString() && output.asString() == "*")
+                            return APERR(Ec::InvalidParam, "Service",
+                                         def.logicalType,
+                                         "outputs \"*\" on the lane", key,
+                                         "- only a service that accepts "
+                                         "any lane forwards it");
+                }
+                if (lanes.isMember("*")) {
+                    const auto &outputs = lanes["*"];
+                    bool forwards = outputs.isArray() && outputs.size() == 1 &&
+                                    outputs[0].isString() &&
+                                    outputs[0].asString() == "*";
+                    if (!outputs.isArray() || !(outputs.empty() || forwards))
+                        return APERR(Ec::InvalidParam, "Service",
+                                     def.logicalType,
+                                     "lanes[\"*\"] must be [\"*\"] (forward on "
+                                     "the lane that arrived) or [] (forward "
+                                     "nothing)");
+                }
+            }
 
             // Iterate through each lane
             for (const auto &laneId : lanes.getMemberNames()) {
@@ -2239,40 +2270,6 @@ ErrorOr<json::Value> IServices::getServiceSchemas() noexcept {
 
     // Return the schemas of the services
     return _mv(res);
-}
-
-//-----------------------------------------------------------------------------
-/// @brief Refuses a `lanes` map that buildConnections cannot bind: "*" beside
-///        named lanes, anything under "*" but ["*"] or [], or "*" as the
-///        output of a named lane.
-//-----------------------------------------------------------------------------
-Error IServices::validateLanesShape(const json::Value &lanes,
-                                    const std::string &logicalType) noexcept {
-    if (!lanes.isObject()) return {};
-
-    for (const auto &key : lanes.getMemberNames()) {
-        if (key == "*") continue;
-        if (lanes.isMember("*"))
-            return APERR(Ec::InvalidParam, "Service", logicalType,
-                         "declares the \"*\" lane beside the named lane", key,
-                         "- a service that accepts any lane declares only "
-                         "\"*\"");
-        for (const auto &output : lanes[key])
-            if (output.isString() && output.asString() == "*")
-                return APERR(Ec::InvalidParam, "Service", logicalType,
-                             "outputs \"*\" on the lane", key,
-                             "- only a service that accepts any lane forwards it");
-    }
-
-    if (!lanes.isMember("*")) return {};
-    const auto &outputs = lanes["*"];
-    bool forwards = outputs.isArray() && outputs.size() == 1 &&
-                    outputs[0].isString() && outputs[0].asString() == "*";
-    if (!outputs.isArray() || !(outputs.empty() || forwards))
-        return APERR(Ec::InvalidParam, "Service", logicalType,
-                     "lanes[\"*\"] must be [\"*\"] (forward on the lane that "
-                     "arrived) or [] (forward nothing)");
-    return {};
 }
 
 }  // namespace engine::store
