@@ -47,6 +47,7 @@ class IGlobal(IGlobalBase):
         try:
             # Import after dependencies are loaded
             from langchain_aws import ChatBedrock
+            from .bedrock import ARN_NEEDS_PROVIDER, has_geo_prefix, resolve_model_id, resolve_model_vendor
 
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -72,7 +73,7 @@ class IGlobal(IGlobalBase):
             # Model identifier sanity: must be provider-prefixed ID or ARN
             # Examples: "anthropic.claude-3-7-sonnet-20250219-v1:0" or "arn:aws:bedrock:..."
             if model:
-                has_region_prefix = bool(re.match(r'^(us\.|eu\.|apac\.)', model))
+                has_region_prefix = has_geo_prefix(model)
                 has_provider_prefix = bool(re.match(r'^[a-z0-9]+\.', model))
                 is_arn = model.startswith('arn:')
                 if not (is_arn or has_provider_prefix or has_region_prefix):
@@ -81,22 +82,15 @@ class IGlobal(IGlobalBase):
                     )
                     return
 
+            # The same id and vendor the pipeline will use
+            test_model = resolve_model_id(model or '', region)
+            vendor = resolve_model_vendor(test_model, config.get('modelProvider'))
+            if test_model.startswith('arn:') and not vendor:
+                warning(ARN_NEEDS_PROVIDER)
+                return
+
             # Test AWS credentials and model availability using a minimal call
             try:
-                # Add region prefix when not already present or ARN
-                test_model = model or ''
-                if (
-                    test_model
-                    and not test_model.startswith('arn:')
-                    and not re.match(r'^(us\.|eu\.|apac\.)', test_model)
-                ):
-                    model_prefix = 'us.'
-                    if region and region[:2] == 'eu':
-                        model_prefix = 'eu.'
-                    elif region and region[:2] == 'ap':
-                        model_prefix = 'apac.'
-                    test_model = model_prefix + test_model
-
                 # Test with minimal API call (limit output to minimal to avoid spend)
                 llm = ChatBedrock(
                     model=test_model,
@@ -104,6 +98,7 @@ class IGlobal(IGlobalBase):
                     aws_secret_access_key=secretKey,
                     region=region,
                     temperature=0,
+                    **({'provider': vendor} if vendor else {}),
                 )
 
                 # Try a minimal test call
