@@ -30,6 +30,7 @@
 # import-time error rather than a silent runtime AttributeError.
 # =============================================================================
 
+import json
 import os
 from abc import ABC, abstractmethod
 from typing import NamedTuple
@@ -187,6 +188,18 @@ class AccountBase(ABC):
             server: ``WebServer`` instance (from ``ai.web``).
         """
         pass
+
+    def node_index(self) -> dict:
+        """The nodes this server serves: {contract, nodes: {name: {sha256, size, services, icons}}}."""
+        from ai.common import node_release
+
+        return json.loads(node_release.read_index())
+
+    def node_package(self, name: str, sha256: str) -> bytes:
+        """The <name>.rrnode the index lists with that digest."""
+        from ai.common import node_release
+
+        return node_release.read_package(name, sha256)
 
     async def get_public_apps(self) -> list:
         """

@@ -213,6 +213,11 @@ async def run(config: Dict[str, Any] = None) -> None:
 
     await account.init_account(server)
 
+    # The nodes the server does not carry: their definitions now, their code on demand
+    from ai.modules.task import node_store
+
+    node_store.start()
+
     # Start the FastAPI server loop
     await server.serve()
 
