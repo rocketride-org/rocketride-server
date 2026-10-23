@@ -170,6 +170,21 @@ def test_falls_through_when_the_guard_is_not_active(monkeypatch, depends_calls):
     assert _wrapper_installs(depends_calls), 'the install was not reached'
 
 
+def test_shared_host_alone_installs_no_guard(monkeypatch):
+    """--shared-host is about the host, not the hosted rules: torch stays allowed."""
+    from ai.common.models import gpu_guard
+
+    monkeypatch.setattr(sys, 'argv', ['engine', 'node.py', '--shared-host'])
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    monkeypatch.setattr(gpu_guard, '_installed', False)
+    monkeypatch.setattr(gpu_guard, '_reason', None)
+    monkeypatch.setattr(gpu_guard, 'get_model_server_address', lambda: None)
+
+    gpu_guard.install_gpu_guard()
+
+    assert not gpu_guard.is_installed()
+
+
 def _install_hosted_guard(monkeypatch, gpu_guard):
     """A hosted engine's task with no model server, as on staging."""
     monkeypatch.setattr(sys, 'argv', ['engine', 'node.py', '--hosted'])

@@ -1,13 +1,14 @@
 """Unit tests for this module's _depends_hooks.py (#2681).
 
 This is a plain depends.py excludes hook (see that module's "Hook files"
-section), so it is testable on its own: no engine, no depends.py involved.
-Discovery itself — that depends.py finds this file wherever it lives, not
+section), so it is testable on its own: no depends.py involved, only the
+hosting module that ships next to it. Discovery itself — that depends.py finds this file wherever it lives, not
 just under its own requirements.txt's directory — is covered in
 packages/server/engine-lib/rocketlib-python/tests/test_depends.py.
 """
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,12 @@ SPEC.loader.exec_module(HOOKS)
 
 
 def test_not_hosted_does_nothing(monkeypatch):
-    monkeypatch.setattr(HOOKS.sys, 'argv', ['engine', 'node.py'])
+    monkeypatch.setattr(sys, 'argv', ['engine', 'node.py'])
+    assert HOOKS.excludes(['torch', 'numpy']) is None
+
+
+def test_shared_host_alone_does_nothing(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['engine', 'node.py', '--shared-host'])
     assert HOOKS.excludes(['torch', 'numpy']) is None
 
 
@@ -33,7 +39,7 @@ def test_not_hosted_does_nothing(monkeypatch):
     ],
 )
 def test_hosted_refuses_once_torch_is_in_the_plan(monkeypatch, packages):
-    monkeypatch.setattr(HOOKS.sys, 'argv', ['engine', 'node.py', '--hosted'])
+    monkeypatch.setattr(sys, 'argv', ['engine', 'node.py', '--hosted'])
     forbidden = {'torch', 'torchvision', 'torchaudio'}
     present = forbidden & {p.lower() for p in packages}
 

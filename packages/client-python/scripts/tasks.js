@@ -203,6 +203,8 @@ function makeStartTestServerAction(options = {}) {
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
+				logName: 'client-python',
+				verbose: ctx.options?.verbose,
 				basePort: 20000,
 				// CI for fork PRs doesn't have repo secrets; the integration tests
 				// expect a shared API key between server and client. Default to the
@@ -346,7 +348,7 @@ module.exports = {
 		},
 		{
 			name: 'client-python:test',
-			action: () => ({
+			action: (options) => ({
 				description: 'Testing client-python',
 				steps: [
 					'server:build',
@@ -358,7 +360,7 @@ module.exports = {
 					'client-python:setup-test-deps',
 					bracket({
 						name: 'py-test-server',
-						setup: makeStartTestServerAction(),
+						setup: makeStartTestServerAction(options),
 						teardown: makeStopTestServerAction(),
 						steps: ['client-python:run-pytest'],
 					}),

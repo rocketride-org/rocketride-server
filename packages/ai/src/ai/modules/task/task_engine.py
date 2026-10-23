@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Any, List, Mapping,
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
+from hosting import HOSTED_FLAG, SHARED_HOST_FLAG
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
@@ -320,17 +321,20 @@ def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
 # `nosaas` services, but a pipeline can reach the engine without the canvas,
 # so the engine enforces the same rule itself. Any service built on the MCP
-# client node is refused in stdio mode: that transport launches a command
-# inside the engine's container. Its HTTP transports are fine. Matching is on
-# the node module, not the provider name: several services share the node
-# (tool_butterbase is one) and provider lookup is case-insensitive.
+# client node is refused in stdio mode while the task shares the engine's
+# host: that transport launches a command there. Its HTTP transports are
+# fine. Matching is on the node module, not the provider name: several
+# services share the node (tool_butterbase is one) and provider lookup is
+# case-insensitive.
 CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
 CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 
-# Task subprocesses of a hosted engine get this flag on their command line.
-# Pipeline-supplied args can add flags but not remove this one, so nodes can
-# rely on it (the MCP stdio client refuses to start when it is present).
-CONST_HOSTED_CHILD_FLAG = '--hosted'
+# Task subprocesses of a hosted engine get these flags on their command line
+# (see the hosting module): --hosted always, --shared-host when the task shares
+# the engine's host. Pipeline-supplied args can add flags but not remove these,
+# so the task can rely on them.
+CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
+CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
 
 def _service_capabilities(service: Any) -> List[str]:
@@ -345,6 +349,7 @@ def saas_pipeline_violation(
     pipeline: Dict[str, Any],
     get_service: Callable[[str], Any],
     get_node_config: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+    shared_host: bool = True,
 ) -> Optional[str]:
     """Return why a hosted engine must refuse ``pipeline``, or None if it may run.
 
@@ -352,7 +357,8 @@ def saas_pipeline_violation(
     and ``Config.getNodeConfig`` in production. The MCP transport is resolved the
     way the node resolves it (profile defaults merged under the component config),
     because the default profile is itself stdio. Anything that cannot be resolved
-    is refused.
+    is refused. ``shared_host`` says the task will share the engine's host (the
+    task's ``--shared-host``); only then is stdio MCP refused.
     """
     for component in pipeline.get('components', []) or []:
         provider = str(component.get('provider') or '')
@@ -362,7 +368,7 @@ def saas_pipeline_violation(
         if CONST_SAAS_BLOCKED_CAPABILITY in _service_capabilities(service):
             return f'Node "{label}" ({provider}) is not available on RocketRide Cloud.'
 
-        if str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
+        if shared_host and str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
             try:
                 transport = str(get_node_config(provider, component.get('config') or {}).get('transport') or 'stdio')
             except Exception:
@@ -965,6 +971,18 @@ class Task(DAPBase):
 
         return subprocess_env
 
+    def _shares_host(self) -> bool:
+        """
+        Whether the task shares the engine's host, so it gets --shared-host.
+
+        A hosted engine's task does: spawn is the only runtime. The pre-launch
+        check and the task's command line both ask here, so they agree.
+
+        Returns:
+            True for a task of a hosted engine.
+        """
+        return _is_saas_engine()
+
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
         Validate pipeline configuration and extract metadata.
@@ -989,7 +1007,9 @@ class Task(DAPBase):
             from rocketlib import getServiceDefinition
             from ai.common.config import Config
 
-            problem = saas_pipeline_violation(pipeline, getServiceDefinition, Config.getNodeConfig)
+            problem = saas_pipeline_violation(
+                pipeline, getServiceDefinition, Config.getNodeConfig, shared_host=self._shares_host()
+            )
             if problem:
                 raise ValueError(problem)
 
@@ -2583,9 +2603,11 @@ class Task(DAPBase):
                     '--data_host=127.0.0.1',
                 ]
             )
-            # Tell the task it runs under a hosted engine (see CONST_HOSTED_CHILD_FLAG)
+            # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
             if _is_saas_engine():
                 child_args.append(CONST_HOSTED_CHILD_FLAG)
+            if self._shares_host():
+                child_args.append(CONST_SHARED_HOST_CHILD_FLAG)
 
             # Pass model server address if configured
             modelserver = self._server._config.get('modelserver')

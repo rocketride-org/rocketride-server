@@ -1240,6 +1240,42 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
     assert '${' not in json.dumps(written)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('saas', 'flags'), [(True, ['--hosted', '--shared-host']), (False, [])])
+async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
+    """A hosted engine's spawn task gets --hosted and --shared-host, a local one
+    neither; the pre-launch check is told the same about the shared host.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: saas)
+    checked = []
+    monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    t.source = 'src'
+    t._env = {}
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    spawn = AsyncMock(side_effect=Launched)
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    with pytest.raises(Launched):
+        await Task.start_task(t)
+
+    assert [a for a in spawn.call_args.args if a in ('--hosted', '--shared-host')] == flags
+    assert checked == ([True] if saas else [])
+
+
 # ---------------------------------------------------------------------------
 # filter_subprocess_env — the child inherits an allowlist, never the whole env
 # ---------------------------------------------------------------------------
@@ -2142,6 +2178,14 @@ def test_saas_gate_refuses_stdio_mcp(config):
 def test_saas_gate_matches_the_node_not_the_provider_name(component):
     problem = _violation(component)
     assert problem and 'stdio MCP transport' in problem
+
+
+def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():
+    def violation(component):
+        return saas_pipeline_violation({'components': [component]}, _get_service, _mcp_node_config, shared_host=False)
+
+    assert violation({'id': 'm', 'provider': 'mcp_client', 'config': {'transport': 'stdio'}}) is None
+    assert 'not available on RocketRide Cloud' in violation({'id': 'f', 'provider': 'filesys'})
 
 
 # ---------------------------------------------------------------------------

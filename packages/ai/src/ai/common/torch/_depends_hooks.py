@@ -1,12 +1,11 @@
-import sys
+from hosting import is_hosted
 
-_HOSTED_FLAG = '--hosted'
 _FORBIDDEN = ('torch', 'torchvision', 'torchaudio')
 
 
 def excludes(packages):
     """See depends.py's "Hook files" section for the stage contract."""
-    if _HOSTED_FLAG not in sys.argv:
+    if not is_hosted():
         return None
 
     present = sorted({p for p in packages if p.lower().replace('_', '-') in _FORBIDDEN})

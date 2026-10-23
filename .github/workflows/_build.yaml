@@ -329,6 +329,24 @@ jobs:
         #       after the appropriate fixes have been made, see #743 #1048 for details.
         run: ${{ matrix.builder_cmd }} test --verbose --sequential --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }}
 
+      # The test servers' side of a failure. Printed rather than uploaded:
+      # storage-cleanup.yml deletes artifacts after 3 days, the job log stays.
+      # Workflow commands are stopped around each file so log lines stay inert.
+      - name: Show test server logs
+        if: failure()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          stop="stop-$(date +%s%N)-$$"
+          for log in dist/server/test-logs/*.log; do
+            echo "::group::$log"
+            echo "::stop-commands::$stop"
+            cat "$log"
+            echo
+            echo "::$stop::"
+            echo "::endgroup::"
+          done
+
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
         uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3

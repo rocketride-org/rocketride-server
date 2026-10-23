@@ -51,6 +51,8 @@ import sys
 from importlib.machinery import ModuleSpec
 from typing import Optional
 
+from hosting import is_hosted
+
 from .base import get_model_server_address
 
 
@@ -178,10 +180,6 @@ _installed = False
 # Why it was installed: 'modelserver' or 'hosted'. Picks the refusal message.
 _reason: Optional[str] = None
 
-# Task subprocesses of a hosted engine carry this flag (task_engine
-# CONST_HOSTED_CHILD_FLAG). Not imported from there: that pulls in the engine.
-_HOSTED_FLAG = '--hosted'
-
 
 def blocked_message(name: str) -> str:
     """The ImportError text for a refused GPU library import or install."""
@@ -229,7 +227,7 @@ def install_gpu_guard():
     # even when it has no model server configured
     if get_model_server_address() is not None:
         _reason = 'modelserver'
-    elif _HOSTED_FLAG in sys.argv:
+    elif is_hosted():
         _reason = 'hosted'
     else:
         # Local engine without a model server: GPU libraries are needed
