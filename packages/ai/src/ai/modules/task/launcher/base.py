@@ -129,7 +129,8 @@ class Launcher(abc.ABC):
 
     # The runtime's name, as given to --runtime
     name: str = ''
-    # The task cannot see the engine's files, so Task says what it needs from them
+    # The task cannot see the engine's files, so Task says what it needs from them;
+    # nor does it share the engine's host, so it gets no --shared-host
     isolated: bool = False
 
     async def prepare(self) -> None:

@@ -147,6 +147,8 @@ left behind.
 - Nodes that work on the engine host's own files see only the container's.
 - Workspace nodes from `--node_path` are not available: tasks run the nodes in
   the image.
+- A task in a container writes no crash dump: the engine's `--dumps` is not
+  passed on.
 - Task containers can reach whatever the Docker network allows. Restrict
   egress on the host if tasks must not reach your internal network. On Docker
   Desktop they can also reach services on the host's loopback, the engine's
