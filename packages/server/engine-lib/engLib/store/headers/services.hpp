@@ -168,6 +168,33 @@ public:
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
 
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Registers one parsed service definition into the service map,
+    ///		without reading anything from disk. The directory walk uses it
+    ///		for every services.json it finds; anything else that can hand
+    ///		us a definition uses the same path
+    //-----------------------------------------------------------------
+    static Error registerDefinition(json::Value serviceInfo,
+                                    const Path &definitionPath,
+                                    bool replace = false,
+                                    bool factories = true) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Resolves what registerDefinition added since the last call
+    //-----------------------------------------------------------------
+    static Error refreshDefinitions() noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Registers and resolves a batch of definitions, all or none:
+    ///		a failure leaves the services and global fields as they were.
+    ///		Called before any pipeline runs; nothing guards concurrent reads
+    //-----------------------------------------------------------------
+    static Error registerDefinitions(
+        std::vector<std::pair<json::Value, Path>> batch) noexcept;
+
 private:
     //-----------------------------------------------------------------
     ///	@details
@@ -238,6 +265,7 @@ private:
     static ErrorOr<IServices::ServiceSchema> getFields(
         ServiceContext &context, json::Value &section) noexcept;
     static Error updateDefinitions() noexcept;
+    static Error registerFactories(const ServiceDefinition &def) noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
     static std::list<Text> getFieldNames(const ServiceSchema &schema) noexcept;

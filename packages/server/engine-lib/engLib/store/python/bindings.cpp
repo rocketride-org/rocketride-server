@@ -308,6 +308,26 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
+    ///		Registers node definitions that did not come from a scan, as
+    ///		[(definition, path), ...], then resolves them together so
+    ///		fields that list other services see all of them. path is the
+    ///		services file's place in the unpacked node; it anchors the icon.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(registerServices, [](py::list nodes) {
+        // Convert the whole batch first: a malformed entry registers nothing
+        std::vector<std::pair<json::Value, file::Path>> batch;
+        for (auto node : nodes) {
+            auto pair = node.cast<py::tuple>();
+            batch.emplace_back(engine::python::pyjson::dictToJson(pair[0]),
+                               file::Path(pair[1].cast<std::string>()));
+        }
+        if (auto ccode =
+                engine::store::IServices::registerDefinitions(_mv(batch)))
+            throw ccode;
+    });
+
+    //-------------------------------------------------------------
+    /// @details
     ///		Returns the complete task-file JSON of the task currently
     ///		executing in this process, or None when no task is
     ///		running. This is how subprocess python reads trusted
