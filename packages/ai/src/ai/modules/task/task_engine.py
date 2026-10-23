@@ -624,6 +624,9 @@ class Task(DAPBase):
         # Lifecycle state
         self._tmpfile = None
         self._stop_requested = False
+        # Bumped by every stop_task, so a restart can tell whether a stop arrived
+        # while it loaded, even on a task whose last run was already stopped
+        self._stop_count = 0
         # WHY the stop was requested ('user' | 'ttl'); None until requested.
         # A ttl-window expiry is SUCCESS (the run stayed up exactly as
         # configured), so the run-log outcome derives from this.
@@ -2423,12 +2426,12 @@ class Task(DAPBase):
 
             # Load the new run's values while the old process still runs and
             # nothing has changed yet: a failed load leaves the task as it was
-            stop_seen = self._stop_requested
+            stops_before = self._stop_count
             self._restart_env = await self._load_env(pipeline)
 
             # A stop that arrived while the values loaded wins: nothing has
             # changed yet, so the task stays stopped instead of starting again
-            if self._stop_requested and not stop_seen:
+            if self._stop_count != stops_before:
                 raise RuntimeError('the task was stopped while the restart loaded its values')
 
             # Set the restart flag to inhibit termination/start events
@@ -2628,6 +2631,12 @@ class Task(DAPBase):
             if self._pipeline.get('avoidMocks'):
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
 
+            # A stop that arrived during the awaits above (loading the
+            # placeholder values, writing the task file) found no process to
+            # end: honour it here instead of starting one
+            if self._stop_requested:
+                raise RuntimeError('the task was stopped before it started')
+
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
                 *child_args,
@@ -2806,6 +2815,7 @@ class Task(DAPBase):
 
                 # Mark as a requested stop and block new operations.
                 self._stop_requested = True
+                self._stop_count += 1
                 self._stop_reason = reason
                 self._is_terminating = True
 

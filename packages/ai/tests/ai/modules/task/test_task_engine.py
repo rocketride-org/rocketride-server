@@ -1667,6 +1667,7 @@ async def test_a_stop_during_the_restart_load_wins():
 
     async def load_while_stopping():
         task._stop_requested = True  # what stop_task sets
+        task._stop_count += 1
         return {'ROCKETRIDE_KEY': 'v'}
 
     task._env_source = load_while_stopping
@@ -1679,6 +1680,71 @@ async def test_a_stop_during_the_restart_load_wins():
     task.stop_task.assert_not_awaited()
     task.start_task.assert_not_awaited()
     assert task._pipeline is old and task._stop_requested
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_the_restart_load_wins_on_an_already_stopped_task():
+    """A task whose last run was stopped still has _stop_requested set; a new
+    stop during the restart's load is still seen (counted, not just flagged).
+    """
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline={},
+    )
+    task._stop_requested = True  # the previous run was stopped
+
+    async def load_while_stopping():
+        task._stop_count += 1  # a second stop_task arrives during the load
+        return {}
+
+    task._env_source = load_while_stopping
+    task.has_attached_debugger = lambda: False
+    task.stop_task = AsyncMock()
+    task.start_task = AsyncMock()
+
+    with pytest.raises(RuntimeError, match='stopped while the restart'):
+        await task.restart_task({'components': [], 'config': '${ROCKETRIDE_KEY}'}, 'p-1', 's-1', 'tools')
+    task.start_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
+    """A stop that lands while start_task loads the placeholder values finds no
+    process yet; the start then ends through _terminated() instead of
+    launching the engine.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {'k': '${ROCKETRIDE_KEY}'}}]})
+    t.source = 'src'
+
+    async def load_while_stopping():
+        t._stop_requested = True  # what stop_task sets when it arrives now
+        return {'ROCKETRIDE_KEY': 'v'}
+
+    t._env_source = load_while_stopping
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+    spawn = AsyncMock()
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+
+    with pytest.raises(RuntimeError, match='stopped before it started'):
+        await Task.start_task(t)
+    spawn.assert_not_awaited()
+    t._terminated.assert_awaited()
 
 
 @pytest.mark.asyncio

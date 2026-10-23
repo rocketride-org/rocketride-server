@@ -351,7 +351,15 @@ class TaskCommands(DAPConn):
             # task.control on that team (sys.admin bypasses). A dev-team
             # check alone let any task.control holder restart other teams'
             # token-addressed tasks.
-            self.get_task(request, 'task.control')
+            task = self.get_task(request, 'task.control')
+
+            # A restart decrypts the team's CURRENT secrets again (the task loads
+            # its ${...} values at every start), so re-check access to the team as
+            # on_execute does: get_task gives a run's owner access without asking
+            # whether they are still on the team. pk_/tk_ connections are scoped
+            # to their task already.
+            if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
+                self.verify_team_permission(task.team_id, 'task.control')
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(

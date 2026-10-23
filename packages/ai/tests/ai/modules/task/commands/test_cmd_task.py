@@ -461,6 +461,24 @@ async def test_on_terminate_denied_does_not_stop_the_task():
 
 
 @pytest.mark.asyncio
+async def test_on_restart_rechecks_the_callers_access_to_the_team():
+    """A restart decrypts the team's current secrets again, so a caller who
+    passes get_task (the run's owner) but no longer holds task.control on the
+    team is refused before the task restarts and loads anything.
+    """
+    server = MagicMock()
+    server.restart_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.get_task = MagicMock(return_value=MagicMock(team_id='team-9'))
+    conn.verify_team_permission = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
+
+    with pytest.raises(PermissionError, match='denied'):
+        await TaskCommands.on_restart(conn, {'arguments': {'token': 'tk_x'}})
+    conn.verify_team_permission.assert_called_once_with('team-9', 'task.control')
+    server.restart_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_on_restart_delegates_to_restart_task():
     """on_restart forwards to TaskServer.restart_task and returns its body."""
     server = MagicMock()
