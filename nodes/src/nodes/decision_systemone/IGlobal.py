@@ -20,10 +20,93 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""System One node: global state (shared by every vendor profile)."""
+"""System One node: global state, shared by every vendor profile.
 
-from ai.common.systemone.global_base import SystemOneGlobalBase
+Builds a DecisionRunner from the node's merged config, and probes it in validateConfig.
+"""
+
+from __future__ import annotations
+
+from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+
+from ai.common.config import Config
+
+from .client import SystemOneClient, SystemOneError
+from .limits import DecisionLimits
+from .questions import parse_questions
+from .runner import DecisionRunner
+
+PROBE_STATE = 'Hello, this is a short test message.'
+PROBE_QUESTIONS = {'probe': {'type': 'noul', 'instructions': 'Is this text a greeting?'}}
 
 
-class IGlobal(SystemOneGlobalBase):
+class IGlobal(IGlobalBase):
     """System One node (all vendors share this; differences live in services.*.json)."""
+
+    runner: DecisionRunner | None = None
+    _client: SystemOneClient | None = None
+
+    def _base_url(self, config: dict) -> str:
+        """Return the backend base URL (vendor services files set ``serverbase``)."""
+        url = str(config.get('serverbase', '')).strip()
+        if not url:
+            raise ValueError('System One node needs a server URL (serverbase)')
+        return url
+
+    def _api_key(self, config: dict) -> str | None:
+        """Return the API key, or None for keyless backends."""
+        return str(config.get('apikey') or '').strip() or None
+
+    def _limits(self, config: dict) -> DecisionLimits:
+        """Return this backend's limits (from the profile's ``limits`` block)."""
+        return DecisionLimits.from_config(config)
+
+    def _model(self, config: dict) -> str:
+        model = str(config.get('model', '')).strip()
+        if not model:
+            raise ValueError('System One node needs a model name')
+        return model
+
+    def _timeout(self, config: dict) -> float:
+        return float(config.get('timeout') or 30)
+
+    def validateConfig(self):
+        """Check the questions and server fields, then make one live yes/no call (spec §6.4)."""
+        client = None
+        try:
+            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            model = self._model(config)
+            parse_questions(config, self._limits(config))
+            client = SystemOneClient(
+                self._base_url(config), self._api_key(config), timeout=self._timeout(config), max_attempts=1
+            )
+            client.decide(model, PROBE_STATE, PROBE_QUESTIONS)
+        except (ValueError, SystemOneError) as exc:
+            warning(str(exc))
+        except Exception as exc:
+            warning(f'System One config check failed: {exc}')
+        finally:
+            if client is not None:
+                client.close()
+
+    def beginGlobal(self):
+        """Validate the questions and build the runner (skipped in CONFIG mode)."""
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        model = self._model(config)
+        limits = self._limits(config)
+        specs = parse_questions(config, limits)
+        self._client = SystemOneClient(self._base_url(config), self._api_key(config), timeout=self._timeout(config))
+        state_metadata = tuple(
+            line.strip() for line in str(config.get('state_metadata') or '').splitlines() if line.strip()
+        )
+        self.runner = DecisionRunner(self._client, model, specs, limits, state_metadata=state_metadata, debug=debug)
+        debug(f'    System One: {self._client.endpoint} model={model} questions={len(specs)}')
+
+    def endGlobal(self):
+        """Release the HTTP client."""
+        if self._client is not None:
+            self._client.close()
+        self._client = None
+        self.runner = None

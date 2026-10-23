@@ -20,11 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Unit tests for ai.common.systemone.limits."""
+"""Unit tests for the System One node's limits module."""
 
 import pytest
 
-from ai.common.systemone.limits import (
+from decision_systemone_under_test.limits import (
     DecisionLimits,
     estimate_tokens,
     json_bytes,

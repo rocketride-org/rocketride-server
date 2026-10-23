@@ -33,10 +33,10 @@ import httpx
 import pytest
 
 from ai.common.decision import resolve, snapshot
-from ai.common.systemone.client import SystemOneClient
-from ai.common.systemone.limits import DecisionLimits
-from ai.common.systemone.questions import PICK_ONE, RUBRIC, YES_NO, QuestionSpec
-from ai.common.systemone.runner import DecisionRunner
+from decision_systemone_under_test.client import SystemOneClient
+from decision_systemone_under_test.limits import DecisionLimits
+from decision_systemone_under_test.questions import PICK_ONE, RUBRIC, YES_NO, QuestionSpec
+from decision_systemone_under_test.runner import DecisionRunner
 
 from .conftest import Doc, Meta, Prevented
 
@@ -83,7 +83,7 @@ def test_real_runner_and_client_record_contract_answers(systemone):
 
     client = SystemOneClient('http://jev.test', transport=httpx.MockTransport(handler), sleep=lambda _s: None)
 
-    class Node(systemone.instance_base.SystemOneInstanceBase):
+    class Node(systemone.IInstance.IInstance):
         pass
 
     inst = Node()

@@ -24,7 +24,7 @@
 
 from types import SimpleNamespace
 
-from ai.common.systemone.client import SystemOneError
+from decision_systemone_under_test.client import SystemOneError
 
 CONFIG = {
     'model': 'nimble',
@@ -61,9 +61,9 @@ class ProbeClient:
 
 def _global(systemone, monkeypatch, config):
     systemone.config.Config.getNodeConfig = lambda *_a, **_k: config
-    monkeypatch.setattr(systemone.global_base, 'SystemOneClient', ProbeClient)
+    monkeypatch.setattr(systemone.IGlobal, 'SystemOneClient', ProbeClient)
     ProbeClient.instances.clear()
-    glb = systemone.global_base.SystemOneGlobalBase()
+    glb = systemone.IGlobal.IGlobal()
     glb.glb = SimpleNamespace(logicalType='decision_ollama', connConfig={})
     return glb
 

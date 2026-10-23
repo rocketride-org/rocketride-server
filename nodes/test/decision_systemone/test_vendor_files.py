@@ -31,7 +31,7 @@ import pytest
 NODE = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'decision_systemone'
 CREDENTIALS = Path(__file__).parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'mcp' / 'credentials.json'
 LIMIT_KEYS = {'max_options', 'max_levels', 'max_questions', 'max_state_tokens'}
-# Every lane SystemOneInstanceBase decides on; each forwards to itself.
+# Every lane IInstance decides on; each forwards to itself.
 LANES = ('text', 'documents', 'table', 'questions', 'answers', 'json')
 
 

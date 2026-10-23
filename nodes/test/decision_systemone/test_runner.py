@@ -24,10 +24,10 @@
 
 import pytest
 
-from ai.common.systemone.client import SystemOneError
-from ai.common.systemone.limits import DecisionLimits
-from ai.common.systemone.questions import YES_NO, ProtocolError, QuestionSpec
-from ai.common.systemone.runner import DecisionRunner, Outcome
+from decision_systemone_under_test.client import SystemOneError
+from decision_systemone_under_test.limits import DecisionLimits
+from decision_systemone_under_test.questions import YES_NO, ProtocolError, QuestionSpec
+from decision_systemone_under_test.runner import DecisionRunner, Outcome
 
 SPECS = [QuestionSpec('urgent', YES_NO, 'Is it urgent?')]
 LIMITS = DecisionLimits(max_options=26, max_levels=26, max_questions=64, max_state_tokens=400, chars_per_token=4.0)

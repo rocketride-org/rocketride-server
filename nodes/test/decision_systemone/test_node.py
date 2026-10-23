@@ -25,7 +25,7 @@
 import pytest
 
 from ai.common.decision import fingerprint, resolve, snapshot
-from ai.common.systemone.client import SystemOneError
+from decision_systemone_under_test.client import SystemOneError
 
 from .conftest import Doc, Meta, Prevented, group
 

@@ -26,7 +26,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ai.common.systemone.client import SystemOneError
+from decision_systemone_under_test.client import SystemOneError
 
 from .conftest import Answer, Prevented, group
 

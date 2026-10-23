@@ -20,20 +20,36 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-"""Stubs for System One node tests: a fake engine around the real runner and a fake HTTP client."""
+"""Stubs for System One node tests: a fake engine around the real runner and a fake HTTP client.
+
+The node folder is registered as the package ``decision_systemone_under_test`` without running its
+``__init__`` (which calls ``depends()`` and imports the engine glue), so the tests here import the node's
+modules from source as ``decision_systemone_under_test.<module>``.
+"""
 
 import importlib
+import importlib.util
 import json
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import rocketlib.decisions as real_decisions
 
-from ai.common.systemone.limits import DecisionLimits
-from ai.common.systemone.questions import YES_NO, QuestionSpec
-from ai.common.systemone.runner import DecisionRunner
+NODE_DIR = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'decision_systemone'
+PKG = 'decision_systemone_under_test'
+
+if PKG not in sys.modules:
+    _spec = importlib.util.spec_from_file_location(
+        PKG, NODE_DIR / '__init__.py', submodule_search_locations=[str(NODE_DIR)]
+    )
+    sys.modules[PKG] = importlib.util.module_from_spec(_spec)
+
+from decision_systemone_under_test.limits import DecisionLimits  # noqa: E402
+from decision_systemone_under_test.questions import YES_NO, QuestionSpec  # noqa: E402
+from decision_systemone_under_test.runner import DecisionRunner  # noqa: E402
 
 SPECS = [QuestionSpec('urgent', YES_NO, 'Is it urgent?')]
 # 400 tokens at 4 chars/token: 'hello' fits, 'x' * 2000 does not.
@@ -112,7 +128,7 @@ class _InstanceBase:
 
 @pytest.fixture
 def systemone(monkeypatch):
-    """Import the node bases against stubbed rocketlib/schema/config; yield helpers."""
+    """Import the node's IGlobal and IInstance against stubbed rocketlib/schema/config; yield helpers."""
     warnings = []
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IGlobalBase = object
@@ -132,22 +148,21 @@ def systemone(monkeypatch):
         'ai.common.config': config,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
-    for name in ('ai.common.systemone.instance_base', 'ai.common.systemone.global_base'):
-        monkeypatch.delitem(sys.modules, name, raising=False)
+    for name in ('IInstance', 'IGlobal'):
+        monkeypatch.delitem(sys.modules, f'{PKG}.{name}', raising=False)
     helpers = SimpleNamespace(
-        instance_base=importlib.import_module('ai.common.systemone.instance_base'),
-        global_base=importlib.import_module('ai.common.systemone.global_base'),
+        IInstance=importlib.import_module(f'{PKG}.IInstance'),
+        IGlobal=importlib.import_module(f'{PKG}.IGlobal'),
         warnings=warnings,
         config=config,
     )
     yield helpers
     # The modules were imported against the stubs; don't let them outlive them on this worker.
-    for package_name, names in (('ai.common.systemone', ('instance_base', 'global_base')),):
-        package = sys.modules.get(package_name)
-        for name in names:
-            sys.modules.pop(f'{package_name}.{name}', None)
-            if package is not None and hasattr(package, name):
-                delattr(package, name)
+    package = sys.modules.get(PKG)
+    for name in ('IInstance', 'IGlobal'):
+        sys.modules.pop(f'{PKG}.{name}', None)
+        if package is not None and hasattr(package, name):
+            delattr(package, name)
 
 
 @pytest.fixture
@@ -155,7 +170,7 @@ def node(systemone):
     """A System One node instance on a fresh object, with the real runner over FakeClient."""
     client = FakeClient()
 
-    class Node(systemone.instance_base.SystemOneInstanceBase):
+    class Node(systemone.IInstance.IInstance):
         pass
 
     inst = Node()
