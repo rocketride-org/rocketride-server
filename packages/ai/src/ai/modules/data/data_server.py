@@ -17,22 +17,50 @@ Primary Responsibilities:
 Designed for integration with a FastAPI application and built on top of the ai.web debug server stack.
 """
 
-import asyncio
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
+import hashlib
+import hmac
 from fastapi import WebSocket
 from dataclasses import dataclass
 import engLib
+from starlette.websockets import WebSocketState
 from rocketlib import IEndpointBase
 from ai.common.dap import DAPBase, TransportWebSocket
 from ai.account.base import OutOfCreditsError
 from ai.constants import CONST_SPEND_ALLOW_SECONDS, CONST_SPEND_CHECK_TIMEOUT
+from .channel import ChannelError, ChannelUnavailable, task_channel
 from .data_conn import DataConn
 
 if TYPE_CHECKING:
     from ai.web import WebServer
+
+# Close code for a refused connection; before accept the client sees HTTP 403
+CONST_DATA_REFUSED = 1008
+
+# Handshake header naming the engine's connection; the task echoes it when the connection ends
+CONST_CHANNEL_ID_HEADER = 'x-channel-id'
+
+
+def token_matches(presented: str, token_sha256: Optional[str]) -> bool:
+    """
+    Tell whether ``presented`` is the run's channel token.
+
+    Args:
+        presented: The credential a client sent.
+        token_sha256: Hex SHA-256 of the run's token; ``None`` matches nothing.
+
+    Returns:
+        bool: True when ``sha256(presented)`` equals ``token_sha256``.
+    """
+    if not token_sha256:
+        return False
+    digest = hashlib.sha256(presented.encode('utf-8')).hexdigest()
+
+    # Bytes, so a malformed non-ASCII expected value is a mismatch rather than a TypeError
+    return hmac.compare_digest(digest.encode('ascii'), token_sha256.encode('utf-8'))
 
 
 @dataclass
@@ -62,7 +90,13 @@ class DataServer(DAPBase):
         Client (Data Tools) → ALB → DataServer → Backend Data Engine
     """
 
-    def __init__(self, server: 'WebServer', **kwargs) -> None:
+    def __init__(
+        self,
+        server: 'WebServer',
+        token_sha256: Optional[str] = None,
+        on_closed: Optional[Callable[[Optional[str]], None]] = None,
+        **kwargs,
+    ) -> None:
         """Initialize the DataServer with a back-reference for lazy target lookup.
 
         For sourceless pipelines (agentic, etc.) ``state.target`` is never
@@ -71,6 +105,10 @@ class DataServer(DAPBase):
 
         Args:
             server: The parent WebServer; used for lazy ``state.target`` reads.
+            token_sha256: Hex SHA-256 of the run's channel token, which a
+                connection must present; ``None`` refuses every connection.
+            on_closed: Called with the engine's connection id when an accepted
+                connection ends while the server still listens.
             **kwargs: Additional arguments passed to the parent ``DAPBase``.
         """
         # Hold the server reference for lazy target lookup.
@@ -79,6 +117,15 @@ class DataServer(DAPBase):
         # A hosted task asks EaaS for credit before every getPipe()
         if '--hosted' in sys.argv:
             engLib.setPipeGate(require_credit)
+
+        # Only the token's hash is known here; None fails closed
+        self._token_sha256 = token_sha256
+
+        # Tells the engine to reconnect; see listen()
+        self._on_closed = on_closed
+
+        # Socket currently holding the channel (one live connection at a time)
+        self._live: Optional[WebSocket] = None
 
         # Initialize parent with server identification
         super().__init__(module='DATA-SERVER', **kwargs)
@@ -119,9 +166,52 @@ class DataServer(DAPBase):
         # Log the disconnection for debugging purposes
         self.debug_message('Data connection disconnected.')
 
+    def _authorized(self, websocket: WebSocket) -> bool:
+        """
+        Check the handshake's ``Authorization`` header against the run's token hash.
+
+        Args:
+            websocket (WebSocket): The connection, not yet accepted.
+
+        Returns:
+            bool: True when the SHA-256 of the presented token is this run's;
+            False otherwise, and always False when the server has no hash.
+        """
+        presented = websocket.headers.get('authorization', '').removeprefix('Bearer ').strip()
+        return token_matches(presented, self._token_sha256)
+
+    def _listening(self) -> bool:
+        """
+        Tell whether this task's web server is still accepting connections.
+
+        Returns:
+            bool: True while uvicorn has bound its socket and no stop is pending.
+        """
+        uvicorn = getattr(self._server, 'server', None)
+        return bool(getattr(uvicorn, 'started', False)) and not getattr(uvicorn, 'should_exit', False)
+
+    def _channel_busy(self) -> bool:
+        """
+        Tell whether another connection holds the channel.
+
+        The holder counts until either side has closed it, not until its
+        handlers drain, so a reconnect is never blocked by a slow handler.
+
+        Returns:
+            bool: True while the holder is handshaking or open.
+        """
+        live = self._live
+        if live is None:
+            return False
+        return WebSocketState.DISCONNECTED not in (live.client_state, live.application_state)
+
     async def listen(self, websocket: WebSocket) -> None:
         """
-        Accept an incoming WebSocket connection and start listening for messages.
+        Authenticate an incoming WebSocket connection, accept it and service it.
+
+        The run's token is checked on the handshake, before accept: a
+        connection without it, or arriving while another one is live, is
+        closed unaccepted (HTTP 403) and never reaches a ``DataConn``.
 
         Listen is not a traditional receive loop. Since we are using
         FastAPI and websockets, listen has already established the connection
@@ -132,64 +222,79 @@ class DataServer(DAPBase):
         Args:
             websocket (WebSocket): The FastAPI WebSocket object.
         """
-        # Create the transport and accept the connection
-        transport = TransportWebSocket()
+        if not self._authorized(websocket):
+            self.debug_message('Data connection refused: missing or wrong token')
+            await websocket.close(code=CONST_DATA_REFUSED)
+            return
 
-        # Allocate a new connection
-        conn = DataConn(server=self, transport=transport)
+        if self._channel_busy():
+            self.debug_message('Data connection refused: the channel is in use')
+            await websocket.close(code=CONST_DATA_REFUSED)
+            return
 
-        # Signal we are connected
-        await self._dapbase_on_connected(conn)
+        # Claim the channel before the first await, so a concurrent handshake sees it
+        self._live = websocket
 
-        # EaaS is the only peer of /task/data: its connection answers credit checks
-        global _eaas
-        _eaas = (conn, asyncio.get_running_loop())
-        _eaas_connected.set()
+        # The engine names each connection; the close signal echoes the name
+        channel_id = websocket.headers.get(CONST_CHANNEL_ID_HEADER)
 
-        # Accept the connection and start servicing it. This will not
-        # return until the connection is closed
-        await transport.accept(websocket=websocket)
+        try:
+            # Allocate a new connection
+            transport = TransportWebSocket()
+            conn = DataConn(server=self, transport=transport)
+            conn.channel_id = channel_id
 
-        if _eaas and _eaas[0] is conn:
-            _eaas = None
-            _eaas_connected.clear()
+            # Signal we are connected
+            await self._dapbase_on_connected(conn)
 
-        # Signal we are disconnected
-        await self._dapbase_on_disconnected(conn)
-        return
+            # Accept the connection and start servicing it. This will not
+            # return until the connection is closed
+            await transport.accept(websocket=websocket)
 
+            # Signal we are disconnected
+            await self._dapbase_on_disconnected(conn)
 
-# The EaaS data connection and the loop it runs on, while EaaS is connected
-_eaas: 'tuple[DataConn, asyncio.AbstractEventLoop] | None' = None
-_eaas_connected = threading.Event()
+        finally:
+            # A newer connection may already hold the channel
+            if self._live is websocket:
+                self._live = None
+
+    async def _closing(self, conn: DataConn, channel_id: Optional[str]) -> None:
+        """
+        React to the socket closing, before its handlers are drained.
+
+        The task's own pending requests fail now, and the engine is told to
+        reconnect — but only while this server still listens, or the signal
+        would call it to a port the task no longer holds.
+
+        Args:
+            conn (DataConn): The connection whose socket closed.
+            channel_id (Optional[str]): The engine's name for it, from the handshake.
+        """
+        conn.fail_pending(ConnectionError('the engine disconnected'))
+        task_channel.detach(conn)
+        if self._on_closed is not None and self._listening():
+            self._on_closed(channel_id)
+
 
 # Until when the last "allowed" answer stands, so a job asks once per window, not per object
 _allowed_until = 0.0
 
+# One question at a time: the threads that open pipes together wait for its answer
+_asking = threading.Lock()
+
 
 def require_credit() -> None:
-    """
-    Engine pipe gate: raise OutOfCreditsError if this task's org may not open a pipe.
-
-    It trusts the peer by position: whoever holds /task/data (loopback, the
-    run's token) answers, and only EaaS opens it.
-    """
+    """Engine pipe gate: raise OutOfCreditsError if this task's org may not open a pipe."""
     global _allowed_until
-    if time.monotonic() < _allowed_until:
-        return
-    # EaaS connects once the task is up and again after a drop; no answer, no pipe
-    _eaas_connected.wait(CONST_SPEND_CHECK_TIMEOUT)
-    peer = _eaas
-    if peer is None:
-        raise RuntimeError('No credit check answered: EaaS is not connected to the task')
-    conn, loop = peer
-    asking = asyncio.run_coroutine_threadsafe(conn.ask_spend(), loop)
-    try:
-        refusal = asking.result(CONST_SPEND_CHECK_TIMEOUT)
-    except TimeoutError:
-        raise TimeoutError('No credit check answered: EaaS did not answer in time') from None
-    finally:
-        asking.cancel()  # no-op once answered; drops a question EaaS never answered
-    if refusal:
-        raise OutOfCreditsError(refusal)
-    _allowed_until = time.monotonic() + CONST_SPEND_ALLOW_SECONDS
+    with _asking:
+        if time.monotonic() < _allowed_until:
+            return
+        try:
+            reply = task_channel.request_sync('spend.check', timeout=CONST_SPEND_CHECK_TIMEOUT)
+        except (ChannelUnavailable, ChannelError) as e:
+            # No answer, no pipe
+            raise RuntimeError(f'No credit check answered: {getattr(e, "message", e)}') from None
+        if reply.body.get('refusal'):
+            raise OutOfCreditsError(reply.body['refusal'])
+        _allowed_until = time.monotonic() + CONST_SPEND_ALLOW_SECONDS
