@@ -329,18 +329,41 @@ def _announce_channel(server: Optional[Any]) -> None:
 
 
 def _fetch_pipeline_nodes() -> None:
-    """Fetch each node the pipeline names that this process does not carry, before the engine loads it."""
+    """Fetch each node the pipeline names that this process does not carry, and solve their requirements together."""
+    from depends import RequirementsConflict, ensure_run_constraints
+
     from ai.common import node_packages
 
     try:
         with open(sys.argv[1], encoding='utf-8') as file:
             components = json.load(file)['config']['pipeline'].get('components', [])
+        providers = {component['provider'] for component in components}
         node_packages.serve(_fetch_from_eaas)
-        node_packages.ensure(*{component['provider'] for component in components})
+        node_packages.ensure(*providers)
+        ensure_run_constraints(_node_dirs(providers))
+    except RequirementsConflict as e:
+        message = f'Refusing to run: {e}'
+        warning(message)
+        raise TaskNodesError(message) from e
     except Exception as e:
         message = f"Refusing to run: could not get the pipeline's nodes ({e})"
         warning(message)
         raise TaskNodesError(message) from e
+
+
+def _node_dirs(providers: set) -> list:
+    """The folders of the Python nodes behind these providers."""
+    import importlib.util
+
+    from rocketlib import getServiceDefinition
+
+    dirs = set()
+    for provider in providers:
+        module = (getServiceDefinition(provider) or {}).get('path') or ''
+        spec = importlib.util.find_spec(module) if module.startswith('nodes.') else None
+        if spec and spec.submodule_search_locations:
+            dirs.add(list(spec.submodule_search_locations)[0])
+    return sorted(dirs)
 
 
 def _fetch_from_eaas(name: str):

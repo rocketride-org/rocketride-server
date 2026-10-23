@@ -765,14 +765,19 @@ def test_the_task_ensures_each_node_its_pipeline_names_once(monkeypatch, tmp_pat
     _task_file(
         tmp_path, monkeypatch, {'components': [{'provider': 'webhook'}, {'provider': 'llm_x'}, {'provider': 'llm_x'}]}
     )
-    served, ensured = [], []
+    import depends
+
+    served, ensured, solved = [], [], []
     monkeypatch.setattr(node_packages, 'serve', served.append)
     monkeypatch.setattr(node_packages, 'ensure', lambda *names: ensured.append(sorted(names)))
+    monkeypatch.setattr(node, '_node_dirs', lambda providers: [f'/nodes/{name}' for name in sorted(providers)])
+    monkeypatch.setattr(depends, 'ensure_run_constraints', solved.append)
 
     node._fetch_pipeline_nodes()
 
     assert served == [node._fetch_from_eaas]
     assert ensured == [['llm_x', 'webhook']]
+    assert solved == [['/nodes/llm_x', '/nodes/webhook']]
 
 
 @pytest.mark.parametrize('served', [True, False])
@@ -818,3 +823,40 @@ def test_a_task_that_cannot_get_its_nodes_stops_with_the_reason(monkeypatch, tmp
     assert message.startswith("Refusing to run: could not get the pipeline's nodes (")
     if broken == 'package':
         assert 'does not match its digest' in message
+
+
+def test_a_task_whose_nodes_cannot_be_installed_together_stops_and_names_them(monkeypatch, tmp_path):
+    import depends
+
+    from ai.common import node_packages
+
+    _task_file(tmp_path, monkeypatch, {'components': [{'provider': 'store_a'}, {'provider': 'store_b'}]})
+    monkeypatch.setattr(node_packages, 'serve', lambda source: None)
+    monkeypatch.setattr(node_packages, 'ensure', lambda *names: None)
+    monkeypatch.setattr(node, '_node_dirs', lambda providers: [])
+
+    def conflict(dirs):
+        raise depends.RequirementsConflict('store_a and store_b cannot be installed together: Because shared==1')
+
+    monkeypatch.setattr(depends, 'ensure_run_constraints', conflict)
+    warned = []
+    monkeypatch.setattr(node, 'warning', warned.append)
+
+    with pytest.raises(node.TaskNodesError):
+        node._fetch_pipeline_nodes()
+
+    assert warned == ['Refusing to run: store_a and store_b cannot be installed together: Because shared==1']
+
+
+def test_the_folders_of_a_pipelines_python_nodes_are_found_and_cpp_ones_skipped(monkeypatch, tmp_path):
+    import rocketlib
+
+    (tmp_path / 'nodes' / 'llm_q').mkdir(parents=True)
+    (tmp_path / 'nodes' / 'llm_q' / '__init__.py').write_text('')
+    monkeypatch.syspath_prepend(str(tmp_path))
+    definitions = {'llm_q': {'path': 'nodes.llm_q'}, 'parse': {'path': 'parse', 'node': 'cpp'}}
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', definitions.get)
+
+    dirs = node._node_dirs({'llm_q', 'parse', 'unknown'})
+
+    assert dirs == [str(tmp_path / 'nodes' / 'llm_q')]
