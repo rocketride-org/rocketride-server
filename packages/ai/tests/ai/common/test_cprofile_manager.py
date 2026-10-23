@@ -43,12 +43,13 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
 import yappi
 
-from ai.common.cprofile_manager import _COLUMNS, CProfileManager, profiler
+from ai.common.cprofile_manager import _COLUMNS, CProfileManager, _components, profiler
 
 # Rows are fixed-width, so the numeric columns start right after the name one.
 # Taken from the module rather than hardcoded: the width is a tuning knob.
@@ -1142,6 +1143,112 @@ def test_report_tree_sums_the_same_path_across_threads():
     job = _node(profiler.report_tree(min_pct=0)['tree'], 'run', 'job')
 
     assert (job['ncalls'], job['cumtime']) == (4, 4.0)
+
+
+def test_report_tree_keeps_work_spread_over_threads():
+    """32 workers each spend 0.1 s in leaf: 3.2 s together, ten times the 0.32 s cutoff.
+
+    Found in review: pruning each thread's tree before summing them dropped
+    every 0.1 s contribution, so the leaf vanished from the all-threads tree.
+    """
+    worker = [
+        _entry('run', 1, 10.0, 0.0, {'job': (1, 10.0, 0.0)}),
+        _entry('job', 1, 10.0, 9.9, {'leaf': (1, 0.1, 0.1)}),
+        _entry('leaf', 1, 0.1, 0.1),
+    ]
+    profiler._last_stats_data = [
+        _entry('run', 32, 320.0, 0.0, {'job': (32, 320.0, 0.0)}),
+        _entry('job', 32, 320.0, 316.8, {'leaf': (32, 3.2, 3.2)}),
+        _entry('leaf', 32, 3.2, 3.2),
+    ]
+    profiler._last_thread_data = [
+        {'id': i, 'name': f'w{i}', 'tid': i, 'ttot': 10.0, 'sched_count': 1, 'stats': worker} for i in range(32)
+    ]
+
+    leaves = _copies(profiler.report_tree()['tree'], 'leaf')
+
+    assert sum(n['ncalls'] for n in leaves) == 32
+    assert sum(n['cumtime'] for n in leaves) == pytest.approx(3.2)
+
+
+def test_tree_keeps_the_callees_of_a_finished_recursion():
+    """recursive(5) calls leaf once per level; every call returned before stop.
+
+    yappi books recursive's total once, for the outer call, but the recursive
+    -> recursive pair again with the nested times. Found in review: read as a
+    frame still running, the outer copy got a sixth of leaf: 1 call of 6.
+    """
+    data = [
+        _entry('root', 1, 0.6, 0.0, {'recursive': (1, 0.6, 0.0)}),
+        _entry('recursive', 6, 0.6, 0.0, {'leaf': (6, 0.6, 0.6), 'recursive': (5, 1.5, 0.0)}),
+        _entry('leaf', 6, 0.6, 0.6),
+    ]
+
+    leaves = _copies(CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=0.6)['tree'], 'leaf')
+
+    assert sum(n['ncalls'] for n in leaves) == 6
+    assert sum(n['cumtime'] for n in leaves) == pytest.approx(0.6)
+
+
+def test_tree_keeps_the_callees_of_a_mutual_recursion():
+    """Mutual recursion f -> g -> f: g's leaf calls from both levels stay under the outer f."""
+    data = [
+        _entry('main', 1, 0.6, 0.0, {'f': (1, 0.6, 0.0)}),
+        _entry('f', 2, 0.6, 0.2, {'g': (2, 0.7, 0.0)}),
+        _entry('g', 2, 0.5, 0.2, {'leaf': (2, 0.2, 0.2), 'f': (1, 0.3, 0.0)}),
+        _entry('leaf', 2, 0.2, 0.2),
+    ]
+
+    leaves = _copies(CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=0.6)['tree'], 'leaf')
+
+    assert sum(n['ncalls'] for n in leaves) == 2
+    assert sum(n['cumtime'] for n in leaves) == pytest.approx(0.2)
+
+
+def _review_leaf():
+    """A measurable leaf for the live recursion test."""
+    time.sleep(0.002)
+
+
+def _review_recursive(n):
+    """Recurse n levels, calling the leaf on each."""
+    _review_leaf()
+    if n:
+        _review_recursive(n - 1)
+
+
+def test_report_tree_keeps_the_callees_of_a_live_recursion():
+    """The review's live yappi case: the tree's leaf copies add up to the leaf's totals."""
+    profiler.start('owner-1')
+    _review_recursive(5)
+    profiler.stop('owner-1')
+
+    report = profiler.report_tree(min_pct=0, max_depth=500)
+
+    exact = next(f for f in report['functions'] if f['name'] == '_review_leaf')
+    leaves = _copies(report['tree'], '_review_leaf')
+    assert exact['ncalls'] == 6
+    assert sum(n['ncalls'] for n in leaves) == 6
+    assert sum(n['cumtime'] for n in leaves) == pytest.approx(exact['cumtime'], rel=1e-3, abs=1e-5)
+
+
+def test_components_find_recursion():
+    """Functions that reach each other share a component; a self call is its own."""
+    lookup = {
+        e['key']: e
+        for e in [
+            _entry('a', 1, 1.0, 0.0, {'b': (1, 1.0, 0.0)}),
+            _entry('b', 1, 1.0, 0.0, {'a': (1, 0.5, 0.0), 'c': (1, 0.5, 0.5)}),
+            _entry('c', 1, 0.5, 0.5),
+            _entry('d', 2, 1.0, 0.5, {'d': (1, 0.5, 0.5)}),
+        ]
+    }
+
+    component = _components(lookup)
+
+    a, b, c, d = (component[('./ai/fake.py', 1, n)] for n in 'abcd')
+    assert a == b
+    assert len({a, c, d}) == 3
 
 
 def test_report_tree_lists_the_exact_function_totals():
