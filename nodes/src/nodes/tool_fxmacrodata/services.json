@@ -1,0 +1,112 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "FXMacroData",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_fxmacrodata://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_fxmacrodata",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "fxmacrodata",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "fxmacrodata.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_fxmacrodata",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes FXMacroData macroeconomic and FX data as agent tools.", "Latest releases, indicator history, the release calendar, the indicator catalogue and FX reference rates for 22 currencies. The API key is optional: USD releases, the USD calendar and the catalogue work without one."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "FXMacroData",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"tool_fxmacrodata.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Optional FXMacroData API key (from https://fxmacrodata.com/subscribe). Leave empty for keyless USD access.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	//
+	//	Test configuration for automated node testing.
+	//	The API key is optional, so the default profile opens keyless; no live
+	//	API call is made by this case.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation without an API key",
+				"text": "test query"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "FXMacroData",
+			"properties": ["type", "tool_fxmacrodata.apikey"]
+		}
+	]
+}
