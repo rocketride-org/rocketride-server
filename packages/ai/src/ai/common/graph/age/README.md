@@ -116,7 +116,7 @@ rocketride-saas#814) and `apache/age:release_PG16_1.6.0`:
   although it already behaves as 1.6.0. The node reads `extversion`, so such a
   database keeps the strict 1.5.0 rules until the update.
 
-The canary tests in `nodes/test/test_rocketride_graph_full.py` run each shape
+The canary tests in `nodes/test/test_rocketride_graph_live.py` run each shape
 on AGE directly and record what each version stores: when one fails after an
 AGE upgrade, the engine changed and its capability cell needs a look.
 

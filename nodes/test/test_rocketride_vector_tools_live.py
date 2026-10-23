@@ -12,7 +12,7 @@ objdir, get, search and delete in one round trip. The engine library is stood in
 for only when it is not importable (a plain venv); the ``ai`` and ``rocketride``
 packages are the real ones.
 
-Requires the same container as test_rocketride_db_full.py::
+Requires the same container as test_rocketride_db_live.py::
 
     docker run -d --name rr-pg-phase1 -p 55432:5432 \\
         -e POSTGRES_PASSWORD=rrpass -e POSTGRES_USER=rruser -e POSTGRES_DB=rrtenant \\
@@ -20,9 +20,12 @@ Requires the same container as test_rocketride_db_full.py::
     docker exec rr-pg-phase1 psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS vector;'
 
 Configuration via environment variables:
-    RR_TEST_PG_DSN       libpq URL of the test database
-                         (default: postgresql://rruser:rrpass@localhost:55432/rrtenant)
-    RR_REQUIRE_DB_TESTS  when set, an unreachable database fails instead of skipping
+    RR_TEST_PG_DSN       libpq URL of the test database, for example
+                         postgresql://rruser:rrpass@localhost:55432/rrtenant
+    RR_REQUIRE_DB_TESTS  when set, a missing or unreachable database fails instead of skipping
+
+Runs in ``nodes:test``. Skips when RR_TEST_PG_DSN is not set or the database
+is unreachable.
 """
 
 from __future__ import annotations
@@ -43,7 +46,9 @@ _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 _AI_SRC = _REPO / 'packages' / 'ai' / 'src'
 _CLIENT_SRC = _REPO / 'packages' / 'client-python' / 'src'
 
-TEST_DSN = os.environ.get('RR_TEST_PG_DSN', 'postgresql://rruser:rrpass@localhost:55432/rrtenant')
+# No default address: a plain nodes:test run must not reach a database the
+# developer did not point it at.
+TEST_DSN = os.environ.get('RR_TEST_PG_DSN', '')
 _DB_TESTS_REQUIRED = bool(os.environ.get('RR_REQUIRE_DB_TESTS'))
 TABLE = 'rr_vec_tools_e2e'
 DIMS = 8
@@ -54,6 +59,8 @@ np = pytest.importorskip('numpy')
 
 
 def _db_reachable() -> bool:
+    if not TEST_DSN:
+        return False
     try:
         conn = psycopg2.connect(TEST_DSN, connect_timeout=3)
         conn.close()
@@ -62,10 +69,17 @@ def _db_reachable() -> bool:
         return False
 
 
-if _DB_TESTS_REQUIRED and not _db_reachable():
-    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but the test database is not reachable at {TEST_DSN}', pytrace=False)
+_DB_MISSING = f'RocketRide test database not reachable at {TEST_DSN}' if TEST_DSN else 'RR_TEST_PG_DSN is not set'
 
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide test database not reachable at {TEST_DSN}')
+if _DB_TESTS_REQUIRED and not _db_reachable():
+    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but: {_DB_MISSING}', pytrace=False)
+
+# The tests share one fixed table (rr_vec_tools_e2e), so one xdist worker runs
+# the whole module (nodes:test passes --dist loadgroup).
+pytestmark = [
+    pytest.mark.skipif(not _db_reachable(), reason=_DB_MISSING),
+    pytest.mark.xdist_group('rocketride_vector_tools_live'),
+]
 
 
 def _unit_vec(rng) -> list[float]:

@@ -38,10 +38,13 @@ Requires a container on the live pin (PG16 + pgvector), e.g.::
     docker exec rr-pg-phase1 psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS vector;'
 
 Configuration via environment variables:
-    RR_TEST_PG_DSN — libpq URL of the test database
-                     (default: postgresql://rruser:rrpass@localhost:55432/rrtenant)
+    RR_TEST_PG_DSN      — libpq URL of the test database, for example
+                          postgresql://rruser:rrpass@localhost:55432/rrtenant
+    RR_REQUIRE_DB_TESTS — when set, a missing or unreachable database fails
+                          instead of skipping
 
-Skips cleanly when the database is unreachable.
+Runs in ``nodes:test``. Skips when RR_TEST_PG_DSN is not set or the database
+is unreachable.
 """
 
 from __future__ import annotations
@@ -67,7 +70,9 @@ _UTILS_DIR = _AI_SRC / 'ai' / 'common' / 'utils'
 _SQL_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_sql'
 _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 
-TEST_DSN = os.environ.get('RR_TEST_PG_DSN', 'postgresql://rruser:rrpass@localhost:55432/rrtenant')
+# No default address: a plain nodes:test run must not reach a database the
+# developer did not point it at.
+TEST_DSN = os.environ.get('RR_TEST_PG_DSN', '')
 # Derived, not hardcoded: the suite must also run against a provisioned tenant
 # DSN (e.g. t_<slug>_<hash> through a pooler), not just the default container.
 TEST_DB_NAME = urllib.parse.urlparse(TEST_DSN).path.lstrip('/')
@@ -90,6 +95,8 @@ else:
 
 
 def _db_reachable() -> bool:
+    if not TEST_DSN:
+        return False
     try:
         conn = psycopg2.connect(TEST_DSN, connect_timeout=3)
         conn.close()
@@ -98,10 +105,17 @@ def _db_reachable() -> bool:
         return False
 
 
-if _DB_TESTS_REQUIRED and not _db_reachable():
-    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but the test database is not reachable at {TEST_DSN}', pytrace=False)
+_DB_MISSING = f'RocketRide test database not reachable at {TEST_DSN}' if TEST_DSN else 'RR_TEST_PG_DSN is not set'
 
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide test database not reachable at {TEST_DSN}')
+if _DB_TESTS_REQUIRED and not _db_reachable():
+    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but: {_DB_MISSING}', pytrace=False)
+
+# The tests share fixed table names (rr_sql_e2e, rr_vec_e2e), so one xdist
+# worker runs the whole module (nodes:test passes --dist loadgroup).
+pytestmark = [
+    pytest.mark.skipif(not _db_reachable(), reason=_DB_MISSING),
+    pytest.mark.xdist_group('rocketride_db_live'),
+]
 
 
 def _load_from_path(name: str, path: Path, *, is_package: bool = False, register: bool = True):

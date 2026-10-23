@@ -580,6 +580,47 @@ ROCKETRIDE_TEST_HARDWARE_STRICT=1 ./builder nodes:test-full
 
 The same pytest options work without the builder: `--warmup-models[=plan]`.
 
+### Live database tests
+
+The RocketRide cloud database nodes have suites that run against a real
+PostgreSQL: `nodes/test/test_*_live.py`. They are part of `nodes:test`, and
+each one skips unless its variable points at a test database. A run without the
+variables never connects to a database.
+
+| Variable | Database | Suites |
+| --- | --- | --- |
+| `RR_TEST_PG_DSN` | PG16 + pgvector 0.8.0 | `test_rocketride_db_live.py`, `test_rocketride_vector_tools_live.py`, `test_vector_store_writes_live.py` |
+| `RR_TEST_AGE_DSN` | PG16 + Apache AGE 1.5.0 or 1.6.0 | `test_rocketride_graph_live.py` |
+
+`RR_REQUIRE_DB_TESTS=1` turns a missing or unreachable database into a failure.
+CI sets all three on Linux and runs the graph suite twice: on AGE 1.5.0 in the
+`Test` step, then on AGE 1.6.0. To run them locally:
+
+```bash
+docker run -d --rm --name rr-test-pg -p 55432:5432 \
+  -e POSTGRES_USER=rruser -e POSTGRES_PASSWORD=rrpass -e POSTGRES_DB=rrtenant \
+  pgvector/pgvector:0.8.0-pg16
+docker exec rr-test-pg psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+
+docker run -d --rm --name rr-test-age -p 55433:5432 \
+  -e POSTGRES_USER=rruser -e POSTGRES_PASSWORD=rrpass -e POSTGRES_DB=rrtenant \
+  apache/age:release_PG16_1.5.0 -c shared_preload_libraries=age
+docker exec rr-test-age psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS age;'
+
+# The variables can also go in the repository .env, which nodes:test loads.
+RR_TEST_PG_DSN=postgresql://rruser:rrpass@localhost:55432/rrtenant \
+RR_TEST_AGE_DSN=postgresql://rruser:rrpass@localhost:55433/rrtenant \
+./builder nodes:test
+```
+
+For AGE 1.6.0, start `apache/age:release_PG16_1.6.0` the same way on another
+port and point `RR_TEST_AGE_DSN` at it.
+
+A suite that reuses fixed table or graph names marks its module with
+`pytest.mark.xdist_group`, so one worker runs all of its tests (see
+[Parallel runs](#parallel-runs)). A new live suite either does the same or names
+its tables per test, as `test_vector_store_writes_live.py` does.
+
 ### Listing skipped tests
 
 `--list-skipped` collects the selected tests and prints the ones that will be
