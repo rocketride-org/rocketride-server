@@ -144,4 +144,12 @@ node only to callers it is published to; a caller who cannot run it gets a
 `CommandException` with `NODE_NOT_ENTITLED`, or `NODE_NOT_FOUND` when no one in
 the org uploaded it.
 
+A run whose pipeline names a published node inherits only the process runtime
+from the engine: no file store or signing key, no cloud identity, no
+`ROCKETRIDE_*` variable and no host API key. That holds for every node in the
+run, so a catalog node in it that opens the file store directly
+(`tool_filesystem`) fails with a message saying the run has no direct access to
+it. Keys a pipeline names with `${ROCKETRIDE_*}` still reach the node that uses
+them.
+
 See the [Shell API guide](/guides/apps) for the app model itself.
