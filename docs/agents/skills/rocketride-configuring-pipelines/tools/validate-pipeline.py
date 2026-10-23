@@ -255,12 +255,13 @@ def static_validate(path):
                 continue
             adj[frm].append(cid)
             has_incoming.add(cid)
-            # 7. lane compatibility
-            if cat and entry is not None:
+            # 7. lane compatibility; a "*" wire is bound when the engine builds
+            # the pipeline, and a node that forwards "*" outputs any lane
+            if cat and entry is not None and lane != '*':
                 frm_entry = cat.get(comp_by_id(comps, frm, 'provider'))
-                if frm_entry and lane not in out_lanes(frm_entry):
+                if frm_entry and lane not in out_lanes(frm_entry) and '*' not in out_lanes(frm_entry):
                     errors.append(f'lane {lane!r}: {frm!r} does not output it (edge {frm}->{cid})')
-                if lane not in in_lanes(entry) and in_lanes(entry):
+                if lane not in in_lanes(entry) and in_lanes(entry) and '*' not in in_lanes(entry):
                     errors.append(f'lane {lane!r}: {cid!r} does not accept it (edge {frm}->{cid})')
         # 9. secrets via env substitution (any ${VAR}); flag hardcoded literals only
         for k, v in flatten(c.get('config') or {}):
