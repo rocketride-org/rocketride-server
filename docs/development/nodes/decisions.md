@@ -128,33 +128,6 @@ Gate: gte 5 is out of range for "urgency": its answers are levels 0-2 (so_1: 0=l
 
 Values are case-sensitive. Surrounding spaces in a condition value are trimmed first. Declare `values` for any question whose answers come from a closed set.
 
-## Explaining a Gate's choice
-
-On every call the Gate attaches a `detail` object to its `leave` trace event (pipeline trace level `metadata` and up). `detail.outcome` is what tells you whether the Gate passed, partly passed or blocked an item: the event's `result` is always `continue` for a Python node that doesn't fail, whether it forwarded the item or held it back.
-
-An object-level lane (text, table, json, questions, answers, image, audio, video). `confidence` appears only when the answer has one:
-
-```json
-{"outcome": "passed", "match": "all",
- "conditions": [{"question": "is_spam", "op": "equals", "value": "yes",
-                 "answer": "yes", "confidence": 0.86, "from": "decision_systemone_1", "matched": true}]}
-```
-
-An item whose decision is not `ok` (blocked whatever the rule):
-
-```json
-{"outcome": "blocked", "reason": "decision_systemone_1 recorded \"too_long\"", "conditions": []}
-```
-
-The documents lane, with one entry per document (the first 100; `items_truncated` counts the rest). `outcome` is `passed` when every document passes (the Gate returns normally and the engine forwards the original list), `partial` when some do (it forwards those) and `blocked` when none do:
-
-```json
-{"outcome": "partial", "passed": 3, "blocked": 2,
- "items": [{"preview": "Hello support team…", "outcome": "blocked", "match": "all", "conditions": [ ... ]}]}
-```
-
-Any node can do the same: call `self.setTraceDetail(detail)` with a small JSON-serializable dict during a lane method such as `writeText`. The last call in a lane call wins, the engine clears it after that call's `leave` event, and it is a cheap no-op below trace level `metadata`.
-
 ## Reserved values
 
 These mean the same thing for every writer.

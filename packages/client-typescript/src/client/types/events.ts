@@ -247,14 +247,12 @@ export interface TaskEventFlow {
 	/** Component names in the current pipe's execution path. */
 	pipes: string[];
 
-	/** Trace data — lane, input/output data, result, error, node detail. */
+	/** Trace data — lane, input/output data, result, error. */
 	trace: {
 		lane?: string;
 		data?: Record<string, unknown>;
 		result?: string;
 		error?: string;
-		/** Node-defined; leave events only; trace level metadata and up. */
-		detail?: Record<string, unknown>;
 	};
 
 	/**

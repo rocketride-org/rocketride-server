@@ -418,15 +418,6 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Optional detail a node attaches to its current lane call
-    ///		(setTraceDetail from Python). Binder::callMethods clears it
-    ///		before each call, adds it to that call's leave trace (pipeline
-    ///		trace level >= metadata) and clears it again.
-    //-----------------------------------------------------------------
-    json::Value traceDetail;
-
-    //-----------------------------------------------------------------
-    /// @details
     ///		Per-object stream_index counters for the stream descriptor
     ///		(stream_descriptor.hpp); reset in open(). Plain (non-atomic) is
     ///		safe: an instance is owned by one thread for its open->close
