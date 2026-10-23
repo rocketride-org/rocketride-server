@@ -24,19 +24,24 @@
 // NAVIGATION — shared UI state between SqlApp and SqlSidebar
 // =============================================================================
 //
-// Module-level stores (admin-ui navigation pattern): the shell mounts the App
-// and Sidebar as siblings, so cross-cutting UI state lives here.
+// SQL Explorer's own stores, made by the shared factories
+// (shared/explorer/nav): the shell mounts the App and Sidebar as siblings, so
+// cross-cutting UI state lives in external stores (admin-ui navigation
+// pattern). Each app creates its own, so SQL's active connection never leaks
+// into another Explorer. The connection-overlay slot below is SQL Explorer's
+// alone: a request that can also be dismissed (null), which the shared
+// one-way request channel does not model.
 // =============================================================================
 
 import { useSyncExternalStore } from 'react';
+import { createActiveKeyStore, createRequestChannel } from 'shared/explorer/nav/stores';
 import type { SavedSqlConnection } from './connect';
 
 // =============================================================================
 // ACTIVE CONNECTION (which workbench document currently has focus)
 // =============================================================================
 
-let activeConnectionKey: string | null = null;
-const activeListeners = new Set<() => void>();
+const activeConnection = createActiveKeyStore();
 
 /**
  * Record which connection document is active (null = none). Called by SqlApp
@@ -45,12 +50,7 @@ const activeListeners = new Set<() => void>();
  *
  * @param key - The active connection's endpoint key, or null.
  */
-export function setActiveConnection(key: string | null): void {
-	if (activeConnectionKey !== key) {
-		activeConnectionKey = key;
-		activeListeners.forEach((fn) => fn());
-	}
-}
+export const setActiveConnection = activeConnection.set;
 
 /**
  * Plain subscription to the active connection key (for non-React consumers —
@@ -58,31 +58,21 @@ export function setActiveConnection(key: string | null): void {
  *
  * @param cb - Called on every change (not with the current value).
  */
-export function subscribeActiveConnection(cb: () => void): () => void {
-	activeListeners.add(cb);
-	return () => { activeListeners.delete(cb); };
-}
+export const subscribeActiveConnection = activeConnection.subscribe;
 
 /**
  * The current active connection key (pairs with subscribeActiveConnection).
  *
  * @returns The active connection's endpoint key, or null.
  */
-export function getActiveConnection(): string | null {
-	return activeConnectionKey;
-}
+export const getActiveConnection = activeConnection.get;
 
 /**
  * React hook that subscribes to the active connection key.
  *
  * @returns The active connection's endpoint key, or null.
  */
-export function useActiveConnection(): string | null {
-	return useSyncExternalStore(
-		(cb) => { activeListeners.add(cb); return () => activeListeners.delete(cb); },
-		() => activeConnectionKey,
-	);
-}
+export const useActiveConnection = activeConnection.use;
 
 // =============================================================================
 // TABLE RECORD REQUESTS (sidebar tree click -> overview record drawer)
@@ -98,9 +88,7 @@ export interface TableRecordRequest {
 	seq: number;
 }
 
-let tableRequest: TableRecordRequest | null = null;
-let tableRequestSeq = 0;
-const tableListeners = new Set<() => void>();
+const tableRequests = createRequestChannel<{ key: string; table: string }>();
 
 /**
  * Request the record drawer for one table (fired by the sidebar tree; the
@@ -110,8 +98,7 @@ const tableListeners = new Set<() => void>();
  * @param table - The table name.
  */
 export function requestTableRecord(key: string, table: string): void {
-	tableRequest = { key, table, seq: ++tableRequestSeq };
-	tableListeners.forEach((fn) => fn());
+	tableRequests.request({ key, table });
 }
 
 /**
@@ -120,10 +107,7 @@ export function requestTableRecord(key: string, table: string): void {
  * @returns The latest request, or null when none has been made.
  */
 export function useTableRecordRequest(): TableRecordRequest | null {
-	return useSyncExternalStore(
-		(cb) => { tableListeners.add(cb); return () => tableListeners.delete(cb); },
-		() => tableRequest,
-	);
+	return tableRequests.use();
 }
 
 // =============================================================================

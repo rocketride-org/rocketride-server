@@ -24,18 +24,17 @@
 // HISTORY — RUN EVENTS (the query runner -> the history store)
 // =============================================================================
 //
-// A one-way, module-level event bus. The runner knows when a statement
-// finished; the history store knows how to keep it. Neither needs to import
-// the other, and the runner stays correct whether or not anything is
-// listening — a run is never blocked by, or aware of, recording.
+// SQL Explorer's own run bus, made by the shared factory. The runner knows
+// when a statement finished; the history store knows how to keep it. Neither
+// needs to import the other, and the runner stays correct whether or not
+// anything is listening — a run is never blocked by, or aware of, recording.
 // =============================================================================
 
+import { createRunEvents } from 'shared/explorer/history/runEvents';
 import type { HistoryEntry } from './types';
 
-/** A run listener: called once per finished statement. */
-type RunListener = (endpointKey: string, entry: HistoryEntry) => void;
-
-const listeners = new Set<RunListener>();
+/** SQL Explorer's run bus (its history store listens on it). */
+export const sqlRunEvents = createRunEvents<'sql'>();
 
 /**
  * Announce that one statement finished on one connection.
@@ -47,13 +46,7 @@ const listeners = new Set<RunListener>();
  * @param entry - The finished statement's record.
  */
 export function emitRun(endpointKey: string, entry: HistoryEntry): void {
-	listeners.forEach((listener) => {
-		try {
-			listener(endpointKey, entry);
-		} catch {
-			// A broken listener must not break the run that just completed.
-		}
-	});
+	sqlRunEvents.emitRun(endpointKey, entry);
 }
 
 /**
@@ -62,7 +55,6 @@ export function emitRun(endpointKey: string, entry: HistoryEntry): void {
  * @param callback - Called with the endpoint key and the entry.
  * @returns The unsubscribe function.
  */
-export function subscribeRuns(callback: RunListener): () => void {
-	listeners.add(callback);
-	return () => { listeners.delete(callback); };
+export function subscribeRuns(callback: (endpointKey: string, entry: HistoryEntry) => void): () => void {
+	return sqlRunEvents.subscribeRuns(callback as Parameters<typeof sqlRunEvents.subscribeRuns>[0]);
 }

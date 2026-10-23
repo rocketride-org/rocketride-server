@@ -258,6 +258,7 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({ endpoint, snapshot
 						columns={columns}
 						data={rows}
 						tableId="sql-overview-tables"
+						persistence={env.gridPersistence}
 						paginate={false}
 						height="100%"
 						onRowClick={(row) => setStack([row.name])}

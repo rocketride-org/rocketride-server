@@ -24,14 +24,16 @@
 // HISTORY — TYPES (the record of one statement the user ran)
 // =============================================================================
 //
-// Shared between the query runner (which emits entries) and the history store
-// (which keeps and persists them). Entries ride the app's server-side
-// workspace preferences, so every field here ends up on disk: the statement
-// text is stored AS TYPED, literal values included.
+// SQL Explorer's binding of the shared history types (shared/explorer/history).
+// Entries ride the app's server-side workspace preferences, so every field
+// here ends up on disk: the statement text is stored AS TYPED, literal values
+// included, under the persisted field name `sql` — which must never change,
+// because renaming it silently orphans every user's saved history.
 // =============================================================================
 
-/** How a statement ended. */
-export type HistoryOutcome = 'rows' | 'affected' | 'error' | 'abandoned';
+import type { IHistoryEntryBase } from 'shared/explorer/history/types';
+
+export type { HistoryOutcome } from 'shared/explorer/history/types';
 
 /**
  * What the statement was, by TEXT PATTERN — a lexical guess, not a promise
@@ -40,35 +42,9 @@ export type HistoryOutcome = 'rows' | 'affected' | 'error' | 'abandoned';
 export type HistoryKind = 'read' | 'write' | 'ddl' | 'tx' | 'other';
 
 /** One statement the user ran on one connection. */
-export interface HistoryEntry {
-	/** Stable identity within the connection's list. */
-	id: string;
+export type HistoryEntry = IHistoryEntryBase & {
 	/** The statement text as typed (possibly truncated — see `truncated`). */
 	sql: string;
-	/** Unix ms the run started. */
-	at: number;
-	/** Round-trip milliseconds (tool call out and back, not database time). */
-	ms: number;
-	/** How the run ended. */
-	outcome: HistoryOutcome;
-	/** Rows returned, when the outcome is `rows`. */
-	rows?: number;
-	/**
-	 * The row limit in force for this run, when one was applied. A row count
-	 * without its limit is ambiguous: `1000 rows` could be the whole answer
-	 * or the ceiling cutting it off, and those mean opposite things.
-	 */
-	limit?: number;
-	/** Rows affected, when the outcome is `affected`. */
-	affected?: number;
-	/** Error text, when the outcome is `error` (stored bounded). */
-	error?: string;
 	/** Statement kind, by pattern. */
 	kind: HistoryKind;
-	/** Pinned entries survive trimming until only pinned entries remain. */
-	pinned?: boolean;
-	/** The user's own note on this entry. */
-	note?: string;
-	/** True when `sql` was cut to fit the per-statement bound. */
-	truncated?: boolean;
-}
+};

@@ -33,12 +33,13 @@
 // and whether a caller that needs one is made to wait for it.
 // =============================================================================
 
-import { describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { SqlEndpoint, SqlSession } from '../src/connect';
-import type { SqlWireClient } from '../src/connect/busClient';
+import type { IExplorerClient, IExplorerEndpoint } from 'shared/explorer/types';
+import type { SqlSession } from '../src/connect';
 import { createSqlSession } from '../src/connect/session';
 import { refreshSchema } from '../src/schema/schemaStore';
+import { currentRows, describeEndpoint, registerEndpoint, resetEndpoints, sqlEndpoints } from './support';
 
 // =============================================================================
 // FAKE CLIENT
@@ -46,69 +47,63 @@ import { refreshSchema } from '../src/schema/schemaStore';
 
 /** A fake client plus the tool names it was asked for, in order. */
 interface IFakeClient {
-	/** The client handed to the store. */
-	client: SqlWireClient;
+	/** The client handed to the store's session. */
+	client: IExplorerClient;
 	/** Every tool invoked, in order. */
 	tools: string[];
 }
 
+beforeEach(() => { resetEndpoints(); });
+
 /**
- * Build an endpoint with its own key, so one test's snapshot cannot reach
- * another's.
+ * Register an endpoint with its own key (the project id), so one test's
+ * snapshot cannot reach another's.
  *
- * @param key - The endpoint key.
- * @returns The endpoint.
+ * @param key - A name distinct per test; it becomes the project id.
+ * @returns The endpoint, discovered through SQL Explorer's real store.
  */
-function endpointFor(key: string): SqlEndpoint {
-	return {
-		key,
-		projectId: 'p1',
-		pipelineName: 'Pipeline A',
-		source: 's1',
-		nodeId: key,
-		nodeName: 'Orders DB',
-		provider: 'db_postgres',
-		running: true,
-	};
+function endpointFor(key: string): Promise<IExplorerEndpoint> {
+	return registerEndpoint(key);
 }
 
 /**
  * Build a fake client whose tool calls are answered by `behave`.
  *
- * The token never changes, which matches a task that did not restart: the
- * session's one retry is then declined and the first failure is the answer.
+ * The task never restarts (no TASK_STOPPED code), so the session's one retry
+ * is never taken and the first failure is the answer.
  *
  * @param behave - Called per invocation with the tool name and its ordinal.
  * @returns The fake client and its tool log.
  */
 function fakeClient(behave: (tool: string, index: number) => unknown): IFakeClient {
 	const tools: string[] = [];
-	const client = {
-		getTaskToken: async () => 'token-1',
-		tool: async ({ tool }: { tool: string }) => {
+	const client: IExplorerClient = {
+		getTasks: async () => currentRows() as unknown as Array<Record<string, unknown>>,
+		getTaskPipeline: async () => undefined,
+		tool: async <T,>({ tool }: { tool: string }): Promise<T> => {
 			tools.push(tool);
-			return behave(tool, tools.length - 1);
+			return (await behave(tool, tools.length - 1)) as T;
 		},
-	} as unknown as SqlWireClient;
+	};
 	return { client, tools };
 }
 
 /** One session per (fake client, endpoint key), as the app keeps one per connection. */
-const sessions = new WeakMap<SqlWireClient, Map<string, SqlSession>>();
+const sessions = new WeakMap<IExplorerClient, Map<string, SqlSession>>();
 
 /**
  * The session a refresh runs on (refreshSchema takes a session, not a client).
  *
  * @param client - The fake client.
- * @param endpoint - The endpoint.
+ * @param endpoint - The discovered endpoint.
  * @returns The session, created once per client and endpoint.
  */
-function sessionFor(client: SqlWireClient, endpoint: SqlEndpoint): SqlSession {
+function sessionFor(client: IExplorerClient, endpoint: IExplorerEndpoint): SqlSession {
 	const byKey = sessions.get(client) ?? new Map<string, SqlSession>();
 	sessions.set(client, byKey);
 	let session = byKey.get(endpoint.key);
 	if (session === undefined) {
-		session = createSqlSession(client, endpoint);
+		session = createSqlSession(sqlEndpoints.session(client, endpoint), describeEndpoint(endpoint));
 		byKey.set(endpoint.key, session);
 	}
 	return session;
@@ -127,7 +122,7 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 		// fresh refresh used to latch `unavailable`, and every later Refresh
 		// Schema, Reverse Engineer and post-DDL read served the task-start
 		// snapshot for the rest of the app session.
-		const endpoint = endpointFor('latch:one');
+		const endpoint = await endpointFor('latch:one');
 		const { client, tools } = fakeClient((tool) => {
 			if (tool === 'dialect') return { dialect: 'postgres' };
 			if (tool === 'refresh_schema' && countOf(tools, 'refresh_schema') === 1) throw new Error('task restarted');
@@ -148,7 +143,7 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 	it('stops attempting only after a SECOND consecutive fallback', async () => {
 		// A node that genuinely has no `refresh_schema` tool must still stop
 		// costing two round trips per refresh.
-		const endpoint = endpointFor('latch:two');
+		const endpoint = await endpointFor('latch:two');
 		const { client, tools } = fakeClient((tool) => {
 			if (tool === 'dialect') return { dialect: 'postgres' };
 			if (tool === 'refresh_schema') throw new Error('no such tool');
@@ -164,7 +159,7 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 	});
 
 	it('clears the suspicion when a fresh read answers', async () => {
-		const endpoint = endpointFor('latch:recovers');
+		const endpoint = await endpointFor('latch:recovers');
 		const { client, tools } = fakeClient((tool) => {
 			if (tool === 'dialect') return { dialect: 'postgres' };
 			// Fails once, answers once, fails once: never twice in a row, so
@@ -191,7 +186,7 @@ describe('refreshSchema — concurrency', () => {
 		// refresh was loading, so the post-DDL call in TableDesignView neither
 		// started nor awaited a reflection and the outcome banner described
 		// the change against the pre-DDL snapshot.
-		const endpoint = endpointFor('concurrent:fresh');
+		const endpoint = await endpointFor('concurrent:fresh');
 		let release = (): void => {};
 		const blocked = new Promise<void>((resolve) => { release = resolve; });
 		const { client, tools } = fakeClient(async (tool) => {
@@ -214,7 +209,7 @@ describe('refreshSchema — concurrency', () => {
 	});
 
 	it('collapses an ordinary refresh onto the one already running', async () => {
-		const endpoint = endpointFor('concurrent:ordinary');
+		const endpoint = await endpointFor('concurrent:ordinary');
 		let release = (): void => {};
 		const blocked = new Promise<void>((resolve) => { release = resolve; });
 		const { client, tools } = fakeClient(async (tool) => {

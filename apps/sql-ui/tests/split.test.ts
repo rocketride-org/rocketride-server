@@ -172,10 +172,47 @@ const CASES: ISplitCase[] = [
 		expect: ['SELECT 1--2; SELECT 3'],
 	},
 	{
-		name: 'clickhouse has NO # comment — the semicolon splits',
+		// ClickHouse: "SQL-style comments start with --, #! or # ".
+		name: 'clickhouse: # followed by a space is a comment, so its semicolon does not split',
 		sql: 'SELECT 1 # ; x\n; SELECT 2',
 		dialect: 'clickhouse',
-		expect: ['SELECT 1 #', 'x', 'SELECT 2'],
+		expect: ['SELECT 1 # ; x', 'SELECT 2'],
+	},
+	{
+		name: 'clickhouse: #! is a comment too',
+		sql: 'SELECT 1 #!; x\n; SELECT 2',
+		dialect: 'clickhouse',
+		expect: ['SELECT 1 #!; x', 'SELECT 2'],
+	},
+	{
+		name: 'clickhouse: # followed by anything else is not a comment — the semicolon splits',
+		sql: 'SELECT 1 #x; SELECT 2',
+		dialect: 'clickhouse',
+		expect: ['SELECT 1 #x', 'SELECT 2'],
+	},
+	{
+		name: 'clickhouse: a heredoc holds a semicolon',
+		sql: 'SELECT $$a;b$$; SELECT $h$c;d$h$; SELECT 2',
+		dialect: 'clickhouse',
+		expect: ['SELECT $$a;b$$', 'SELECT $h$c;d$h$', 'SELECT 2'],
+	},
+	{
+		name: 'clickhouse: // starts a line comment, so its semicolon does not split',
+		sql: 'SELECT 1 // x; y\n; SELECT 2',
+		dialect: 'clickhouse',
+		expect: ['SELECT 1 // x; y', 'SELECT 2'],
+	},
+	{
+		name: 'clickhouse: block comments nest, so a semicolon inside the outer one does not split',
+		sql: 'SELECT /* a /* b */ ; */ 1; SELECT 2',
+		dialect: 'clickhouse',
+		expect: ['SELECT /* a /* b */ ; */ 1', 'SELECT 2'],
+	},
+	{
+		name: 'clickhouse: an unclosed heredoc tag opens nothing — the semicolon splits',
+		sql: 'SELECT $$a; SELECT 2',
+		dialect: 'clickhouse',
+		expect: ['SELECT $$a', 'SELECT 2'],
 	},
 	{
 		name: 'clickhouse honours -- comments',
@@ -396,6 +433,39 @@ describe('splitStatements', () => {
 	});
 });
 
+describe('what a server runs: MySQL executable comments and PostgreSQL line ends', () => {
+	it('mysql: the text inside /*!NNNNN ... */ is code, so a statement hidden there is found', () => {
+		assert.deepEqual(texts('SELECT 1; /*!50000 DELETE FROM orders */', 'mysql'), ['SELECT 1', '/*!50000 DELETE FROM orders */']);
+		// Each marker becomes one space; the code between them is kept as written.
+		assert.equal(stripSqlComments('/*!50000 DELETE FROM orders */', 'mysql'), '  DELETE FROM orders  ');
+		assert.equal(stripSqlComments('/*! DELETE FROM orders */', 'mysql'), '  DELETE FROM orders  ');
+		assert.equal(stripSqlComments('/*!800001 SELECT 1 */', 'mysql'), '  SELECT 1  ');
+	});
+
+	it('mysql: a separator inside an executable comment separates; one inside a string in it does not', () => {
+		assert.deepEqual(texts("/*!50000 SELECT ';*/' */; SELECT 2", 'mysql'), ["/*!50000 SELECT ';*/' */", 'SELECT 2']);
+	});
+
+	it('mysql: MariaDB\'s /*M! ... */ and /*M!NNNNNN ... */ are code too (a MariaDB server reports itself as mysql)', () => {
+		assert.deepEqual(texts('SELECT 1; /*M!100000 DELETE FROM orders */', 'mysql'), ['SELECT 1', '/*M!100000 DELETE FROM orders */']);
+		assert.equal(stripSqlComments('/*M!100000 DELETE FROM orders */', 'mysql'), '  DELETE FROM orders  ');
+		assert.equal(stripSqlComments('/*M! DELETE FROM orders */', 'unknown'), '  DELETE FROM orders  ');
+		assert.equal(stripSqlComments('/*M!100000 DELETE FROM orders */', 'postgres'), ' ');
+	});
+
+	it('unknown reads them as code too (the safe side); postgres and clickhouse read a comment', () => {
+		assert.equal(stripSqlComments('/*!50000 DELETE FROM orders */', 'unknown'), '  DELETE FROM orders  ');
+		assert.equal(stripSqlComments('/*!50000 DELETE FROM orders */', 'postgres'), ' ');
+		assert.equal(stripSqlComments('/*!50000 DELETE FROM orders */', 'clickhouse'), ' ');
+		assert.equal(stripSqlComments('SELECT /*+ BKA(t) */ 1', 'mysql'), 'SELECT   1', 'an optimizer hint stays a comment');
+	});
+
+	it('postgres: a bare carriage return ends a -- comment, so the separator behind it counts', () => {
+		assert.deepEqual(texts('SELECT 1 -- x\r; DELETE FROM orders', 'postgres'), ['SELECT 1 -- x', 'DELETE FROM orders']);
+		assert.deepEqual(texts('SELECT 1 -- x\r\n; SELECT 2', 'postgres'), ['SELECT 1 -- x', 'SELECT 2']);
+	});
+});
+
 // =============================================================================
 // STATEMENT AT OFFSET
 // =============================================================================
@@ -453,8 +523,10 @@ describe('stripSqlComments', () => {
 		assert.equal(stripSqlComments('SELECT 1 # note\nFROM t', 'mysql'), 'SELECT 1  \nFROM t');
 	});
 
-	it('leaves a # alone for clickhouse', () => {
-		assert.equal(stripSqlComments('SELECT 1 # note', 'clickhouse'), 'SELECT 1 # note');
+	it('clickhouse: strips `# ` and `#!` comments, leaves any other # alone', () => {
+		assert.equal(stripSqlComments('SELECT 1 # note', 'clickhouse'), 'SELECT 1  ');
+		assert.equal(stripSqlComments('SELECT 1 #!note', 'clickhouse'), 'SELECT 1  ');
+		assert.equal(stripSqlComments('SELECT 1 #note', 'clickhouse'), 'SELECT 1 #note');
 	});
 
 	it('strips a nested postgres block comment whole', () => {

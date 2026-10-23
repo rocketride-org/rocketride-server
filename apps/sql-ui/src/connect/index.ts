@@ -37,16 +37,21 @@ export type {
 	SqlSchemaTable,
 	SqlSchemaResponse,
 	SqlSession,
-	SqlProbeResult,
 } from './types';
-export { DATABASE_PROVIDERS, discoverSqlEndpoints } from './discovery';
-export { createSqlSession, probeSqlEndpoint } from './session';
+export { DATABASE_PROVIDERS } from './discovery';
+export { createSqlEndpoints } from './endpoints';
+export { createSqlSession, toDialect } from './session';
+export { SQL_TOOLS, DIALECT_WAIT_MS, GET_SCHEMA_WAIT_MS, REFRESH_SCHEMA_WAIT_MS, statementWaitMs } from './tools';
 export { refreshEndpoints, useSqlEndpoints } from './endpointStore';
 export type { EndpointStatus, EndpointState } from './endpointStore';
 export {
 	loadSavedConnections, resetSavedConnections, useSavedConnections, useSavedConnectionsStatus,
 	upsertSavedConnection, newConnectionId, deleteSavedConnection, getSavedConnection,
 	applySavedConnections, subscribeSavedConnections, getSavedConnections, getSavedConnectionsStatus,
+	ownSavedConnections, applyReplicaConnections, getSavedConnectionsPartial, useSavedConnectionsPartial,
 } from './savedConnections';
-export type { SavedSqlConnection, PipelineBoundConnection, DirectConnection, SavedConnectionsStatus } from './savedConnections';
-export { resolveEndpoint, endpointForConnection, releaseDirectEndpoint, endpointKeyForConnection, isDirectEndpointKey } from './resolver';
+export type { SavedSqlConnection, PipelineBoundConnection, DirectConnection, SavedConnectionsStatus, SavedConnectionsFs, ReplicaPartial } from './savedConnections';
+export {
+	endpointForConnection, endpointKeyForConnection, isDirectEndpointKey, connIdFromDirectKey,
+	directProjectId, directUseOptions, TOOLS_SOURCE_ID,
+} from './resolver';

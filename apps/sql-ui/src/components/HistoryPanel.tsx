@@ -29,10 +29,12 @@
 // instead of it.
 //
 // The privacy notice is not decoration. These statements are written to the
-// user's workspace file on the RocketRide server, verbatim, including any
-// literal values typed into a WHERE clause. Someone who assumes browser-local
-// storage would be wrong in a way that matters, so the drawer says where the
-// text goes, in the drawer, every time it is open.
+// RocketRide server, verbatim, including any literal values typed into a
+// WHERE clause: the full app keeps them in the user's workspace file, a dev
+// tool in a history file in the user's store (or, when that file cannot be
+// read, for the session only). Someone who assumes browser-local storage
+// would be wrong in a way that matters, so the drawer says where the text
+// goes, for the mount it is in, every time it is open (SqlEnv history).
 // =============================================================================
 
 import React, { useMemo, useState } from 'react';
@@ -50,16 +52,7 @@ import {
 } from 'shell';
 import type { SqlEndpoint } from '../connect';
 import type { HistoryEntry } from '../history/types';
-import {
-	HistoryPrefsBridge,
-	clearForKey,
-	removeEntry,
-	setNote,
-	setRecording,
-	togglePin,
-	useHistory,
-	useRecording,
-} from '../history/historyStore';
+import { useSqlEnv } from '../sqlEnv';
 import { DEFAULT_HISTORY_LIMITS } from '../history/trim';
 import { getDocs, nextQueryDoc } from '../docs';
 import type { QueryDocPayload } from '../docs';
@@ -100,13 +93,6 @@ type HistoryFilter = 'all' | 'reads' | 'writes' | 'errors' | 'pinned';
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-/**
- * Where history is stored, said plainly. Approved wording — the statement
- * text leaves the browser, and a person deserves to know that before they
- * type a password into a WHERE clause.
- */
-const PRIVACY_NOTICE = 'Saved in your RocketRide workspace file on the server, not in this browser. Statements are stored as typed, including literal values.';
 
 /** The filter strip's options. */
 const FILTERS: { id: HistoryFilter; label: string }[] = [
@@ -349,8 +335,12 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 	// In-workbench page navigation (null in legacy standalone documents).
 	const pageNav = useSqlPageNav();
 
-	const entries = useHistory(endpoint.key);
-	const isRecording = useRecording(endpoint.key);
+	// History lives where this mount keeps it (the full app's preferences, or
+	// the dev tool's controller), and so does the sentence saying where.
+	const history = useSqlEnv().history;
+	const entries = history.useHistory(endpoint);
+	const isRecording = history.useRecording(endpoint);
+	const privacyNotice = history.usePrivacyNotice();
 
 	const [search, setSearch] = useState('');
 	const debouncedSearch = useDebouncedValue(search, 200);
@@ -486,9 +476,9 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 									value={noteDraft}
 									placeholder="Why this statement matters"
 									onChange={(event) => setNoteDraft(event.target.value)}
-									onBlur={() => setNote(endpoint.key, entry.id, noteDraft.trim())}
+									onBlur={() => history.setNote(endpoint, entry.id, noteDraft.trim())}
 									onKeyDown={(event) => {
-										if (event.key === 'Enter') setNote(endpoint.key, entry.id, noteDraft.trim());
+										if (event.key === 'Enter') history.setNote(endpoint, entry.id, noteDraft.trim());
 									}}
 								/>
 							</label>
@@ -508,7 +498,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 									small
 									pressed={!!entry.pinned}
 									onClick={() => {
-										togglePin(endpoint.key, entry.id);
+										history.togglePin(endpoint, entry.id);
 										announce(entry.pinned ? 'Entry unpinned' : 'Entry pinned');
 									}}
 								>
@@ -518,7 +508,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 									variant="ghost"
 									small
 									onClick={() => {
-										removeEntry(endpoint.key, entry.id);
+										history.removeEntry(endpoint, entry.id);
 										setExpandedId(null);
 										announce('Entry deleted');
 									}}
@@ -553,10 +543,6 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 
 	return (
 		<>
-			{/* Keeps the store's access to workspace preferences alive while the
-			    drawer is open, so a run recorded now is actually written. */}
-			<HistoryPrefsBridge />
-
 			<DetailPanel
 				open={open}
 				onClose={onClose}
@@ -577,7 +563,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 							pressed={isRecording}
 							title="Record the statements you run on this connection"
 							onClick={() => {
-								setRecording(endpoint.key, !isRecording);
+								history.setRecording(endpoint, !isRecording);
 								announce(isRecording ? 'Recording off for this connection' : 'Recording on for this connection');
 							}}
 						>
@@ -611,7 +597,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 					</div>
 				)}
 
-				<div style={styles.notice}>{PRIVACY_NOTICE}</div>
+				<div style={styles.notice}>{privacyNotice}</div>
 			</DetailPanel>
 
 			{confirmRerun && (
@@ -637,7 +623,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 					destructive
 					onCancel={() => setConfirmClear(false)}
 					onConfirm={() => {
-						clearForKey(endpoint.key);
+						history.clearForKey(endpoint);
 						setConfirmClear(false);
 						setExpandedId(null);
 						announce('History cleared for this connection');

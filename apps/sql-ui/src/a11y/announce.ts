@@ -24,32 +24,20 @@
 // A11Y — ANNOUNCE (the app's polite live-region channel)
 // =============================================================================
 //
-// The shell has no live-region utility: `useAnnouncements` fetches GitHub
-// product announcements and is unrelated, and only `Banner` sets `aria-live`.
-// So outcomes that are visible but not focused — a run finishing, an entry
-// pinned, a join path found — would reach a screen-reader user only if they
-// happened to be reading the right part of the page.
-//
-// This module is the write end of that channel: a text store any code may
-// push to without holding a React reference. The read end is a single
-// visually-hidden live region mounted once by the app shell.
+// SQL Explorer's own announcer, made by the shared factory
+// (shared/explorer/a11y). The shell has no live-region utility, so outcomes
+// that are visible but not focused — a run finishing, an entry pinned, a join
+// path found — would reach a screen-reader user only if they happened to be
+// reading the right part of the page. `announce` is the write end; the read
+// end is the single LiveRegion the app mounts once.
 // =============================================================================
 
-/** One announcement: the text, plus a revision that changes on every call. */
-export interface Announcement {
-	/** The sentence to speak. */
-	text: string;
-	/** Monotonic revision — repeating the SAME text still re-announces. */
-	revision: number;
-}
+import { createAnnouncer } from 'shared/explorer/a11y/announce';
 
-/**
- * The current announcement. Replaced (never mutated) on every call, so a
- * `useSyncExternalStore` snapshot stays referentially stable between them.
- */
-let snapshot: Announcement = { text: '', revision: 0 };
+export type { IAnnouncement as Announcement } from 'shared/explorer/a11y/announce';
 
-const listeners = new Set<() => void>();
+/** SQL Explorer's announcement channel. */
+export const sqlAnnouncer = createAnnouncer();
 
 /**
  * Announce one short outcome to assistive technology.
@@ -59,10 +47,7 @@ const listeners = new Set<() => void>();
  *
  * @param text - The sentence to announce.
  */
-export function announce(text: string): void {
-	snapshot = { text, revision: snapshot.revision + 1 };
-	listeners.forEach((listener) => listener());
-}
+export const announce = sqlAnnouncer.announce;
 
 /**
  * Subscribe to announcements.
@@ -70,17 +55,10 @@ export function announce(text: string): void {
  * @param callback - Called after every announcement.
  * @returns The unsubscribe function.
  */
-export function subscribeAnnouncements(callback: () => void): () => void {
-	listeners.add(callback);
-	return () => { listeners.delete(callback); };
-}
+export const subscribeAnnouncements = sqlAnnouncer.subscribe;
 
 /**
  * The current announcement. Safe as a `useSyncExternalStore` snapshot: the
  * same object is returned until the next {@link announce}.
- *
- * @returns The latest announcement.
  */
-export function getAnnouncement(): Announcement {
-	return snapshot;
-}
+export const getAnnouncement = sqlAnnouncer.get;

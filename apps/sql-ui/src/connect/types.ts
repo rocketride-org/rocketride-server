@@ -31,6 +31,8 @@
 // changes, never the views, panels, or canvas.
 // =============================================================================
 
+import type { IGenerationTicket } from 'shared/explorer/generation';
+
 // =============================================================================
 // DIALECT
 // =============================================================================
@@ -48,11 +50,25 @@ export type SqlDialect = 'mysql' | 'postgres' | 'clickhouse' | 'neo4j' | 'unknow
 
 /**
  * One reachable database tool node inside a running pipeline task — the unit
- * a "connection" binds to. Purely descriptive: holds no token or client state.
+ * a "connection" binds to. Purely descriptive and JSON-safe: it holds NO task
+ * token and no client state (tokens live only in the endpoint store's vault,
+ * in the realm that owns the engine connection), so it may travel to a
+ * dev-tool frame.
  */
 export interface SqlEndpoint {
-	/** Stable identity for lists/maps: `${projectId}:${source}:${nodeId}`. */
+	/**
+	 * Stable identity for lists, maps, history and document URIs:
+	 * `${projectId}:${source}:${nodeId}` (for a direct connection
+	 * `sqlconn-<id>:tools_1:<provider>_1`). It is the endpoint store's
+	 * `legacyKey`, never its owner-aware `k1|…` key.
+	 */
 	key: string;
+	/**
+	 * The saved connection this endpoint was resolved from. Every engine call
+	 * names the connection by this id (never by the endpoint itself). Absent
+	 * only on a New Connection picker entry, which is not opened directly.
+	 */
+	connId?: string;
 	/** Project (pipeline) identifier the task was started from. */
 	projectId: string;
 	/** Task display name (pipeline filename or config name). */
@@ -149,21 +165,34 @@ export interface SqlSession {
 	 * them through the driver, so nothing the user typed is ever parsed as
 	 * SQL. Reference them positionally as `$1..$n`.
 	 *
-	 * A session's cached task token goes stale whenever the owning task
-	 * restarts, and a stale token fails INDISTINGUISHABLY from a statement
-	 * the database refused. Retrying is therefore only safe when re-running
-	 * the statement is harmless: pass `idempotent` for reads, and leave it
-	 * unset for anything that writes. A non-idempotent failure surfaces as-is
-	 * — a silently re-sent INSERT is worse than an error the caller can see.
+	 * A statement is sent again in one case only: the engine refused it with
+	 * `TASK_STOPPED` (its task is stopping or restarting), which it raises
+	 * BEFORE the statement reaches the node, and re-discovery then finds the
+	 * same endpoint running again within the call's budget. Even so the retry
+	 * is opt-in: pass `idempotent` for reads, and leave it unset for anything
+	 * that writes. Any other failure, and every failure of a non-idempotent
+	 * call, surfaces as-is — a silently re-sent INSERT is worse than an error
+	 * the caller can see.
 	 *
 	 * @param sql - The statement to execute.
 	 * @param opts - Optional execution options.
 	 * @param opts.params - Positional bind values for `$1..$n`.
-	 * @param opts.idempotent - Allow ONE retry with a re-resolved task token.
-	 *                          Only for statements that are safe to re-run.
+	 * @param opts.idempotent - Allow the ONE retry after a pre-dispatch
+	 *                          `TASK_STOPPED` refusal. Only for statements the
+	 *                          caller classifies as reads.
+	 * @param opts.generation - The caller's ticket for this request. Once it
+	 *                          expires (Stop waiting, a newer request, the view
+	 *                          closing, a change of account) nothing more is
+	 *                          sent for the call and its answer or failure is
+	 *                          dropped as `stale`. It never leaves the realm
+	 *                          that made it: in a dev-tool frame it is checked
+	 *                          by the frame's remote session (a function cannot
+	 *                          cross the op channel), so there it stops the
+	 *                          frame's own send and drops the answer, while the
+	 *                          controller's one retry cannot see it.
 	 * @returns Rows and affected-row count.
 	 */
-	execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<SqlExecuteResult>;
+	execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket }): Promise<SqlExecuteResult>;
 	/**
 	 * Reflect the schema of the attached database (or a single table).
 	 *
@@ -196,22 +225,4 @@ export interface SqlSession {
 	 * @returns The dialect identifier.
 	 */
 	dialect(): Promise<SqlDialect>;
-}
-
-// =============================================================================
-// PROBE
-// =============================================================================
-
-/** Result of probing an endpoint before binding a session to it. */
-export interface SqlProbeResult {
-	/** Whether the endpoint answered both probe calls. */
-	ok: boolean;
-	/** Reported dialect ('unknown' when the probe failed). */
-	dialect: SqlDialect;
-	/** Database name, when schema reflection succeeded. */
-	database?: string;
-	/** Number of tables reported by schema reflection. */
-	tableCount?: number;
-	/** Failure detail when ok is false. */
-	error?: string;
 }

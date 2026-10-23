@@ -1,6 +1,6 @@
 {
 	"name": "@rocketride/sql-ui",
-	"version": "1.0.0",
+	"version": "1.2.0",
 	"private": true,
 	"description": "SQL database workbench over pipeline database tool nodes",
 	"license": "MIT",
@@ -17,7 +17,10 @@
 		],
 		"mode": "free",
 		"authenticated": true,
-		"showStatusBar": true
+		"showStatusBar": true,
+		"include": [
+			"apps/shared"
+		]
 	},
 	"scripts": {
 		"build": "rsbuild build",

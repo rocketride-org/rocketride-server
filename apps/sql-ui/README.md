@@ -19,9 +19,12 @@ apps are new to you, read
 deliberately does not do is under [Limits](#limits); most of those gaps come
 from the tool protocol rather than from the app.
 
-SQL Explorer runs in the RocketRide shell and as a panel inside the
-RocketRide VS Code extension. It is the same app either way, and your
-connection list follows you between them.
+SQL Explorer runs in the RocketRide shell as an app, and as a dev tool: in
+rocket-ui's tool panel and inside the RocketRide VS Code extension, where
+the connection list sits in the sidebar and each connection opens as its own
+document. It is the same app either way, and your connection list follows
+you between them; what differs in a dev tool is under
+[As a dev tool](#as-a-dev-tool).
 
 ## Before you start
 
@@ -29,9 +32,12 @@ connection list follows you between them.
   nodes: [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md),
   [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md),
   [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md) and
-  [`rocketride_sql`](../../nodes/src/nodes/rocketride_sql/README.md). You
-  either point the app at a database node already running in one of your
-  pipelines, or give it the connection details directly — both under
+  [`rocketride_sql`](../../nodes/src/nodes/rocketride_sql/README.md), plus
+  `db_supabase`, the Supabase preset of the `db_postgres` node (see its
+  [Supabase section](../../nodes/src/nodes/db_postgres/README.md#supabase-preset)),
+  which shares the PostgreSQL implementation and reports the `postgres`
+  dialect. You either point the app at a database node already running in one
+  of your pipelines, or give it the connection details directly — both under
   [Connections](#connections).
 - **Direct execution, if you want to run statements.** Each database node
   has an **Allow direct query execution** setting (`allow_execute`), off by
@@ -57,11 +63,14 @@ appear in the shell, in the App Builder preview and in VS Code.
 
 **New Connection** offers two paths:
 
-- **From pipeline** finds every database node in your currently running
-  pipeline tasks and lets you pick one. The connection stays bound to that
-  node: it is usable while the pipeline runs and goes dark when it stops,
-  and statements run with exactly that node's configuration and permissions.
-  An empty list here means no running task has a database node.
+- **From pipeline** finds the database nodes in the pipelines you are
+  running yourself (your own development runs) and lets you pick one. The
+  connection stays bound to that node: it is usable while that pipeline runs
+  and goes dark when it stops, and statements run with exactly that node's
+  configuration and permissions. A team deployment of a pipeline is not
+  offered here: a saved connection names a pipeline by its project, source
+  and node, which is what your own run of it is found by. An empty list
+  here means none of your running pipelines has a database node.
 - **Direct** takes the connection details itself — you pick the engine and
   fill in the same configuration form the pipeline editor uses, host and
   credentials included. When you open a direct connection, the app starts a
@@ -74,6 +83,18 @@ One thing to know about direct connections: the configuration is stored
 as typed in your per-user file on the server. For passwords and other
 secrets, use a `${ROCKETRIDE_*}` environment reference instead of the
 literal value — the server stores those encrypted.
+
+Opening a connection finds the running pipeline it names: your own
+development run of that pipeline, or, for a direct connection, its temporary
+pipeline, started first if it is not running. A connection whose pipeline is
+not running says so instead of opening. Signing out, or signing in as
+another user, organization or team, clears the connection list, which is
+read again for the new sign-in, and closes every document that belonged to a
+connection (workbench, query, data browser, designer, diagram and connection
+editor), so the previous account's results are not left on screen; a
+dropped connection alone closes nothing. The app never holds a connection
+string or a task token in anything it saves or shows: task tokens are kept in
+memory only, where the engine connection is.
 
 Opening a connection gives it a workbench document and fills the sidebar
 with that database's tables. Everything else hangs off a connection: query
@@ -157,11 +178,30 @@ surface (`begin` / `commit` / `rollback` with a session id), but SQL
 Explorer does not use it, and transaction control that quietly does nothing
 would be worse than a refusal.
 
-One statement can also arrive twice. If the pipeline task restarts while a
-statement is in flight, a statement the app classifies as a read may be
-sent once more; a write never is. The classification is by text, so a read
-that changes something — `SELECT … INTO`, a `nextval` or another
-volatile function — counts as a read here and can be re-sent.
+A statement is sent a second time in one case only. When the pipeline task
+is stopping or restarting, the engine refuses a statement with
+`TASK_STOPPED` before the statement reaches the database, so nothing has run.
+A statement the app classifies as a read is then sent once more, after the
+same connection is running again within 15 seconds; a write never is. The
+classification is by text: a `SELECT … INTO`, which fills a new table, a file
+or variables (see [The row limit](#the-row-limit)), counts as a write and is
+never re-sent, but a read that changes something through a function
+(`nextval` or another volatile function) counts as a read here. It is still
+never run twice, because the refusal comes before the database sees it. A
+statement that reached the database is never re-sent, whatever happens to
+its answer. As a dev tool the sidebar checks this again for every statement
+it is sent, with the dialect the database node reports (it asks the node
+when it does not know yet), so a write is never repeated whichever document
+sent it. If the node cannot say which dialect it speaks, the statement is
+sent once and never repeated. In VS Code the engine's refusal code does not
+reach SQL Explorer, so there the statement is not sent again and the
+refusal is shown.
+
+The check reads the statement's text, not the server's settings. A setting
+that changes how the server reads text (MySQL's `NO_BACKSLASH_ESCAPES` or
+`ANSI_QUOTES`, PostgreSQL with `standard_conforming_strings` off) is not
+taken into account, and a read that changes something through a function (`SELECT
+nextval('s')`) still counts as a read.
 
 ### The row limit
 
@@ -255,6 +295,31 @@ as a write, gets no limit and reads `no limit applied`. A chain whose only
 locking clause is `FOR SHARE` or `FOR KEY SHARE` is bounded normally. That is
 a gap in how a `WITH` chain is classified, not in the limit rule.
 
+A `SELECT … INTO` returns no rows: PostgreSQL's `SELECT … INTO new_table`
+creates and fills a table, MySQL's `INTO OUTFILE`, `INTO DUMPFILE` and `INTO
+@variable` write a file or variables, and ClickHouse's `INTO OUTFILE` writes a
+file. Nothing is appended to one, whatever the header says, because a limit
+would silently cut the copy short. It goes out exactly as typed and counts as
+a statement that changes data: it is never retried after a restart, History
+lists it with the writes, and re-running it from History asks first.
+
+ClickHouse's `LIMIT n BY expr` caps the rows of each group, not the result,
+so it is not read as the statement's own limit (on ClickHouse, and on a
+connection whose dialect could not be probed). On **200** or **1000** the
+header's `LIMIT` is appended after it, which ClickHouse accepts, and the line
+reads `limit 200`; with **All** it reads `no limit applied`. A plain `LIMIT`
+after the `BY` list is the statement's own limit, as anywhere else.
+
+ClickHouse puts its `SETTINGS` and `FORMAT` clauses after every `LIMIT` and
+rejects a `LIMIT` that follows either, so on ClickHouse, and on a connection
+whose dialect could not be probed, a statement that ends in one or both (in
+either order) gets the header's `LIMIT` inserted in front of the first of
+them, after any `LIMIT n BY`. A column, sort key or table named `format` or
+`settings` (`ORDER BY format DESC`, `FROM format f`) is not taken for either
+clause. As with a locking clause, one that sits behind a `#` on the same line
+is left alone and the line reads `no limit applied`: ClickHouse can read `#`
+as the start of a comment too.
+
 When the returned count equals an applied limit, a badge reads `Limit
 reached — more rows may exist`, because a full page is not evidence the
 result ended there.
@@ -329,6 +394,15 @@ The banner is explicit — `Stopped waiting after N.N s. The statement may
 still be running on the database; this tool cannot cancel it.` To stop it,
 stop it on the database.
 
+A read you stopped waiting for, or a plan or a table page you navigated
+away from, is not sent again and its answer is not shown. Closing the query
+tab or switching away from the app during a run also ends the run: nothing
+after the statement already sent goes out, and that statement's result is
+neither shown nor added to History. As a dev tool the document stops
+listening the same way, but a read already handed to the connection's engine
+can still take its one retry there, because nothing reaches back to cancel
+it.
+
 ### Autocomplete
 
 Suggestions come from the schema snapshot: columns of the aliased or named
@@ -364,17 +438,22 @@ search and filters for reads, writes, errors and pins. Expanding an entry
 shows the full statement, its outcome and its round trip, and lets you load
 it into the editor, run it again, pin it, annotate it or delete it.
 
-**Where it is stored matters.** History goes to your RocketRide workspace
-preferences on the server, per user, not into the browser, and the drawer
-says so whenever it is open: `Saved in your RocketRide workspace file on the
-server, not in this browser. Statements are stored as typed, including
-literal values.` A literal typed into a `WHERE` clause is stored as typed.
+**Where it is stored matters.** In the app, history goes to your RocketRide
+workspace preferences on the server, per user, not into the browser, and the
+drawer says so whenever it is open: `Saved in your RocketRide workspace file
+on the server, not in this browser. Statements are stored as typed, including
+literal values.` As a dev tool it goes to a history file in your user
+storage on the server instead (see [As a dev tool](#as-a-dev-tool)), and the
+drawer says that. A literal typed into a `WHERE` clause is stored as typed.
 A failed statement is stored with its failure message as that message
 reached the app — the node's own wrapper included, not just the sentence
 the banner quotes — and such a message can carry a value from the
 statement. Both stay in the preferences file until the entry is deleted,
 the list is cleared, or the bounds below trim it. It is not a server audit
-log, and not a place for secrets.
+log, and not a place for secrets. History belongs to the account that ran
+it: when you sign out, or another account signs in, the app forgets the
+history it was holding before it shows or saves anything for the next
+account, so one account's statements never reach another's file.
 
 The list is bounded, because the preferences file is read and written on
 every app switch: 100 entries per connection including pinned ones, 8 KB per
@@ -482,9 +561,89 @@ so: `Applied HH:MM. The node reflected its schema at task start; the tree
 and diagram will not show this change until the pipeline restarts.` The
 statements ran either way; only the app's picture of the schema is behind.
 
+## As a dev tool
+
+As a dev tool, SQL Explorer is split in two. The sidebar is the connection
+list and holds the tool's one connection to the RocketRide engine; each
+saved connection (and the connection editor) opens as its own document, and
+a document reaches the engine only through the sidebar. The generic document
+with no connection says how to open one. The same features are there, with
+these differences:
+
+- **History lives in a file.** The tool keeps query history in
+  `.workspace/rocketride.sql.history.json` in your user storage on the server,
+  beside the saved connections, one section per signed-in account. It is read
+  before anything is recorded, so it is never overwritten by an empty list,
+  and writes are batched. If the file exists but cannot be read, history is
+  kept for that session only and nothing is written to it. Two windows that
+  change history at the same time each write the file from what they read, so
+  the last one to save wins. The drawer's privacy line says which of these
+  applies. The sidebar forgets one account's history as soon as you sign out
+  or another account signs in, before the next account's section is read.
+  What survives a change:
+  - **Sign-out, the connection drops, or the organization changes:** the
+    last unsaved statements are held, and nothing is written while nobody is
+    signed in. They are written when the same account is known again while
+    the sidebar is open. They are dropped if the sidebar closes while nobody
+    is signed in (in VS Code it closes when the connection drops).
+  - **Another account signs in** (or the organization or team changes): the
+    previous account's last unsaved statements are dropped. They are never
+    written into another account's file.
+  - **A statement run while the history file is still being read** (just
+    after the sidebar opens or an account signs in) is saved once the read
+    ends; if the account changes or the sidebar closes before that, it is
+    lost.
+  - **More than 128 history views open at once:** the oldest views stop
+    updating until they are opened again.
+- **Switches are for the session.** **Run and stop asking on this
+  connection** turns the pattern check off until the document's window
+  closes, not for good (the app keeps it in your workspace preferences). A
+  dev tool is given no workspace preferences of its own.
+- **The connection is the sidebar's.** When the engine connection drops, run
+  and apply are disabled in every document, and a statement that was waiting
+  is reported as possibly still running (there is no way to cancel it). An
+  action taken while the connection is down is not sent at all. The sidebar
+  reads nothing from the engine (your saved connections, your history file,
+  the running pipelines) until it is opened: when you select the tool, or
+  when a document needs it. A document restored before the SQL Explorer
+  sidebar was opened asks the host to open the sidebar for it, and says
+  "Starting SQL Explorer…" meanwhile. Only if no sidebar answers within a few
+  seconds does it ask you to open it. A document that is already open stays
+  open, with run and apply disabled, while the sidebar is closed. While
+  nobody is signed in, a document says it is waiting for sign-in. With
+  several hundred saved connections, the sidebar shares only part of the
+  list with documents, and a document asks the sidebar for its own
+  connection when it is not in that part.
+- **Grid layouts are kept for the session.** In a dev tool, a grid's sort,
+  column widths and page size are kept in memory: in rocket-ui until the
+  page reloads, in VS Code until the document's panel closes. They are
+  never written into the host's own preferences (the full app keeps them in
+  its workspace preferences).
+- **Account changes close documents.** A document opened under one account
+  closes itself when another account signs in, and forgets the schema it was
+  showing; while nobody can be vouched for (signed out, connection dropped) it
+  only forgets the schema, and it opens or reads nothing on its own until an
+  account is signed in again.
+- **Engine error codes.** In VS Code the engine's error codes do not reach
+  the tool, so a statement refused while its pipeline restarts is not sent
+  again (see [Each statement commits on its own](#each-statement-commits-on-its-own));
+  the refusal is shown as the engine worded it.
+- **Waits are explicit.** Every request to the engine names how long it may
+  take (see [Limits](#limits)); a document waits a little longer than the
+  sidebar, so the sidebar's own answer arrives first. A statement on a node
+  that publishes no deadline is waited for up to 24 hours (the longest wait
+  the tool sets on any request), or twice that when a read is sent again
+  after its pipeline restarted, plus the few minutes it may take to reach
+  the connection, after which the document stops waiting; the statement
+  itself is not stopped.
+
 ## Limits
 
 - **No cancel.** **Stop waiting** stops the app waiting, not the database.
+- **No client timeout on a statement** unless the node publishes a statement
+  deadline: today's SQL nodes publish none and the engine sets none, so a
+  long query is allowed to run until you stop waiting. Reading the schema
+  waits up to 60 seconds, re-reading it 135, and the engine check 15.
 - **No transactions.** Every statement commits on its own, and transaction
   control is refused.
 - **No `EXPLAIN ANALYZE`.** Plan numbers are estimates, never measurements.
@@ -499,6 +658,13 @@ statements ran either way; only the app's picture of the schema is behind.
   app's to start and stop.
 - **Direct connections store their configuration as typed** in your per-user
   server file. Use `${ROCKETRIDE_*}` references for secrets.
+- **A direct connection's new settings apply once its pipeline restarts.**
+  Editing its configuration (host, database, credentials) without changing
+  its engine leaves the temporary pipeline already running with the
+  settings it started with, until every document of the connection is
+  closed or the pipeline idles out (15 minutes); the next document then
+  starts it with the new settings. Changing the engine starts a new
+  pipeline right away.
 - **The limit moves in front of a locking clause.** MySQL requires the
   locking clause after `LIMIT`; PostgreSQL accepts either order; the app
   inserts its `LIMIT` before a trailing locking clause so the read stays
@@ -510,6 +676,13 @@ statements ran either way; only the app's picture of the schema is behind.
   keeps the old appended placement: a locking clause trailed by the
   statement's own `OFFSET`, where the `LIMIT` is appended after `OFFSET`
   rather than inserted before the clause.
+- **The limit moves in front of ClickHouse's `SETTINGS` and `FORMAT`.** On
+  ClickHouse, and on a connection whose dialect could not be probed,
+  `SELECT … SETTINGS max_threads = 4` is sent as `SELECT …` / `LIMIT 200` /
+  `SETTINGS max_threads = 4`. Such a clause behind a `#` on the same line
+  keeps no limit (sent untouched).
+- **A pipeline connection opens your own development run.** A team
+  deployment of the same pipeline cannot be saved or opened as a connection.
 - **Duplicate column names collapse.** A projection that returns two columns
   with the same name shows one: the node hands back each row as an object
   keyed by column name, and the grid takes its headers from the first row.
@@ -519,7 +692,8 @@ statements ran either way; only the app's picture of the schema is behind.
 
 ## Next steps
 
-- [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md),
+- [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md)
+  (including its [Supabase preset](../../nodes/src/nodes/db_postgres/README.md#supabase-preset), provider `db_supabase`),
   [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md) and
   [`rocketride_sql`](../../nodes/src/nodes/rocketride_sql/README.md): the nodes behind every
   connection, including the tool surface and the direct-execution setting.

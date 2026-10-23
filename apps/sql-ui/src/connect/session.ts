@@ -24,19 +24,31 @@
 // CONNECT — SESSION (tool invocation bound to one endpoint)
 // =============================================================================
 //
-// Attach-mechanics live here on purpose (see types.ts). Today a session
-// resolves the owning task's token lazily and drives the node's shared SQL
-// tools (execute / get_schema / refresh_schema / dialect) via client.tool.
-// When the attach path changes, this file changes — the SqlSession contract
-// does not.
+// A thin SQL face over the shared tool session
+// (shared/explorer/connect/session): it drives the node's shared SQL tools
+// (execute / get_schema / refresh_schema / dialect) through the endpoint
+// store, which owns the task token. The SqlSession contract is unchanged.
+//
+// Retry is no longer "a fresh token lookup returned a different token" (task
+// tokens are deterministic, so that never fired after a restart). It is the
+// shared rule: one retry, idempotent tools only, only on the server's
+// TASK_STOPPED code, and only after re-discovery finds the SAME endpoint
+// running again. `execute` is repeated only when the caller marks the
+// statement a read.
+//
+// It runs where the engine connection is: the full app's realm, or the dev
+// tool's CONTROLLER. A dev-tool frame never holds one (sqlEnv.ts REMOTE).
+//
+// Port of f63da6e22 (connect/session.ts).
 // =============================================================================
 
-import type { SqlWireClient } from './busClient';
-import { revivalFor } from './resolver';
+import { isStaleError } from 'shared/explorer/errors';
+import type { IToolSession } from 'shared/explorer/connect/session';
+import type { IGenerationTicket } from 'shared/explorer/generation';
+import { statementWaitMs } from './tools';
 import type {
 	SqlEndpoint,
 	SqlExecuteResult,
-	SqlProbeResult,
 	SqlSchemaResponse,
 	SqlSession,
 	SqlDialect,
@@ -55,7 +67,7 @@ const KNOWN_DIALECTS: ReadonlySet<string> = new Set(['mysql', 'postgres', 'click
  * @param value - The raw dialect string from the node.
  * @returns The matching SqlDialect, or 'unknown'.
  */
-function toDialect(value: unknown): SqlDialect {
+export function toDialect(value: unknown): SqlDialect {
 	return typeof value === 'string' && KNOWN_DIALECTS.has(value) ? (value as SqlDialect) : 'unknown';
 }
 
@@ -63,121 +75,60 @@ function toDialect(value: unknown): SqlDialect {
 // SESSION IMPLEMENTATION
 // =============================================================================
 
-/**
- * SqlSession over the pipeline tool transport: resolves the task token on
- * first use, invokes the node's tools through client.tool, and re-resolves
- * the token once on failure (the task may have restarted since binding).
- */
+/** SqlSession over the shared tool session. */
 class SqlToolSession implements SqlSession {
 	/** The endpoint this session is bound to. */
 	readonly endpoint: SqlEndpoint;
 
-	/** The shell's RocketRide client (owned by the shell, never by this app). */
-	private readonly client: SqlWireClient;
-
-	/** Cached task token; null until first resolution or after invalidation. */
-	private token: string | null = null;
+	/** The shared session (it reads the task token from the store's vault at call time). */
+	private readonly session: IToolSession;
 
 	/**
-	 * @param client - The shell's RocketRide client.
-	 * @param endpoint - The endpoint to bind to.
+	 * @param session - The shared session for the endpoint.
+	 * @param endpoint - The endpoint to bind to (the app's token-free description).
 	 */
-	constructor(client: SqlWireClient, endpoint: SqlEndpoint) {
-		this.client = client;
+	constructor(session: IToolSession, endpoint: SqlEndpoint) {
+		this.session = session;
 		this.endpoint = endpoint;
 	}
 
-	/**
-	 * Resolve (and cache) the token of the task owning this endpoint.
-	 *
-	 * @returns The task token.
-	 * @throws When no task is currently running for the endpoint's pipeline.
-	 */
-	private async resolveToken(): Promise<string> {
-		if (this.token) return this.token;
-		let token = await this.client.getTaskToken({
-			projectId: this.endpoint.projectId,
-			source: this.endpoint.source,
-		});
-		if (!token) {
-			// Direct-mode temp pipelines idle out on their TTL — when the
-			// resolver registered a revival for this endpoint, re-`use` the
-			// pipeline once and resolve again before giving up.
-			const revive = revivalFor(this.endpoint.key);
-			if (revive) {
-				await revive();
-				token = await this.client.getTaskToken({
-					projectId: this.endpoint.projectId,
-					source: this.endpoint.source,
-				});
-			}
-		}
-		if (!token) {
-			throw new Error(`No running task for pipeline '${this.endpoint.pipelineName}'. Start the pipeline and retry.`);
-		}
-		this.token = token;
-		return token;
-	}
-
-	/**
-	 * Invoke one of the node's tools.
-	 *
-	 * The cached task token goes stale whenever the owning task restarts, and
-	 * a stale token fails exactly like a rejected statement — the transport
-	 * gives no way to tell them apart. Retrying is therefore a per-CALL
-	 * decision, not a transport policy: reflection and dialect reads are safe
-	 * to repeat, a write is not. When `retryOnStaleToken` is false the first
-	 * failure is the answer, and the tool is never invoked a second time.
-	 *
-	 * @param tool - Tool name (execute / get_schema / refresh_schema / dialect).
-	 * @param input - Tool input arguments.
-	 * @param retryOnStaleToken - Whether ONE re-resolved-token retry is safe.
-	 * @returns The tool's result value.
-	 */
-	private async invoke<T>(tool: string, input: Record<string, unknown>, retryOnStaleToken: boolean): Promise<T> {
-		const token = await this.resolveToken();
-		try {
-			return await this.client.tool<T>({ token, tool, nodeId: this.endpoint.nodeId, input });
-		} catch (err) {
-			// Drop the cached token either way: it may well be the stale one,
-			// and the next call should resolve a fresh one from scratch.
-			this.token = null;
-			if (!retryOnStaleToken) throw err;
-			const fresh = await this.resolveToken();
-			// Same token back = the task did not restart, so the failure was
-			// real. Only a genuinely different token justifies a second call.
-			if (fresh === token) throw err;
-			return await this.client.tool<T>({ token: fresh, tool, nodeId: this.endpoint.nodeId, input });
-		}
-	}
-
 	/** @inheritdoc */
-	async execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<SqlExecuteResult> {
+	async execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean; generation?: IGenerationTicket }): Promise<SqlExecuteResult> {
 		// Omit `params` entirely when there is nothing to bind: the node's
 		// placeholder rewriting is skipped for an empty list, so an unbound
 		// statement keeps travelling exactly as it did before.
 		const params = opts?.params;
 		const input = params && params.length > 0 ? { sql, params } : { sql };
-		// Default NO retry: an unmarked statement may well be a write.
-		return this.invoke<SqlExecuteResult>('execute', input, opts?.idempotent === true);
+		// Default NO retry: an unmarked statement may well be a write. The wait
+		// is the node's published statement deadline plus a pad, or none. The
+		// caller's ticket goes down with the call (port of 740b69c6d), so a
+		// request it abandoned is never sent again by the session's retry.
+		const generation = opts?.generation;
+		return this.session.invoke<SqlExecuteResult>('execute', input, {
+			idempotent: opts?.idempotent === true,
+			timeoutMs: statementWaitMs(this.session.info()),
+			...(generation === undefined ? {} : { generation }),
+		});
 	}
 
 	/** @inheritdoc */
 	async getSchema(table?: string): Promise<SqlSchemaResponse> {
-		return this.invoke<SqlSchemaResponse>('get_schema', table ? { table } : {}, true);
+		return this.session.invoke<SqlSchemaResponse>('get_schema', table ? { table } : {});
 	}
 
 	/** @inheritdoc */
 	async refreshSchema(): Promise<SqlSchemaResponse> {
 		try {
-			return await this.invoke<SqlSchemaResponse>('refresh_schema', {}, true);
-		} catch {
-			// ANY failure falls back. A node without the tool and a node that
-			// simply could not answer are indistinguishable at this layer, and
-			// matching the engine's error wording would rot the first time it
+			return await this.session.invoke<SqlSchemaResponse>('refresh_schema', {});
+		} catch (error) {
+			// A dropped (superseded) result is not a failure of the tool.
+			if (isStaleError(error)) throw error;
+			// ANY other failure falls back. A node without the tool and a node
+			// that simply could not answer are indistinguishable at this layer,
+			// and matching the engine's error wording would rot the first time it
 			// changed. Serve the task-start snapshot and flag it, rather than
-			// present it as freshly reflected; when the fallback ALSO fails,
-			// its error is the one the caller sees.
+			// present it as freshly reflected; when the fallback ALSO fails, its
+			// error is the one the caller sees.
 			const schema = await this.getSchema();
 			return { ...schema, stale: true };
 		}
@@ -185,50 +136,22 @@ class SqlToolSession implements SqlSession {
 
 	/** @inheritdoc */
 	async dialect(): Promise<SqlDialect> {
-		const result = await this.invoke<{ dialect?: string }>('dialect', {}, true);
+		const result = await this.session.invoke<{ dialect?: string }>('dialect', {});
 		return toDialect(result?.dialect);
 	}
 }
 
 // =============================================================================
-// FACTORY + PROBE
+// FACTORY
 // =============================================================================
 
 /**
  * Create a live session bound to one database endpoint.
  *
- * @param client - The shell's RocketRide client.
- * @param endpoint - The endpoint to bind to.
+ * @param session - The endpoint store's session for the endpoint (`store.session(client, endpoint)`).
+ * @param endpoint - The app's token-free description of the endpoint.
  * @returns The bound session.
  */
-export function createSqlSession(client: SqlWireClient, endpoint: SqlEndpoint): SqlSession {
-	return new SqlToolSession(client, endpoint);
-}
-
-/**
- * Probe an endpoint before binding to it: report dialect and a shallow
- * schema summary. Never throws — failures come back as `ok: false`.
- *
- * @param client - The shell's RocketRide client.
- * @param endpoint - The endpoint to probe.
- * @returns The probe result.
- */
-export async function probeSqlEndpoint(client: SqlWireClient, endpoint: SqlEndpoint): Promise<SqlProbeResult> {
-	const session = createSqlSession(client, endpoint);
-	try {
-		// Dialect first (cheapest), then a full reflection for the summary.
-		const dialect = await session.dialect();
-		const schema = await session.getSchema();
-		if (schema.error) {
-			return { ok: false, dialect, error: schema.error };
-		}
-		return {
-			ok: true,
-			dialect,
-			database: schema.database,
-			tableCount: schema.tables ? Object.keys(schema.tables).length : 0,
-		};
-	} catch (err) {
-		return { ok: false, dialect: 'unknown', error: err instanceof Error ? err.message : String(err) };
-	}
+export function createSqlSession(session: IToolSession, endpoint: SqlEndpoint): SqlSession {
+	return new SqlToolSession(session, endpoint);
 }

@@ -96,6 +96,20 @@ const KIND_CASES: IKindCase[] = [
 	// though FOR UPDATE only locks. Over-classifying costs a retry, not data.
 	{ sql: 'WITH a AS (SELECT 1) SELECT * FROM a FOR UPDATE', kind: 'write' },
 
+	// A SELECT that sends its rows elsewhere writes: a table, a file, variables.
+	{ sql: 'SELECT * INTO orders_backup FROM orders', kind: 'write', dialect: 'postgres' },
+	{ sql: '(SELECT * INTO t FROM a)', kind: 'write', dialect: 'postgres' },
+	{ sql: 'WITH r AS (SELECT 1) SELECT * INTO t FROM r', kind: 'write', dialect: 'postgres' },
+	{ sql: "SELECT * FROM orders INTO OUTFILE '/tmp/o.csv'", kind: 'write', dialect: 'mysql' },
+	{ sql: 'SELECT id INTO @last FROM orders', kind: 'write', dialect: 'mysql' },
+	{ sql: "SELECT * FROM events INTO OUTFILE 'e.csv'", kind: 'write', dialect: 'clickhouse' },
+	{ sql: 'EXPLAIN ANALYZE SELECT * INTO t FROM a', kind: 'write', dialect: 'postgres' },
+	// Plain EXPLAIN only plans it; INTO in a literal, quoted name or longer word is no INTO.
+	{ sql: 'EXPLAIN SELECT * INTO t FROM a', kind: 'read', dialect: 'postgres' },
+	{ sql: "SELECT 'into' AS w", kind: 'read' },
+	{ sql: 'SELECT * FROM "into"', kind: 'read', dialect: 'postgres' },
+	{ sql: 'SELECT into_count FROM t', kind: 'read' },
+
 	// DDL.
 	{ sql: 'CREATE TABLE t (id INT)', kind: 'ddl' },
 	{ sql: 'ALTER TABLE t ADD COLUMN c INT', kind: 'ddl' },
@@ -115,6 +129,27 @@ const KIND_CASES: IKindCase[] = [
 	{ sql: 'SET GLOBAL autocommit = 0', kind: 'tx' },
 	{ sql: 'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE', kind: 'tx' },
 	{ sql: 'SET SESSION TRANSACTION READ ONLY', kind: 'tx' },
+	// PostgreSQL's other spellings, and MySQL's XA and @@autocommit.
+	{ sql: 'ABORT', kind: 'tx', dialect: 'postgres' },
+	{ sql: 'ABORT', kind: 'tx' },
+	{ sql: 'END', kind: 'tx', dialect: 'postgres' },
+	{ sql: 'END TRANSACTION', kind: 'tx', dialect: 'postgres' },
+	{ sql: "PREPARE TRANSACTION 'x'", kind: 'tx', dialect: 'postgres' },
+	{ sql: "COMMIT PREPARED 'x'", kind: 'tx', dialect: 'postgres' },
+	{ sql: "ROLLBACK PREPARED 'x'", kind: 'tx', dialect: 'postgres' },
+	{ sql: "XA START 'x'", kind: 'tx', dialect: 'mysql' },
+	{ sql: "XA END 'x'", kind: 'tx', dialect: 'mysql' },
+	{ sql: "XA COMMIT 'x'", kind: 'tx' },
+	{ sql: 'SET @@autocommit = 0', kind: 'tx', dialect: 'mysql' },
+	{ sql: 'SET @@session.autocommit = 0', kind: 'tx', dialect: 'mysql' },
+	{ sql: 'SET @@GLOBAL.autocommit = 0', kind: 'tx' },
+	// A lone END closes a compound statement in MySQL, and a PL/pgSQL body split
+	// without its dollar quotes: not transaction control there.
+	{ sql: 'END', kind: 'other', dialect: 'mysql' },
+	{ sql: 'END', kind: 'other' },
+	// PREPARE of a statement is not two-phase commit; @@ of another variable is a variable.
+	{ sql: 'PREPARE stmt FROM \'SELECT 1\'', kind: 'other', dialect: 'mysql' },
+	{ sql: 'SET @@sql_mode = \'\'', kind: 'other', dialect: 'mysql' },
 
 	// Everything else.
 	{ sql: 'SET @x = 1', kind: 'other' },

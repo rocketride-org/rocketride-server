@@ -32,7 +32,6 @@
 
 import React, { useCallback } from 'react';
 import { ConfirmDialog } from 'shell';
-import { deleteSavedConnection, endpointKeyForConnection } from '../connect';
 import { useSqlEnv } from '../sqlEnv';
 import { requestConnectionOverlay, useConnectionOverlay } from '../navigation';
 import NewConnectionModal from './NewConnectionModal';
@@ -47,15 +46,12 @@ const ConnectionOverlays: React.FC = () => {
 
 	const close = useCallback(() => requestConnectionOverlay(null), []);
 
-	/** Delete-confirm action: drop the record; a direct connection's temp
-	 *  pipeline is stopped best-effort (the TTL reaps it otherwise). */
+	/** Delete-confirm action: drop the record where the list is owned; a
+	 *  direct connection's temp pipeline is stopped first, best effort (the
+	 *  TTL reaps it otherwise). */
 	const confirmDelete = useCallback(() => {
 		if (request?.kind !== 'delete') return;
-		const conn = request.conn;
-		if (conn.mode === 'direct') {
-			env.releaseEndpoint(endpointKeyForConnection(conn));
-		}
-		deleteSavedConnection(conn.id);
+		void env.deleteConnection(request.conn).catch(() => undefined);
 		close();
 	}, [request, env, close]);
 

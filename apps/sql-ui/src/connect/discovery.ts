@@ -21,122 +21,35 @@
 // SOFTWARE.
 
 // =============================================================================
-// CONNECT — DISCOVERY (find database tool nodes in running pipelines)
+// CONNECT — DISCOVERY (which components are SQL tool nodes)
 // =============================================================================
 //
-// Attach-mechanics live here on purpose (see types.ts). Today discovery means:
-// list the caller's tasks, resolve each running task's token, read its
-// pipeline, and collect components whose provider is a known database node.
-// When the platform grows a first-class way to enumerate tool nodes, this
-// file is the only place that changes.
-// =============================================================================
-
-import type { SqlWireClient } from './busClient';
-import type { SqlEndpoint } from './types';
-
-// =============================================================================
-// PROVIDER SET
+// Discovery itself — reading `getTasks()`, keying connections by owner and run
+// kind, probing — lives in shared/explorer/connect (see endpoints.ts for SQL
+// Explorer's store). All that is SQL Explorer's own is the answer to "which
+// pipeline components expose the SQL tool surface".
 // =============================================================================
 
 /**
  * Pipeline component providers that expose the shared SQL tool surface
  * (execute / get_schema / dialect, inherited from DatabaseInstanceBase).
  * Extend this set when new relational nodes ship.
+ *
+ * Two entries are not separate engines:
+ * - `db_supabase` is the Supabase preset of the `db_postgres` node
+ *   (`services.supabase.json`: same code, same tools, the `postgres` dialect;
+ *   its provider id comes from its protocol).
+ * - `rocketride_sql` is the managed SQL node of RocketRide cloud deployments:
+ *   it inherits the same tools and answers `postgres` to `dialect`. It only
+ *   yields a connection where the deployment provides that database.
+ *
+ * Nothing else in the app depends on the provider id: the engine comes from
+ * the node's `dialect` tool and no connection fields are read.
  */
 export const DATABASE_PROVIDERS: ReadonlySet<string> = new Set([
 	'db_mysql',
 	'db_postgres',
 	'db_clickhouse',
+	'db_supabase',
 	'rocketride_sql',
 ]);
-
-// =============================================================================
-// PIPELINE SHAPES (minimal, local to discovery)
-// =============================================================================
-
-/** The subset of a pipeline component discovery needs. */
-interface PipelineComponent {
-	/** Component id (tool call target). */
-	id?: string;
-	/** Component provider name. */
-	provider?: string;
-	/** Optional display name. */
-	name?: string;
-}
-
-/** The subset of the pipeline dict discovery needs. */
-interface PipelineDict {
-	/** The pipeline's components. */
-	components?: PipelineComponent[];
-}
-
-// =============================================================================
-// DISCOVERY
-// =============================================================================
-
-/**
- * Discover every database tool node reachable through the caller's current
- * tasks. Tasks that fail token/pipeline resolution are skipped (a task can
- * finish between listing and resolution) — discovery never throws for a
- * single bad task, only for the initial task listing itself.
- *
- * @param client - The shell's RocketRide client.
- * @returns Endpoints sorted by pipeline name, then node id.
- */
-export async function discoverSqlEndpoints(client: SqlWireClient): Promise<SqlEndpoint[]> {
-	// One page of 100 covers realistic task counts; discovery re-runs on demand.
-	const tasks = await client.listTasks({ page_size: 100 });
-	/** The task-row shape this discovery reads (loose adapter result). */
-	interface TaskRow { projectId: string; source: string; completed?: boolean; state: number; name?: string }
-	const rows = (tasks.rows ?? []) as TaskRow[];
-
-	// Deduplicate tasks by project+source: restarts can leave multiple task
-	// rows for the same pipeline; the token resolver returns the live one.
-	const seen = new Set<string>();
-	const candidates = rows.filter((task) => {
-		// TASK_STATE >= 4 (STOPPING/COMPLETED/CANCELLED) is not attachable;
-		// `completed` alone misses the stopping window.
-		if (task.completed || task.state >= 4) return false;
-		const id = `${task.projectId}:${task.source}`;
-		if (seen.has(id)) return false;
-		seen.add(id);
-		return true;
-	});
-
-	// Resolve each candidate's pipeline and collect its database components.
-	const endpoints: SqlEndpoint[] = [];
-	for (const task of candidates) {
-		try {
-			// The token names the running task; the pipeline is read through it.
-			const token = await client.getTaskToken({ projectId: task.projectId, source: task.source });
-			if (!token) continue;
-			const pipeline = (await client.getTaskPipeline(token)) as PipelineDict | undefined;
-			if (!pipeline?.components) continue;
-
-			// Every database-provider component in the pipeline is an endpoint.
-			for (const component of pipeline.components) {
-				if (!component.id || !component.provider) continue;
-				if (!DATABASE_PROVIDERS.has(component.provider)) continue;
-				endpoints.push({
-					// Source is part of the identity: the same project can run
-					// several tasks, each exposing a component with this id.
-					key: `${task.projectId}:${task.source}:${component.id}`,
-					projectId: task.projectId,
-					pipelineName: task.name ?? task.source,
-					source: task.source,
-					nodeId: component.id,
-					nodeName: component.name ?? component.id,
-					provider: component.provider,
-					running: true,
-				});
-			}
-		} catch (err) {
-			// A single unreachable task must not break discovery of the rest.
-			console.log('[sql-ui] discovery skipped task', task.projectId, task.source, err);
-		}
-	}
-
-	// Stable ordering for the landing grid.
-	endpoints.sort((a, b) => a.pipelineName.localeCompare(b.pipelineName) || a.nodeId.localeCompare(b.nodeId));
-	return endpoints;
-}

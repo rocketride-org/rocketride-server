@@ -37,14 +37,14 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, Button, ConnectionManager, ContentHeader, Modal } from 'shell';
+import { Banner, Button, ContentHeader, Modal } from 'shell';
 import type { IFormData, IService, IServiceSchema } from 'shell';
 import NodeConfigForm, { validationProblemFromResponse } from 'shared/components/node-config';
 import type { INodeConfigFormHandle } from 'shared/components/node-config';
 import { PIPELINE_SCHEMA_VERSION } from 'shared/components/node-config';
 import {
 	DATABASE_PROVIDERS,
-	newConnectionId, upsertSavedConnection,
+	newConnectionId,
 	refreshEndpoints, useSqlEndpoints,
 } from '../connect';
 import { useSqlEnv } from '../sqlEnv';
@@ -55,11 +55,13 @@ import { DatabaseIcon } from '../icons';
 // CONSTANTS
 // =============================================================================
 
-/** Fallback titles when the services summary has not arrived yet. */
+/** Fallback titles when the services summary has not arrived yet (and in a dev-tool frame, which has no service cache). */
 const PROVIDER_TITLES: Record<string, string> = {
 	db_mysql: 'MySQL',
 	db_postgres: 'PostgreSQL',
 	db_clickhouse: 'ClickHouse',
+	db_supabase: 'Supabase',
+	rocketride_sql: 'RocketRide SQL',
 };
 
 // =============================================================================
@@ -203,12 +205,6 @@ export interface NewConnectionModalProps {
 	onClose: () => void;
 	/** Called with the saved record (id included) after a save. */
 	onSaved?: (saved: SavedSqlConnection) => void;
-	/**
-	 * Commits the record to the saved-connection list. Defaults to the local
-	 * store (owner realms); isolated editor documents pass a peer post so the
-	 * commit executes in the OWNER realm (see savedConnections.ts ownership).
-	 */
-	commit?: (conn: SavedSqlConnection) => void;
 	/** Render as a full document page (ContentHeader + body) instead of a
 	 *  modal — the top-level-tab flow. */
 	page?: boolean;
@@ -224,7 +220,7 @@ export interface NewConnectionModalProps {
  *
  * @param props - {@link NewConnectionModalProps}.
  */
-const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClose, onSaved, commit = upsertSavedConnection, page = false }) => {
+const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClose, onSaved, page = false }) => {
 	const env = useSqlEnv();
 
 	// ── Shared state ─────────────────────────────────────────────────────────
@@ -252,11 +248,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 
 	// Provider titles from the cached services summary (fallback map until it
 	// arrives — the summary fetch is lazy and connection-scoped).
-	const providerTitle = useCallback((p: string): string => {
-		const { services } = ConnectionManager.getInstance().getCachedServices();
-		const entry = services[p] as { title?: string } | undefined;
-		return entry?.title ?? PROVIDER_TITLES[p] ?? p;
-	}, []);
+	const providerTitle = useCallback((p: string): string => env.serviceTitle(p) ?? PROVIDER_TITLES[p] ?? p, [env]);
 
 	// The full Pipe schema is fetched on demand once a provider is picked.
 	useEffect(() => {
@@ -289,7 +281,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 	// ── Save paths ───────────────────────────────────────────────────────────
 
 	/** Persists the pipeline-bound record from the selected endpoint. */
-	const savePipeline = useCallback(() => {
+	const savePipeline = useCallback(async () => {
 		const endpoint = endpoints.find((e: SqlEndpoint) => e.key === selectedKey);
 		if (!endpoint) { setError('Select a database node.'); return; }
 		const record: SavedSqlConnection = {
@@ -302,10 +294,19 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 			nodeId: endpoint.nodeId,
 			provider: endpoint.provider,
 		};
-		commit(record);
-		onSaved?.(record);
-		onClose();
-	}, [endpoints, selectedKey, name, editing, commit, onClose, onSaved]);
+		setSaving(true);
+		try {
+			// Committed where the list is owned: the full app's core, or the
+			// dev tool's controller (an op). A failure keeps the editor open.
+			await env.saveConnection(record);
+			onSaved?.(record);
+			onClose();
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setSaving(false);
+		}
+	}, [endpoints, selectedKey, name, editing, env, onClose, onSaved]);
 
 	/** Validates the configured component server-side, then persists. */
 	const saveDirect = useCallback(async (formData: IFormData) => {
@@ -337,7 +338,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 				provider,
 				config: formData,
 			};
-			commit(record);
+			await env.saveConnection(record);
 			onSaved?.(record);
 			onClose();
 		} catch (err) {
@@ -345,19 +346,19 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 		} finally {
 			setSaving(false);
 		}
-	}, [provider, env, name, editing, commit, onClose, onSaved, providerTitle]);
+	}, [provider, env, name, editing, onClose, onSaved, providerTitle]);
 
 	/** Footer Save — routes to the active path. */
 	const handleSave = useCallback(() => {
 		setError('');
-		if (path === 'pipeline') savePipeline();
+		if (path === 'pipeline') void savePipeline();
 		// Direct: drive the RJSF submit; saveDirect runs on validation pass.
 		else formRef.current?.submit();
 	}, [path, savePipeline]);
 
-	// No list-readiness gate here: commits run in (or are queued for) the
-	// OWNER realm's loaded store, so a save can never land on a half-loaded
-	// list whatever this document's own read state is.
+	// No list-readiness gate here: the save runs where the list is owned, and
+	// waits there for the list to be read for the signed-in identity, so it
+	// can never land on a half-loaded list (or another account's).
 	const saveReady = path === 'pipeline' ? selectedKey !== null : provider !== null && service !== null;
 
 	// Database providers, stable order (the discovery set is the source of truth).
