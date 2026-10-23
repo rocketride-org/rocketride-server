@@ -23,7 +23,6 @@
 
 import os
 import io
-import threading
 from typing import List, Tuple, Any
 from rocketlib import IGlobalBase, debug, warning
 from ai.common.config import Config
@@ -372,8 +371,11 @@ class IGlobal(IGlobalBase):
         # Get this node's config
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        # Set up the lock for thread safety
-        self.readerLock = threading.Lock()
+        # Local inference must serialize GPU access; with --modelserver this is a
+        # no-op so concurrent requests reach the model server's batcher
+        from ai.common.models.base import make_device_lock
+
+        self.readerLock = make_device_lock()
 
         # Initialize the OCR reader
         self.reader = Reader(self.glb.logicalType, config, bag)
