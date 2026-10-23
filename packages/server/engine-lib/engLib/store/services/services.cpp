@@ -1627,11 +1627,13 @@ Error IServices::declareNode(const ServiceDefinition &def) noexcept {
     const auto libName = _ts("lib", def.nodePath, ".so");
 #endif
 
-    // Nodes are always resolved against the executable. In a repo build the
-    // definitions come from nodes/src/nodes while the libraries are built
-    // into dist/server/nodes - the two halves of a node do not share a
-    // directory, which is why this is not relative to definitionPath.
-    const auto libPath = application::execDir() / "nodes" / nodeDir / libName;
+    // A repo build reads definitions from nodes/src/nodes and builds the
+    // libraries into dist/server/nodes; anywhere else a node, packaged, keeps
+    // its library beside its definition
+    const auto libPath =
+        (application::projectDir() ? application::execDir() / "nodes" / nodeDir
+                                   : nodeParent) /
+        libName;
 
     LOG(Services, "    Node library  :", libPath);
 

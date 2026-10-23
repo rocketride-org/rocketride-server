@@ -103,14 +103,14 @@ def read_index() -> bytes:
     return _read(os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'nodes', 'index.json'))
 
 
-def read_package(name: str, sha256: str) -> bytes:
-    """<name>.rrnode: the local one, else the cached copy of that digest, else the release's."""
-    if os.path.exists(_local(f'{name}.rrnode')):
-        return _read(_local(f'{name}.rrnode'))
+def read_package(file: str, sha256: str) -> bytes:
+    """The package file the index names: the local one, else the cached copy of that digest, else the release's."""
+    if os.path.exists(_local(file)):
+        return _read(_local(file))
     cached = _cached(f'{sha256}.rrnode')
     if os.path.exists(cached) and hashlib.sha256(data := _read(cached)).hexdigest() == sha256:
         return data
-    data = _download(f'{name}.rrnode')
+    data = _download(file)
     if hashlib.sha256(data).hexdigest() != sha256:
-        raise ValueError(f'The release asset {name}.rrnode does not match the index')
+        raise ValueError(f'The release asset {file} does not match the index')
     return save(cached, data)

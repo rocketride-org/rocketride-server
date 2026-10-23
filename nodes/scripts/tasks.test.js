@@ -54,3 +54,11 @@ test('the same node gives the same digest on another build', async () => {
 	const second = (await packageNode('demo', makeNode())).entry.sha256;
 	assert.strictEqual(first, second);
 });
+
+test('a C++ package carries its library beside its definition', async () => {
+	const lib = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rr-lib-')), 'libdemo.so');
+	fs.writeFileSync(lib, 'ELF');
+	const zip = new AdmZip((await packageNode('demo', makeNode(), [lib])).data);
+	assert.strictEqual(zip.readAsText('demo/libdemo.so'), 'ELF');
+	assert.ok(zip.getEntry('demo/services.json'));
+});

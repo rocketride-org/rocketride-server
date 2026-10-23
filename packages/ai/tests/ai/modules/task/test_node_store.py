@@ -26,11 +26,13 @@ def _index(contract=CONST_NODES_CONTRACT):
         'contract': contract,
         'nodes': {
             'webhook': {
+                'file': 'webhook.rrnode',
                 'sha256': 'w',
                 'services': {'services.json': json.dumps(ON_DISK)},
                 'icons': {'webhook.svg': '<svg/>'},
             },
             'llm_x': {
+                'file': 'llm_x-darwin-arm64.rrnode',
                 'sha256': 'x',
                 'services': {'services.json': json.dumps(PACKAGED)},
                 'icons': {'x.svg': '<svg id="x"/>'},
@@ -53,7 +55,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(node_store, 'register_channel_command', lambda name, handler: calls['commands'].append(name))
     monkeypatch.setattr(node_store, 'warning', calls['warnings'].append)
     monkeypatch.setattr(node_store.account, 'node_index', lambda: _index())
-    monkeypatch.setattr(node_store.account, 'node_package', lambda name, sha256: f'{name}:{sha256}'.encode())
+    monkeypatch.setattr(node_store.account, 'node_package', lambda file, sha256: f'{file}:{sha256}'.encode())
     return calls
 
 
@@ -102,7 +104,7 @@ async def test_a_task_gets_a_package_by_node_or_provider_name(server, asked):
     reply = await node_store._fetch(RUN, {'name': asked}, None)
 
     assert reply.body == {'name': 'llm_x', 'sha256': 'x', 'services': {'services.json': PACKAGED}}
-    assert reply.data == b'llm_x:x'
+    assert reply.data == b'llm_x-darwin-arm64.rrnode:x'
 
 
 @pytest.mark.asyncio
@@ -117,7 +119,12 @@ async def test_a_name_this_server_does_not_serve_gets_an_empty_answer(server):
 def test_the_source_serves_a_node_by_node_or_provider_name_and_nothing_else(server):
     node_store.start()
 
-    assert node_store._package('provider_x') == ('llm_x', b'llm_x:x', 'x', {'services.json': PACKAGED})
+    assert node_store._package('provider_x') == (
+        'llm_x',
+        b'llm_x-darwin-arm64.rrnode:x',
+        'x',
+        {'services.json': PACKAGED},
+    )
     assert node_store._package('llm_x') == node_store._package('provider_x')
     assert node_store._package('filesys') is None
     # A published node is served only to the run it was resolved for, never from here
