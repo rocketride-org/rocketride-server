@@ -40,6 +40,7 @@ Components:
     TransportWebSocket: WebSocket transport for client-server communication
     RocketRideException: Base exception class for all RocketRide operations
     ConnectionException: Raised for connection-related errors
+    CommandException: Raised when the server refuses a command
     PipeException: Raised for data pipe operation errors
     ExecutionException: Raised for pipeline execution errors
     ValidationException: Raised for input validation failures
@@ -68,6 +69,7 @@ from .exceptions import (
     RocketRideException,
     ConnectionException,
     AuthenticationException,
+    CommandException,
     PipeException,
     ExecutionException,
     ValidationException,
@@ -85,6 +87,7 @@ __all__ = [
     'RocketRideException',
     'AuthenticationException',
     'ConnectionException',
+    'CommandException',
     'PipeException',
     'ExecutionException',
     'ValidationException',

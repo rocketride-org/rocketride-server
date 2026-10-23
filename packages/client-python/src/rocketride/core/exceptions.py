@@ -182,6 +182,15 @@ class AuthenticationException(ConnectionException):
     pass
 
 
+class CommandException(RocketRideException, RuntimeError):
+    """
+    A command the server refused, such as starting or validating a pipeline.
+
+    ``code`` says why, e.g. ``NODE_NOT_ENTITLED``. Also a :class:`RuntimeError`,
+    which is what these failures raised before ``code`` reached the caller.
+    """
+
+
 class PipeException(RocketRideException, RuntimeError):
     """
     Exception raised for data pipe operations.
