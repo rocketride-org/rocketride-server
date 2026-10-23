@@ -1174,35 +1174,40 @@ def test_report_tree_keeps_work_spread_over_threads():
 def test_tree_keeps_the_callees_of_a_finished_recursion():
     """recursive(5) calls leaf once per level; every call returned before stop.
 
-    yappi books recursive's total once, for the outer call, but the recursive
-    -> recursive pair again with the nested times. Found in review: read as a
-    frame still running, the outer copy got a sixth of leaf: 1 call of 6.
+    yappi books recursive's total for the outer call only, and the recursive
+    -> recursive pair for its outermost call, whose time nests the deeper ones.
+    Found in review: read as a frame still running, the outer copy got a sixth
+    of leaf: 1 call of 6.
     """
     data = [
         _entry('root', 1, 0.6, 0.0, {'recursive': (1, 0.6, 0.0)}),
-        _entry('recursive', 6, 0.6, 0.0, {'leaf': (6, 0.6, 0.6), 'recursive': (5, 1.5, 0.0)}),
+        _entry('recursive', 6, 0.6, 0.0, {'leaf': (6, 0.6, 0.6), 'recursive': (5, 0.5, 0.0)}),
         _entry('leaf', 6, 0.6, 0.6),
     ]
 
-    leaves = _copies(CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=0.6)['tree'], 'leaf')
+    tree = CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=0.6)['tree']
+    leaves = _copies(tree, 'leaf')
 
     assert sum(n['ncalls'] for n in leaves) == 6
     assert sum(n['cumtime'] for n in leaves) == pytest.approx(0.6)
+    assert _node(tree, 'root', 'recursive', 'recursive [cycle]')['cumtime'] == pytest.approx(0.5)
 
 
 def test_tree_keeps_the_callees_of_a_mutual_recursion():
     """Mutual recursion f -> g -> f: g's leaf calls from both levels stay under the outer f."""
     data = [
         _entry('main', 1, 0.6, 0.0, {'f': (1, 0.6, 0.0)}),
-        _entry('f', 2, 0.6, 0.2, {'g': (2, 0.7, 0.0)}),
+        _entry('f', 2, 0.6, 0.2, {'g': (2, 0.5, 0.0)}),
         _entry('g', 2, 0.5, 0.2, {'leaf': (2, 0.2, 0.2), 'f': (1, 0.3, 0.0)}),
         _entry('leaf', 2, 0.2, 0.2),
     ]
 
-    leaves = _copies(CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=0.6)['tree'], 'leaf')
+    tree = CProfileManager._build_tree(data, max_depth=50, min_pct=0, total_time=0.6)['tree']
+    leaves = _copies(tree, 'leaf')
 
     assert sum(n['ncalls'] for n in leaves) == 2
     assert sum(n['cumtime'] for n in leaves) == pytest.approx(0.2)
+    assert _node(tree, 'main', 'f', 'g')['cumtime'] <= _node(tree, 'main', 'f')['cumtime']
 
 
 def _review_leaf():
@@ -1215,6 +1220,19 @@ def _review_recursive(n):
     _review_leaf()
     if n:
         _review_recursive(n - 1)
+
+
+def _review_f(n):
+    """Recurse n levels through _review_g, calling the leaf on each."""
+    _review_leaf()
+    if n:
+        _review_g(n)
+
+
+def _review_g(n):
+    """The other half of _review_f's recursion."""
+    _review_leaf()
+    _review_f(n - 1)
 
 
 def test_report_tree_keeps_the_callees_of_a_live_recursion():
@@ -1230,6 +1248,22 @@ def test_report_tree_keeps_the_callees_of_a_live_recursion():
     assert exact['ncalls'] == 6
     assert sum(n['ncalls'] for n in leaves) == 6
     assert sum(n['cumtime'] for n in leaves) == pytest.approx(exact['cumtime'], rel=1e-3, abs=1e-5)
+
+
+def test_report_tree_keeps_a_recursive_call_within_its_caller():
+    """A recursive pair is timed by its outermost call, so its copy never outweighs the caller's."""
+    profiler.start('owner-1')
+    _review_recursive(5)
+    _review_f(3)
+    profiler.stop('owner-1')
+
+    tree = profiler.report_tree(min_pct=0, max_depth=500)['tree']
+
+    callers = [n for name in ('_review_recursive', '_review_f', '_review_g') for n in _copies(tree, name)]
+    assert callers
+    for caller in callers:
+        for child in caller['children']:
+            assert child['cumtime'] <= caller['cumtime'] + 1e-6, (caller['name'], child['name'])
 
 
 def test_components_find_recursion():
