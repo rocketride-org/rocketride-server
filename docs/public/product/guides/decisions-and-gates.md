@@ -43,7 +43,7 @@ There is no "otherwise" output. To handle the other side of a rule, add a second
 
 ### Typos in a condition value
 
-Values are case-sensitive: `Yes` is not `yes`. If a condition asks for a value the question can never have, the Gate stops the run with a message that lists the valid answers, for example `Gate: "Yes" is not an answer "is_spam" can have (so_1 answers: yes, no). Values are case-sensitive.` A numeric condition on a rubric that is out of range (for example `≥ 5` on three levels) is reported the same way. `uncertain` is always a valid value. This check needs the node that answers the question to declare its answers, which System One and anomaly_detector do.
+Values are case-sensitive: `Yes` is not `yes`. If a condition asks for a value the question can never have, the Gate fails every item it sees (the run keeps going and each item reports the error) with a message that lists the valid answers, for example `Gate: "Yes" is not an answer "is_spam" can have (so_1 answers: yes, no). Values are case-sensitive.` A numeric condition on a rubric that is out of range (for example `≥ 5` on three levels) is reported the same way. `uncertain` is always a valid value. This check needs the node that answers the question to declare its answers, which System One and anomaly_detector do.
 
 ## Whole document vs. each chunk
 

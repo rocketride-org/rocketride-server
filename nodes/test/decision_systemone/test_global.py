@@ -24,6 +24,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from decision_systemone_under_test.client import SystemOneError
 
 CONFIG = {
@@ -96,6 +98,36 @@ def test_probe_reply_without_an_answer_is_reported_as_a_warning(systemone, monke
     monkeypatch.setattr(ProbeClient, 'decide', lambda self, *a: {})
     glb.validateConfig()
     assert systemone.warnings == ['http://localhost:11434 did not answer the test question with a yes/no answer']
+
+
+def test_probe_reply_that_is_not_a_yes_no_answer_is_reported_as_a_warning(systemone, monkeypatch):
+    glb = _global(systemone, monkeypatch, CONFIG)
+    monkeypatch.setattr(ProbeClient, 'decide', lambda self, *a: {'answers': {'probe': {'type': 'noul', 'noul': 7}}})
+    glb.validateConfig()
+    assert systemone.warnings == ['probe: noul 7.0 must be finite and in [0, 1]']
+
+
+@pytest.mark.parametrize('serverbase', ['http://10.0.0.5:11434', 'http://example.com'])
+def test_api_key_over_plain_http_to_a_remote_host_is_refused(systemone, monkeypatch, serverbase):
+    _global(systemone, monkeypatch, {**CONFIG, 'serverbase': serverbase, 'apikey': 'sk-1'}).validateConfig()
+    assert ProbeClient.instances == []
+    assert 'will not send an API key over plain http' in systemone.warnings[0]
+
+
+@pytest.mark.parametrize(
+    'serverbase, apikey',
+    [
+        ('http://localhost:11434', 'sk-1'),
+        ('http://127.0.0.1:8700', 'sk-1'),
+        ('http://[::1]:8700', 'sk-1'),
+        ('https://api.example.com', 'sk-1'),
+        ('http://10.0.0.5:11434', None),
+    ],
+)
+def test_api_key_over_https_or_loopback_or_no_key_is_allowed(systemone, monkeypatch, serverbase, apikey):
+    _global(systemone, monkeypatch, {**CONFIG, 'serverbase': serverbase, 'apikey': apikey}).validateConfig()
+    assert ProbeClient.instances[0].args[:2] == (serverbase, apikey)
+    assert systemone.warnings == []
 
 
 def test_bad_questions_warn_without_a_live_call(systemone, monkeypatch):

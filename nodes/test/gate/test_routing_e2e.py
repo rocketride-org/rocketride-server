@@ -374,7 +374,7 @@ async def test_anomaly_detector_routes_through_a_gate():
     assert group['writer'] == 'anomaly_detector' and len(group['items']) == 10
 
 
-async def test_a_gate_value_typo_fails_the_run_loudly():
+async def test_a_gate_value_typo_fails_each_item():
     with FakeSystemOne() as fake:
         pipeline = text_pipeline(fake.url)
         for component in pipeline['components']:

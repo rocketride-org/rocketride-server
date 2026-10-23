@@ -206,9 +206,9 @@ def test_preview_is_one_line_and_at_most_80_chars():
     assert preview(None) == ''
 
 
-@pytest.mark.parametrize('values', [[], 'yes,no', [None], [{'a': 1}]])
+@pytest.mark.parametrize('values', [[], 'yes,no', [None], [{'a': 1}], ['yes', 'no', None]])
 def test_values_must_be_a_non_empty_list_of_scalars(values):
-    with pytest.raises(DecisionError, match='values'):
+    with pytest.raises(DecisionError, match='must be a non-empty list'):
         _record({}, questions={'is_spam': {'kind': 'yes_no', 'values': values}})
 
 

@@ -117,6 +117,8 @@ def test_match_defaults_to_all_and_questions_are_unique_in_order():
         ({'conditions': [{'op': 'exists'}]}, 'question name is required'),
         ({'conditions': [{'question': 'a', 'op': 'like'}]}, 'unknown operator'),
         ({'conditions': [{'question': 'a', 'op': 'gt', 'value': 'high'}]}, 'not a number'),
+        ({'conditions': [{'question': 'a', 'op': 'gte', 'value': 'nan'}]}, 'not a finite number'),
+        ({'conditions': [{'question': 'a', 'op': 'between', 'value': '1, inf'}]}, 'not a finite number'),
         ({'conditions': [{'question': 'a', 'op': 'between', 'value': '1'}]}, 'two numbers'),
         ({'conditions': [{'question': 'a', 'op': 'between', 'value': '3, 1'}]}, 'greater than high'),
         ({'conditions': [{'question': 'a', 'op': 'in', 'value': ' , '}]}, 'non-empty list'),

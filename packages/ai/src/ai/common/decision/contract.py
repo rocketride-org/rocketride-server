@@ -63,7 +63,8 @@ def resolve_hit(decisions, lane: str, question: str, *, refs=None, table_key=Non
         has a non-ok status. None when nothing answers ``question`` for this item.
 
     Raises:
-        DecisionError: two writers answer the same question for the item, or the match is ambiguous.
+        DecisionError: two writers answer the same question for the item at the same level (a linked answer
+            wins over a whole-object one), or the match is ambiguous.
     """
     groups = {gid: group for gid, group in (decisions or {}).items() if question in (group.get('questions') or {})}
     hits = _item_hits(groups, refs, table_key) or _object_hits(groups, lane)

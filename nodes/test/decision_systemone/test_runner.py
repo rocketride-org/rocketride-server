@@ -213,3 +213,18 @@ def test_state_tokens_only_measures_the_state_alone():
     assert _runner(limits=counted).oversize(text) is not None
     assert _runner(limits=state_only).oversize(text) is None
     assert _runner(limits=state_only).oversize('x' * 1804)['tokens'] == 451
+
+
+def test_state_tokens_only_counts_each_non_ascii_character_as_a_token():
+    limits = DecisionLimits(
+        max_options=26,
+        max_levels=26,
+        max_questions=8,
+        max_state_tokens=450,
+        chars_per_token=4.0,
+        state_tokens_only=True,
+    )
+    client = FakeClient()
+    outcome = _runner(client, limits=limits).decide('中' * (450 * 4 - 1), source='n1')
+    assert outcome.answers is None and outcome.size == {'tokens': 1799, 'limit': 450}
+    assert client.calls == []

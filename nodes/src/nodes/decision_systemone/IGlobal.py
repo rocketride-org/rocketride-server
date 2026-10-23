@@ -27,6 +27,8 @@ Builds a DecisionRunner from the node's merged config, and probes it in validate
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 
 from ai.common.config import Config
@@ -39,6 +41,7 @@ from .runner import DecisionRunner
 PROBE_STATE = 'Hello, this is a short test message.'
 PROBE_QUESTIONS = {'probe': {'type': 'noul', 'instructions': 'Is this text a greeting?'}}
 PROBE_SPEC = QuestionSpec('probe', YES_NO, 'Is this text a greeting?')
+LOOPBACK_HOSTS = ('localhost', '127.0.0.1', '::1')
 
 
 class IGlobal(IGlobalBase):
@@ -55,8 +58,15 @@ class IGlobal(IGlobalBase):
         return url
 
     def _api_key(self, config: dict) -> str | None:
-        """Return the API key, or None for keyless backends."""
-        return str(config.get('apikey') or '').strip() or None
+        """Return the API key, or None for keyless backends; refuse to send one over plain http to another host."""
+        key = str(config.get('apikey') or '').strip() or None
+        url = str(config.get('serverbase', '')).strip()
+        if key and url.lower().startswith('http://') and urlsplit(url).hostname not in LOOPBACK_HOSTS:
+            raise ValueError(
+                f'System One node will not send an API key over plain http to {url}; use https:// '
+                '(http:// is allowed only for localhost)'
+            )
+        return key
 
     def _limits(self, config: dict) -> DecisionLimits:
         """Return this backend's limits (from the profile's ``limits`` block)."""

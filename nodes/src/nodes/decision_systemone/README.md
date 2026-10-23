@@ -183,7 +183,8 @@ environment reference in the **API Key** field and set the variable in the envir
 | System One (custom endpoint) | `ROCKETRIDE_SYSTEMONE_KEY` (optional) |
 
 For example `${ROCKETRIDE_TYPESAFE_KEY}`. The key is sent as a bearer token and is
-omitted when the field is empty.
+omitted when the field is empty. The node refuses to start with a key and a plain `http://`
+server URL unless the host is `localhost`, `127.0.0.1` or `::1`; use `https://` for any other host.
 
 ## Notes
 
@@ -208,15 +209,17 @@ state alone (`state_tokens_only`): it is measured before the call, without the r
 overhead or the question text that other backends count, and anything longer is recorded
 `too_long`. The Laya limits sit just under the model's context (512 tokens for `english`,
 1,024 for `multilingual` and `typed-decisions`). Those two profiles estimate 3 characters per
-token instead of 4, so non-Latin text, which packs fewer characters into a token, is far less
-likely to exceed Laya's read silently. The CLM limit sits at clm-serve's default
+token instead of 4 for ASCII text, and the node counts each non-ASCII character as a whole
+token, so non-Latin text is unlikely to exceed Laya's read silently. The CLM limit sits at clm-serve's default
 `--max-tokens` of 2,048. Raise the CLM limit only if you started clm-serve with a larger one.
 Laya Studio degrades past about 20 options, so its option limit is 20. Superagent Security-One
 is a security triage model (prompt injection and similar); it is not a general classifier.
+A decision on untrusted content can be steered by that content, since the text is what the
+model reads; do not use a single System One question as a security boundary.
 
 The custom endpoint uses conservative, Ollama-level limits because the node cannot know
-what an arbitrary server accepts. Characters per token is the node's own estimate, used
-only to decide when an input is too long.
+what an arbitrary server accepts. Characters per token is the node's own estimate for ASCII
+text (any other character counts as one token), used only to decide when an input is too long.
 
 ### Too long
 

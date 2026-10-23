@@ -149,7 +149,7 @@ Chunks made from a stamped document inherit `decision_refs` through the usual me
 
 Within one writer's group, a Gate looks for the object-level item (one with no `item` key) in this order: the one whose `lane` matches the incoming item's lane, then the `text` one, then the group's only object-level item. It uses the first tier that has any match. If that tier has more than one item, the Gate raises an error ("`<group>` holds N whole-object decisions that could apply to the <lane> lane") and does not fall through to the next tier.
 
-Separately, if two different writers answer the same question name for the same item, the Gate raises an error ("`<question>` is answered by both `<a>` and `<b>`; rename one"). It never guesses. Use distinct question names across writers on the same path.
+Separately, if two different writers answer the same question name for the same item at the same level (both linked to it, or both whole-object), the Gate raises an error ("`<question>` is answered by both `<a>` and `<b>`; rename one"). An answer linked to the item takes precedence over another writer's whole-object answer to the same question. Use distinct question names across writers on the same path.
 
 Per-item links for image, audio and video streams don't exist yet. Those lanes use the object-level decision.
 

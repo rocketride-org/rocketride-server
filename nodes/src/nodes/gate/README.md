@@ -4,15 +4,7 @@ A RocketRide pipeline node that passes or blocks each item on its wire according
 
 ## What it does
 
-The Gate reads `response.decisions` and evaluates its rule against the answers recorded there. It checks documents one by one and tables by their fingerprint. Everything else (text, questions, answers, json, image, audio, video) is checked against the decision for the whole object. A passing item is forwarded unchanged on the same lane; a failing item is dropped. `open`, `closing` and `close` always continue; only data writes are filtered. The Gate never calls a model and does not depend on System One: it works with any node that records decisions in the [Decisions](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/development/nodes/decisions.md) format. Put one Gate on each branch, with the rule for that branch.
-
-## Example pipelines
-
-**Drop spam, then keep only billing and refund chunks**
-
-`parse → system_one (is_spam) → gate (is_spam equals no) → preprocessor → system_one (topic) → gate (topic is one of billing, refund) → response`
-
-The first System One node classifies the whole text, and the first Gate passes it only when `is_spam` is `no`. The preprocessor splits the text into documents, a second System One node classifies each one as `billing`, `refund`, `legal` or `other`, and the second Gate forwards only the documents whose `topic` is `billing` or `refund`. A second Gate with `is_spam equals yes` on another branch from the first System One node handles the other side.
+The Gate reads `response.decisions` and evaluates its rule against the answers recorded there. It checks documents one by one, tables by their fingerprint, and everything else (text, questions, answers, json, image, audio, video) against the decision for the whole object. A passing item is forwarded unchanged on the same lane and a failing item is dropped; only data writes are filtered, so `open`, `closing` and `close` always continue. The Gate never calls a model and does not depend on System One: it works with any node that records decisions in the [Decisions](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/development/nodes/decisions.md) format. Put one Gate on each branch, with the rule for that branch.
 
 ## Lanes
 
@@ -63,13 +55,21 @@ A rule needs at least one condition. Values typed in the panel are text; when th
 
 ### Condition values are checked against the writer's answers
 
-When the node that answers a question declares the answers it can give (System One and anomaly_detector both do), the Gate checks each condition value against them. A value that is not one of the writer's `values` stops the run with a message that lists the valid answers, for example `Gate: "Yes" is not an answer "is_spam" can have (so_1 answers: yes, no). Values are case-sensitive.` Values are case-sensitive, so `Yes` is not `yes`. A numeric condition on a rubric that is out of range is reported the same way. `uncertain` is always a valid value. The check runs the first time a condition meets a writer's answer, and a failed check is raised again for every later item rather than remembered as passed.
+When the node that answers a question declares the answers it can give (System One and anomaly_detector both do), the Gate checks each condition value against them. A value that is not one of the writer's `values` fails every object the Gate sees (the task keeps running) with a message that lists the valid answers, for example `Gate: "Yes" is not an answer "is_spam" can have (so_1 answers: yes, no). Values are case-sensitive.` Values are case-sensitive, so `Yes` is not `yes`. A numeric condition on a rubric that is out of range is reported the same way. `uncertain` is always a valid value. The check runs the first time a condition meets a writer's answer, and a failed check is raised again for every later item rather than remembered as passed.
 
 ### Lanes and handles
 
 The node declares all nine lanes as inputs and as outputs, so the canvas shows up to nine handles on each side and any lane can be connected; each lane goes out on the same lane it came in on. A single "any" handle is planned.
 
 A document is checked by its own recorded answers when it carries `metadata.decision_refs` (a System One node stamps this on the documents it forwards). A document without its own reference, such as a chunk made after the decision, uses the decision for the whole object.
+
+### Example pipelines
+
+**Drop spam, then keep only billing and refund chunks**
+
+`parse → system_one (is_spam) → gate (is_spam equals no) → preprocessor → system_one (topic) → gate (topic is one of billing, refund) → response`
+
+The first System One node classifies the whole text, and the first Gate passes it only when `is_spam` is `no`. The preprocessor splits the text into documents, a second System One node classifies each one as `billing`, `refund`, `legal` or `other`, and the second Gate forwards only the documents whose `topic` is `billing` or `refund`. A second Gate with `is_spam equals yes` on another branch from the first System One node handles the other side.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->

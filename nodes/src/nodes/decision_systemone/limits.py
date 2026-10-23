@@ -65,8 +65,11 @@ class DecisionLimits:
 
 
 def estimate_tokens(text: str, chars_per_token: float) -> int:
-    """Estimate tokens for ``text`` with a characters-per-token heuristic."""
-    return math.ceil(len(text) / chars_per_token) if text else 0
+    """Estimate tokens for ``text``: ASCII at ``chars_per_token``, any other character as one token."""
+    if not text:
+        return 0
+    wide = sum(1 for ch in text if ord(ch) > 127)
+    return math.ceil((len(text) - wide) / chars_per_token) + wide
 
 
 def encode_json(value) -> bytes:

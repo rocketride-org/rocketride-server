@@ -147,12 +147,16 @@ def test_error_kinds_not_retried(status, body, kind):
 
 
 def test_network_error_retried_then_raised():
+    calls = []
+
     def handler(request):
+        calls.append(request)
         raise httpx.ConnectError('refused', request=request)
 
     with pytest.raises(SystemOneError) as exc:
         _client(handler, max_attempts=2).decide('m', 's', {})
     assert exc.value.kind == 'network'
+    assert len(calls) == 2
 
 
 def test_non_json_success_is_protocol_error():
