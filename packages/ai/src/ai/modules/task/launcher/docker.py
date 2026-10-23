@@ -45,7 +45,7 @@ import sys
 import tarfile
 import time
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
@@ -914,8 +914,8 @@ class DockerLauncher(Launcher):
         """
         The command line inside the container: the task's argv with the container's paths.
 
-        No ``--shared-host``: the container is the boundary. The data port is fixed
-        and bound on every interface of the container's own network namespace.
+        The data port is fixed and bound on every interface of the container's
+        own network namespace.
 
         Args:
             spec: What to launch.
@@ -927,7 +927,7 @@ class DockerLauncher(Launcher):
         return [
             CONST_CONTAINER_ENGINE,
             *task_argv(
-                replace(spec, shared_host=False),
+                spec,
                 CONST_CONTAINER_NODE_SCRIPT,
                 f'{CONST_CONTAINER_DATA_PATH}/task.json',
                 CONST_TASK_DATA_PORT_CONTAINER,
