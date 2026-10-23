@@ -265,6 +265,81 @@ describe('createHistoryStore — two stores in one process', () => {
 });
 
 // =============================================================================
+// OUTSIDE REACT (a dev-tool controller serves history to its frames)
+// =============================================================================
+
+describe('createHistoryStore — read from code outside React', () => {
+	it('getHistory and getRecording answer what the hooks would, and subscribe fires on every change until unsubscribed', async () => {
+		const store = createHistoryStore<'sql'>({ historyKey: 'o.h', recordingKey: 'o.r', textField: 'sql', persistDelayMs: BATCH_MS });
+		const prefs = fakePrefs({ 'o.h': { k: [run('sql', 'old', 'SELECT 0', 1)] }, 'o.r': { off: false } });
+		let changes = 0;
+		const off = store.subscribe(() => { changes += 1; });
+		const detach = store.attachPrefs(prefs.api);
+		try {
+			assert.deepEqual(store.getHistory('k').map((e) => e.id), ['old']);
+			assert.deepEqual(store.getHistory('unknown'), []);
+			assert.equal(store.getHistory('unknown'), store.getHistory('other'), 'an unknown connection reads one stable empty list');
+			assert.equal(store.getRecording('k'), true);
+			assert.equal(store.getRecording('off'), false);
+			const before = store.getHistory('k');
+			const seen = changes;
+			store.runs.emitRun('k', run('sql', 'new', 'SELECT 1', 2));
+			assert.ok(changes > seen, 'a recorded run notifies');
+			assert.deepEqual(store.getHistory('k').map((e) => e.id), ['new', 'old']);
+			assert.notEqual(store.getHistory('k'), before, 'a changed list is a new snapshot');
+			assert.equal(store.getHistory('k'), store.getHistory('k'), 'an unchanged list is the same snapshot');
+			store.setRecording('k', false);
+			assert.equal(store.getRecording('k'), false);
+			off();
+			const after = changes;
+			store.togglePin('k', 'new');
+			assert.equal(changes, after, 'nothing after unsubscribe');
+			await settle();
+		} finally {
+			detach();
+		}
+	});
+});
+
+describe('createHistoryStore — flush before the last detach', () => {
+	it('flush writes a batch still inside its debounce at once; without it the last detach drops that batch', () => {
+		const flushed = createHistoryStore<'sql'>({ historyKey: 'f.h', recordingKey: 'f.r', textField: 'sql', persistDelayMs: 60_000 });
+		const kept = fakePrefs();
+		const detachKept = flushed.attachPrefs(kept.api, 'owner');
+		flushed.runs.emitRun('k', run('sql', 'last', 'SELECT 1', 5));
+		assert.equal(kept.values['f.h'], undefined, 'the premise: the run waits in the debounce');
+		flushed.flush();
+		const written = kept.values['f.h'] as unknown as Record<string, Array<{ id: string }>>;
+		assert.deepEqual(written.k.map((e) => e.id), ['last'], 'written at once');
+		detachKept();
+
+		const dropped = createHistoryStore<'sql'>({ historyKey: 'f.h', recordingKey: 'f.r', textField: 'sql', persistDelayMs: 60_000 });
+		const lost = fakePrefs();
+		const detachLost = dropped.attachPrefs(lost.api, 'owner');
+		dropped.runs.emitRun('k', run('sql', 'last', 'SELECT 1', 5));
+		detachLost();
+		assert.equal(lost.values['f.h'], undefined, 'the control: the last detach drops the batch');
+	});
+
+	it('flush writes nothing when nothing is pending, and is a no-op with no accessor attached', () => {
+		const store = createHistoryStore<'sql'>({ historyKey: 'g.h', recordingKey: 'g.r', textField: 'sql', persistDelayMs: 60_000 });
+		store.flush();
+		let writes = 0;
+		const prefs = fakePrefs({ 'g.h': { k: [run('sql', 'old', 'SELECT 0', 1)] } });
+		const detach = store.attachPrefs({ getPref: prefs.api.getPref, setPref: (key, value) => { writes += 1; prefs.api.setPref(key, value); } }, 'owner');
+		store.flush();
+		assert.equal(writes, 0, 'no pending batch: no write');
+		store.setRecording('k', false);
+		const afterSwitch = writes;
+		store.flush();
+		assert.equal(writes, afterSwitch, 'the switch was written at once (persistNow), so nothing is left to flush');
+		detach();
+		store.flush();
+		assert.equal(writes, afterSwitch, 'detached: no write');
+	});
+});
+
+// =============================================================================
 // TRIM, PARAMETERISED
 // =============================================================================
 

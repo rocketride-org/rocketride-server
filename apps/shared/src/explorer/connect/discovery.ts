@@ -45,6 +45,24 @@
 // Runs of different owners, teams or run kinds never merge, and a missing role
 // is reported as missing — never borrowed from another run.
 //
+// NAMES: getTasks names a run by its pipeline's name, or by its source id when
+// the pipeline has none. The readable name #2625 shows ("Shop Postgres.Tools",
+// `{task name}.{source component name}`) is the task's status name, and only
+// `listTasks` carries it. So discovery also asks `listTasks` ONCE, alongside
+// getTasks, for the newest 100 live tasks, and uses it for NAMES ONLY: which
+// endpoints exist, their keys and their tokens all come from getTasks.
+//
+// A listTasks row is matched to EXACTLY one run, by the run's display id,
+// built here, in memory, the way the server builds it (listTasks rows carry
+// no owner or team, so nothing else tells two teams' deployments of one
+// project apart). A run started without a task name (every deploy) has a
+// status name made from that id, which is not a readable name, so it is not
+// used. A run listTasks does not name (not among those 100, no task name, or
+// listTasks failed or took longer than its own timeout) is named by its
+// pipeline's name, then its source component's name, then its source id. A
+// role map takes the name of its tools run only, so the label does not change
+// with which run anchors the connection.
+//
 // TOKENS: a task token is read here and returned beside the endpoint, never
 // inside it. The caller (the store) puts it in a transient vault; nothing else
 // in the library ever sees it.
@@ -76,6 +94,8 @@ export interface IDiscoveryOptions {
 	identity?: IExplorerIdentity | null;
 	/** Concurrency of the getTaskPipeline fallback (default 4). */
 	concurrency?: number;
+	/** How long to wait for listTasks's names (default {@link TASK_NAMES_TIMEOUT_MS}). */
+	taskNamesTimeoutMs?: number;
 }
 
 /** One discovered endpoint, with the secret that belongs in the vault. */
@@ -142,6 +162,124 @@ function projectIdOf(row: IExplorerTaskRow): string {
 function ownerKindOf(row: IExplorerTaskRow): 'user' | 'team' {
 	if (row.ownerKind === 'team' || row.ownerKind === 'user') return row.ownerKind;
 	return row.runKind === 'deploy' ? 'team' : 'user';
+}
+
+// =============================================================================
+// READABLE NAMES (one listTasks per discovery; names only)
+// =============================================================================
+
+/**
+ * How long discovery waits for `listTasks`. It is asked together with
+ * getTasks, so the wait overlaps the list call; the store's discovery bound
+ * (30 s) stays the deadline, and a slow or failed `listTasks` costs only the
+ * readable names.
+ */
+export const TASK_NAMES_TIMEOUT_MS = 10_000;
+
+/** The one `listTasks` request: the newest 100 live tasks (the server pages at 100). */
+export const TASK_NAMES_REQUEST: Parameters<NonNullable<IExplorerClient['listTasks']>>[0] = {
+	page_size: 100,
+	filters: { completed: 'false' },
+	sort: [{ field: 'startTime', dir: 'desc' }],
+};
+
+/** TASK_STATE.STOPPING: a row at or past it is no longer a live run. */
+const TASK_STATE_STOPPING = 4;
+
+/** Clients whose listTasks failure is already logged (one line per client, not per discovery). */
+const namesFailureLogged = new WeakSet<IExplorerClient>();
+
+/**
+ * A run's display id, built the way the server builds it (task_server.py).
+ * Kept in memory only, to match a listTasks row to its run.
+ *
+ * @param row - The getTasks row.
+ * @returns The id.
+ */
+function runIdOf(row: IExplorerTaskRow): string {
+	return `${row.token.replace(/^(tk_|pk_)/, '').slice(0, 8)}.${row.source}`;
+}
+
+/**
+ * Read the display names a `listTasks` answer gives live runs, by display id.
+ * A run started without a task name (`{display id}.{component}`) names
+ * nothing, and an id whose live rows disagree maps to null.
+ *
+ * @param answer - The listTasks answer (`{ rows, … }`); anything else names nothing.
+ * @returns Name by display id.
+ */
+function readTaskNames(answer: unknown): Map<string, string | null> {
+	const names = new Map<string, string | null>();
+	const rows = isPlainObject(answer) && Array.isArray(answer.rows) ? (answer.rows as unknown[]) : [];
+	for (const raw of rows) {
+		if (!isPlainObject(raw) || raw.completed === true) continue;
+		if (typeof raw.state === 'number' && raw.state >= TASK_STATE_STOPPING) continue;
+		const { id, name } = raw;
+		if (typeof id !== 'string' || id === '' || typeof name !== 'string' || name === '' || name.startsWith(`${id}.`)) continue;
+		const earlier = names.get(id);
+		names.set(id, earlier === undefined || earlier === name ? name : null);
+	}
+	return names;
+}
+
+/**
+ * Ask `listTasks` for the names, within its own timeout. Never throws, never
+ * waits longer than `timeoutMs`, and logs a failure once per client.
+ *
+ * @param client - The client (one without listTasks names nothing).
+ * @param timeoutMs - The wait.
+ * @returns Name by display id; empty when listTasks could not answer.
+ */
+async function fetchTaskNames(client: IExplorerClient, timeoutMs: number): Promise<Map<string, string | null>> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const list = client.listTasks;
+		if (typeof list !== 'function') return new Map();
+		const answer = await Promise.race([
+			Promise.resolve().then(() => list.call(client, TASK_NAMES_REQUEST)),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error(`listTasks did not answer within ${timeoutMs} ms.`)), timeoutMs);
+			}),
+		]);
+		return readTaskNames(answer);
+	} catch (error) {
+		if (!namesFailureLogged.has(client)) {
+			namesFailureLogged.add(client);
+			console.warn('[explorer] Pipeline names from listTasks are unavailable; naming connections by pipeline and source instead.', error);
+		}
+		return new Map();
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
+	}
+}
+
+/**
+ * The display name of a connection: listTasks's name for its tools run when it
+ * has one, else, from the anchor row, the pipeline's name (getTasks's own name
+ * when that is more than the source id, which is what the server sends then),
+ * the source component's name, or the source id.
+ *
+ * @param toolsRow - The tools role's run (null while it is not running).
+ * @param row - The anchor row.
+ * @param components - The pipeline's components.
+ * @param names - listTasks's names, by display id.
+ * @returns The name.
+ */
+function displayNameOf(toolsRow: IExplorerTaskRow | null, row: IExplorerTaskRow, components: IExplorerComponent[], names: Map<string, string | null>): string {
+	const listed = toolsRow ? names.get(runIdOf(toolsRow)) : undefined;
+	if (typeof listed === 'string') return listed;
+	// The server names a getTasks row `pipeline.name || source`.
+	if (row.name !== row.source) return row.name;
+	const pipelineName = row.pipeline?.name;
+	if (typeof pipelineName === 'string' && pipelineName !== '') return pipelineName;
+	// The engine names a status `{task}.{component name | config.name | source}`.
+	const component: unknown = components.find((c) => c?.id === row.source);
+	if (isPlainObject(component)) {
+		if (typeof component.name === 'string' && component.name !== '') return component.name;
+		const config = component.config;
+		if (isPlainObject(config) && typeof config.name === 'string' && config.name !== '') return config.name;
+	}
+	return row.source;
 }
 
 // =============================================================================
@@ -276,6 +414,8 @@ async function componentsOf(client: IExplorerClient, group: IGroup): Promise<IEx
  * @returns Endpoints (state `probing`, or `stopped` when a required role is not running), sorted by pipeline name, node id, key.
  */
 export async function discoverToolEndpoints(client: IExplorerClient, options: IDiscoveryOptions): Promise<IDiscoveredEndpoint[]> {
+	// Asked first, so its wait overlaps getTasks; it never throws.
+	const names = fetchTaskNames(client, options.taskNamesTimeoutMs ?? TASK_NAMES_TIMEOUT_MS);
 	const raw = await client.getTasks();
 	const identity = options.identity ?? null;
 	const rows = (Array.isArray(raw) ? raw : [])
@@ -283,6 +423,7 @@ export async function discoverToolEndpoints(client: IExplorerClient, options: ID
 		.filter((row): row is IExplorerTaskRow => row !== null && runInIdentityOrganization(identity, row.teamId));
 	const groups = groupRows(rows, options.roles);
 	const componentLists = await mapWithConcurrency(groups, options.concurrency ?? 4, (group) => componentsOf(client, group));
+	const taskNames = await names;
 
 	const seen = new Map<string, number>();
 	const found: IDiscoveredEndpoint[] = [];
@@ -334,7 +475,7 @@ export async function discoverToolEndpoints(client: IExplorerClient, options: ID
 				key,
 				legacyKey: legacyKeyFromKey(key),
 				projectId,
-				pipelineName: anchor.name,
+				pipelineName: displayNameOf(toolsRow, anchor, components, taskNames),
 				runKind: anchor.runKind,
 				ownerKind,
 				ownerId: anchor.ownerId,

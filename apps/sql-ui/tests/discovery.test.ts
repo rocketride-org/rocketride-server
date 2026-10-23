@@ -26,7 +26,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { RocketRideClient } from 'shell';
+import type { SqlWireClient } from '../src/connect/busClient';
 import { DATABASE_PROVIDERS, discoverSqlEndpoints } from '../src/connect/discovery';
 
 // =============================================================================
@@ -64,7 +64,7 @@ interface IFakeTaskBehaviour {
  * @param behaviour - Per `projectId:source` behaviour (default: one db node).
  * @returns The fake client and the token lookups it received.
  */
-function fakeClient(rows: IFakeTask[], behaviour: Record<string, IFakeTaskBehaviour> = {}): { client: RocketRideClient; tokenLookups: string[] } {
+function fakeClient(rows: IFakeTask[], behaviour: Record<string, IFakeTaskBehaviour> = {}): { client: SqlWireClient; tokenLookups: string[] } {
 	const tokenLookups: string[] = [];
 	const client = {
 		listTasks: async () => ({ rows }),
@@ -80,7 +80,7 @@ function fakeClient(rows: IFakeTask[], behaviour: Record<string, IFakeTaskBehavi
 			if (spec?.fail) throw new Error('task went away');
 			return { components: spec?.components ?? [{ id: 'db_1', provider: 'db_mysql', name: 'Orders DB' }] };
 		},
-	} as unknown as RocketRideClient;
+	} as unknown as SqlWireClient;
 	return { client, tokenLookups };
 }
 

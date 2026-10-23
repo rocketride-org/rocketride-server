@@ -48,6 +48,18 @@ export interface IActiveKeyStore {
 	set(key: string | null): void;
 	/** Subscribe to the active key (a React hook). */
 	use(): string | null;
+	/**
+	 * The active key now, for code outside React (a dev-tool frame pushing its
+	 * active key to the controller). Pairs with {@link IActiveKeyStore.subscribe}.
+	 */
+	get(): string | null;
+	/**
+	 * Subscribe to changes from code outside React. The callback is called on
+	 * every change, not with the key; read it with {@link IActiveKeyStore.get}.
+	 *
+	 * @returns The unsubscribe function.
+	 */
+	subscribe(callback: () => void): () => void;
 }
 
 /**
@@ -75,6 +87,10 @@ export function createActiveKeyStore(): IActiveKeyStore {
 			const snapshot = (): string | null => activeKey;
 			return useSyncExternalStore(subscribe, snapshot, snapshot);
 		},
+		get(): string | null {
+			return activeKey;
+		},
+		subscribe,
 	};
 }
 

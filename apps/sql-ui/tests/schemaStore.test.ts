@@ -35,8 +35,9 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { RocketRideClient } from 'shell';
-import type { ISqlEndpoint } from '../src/connect';
+import type { SqlEndpoint, SqlSession } from '../src/connect';
+import type { SqlWireClient } from '../src/connect/busClient';
+import { createSqlSession } from '../src/connect/session';
 import { refreshSchema } from '../src/schema/schemaStore';
 
 // =============================================================================
@@ -46,7 +47,7 @@ import { refreshSchema } from '../src/schema/schemaStore';
 /** A fake client plus the tool names it was asked for, in order. */
 interface IFakeClient {
 	/** The client handed to the store. */
-	client: RocketRideClient;
+	client: SqlWireClient;
 	/** Every tool invoked, in order. */
 	tools: string[];
 }
@@ -58,7 +59,7 @@ interface IFakeClient {
  * @param key - The endpoint key.
  * @returns The endpoint.
  */
-function endpointFor(key: string): ISqlEndpoint {
+function endpointFor(key: string): SqlEndpoint {
 	return {
 		key,
 		projectId: 'p1',
@@ -88,8 +89,29 @@ function fakeClient(behave: (tool: string, index: number) => unknown): IFakeClie
 			tools.push(tool);
 			return behave(tool, tools.length - 1);
 		},
-	} as unknown as RocketRideClient;
+	} as unknown as SqlWireClient;
 	return { client, tools };
+}
+
+/** One session per (fake client, endpoint key), as the app keeps one per connection. */
+const sessions = new WeakMap<SqlWireClient, Map<string, SqlSession>>();
+
+/**
+ * The session a refresh runs on (refreshSchema takes a session, not a client).
+ *
+ * @param client - The fake client.
+ * @param endpoint - The endpoint.
+ * @returns The session, created once per client and endpoint.
+ */
+function sessionFor(client: SqlWireClient, endpoint: SqlEndpoint): SqlSession {
+	const byKey = sessions.get(client) ?? new Map<string, SqlSession>();
+	sessions.set(client, byKey);
+	let session = byKey.get(endpoint.key);
+	if (session === undefined) {
+		session = createSqlSession(client, endpoint);
+		byKey.set(endpoint.key, session);
+	}
+	return session;
 }
 
 /** How many times one tool was invoked. */
@@ -112,12 +134,12 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			return { database: 'shop', tables: {} };
 		});
 
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 1);
 		// The first attempt fell back, so the snapshot came from get_schema.
 		assert.equal(countOf(tools, 'get_schema'), 1);
 
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2);
 		// The second attempt answered, so no fallback read was needed.
 		assert.equal(countOf(tools, 'get_schema'), 1);
@@ -133,11 +155,11 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			return { database: 'shop', tables: {} };
 		});
 
-		await refreshSchema(client, endpoint, { fresh: true });
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2);
 
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2, 'the latch holds after two fallbacks');
 	});
 
@@ -151,10 +173,10 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			return { database: 'shop', tables: {} };
 		});
 
-		await refreshSchema(client, endpoint, { fresh: true });
-		await refreshSchema(client, endpoint, { fresh: true });
-		await refreshSchema(client, endpoint, { fresh: true });
-		await refreshSchema(client, endpoint, { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 4);
 	});
 });
@@ -179,10 +201,10 @@ describe('refreshSchema — concurrency', () => {
 			return { database: 'shop', tables: {} };
 		});
 
-		const ordinary = refreshSchema(client, endpoint);
+		const ordinary = refreshSchema(sessionFor(client, endpoint));
 		// Let the ordinary refresh reach its held `get_schema` call.
 		await new Promise((resolve) => { setTimeout(resolve, 0); });
-		const fresh = refreshSchema(client, endpoint, { fresh: true });
+		const fresh = refreshSchema(sessionFor(client, endpoint), { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 0, 'the queued fresh read has not jumped the queue');
 
 		release();
@@ -201,9 +223,9 @@ describe('refreshSchema — concurrency', () => {
 			return { database: 'shop', tables: {} };
 		});
 
-		const first = refreshSchema(client, endpoint);
+		const first = refreshSchema(sessionFor(client, endpoint));
 		await new Promise((resolve) => { setTimeout(resolve, 0); });
-		const second = refreshSchema(client, endpoint);
+		const second = refreshSchema(sessionFor(client, endpoint));
 		release();
 		await Promise.all([first, second]);
 		assert.equal(countOf(tools, 'get_schema'), 1);

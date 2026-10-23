@@ -51,6 +51,12 @@ import type { ExplorerErrorKind } from './errors';
 export interface IExplorerClient {
 	/** Running tasks visible to the caller, each with its OWN token (rrext_get_tasks). */
 	getTasks(): Promise<Array<Record<string, unknown>>>;
+	/**
+	 * One page of the caller's tasks (rrext_list_tasks). Discovery reads only
+	 * their display names from it (`{task name}.{source component name}`),
+	 * never which tasks exist; optional, and a failure only costs those names.
+	 */
+	listTasks?(req: { page_size?: number; filters?: Record<string, string | string[]>; sort?: Array<{ field: string; dir: 'asc' | 'desc' }> }): Promise<unknown>;
 	/** The task's pipeline (only needed when a task row carries no components). */
 	getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined>;
 	/** Invoke a node tool through the task's token. */

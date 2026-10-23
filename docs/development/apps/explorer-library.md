@@ -46,6 +46,28 @@ project id is `pipeline.project_id`; the row has no `projectId` field.
 `pipeline.components` is read from the row; `getTaskPipeline(token)` is a
 bounded fallback only when a row carries none.
 
+**Names come from one `listTasks` call.** `getTasks()` names a run by its
+pipeline's `name`, or by its source id when the pipeline has none. The readable
+name #2625 shows, `{task name}.{source component name}` (for example "Shop
+Postgres.Tools"), is the task's status name, and only `listTasks` carries it.
+So discovery asks `listTasks` once, together with `getTasks()`, for the newest
+100 live tasks (`TASK_NAMES_REQUEST`), and uses it **for names only**. Which
+endpoints exist, and their keys and tokens, still come from `getTasks()`.
+- **Matching.** A name matches exactly one run, by the run's display id,
+  built in memory the way the server builds it. A `listTasks` row has no owner
+  or team, so nothing else tells two teams' deployments of one project apart.
+- **Unnamed runs.** A run started without a task name, including every deploy,
+  has a status name made from its display id. That is not a readable name, so
+  it is ignored.
+- **Role maps.** A role map is named by its tools run only, so its label does
+  not change with which run anchors the connection.
+- **Waiting.** Discovery waits for the names at most `TASK_NAMES_TIMEOUT_MS`
+  (10 s). The wait overlaps `getTasks()`, so the store's 30 s discovery bound
+  stays the deadline.
+- **Failure.** A failure is logged once per client, and the names fall back.
+- **Fallback.** A run `listTasks` does not name is named by its pipeline's
+  name, then its source component's name, then its source id.
+
 The server scopes a user-owned run by its owner, so `getTasks()` still returns
 the caller's own runs from an organization they have switched away from, with
 their tokens. Discovery drops a row, before grouping and before its token
@@ -256,7 +278,20 @@ the owner read with the shell's `useAuthUser`) and attaches again when it
 changes. An attach under a different owner, a sign-out included, first forgets
 every entry, switch, queued run and pending write held in memory, so one
 account's history is never shown to, merged into or written for the next one
-that signs in on the same page. Per-connection booleans use
+that signs in on the same page. Writes are batched (`persistDelayMs`, 300 ms
+by default) and the LAST detach drops a batch still waiting. So call `flush()`
+before every detach that ends an owner's attachment while that batch is still
+theirs: an unmount, and the moment the identity becomes unknown or changes (a
+disconnect, a sign-out and an account switch all reach the identity before
+anything unmounts, so an unmount-time flush comes too late for them).
+`flush()` hands the pending batch at once to the attached accessor, and does
+nothing when nothing is pending or nothing is attached. What happens to it
+next is the accessor's rule: the dev-tool fs accessor (`devtool/prefs.ts`)
+writes it for its owner, holds it while nobody is known, and drops it once
+another identity is known, so keep that accessor alive (do not dispose it)
+while the identity is merely unknown. Code outside React
+reads the store with `getHistory(key)`, `getRecording(key)` and
+`subscribe(listener)`. Per-connection booleans use
 `createConnectionFlags` ([`history/flags.ts`](../../../apps/shared/src/explorer/history/flags.ts)).
 
 **Legacy keys.** When `legacyKeyOf` maps a connection to its pre-v1 key (SQL
@@ -331,6 +366,392 @@ document-URI key rule), and the drawer's selection and probe rules
 6. Tests: pure logic runs under the app's `*:test` action; for `shared:test`,
    keep suites beside the code. `connect/testing.ts` has a fake client and a
    manual clock (not exported from the barrel).
+
+## Running the library in a dev-tool controller
+
+A dev tool (`AppDescriptor.devToolSidebar` plus `devToolFrame`) mounts the app
+twice and gives neither mount a client. The deep entry
+[`devtool/`](../../../apps/shared/src/explorer/devtool/), imported as
+`shared/explorer/devtool/<module>`, is what an Explorer needs to run there. It
+is **not** exported from the `shared/explorer` barrel and imports no value from
+`shell`: the caller passes in the realm's `ConnectionManager` (as a structural
+type) and the shell's `createToolChannel`, `createToolController` and
+`createToolOpServer`. So every module runs under `node:test`.
+
+**Split ownership.** The sidebar mount is the **controller**. It owns the
+endpoint store (token vault, discovery, probes, task watch), the bus client,
+identity, schema caches, history and every op handler. **Frames** own the
+editor, the statement runner and its generation tickets, render models,
+selection and "Stop waiting". They hold no client and reach the engine only
+through ops. Nothing may assume the two share memory: in VS Code they are
+separate webviews.
+
+**Engine access** ([`busClient.ts`](../../../apps/shared/src/explorer/devtool/busClient.ts)).
+`getBusExplorerClient(cm)` is the library's `IExplorerClient` over
+`cm.request('client.<op>', …)`, with one instance per realm. Every request names
+its own bus timeout, and none relies on the bus's 120 s default
+([`timeouts.ts`](../../../apps/shared/src/explorer/devtool/timeouts.ts)):
+
+| Request | Bus `timeoutMs` |
+|---|---|
+| `client.tool` with an SDK `timeout` | `timeout + BUS_TOOL_MARGIN_MS` (5 s) |
+| `client.tool` the session left unbounded (`timeoutMs: null`) | `UNBOUNDED_TOOL_TIMEOUT_MS` (24 h; a delay above 2^31-1 ms fires at once) |
+| `client.getTasks`, `client.getTaskPipeline` | 30 s each |
+| `client.listTasks` (discovery's names) | `LIST_TASKS_TIMEOUT_MS` (10 s, discovery's own wait for it) |
+| `client.addMonitor`, `client.removeMonitor` | 15 s |
+| anything else (`fs*`, `use`, `getEnvironmentKeys`) | `busRequest(cm, op, params, timeoutMs)`; the timeout is required |
+
+A frame waits longer than its controller: `frameOpTimeoutMs(controllerMs)` adds
+`FRAME_OP_MARGIN_MS` (5 s), and `toolCallBudgetMs(wait)` is one tool call's
+controller budget.
+
+**Ops** ([`reply.ts`](../../../apps/shared/src/explorer/devtool/reply.ts),
+[`deadline.ts`](../../../apps/shared/src/explorer/devtool/deadline.ts),
+[`frame.ts`](../../../apps/shared/src/explorer/devtool/frame.ts)).
+
+- **Failures are data.** The op lane carries a handler's failure as its message
+  only. So every op returns `Reply<T>`: `{ ok: true, value }` or
+  `{ ok: false, error: { kind, code?, message, tool?, detail?, retryAfterS? } }`.
+  - On the controller, `toReply(fn)` builds it. The lanes' own timeout texts
+    ("did not answer within", "timed out after") become kind `timeout`, and
+    "Not connected to server" becomes `unavailable`. Programming errors are
+    rethrown.
+  - On the frame, `fromReply` (or `callReply`) rebuilds an `ExplorerToolError`
+    equal to the original, so `failures.ts` and the `code` switches work
+    unchanged.
+- **Void ops answer `Reply<null>`.** JSON has no `undefined`: in VS Code,
+  `{ ok: true, value: undefined }` arrives as `{ ok: true }`. So `replyOk` and
+  `toReply` turn an undefined value into `null`, and a success whose value was
+  dropped still reads as a Reply with value `null`.
+- **Deadlines.** Every call carries `deadlineAt` (the frame's now plus its
+  `timeoutMs`). The controller refuses a call that has no deadline, or that
+  arrives after it, without running it.
+- **The frame caller.** `createFrameCaller` builds one controller function and
+  one channel per frame peer.
+  - Every call needs an explicit `timeoutMs`. A missing or unusable one is a
+    programming error: `call` and `callReply` **throw** a RangeError
+    synchronously, so a `.catch` on the returned promise never sees it.
+  - It rejects every pending call as soon as `host:connection` turns false,
+    with kind `timeout`: the call may still have run.
+  - A call made while `host:connection` is already false is rejected at once,
+    before anything is posted, with kind `unavailable`: it was not sent, so it
+    cannot have run. Before the host publishes the topic at all, calls pass.
+  - The controller's refusal of a call that arrived after its deadline (timers
+    throttled in a hidden webview) reaches a still-waiting frame as kind
+    `timeout`.
+  - **It waits for its controller.** A call is sent only while the controller's
+    readiness state carries a nonce (see below). Until then it waits, inside
+    its own timeout: the deadline stays the one stamped at call time, and the
+    op lane gets what is left of it. If readiness never comes, the call
+    rejects as kind `timeout`, unsent. A wait cut short by `host:connection`
+    turning false rejects as `unavailable`. `controllerReady()` reports the
+    state, and `waitForController: false` sends at once (for a controller
+    that publishes no readiness).
+
+**Controller wiring** ([`controller.ts`](../../../apps/shared/src/explorer/devtool/controller.ts)).
+`attachController({ peer, channel, createToolChannel, createToolOpServer, handlers })`
+uses the host's channel, or builds one per peer, **before** it creates exactly
+one op server, and serves every handler through the deadline guard. Call it in a
+`useEffect` and return its `dispose` as the cleanup; never build the op server
+in `useMemo`, because StrictMode mounts twice.
+
+- **Every op answers a Reply.** The op map must declare a `Reply<T>` result and
+  an `IDeadline` in the params of every op, or `attachController<Ops>` does not
+  compile. Each handler is wrapped, so a lane cannot lose a failure's kind or
+  code by forgetting `toReply`:
+  - a returned Reply passes through;
+  - a plain value becomes `replyOk(value)`, and nothing at all becomes
+    `Reply<null>`;
+  - a tool failure that escapes becomes Reply data with its kind and code;
+  - programming errors still throw.
+
+  A returned object counts as a Reply only when its keys are exactly `ok` and
+  `value` (or `ok` and a valid `error`). So a plain result that has an `ok`
+  field, such as a probe result, is wrapped as data. **Those two shapes are
+  reserved:** a domain value that has exactly one of them is taken for a
+  Reply, so a handler answering one returns `replyOk(value)` explicitly.
+- **The types refuse what cannot work.** An op whose params or result is
+  `any`, or whose result is `never`, does not compile (an op that never
+  answers is `Reply<never>`). Handlers are optional in `ControllerHandlers`;
+  annotate production wiring with `RequiredControllerHandlers<Ops>` so that a
+  missing or misspelt op is a compile error.
+- **The op server sees calls only.** It subscribes through a shim that drops
+  every other envelope, so a channel event that shares an op's name can never
+  run a handler. The controller's channel still hears every event.
+- **Readiness.** Once every handler is served, the controller publishes
+  `{ ready: <nonce> }` on the state topic `devtool:controller`
+  (`CONTROLLER_STATE_TOPIC`), and `{ ready: null }` when the live mount
+  unmounts. Frames send nothing before they see a nonce. The `devtool:` prefix
+  (`RESERVED_STATE_PREFIX`) is reserved for this library: lanes never publish
+  under it (the shell reserves `host:` the same way).
+- **Held calls, and dropped ones.** The peer holds a frame call only while NO
+  subscriber at all is on the sidebar peer, and hands it to the next
+  subscriber. The calls held that way reach the handlers once they are all
+  registered, and the deadline decides whether each one runs. But both hosts
+  build the sidebar channel during render (VS Code `DevToolSidebarMount.tsx`,
+  rocket-ui `DevToolMount.tsx`), before the controller's effect, and that
+  channel holds the live slot until the op server subscribes. A call that
+  arrives in that window goes to the channel, which drops it. Readiness is
+  what keeps frames from sending then.
+- **Without a host channel** (a test-only path: both real hosts pass a sidebar
+  channel), the fallback channel's first subscription hands any held calls
+  over to the op server instead of swallowing them.
+
+**Identity** ([`identity.ts`](../../../apps/shared/src/explorer/devtool/identity.ts)).
+`createIdentityTracker({ cm })` reports `{ known, identity, fingerprint }` and
+fails closed:
+
+- A disconnect, a logout or an organization change makes the identity unknown.
+  Logout and organization change stay unknown until a real account arrives.
+- In a realm that owns the client (rocket-ui), the source is the SDK client's
+  account, which every handshake refreshes. It is not
+  `ConnectionManager.getAccountInfo()`, which keeps the account from sign-in.
+- In a socketless realm (VS Code), the source is the root's retained
+  `shell:account` topic, read at mount and on every reconnect. The realm's
+  manager ignores the `null` that topic carries after a sign-out.
+- A reconnect never brings back the account from before the drop. Account A,
+  then a disconnect, then a reconnect as B reads A, unknown, B.
+- A topic delivery is newer than any root read still in flight, so a late read
+  never overrides it.
+- An anonymous or public attach never yields an identity. The SDK sets no
+  account for it, and the shell emits `shell:connected` only for an
+  authenticated client. The tracker also requires a client realm's client to
+  report `isAuthenticated()`.
+
+**Activation** ([`activation.ts`](../../../apps/shared/src/explorer/devtool/activation.ts)).
+The first discovery waits until the tool has been activated. Both hosts build
+a store tool's sidebar only when its tab is first selected, or when one of its
+frames summons the controller (`host.mountToolSidebar`), and then keep it
+mounted. So the mount itself counts as the activation in any realm the gate can
+classify: a client realm (rocket-ui) or a **socketless** one (VS Code:
+connected, `getClient()` null). The selection's `shell:toolSidebarActivated`
+fires before the sidebar can hear it, so the gate cannot wait for it.
+
+A bus the gate cannot classify (no `getClient`) waits for the first of these:
+
+- `shell:toolSidebarActivated` for this app;
+- the first op from a frame;
+- a string `activeDocKey` (`''` is the generic frame);
+- `open('user')`.
+
+Before #2625 `9bd5d931f`, rocket-ui mounted every pinned controller at boot,
+and the gate kept a client realm closed until one of those signals arrived.
+
+**Discovery** ([`watch.ts`](../../../apps/shared/src/explorer/devtool/watch.ts)).
+`createDevToolDiscovery({ cm, client, identity, activation })` gives the store's
+watch. It allows discovery only while the identity is known **and** the tool is
+activated. It forwards identity changes (unknown resets the store), and
+registers the task monitor only once discovery is allowed. It refreshes once
+whenever discovery becomes allowed, and again when the identity switches
+between two known fingerprints. A change in permission hints alone refreshes
+nothing.
+
+**Frame identity** ([`frameIdentity.ts`](../../../apps/shared/src/explorer/devtool/frameIdentity.ts)).
+The controller publishes `{ fingerprint }` on the `identity` state topic with
+`publishIdentityState(channel, tracker)`. In each frame,
+`createFrameIdentityGuard({ channel, docKey, documents, onReset })` remembers
+the first fingerprint it sees and keeps following:
+
+- every different one calls `onReset('identity')`, so the frame clears its
+  caches, and is adopted. A document frame also closes
+  (`documents.close(docKey)`), at most once. `closed()` latches only on a
+  close that returned: with no `documents`, or a close that threw, the next
+  change tries again. A landing frame (`docKey` undefined or `''`) is reset
+  but never closed;
+- `null` calls `onReset('unknown')`;
+- `host:connection` turning false calls `onReset('disconnected')`.
+
+`publishIdentityState` publishes nothing until the tracker settles
+(`whenSettled`: at once in a client realm, after the root read in a socketless
+one) or knows an identity. So a controller remount, whose new tracker starts
+unknown, does not make live frames reset for nothing.
+
+`followSignIn(channel, onChange)` tells a frame what it may say about the
+account. It reports one of three states:
+
+- `'pending'`: nothing published yet; claim nothing;
+- `'nobody'`: the controller vouches for no one; say "waiting for sign-in", not "not connected";
+- `'signed-in'`: a fingerprint was published.
+
+**Summoning the controller** ([`summon.ts`](../../../apps/shared/src/explorer/devtool/summon.ts)).
+Since #2625 `9bd5d931f`, a host builds a tool's sidebar only when the tool is
+selected, or when busPeer summons it: while no controller is subscribed, the
+sidebar peer holds frame messages and emits `host.mountToolSidebar` once per
+hold period. `createControllerSummon({ channel })` uses that on purpose.
+
+- **What it sends.** A frame whose controller has published no readiness nonce
+  sends one `devtool:summon` event once `SUMMON_SETTLE_MS` have passed. It
+  re-sends at `SUMMON_RETRY_MS` while no nonce arrives, and sends nothing
+  while the host says it is disconnected. The re-sends help only a sidebar
+  peer that rocket-ui arms late. A peer whose host has no mount handler (a
+  collapsed rocket-ui sidebar) latches busPeer's one summon per hold, and the
+  re-sends are only held; the frame then says to open the sidebar.
+- **It is an event, never a call.** On the summon-driven mount, a call held in
+  the peer is delivered into the host channel and dropped. No controller
+  listens for the event, so its replays do nothing.
+- **Its states.** `state()` is `'summoning'` for `SUMMON_GRACE_MS`, then
+  `'unanswered'`, or `'ready'` once a nonce arrives. Say "open the sidebar"
+  only when the state is `'unanswered'`.
+- **The retained slot.** The event takes the peer's retained last-payload slot,
+  so a frame re-announces its own hints (such as `active`) once a controller is
+  ready.
+
+**Grid layouts: never hand Tabulator a stored object** ([`gridPersistence.ts`](../../../apps/shared/src/explorer/devtool/gridPersistence.ts)).
+A shell `DataGrid` with a `tableId` persists its layout through the grid config
+channel. That covers Tabulator's sort, columns and page blobs, and DataGrid's
+own display and format blobs. The host answers from the active app's workspace
+prefs.
+
+On #2625 `9bd5d931f` this freezes the page:
+1. The host hands a stored blob out by reference.
+2. Tabulator's sort module rewrites the sorter list it reads in place, putting
+   its live column object where the field name was. That list is the workspace
+   store's own object, so the column is now in the prefs.
+3. Only a later sort write would replace it, and the web host's bridge merges
+   each write over the prefs it saw at its last render. So a write of another
+   blob in the same pass keeps the rewritten list, and can even undo a sort
+   write.
+4. The next workspace save never finishes: the SDK's message redaction walk
+   does not end on a Tabulator column.
+
+Once a sort is stored, any remount of the grid reads it again (a page switch, a
+re-run, a reload). So this hits a full app as surely as Rocket Builder.
+
+So every explorer grid takes `persistence={env.gridPersistence}`, and both
+choices below store and hand out plain-JSON copies:
+- **A dev-tool frame** uses `createSessionGridPersistence()`, one per realm. Its
+  active app is the host, whose prefs a store tool must not write, so layouts
+  stay in memory. In Rocket Builder that is until the page reloads. In VS Code
+  each document is its own panel and realm, so it is as long as that panel.
+- **A full app** uses `createCopyingGridPersistence(() => createMessageGridPersistence())`,
+  passing in the shell's own channel factory. The adapter is made on first use,
+  so building an env never touches the shell, and a test can stand in a
+  channel first. Layouts stay in the app's own prefs.
+
+Tests use `installHostGridBridge` and `tabulatorSetSort` from
+[`devtool/testing.ts`](../../../apps/shared/src/explorer/devtool/testing.ts): the
+real channel behind a stand-in `document` whose bridge answers by reference, as
+the web host's does.
+
+**Retained state stays small** ([`state.ts`](../../../apps/shared/src/explorer/devtool/state.ts)).
+The cost of a publish is the whole state map. The sidebar peer republishes the
+WHOLE map on every publish, and the VS Code bridge posts it to every frame
+realm. So every publish of any topic re-delivers EVERY topic to every frame
+there, and **a frame's `onState` handlers must be idempotent**. Every frame
+also replays the map when it attaches.
+
+**Lanes publish summaries that are bounded by construction**, and bulk data
+(rows, samples) travels as op results. `guardRetainedState(channel)` is the
+backstop:
+
+- **Limits.** It holds each snapshot to `MAX_RETAINED_STATE_BYTES` (64 KiB of
+  JSON, measured by `jsonByteLength`) and all of its topics together to
+  `MAX_RETAINED_TOTAL_BYTES` (128 KiB). It tracks the last size per topic, and
+  `retainedBytes()` reports them.
+- **It degrades.** It replaces an oversize snapshot with the lane's
+  `shrink(topic, snapshot, info)`, or else with `truncateLists`. That cuts the
+  largest list properties and records `truncated: { <prop>: { kept, total } }`
+  (the key `truncated` is reserved in guarded snapshots).
+- **Withholding is the opt-in** (`withhold: true`), and throwing is
+  `strict: true`, for tests. By default nothing is thrown into the publisher.
+- **Reports.** `onOversize` reports every case, with its `outcome`, and
+  `assertRetainedStateSize` lets a test pin the largest snapshots.
+
+**History in dev-tool mounts** ([`prefs.ts`](../../../apps/shared/src/explorer/devtool/prefs.ts)).
+Store tools get no workspace preferences, so the controller passes the history
+store `createFsPrefs({ cm, path: historyPrefsPath('<tool>'), owner: fingerprint, ownerNow })`.
+That is a file at `@/User/.workspace/rocketride.<tool>.history.json`, attached
+with `attachWhenLoaded(prefs, (api, owner) => store.attachPrefs(api, owner))`.
+
+- **Load first.** `client.fsStat` then `client.fsReadJson` run before the
+  attach, so the store never starts empty and its first write never clobbers
+  the file. A change made before or during the load is queued, applied over
+  what the load read, and written once it is ready.
+- **First run vs unreadable file.**
+  - The engine's `fs_stat` answers `{ exists: false }` for a missing file AND
+    for a missing parent folder (`FileStore.stat`,
+    `packages/ai/src/ai/account/file_store.py`), so a first run is always
+    ready.
+  - A failed request is retried (`PREFS_LOAD_ATTEMPTS` in all) before the
+    session falls back to memory.
+  - A file that exists but cannot be read, or is in an unknown or newer
+    format, is never written; history stays in memory for that session.
+    That includes a zero-byte file, such as one left by an interrupted write
+    before #2625 `9bd5d931f` made `fsWriteJson` a single request. It never
+    parses, so history stays in memory in every session until the file is
+    deleted by hand.
+- **One bag per identity fingerprint.** At most 8 bags are kept. The owner is
+  checked before every file request and again after every awaited one (a
+  write's mkdir, a load's stat and read).
+  - A write that falls due while nobody is vouched for (`ownerNow()` null, a
+    reconnect) is held. It looks again at most every 30 s, without using up
+    the failure retries, and lands once the same owner is back. A load waits
+    the same way before its next request.
+  - A different owner drops a pending write and stops a load.
+  - An answer that arrives after the owner changed is discarded: a load reads
+    again once the owner is back. A write is composed only after its mkdir
+    settled and the owner was checked again.
+  - After `dispose()`, nothing is sent and nothing read is accepted.
+- **Writes.** They are debounced and serialised, and the first one runs
+  `client.fsMkdir` on the folder.
+  - A failed write retries with backoff (`PREFS_WRITE_RETRIES`).
+  - The file is capped at twice the 256 KB history bag, measured as the SDK
+    writes it (two-space indented JSON).
+  - Every fs request has an explicit timeout.
+  - `@/User/.workspace/…` and SQL's scope-less `.workspace/…` are the same
+    folder.
+- **Last writer wins across windows** (a known limitation). Drafts and
+  captions stay session-only.
+
+**Rules a controller must follow** (they come from the shell's `busPeer.ts`
+and `toolOps.ts`):
+
+- The sidebar peer has **one** live subscriber, whichever subscribed last.
+  Nothing may subscribe after the op server, and the controller never calls
+  `peer.subscribe` itself. Nothing at runtime can catch a stray subscriber, so
+  each app keeps two guards:
+  - **One wiring module.** `createToolChannel`, `createToolOpServer` and
+    `createToolController` are imported in ONE wiring module per app. A
+    source-reading test pins this with `findToolFactoryImports` from
+    `testing.ts`. That helper is an accident guard, not a boundary: it reads
+    text, and catches named, aliased, namespace, default, re-export and
+    dynamic imports in either quote style.
+  - **A mount test.** The lane's mount test ends with
+    `assertSidebarSubscribers(spy)`, which requires exactly two live
+    subscriptions: the channel, then the op server.
+- The live subscriber hears every frame event twice, and a remount replays the
+  last one. Events are idempotent hints only and every mutation is an op. Rod's
+  op server would run an event that shares an op's name, so
+  `attachController`'s shim drops events before the op server sees them. Even
+  so, keep event and op names disjoint.
+- Calls are held only while no subscriber at all is on the sidebar peer, and
+  `attachController` passes held calls to the handlers, so the deadline
+  decides whether each one runs. A call that arrives while another subscriber
+  (the host channel) holds the slot is dropped; frames wait for readiness to
+  avoid that.
+- A sidebar mount posts no event and no call, opens no document and registers
+  no monitor; its only posts are retained state (readiness, identity).
+
+**What the platform loses.** In VS Code, the controller's own `client.tool`
+failures arrive without `code`: the bus bridge carries messages only. So the
+`TASK_STOPPED` retry and the stopped-versus-unreachable probe split cannot work
+there, and no code is ever rebuilt from message text. There are no brokered
+`chat` or pipe ops, so features that need them must degrade in dev-tool mounts.
+
+**Testing** ([`testing.ts`](../../../apps/shared/src/explorer/devtool/testing.ts)).
+The harness runs the shell's **real** `busPeer`, `toolOps`, `toolChannel` and
+retained registry, imported from source by relative path.
+
+- **The JSON wire.** By default `createDevToolHarness` carries every bus
+  payload as its JSON image, as VS Code's postMessage does, and records each
+  payload that JSON would change in `h.violations`. A test that asserts
+  `h.violations` is empty proves R4 end to end. The shell envelope's own
+  optional fields (`payload`, `args`, `result`, `error`) may be absent;
+  whatever they hold is judged in full. `{ json: false }` models rocket-ui's
+  in-process realm.
+- **Helpers.** It adds `assertJsonSafe`, `settle()`, `spyPeer`, the two quirk-1
+  guards above, and fake VS Code and rocket-ui realms whose rules cite
+  `connection.ts`.
 
 ## Known limits
 

@@ -32,8 +32,8 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { RocketRideClient } from 'shell';
-import type { ISqlEndpoint } from '../src/connect';
+import type { SqlWireClient } from '../src/connect/busClient';
+import type { SqlEndpoint } from '../src/connect';
 import { createSqlSession } from '../src/connect/session';
 
 // =============================================================================
@@ -53,7 +53,7 @@ interface IToolCall {
 /** A fake client plus the call log it records. */
 interface IFakeClient {
 	/** The client handed to the session. */
-	client: RocketRideClient;
+	client: SqlWireClient;
 	/** Every tool invocation, in order. */
 	calls: IToolCall[];
 	/** How many times the token was resolved. */
@@ -61,7 +61,7 @@ interface IFakeClient {
 }
 
 /** The endpoint every session in this suite binds to. */
-const ENDPOINT: ISqlEndpoint = {
+const ENDPOINT: SqlEndpoint = {
 	key: 'p1:s1:db_1',
 	projectId: 'p1',
 	pipelineName: 'Pipeline A',
@@ -94,7 +94,7 @@ function fakeClient(tokens: string[], behave: (call: IToolCall, index: number) =
 			calls.push(call);
 			return behave(call, calls.length - 1);
 		},
-	} as unknown as RocketRideClient;
+	} as unknown as SqlWireClient;
 	return {
 		client,
 		calls,

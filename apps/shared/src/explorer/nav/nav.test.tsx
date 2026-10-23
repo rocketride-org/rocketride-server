@@ -70,6 +70,24 @@ describe('createActiveKeyStore', () => {
 		assert.equal(read(sql.use), null);
 		assert.equal(read(graph.use), 'graph-key');
 	});
+
+	it('serves non-React readers too: get() is the key now, subscribe() fires on each change until unsubscribed', () => {
+		// A dev-tool frame pushes its active key to the controller from plain
+		// code, outside any render.
+		const store = createActiveKeyStore();
+		assert.equal(store.get(), null);
+		const seen: (string | null)[] = [];
+		const off = store.subscribe(() => seen.push(store.get()));
+		store.set('a');
+		store.set('a');
+		store.set(null);
+		assert.deepEqual(seen, ['a', null], 'one call per change, none for a repeat');
+		off();
+		store.set('b');
+		assert.deepEqual(seen, ['a', null], 'nothing after unsubscribe');
+		assert.equal(store.get(), 'b');
+		assert.equal(read(store.use), 'b', 'the hook and get() read the same key');
+	});
 });
 
 describe('createRequestChannel', () => {

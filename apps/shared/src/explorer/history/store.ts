@@ -150,6 +150,16 @@ export interface IHistoryStore<F extends string> {
 	useHistory(key: string): IHistoryEntry<F>[];
 	/** Subscribe to one connection's recording switch (default on). */
 	useRecording(key: string): boolean;
+	/**
+	 * One connection's history now, for code outside React (a dev-tool
+	 * controller serving its frames): the snapshot `useHistory` would render,
+	 * referentially stable until that list changes.
+	 */
+	getHistory(key: string): IHistoryEntry<F>[];
+	/** One connection's recording switch now, for code outside React. */
+	getRecording(key: string): boolean;
+	/** Be told about every change from code outside React; returns unsubscribe. */
+	subscribe(listener: () => void): () => void;
 	/** Forget one entry. */
 	removeEntry(key: string, id: string): void;
 	/** Flip one entry's pinned state. */
@@ -162,6 +172,14 @@ export interface IHistoryStore<F extends string> {
 	setRecording(key: string, on: boolean): void;
 	/** The run bus: emitting here records (unless recording is off for that connection). */
 	runs: IRunEvents<F>;
+	/**
+	 * Write the batch still waiting in the debounce NOW, through the attached
+	 * accessor. Call it before the last detach when the mount is going away
+	 * under the same owner (an unmount, a disconnect): the last detach drops a
+	 * pending batch, so a run recorded in the final `persistDelayMs` would never
+	 * be written. A no-op when nothing is pending or nothing is attached.
+	 */
+	flush(): void;
 	/** The bounds this store enforces. */
 	limits: IHistoryLimits;
 }
@@ -662,6 +680,9 @@ export function createHistoryStore<F extends string>(options: IHistoryStoreOptio
 		attachPrefs,
 		useHistory,
 		useRecording,
+		getHistory: viewOf,
+		getRecording: recordingOf,
+		subscribe,
 		removeEntry,
 		togglePin,
 		setNote,
@@ -669,5 +690,8 @@ export function createHistoryStore<F extends string>(options: IHistoryStoreOptio
 		setRecording,
 		runs,
 		limits,
+		flush: () => {
+			if (prefs !== null && persistTimer !== null) persistNow();
+		},
 	};
 }
