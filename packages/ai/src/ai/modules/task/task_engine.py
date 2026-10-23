@@ -1010,13 +1010,15 @@ class Task(DAPBase):
         """
         Whether the task shares the engine's host, so it gets --shared-host.
 
-        A hosted engine's task does: spawn is the only runtime. The pre-launch
-        check and the task's command line both ask here, so they agree.
+        A hosted engine's task does under spawn. In a container or a pod it
+        does not: the container is the boundary, and the task keeps only the
+        hosted rules (--hosted). The pre-launch check and the task's command
+        line both ask here, so they agree.
 
         Returns:
-            True for a task of a hosted engine.
+            True for a task of a hosted engine whose runtime does not isolate it.
         """
-        return _is_saas_engine()
+        return _is_saas_engine() and not self._launcher.isolated
 
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """

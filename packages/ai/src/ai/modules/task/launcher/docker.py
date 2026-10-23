@@ -892,10 +892,12 @@ class DockerLauncher(Launcher):
         The command line inside the container: the subprocess runtime's, minus what does not apply.
 
         ``--hosted`` as under spawn: a hosted task's pipes ask EaaS for credit
-        and it never installs torch, wherever it runs. No inherited
-        ``--node_path`` (the nodes are in the image; a host path means nothing
-        there). The data port is fixed and bound on every interface of the
-        container's own network namespace.
+        and it never installs torch, wherever it runs. No ``--shared-host``:
+        the container is the boundary, so the guards for a task on the
+        engine's own host stay off. No inherited ``--node_path`` (the nodes
+        are in the image; a host path means nothing there). The data port is
+        fixed and bound on every interface of the container's own network
+        namespace.
 
         Args:
             spec: What to launch.
