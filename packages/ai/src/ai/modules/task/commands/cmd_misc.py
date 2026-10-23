@@ -53,7 +53,8 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
-from .. import services_catalog
+from ai.account import node_deploy
+from .. import node_store, services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
 # Only import for type checking to avoid circular import errors
@@ -85,6 +86,11 @@ def _service_profile_names(provider: str) -> frozenset:
         return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
     except Exception:
         return frozenset()
+
+
+def _visible(name: str, published: Dict[str, Any]) -> bool:
+    """A release node is visible to everyone; a published one (a dotted id) only where it is published."""
+    return '.' not in name or name in published
 
 
 class MiscCommands(DAPConn):
@@ -161,16 +167,23 @@ class MiscCommands(DAPConn):
             args = request.get('arguments', {})
             service = args.get('service', None)
 
+            # The published nodes this caller reaches join the engine's catalogue
+            published = await node_deploy.visible_nodes(self)
+            node_store.register_published(published)
+
             if service:
-                # Retrieve the full cached entry (config schema included)
-                schema = await services_catalog.get_service(service)
+                # Retrieve the full cached entry (config schema included); a
+                # published node only for a caller it is published to
+                schema = await services_catalog.get_service(service) if _visible(service, published) else None
 
                 # Validate the service exists
                 if not schema:
                     raise ValueError(f"Service '{service}' not found. Please check the service name and try again.")
             else:
                 # The cached summary view: display fields + inline icons
-                schema = await services_catalog.get_summary()
+                summary = await services_catalog.get_summary()
+                services = {name: entry for name, entry in summary['services'].items() if _visible(name, published)}
+                schema = {**summary, 'services': services}
 
             # Return successful response with service definition(s)
             return self.build_response(request, body=schema)
@@ -263,6 +276,10 @@ class MiscCommands(DAPConn):
 
             # Resolve ${ROCKETRIDE_*} variables before validation
             pipeline = resolve_pipeline_env(pipeline, merged_env)
+
+            # A published node validates only for a caller it is published to
+            components = pipeline.get('components') or [pipeline.get('component') or {}]
+            node_store.register_published(await node_deploy.nodes_for(self, components))
 
             # The node config panel validates one component at a time and sends
             # {version, component} — the IComponentValidatePayload shape the

@@ -32,8 +32,10 @@ function makeNode() {
 
 test('a package holds the node, its marker, and no build inputs', async () => {
 	const { data } = await packageNode('demo', makeNode());
-	const names = new AdmZip(data).getEntries().map((e) => e.entryName);
+	const zip = new AdmZip(data);
+	const names = zip.getEntries().map((e) => e.entryName);
 	assert.deepStrictEqual(names.sort(), ['demo/.rrnode', 'demo/IGlobal.py', 'demo/demo.svg', 'demo/services.json']);
+	assert.deepStrictEqual(JSON.parse(zip.readAsText('demo/.rrnode')), { name: 'demo', contract: 1 });
 });
 
 test('the index entry carries each definition as plain JSON text by file, and the icons inline', async () => {

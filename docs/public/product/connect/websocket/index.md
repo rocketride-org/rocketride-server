@@ -134,6 +134,11 @@ than inferring one from the prose.
 | `TASK_COMPLETED` | The task finished before the request could be served. |
 | `TASK_STOPPED` | The task was stopped or cancelled before the request. |
 | `OUT_OF_CREDITS` | The org is out of credit, so the task refuses a new pipe; clears when it tops up. |
+| `NODE_NOT_FOUND` | The pipeline names a published node (`<developerId>.<name>`) that no one in the org has uploaded. |
+| `NODE_NOT_ENTITLED` | The node exists, but no version of it is published to the caller or any of their teams. |
+| `NODE_REGISTRY_UNAVAILABLE` | The node rail did not answer, so a published node cannot be resolved; the release's nodes still run. |
+| `NODE_VERSION_MISMATCH` | The package or node index was built for a node contract this engine does not speak. |
+| `NODE_PACKAGE_INVALID` | An uploaded `.rrnode` breaks a rule (the message names it), or a package does not match its digest. |
 
 These codes ride command replies. A task key rejected while the connection is
 still being established — on the HTTP request or the WebSocket upgrade — is

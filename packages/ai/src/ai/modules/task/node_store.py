@@ -36,15 +36,20 @@ import engLib
 from depends import engine_cache_dir
 from rocketlib import getServiceDefinition, warning
 
-from ai.account import account
+from ai.account import account, node_deploy
 from ai.common import node_packages, node_release
+from ai.common.node_packages import NodePackageInvalid
 from ai.constants import CONST_NODES_CONTRACT
 
-from .task_channel import ChannelReply, register_channel_command
+from . import services_catalog
+from .task_channel import ChannelRefused, ChannelReply, register_channel_command
 
 # name -> index entry, and provider (logical type) -> name
 _nodes: Dict[str, Dict[str, Any]] = {}
 _providers: Dict[str, str] = {}
+
+# published node id -> the digest whose definitions are registered
+_published: Dict[str, str] = {}
 
 
 def start() -> None:
@@ -86,13 +91,27 @@ def start() -> None:
     register_channel_command('node.fetch', _fetch)
 
 
-def _definitions(name: str, entry: Dict[str, Any]) -> List[Tuple[Dict[str, Any], str]]:
+def _definitions(module: str, entry: Dict[str, Any]) -> List[Tuple[Dict[str, Any], str]]:
     """A node's (definition, path) pairs to register, with its icons written beside them; no code is unpacked."""
-    icon_dir = os.path.join(engine_cache_dir(create=True), 'node-icons', entry['sha256'], name)
+    icon_dir = os.path.join(engine_cache_dir(create=True), 'node-icons', entry['sha256'], module)
     for icon, svg in entry['icons'].items():
         if not os.path.exists(os.path.join(icon_dir, icon)):
             node_release.save(os.path.join(icon_dir, icon), svg.encode('utf-8'))
     return [(definition, os.path.join(icon_dir, file)) for file, definition in entry['services'].items()]
+
+
+def register_published(rows: Dict[str, Dict[str, Any]]) -> None:
+    """Register the definitions of published nodes the engine does not have at that digest yet."""
+    fresh = {
+        node_id: row['snapshot']
+        for node_id, row in rows.items()
+        if _published.get(node_id) != row['snapshot']['sha256']
+    }
+    if not fresh:
+        return
+    engLib.registerServices([pair for snap in fresh.values() for pair in _definitions(snap['module'], snap)])
+    _published.update({node_id: snap['sha256'] for node_id, snap in fresh.items()})
+    services_catalog.invalidate()
 
 
 def _package(name: str) -> Optional[Tuple[str, bytes, str, Dict[str, Dict[str, Any]]]]:
@@ -106,7 +125,19 @@ def _package(name: str) -> Optional[Tuple[str, bytes, str, Dict[str, Dict[str, A
 
 async def _fetch(task, arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Answer a task's node.fetch {name}: the package, or an empty body when there is none."""
-    package = await asyncio.to_thread(_package, arguments.get('name', ''))
+    name = arguments.get('name', '')
+    # A published node: the version resolved for this run when it was launched
+    row = task.node_versions.get(node_packages.node_of(name))
+    if row is not None:
+        snapshot = row['snapshot']
+        try:
+            data = await node_deploy.read_package(task.org_id or 'local', task.client_id, row)
+        except NodePackageInvalid as e:
+            raise ChannelRefused(str(e)) from None
+        return ChannelReply(
+            body={'name': snapshot['module'], 'sha256': snapshot['sha256'], 'services': snapshot['services']}, data=data
+        )
+    package = await asyncio.to_thread(_package, name)
     if package is None:
         return ChannelReply(body={})
     name, data, sha256, services = package
