@@ -101,8 +101,10 @@ macOS ARM64), each doing `./builder build` then `./builder test --verbose --sequ
 with 90-minute timeouts. The test step boots a local engine on `:5565` and
 connects a test client, so both sides need a matching `ROCKETRIDE_APIKEY` — CI
 uses the literal `MYAPIKEY`, the same placeholder as `.env.template`. Ubuntu also
-starts MinIO, Azurite, and Postgres (pgvector + Apache AGE, on `:55432`/`:55433`)
-for the storage and database node tests.
+starts MinIO, Azurite, and Postgres (pgvector on `:55432`, Apache AGE 1.5.0 on
+`:55433` and 1.6.0 on `:55434`) for the storage tests and the live database node
+tests (`nodes/test/test_*_live.py`), then runs the graph suite once more against
+AGE 1.6.0.
 
 Per-module equivalents when you only touched one area:
 

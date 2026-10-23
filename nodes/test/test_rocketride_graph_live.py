@@ -36,10 +36,13 @@ engine version follow the version the test database reports. Container:
     # image: apache/age:release_PG16_1.5.0 + pgvector v0.8.0 (see the layer README)
 
 Configuration via environment variables:
-    RR_TEST_AGE_DSN — libpq URL of the AGE test database
-                      (default: postgresql://rruser:rrpass@localhost:55433/rrtenant)
+    RR_TEST_AGE_DSN     — libpq URL of the AGE test database, for example
+                          postgresql://rruser:rrpass@localhost:55433/rrtenant
+    RR_REQUIRE_DB_TESTS — when set, a missing or unreachable database fails
+                          instead of skipping
 
-Skips cleanly when the database is unreachable.
+Runs in ``nodes:test``. Skips when RR_TEST_AGE_DSN is not set or the database
+is unreachable.
 """
 
 from __future__ import annotations
@@ -61,7 +64,9 @@ _UTILS_DIR = _AI_SRC / 'ai' / 'common' / 'utils'
 _RRDB_PATH = _AI_SRC / 'ai' / 'common' / 'rocketride_db.py'
 _NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_graph'
 
-TEST_DSN = os.environ.get('RR_TEST_AGE_DSN', 'postgresql://rruser:rrpass@localhost:55433/rrtenant')
+# No default address: a plain nodes:test run must not reach a database the
+# developer did not point it at.
+TEST_DSN = os.environ.get('RR_TEST_AGE_DSN', '')
 GRAPH = 'rr_graph_e2e'
 
 # RR_REQUIRE_DB_TESTS (set by CI once its DB containers are healthy) turns
@@ -78,6 +83,8 @@ else:
 
 
 def _db_reachable() -> bool:
+    if not TEST_DSN:
+        return False
     try:
         conn = psycopg2.connect(TEST_DSN, connect_timeout=3)
         conn.close()
@@ -86,14 +93,23 @@ def _db_reachable() -> bool:
         return False
 
 
-if _DB_TESTS_REQUIRED and not _db_reachable():
-    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but the AGE test database is not reachable at {TEST_DSN}', pytrace=False)
+_DB_MISSING = f'RocketRide AGE test database not reachable at {TEST_DSN}' if TEST_DSN else 'RR_TEST_AGE_DSN is not set'
 
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide AGE test database not reachable at {TEST_DSN}')
+if _DB_TESTS_REQUIRED and not _db_reachable():
+    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but: {_DB_MISSING}', pytrace=False)
+
+# Every test drops and recreates the same graph, so one xdist worker runs the
+# whole module (nodes:test passes --dist loadgroup).
+pytestmark = [
+    pytest.mark.skipif(not _db_reachable(), reason=_DB_MISSING),
+    pytest.mark.xdist_group('rocketride_graph_live'),
+]
 
 
 def _server_age_version() -> str | None:
     """The AGE version the test database reports, or None when it has no AGE."""
+    if not TEST_DSN:
+        return None
     try:
         conn = psycopg2.connect(TEST_DSN, connect_timeout=3)
     except Exception:
