@@ -709,6 +709,8 @@ class Task(DAPBase):
 
         # Termination management
         self._is_restarting = False
+        # One restart at a time: two would share _restart_env and _is_restarting
+        self._restart_in_progress = False
         self._is_terminating = False
         self._termination_lock = asyncio.Lock()
 
@@ -2406,6 +2408,12 @@ class Task(DAPBase):
         5. Reset all status from the previous run
         6. Start task (full initialization)
         """
+        # Checked and set before the first await, so a concurrent restart is refused
+        # instead of starting with the other restart's values
+        if self._restart_in_progress:
+            raise RuntimeError('Failed to restart task: a restart is already in progress')
+        self._restart_in_progress = True
+
         try:
             self._server.debug_message(f'Task "{self.id}" restart initiated...')
 
@@ -2461,6 +2469,7 @@ class Task(DAPBase):
             # Always reset these
             self._is_restarting = False
             self._restart_env = None
+            self._restart_in_progress = False
 
     async def start_task(self) -> None:
         """

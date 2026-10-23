@@ -1650,6 +1650,58 @@ async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_f
 
 
 @pytest.mark.asyncio
+async def test_a_second_restart_while_one_runs_is_refused():
+    """Two restarts of one task would share _restart_env: the second is refused
+    before it loads anything, the first starts with its own values, and a later
+    restart works again.
+    """
+    pipeline = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline=pipeline,
+        env_source=AsyncMock(return_value={'ROCKETRIDE_KEY': 'first'}),
+    )
+    task.has_attached_debugger = lambda: False
+    task.is_task_complete = lambda: True
+    task._reset_status = lambda: None
+    stopping = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stop():
+        stopping.set()
+        await release.wait()
+
+    seen = []
+
+    async def start():
+        seen.append(await task._resolve_pipeline(task._pipeline))
+
+    task.stop_task = stop
+    task.start_task = start
+
+    first = asyncio.ensure_future(task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools'))
+    await stopping.wait()
+    second_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'second'})
+    task._env_source = second_source
+    with pytest.raises(RuntimeError, match='already in progress'):
+        await task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools')
+    second_source.assert_not_awaited()
+
+    release.set()
+    await first
+    assert [run['config'] for run in seen] == ['first']
+
+    await task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools')
+    assert [run['config'] for run in seen] == ['first', 'second']
+    assert task._restart_in_progress is False
+
+
+@pytest.mark.asyncio
 async def test_task_loads_placeholder_values_at_each_resolve():
     """A Task given an env_source calls it every time it resolves the pipeline
     and keeps no copy of the values; a plain env dict still works.
