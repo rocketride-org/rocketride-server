@@ -2423,7 +2423,13 @@ class Task(DAPBase):
 
             # Load the new run's values while the old process still runs and
             # nothing has changed yet: a failed load leaves the task as it was
+            stop_seen = self._stop_requested
             self._restart_env = await self._load_env(pipeline)
+
+            # A stop that arrived while the values loaded wins: nothing has
+            # changed yet, so the task stays stopped instead of starting again
+            if self._stop_requested and not stop_seen:
+                raise RuntimeError('the task was stopped while the restart loaded its values')
 
             # Set the restart flag to inhibit termination/start events
             self._is_restarting = True

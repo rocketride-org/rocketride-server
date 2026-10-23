@@ -1650,6 +1650,38 @@ async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_f
 
 
 @pytest.mark.asyncio
+async def test_a_stop_during_the_restart_load_wins():
+    """A stop that lands while a restart loads its values is kept: the restart
+    is refused, nothing is stopped again or started, and the pipeline is unchanged.
+    """
+    old = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline=old,
+    )
+
+    async def load_while_stopping():
+        task._stop_requested = True  # what stop_task sets
+        return {'ROCKETRIDE_KEY': 'v'}
+
+    task._env_source = load_while_stopping
+    task.has_attached_debugger = lambda: False
+    task.stop_task = AsyncMock()
+    task.start_task = AsyncMock()
+
+    with pytest.raises(RuntimeError, match='stopped while the restart'):
+        await task.restart_task({'components': [], 'config': '${ROCKETRIDE_KEY}!'}, 'p-1', 's-1', 'tools')
+    task.stop_task.assert_not_awaited()
+    task.start_task.assert_not_awaited()
+    assert task._pipeline is old and task._stop_requested
+
+
+@pytest.mark.asyncio
 async def test_a_second_restart_while_one_runs_is_refused():
     """Two restarts of one task would share _restart_env: the second is refused
     before it loads anything, the first starts with its own values, and a later
