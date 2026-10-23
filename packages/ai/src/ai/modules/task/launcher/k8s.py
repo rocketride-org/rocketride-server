@@ -107,8 +107,11 @@ CONST_FORWARD_TIMEOUT = 30.0
 # A watch that ends sooner than this is not started again at once: the cluster cannot be reached
 CONST_WATCH_MIN_LIFE = 5.0
 
-# Seconds one watch lives before it ends itself and is started again. It bounds a watch whose
-# engine went without running its exit hooks (--autoterm leaves by quick_exit): nothing else ends it
+# Seconds one watch lives before the launcher ends it and starts it again. Not kubectl's
+# --request-timeout: inside a pod with no kubeconfig, kubectl takes the in-cluster settings only
+# while no flag changes its client config, and dials localhost:8080 otherwise. A watch left by an
+# engine that went without its exit hooks (--autoterm leaves by quick_exit) is ended by the API
+# server instead (its watch timeout, 30-60 min by default); in a pod it goes with the engine
 CONST_WATCH_MAX_LIFE = 300
 
 # Seconds a new watch gets to print the pods that exist before the missing ones are counted
@@ -760,9 +763,9 @@ class PodWatcher:
 
     A CLI process per task only to learn its exit code would cost 39 MB each
     (measured), so a single watch on the instance's label tells every launch
-    its pod's name, when it runs and how it ended. A watch ends itself every
-    few minutes (``CONST_WATCH_MAX_LIFE``), or sooner when the API server
-    closes it; it is started again and first prints the pods that exist. A pod
+    its pod's name, when it runs and how it ended. The launcher ends a watch
+    every ``CONST_WATCH_MAX_LIFE`` seconds, or the API server closes it sooner;
+    it is started again and first prints the pods that exist. A pod
     that went meanwhile is in no such list, so the pods are counted once more
     (``_resync``) and a launch whose pod is missing without an exit code is
     lost.
@@ -788,6 +791,10 @@ class PodWatcher:
         """
         The watch command.
 
+        No flag that changes kubectl's client config (``--request-timeout``,
+        ``--server``, ``--token``...): inside a pod it would skip the in-cluster
+        settings. How long a watch lives is bounded in ``_run`` instead.
+
         Returns:
             The command and its arguments.
         """
@@ -800,7 +807,6 @@ class PodWatcher:
             '--output-watch-events',
             '-o',
             f'jsonpath={WATCH_FORMAT}',
-            f'--request-timeout={CONST_WATCH_MAX_LIFE}s',
         ]
 
     def track(self, job: str) -> WatchedPod:
@@ -858,13 +864,34 @@ class PodWatcher:
                     resync = asyncio.ensure_future(self._resync())
                     self._resyncs.add(resync)
                     resync.add_done_callback(self._resyncs.discard)
-                ended = await self._read(self._process)
+                ended = await self._read_for(self._process, CONST_WATCH_MAX_LIFE)
             except OSError as e:
                 ended = str(e)
             self._process = None
             debug(f'[k8s] the pod watch ended ({ended}); starting it again')
             # One that ended at once is not hammered
             await asyncio.sleep(max(0.0, CONST_WATCH_MIN_LIFE - (time.monotonic() - started)))
+
+    async def _read_for(self, process: asyncio.subprocess.Process, limit: float) -> str:
+        """
+        Read the watch until it ends, or end it once it has run for ``limit`` seconds.
+
+        Args:
+            process: The watch.
+            limit: Seconds it may run.
+
+        Returns:
+            How it ended, for the log.
+        """
+        reading = asyncio.ensure_future(self._read(process))
+        try:
+            return await asyncio.wait_for(asyncio.shield(reading), limit)
+        except asyncio.TimeoutError:
+            await _stop(process)
+            return f'its {limit:g} s were up; {await reading}'
+        except asyncio.CancelledError:
+            reading.cancel()
+            raise
 
     async def _read(self, process: asyncio.subprocess.Process) -> str:
         """
