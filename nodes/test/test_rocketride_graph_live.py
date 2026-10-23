@@ -93,7 +93,10 @@ def _db_reachable() -> bool:
         return False
 
 
-_DB_MISSING = f'RocketRide AGE test database not reachable at {TEST_DSN}' if TEST_DSN else 'RR_TEST_AGE_DSN is not set'
+# Names the variable, never its value: the DSN may carry a password.
+_DB_MISSING = (
+    'RocketRide AGE test database in RR_TEST_AGE_DSN is not reachable' if TEST_DSN else 'RR_TEST_AGE_DSN is not set'
+)
 
 if _DB_TESTS_REQUIRED and not _db_reachable():
     pytest.fail(f'RR_REQUIRE_DB_TESTS is set but: {_DB_MISSING}', pytrace=False)
