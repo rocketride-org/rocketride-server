@@ -58,7 +58,7 @@ Ports may be literal integers, numeric strings, or interpolated environment valu
 
 The collection is created on first write with the selected similarity in its `hnsw:space` metadata. `cosine` is the default; `l2` and `ip` are the only other accepted values. Keep that setting aligned with your embedding model, and do not expect changing it later to rewrite an existing collection's index. Use a separate collection if the new model needs a different vector shape or distance metric.
 
-Semantic retrieval needs a question embedding and does not support a non-zero offset. Use keyword search when you need paged text matching: it uses Chroma's document-contains filter and supports offset and limit. Semantic scores are converted from Chroma distances and hits below `0.20` are always discarded. Raise the requested score when marginal chunks are harming a prompt; lower it for recall, knowing the hard floor still applies.
+Semantic retrieval needs a question embedding and does not support a non-zero offset. Use keyword search when you need paged text matching: it uses Chroma's document-contains filter and supports offset and limit. Semantic scores are converted from Chroma distances to a `0` to `1` scale where `1` is a perfect match, and hits below `0.20` are always discarded. Raise the requested score when marginal chunks are harming a prompt; lower it for recall, knowing the hard floor still applies.
 
 ### Retrieval score and document filters
 
@@ -108,7 +108,17 @@ The node gives each Chroma record a fresh UUID, even when an object is being re-
 
 ### Search result interpretation
 
-Chroma reports distances, which the node converts to the score carried by a returned document. The conversion differs for cosine versus `l2` or `ip`, so a numeric threshold has meaning only alongside the selected similarity. Compare retrieval-score behavior within one collection and metric; do not treat the same threshold as equivalent after changing metrics.
+Chroma reports a distance for every metric, where lower means more similar. The node converts that distance to the score carried by a returned document, on a `0` to `1` scale where `1` is a perfect match and `0.5` is an orthogonal (unrelated) vector:
+
+| Similarity | Chroma distance | Score |
+| --- | --- | --- |
+| `cosine` | `1 - cos(a, b)`, from `0` to `2` | `1 - distance / 2` |
+| `ip` | `1 - dot(a, b)` | `1 - distance / 2`, clamped to `0` to `1` |
+| `l2` | squared Euclidean distance | `1 - distance / 4`, clamped to `0` to `1` |
+
+For unit-length embeddings, which is what most embedding models produce, all three metrics give the same score for the same pair of vectors, so a retrieval-score threshold means the same thing whichever `hnsw:space` the collection uses, and the scale matches the Qdrant store. With non-normalized embeddings, an `ip` match stronger than a unit-vector identity saturates at `1.0` rather than being dropped, and an `l2` distance beyond `4` saturates at `0.0`; prefer `cosine` for such models, since it ignores vector length.
+
+Scores decrease with distance, so the best match always carries the highest score. Earlier releases converted in the other direction: a perfect cosine match scored `0.5`, an unrelated vector `1.0` and the opposite vector `1.5`, so the default retrieval score of `0.5` never removed anything and ordering by score was reversed. With the corrected scale the default removes hits whose cosine similarity is negative, which real embeddings almost never produce for a related chunk. A pipeline that sets an explicit `score` for a Chroma store should re-check that value against the table above.
 
 When semantic results are unexpectedly empty, verify the query embedding, the collection metric, the `isDeleted` filter, and the `0.20` hard floor in that order. When keyword results are unexpectedly empty, verify the search text and document containment rather than the vector score.
 
