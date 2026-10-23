@@ -213,6 +213,7 @@ def _spec(**overrides):
         hosted=True,
         trace_arg='--trace=debugOut',
         node_path_arg='--node_path=/ws/nodes',
+        dumps_arg='--dumps',
     )
     values.update(overrides)
     return LaunchSpec(**values)
@@ -448,7 +449,7 @@ async def test_create_carries_the_isolation_and_limits():
 
 
 async def test_command_line_inside_the_container():
-    """The subprocess runtime's argv minus --node_path, the port fixed, the model server rewritten."""
+    """The subprocess runtime's argv minus --node_path and --dumps, the port fixed, the model server rewritten."""
     cli = FakeCli()
     await _launcher(cli).start(_spec())
     args = cli.call('create').args
@@ -468,12 +469,17 @@ async def test_command_line_inside_the_container():
         '--trace=debugOut',
     ]
     assert not any(a.startswith('--node_path') for a in args)
+    assert not any(a.startswith('--dumps') for a in args)
 
 
 def test_hosted_flag_follows_the_spec():
-    """A hosted engine's task gets --hosted in its container as under spawn; any other gets none."""
+    """A hosted engine's task gets --hosted in its container as under spawn; any other gets none.
+
+    --shared-host never: the container is the boundary.
+    """
     assert '--hosted' in DockerLauncher.task_args(_spec(hosted=True))
     assert '--hosted' not in DockerLauncher.task_args(_spec(hosted=False))
+    assert '--shared-host' not in DockerLauncher.task_args(_spec(hosted=True, shared_host=True))
 
 
 async def test_environment_goes_in_as_names_only():
