@@ -392,13 +392,15 @@ def test_a_timeout_is_cached_like_any_other_failure(monkeypatch, fresh_probe):
     assert len(calls) == 1
 
 
-def test_an_out_of_memory_child_is_reported_but_not_a_verdict(monkeypatch, fresh_probe):
-    """A full GPU says nothing about the CUDA stack: the next load probes again."""
+def test_an_out_of_memory_before_the_storage_view_is_reported_but_not_a_verdict(monkeypatch, fresh_probe):
+    """A full GPU says nothing about the CUDA stack: this load goes to the CPU and the next load probes again."""
     calls = []
 
     def _run(*a, **k):
         calls.append(1)
-        return _completed(1, stdout='probe: storage view ok\n', stderr='CUDA failed with error out of memory')
+        return _completed(
+            1, stdout='probe: versions ctranslate2 4.8.2\n', stderr='RuntimeError: CUDA error: out of memory'
+        )
 
     monkeypatch.setattr(subprocess, 'run', _run)
 
@@ -408,6 +410,27 @@ def test_an_out_of_memory_child_is_reported_but_not_a_verdict(monkeypatch, fresh
     assert WhisperLoader._gpu_compatible is None
     assert WhisperLoader._check_gpu_compatible(device_index=1) is False
     assert len(calls) == 2
+
+
+def test_an_out_of_memory_after_the_storage_view_is_a_storage_view_pass_for_this_load(monkeypatch, fresh_probe, caplog):
+    """No room for the probe's own model, but the stack passed the storage view: like missing weights, not cached."""
+    calls = []
+
+    def _run(*a, **k):
+        calls.append(1)
+        return _completed(1, stdout='probe: storage view ok\n', stderr='CUDA failed with error out of memory')
+
+    monkeypatch.setattr(subprocess, 'run', _run)
+
+    with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
+        assert WhisperLoader._check_gpu_compatible(device_index=1) is True
+
+    assert WhisperLoader._gpu_probe_reason is None
+    assert WhisperLoader._gpu_probe_inference_skipped == 'probe: inference skipped: GPU 1 ran out of memory'
+    assert WhisperLoader._gpu_compatible is None  # not a verdict
+    assert any('GPU 1 ran out of memory' in record.getMessage() for record in caplog.records)
+    assert WhisperLoader._check_gpu_compatible(device_index=1) is True
+    assert len(calls) == 2  # the next load probes again
 
 
 def test_local_files_only_skips_the_weight_fetch(monkeypatch, fresh_probe):
@@ -656,6 +679,37 @@ def test_the_prefetched_weights_land_in_the_callers_cache(monkeypatch, fresh_pro
     assert WhisperLoader._check_gpu_compatible(download_root='/models') is True
     assert fetch.starts[0][-2:] == [whispermod._GPU_PROBE_MODEL, '/models']  # the fetch child fills the same cache
     assert "name, root = 'tiny', '/models'" in seen['script']  # the probe child looks in the same cache
+
+
+@pytest.mark.parametrize('truststore', ['present', 'absent'])
+def test_the_fetch_child_uses_the_os_trust_store_when_it_can(monkeypatch, fresh_probe, tmp_path, truststore):
+    """ai.common.ssl patches only the parent; behind a TLS-intercepting proxy the fetch child needs the OS store too."""
+    _local_lookup(monkeypatch, None)
+    real_popen = subprocess.Popen
+    fetch = _fetch_child(monkeypatch, ['fail'])
+    WhisperLoader._prefetch_probe_weights('/models')
+    script = fetch.starts[0][2]
+    assert 'truststore.inject_into_ssl()' in script
+
+    # Run that script for real, with stub truststore and faster_whisper first on its path.
+    stubs = tmp_path / 'stubs'
+    trust = 'def inject_into_ssl():\n    print("trust store injected", flush=True)\n'
+    for name, source in (
+        ('truststore', trust if truststore == 'present' else 'raise ImportError("No module named truststore")\n'),
+        (
+            'faster_whisper',
+            'def download_model(name, cache_dir=None):\n    print("fetched", name, cache_dir, flush=True)\n',
+        ),
+    ):
+        (stubs / name).mkdir(parents=True)
+        (stubs / name / '__init__.py').write_text(source)
+    monkeypatch.setattr(subprocess, 'Popen', real_popen)
+    child = f'import sys\nsys.path.insert(0, {str(stubs)!r})\n' + script
+    result = subprocess.run([sys.executable, '-c', child, 'tiny', ''], capture_output=True, text=True, timeout=60)
+
+    assert result.returncode == 0, result.stderr
+    assert 'fetched tiny None' in result.stdout
+    assert ('trust store injected' in result.stdout) is (truststore == 'present')
 
 
 def test_first_candidate_gpu_skips_excluded_devices():

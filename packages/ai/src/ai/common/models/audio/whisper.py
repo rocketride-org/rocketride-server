@@ -226,10 +226,13 @@ class WhisperLoader(BaseLoader):
         they are absent, so no download problem ever becomes a CPU verdict. The
         fetch is skipped when the caller asked for local files only, or when the
         installed versions would stop the child at the guard anyway. A timeout
-        is a failure like any other and is cached; a child that ran out of GPU
-        memory is reported but not cached, since a full GPU says nothing about
-        the CUDA stack. On failure ``_gpu_probe_reason`` names the stage, the
-        exit code and the child's last output lines.
+        is a failure like any other and is cached. A child that ran out of GPU
+        memory is not cached, since a full GPU says nothing about the CUDA
+        stack: after the storage view it is a storage-view pass for this load,
+        as with missing weights, so ``allocate_gpu`` places the model as it did
+        before #2498; before the storage view it is reported as a failure for
+        this load. On failure ``_gpu_probe_reason`` names the stage, the exit
+        code and the child's last output lines.
 
         Args:
             device_index: CUDA device to probe.
@@ -310,8 +313,23 @@ class WhisperLoader(BaseLoader):
                 reason = f'exit {result.returncode} after "{stage}"' + (f'; stderr: {tail}' if tail else '')
                 if 'out of memory' in ((result.stderr or '') + (result.stdout or '')).lower():
                     # A full GPU says nothing about the CUDA stack (the CUDA and
-                    # CTranslate2 wording is "out of memory"): report, do not cache,
-                    # and let the next load probe again.
+                    # CTranslate2 wording is "out of memory"): do not cache, and let
+                    # the next load probe again. Past the storage view the stack
+                    # passed what the probe checked before #2498, so, as with missing
+                    # weights, this load keeps the GPU and allocate_gpu places the
+                    # model; before it, this load goes to the CPU with the reason.
+                    if 'probe: storage view ok' in lines:
+                        cls._gpu_probe_reason = None
+                        cls._gpu_probe_inference_skipped = (
+                            f'probe: inference skipped: GPU {device_index} ran out of memory'
+                        )
+                        logger.warning(
+                            'Whisper GPU probe passed on the storage view only: GPU %s ran out of memory in the '
+                            'inference stage (%s); the next load probes again.',
+                            device_index,
+                            reason,
+                        )
+                        return True
                     cls._gpu_probe_reason = (
                         f'GPU {device_index} ran out of memory during the probe, not a verdict: {reason}'
                     )
@@ -391,8 +409,14 @@ class WhisperLoader(BaseLoader):
         import subprocess
         import sys
 
+        # ai.common.ssl patches only this process; the child repeats it for hosts behind a TLS-intercepting proxy.
         script = (
             'import sys\n'
+            'try:\n'
+            '    import truststore\n'
+            '    truststore.inject_into_ssl()\n'
+            'except Exception:\n'
+            '    pass\n'
             'from faster_whisper import download_model\n'
             'download_model(sys.argv[1], cache_dir=sys.argv[2] or None)\n'
         )
