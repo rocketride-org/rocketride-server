@@ -135,3 +135,42 @@ assert refused([at(node('rail_e')), (node('rail_f'), None)])
     REQUIRE(heldDefinition->title == "Rail G");
     REQUIRE(heldDefinition->serviceDefinition.lookup<iText>("register") == "filter");
 }
+
+TEST_CASE("store::registerServices replacing a C++ node") {
+    // A C++ node is only declared here: its library is mapped on first use,
+    // which none of these reach
+    const auto python = localfcn()->Error {
+        py::exec(R"(
+import engLib, tempfile
+def node(name, **fields):
+    return dict({'register': 'filter', 'classType': ['text'], 'capabilities': [],
+                 'lanes': {'text': ['text']}, 'fields': {}, 'shape': [], 'title': name,
+                 'protocol': name + '://', 'path': 'nodes.' + name, 'prefix': name}, **fields)
+def refused(batch):
+    try:
+        engLib.registerServices(batch)
+    except Exception:
+        return True
+    return False
+def at(definition):
+    return (definition, tempfile.mkdtemp() + '/services.json')
+# A Python node that names no "node" has the same physical type a C++ node has
+engLib.registerServices([at(node('rail_p'))])
+assert refused([at(node('rail_p', node='cpp', path='rail_p'))])
+engLib.registerServices([at(node('rail_q', node='cpp', path='rail_q'))])
+assert refused([at(node('rail_q'))])
+# A new version of a C++ node may name another library
+engLib.registerServices([at(node('rail_q', node='cpp', path='rail_q_2'))])
+)");
+        return {};
+    };
+    REQUIRE_NO_ERROR(callPython(python));
+
+    auto pythonNode = IServices::getServiceDefinition("rail_p");
+    REQUIRE_NO_ERROR(pythonNode);
+    REQUIRE_FALSE((*pythonNode)->serviceDefinition.isMember("node"));
+
+    auto cppNode = IServices::getServiceDefinition("rail_q");
+    REQUIRE_NO_ERROR(cppNode);
+    REQUIRE((*cppNode)->nodePath == "rail_q_2");
+}

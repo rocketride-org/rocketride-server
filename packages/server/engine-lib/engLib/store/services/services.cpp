@@ -2018,11 +2018,20 @@ Error IServices::registerDefinition(json::Value serviceInfo,
     // A replacement keeps the factories in place, so it must ask for the same ones
     if (known) {
         const auto &kept = m_services[logicalType];
-        if (kept.physicalType != def.physicalType ||
+        // A C++ node's physical type is its logical type, as is a Python
+        // node's that names no "node", so the cpp flag is compared too
+        const bool keptIsCpp =
+            kept.serviceDefinition.lookup<iText>("node") == "cpp";
+        if (kept.physicalType != def.physicalType || keptIsCpp != isCppNode ||
             kept.serviceDefinition.lookup<iText>("register") != registerType)
             return APERR(Ec::InvalidParam,
                          "A replacement cannot change the kind of node in",
                          definitionPath);
+        // A new library is not remapped here: a process that mapped the old
+        // one keeps it, and the next run's process maps the new one
+        if (isCppNode && kept.nodePath != def.nodePath)
+            LOG(Services, "    Library       :", kept.nodePath, "->",
+                def.nodePath, "from the next process that loads it");
     }
 
     // Save it
