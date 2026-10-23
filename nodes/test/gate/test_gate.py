@@ -1,0 +1,363 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""Gate node: passes or blocks each item by response['decisions'] (spec §7)."""
+
+import importlib
+import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from rocketlib import AVI_ACTION, OPEN_MODE
+from rocketlib.decisions import record, record_decision
+
+from ai.common.decision import DecisionError, RuleConfigError, fingerprint, parse_rule
+
+NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
+# sys.path can hold a package with the same name as the node (see #1687).
+while str(NODES_SRC) in sys.path:
+    sys.path.remove(str(NODES_SRC))
+sys.path.insert(0, str(NODES_SRC))
+
+# The package re-exports the IInstance class under the module's name, so `import gate.IInstance as x` would bind the class.
+gate_instance = importlib.import_module('gate.IInstance')
+gate_global = importlib.import_module('gate.IGlobal')
+
+SPAM = {'is_spam': {'kind': 'yes_no'}}
+TOPIC = {'topic': {'kind': 'pick_one'}}
+
+
+class Blocked(Exception):
+    pass
+
+
+def _gate(conditions, match='all'):
+    inst = gate_instance.IInstance()
+    out = {'documents': []}
+    inst.instance = SimpleNamespace(currentObject=SimpleNamespace(response={}), writeDocuments=out['documents'].append)
+    inst.IGlobal = SimpleNamespace(rule=parse_rule({'match': match, 'conditions': conditions}))
+
+    def block():
+        raise Blocked()
+
+    inst.preventDefault = block
+    return inst, out
+
+
+def _spam(inst, answer):
+    record(
+        inst.instance.currentObject.response,
+        'so_1',
+        writer='decision_ollama',
+        questions=SPAM,
+        item={'lane': 'text', 'status': 'ok', 'answers': {'is_spam': {'answer': answer}}},
+    )
+
+
+def _doc(text, refs=None):
+    meta = SimpleNamespace(decision_refs=refs) if refs is not None else SimpleNamespace()
+    return SimpleNamespace(page_content=text, metadata=meta)
+
+
+NOT_SPAM = [{'question': 'is_spam', 'op': 'equals', 'value': 'no'}]
+
+
+def test_text_passes_when_the_rule_holds():
+    inst, _ = _gate(NOT_SPAM)
+    _spam(inst, 'no')
+    assert inst.writeText('hello') is None
+
+
+def test_text_is_blocked_when_the_rule_fails():
+    inst, _ = _gate(NOT_SPAM)
+    _spam(inst, 'yes')
+    with pytest.raises(Blocked):
+        inst.writeText('hello')
+
+
+def test_missing_decision_names_question_lane_and_fix():
+    inst, _ = _gate(NOT_SPAM)
+    with pytest.raises(DecisionError) as caught:
+        inst.writeText('hello')
+    message = str(caught.value)
+    assert '"is_spam"' in message and 'text lane' in message and 'downstream' in message
+
+
+@pytest.mark.parametrize('call', ['writeImage', 'writeAudio', 'writeVideo'])
+def test_missing_decision_on_a_media_lane_explains_the_text_only_writer(call):
+    inst, _ = _gate(NOT_SPAM)
+    lane = call.removeprefix('write').lower()
+    with pytest.raises(DecisionError) as caught:
+        getattr(inst, call)(AVI_ACTION.BEGIN, 'x/y', b'')
+    message = str(caught.value)
+    assert '"is_spam"' in message and f'{lane} lane' in message
+    assert f'before this {lane} item arrived' in message and 'text lanes only' in message
+
+
+def test_missing_decision_on_the_json_lane_names_question_lane_and_fix():
+    inst, _ = _gate(NOT_SPAM)
+    with pytest.raises(DecisionError) as caught:
+        inst.writeJson({'a': 1})
+    message = str(caught.value)
+    assert '"is_spam"' in message and 'json lane' in message and 'downstream' in message
+    assert 'text lanes only' not in message
+
+
+def test_documents_are_filtered_per_document():
+    inst, out = _gate([{'question': 'topic', 'op': 'equals', 'value': 'billing'}])
+    response = inst.instance.currentObject.response
+    for answer in ('billing', 'legal'):
+        record(
+            response,
+            'so_2',
+            writer='w',
+            questions=TOPIC,
+            item={
+                'lane': 'documents',
+                'status': 'ok',
+                'item': {'chunkId': 0},
+                'answers': {'topic': {'answer': answer}},
+            },
+        )
+    with pytest.raises(Blocked):
+        inst.writeDocuments([_doc('a', {'so_2': 0}), _doc('b', {'so_2': 1})])
+    assert [d.page_content for d in out['documents'][0]] == ['a']
+
+
+def test_documents_none_passing_forwards_nothing():
+    inst, out = _gate([{'question': 'topic', 'op': 'equals', 'value': 'billing'}])
+    record(
+        inst.instance.currentObject.response,
+        'so_2',
+        writer='w',
+        questions=TOPIC,
+        item={'lane': 'documents', 'status': 'ok', 'item': {'chunkId': 0}, 'answers': {'topic': {'answer': 'legal'}}},
+    )
+    with pytest.raises(Blocked):
+        inst.writeDocuments([_doc('a', {'so_2': 0})])
+    assert out['documents'] == []
+
+
+def test_too_long_item_is_blocked_whatever_the_rule_and_warned(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(gate_instance, 'warning', warnings.append)
+    inst, out = _gate([{'question': 'topic', 'op': 'not_equals', 'value': 'billing'}])
+    record(
+        inst.instance.currentObject.response,
+        'so_2',
+        writer='w',
+        questions=TOPIC,
+        item={'lane': 'documents', 'status': 'too_long', 'item': {'chunkId': 0}},
+    )
+    with pytest.raises(Blocked):
+        inst.writeDocuments([_doc('huge', {'so_2': 0})])
+    assert out['documents'] == []
+    assert 'too_long' in warnings[0]
+
+
+def test_too_long_first_question_does_not_hide_a_missing_second_decision(monkeypatch):
+    """Spec 7.2: every question is resolved before a NotDecided item may block."""
+    warnings = []
+    monkeypatch.setattr(gate_instance, 'warning', warnings.append)
+    inst, _ = _gate(
+        [
+            {'question': 'topic', 'op': 'not_equals', 'value': 'billing'},
+            {'question': 'is_spam', 'op': 'equals', 'value': 'no'},
+        ]
+    )
+    record(
+        inst.instance.currentObject.response,
+        'so_2',
+        writer='w',
+        questions=TOPIC,
+        item={'lane': 'documents', 'status': 'too_long', 'item': {'chunkId': 0}},
+    )
+    with pytest.raises(DecisionError) as caught:
+        inst.writeDocuments([_doc('huge', {'so_2': 0})])
+    assert '"is_spam"' in str(caught.value)
+    assert warnings == []
+
+
+def test_chunk_without_its_own_ref_uses_the_whole_object_decision():
+    inst, out = _gate(NOT_SPAM)
+    _spam(inst, 'no')
+    assert inst.writeDocuments([_doc('chunk')]) is None  # it passed, so the engine forwards the original list
+    assert out['documents'] == []
+
+
+def test_table_uses_its_fingerprint_then_object_level():
+    inst, _ = _gate([{'question': 'risky', 'op': 'equals', 'value': 'yes'}])
+    record(
+        inst.instance.currentObject.response,
+        'so_3',
+        writer='w',
+        questions={'risky': {'kind': 'yes_no'}},
+        item={
+            'lane': 'table',
+            'status': 'ok',
+            'item': {'table_index': 0, 'fingerprint': fingerprint('|t|')},
+            'answers': {'risky': {'answer': 'yes'}},
+        },
+    )
+    assert inst.writeTable('|t|') is None
+    with pytest.raises(DecisionError):
+        inst.writeTable('|other|')
+
+
+@pytest.mark.parametrize('lane', ['writeImage', 'writeAudio', 'writeVideo'])
+def test_media_checks_every_call_on_the_object_decision(lane):
+    inst, _ = _gate(NOT_SPAM)
+    _spam(inst, 'yes')
+    for action in (AVI_ACTION.BEGIN, AVI_ACTION.WRITE, AVI_ACTION.END):
+        with pytest.raises(Blocked):
+            getattr(inst, lane)(action, 'video/mp4', b'x')
+
+
+@pytest.mark.parametrize('lane', ['image', 'audio', 'video'])
+def test_media_uses_a_decision_recorded_on_its_own_lane_over_the_text_decision(lane):
+    """Any node can decide on media: a Gate on that lane reads the node's recordDecision(lane=...)."""
+    inst, _ = _gate(NOT_SPAM)
+    writer = SimpleNamespace(
+        instance=SimpleNamespace(currentObject=inst.instance.currentObject, pipeType={'id': 'vision_1'}),
+        IGlobal=SimpleNamespace(glb=SimpleNamespace(logicalType='vision')),
+    )
+    record_decision(writer, SPAM, {'is_spam': {'answer': 'yes'}}, lane='text')
+    record_decision(writer, SPAM, {'is_spam': {'answer': 'no'}}, lane=lane)
+    call = getattr(inst, f'write{lane.capitalize()}')
+    for action in (AVI_ACTION.BEGIN, AVI_ACTION.WRITE, AVI_ACTION.END):
+        assert call(action, 'x/y', b'x') is None
+    with pytest.raises(Blocked):
+        inst.writeText('hello')
+
+
+def test_questions_answers_and_json_use_object_level():
+    inst, _ = _gate(NOT_SPAM)
+    _spam(inst, 'no')
+    question = SimpleNamespace(questions=[SimpleNamespace(text='q?')])
+    answer = SimpleNamespace(getText=lambda: 'a')
+    assert inst.writeQuestions(question) is None
+    assert inst.writeAnswers(answer) is None
+    assert inst.writeJson({'k': 1}) is None
+
+
+def test_match_any():
+    inst, _ = _gate([*NOT_SPAM, {'question': 'is_spam', 'op': 'equals', 'value': 'yes'}], match='any')
+    _spam(inst, 'yes')
+    assert inst.writeText('x') is None
+
+
+def test_lifecycle_calls_always_continue():
+    inst, _ = _gate(NOT_SPAM)
+    inst.open(None)
+    inst.closing()
+    inst.close()
+
+
+SPAM_WITH_VALUES = {'is_spam': {'kind': 'yes_no', 'values': ['yes', 'no']}}
+
+
+def _spam_with_values(inst, answer=None, status='ok'):
+    item = {'lane': 'text', 'status': status}
+    if status == 'ok':
+        item['answers'] = {'is_spam': {'answer': answer}}
+    record(
+        inst.instance.currentObject.response,
+        'so_1',
+        writer='decision_ollama',
+        questions=SPAM_WITH_VALUES,
+        item=item,
+    )
+
+
+def test_value_typo_is_a_loud_error():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}])
+    _spam_with_values(inst, 'yes')
+    with pytest.raises(DecisionError) as caught:
+        inst.writeText('hello')
+    assert 'is not an answer "is_spam" can have (so_1 answers: yes, no)' in str(caught.value)
+
+
+def test_value_typo_errors_even_when_the_item_was_not_decided():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}])
+    _spam_with_values(inst, status='too_long')
+    with pytest.raises(DecisionError, match='is not an answer'):
+        inst.writeText('hello')
+
+
+def test_valid_values_still_route():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'no'}])
+    _spam_with_values(inst, 'no')
+    assert inst.writeText('hello') is None
+
+
+def test_writer_without_values_is_not_checked():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}])
+    _spam(inst, 'yes')  # header has no values
+    with pytest.raises(Blocked):
+        inst.writeText('hello')
+
+
+def test_value_typo_raises_on_every_item_not_just_the_first():
+    inst, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'Yes'}])
+    _spam_with_values(inst, 'yes')
+    for _ in range(2):
+        with pytest.raises(DecisionError, match='is not an answer'):
+            inst.writeText('hello')
+
+
+def test_a_passed_value_check_is_remembered_per_instance_only():
+    first, _ = _gate([{'question': 'is_spam', 'op': 'equals', 'value': 'no'}])
+    _spam_with_values(first, 'no')
+    first.writeText('a')
+    assert first._values_checked == {(0, 'so_1')}
+    assert gate_instance.IInstance._values_checked == frozenset()
+
+
+def _global(monkeypatch, open_mode):
+    """A Gate IGlobal configured with the default profile from services.json."""
+    preconfig = json.loads((NODES_SRC / 'gate' / 'services.json').read_text(encoding='utf-8'))['preconfig']
+    config = preconfig['profiles'][preconfig['default']]
+    warnings = []
+    monkeypatch.setattr(gate_global, 'Config', SimpleNamespace(getNodeConfig=lambda *_a: config))
+    monkeypatch.setattr(gate_global, 'warning', warnings.append)
+    glb = gate_global.IGlobal()
+    glb.glb = SimpleNamespace(logicalType='gate', connConfig={})
+    glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=open_mode))
+    return glb, warnings
+
+
+def test_the_default_config_warns_in_validate_and_fails_at_start(monkeypatch):
+    glb, warnings = _global(monkeypatch, OPEN_MODE.PIPELINE)
+    glb.validateConfig()
+    assert len(warnings) == 1 and 'at least one condition' in warnings[0]
+    with pytest.raises(RuleConfigError, match='at least one condition'):
+        glb.beginGlobal()
+
+
+def test_begin_global_skips_the_rule_in_config_mode(monkeypatch):
+    glb, _ = _global(monkeypatch, OPEN_MODE.CONFIG)
+    glb.beginGlobal()
+    assert glb.rule is None
