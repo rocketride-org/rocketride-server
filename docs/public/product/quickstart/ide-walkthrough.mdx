@@ -9,8 +9,19 @@ import { LuPlay } from 'react-icons/lu';
 # Build a pipeline in your IDE
 
 The visual canvas in the VS Code extension is the fastest way to author a `.pipe` file.
-This walkthrough starts from zero and finishes with a running `Chat → LLM` pipeline you
+This walkthrough starts from zero and finishes with a running `Chat → LLM → Return Answers` pipeline you
 can talk to.
+
+<div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', marginBottom: '1.5rem' }}>
+	<iframe
+		src="https://www.youtube-nocookie.com/embed/bpoNvb8oOxY"
+		title="RocketRide Quickstart: Build & Deploy Your First AI Pipeline"
+		style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
+		allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+		allowFullScreen
+		loading="lazy"
+	/>
+</div>
 
 ## 1. Install the extension
 
@@ -39,10 +50,21 @@ Every pipeline starts with a **source node**:
 
 1. Add a **Chat** source node: an interactive conversational interface.
 2. Add an **LLM** node: pick a provider (OpenAI, Anthropic, Google, …) and set your API key.
-3. Connect the Chat source's output lane to the LLM's input lane.
+3. Add a **Return Answers** node.
+4. Connect Chat → LLM → Return Answers: the Chat source's **Questions** output lane to the
+   LLM's **Questions** input, then the LLM's **Answers** output lane to **Return Answers**.
 
-The result is a `Chat → LLM` pipeline; the LLM's response routes back to the chat interface
-automatically.
+The result is a `Chat → LLM → Return Answers` pipeline. The Return Answers node sends the
+LLM's response back to the chat interface. Without it the pipeline still runs, but the chat
+replies "I don't see any answers in there..." instead of showing the LLM's response.
+
+:::tip Compare with a working pipeline
+[`quickstart-chat.pipe`](https://github.com/rocketride-org/rocketride-server/blob/develop/examples/quickstart-chat.pipe)
+is the finished `Chat → LLM → Return Answers` pipeline, using OpenAI. Save it into your
+workspace and open it to see the expected wiring, or run it directly: add
+`ROCKETRIDE_OPENAI_KEY=<your key>` to your workspace `.env`, or paste your key into the
+OpenAI node's settings.
+:::
 
 ## 5. Run it
 

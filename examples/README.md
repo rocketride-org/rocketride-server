@@ -4,6 +4,21 @@ Ready-to-use `.pipe` templates for common AI workflows. Open any template in the
 
 ## Templates
 
+### quickstart-chat.pipe
+
+**The simplest working chat pipeline**, the finished result of the [IDE walkthrough](https://docs.rocketride.org/quickstart/ide-walkthrough).
+
+```
+chat -> LLM (OpenAI) -> Return Answers
+```
+
+- Sends each chat message to OpenAI GPT-5.2
+- The Return Answers node sends the LLM's response back to the chat interface; without it the chat shows no answer
+
+**Required env vars:** `ROCKETRIDE_OPENAI_KEY`
+
+---
+
 ### rag-pipeline.pipe
 
 **Full RAG (Retrieval-Augmented Generation) system** with separate ingestion and query flows.
