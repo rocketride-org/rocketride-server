@@ -53,3 +53,32 @@ def test_load_image_from_bytes_survives_source_buffer_close():
 def test_load_image_from_bytes_empty_raises():
     with pytest.raises(ValueError):
         ImageProcessor.load_image_from_bytes(b'')
+
+
+def test_load_image_from_bytes_transposes_exif_orientation():
+    # Portrait photo saved with landscape sensor pixels (width=20, height=10) + Orientation 6.
+    src = io.BytesIO()
+    img = Image.new('RGB', (20, 10), (10, 20, 30))
+    exif = img.getexif()
+    exif[0x0112] = 6  # Rotate 90 CW
+    img.save(src, format='JPEG', exif=exif)
+
+    loaded = ImageProcessor.load_image_from_bytes(src.getvalue())
+    assert loaded is not None
+    # Must be transposed to upright dimensions (10, 20)
+    assert loaded.size == (10, 20)
+
+
+def test_load_image_from_bytes_decodes_heif():
+    pytest.importorskip('pillow_heif', reason='pillow-heif not installed')
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+
+    src = io.BytesIO()
+    img = Image.new('RGB', (16, 8), (10, 20, 30))
+    img.save(src, format='HEIF')
+
+    loaded = ImageProcessor.load_image_from_bytes(src.getvalue())
+    assert loaded is not None
+    assert loaded.size == (16, 8)

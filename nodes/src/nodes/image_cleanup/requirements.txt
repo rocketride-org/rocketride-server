@@ -1,2 +1,3 @@
 # opencv is handled by ai.common.opencv module
 pillow
+pillow-heif
