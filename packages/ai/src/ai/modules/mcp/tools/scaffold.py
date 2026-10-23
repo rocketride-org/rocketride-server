@@ -47,7 +47,6 @@ _SERVICES_JSON = """{{
 \t"register": "filter",
 \t"node": "python",
 \t"path": "local_nodes.{name}",
-\t"prefix": "{name}",
 \t"description": ["TODO: describe what this node does."],
 \t"documentation": "https://docs.rocketride.org",
 \t"lanes": {{

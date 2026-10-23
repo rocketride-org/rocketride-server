@@ -14,34 +14,12 @@ from ai.modules.mcp.tools import introspection
 from ai.modules.mcp.tools import register_all
 
 
-# A small, self-contained catalog -- must not depend on the shipped
-# credentials.json's 55 real nodes/83 fields.
-_CATALOG_RAW = {
-    'store_qdrant': {
-        'title': 'Qdrant',
-        'docs': 'https://qdrant.tech/documentation/',
-        'fields': [
-            {
-                'path': 'qdrant.url',
-                'title': 'Cluster URL',
-                'kind': 'endpoint',
-                'required': True,
-                'suggests': 'ROCKETRIDE_QDRANT_URL',
-            },
-            {
-                'path': 'qdrant.apikey',
-                'title': 'API key',
-                'kind': 'secret',
-                'required': True,
-                'suggests': 'ROCKETRIDE_QDRANT_APIKEY',
-            },
-        ],
-    },
-}
-
-
-def _fake_catalog():
-    return credentials_mod.catalog_from_dict(_CATALOG_RAW)
+# A credentialed node declares its variables on the properties themselves, so
+# the readiness catalog comes straight out of these definitions.
+_QDRANT_PROPERTIES = [
+    {'name': 'url', 'title': 'Cluster URL', 'type': 'string', 'env': 'ROCKETRIDE_QDRANT_URL'},
+    {'name': 'apikey', 'title': 'API key', 'type': 'string', 'secret': True, 'env': 'ROCKETRIDE_QDRANT_APIKEY'},
+]
 
 
 def _services_with_catalog_node():
@@ -58,6 +36,8 @@ def _services_with_catalog_node():
                 'protocol': 'qdrant',
                 'classType': ['store'],
                 'description': 'Vector store',
+                'documentation': 'https://qdrant.tech/documentation/',
+                'properties': _QDRANT_PROPERTIES,
             },
         },
         'version': 'x',
@@ -120,7 +100,6 @@ async def test_list_components_skips_env_call_when_no_catalog_overlap(fake_engin
     """Default fixture services ('ocr', 'anthropic') don't collide with any
     catalog entry -- the extra get_environment_keys round trip must not fire.
     """
-    monkeypatch.setattr(introspection.credentials_mod, 'load_catalog', _fake_catalog)
     registry = ToolRegistry()
     introspection.register(registry)
 
@@ -136,7 +115,6 @@ async def test_list_components_skips_env_call_when_no_catalog_overlap(fake_engin
 async def test_list_components_configured_catalog_node_carries_wiring(monkeypatch):
     from .conftest import FakeEngineClient
 
-    monkeypatch.setattr(introspection.credentials_mod, 'load_catalog', _fake_catalog)
     engine = FakeEngineClient(
         services=_services_with_catalog_node(),
         env_keys=['ROCKETRIDE_QDRANT_URL', 'ROCKETRIDE_QDRANT_APIKEY'],
@@ -151,8 +129,8 @@ async def test_list_components_configured_catalog_node_carries_wiring(monkeypatc
     assert engine.get_environment_keys_calls == 1
     by_name = {c['name']: c for c in result['components']}
     assert by_name['store_qdrant']['wiring'] == {
-        'qdrant.url': '${ROCKETRIDE_QDRANT_URL}',
-        'qdrant.apikey': '${ROCKETRIDE_QDRANT_APIKEY}',
+        'url': '${ROCKETRIDE_QDRANT_URL}',
+        'apikey': '${ROCKETRIDE_QDRANT_APIKEY}',
     }
     # Zero-config entry stays unchanged -- no `wiring` key at all.
     assert 'wiring' not in by_name['ocr']
@@ -162,7 +140,6 @@ async def test_list_components_configured_catalog_node_carries_wiring(monkeypatc
 async def test_list_components_unconfigured_catalog_node_omitted_with_note(monkeypatch):
     from .conftest import FakeEngineClient
 
-    monkeypatch.setattr(introspection.credentials_mod, 'load_catalog', _fake_catalog)
     engine = FakeEngineClient(
         services=_services_with_catalog_node(),
         env_keys=[],  # nothing set -> 'available', not 'configured'
@@ -187,7 +164,6 @@ async def test_list_components_env_read_error_omits_catalog_node_not_zero_config
     """
     from .conftest import FakeEngineClient
 
-    monkeypatch.setattr(introspection.credentials_mod, 'load_catalog', _fake_catalog)
     engine = FakeEngineClient(
         services=_services_with_catalog_node(),
         env_keys=RuntimeError('scope denied'),
@@ -247,7 +223,6 @@ async def test_describe_component_unknown_name_returns_bad(fake_engine):
 
 @pytest.mark.asyncio
 async def test_describe_component_zero_config_node_has_no_credentials_key(fake_engine, monkeypatch):
-    monkeypatch.setattr(introspection.credentials_mod, 'load_catalog', _fake_catalog)
     registry = ToolRegistry()
     introspection.register(registry)
 
@@ -262,7 +237,6 @@ async def test_describe_component_zero_config_node_has_no_credentials_key(fake_e
 async def test_describe_component_configured_catalog_node_has_credentials_with_wiring(monkeypatch):
     from .conftest import FakeEngineClient
 
-    monkeypatch.setattr(introspection.credentials_mod, 'load_catalog', _fake_catalog)
     engine = FakeEngineClient(
         services=_services_with_catalog_node(),
         env_keys=['ROCKETRIDE_QDRANT_URL', 'ROCKETRIDE_QDRANT_APIKEY'],
@@ -278,8 +252,8 @@ async def test_describe_component_configured_catalog_node_has_credentials_with_w
         'missing': [],
         'candidates': [],
         'wiring': {
-            'qdrant.url': '${ROCKETRIDE_QDRANT_URL}',
-            'qdrant.apikey': '${ROCKETRIDE_QDRANT_APIKEY}',
+            'url': '${ROCKETRIDE_QDRANT_URL}',
+            'apikey': '${ROCKETRIDE_QDRANT_APIKEY}',
         },
     }
     assert 'setup' not in result['credentials']
@@ -289,7 +263,6 @@ async def test_describe_component_configured_catalog_node_has_credentials_with_w
 async def test_describe_component_available_catalog_node_has_credentials_with_setup(monkeypatch):
     from .conftest import FakeEngineClient
 
-    monkeypatch.setattr(introspection.credentials_mod, 'load_catalog', _fake_catalog)
     engine = FakeEngineClient(
         services=_services_with_catalog_node(),
         env_keys=[],  # nothing set, no candidates -> 'available'

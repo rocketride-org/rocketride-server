@@ -12,49 +12,9 @@ from ai.modules.mcp.tools import register_all
 
 from .conftest import FakeEngineClient
 
-# A small, self-contained catalog -- must not depend on the shipped
-# credentials.json's 55 real nodes/83 fields.
-_CATALOG_RAW = {
-    'store_qdrant': {
-        'title': 'Qdrant',
-        'docs': 'https://qdrant.tech/documentation/',
-        'fields': [
-            {
-                'path': 'qdrant.url',
-                'title': 'Cluster URL',
-                'kind': 'endpoint',
-                'required': True,
-                'suggests': 'ROCKETRIDE_QDRANT_URL',
-            },
-            {
-                'path': 'qdrant.apikey',
-                'title': 'API key',
-                'kind': 'secret',
-                'required': True,
-                'suggests': 'ROCKETRIDE_QDRANT_APIKEY',
-            },
-        ],
-    },
-    'store_pinecone': {
-        'title': 'Pinecone',
-        'docs': 'https://docs.pinecone.io/',
-        'fields': [
-            {
-                'path': 'pinecone.apikey',
-                'title': 'API key',
-                'kind': 'secret',
-                'required': True,
-                'suggests': 'ROCKETRIDE_PINECONE_APIKEY',
-            },
-        ],
-    },
-}
 
-
-def _fake_catalog():
-    return credentials_mod.catalog_from_dict(_CATALOG_RAW)
-
-
+# Credentials are declared on the properties themselves, so these definitions
+# are the whole input: a node with no `env` property is not an integration.
 def _services_with_catalog_nodes():
     return {
         'services': {
@@ -63,16 +23,42 @@ def _services_with_catalog_nodes():
                 'protocol': 'ocr',
                 'classType': ['source'],
                 'description': 'Optical character recognition component',
+                # No `env` anywhere -- must never appear as an integration.
+                'properties': [{'name': 'language', 'type': 'string'}],
             },
             'store_qdrant': {
                 'title': 'Qdrant',
                 'protocol': 'qdrant',
                 'classType': ['store'],
                 'description': 'Vector store',
+                'documentation': 'https://qdrant.tech/documentation/',
+                'properties': [
+                    {'name': 'url', 'title': 'Cluster URL', 'type': 'string', 'env': 'ROCKETRIDE_QDRANT_URL'},
+                    {
+                        'name': 'apikey',
+                        'title': 'API key',
+                        'type': 'string',
+                        'secret': True,
+                        'env': 'ROCKETRIDE_QDRANT_APIKEY',
+                    },
+                ],
             },
-            # store_pinecone deliberately absent from this engine's
-            # get_services() -- proves the bare list intersects, not just
-            # dumps the whole catalog.
+            'store_pinecone': {
+                'title': 'Pinecone',
+                'protocol': 'pinecone',
+                'classType': ['store'],
+                'description': 'Vector store',
+                'documentation': 'https://docs.pinecone.io/',
+                'properties': [
+                    {
+                        'name': 'apikey',
+                        'title': 'API key',
+                        'type': 'string',
+                        'secret': True,
+                        'env': 'ROCKETRIDE_PINECONE_APIKEY',
+                    },
+                ],
+            },
         },
         'version': 'x',
     }
@@ -114,8 +100,7 @@ def test_list_integrations_description_mentions_setup_and_variable_relay():
 
 
 @pytest.mark.asyncio
-async def test_list_integrations_bare_intersects_engine_and_sorts(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
+async def test_list_integrations_bare_lists_only_credentialed_nodes(monkeypatch):
     engine = FakeEngineClient(
         services=_services_with_catalog_nodes(),
         env_keys=['ROCKETRIDE_QDRANT_URL', 'ROCKETRIDE_QDRANT_APIKEY'],
@@ -127,22 +112,36 @@ async def test_list_integrations_bare_intersects_engine_and_sorts(monkeypatch):
 
     assert result['ok'] is True
     assert 'note' in result
-    # store_pinecone is in the catalog but not in this engine's services --
-    # must be excluded from the bare list entirely.
+    # 'ocr' declares no `env` property, so it needs no setup and must not be
+    # listed as an integration at all.
     names = [row['name'] for row in result['integrations']]
-    assert names == ['store_qdrant']
-    assert result['integrations'] == [
-        {'name': 'store_qdrant', 'title': 'Qdrant', 'status': 'configured', 'missing_count': 0}
-    ]
+    assert names == ['store_pinecone', 'store_qdrant']
+    by_name = {row['name']: row for row in result['integrations']}
+    assert by_name['store_qdrant'] == {
+        'name': 'store_qdrant',
+        'title': 'Qdrant',
+        'status': 'configured',
+        'missing_count': 0,
+    }
+    assert by_name['store_pinecone']['status'] == 'available'
 
 
 @pytest.mark.asyncio
 async def test_list_integrations_bare_sorted_by_name(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
     services = {
         'services': {
-            'store_qdrant': {'title': 'Qdrant', 'protocol': 'qdrant', 'classType': ['store']},
-            'store_pinecone': {'title': 'Pinecone', 'protocol': 'pinecone', 'classType': ['store']},
+            'store_qdrant': {
+                'title': 'Qdrant',
+                'protocol': 'qdrant',
+                'classType': ['store'],
+                'properties': [{'name': 'apikey', 'secret': True, 'env': 'ROCKETRIDE_QDRANT_APIKEY'}],
+            },
+            'store_pinecone': {
+                'title': 'Pinecone',
+                'protocol': 'pinecone',
+                'classType': ['store'],
+                'properties': [{'name': 'apikey', 'secret': True, 'env': 'ROCKETRIDE_PINECONE_APIKEY'}],
+            },
         },
         'version': 'x',
     }
@@ -159,7 +158,6 @@ async def test_list_integrations_bare_sorted_by_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_integrations_bare_skips_env_call_when_no_catalog_overlap(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
     # Default fixture services ('ocr', 'anthropic') don't collide with the
     # fake catalog -- the extra get_environment_keys round trip must not fire.
     engine = FakeEngineClient()
@@ -175,7 +173,6 @@ async def test_list_integrations_bare_skips_env_call_when_no_catalog_overlap(mon
 
 @pytest.mark.asyncio
 async def test_list_integrations_bare_env_error_marks_every_row_unconfirmed(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
     engine = FakeEngineClient(
         services=_services_with_catalog_nodes(),
         env_keys=RuntimeError('scope denied'),
@@ -186,8 +183,8 @@ async def test_list_integrations_bare_env_error_marks_every_row_unconfirmed(monk
     result = await registry.handler('list_integrations')(engine, None, {})
 
     assert result['ok'] is True
-    assert len(result['integrations']) == 1
-    assert result['integrations'][0]['status'] == 'unconfirmed'
+    assert len(result['integrations']) == 2
+    assert {row['status'] for row in result['integrations']} == {'unconfirmed'}
 
 
 # --- name detail --------------------------------------------------------------
@@ -195,8 +192,9 @@ async def test_list_integrations_bare_env_error_marks_every_row_unconfirmed(monk
 
 @pytest.mark.asyncio
 async def test_list_integrations_detail_configured_has_wiring_no_setup(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
-    engine = FakeEngineClient(env_keys=['ROCKETRIDE_QDRANT_URL', 'ROCKETRIDE_QDRANT_APIKEY'])
+    engine = FakeEngineClient(
+        services=_services_with_catalog_nodes(), env_keys=['ROCKETRIDE_QDRANT_URL', 'ROCKETRIDE_QDRANT_APIKEY']
+    )
     registry = ToolRegistry()
     integrations.register(registry)
 
@@ -210,20 +208,20 @@ async def test_list_integrations_detail_configured_has_wiring_no_setup(monkeypat
     assert result['candidates'] == []
     assert result['caller_variables'] == ['ROCKETRIDE_QDRANT_URL', 'ROCKETRIDE_QDRANT_APIKEY']
     assert result['wiring'] == {
-        'qdrant.url': '${ROCKETRIDE_QDRANT_URL}',
-        'qdrant.apikey': '${ROCKETRIDE_QDRANT_APIKEY}',
+        'url': '${ROCKETRIDE_QDRANT_URL}',
+        'apikey': '${ROCKETRIDE_QDRANT_APIKEY}',
     }
     assert 'setup' not in result
     assert result['fields'] == [
         {
-            'path': 'qdrant.url',
+            'path': 'url',
             'title': 'Cluster URL',
-            'kind': 'endpoint',
+            'kind': 'text',
             'required': True,
             'suggests': 'ROCKETRIDE_QDRANT_URL',
         },
         {
-            'path': 'qdrant.apikey',
+            'path': 'apikey',
             'title': 'API key',
             'kind': 'secret',
             'required': True,
@@ -234,8 +232,9 @@ async def test_list_integrations_detail_configured_has_wiring_no_setup(monkeypat
 
 @pytest.mark.asyncio
 async def test_list_integrations_detail_available_has_setup_block(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
-    engine = FakeEngineClient(env_keys=[])  # nothing set, no candidates -> 'available'
+    engine = FakeEngineClient(
+        services=_services_with_catalog_nodes(), env_keys=[]
+    )  # nothing set, no candidates -> 'available'
     registry = ToolRegistry()
     integrations.register(registry)
 
@@ -256,10 +255,9 @@ async def test_list_integrations_detail_available_has_setup_block(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_integrations_detail_unconfirmed_has_candidates_and_caller_variables(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
     # A near-miss variable name (token match on QDRANT) but not the exact
     # suggested name -> 'unconfirmed' with a surfaced candidate.
-    engine = FakeEngineClient(env_keys=['MY_QDRANT_KEY'])
+    engine = FakeEngineClient(services=_services_with_catalog_nodes(), env_keys=['MY_QDRANT_KEY'])
     registry = ToolRegistry()
     integrations.register(registry)
 
@@ -275,8 +273,7 @@ async def test_list_integrations_detail_unconfirmed_has_candidates_and_caller_va
 
 @pytest.mark.asyncio
 async def test_list_integrations_detail_env_error_is_unconfirmed_with_empty_caller_variables(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
-    engine = FakeEngineClient(env_keys=RuntimeError('scope denied'))
+    engine = FakeEngineClient(services=_services_with_catalog_nodes(), env_keys=RuntimeError('scope denied'))
     registry = ToolRegistry()
     integrations.register(registry)
 
@@ -291,7 +288,6 @@ async def test_list_integrations_detail_env_error_is_unconfirmed_with_empty_call
 
 @pytest.mark.asyncio
 async def test_list_integrations_unknown_name_is_bad_request(monkeypatch):
-    monkeypatch.setattr(integrations.credentials_mod, 'load_catalog', _fake_catalog)
     engine = FakeEngineClient()
     registry = ToolRegistry()
     integrations.register(registry)
