@@ -180,7 +180,11 @@ The anomaly_detector node is the worked example. It declares its questions once 
 ```python
 QUESTIONS = {
     'is_anomalous': {'kind': 'yes_no', 'values': ['yes', 'no']},
-    'severity': {'kind': 'rubric', 'levels': ['normal', 'warning', 'critical'], 'values': ['normal', 'warning', 'critical']},
+    'severity': {
+        'kind': 'rubric',
+        'levels': ['normal', 'warning', 'critical'],
+        'values': ['normal', 'warning', 'critical'],
+    },
     'score': {'kind': 'number'},
 }
 
