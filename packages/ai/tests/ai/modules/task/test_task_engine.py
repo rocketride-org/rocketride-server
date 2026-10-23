@@ -1333,6 +1333,80 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
     t._terminated.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_an_isolated_task_does_not_share_the_host(monkeypatch):
+    """A hosted engine's container or pod task is hosted but does not share
+    the engine's host: the container is the boundary, so the runtime is told
+    so and the pre-launch check keeps stdio MCP allowed.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(engine, 'pipeline_opens_store', lambda *a: False)
+    checked = []
+    monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    t.source = 'src'
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
+    with pytest.raises(Launched):
+        await TaskEngine.start_task(t)
+
+    spec = t._launcher.start.call_args.args[0]
+    assert (spec.hosted, spec.shared_host) == (True, False)
+    assert checked == [False]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('opens', [True, False])
+async def test_an_isolated_task_is_told_whether_it_opens_the_store(monkeypatch, opens):
+    """A container or pod task is told whether its pipeline opens the store,
+    and the task's storage anchor when it does: the runtime gives it that
+    subtree of the store or refuses the pipeline. The store node counts when
+    only EaaS serves it, as before the engine's first restart after it came.
+    """
+    import rocketlib
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: None)
+    store = {'path': 'nodes.tool_filesystem'} if opens else None
+    monkeypatch.setattr(engine.node_store, 'served', lambda provider: store if provider == 'filestore' else None)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'filestore'}]})
+    t.source = 'src'
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
+    with pytest.raises(Launched):
+        await TaskEngine.start_task(t)
+
+    spec = t._launcher.start.call_args.args[0]
+    assert (spec.uses_store, spec.storage_root) == ((True, 'users/client-env-test/files') if opens else (False, ''))
+
+
 # ---------------------------------------------------------------------------
 # filter_subprocess_env — the child inherits an allowlist, never the whole env
 # ---------------------------------------------------------------------------
