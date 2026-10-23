@@ -72,6 +72,9 @@ class version:
 class _Cudnn:
     @staticmethod
     def version():
+        if os.environ.get("PROBE_CUDNN_MISMATCH"):
+            # What torch raises when the cuDNN found at runtime is older than the one it was built against.
+            raise RuntimeError("cuDNN version incompatibility")
         return 91002
 
 
@@ -118,6 +121,8 @@ def download_model(name, *_args, **kwargs):
         raise FileNotFoundError(f"{name} is not in the local cache")
     if cached == "error":
         raise PermissionError("cache directory is not readable")
+    if cached == "type":
+        raise TypeError("expected str, bytes or os.PathLike object, not int")
     if os.environ.get("PROBE_TINY_DIR"):
         return os.environ["PROBE_TINY_DIR"]  # a real snapshot directory, complete or not
     # The fake cache root is a marker the tests assert literally; it is never touched
@@ -207,13 +212,25 @@ def test_probe_script_skips_inference_when_the_weights_are_not_local(stub_stack)
     assert 'probe model' not in result.stdout  # no model was loaded
 
 
-def test_probe_script_fails_when_the_cache_cannot_be_read(stub_stack):
-    """Only missing weights skip the stage; any other error resolving them is a probe failure."""
-    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_CACHED': 'error'})
+@pytest.mark.parametrize(
+    'cached, error',
+    [
+        ('error', 'PermissionError: cache directory is not readable'),  # a download_root the engine user cannot read
+        ('type', 'TypeError: expected str'),  # a non-string value in loader_options
+    ],
+)
+def test_probe_script_skips_inference_when_the_cache_cannot_be_read(stub_stack, cached, error):
+    """A cache this caller cannot use says nothing about the GPU stack: the stage is skipped and the error named."""
+    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_CACHED': cached})
 
-    assert result.returncode != 0
-    assert _probe_lines(result)[-1] == 'probe: storage view ok'
-    assert 'cache directory is not readable' in result.stderr
+    assert result.returncode == 0, result.stderr
+    lines = _probe_lines(result)
+    assert lines[-1] == 'probe: ok'
+    skipped = [
+        line for line in lines if line.startswith('probe: inference skipped: tiny weights could not be looked up')
+    ]
+    assert len(skipped) == 1 and error in skipped[0]
+    assert 'probe model' not in result.stdout  # no model was loaded
 
 
 def test_probe_script_treats_an_incomplete_snapshot_as_not_cached(stub_stack, tmp_path):
@@ -275,6 +292,16 @@ def test_probe_script_version_guard_boundaries(stub_stack, ct2, cuda, passes):
     assert (result.returncode == 0) is passes, result.stdout + result.stderr
     if not passes:
         assert _probe_lines(result)[-1].startswith('probe: guard')
+
+
+def test_probe_script_survives_a_cudnn_version_error(stub_stack):
+    """A diagnostic line must not decide the verdict: CTranslate2 loads cuDNN on its own and the inference stage tests it."""
+    result = _run_probe_child(stub_stack, env={'PROBE_CUDNN_MISMATCH': '1'})
+
+    assert result.returncode == 0, result.stderr
+    lines = _probe_lines(result)
+    assert lines[0].endswith('cudnn RuntimeError')
+    assert lines[-1] == 'probe: ok'
 
 
 def test_probe_script_fails_when_the_model_cannot_load(stub_stack):
@@ -712,6 +739,37 @@ def test_the_fetch_child_uses_the_os_trust_store_when_it_can(monkeypatch, fresh_
     assert ('trust store injected' in result.stdout) is (truststore == 'present')
 
 
+# U+2501 (a progress bar) is E2 94 81 in UTF-8; a lone 0x81 is defined neither in cp1252 nor in UTF-8.
+_NOT_TEXT_CHILD = (
+    'import sys\n'
+    'sys.stderr.buffer.write(b"\\xe2\\x94\\x81 \\x81\\n")\n'
+    'sys.stderr.buffer.flush()\n'
+    'sys.stdout.buffer.write(b"\\x81\\n")\n'
+    'sys.stdout.buffer.flush()\n'
+    'print("probe: ok", flush=True)\n'
+    'sys.exit(1 if sys.argv[1:] else 0)\n'
+)
+
+
+def test_child_output_that_is_not_text_does_not_fail_the_load(monkeypatch, fresh_probe, caplog):
+    """Native code in the children writes raw bytes; both are read as UTF-8 with replacement, not the locale codec."""
+    _local_lookup(monkeypatch, None)  # not cached: the fetch child runs as well
+    real_popen = subprocess.Popen
+
+    def _not_text(args, **kwargs):
+        # Both children keep the parent's own pipes and decoding; only the script is swapped.
+        # The fetch child (it gets the model and cache arguments) exits 1, so its stderr is logged.
+        return real_popen([sys.executable, '-c', _NOT_TEXT_CHILD, *args[3:]], **kwargs)
+
+    monkeypatch.setattr(subprocess, 'Popen', _not_text)
+
+    with caplog.at_level(logging.WARNING, logger='rocketlib.models.whisper'):
+        assert WhisperLoader._check_gpu_compatible() is True
+
+    assert WhisperLoader._gpu_probe_reason is None
+    assert any('\ufffd' in record.getMessage() for record in caplog.records)  # the fetch child's stderr, replaced
+
+
 def test_first_candidate_gpu_skips_excluded_devices():
     torch = types.SimpleNamespace(cuda=types.SimpleNamespace(device_count=lambda: 3))  # no memory query
 
@@ -810,6 +868,20 @@ def test_server_mode_probes_a_gpu_the_allocator_may_hand_out(model_stack, monkey
     WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (1, 'cuda:1'), exclude_gpus=[0])
 
     assert calls[0]['device_index'] == 1
+
+
+def test_a_cached_verdict_does_not_pick_a_probe_gpu_again(model_stack, monkeypatch):
+    """Choosing the probe GPU opens a CUDA context on every candidate; once the verdict is cached the index is unused."""
+    _probe_says(monkeypatch, True)
+    picks = []
+    monkeypatch.setattr(
+        WhisperLoader, '_first_candidate_gpu', staticmethod(lambda exclude, torch: picks.append(1) or 0)
+    )
+
+    WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (0, 'cuda:0'))
+    WhisperLoader.load('tiny', allocate_gpu=lambda mem, ex: (0, 'cuda:0'))
+
+    assert len(picks) == 1
 
 
 def test_local_mode_without_a_device_falls_back_and_says_why(model_stack, monkeypatch, caplog):

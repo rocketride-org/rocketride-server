@@ -61,7 +61,7 @@ the node checks, in a separate process, that GPU transcription really works:
 it transcribes one second of audio with the `tiny` model when those weights
 are present (fetching them first if it can, waiting at most 30 seconds and
 retrying the download once, on the next load, if that was not enough; without
-them, or when the GPU has no memory left for
+them, when the cache cannot be read, or when the GPU has no memory left for
 `tiny`, the check rests on handing a CUDA tensor to CTranslate2, a lighter
 check that can still fail). If the check fails, the node logs an error naming the cause,
 reports the reason as `device_fallback` in the model metadata, and runs on the

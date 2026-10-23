@@ -81,9 +81,12 @@ def _gpu_probe_script(
     what the probe checked before #2498, so a host without the weights keeps
     its GPU. A snapshot without ``model.bin`` (an interrupted download: the hub
     cache lists a snapshot before its files have all arrived) counts as not
-    cached. Any other error while resolving the weights fails the probe. The
-    loader always probes with the default model today; ``model_name`` is there
-    for a caller that wants to probe a specific one.
+    cached. Any other error while resolving the weights (a ``download_root``
+    the engine user cannot read) skips the stage as well and names the error:
+    the verdict is shared by every load in the process, and a cache one caller
+    cannot use says nothing about the GPU stack. The loader always probes with
+    the default model today; ``model_name`` is there for a caller that wants to
+    probe a specific one.
 
     Returns:
         Python source for ``python -c``.
@@ -92,8 +95,12 @@ def _gpu_probe_script(
         'import sys\n'
         'import torch\n'
         'import ctranslate2\n'
+        'try:\n'
+        '    cudnn = torch.backends.cudnn.version()\n'
+        'except RuntimeError as exc:\n'
+        '    cudnn = type(exc).__name__\n'
         'print("probe: versions ctranslate2", ctranslate2.__version__, "torch", torch.__version__,\n'
-        '      "cuda", torch.version.cuda or "", "cudnn", torch.backends.cudnn.version(), flush=True)\n'
+        '      "cuda", torch.version.cuda or "", "cudnn", cudnn, flush=True)\n'
         f'index = {int(device_index)!r}\n'
         '# A set (pybind unordered_set), queried for the device being probed.\n'
         'v = set(ctranslate2.get_supported_compute_types("cuda", device_index=index))\n'
@@ -117,10 +124,15 @@ def _gpu_probe_script(
         '    path = name if os.path.isdir(name) else download_model(name, cache_dir=root, local_files_only=True)\n'
         '    if os.path.isdir(path) and not os.path.isfile(os.path.join(path, "model.bin")):\n'
         '        raise FileNotFoundError("model.bin is missing from " + path)\n'
-        '# Only "not cached" skips the stage (huggingface_hub raises a FileNotFoundError\n'
-        '# subclass; an unresolvable name is a ValueError). Anything else fails the probe.\n'
+        '# Not cached: huggingface_hub raises a FileNotFoundError subclass, an unresolvable name\n'
+        '# is a ValueError. Any other lookup error (an unreadable download_root) skips the stage\n'
+        '# too: a cache this caller cannot use says nothing about the GPU stack.\n'
         'except (FileNotFoundError, ValueError) as exc:\n'
         '    print("probe: inference skipped:", name, "weights are not cached locally;", type(exc).__name__, flush=True)\n'
+        '    print("probe: ok", flush=True)\n'
+        '    sys.exit(0)\n'
+        'except Exception as exc:\n'
+        '    print("probe: inference skipped:", name, "weights could not be looked up;", f"{type(exc).__name__}: {exc}", flush=True)\n'
         '    print("probe: ok", flush=True)\n'
         '    sys.exit(0)\n'
         '# Fastest precision the device supports; float32 is always in the set.\n'
@@ -223,16 +235,17 @@ class WhisperLoader(BaseLoader):
         at most once per process, on the first device asked for (hosts are
         assumed homogeneous). The probe weights are fetched here, best effort;
         the child only reads the local cache and skips the inference stage when
-        they are absent, so no download problem ever becomes a CPU verdict. The
-        fetch is skipped when the caller asked for local files only, or when the
-        installed versions would stop the child at the guard anyway. A timeout
-        is a failure like any other and is cached. A child that ran out of GPU
-        memory is not cached, since a full GPU says nothing about the CUDA
-        stack: after the storage view it is a storage-view pass for this load,
-        as with missing weights, so ``allocate_gpu`` places the model as it did
-        before #2498; before the storage view it is reported as a failure for
-        this load. On failure ``_gpu_probe_reason`` names the stage, the exit
-        code and the child's last output lines.
+        they are absent or cannot be read, so no download or cache problem ever
+        becomes a CPU verdict. The fetch is skipped when the caller asked for
+        local files only, or when the installed versions would stop the child at
+        the guard anyway. A timeout is a failure like any other and is cached. A
+        child that ran out of GPU memory is not cached, since a full GPU says
+        nothing about the CUDA stack: after the storage view it is a
+        storage-view pass for this load, as with missing weights, so
+        ``allocate_gpu`` places the model as it did before #2498; before the
+        storage view it is reported as a failure for this load. On failure
+        ``_gpu_probe_reason`` names the stage, the exit code and the child's
+        last output lines.
 
         Args:
             device_index: CUDA device to probe.
@@ -267,6 +280,8 @@ class WhisperLoader(BaseLoader):
                     [sys.executable, '-c', script],
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     timeout=_GPU_PROBE_TIMEOUT_S,
                 )
             except subprocess.TimeoutExpired as exc:
@@ -426,6 +441,8 @@ class WhisperLoader(BaseLoader):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -556,7 +573,13 @@ class WhisperLoader(BaseLoader):
             # transcription in a child process (when the tiny weights are local),
             # so a native crash or missing CUDA library is found here, not on the
             # first request.
-            probe_index = WhisperLoader._first_candidate_gpu(exclude_gpus, torch)
+            # Choosing the probe GPU reads free memory through torch, which opens a CUDA context (a few
+            # hundred MB, kept until exit) on every candidate GPU. A cached verdict ignores the index, so
+            # it is chosen only while none is cached; reading the memory through NVML, as
+            # probe_cuda_memory in ai.common.utils.hardware does, needs no context and is the fuller fix.
+            probe_index = 0
+            if WhisperLoader._gpu_compatible is None:
+                probe_index = WhisperLoader._first_candidate_gpu(exclude_gpus, torch)
             if torch.cuda.is_available() and WhisperLoader._check_gpu_compatible(
                 device_index=probe_index, download_root=download_root, local_files_only=local_files_only
             ):
