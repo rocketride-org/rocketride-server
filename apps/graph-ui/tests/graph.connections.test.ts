@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { fakeWorld, manualClock, row } from 'shared/explorer/connect/testing';
 import { makeGraphEndpointStore } from '../src/adapters/explorer';
-import { RECHECKING_TEXT, connectionView, drawerKeyAfter, emptyState, landingView, ownerText, surfaceGate, testResultText } from '../src/graph/connections';
+import { DETAILS_CLOSED, RECHECKING_TEXT, connectionRow, connectionView, detailsPanelAfter, drawerKeyAfter, emptyState, landingView, ownerText, rowStatusText, sidebarListLine, surfaceGate, testResultText } from '../src/graph/connections';
 import { fixture } from './support/builders';
 
 function endpoint(over: Partial<IExplorerEndpoint> = {}): IExplorerEndpoint {
@@ -252,4 +252,59 @@ test('the connection drawer keeps its card while the store lists it and closes o
 
 	store.reset();
 	assert.equal(drawerKeyAfter(key, store.getState().endpoints), null, 'a reset forgets every connection, so the drawer closes');
+});
+
+// The dev-tool sidebar lists the connections as rows (Rod's anatomy): a state dot plus a text suffix, never colour
+// alone, and a tooltip that says which pipeline and why a row cannot be browsed.
+test('a sidebar row says its state in words: no suffix for a running node, the card\'s badge label otherwise', () => {
+	assert.equal(rowStatusText(endpoint(), probeOf('neo4j')), null, 'a running node needs no suffix');
+	assert.equal(rowStatusText(endpoint({ state: 'probing' }), undefined), 'Checking');
+	assert.equal(rowStatusText(endpoint({ state: 'stopped', running: false }), undefined), 'Stopped');
+	assert.equal(rowStatusText(endpoint({ state: 'unreachable' }), undefined), 'Unreachable');
+	assert.equal(rowStatusText(endpoint({ state: 'inaccessible' }), undefined), 'No access');
+	assert.equal(rowStatusText(endpoint(), probeOf('old_node')), 'Needs upgrade', 'the same word as the card');
+});
+
+test('a sidebar row carries a tooltip and an accessible name that include its state, and its dot variant is the card\'s', () => {
+	const running = connectionRow(endpoint(), probeOf('neo4j'));
+	assert.deepEqual({ label: running.label, status: running.status, variant: running.variant }, { label: 'Neo4j', status: null, variant: 'success' });
+	assert.equal(running.tooltip, 'Neo4j \u2014 graph_neo4j \u00b7 Social graph \u00b7 Running');
+	assert.equal(running.ariaLabel, 'Neo4j, Running');
+	const stopped = connectionRow(endpoint({ state: 'stopped', running: false }), undefined);
+	assert.equal(stopped.variant, 'muted');
+	assert.equal(stopped.ariaLabel, 'Neo4j, Stopped');
+	assert.match(stopped.tooltip, /\u00b7 Stopped\nThe pipeline is stopped\. Start it to browse this graph\.$/, 'the reason follows on its own line');
+	const deployed = connectionRow(endpoint({ runKind: 'deploy' }), probeOf('neo4j'));
+	assert.match(deployed.tooltip, /Social graph \(deployment\) \u00b7 Running$/);
+	assert.ok(!JSON.stringify([running, stopped]).toLowerCase().includes('password'));
+});
+
+test('the line under the sidebar rows: discovering, none running (with what cannot be known), discovery failed; nothing before discovery starts or while rows say it all', () => {
+	assert.equal(sidebarListLine('idle', [], null), null, 'nothing asked yet (discovery waits for the activation and a known identity): no "discovering" claim');
+	assert.deepEqual(sidebarListLine('loading', [], null), { tone: 'muted', text: 'Discovering graph nodes\u2026', detail: null });
+	assert.equal(sidebarListLine('loading', [endpoint()], null), null, 'a refresh with rows on screen says nothing');
+	const none = sidebarListLine('ready', [], null);
+	assert.equal(none?.tone, 'muted');
+	assert.equal(none?.text, 'No running graph node found. Start a pipeline with a graph node, then refresh.');
+	assert.match(none?.detail ?? '', /fails to start does not appear in this list at all/, 'what an empty list cannot tell, in the tooltip');
+	const failedLine = sidebarListLine('error', [], 'socket closed');
+	assert.deepEqual({ tone: failedLine?.tone, text: failedLine?.text }, { tone: 'error', text: 'Discovery failed: socket closed' });
+	assert.match(failedLine?.detail ?? '', /Nothing is known about which graph nodes are running/);
+	assert.deepEqual(sidebarListLine('error', [endpoint()], 'socket closed'), { tone: 'error', text: 'Refresh failed: socket closed. Showing what was found before.', detail: null }, 'the rows stay');
+	assert.equal(sidebarListLine('ready', [endpoint({ state: 'stopped', running: false })], null), null, 'each row says why it cannot be used');
+});
+
+// A dev-tool document shows the connection details inline (CE-1): Details toggles them, Test connection opens them and
+// tests, and every Test connection asked while they are open tests again. A panel opened by Details never tests.
+test('the inline details panel: Details toggles, Test connection opens and asks for a test each time, close forgets the requests', () => {
+	assert.deepEqual(DETAILS_CLOSED, { open: false, testRequest: 0 });
+	const shown = detailsPanelAfter(DETAILS_CLOSED, 'toggle');
+	assert.deepEqual(shown, { open: true, testRequest: 0 }, 'opened by Details: nothing is tested');
+	assert.deepEqual(detailsPanelAfter(shown, 'toggle'), DETAILS_CLOSED, 'Details again closes it');
+	const tested = detailsPanelAfter(DETAILS_CLOSED, 'test');
+	assert.deepEqual(tested, { open: true, testRequest: 1 }, 'Test connection opens it and asks for a test');
+	assert.deepEqual(detailsPanelAfter(tested, 'test'), { open: true, testRequest: 2 }, 'asked again while open: a new request');
+	assert.deepEqual(detailsPanelAfter(shown, 'test'), { open: true, testRequest: 1 });
+	assert.deepEqual(detailsPanelAfter(tested, 'close'), DETAILS_CLOSED);
+	assert.deepEqual(detailsPanelAfter(detailsPanelAfter(tested, 'close'), 'toggle'), { open: true, testRequest: 0 }, 'a reopened panel does not test again by itself');
 });

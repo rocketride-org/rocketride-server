@@ -82,6 +82,17 @@ export default defineConfig(() => {
 			},
 		},
 		server: { port: 3102, cors: { origin: '*' } },
+		// lazyCompilation stays off: this bundle loads INSIDE the shell host's
+		// page (a different origin), so the lazy-compilation client's relative
+		// "active modules" XHR resolves against the HOST's origin and 401s on
+		// the platform server — the first async chunk (e.g. Monaco) then never
+		// compiles. client: the same cross-origin problem for the HMR socket;
+		// '<port>' is rsbuild's runtime placeholder for the ACTUAL bound port.
+		dev: {
+			hmr: true,
+			lazyCompilation: false,
+			client: { protocol: 'ws', host: 'localhost', port: '<port>' } as const,
+		},
 		source: {
 			entry: {
 				index: './src/index.ts',

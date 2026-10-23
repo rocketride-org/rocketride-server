@@ -110,9 +110,9 @@ result tabs.
   the graph's actions pause, with the reason above the editor, until the node
   answers again.
 - **The editor** highlights Cypher and keeps a draft per connection (text only).
-  It loads the Monaco editor from `cdn.jsdelivr.net`; where that is not
-  reachable, a plain text box is used after ten seconds, with the same run keys,
-  drafts and history, and a notice says so.
+  It is the platform's shared code editor, which comes with the app (nothing is
+  fetched from a CDN). If it has not loaded after ten seconds, a plain text box
+  is used, with the same run keys, drafts and history, and a notice says so.
 - **Browsing is read-only.** A statement the text check takes for a write is
   refused before anything is sent: one that uses `CREATE`, `INSERT`, `MERGE`,
   `SET`, `DELETE`, `DETACH`, `REMOVE`, `DROP`, `FOREACH` or `LOAD CSV` as a
@@ -260,6 +260,81 @@ connections: past that, the oldest entries anywhere are dropped first, unpinned
 before pinned. When a search or **Pinned only** hides every entry, the panel says
 that nothing matches. Tokens and connection strings are never recorded.
 
+## As a dev tool
+
+Graph Explorer also runs as a dev tool beside the pipeline editor, in VS Code
+and in the RocketRide workspace. There the sidebar lists your graph connections
+and shows the active connection's schema, and each workbench and write console
+opens as its own document. A connection's row shows its state as a dot and,
+when it is not running, in words (**Checking**, **Stopped**, **Unreachable**,
+**No access**, **Needs upgrade**); its tooltip names the pipeline and says why
+it cannot be browsed. Click a row, or press Enter or Space on it, to open its
+workbench. **Refresh** is on the Connections header, and a line under the rows
+says when discovery is running, found nothing, or failed. What a card's drawer
+shows in the full app (engine, version, target, writes, **Test connection**)
+shows inside the connection's own document instead, under its header:
+**Details** on the workbench header shows or hides it, and **Test connection**
+where a connection cannot be browsed or its write console is not available
+shows it and tests. Close it with its close button, or Escape inside it. The tool's own page, with no document, only says to
+open a connection from the sidebar. Everything that reaches the engine goes
+through the sidebar, which holds the tool's one connection; the documents hold
+none.
+
+What is different there:
+
+- History is kept in a file in your user folder on the server
+  (`rocketride.graph.history.json`), not in the workspace file, and the History
+  panel says so. Changes are written about a second after you make them. If
+  that file cannot be read, history is kept for the session only and the file
+  is left alone. Two windows writing history at the same time keep the later
+  one's copy. That holds across a disconnect too: a window whose changes wait
+  for the account to come back writes the history it read before the
+  disconnect plus those changes, so what another window wrote meanwhile is
+  overwritten.
+- History across a disconnect, a sign-out and an account switch:
+  - after a disconnect or a sign-out, the last changes (the second before it)
+    are kept and written once the same account is back. If the sidebar closes
+    meanwhile (VS Code closes it on every disconnect), they wait in that window
+    for up to 10 minutes;
+  - after a switch to another account they are dropped, never written into
+    the other account's file, and that account never sees them;
+  - a run recorded in the moment after a switch, while the new account's
+    history is still loading (usually under a second), is lost if the account
+    changes again before the load finishes. It is never added to another
+    account's history.
+- Editor drafts and caption choices last for the session only.
+- Results grid layouts (sort, column widths) are kept in memory: in
+  rocket-ui until the page reloads, in VS Code until the document's panel
+  closes. They are never written into the host's own preferences.
+- A large graph is laid out by a worker. A panel that cannot start it (VS Code
+  loads the app from the engine, a different origin) places the nodes on a
+  grid, and a note says why.
+- Where a panel does not allow the clipboard, Copy JSON shows the text to
+  select and copy by hand.
+- In VS Code the sidebar does not receive the server's error codes, so a
+  statement interrupted by a pipeline restart is reported as failed instead of
+  being retried once, and a stopped pipeline and an unreachable one are reported
+  the same way. Refresh always checks every connection again.
+- A result too large to send to a document (over 32 MB) is refused with a
+  reason; lower the row limit.
+- When the connection to the server drops, the editors close the tool's
+  documents until it is back (VS Code shows that it is not connected, the
+  RocketRide workspace asks you to connect), so an open document's editor text,
+  results and graph do not survive a disconnect. Its history does (see above).
+  A connection that is only checked again while the server stays connected (a
+  pipeline restart, **Test connection**) keeps them, as in the full app.
+- When the signed-in user, organization or team changes, every open workbench
+  and write console closes.
+- A document that cannot open yet says what it waits for: the server
+  connection ("Not connected", or "Waiting for the server connection…" before
+  the editor reports it), the sidebar ("Starting Graph Explorer…" while the
+  document asks the editor to open the sidebar by itself, then "Open the Graph
+  Explorer sidebar to connect" if nothing answers within a few seconds), or a
+  sign-in ("Waiting for sign-in"). A document that already showed its
+  workbench keeps it while the sidebar restarts, with a note to open the
+  sidebar if it does not come back; after a sign-out it waits for sign-in
+  instead.
+
 ## The write console
 
 A connection whose node reports `allow_execute` and supports the graph result
@@ -340,8 +415,11 @@ editor and an **Execute** button, and it always says what it is:
   starts in Safari 14, so Safari 14 is the lowest version the canvas can run in.
   The declared floor has not been changed. The layout worker's cross-origin
   handling differs by browser.
-- The code editor needs `cdn.jsdelivr.net`; without it the plain text box is
-  used.
+- The code editor uses the platform's shared editor theme, so Cypher is shown
+  in Monaco's standard colours. Some of them are below 4.5:1 in the Dark, Gray
+  and RocketRide Light themes, and the line numbers are below it in RocketRide
+  Dark (see
+  [docs/contrast.md](https://github.com/rocketride-org/rocketride-server/blob/develop/apps/graph-ui/docs/contrast.md)).
 
 ## For developers
 

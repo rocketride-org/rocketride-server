@@ -26,44 +26,15 @@
 //
 // `shared/explorer/react` imports values from `shell` (the preference hook, the
 // task-event watch), so it is kept out of the pure adapter and imported here once.
+// Both bindings are the FULL APP's (GraphApp): the dev-tool mounts keep their
+// store wired through the controller (devtool/controller.ts) and never touch the
+// workspace prefs. Views read every store through the GraphEnv (env.ts).
 // =============================================================================
 
-import { useSyncExternalStore } from 'react';
-import { createHistoryPrefsBridge, useEndpointState, useEndpointStoreLifecycle } from 'shared/explorer/react';
-import type { IEndpointState } from 'shared/explorer';
-import { activeConnection, graphEndpoints, graphHistory, schemas, workbenchRequests } from './explorer';
-import type { ISchemaEntry } from '../graph/schemaStore';
+import { createHistoryPrefsBridge, useEndpointStoreLifecycle } from 'shared/explorer/react';
+import { graphHistory } from './explorer';
 
 export { useEndpointStoreLifecycle };
 
-/** Mount once near the root: keeps graph history's access to workspace preferences alive. */
+/** Mount once near the root of the full app: keeps graph history's access to workspace preferences alive. */
 export const GraphHistoryPrefsBridge = createHistoryPrefsBridge(graphHistory);
-
-/**
- * Subscribe to endpoint discovery and probe state.
- *
- * @returns The current snapshot.
- */
-export function useGraphEndpoints(): IEndpointState {
-	return useEndpointState(graphEndpoints);
-}
-
-/**
- * Subscribe to one connection's schema.
- *
- * @param key - The endpoint key, or null.
- * @returns The schema entry (idle and empty for null or an unloaded connection).
- */
-export function useSchema(key: string | null): ISchemaEntry {
-	return useSyncExternalStore(
-		schemas.subscribe,
-		() => schemas.get(key ?? ''),
-		() => schemas.get(key ?? '')
-	);
-}
-
-/** The active connection's key (the sidebar follows the active document). */
-export const useActiveConnection = activeConnection.use;
-
-/** The latest sidebar-to-workbench request. */
-export const useWorkbenchRequest = workbenchRequests.use;

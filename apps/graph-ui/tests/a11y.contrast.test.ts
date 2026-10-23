@@ -244,11 +244,30 @@ test('a missing or unreadable token falls back to the existing defaults, still a
 	assert.equal(readableOnEditor('#000000', 'nonsense', '#abcdef'), '#abcdef');
 });
 
-test('wiring: the editor theme is built from the rules and the line-number colour, and defines no colour per theme', () => {
-	const editor = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'QueryEditor.tsx'), 'utf8');
-	assert.match(editor, /rules: cypherTokenRules\(dark, colors\['editor\.background'\]\)/);
-	assert.match(editor, /const colors = editorColors\(\{ dark, background: cssVar\('--rr-bg-paper', ''\)/);
-	assert.doesNotMatch(editor.slice(editor.indexOf('function defineTheme'), editor.indexOf('A counter that changes when the app theme does')), /'editor(LineNumber)?\.[a-zA-Z]+': cssVar/, 'no raw token string goes into the theme colours');
-	const body = editor.slice(editor.indexOf('function defineTheme'), editor.indexOf('A counter that changes when the app theme does'));
-	assert.doesNotMatch(body, /rocketride|#[0-9a-fA-F]{6}\b(?!.*fallback)/i.source.length ? /rocketride-light|data-theme/ : /x^/, 'no theme is named');
+// The editor mounts the platform's shared MonacoEditor ('shared/components/monaco'). That component defines and
+// FORCES its own theme ('rr-theme', with no token rules) when it creates the editor and again on every theme flip,
+// so an app-local theme cannot persist. The Cypher token rules and the line-number colour measured above are still
+// computed and tested, but the editor does not apply them until the shared editor takes per-app token colours
+// (drafted platform ask: explorer-devtool ROD_ASKS #7). Until then the editor shows Monaco's own vs / vs-dark token
+// colours, including the ones listed as failing in the output of the token test above. These pins describe the
+// seam as it is, so a change on either side is a decision rather than drift.
+test('wiring: the editor is the shared MonacoEditor, with no @monaco-editor package and no theme of its own (token colours: ROD_ASKS #7)', () => {
+	const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'QueryEditor.tsx'), 'utf8');
+	const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+	assert.match(code, /import \{ MonacoEditor, loadMonaco \} from 'shared\/components\/monaco';/, 'the shared editor and its one loader');
+	const at = code.indexOf('<MonacoEditor');
+	assert.ok(at >= 0, 'the editor renders <MonacoEditor');
+	assert.match(code.slice(at, code.indexOf('/>', at)), /\blanguage="cypher"/, 'Monaco\'s built-in cypher language');
+	assert.doesNotMatch(code, /@monaco-editor\//, 'the platform loader bans @monaco-editor/react and @monaco-editor/loader');
+	assert.doesNotMatch(code, /defineTheme|setTheme|\btheme=|THEME_NAME|cypherTokenRules|editorColors/, 'no app-local theme: the shared editor forces its own');
+	assert.doesNotMatch(code, /from '\.\/editorTheme'/, 'the measured rules are not wired into the editor (ROD_ASKS #7)');
+
+	// The shared side of the seam. When the shared theme starts carrying token rules, or stops forcing its theme,
+	// this fails: wire cypherTokenRules and the line-number colour back in, and update these pins.
+	const shared = path.resolve(__dirname, '..', '..', 'shared', 'src', 'components', 'monaco');
+	const theme = fs.readFileSync(path.join(shared, 'theme.ts'), 'utf8');
+	const editor = fs.readFileSync(path.join(shared, 'MonacoEditor.tsx'), 'utf8');
+	assert.match(theme, /rules: \[\],/, 'the shared theme has no token rules');
+	assert.match(editor, /theme: THEME_NAME,/, 'the shared editor creates every editor with its own theme');
+	assert.match(editor, /defineRrTheme\(monaco\);\s*monaco\.editor\.setTheme\(THEME_NAME\);/, 'and re-applies it on every theme flip');
 });

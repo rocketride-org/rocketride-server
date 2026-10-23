@@ -24,14 +24,22 @@
 // GRAPH-UI - CYPHER EDITOR (Monaco with a plain text box as the fallback)
 // =============================================================================
 //
-// Monaco has a built-in `cypher` language (monaco-editor 0.55), so highlighting
-// needs no registration. The editor's own script is fetched from the jsdelivr CDN
-// at runtime (the same as SQL Explorer's editor), so a browser with no route to
-// cdn.jsdelivr.net - an air-gapped site, or a locked-down embedded webview - never
-// gets it. Rather than leave an empty box, the editor falls back to a plain
-// <textarea> after a bounded wait or a load failure: typing, drafts, Ctrl/Cmd+Enter,
-// running and history work the same, only the highlighting is gone, and a notice
-// says so.
+// The editor is the platform's shared MonacoEditor ('shared/components/monaco'):
+// Monaco and its workers are chunks of this remote's own bundle, loaded lazily by
+// the shared loader (no CDN, no @monaco-editor/react). Monaco has a built-in
+// `cypher` language (monaco-editor 0.55, registered by the editor.main entry the
+// shared loader imports), so highlighting needs no registration and no beforeMount.
+//
+// If Monaco does not load (a chunk that fails to arrive, or a wait longer than the
+// budget below), the editor falls back to a plain <textarea>: typing, drafts,
+// Ctrl/Cmd+Enter, running and history work the same, only the highlighting is gone,
+// and a notice says so.
+//
+// Theme: the shared editor defines and forces the platform theme on create and on
+// every theme flip, so this editor has no theme of its own. Its Cypher token colours
+// are Monaco's vs / vs-dark ones; the 4.5:1 token rules and line-number colour in
+// editorTheme.ts are still computed and measured (tests/a11y.contrast.test.ts) and
+// are wired back in once the shared editor takes per-app token colours.
 //
 // Keys: Ctrl/Cmd+Enter runs the selection or the statement at the caret;
 // Ctrl/Cmd+Shift+Enter runs every statement. Neither traps focus: Tab leaves the
@@ -40,10 +48,10 @@
 
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import Editor, { loader } from '@monaco-editor/react';
 import type * as MonacoNS from 'monaco-editor';
+import { MonacoEditor, loadMonaco } from 'shared/components/monaco';
+import type { Monaco } from 'shared/components/monaco';
 import type { IEditorSnapshot, ISelection } from '../cypher/targets';
-import { cypherTokenRules, editorColors } from './editorTheme';
 
 // =============================================================================
 // TYPES
@@ -91,14 +99,15 @@ export const MONACO_LOAD_BUDGET_MS = 10_000;
 let availability: Promise<'ready' | 'failed'> | null = null;
 
 /**
- * Try to load Monaco once, giving up after {@link MONACO_LOAD_BUDGET_MS}.
+ * Try to load Monaco once (through the shared loader, which the shared editor then reuses), giving up after
+ * {@link MONACO_LOAD_BUDGET_MS}.
  *
  * @returns Whether Monaco is usable.
  */
-function loadMonaco(): Promise<'ready' | 'failed'> {
+function monacoAvailability(): Promise<'ready' | 'failed'> {
 	if (!availability) {
 		availability = Promise.race([
-			loader.init().then(() => 'ready' as const),
+			loadMonaco().then(() => 'ready' as const),
 			new Promise<'failed'>((resolve) => setTimeout(() => resolve('failed'), MONACO_LOAD_BUDGET_MS)),
 		]).catch(() => 'failed' as const);
 	}
@@ -114,7 +123,7 @@ function useMonacoStatus(): 'loading' | 'ready' | 'failed' {
 	const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
 	useEffect(() => {
 		let alive = true;
-		void loadMonaco().then((result) => {
+		void monacoAvailability().then((result) => {
 			if (alive) setStatus(result);
 		});
 		return () => {
@@ -125,57 +134,12 @@ function useMonacoStatus(): 'loading' | 'ready' | 'failed' {
 }
 
 // =============================================================================
-// THEME
-// =============================================================================
-
-const THEME_NAME = 'rr-graph-theme';
-
-/**
- * Read a CSS custom property from the root.
- *
- * @param name - The property.
- * @param fallback - Used when unset.
- * @returns The value.
- */
-function cssVar(name: string, fallback: string): string {
-	return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-}
-
-/**
- * Register the token-derived editor theme.
- *
- * @param monaco - The loaded Monaco namespace.
- */
-function defineTheme(monaco: typeof MonacoNS): void {
-	const dark = cssVar('--rr-palette-mode', 'light').replace(/['"]/g, '') === 'dark';
-	// Every colour is #RRGGBB: Monaco reads rgba() as red (see editorTheme.ts).
-	const colors = editorColors({ dark, background: cssVar('--rr-bg-paper', ''), foreground: cssVar('--rr-text-primary', ''), secondary: cssVar('--rr-text-secondary', '') });
-	monaco.editor.defineTheme(THEME_NAME, {
-		base: dark ? 'vs-dark' : 'vs',
-		inherit: true,
-		// Monaco's own token colours, except where one would not read on THIS background.
-		rules: cypherTokenRules(dark, colors['editor.background']),
-		colors,
-	});
-}
-
-/** A counter that changes when the app theme does, so the editor re-derives its colours. */
-function useThemeVersion(): number {
-	const [version, setVersion] = useState(0);
-	useEffect(() => {
-		const observer = new MutationObserver(() => setVersion((v) => v + 1));
-		observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
-		return () => observer.disconnect();
-	}, []);
-	return version;
-}
-
-// =============================================================================
 // STYLES
 // =============================================================================
 
 const styles = {
-	frame: { border: '1px solid var(--rr-border)', borderRadius: 6, overflow: 'hidden', height: '100%', minHeight: 0 } as CSSProperties,
+	// display:flex lets the shared editor's container (flex: 1) fill the frame.
+	frame: { border: '1px solid var(--rr-border)', borderRadius: 6, overflow: 'hidden', height: '100%', minHeight: 0, display: 'flex' } as CSSProperties,
 	text: {
 		width: '100%',
 		height: '100%',
@@ -196,7 +160,7 @@ const styles = {
 };
 
 /** The wording of the fallback notice (also used by the README and the tests). */
-export const EDITOR_FALLBACK_NOTICE = 'The code editor could not be loaded (it needs access to cdn.jsdelivr.net), so a plain text box is used. Running, drafts and history work the same; only highlighting is missing.';
+export const EDITOR_FALLBACK_NOTICE = 'The code editor could not be loaded, so a plain text box is used. Running, drafts and history work the same; only highlighting is missing.';
 
 // =============================================================================
 // COMPONENT
@@ -210,13 +174,12 @@ export const EDITOR_FALLBACK_NOTICE = 'The code editor could not be loaded (it n
  */
 export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(function QueryEditor({ value, onChange, onRun, onRunAll, onCursorChange, label }, ref) {
 	const status = useMonacoStatus();
-	const themeVersion = useThemeVersion();
-	const monacoRef = useRef<typeof MonacoNS | null>(null);
 	const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null);
 	const textRef = useRef<HTMLTextAreaElement | null>(null);
 	const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// Monaco is UNCONTROLLED: it starts from the first value and then owns its buffer. A controlled `value` prop is a copy that
-	// lags a render behind fast typing, and the library writes that copy back into the model when it differs.
+	// lags a render behind fast typing, and the shared editor writes its `value` prop back into the model whenever the two
+	// differ. So the shared editor only ever gets `initial.current`, which changes only before Monaco has mounted (setText).
 	const initial = useRef(value);
 	const pending = useRef<string | null>(null);
 
@@ -226,12 +189,6 @@ export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(fun
 		latest.current = { onRun, onRunAll, onCursorChange };
 	});
 
-	useEffect(() => {
-		if (monacoRef.current) {
-			defineTheme(monacoRef.current);
-			monacoRef.current.editor.setTheme(THEME_NAME);
-		}
-	}, [themeVersion]);
 	useEffect(
 		() => () => {
 			if (timer.current) clearTimeout(timer.current);
@@ -300,13 +257,8 @@ export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(fun
 		timer.current = setTimeout(() => latest.current.onCursorChange?.(), 150);
 	}, []);
 
-	const handleBeforeMount = useCallback((monaco: typeof MonacoNS) => {
-		monacoRef.current = monaco;
-		defineTheme(monaco);
-	}, []);
-
 	const handleMount = useCallback(
-		(editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: typeof MonacoNS) => {
+		(editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: Monaco) => {
 			editorRef.current = editor;
 			if (pending.current !== null) {
 				editor.setValue(pending.current);
@@ -345,17 +297,19 @@ export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(fun
 		);
 	}
 
+	// The shared editor mounts only once Monaco has loaded: it awaits the same (memoized) load with no catch of its own, so
+	// mounting it earlier would leave a rejected load unhandled after the text box had already taken over.
 	return (
-		<div style={styles.frame} aria-label={label}>
-			<Editor
-				defaultValue={initial.current}
-				language="cypher"
-				theme={THEME_NAME}
-				beforeMount={handleBeforeMount}
-				onMount={handleMount}
-				onChange={(next) => onChange(next ?? '')}
-				options={{ minimap: { enabled: false }, fontSize: 13, lineNumbersMinChars: 3, scrollBeyondLastLine: false, automaticLayout: true, wordWrap: 'on', padding: { top: 10, bottom: 10 }, ariaLabel: label }}
-			/>
+		<div style={styles.frame} aria-label={label} aria-busy={status === 'loading'}>
+			{status === 'ready' && (
+				<MonacoEditor
+					language="cypher"
+					value={initial.current}
+					onMount={handleMount}
+					onChange={onChange}
+					options={{ minimap: { enabled: false }, fontSize: 13, lineNumbersMinChars: 3, scrollBeyondLastLine: false, automaticLayout: true, wordWrap: 'on', padding: { top: 10, bottom: 10 }, ariaLabel: label }}
+				/>
+			)}
 		</div>
 	);
 });

@@ -46,6 +46,8 @@ export interface IDataVersions {
 	bump(key: string): void;
 	/** Subscribe to any change. */
 	subscribe(listener: () => void): () => void;
+	/** Every connection's version, as a plain object ordered from the least to the most recently bumped. */
+	snapshot(): Record<string, number>;
 }
 
 /**
@@ -59,7 +61,10 @@ export function createDataVersions(): IDataVersions {
 	return {
 		get: (key) => versions.get(key) ?? 0,
 		bump(key) {
-			versions.set(key, (versions.get(key) ?? 0) + 1);
+			const next = (versions.get(key) ?? 0) + 1;
+			// Re-inserted, so the map runs from the least to the most recently bumped (a capped summary keeps the newest).
+			versions.delete(key);
+			versions.set(key, next);
 			listeners.forEach((l) => l());
 		},
 		subscribe(listener) {
@@ -68,6 +73,7 @@ export function createDataVersions(): IDataVersions {
 				listeners.delete(listener);
 			};
 		},
+		snapshot: () => Object.fromEntries(versions),
 	};
 }
 

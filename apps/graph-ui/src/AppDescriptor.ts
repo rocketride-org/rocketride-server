@@ -32,6 +32,8 @@ import React from 'react';
 import type { AppDescriptor } from 'shell';
 import { RocketRideMark } from 'shell';
 import GraphApp from './GraphApp';
+import { GraphDevTool } from './GraphDevToolFrame';
+import { GraphDevToolSidebar } from './GraphDevToolSidebar';
 
 const GRAPH_APP: AppDescriptor = {
 	id: 'rocketride.graph',
@@ -46,6 +48,11 @@ const GRAPH_APP: AppDescriptor = {
 	// Two-column app: GraphApp's root AppLayout declares the navigation/schema
 	// sidebar and the status bar.
 	app: GraphApp,
+	// Dev-tool mounts (VS Code, rocket-ui): the sidebar is the CONTROLLER (it
+	// owns the tool's one engine connection), every document is a frame with no
+	// client that calls it over ops (devtool/protocol.ts).
+	devToolFrame: GraphDevTool,
+	devToolSidebar: GraphDevToolSidebar,
 };
 
 export default GRAPH_APP;

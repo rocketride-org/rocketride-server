@@ -74,7 +74,7 @@ test('no template holds a password, token, key or a URL with credentials in it',
 test('no template ships a project_id: nothing is shared between everyone who imports one', () => {
 	// An id baked into a shared file would be the same for every user, and a task's identity is derived from
 	// (owner, project, source). The editor mints a fresh id when a .pipe is created without one
-	// (apps/vscode/src/providers/SidebarProvider.ts handleFileCreated), so the templates carry none.
+	// (apps/vscode/src/providers/sidebar/pipelineFiles.ts handleFileCreated), so the templates carry none.
 	for (const key of FILES) {
 		const doc = read(key) as Record<string, unknown>;
 		assert.equal('project_id' in doc, false, `${key} has a project_id`);
@@ -83,9 +83,13 @@ test('no template ships a project_id: nothing is shared between everyone who imp
 });
 
 test('the editor path that gives an imported template its own id still exists (a guard that the premise above holds)', () => {
-	const provider = path.resolve(__dirname, '..', '..', 'vscode', 'src', 'providers', 'SidebarProvider.ts');
+	// The .pipe watcher moved out of SidebarProvider.ts into sidebar/pipelineFiles.ts (PipelineFiles) with the dev-tool platform.
+	const provider = path.resolve(__dirname, '..', '..', 'vscode', 'src', 'providers', 'sidebar', 'pipelineFiles.ts');
 	const source = fs.readFileSync(provider, 'utf8');
-	const created = source.slice(source.indexOf('private async handleFileCreated'), source.indexOf('private async handleFileDeleted'));
+	const from = source.indexOf('private async handleFileCreated');
+	const to = source.indexOf('private async handleFileChanged', from);
+	assert.ok(from >= 0 && to > from, `handleFileCreated (followed by handleFileChanged) is in ${provider}; if it moved again, follow it`);
+	const created = source.slice(from, to);
 	assert.match(created, /if \(!projectId \|\| isDuplicate\)/);
 	assert.match(created, /crypto\.randomUUID\(\)/);
 });

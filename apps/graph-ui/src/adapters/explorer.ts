@@ -67,12 +67,13 @@ import {
 	createEndpointStore,
 	createHistoryStore,
 	createLiveRegion,
-	createRequestChannel,
 } from 'shared/explorer';
 import type { IEndpointStore, IEndpointStoreOptions, IHistoryStore, IToolSpec } from 'shared/explorer';
 import type { GraphDialect } from '../cypher/quote';
 import { createDataVersions } from '../graph/dataVersion';
 import type { IDataVersions } from '../graph/dataVersion';
+import { createPreviewStore } from '../graph/previews';
+import type { IPreviewStore } from '../graph/previews';
 import { createSchemaStore } from '../graph/schemaStore';
 import type { ISchemaStore } from '../graph/schemaStore';
 
@@ -169,20 +170,8 @@ export const LiveRegion = createLiveRegion(announcer);
 /** Which connection document is active (the sidebar follows it). */
 export const activeConnection = createActiveKeyStore();
 
-/** A sidebar click that asks a connection's workbench to show a preview. */
-export interface IWorkbenchRequest {
-	/** The connection the request is for. */
-	endpointKey: string;
-	/** What to do: the 25-node preview of a label, or of a relationship type. */
-	action: 'label-preview' | 'type-preview';
-	/** The label or relationship type, exactly as the schema holds it. */
-	name: string;
-	/** When the click happened (ms since the epoch): a workbench that mounts later ignores a request older than a few seconds. */
-	at: number;
-}
-
-/** The sidebar-to-workbench request channel. */
-export const workbenchRequests = createRequestChannel<IWorkbenchRequest>();
+/** The full app's sidebar-to-workbench preview request (taken once by nonce; see graph/previews.ts). */
+export const appPreviews: IPreviewStore = createPreviewStore();
 
 /** The documents' URI schemes, for the shared "key from any URI" rule. */
 export const DOC_SCHEMES = { bare: ['workbench', 'write'], suffixed: [] as string[] } as const;

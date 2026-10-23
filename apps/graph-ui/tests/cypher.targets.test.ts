@@ -112,3 +112,34 @@ test('wiring guard: the run surface sends what targetsFromEditor reads from the 
 	assert.ok(editorSource.includes('text: area.value') && editorSource.includes('model.getValue()'), 'the snapshot reads the textarea value or the Monaco model');
 	assert.doesNotMatch(snapshot, /\bvalue\b/, 'the snapshot does not read the value prop');
 });
+
+// The editor is the platform's shared MonacoEditor ('shared/components/monaco'). Two things keep the pins above
+// meaningful on it: the model the snapshot reads belongs to the editor instance the shared component hands to
+// onMount, and the shared component is never given the React `value` prop. The shared component writes its `value`
+// prop back into the model whenever the two differ, so passing the React state would make Monaco controlled again,
+// and a render that is a keystroke behind fast typing could put old text back (the reason the editor is uncontrolled).
+test('wiring guard: the snapshot reads the editor the shared MonacoEditor mounted, and the shared editor only ever gets the first text', () => {
+	const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'QueryEditor.tsx'), 'utf8');
+	const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+	const at = code.indexOf('<MonacoEditor');
+	assert.ok(at >= 0, 'the editor renders <MonacoEditor');
+	const jsx = code.slice(at, code.indexOf('/>', at));
+	assert.match(jsx, /\bonMount=\{handleMount\}/);
+	assert.match(jsx, /\bvalue=\{initial\.current\}/, 'the first text (or text set before Monaco mounted), not the live prop');
+	assert.doesNotMatch(jsx, /\bvalue=\{value\}/, 'never the React state');
+	const mount = code.slice(code.indexOf('const handleMount = useCallback('), code.indexOf('if (status === \'failed\')'));
+	assert.match(mount, /editorRef\.current = editor;/, 'the snapshot\'s editorRef is the instance the shared editor mounted');
+
+	// The shared editor's side of that reasoning: a `value` that differs from the buffer is written back with setValue.
+	const shared = fs.readFileSync(path.resolve(__dirname, '..', '..', 'shared', 'src', 'components', 'monaco', 'MonacoEditor.tsx'), 'utf8');
+	assert.match(shared, /if \(editorInstance\.getValue\(\) !== value\) \{[\s\S]*?editorInstance\.setValue\(value\);[\s\S]*?\}, \[value, model\]\);/);
+});
+
+test('the shared editor brings Monaco\'s built-in cypher language: its loader imports editor.main, which registers basic-languages/cypher', () => {
+	const sharedMonaco = path.resolve(__dirname, '..', '..', 'shared', 'src', 'components', 'monaco');
+	const loader = fs.readFileSync(path.join(sharedMonaco, 'loader.ts'), 'utf8');
+	assert.match(loader, /import\('monaco-editor\/esm\/vs\/editor\/editor\.main\.js'\)/);
+	const pkg = require.resolve('monaco-editor/package.json', { paths: [sharedMonaco] });
+	const main = fs.readFileSync(path.join(path.dirname(pkg), 'esm', 'vs', 'editor', 'editor.main.js'), 'utf8');
+	assert.match(main, /import '\.\.\/basic-languages\/cypher\/cypher\.contribution\.js';/, 'nothing needs registering in beforeMount');
+});

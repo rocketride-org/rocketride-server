@@ -33,26 +33,32 @@
 //
 // The statement runner, strip, failure banner and row inspector are the shared
 // Explorer ones; this file only configures them for Cypher.
+//
+// Everything engine-facing comes from the GraphEnv (env.ts): the session (the
+// store's own in the full app, a remote one over controller ops in a dev-tool
+// frame), the write count, the data versions, history and the drafts/captions
+// prefs (session-only in a dev-tool mount). The runner, the graph session, path
+// search and the editor stay HERE in every mount.
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, Button, EmptyState, StatusBadge, TabControl, ToggleGroup, usePrefs, useShellConnection } from 'shell';
-import type { RocketRideClient, ViewMenu } from 'shell';
+import { Banner, Button, EmptyState, StatusBadge, TabControl, ToggleGroup } from 'shell';
+import type { ViewMenu } from 'shell';
 import { ExplorerToolError, clock, createGeneration, formatBatchOutcome, formatPriorStatements, formatRunLabel, useStatementRunner } from 'shared/explorer';
 import type { IExplorerEndpoint, IRunTarget, IStatementRunBase } from 'shared/explorer';
 import FailureBanner from 'shared/explorer/components/FailureBanner';
 import RowInspector from 'shared/explorer/components/RowInspector';
 import StatementStrip from 'shared/explorer/components/StatementStrip';
-import { CAPTIONS_PREF_KEY, DRAFTS_PREF_KEY, TOOL, announcer, dataVersions, graphEndpoints, graphHistory } from '../adapters/explorer';
-import { useGraphEndpoints, useSchema } from '../adapters/react';
+import { CAPTIONS_PREF_KEY, DRAFTS_PREF_KEY, TOOL, announcer } from '../adapters/explorer';
+import { useDataVersion, useGraphEndpoints, useGraphEnv, useSchemaLabels } from '../env';
 import { describeSnapshot, targetsFromEditor } from '../cypher/targets';
 import type { IEditorSnapshot } from '../cypher/targets';
 import { DEFAULT_ROW_LIMIT, ROW_LIMIT_CHOICES } from '../graph/budgets';
 import { canWrite as dialectCanWrite, parseDialect, rowLimitChip } from '../graph/dialect';
 import { describeFailureOf, describeWriteFailure } from '../graph/failures';
 import type { IFailureNotice } from '../graph/failures';
-import { countWrite, isAbandonedWrite } from '../graph/dataVersion';
+import { isAbandonedWrite } from '../graph/dataVersion';
 import { createGraphSession } from '../graph/graphSession';
 import type { IGraphSession } from '../graph/graphSession';
 import { describeWrites } from '../graph/writeConfirm';
@@ -137,16 +143,16 @@ function entryId(): string {
  * @returns The surface.
  */
 export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused = null, loadSlot, loadSeq, topSlot, onTextChange, onOpenHistory }) => {
-	const { client, isConnected } = useShellConnection();
-	const prefs = usePrefs();
+	const env = useGraphEnv();
+	const prefs = env.prefs;
 	const { probes } = useGraphEndpoints();
-	const schema = useSchema(endpoint.key);
+	const schemaLabels = useSchemaLabels(endpoint.key);
 	const probe = probes[endpoint.key];
 	const dialect = useMemo(() => (probe?.ok ? parseDialect(probe.info) : null), [probe]);
 	const writable = dialectCanWrite(dialect);
 	const announce = useCallback((text: string) => announcer.announce(text), []);
 	// Why nothing may be sent right now (statements and graph actions alike), or null.
-	const blocked = !isConnected || !client ? 'The shell is not connected to the engine.' : paused;
+	const blocked = !env.ready ? 'The shell is not connected to the engine.' : paused;
 
 	// ── The session on this endpoint (the token never leaves the store) ──────
 	// Keyed on the endpoint's KEY, not its object: background discovery hands back a new object for the same
@@ -154,7 +160,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 	const endpointRef = useRef(endpoint);
 	endpointRef.current = endpoint;
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	const session = useMemo(() => (client ? graphStoreSession(client, endpointRef.current) : null), [client, endpoint.key]);
+	const session = useMemo(() => env.session(endpointRef.current), [env, endpoint.key]);
 	// Recipes (expand, connect, inspect) get their own ticket, so they never expire a statement in flight.
 	const recipeGeneration = useRef(createGeneration());
 	useEffect(() => {
@@ -207,7 +213,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 	const [confirm, setConfirm] = useState<{ content: IWriteConfirmation; targets: IRunTarget[] } | null>(null);
 	const failureNotes = useRef<IFailureNotice | null>(null);
 	const runner = useStatementRunner<IGraphRun, { cypher: string; limit: number }, ReadQueryResult, IFailureNotice & { verbatim: string }>({
-		canRun: () => client !== null && isConnected && session !== null && paused == null,
+		canRun: () => env.ready && session !== null && paused == null,
 		initRun: (target, index) => {
 			const prepared = prepareStatement(target.text, limitChoice, dialect);
 			return { index, cypher: target.text, kind: prepared.kind, verb: prepared.verb, outcome: 'pending', ...(target.start !== undefined ? { start: target.start } : {}), ...(target.end !== undefined ? { end: target.end } : {}), ...(target.startLine !== undefined ? { startLine: target.startLine } : {}), ...(target.endLine !== undefined ? { endLine: target.endLine } : {}) };
@@ -222,8 +228,9 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 			if (!session) throw new ExplorerToolError({ kind: 'unavailable', tool: mode === 'read' ? TOOL.readQuery : TOOL.execute, message: 'This connection is not available.' });
 			return mode === 'read'
 				? session.invoke<ReadQueryResult>(TOOL.readQuery, { cypher: send.cypher, params: {}, limit: send.limit }, { generation: ticket })
-				// Counted here, in the call, so a write that lands after this console closed still marks drawn graphs out of date.
-				: countWrite(dataVersions, endpoint.key, () => session.invoke<ReadQueryResult>(TOOL.execute, { query: send.cypher, shape: 'graph' }, { generation: ticket }));
+				// Counted in the call (the dev-tool controller counts it itself), so a write that lands after this console
+				// closed still marks drawn graphs out of date.
+				: env.countWrite(endpoint.key, () => session.invoke<ReadQueryResult>(TOOL.execute, { query: send.cypher, shape: 'graph' }, { generation: ticket }));
 		},
 		settle: (_run, result) => settleRun(mode, result),
 		describeFailure: (message, error) => {
@@ -235,8 +242,8 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 		record: (run) => {
 			// A write is counted where it is sent (countWrite); one the user stopped waiting for may still complete, so it
 			// makes every graph drawn from this connection out of date now, in every document.
-			if (isAbandonedWrite(mode, run.outcome)) dataVersions.bump(endpoint.key);
-			graphHistory.runs.emitRun(endpoint.key, toHistoryEntry(historySummaryOf(run, Date.now()), entryId()));
+			if (isAbandonedWrite(mode, run.outcome)) env.markAbandonedWrite(endpoint.key);
+			env.history.record(endpoint.key, toHistoryEntry(historySummaryOf(run, Date.now()), entryId()));
 		},
 		summarize: ({ shown, runs }) => {
 			if (shown?.result) {
@@ -286,10 +293,13 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 	// everything in flight; a result change only needs `load`.
 	useEffect(() => () => graphSession.dispose(), [graphSession]);
 	// The version of this connection's data when the graph was drawn: a later write marks the drawing out of date.
-	const version = useSyncExternalStore(dataVersions.subscribe, () => dataVersions.get(endpoint.key), () => dataVersions.get(endpoint.key));
+	const version = useDataVersion(endpoint.key);
 	const drawnAt = useRef(version);
+	// Read through a ref: the env is rebuilt when the connection flag flips, and that must not reload the result.
+	const versions = useRef(env.dataVersions);
+	versions.current = env.dataVersions;
 	useEffect(() => {
-		drawnAt.current = dataVersions.get(endpoint.key);
+		drawnAt.current = versions.current.get(endpoint.key);
 		graphSession.load(result);
 	}, [graphSession, result, endpoint.key]);
 	useEffect(() => {
@@ -424,7 +434,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 					{!result ? (
 						<EmptyState icon={<GraphIcon />} title={runner.running ? 'Waiting for the node' : runner.failure ? 'Statement failed' : 'No results yet'} description={runner.running ? 'The statement has been sent.' : runner.failure ? 'The error is above. Fix the statement and run it again.' : mode === 'read' ? 'Run a query. Results with nodes open as a graph; everything else opens as a table.' : 'Statements run here change data only after you confirm them.'} />
 					) : tab === 'graph' ? (
-						<GraphView session={graphSession} schemaLabels={schema.view.labels.map((l) => l.name)} captions={captions} onCaption={setCaption} onInspect={(id) => graphSession.inspect({ kind: 'node', id })} seedKey={`${endpoint.key}:${resultKey.current}`} announce={announce} />
+						<GraphView session={graphSession} schemaLabels={schemaLabels} captions={captions} onCaption={setCaption} onInspect={(id) => graphSession.inspect({ kind: 'node', id })} seedKey={`${endpoint.key}:${resultKey.current}`} announce={announce} />
 					) : tab === 'table' ? (
 						<ResultTable result={result} tableKey={`${endpoint.key}-${resultKey.current}`} onRowOpen={setOpenRow} meta={<>{metaText}{truncation && <StatusBadge variant="warning">{truncation}</StatusBadge>}</>} />
 					) : (
@@ -462,16 +472,5 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 		</div>
 	);
 };
-
-/**
- * The session on an endpoint, from the app's store.
- *
- * @param client - The shell's client.
- * @param endpoint - The endpoint.
- * @returns The session.
- */
-function graphStoreSession(client: RocketRideClient, endpoint: IExplorerEndpoint) {
-	return graphEndpoints.session(client, endpoint);
-}
 
 export default RunSurface;

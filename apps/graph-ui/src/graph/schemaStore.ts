@@ -75,6 +75,8 @@ export interface ISchemaStore {
 	load(key: string, fetch: () => Promise<unknown>, describe: (error: unknown) => IFailureNotice, options?: { refresh?: boolean }): Promise<void>;
 	/** Forget one connection (or all). A load in flight for it is ignored when it lands. */
 	clear(key?: string): void;
+	/** The connections that have an entry (the dev-tool controller publishes a summary of each). */
+	keys(): string[];
 }
 
 /** The entry of a connection nothing was loaded for. */
@@ -102,6 +104,8 @@ export function createSchemaStore(now: () => number = () => Date.now()): ISchema
 
 	const store: ISchemaStore = {
 		get: (key) => entries.get(key) ?? IDLE,
+
+		keys: () => [...entries.keys()],
 
 		subscribe(listener) {
 			listeners.add(listener);

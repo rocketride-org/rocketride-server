@@ -89,9 +89,15 @@ canvas and its panels sit on (`--rr-bg-default` and `--rr-bg-paper`). The pairs 
   `--rr-text-secondary`, which is 3.8:1 in RocketRide Dark.
 - **Inspector label pills**: `--rr-text-primary` on paper. The shell's chip draws its text in the info colour,
   3.46:1 on the panel in RocketRide Light.
-- **Editor tokens**: Monaco's own `vs` / `vs-dark` colours are kept where they reach 4.5:1 on the editor
-  background and otherwise moved along their own lightness until they do (`src/components/editorTheme.ts`).
-  They failed in three themes (for example the label token `:Person`, 3.85:1 in RocketRide Light, and the
-  comment colour, 2.42:1 in Gray); nothing is written per theme.
+- **Editor tokens and line numbers: measured, not applied at present.** The editor is the platform's shared
+  Monaco editor, which sets its own theme (with no token colours) whenever it creates an editor and whenever
+  the app theme changes, so an app cannot keep a theme of its own. The editor therefore shows Monaco's own
+  `vs` / `vs-dark` token colours. Eleven of them are below 4.5:1 on the editor background in three themes
+  (for example the label token `:Person`, 3.85:1 in RocketRide Light, and the comment colour, 2.42:1 in Gray),
+  and the line numbers, drawn in `--rr-text-secondary`, are below it in RocketRide Dark. The fix is still
+  computed and measured in `src/components/editorTheme.ts`: a failing token colour is moved along its own
+  lightness until it reaches 4.5:1, the line numbers get the colour the token looks like over the paper and
+  move only where that fails, and nothing is written per theme. It goes back into the editor once the shared
+  editor accepts an app's token colours.
 - Small secondary text elsewhere in the app uses the shell's `--rr-text-secondary`, which is a platform
   decision and is not restyled here.

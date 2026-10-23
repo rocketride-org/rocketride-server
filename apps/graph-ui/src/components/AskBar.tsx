@@ -33,13 +33,14 @@
 
 import React, { useCallback, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, Button, InputField, useShellConnection } from 'shell';
+import { Banner, Button, InputField } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
-import { askConnection } from '../adapters/actions';
-import { announcer } from '../adapters/explorer';
+import { TOOL, announcer } from '../adapters/explorer';
 import { patternCheck } from '../cypher/classify';
-import { ASK_MAX_CHARS } from '../graph/ask';
+import { useGraphEnv } from '../env';
+import { ASK_MAX_CHARS, askQuestion } from '../graph/ask';
 import type { AskOutcome } from '../graph/ask';
+import { ASK_UNAVAILABLE } from '../graph/wording';
 
 /** Shown under a Cypher preview. */
 export const ASK_PREVIEW_NOTE = 'This is a preview written by the language model. It has not been run: read it, edit it if you like, then press Run.';
@@ -67,19 +68,22 @@ const styles = {
  * @returns The bar.
  */
 export const AskBar: React.FC<IAskBarProps> = ({ endpoint, onPreview }) => {
-	const { client, isConnected } = useShellConnection();
+	const env = useGraphEnv();
+	const isConnected = env.ready;
 	const [question, setQuestion] = useState('');
 	const [pending, setPending] = useState(false);
 	const [outcome, setOutcome] = useState<AskOutcome | null>(null);
 	const ticket = useRef(0);
 
 	const ask = useCallback(async () => {
-		if (!client || pending) return;
+		const session = env.session(endpoint);
+		if (!session || pending) return;
 		const mine = ++ticket.current;
 		setPending(true);
 		setOutcome(null);
 		announcer.announce('Asking the node. This can take a while.');
-		const result = await askConnection(client, endpoint, question);
+		// The same rules as adapters/actions.ts askConnection, over this mount's session (a remote one in a dev-tool frame).
+		const result = await askQuestion(question, (text) => session.invoke(TOOL.getQuery, { question: text }), ASK_UNAVAILABLE);
 		if (mine !== ticket.current) return;
 		setPending(false);
 		if (result.kind === 'ignored') return;
@@ -91,7 +95,7 @@ export const AskBar: React.FC<IAskBarProps> = ({ endpoint, onPreview }) => {
 		else if (result.kind === 'unavailable') announcer.announce('Asking is unavailable for this pipeline.');
 		else if (result.kind === 'refused') announcer.announce(result.text);
 		else announcer.announce(`Asking failed. ${result.headline}`);
-	}, [client, endpoint, pending, question, onPreview]);
+	}, [env, endpoint, pending, question, onPreview]);
 
 	const stop = useCallback(() => {
 		ticket.current += 1;
@@ -124,7 +128,7 @@ export const AskBar: React.FC<IAskBarProps> = ({ endpoint, onPreview }) => {
 						Stop waiting
 					</Button>
 				) : (
-					<Button variant="secondary" disabled={!isConnected || !client || question.trim() === ''} onClick={() => void ask()}>
+					<Button variant="secondary" disabled={!isConnected || question.trim() === ''} onClick={() => void ask()}>
 						Ask
 					</Button>
 				)}

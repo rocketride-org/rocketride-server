@@ -28,14 +28,17 @@
 // whether writes are allowed, how reads are kept read-only) and the endpoint's own
 // pipeline, run kind and owner. "Test connection" asks the node's `dialect` tool
 // again through the shared store; nothing here holds or shows a credential.
+//
+// The full app opens it from a Connections card, over the window. A dev-tool
+// document shows the same body inline instead (ConnectionDetailsPanel).
 // =============================================================================
 
-import React, { useState } from 'react';
-import { Banner, Button, DetailPanel, LabelValue, Section, StatusBadge } from 'shell';
+import React from 'react';
+import { Button, DetailPanel } from 'shell';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
-import { connectionView, testResultText } from '../graph/connections';
-import type { ITestResult } from '../graph/connections';
+import { connectionView } from '../graph/connections';
 import { GraphIcon } from '../icons';
+import { ConnectionDetailsBody, useConnectionTest } from './ConnectionDetails';
 
 /** Props. */
 export interface IConnectionDrawerProps {
@@ -55,21 +58,10 @@ export interface IConnectionDrawerProps {
  * @returns The drawer, or nothing while closed.
  */
 export const ConnectionDrawer: React.FC<IConnectionDrawerProps> = ({ open, endpoint, probe, onTest, onOpen, onClose }) => {
-	const [testing, setTesting] = useState(false);
 	// The host keys this drawer on the card it shows, so a result never carries over to another connection.
-	const [tested, setTested] = useState<ITestResult | null>(null);
+	const { testing, tested, test } = useConnectionTest(onTest);
 	if (!endpoint) return null;
 	const view = connectionView(endpoint, probe);
-
-	const test = async (): Promise<void> => {
-		setTesting(true);
-		try {
-			const result = await onTest(endpoint);
-			setTested(testResultText(result));
-		} finally {
-			setTesting(false);
-		}
-	};
 
 	return (
 		<DetailPanel
@@ -80,7 +72,7 @@ export const ConnectionDrawer: React.FC<IConnectionDrawerProps> = ({ open, endpo
 			subtitle={view.address}
 			footer={
 				<>
-					<Button variant="ghost" disabled={testing} onClick={() => void test()}>
+					<Button variant="ghost" disabled={testing} onClick={() => void test(endpoint)}>
 						{testing ? 'Testing...' : 'Test connection'}
 					</Button>
 					<Button variant="primary" disabled={!view.openable} onClick={() => onOpen(endpoint)}>
@@ -89,31 +81,7 @@ export const ConnectionDrawer: React.FC<IConnectionDrawerProps> = ({ open, endpo
 				</>
 			}
 		>
-			<Section label="Status">
-				<StatusBadge variant={view.badge.variant}>{view.badge.label}</StatusBadge>
-				{view.blocked && (
-					<div style={{ marginTop: 12 }}>
-						<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{view.blocked}</Banner>
-					</div>
-				)}
-				{tested && <div style={{ marginTop: 12 }}><Banner variant={tested.variant}>{tested.text}</Banner></div>}
-			</Section>
-			<Section label="Connection">
-				{view.details.map((row) => (
-					<LabelValue key={row.label} label={row.label}>
-						{row.value}
-					</LabelValue>
-				))}
-			</Section>
-			{view.notes.length > 0 && (
-				<Section label="What to know">
-					{view.notes.map((note) => (
-						<div key={note} style={{ fontSize: 12.5, color: 'var(--rr-text-secondary)', lineHeight: 1.5, marginBottom: 8 }}>
-							{note}
-						</div>
-					))}
-				</Section>
-			)}
+			<ConnectionDetailsBody endpoint={endpoint} probe={probe} tested={tested} />
 		</DetailPanel>
 	);
 };

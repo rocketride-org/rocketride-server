@@ -31,7 +31,7 @@
 // the canvas. Copy JSON copies the wire form of the entity.
 // =============================================================================
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Banner, Button, DetailPanel, LabelValue, Section } from 'shell';
 import { CHIP_TEXT_TOKEN } from '../canvas/tokens';
 import { captionOf } from '../graph/captions';
@@ -40,7 +40,7 @@ import { STALE_ELEMENT_TEXT, STALE_RELATIONSHIP_TEXT } from '../graph/identity';
 import { inspectNode, inspectRelationship } from '../graph/inspector';
 import { relationshipsOf } from '../graph/model';
 import { STOP_WAITING_NOTE } from '../graph/wording';
-import { copyText } from './ResultViews';
+import { CopyBlocked, copyText } from './ResultViews';
 import { GraphIcon } from '../icons';
 
 /** Props. */
@@ -88,6 +88,8 @@ export const InspectorPanel: React.FC<IInspectorPanelProps> = ({ state, session,
 		return rel ? { model: inspectRelationship(rel, (id) => { const n = model.nodes.get(id); return n ? captionOf(n, captions.get(n.labels[0] ?? '')) : id; }), node: null } : null;
 	}, [target, model, captions]);
 
+	// The JSON a blocked copy left on screen (shown only while it is still this entity's).
+	const [blocked, setBlocked] = useState<string | null>(null);
 	if (!target || !view) return null;
 	const m = view.model;
 	// Node and relationship ids are separate namespaces (FalkorDB numbers both from 0): each kind has its own marks.
@@ -95,7 +97,9 @@ export const InspectorPanel: React.FC<IInspectorPanelProps> = ({ state, session,
 	const rels = view.node ? relationshipsOf(model, view.node.id) : [];
 
 	const copy = async (): Promise<void> => {
-		announce((await copyText(m.json)) ? 'Copied as JSON.' : 'Copying was not allowed by the browser.');
+		const ok = await copyText(m.json);
+		setBlocked(ok ? null : m.json);
+		announce(ok ? 'Copied as JSON.' : 'Copying was not allowed by the browser.');
 	};
 
 	return (
@@ -119,6 +123,7 @@ export const InspectorPanel: React.FC<IInspectorPanelProps> = ({ state, session,
 				</>
 			}
 		>
+			{blocked !== null && blocked === m.json && <CopyBlocked text={blocked} />}
 			{(state.stale || targetStale) && (
 				<Banner variant="warning">{state.stale ? 'This copy may be out of date: a statement that can change data ran on this connection after it was drawn. It is shown as the query returned it.' : target.kind === 'node' ? STALE_ELEMENT_TEXT : STALE_RELATIONSHIP_TEXT}</Banner>
 			)}

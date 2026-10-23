@@ -182,6 +182,96 @@ export function connectionView(endpoint: IExplorerEndpoint, probe: IProbeResult 
 }
 
 // =============================================================================
+// SIDEBAR ROWS (the dev tool lists the connections in its sidebar)
+// =============================================================================
+//
+// The same facts as a card, in the room of one row: the name, a state dot and,
+// for a connection that is not plainly running, the badge label as a text
+// suffix (colour never says it alone). The tooltip names the node, its address
+// and its state, and the reason it cannot be browsed on its own line.
+
+/** What one sidebar row shows. */
+export interface IConnectionRow {
+	/** The row's name. */
+	label: string;
+	/** The muted suffix after the name, or null for a running connection. */
+	status: string | null;
+	/** The dot's colour family (the card badge's variant). */
+	variant: IBadge['variant'];
+	/** The row's `title`. */
+	tooltip: string;
+	/** The row's accessible name (name and state). */
+	ariaLabel: string;
+}
+
+/**
+ * The state a sidebar row says after its name: the card's badge label, or nothing for a connection that is running.
+ *
+ * @param endpoint - The endpoint (token-free).
+ * @param probe - Its probe result, when one exists.
+ * @returns The suffix text, or null.
+ */
+export function rowStatusText(endpoint: IExplorerEndpoint, probe: IProbeResult | undefined): string | null {
+	const badge = connectionView(endpoint, probe).badge;
+	return badge.variant === 'success' ? null : badge.label;
+}
+
+/**
+ * Everything a sidebar row shows for one endpoint.
+ *
+ * @param endpoint - The endpoint (token-free).
+ * @param probe - Its probe result, when one exists.
+ * @returns The row.
+ */
+export function connectionRow(endpoint: IExplorerEndpoint, probe: IProbeResult | undefined): IConnectionRow {
+	const view = connectionView(endpoint, probe);
+	const summary = `${view.title} \u2014 ${view.address} \u00b7 ${view.badge.label}`;
+	return {
+		label: view.title,
+		status: rowStatusText(endpoint, probe),
+		variant: view.badge.variant,
+		tooltip: view.blocked ? `${summary}\n${view.blocked}` : summary,
+		ariaLabel: `${view.title}, ${view.badge.label}`,
+	};
+}
+
+/** The line under the sidebar rows. */
+export interface IListLine {
+	/** Muted text, or the error colour. */
+	tone: 'muted' | 'error';
+	text: string;
+	/** What the line cannot say in its room (its tooltip), or null. */
+	detail: string | null;
+}
+
+/**
+ * The line under the sidebar rows, from the same empty states as the full app's landing. Nothing while discovery has
+ * not started (it waits for the activation and a known identity, so "discovering" would not be true), and nothing
+ * while the rows say it all (each row says why it cannot be used).
+ *
+ * @param status - The discovery lifecycle.
+ * @param endpoints - The discovered endpoints.
+ * @param error - The discovery failure text, when it failed.
+ * @returns The line, or null.
+ */
+export function sidebarListLine(status: 'idle' | 'loading' | 'ready' | 'error', endpoints: readonly IExplorerEndpoint[], error: string | null): IListLine | null {
+	if (status === 'idle') return null;
+	if (status === 'error' && endpoints.length > 0) return { tone: 'error', text: `Refresh failed: ${error ?? 'the list of running pipelines could not be read'}. Showing what was found before.`, detail: null };
+	const empty = emptyState(status, endpoints, error);
+	if (!empty) return null;
+	switch (empty.kind) {
+		case 'loading':
+			return { tone: 'muted', text: `${empty.title}\u2026`, detail: null };
+		case 'error':
+			return { tone: 'error', text: `${empty.title}: ${empty.description}`, detail: empty.unknown };
+		case 'none-running':
+			return { tone: 'muted', text: 'No running graph node found. Start a pipeline with a graph node, then refresh.', detail: [empty.description, empty.unknown].filter(Boolean).join(' ') };
+		default:
+			return null;
+	}
+}
+
+// =============================================================================
 // TEST CONNECTION
 // =============================================================================
 
@@ -217,6 +307,47 @@ export function testResultText(result: IProbeResult | null): ITestResult {
  */
 export function drawerKeyAfter(drawerKey: string | null, endpoints: readonly IExplorerEndpoint[]): string | null {
 	return drawerKey !== null && endpoints.some((e) => e.key === drawerKey) ? drawerKey : null;
+}
+
+// =============================================================================
+// THE INLINE DETAILS PANEL OF A DEV-TOOL CONNECTION DOCUMENT
+// =============================================================================
+//
+// As a dev tool a connection document shows the details in its own layout (no
+// drawer: rocket-ui keeps hidden documents mounted, and a modal drawer left
+// open there would hold the keyboard and the page scroll for the whole realm).
+// Details toggles them. Test connection opens them and asks for a test, again
+// each time it is pressed while they are open. A panel opened by Details tests
+// nothing by itself, and closing forgets the requests.
+
+/** Whether a document's details panel is open, and the last Test connection request (0: none). */
+export interface IDetailsPanelState {
+	open: boolean;
+	testRequest: number;
+}
+
+/** What a document does to its details panel. */
+export type DetailsPanelAction = 'toggle' | 'test' | 'close';
+
+/** A closed panel with no request. */
+export const DETAILS_CLOSED: IDetailsPanelState = { open: false, testRequest: 0 };
+
+/**
+ * The details panel after an action.
+ *
+ * @param state - The panel now.
+ * @param action - Details (toggle), Test connection (test), or close.
+ * @returns The panel after it.
+ */
+export function detailsPanelAfter(state: IDetailsPanelState, action: DetailsPanelAction): IDetailsPanelState {
+	switch (action) {
+		case 'toggle':
+			return state.open ? DETAILS_CLOSED : { open: true, testRequest: 0 };
+		case 'test':
+			return { open: true, testRequest: (state.open ? state.testRequest : 0) + 1 };
+		default:
+			return DETAILS_CLOSED;
+	}
 }
 
 // =============================================================================

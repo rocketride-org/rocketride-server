@@ -1,6 +1,6 @@
 {
 	"name": "@rocketride/graph-ui",
-	"version": "1.0.0",
+	"version": "1.2.0",
 	"private": true,
 	"description": "Graph database workbench over pipeline graph tool nodes",
 	"license": "MIT",
@@ -13,7 +13,8 @@
 		"icon": "./src/icon.svg",
 		"readme": "./README.md",
 		"categories": [
-			"tools"
+			"tools",
+			"devTool"
 		],
 		"mode": "free",
 		"authenticated": true,
@@ -37,7 +38,6 @@
 	],
 	"dependencies": {
 		"@module-federation/rsbuild-plugin": "^2.5.1",
-		"@monaco-editor/react": "^4.7.0",
 		"@xyflow/react": "~12.3.4",
 		"d3-force": "~3.0.0",
 		"monaco-editor": "^0.55.1",
@@ -47,7 +47,7 @@
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"devDependencies": {
-		"@rsbuild/core": "~2.0.11",
+		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"@types/d3-force": "~3.0.10",
 		"@types/react": "~18.3.31",

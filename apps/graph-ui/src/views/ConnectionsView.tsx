@@ -25,16 +25,18 @@
 // =============================================================================
 
 import React, { useEffect, useState } from 'react';
-import { Banner, Button, ConnectionCard, ContentHeader, EmptyState, useShellConnection } from 'shell';
+import { Banner, Button, ConnectionCard, ContentHeader, EmptyState } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
-import { graphEndpoints } from '../adapters/explorer';
-import { useGraphEndpoints } from '../adapters/react';
 import ConnectionDrawer from '../components/ConnectionDrawer';
-import { getDocs } from '../docs';
+import { useGraphEndpoints, useGraphEnv } from '../env';
 import { connectionView, drawerKeyAfter, landingView } from '../graph/connections';
-import { workbenchUri } from '../graph/addresses';
 import { GraphIcon } from '../icons';
 import { styles } from '../styles';
+
+/** Said when the dev-tool controller could not fit every connection into one update. */
+export function omittedText(omitted: number): string {
+	return `${omitted.toLocaleString('en-US')} more ${omitted === 1 ? 'connection is' : 'connections are'} not shown here: there are too many to send to this window at once.`;
+}
 
 /**
  * The landing view: every graph node found in the caller's running pipelines, as
@@ -43,14 +45,16 @@ import { styles } from '../styles';
  * @returns The view.
  */
 export const ConnectionsView: React.FC = () => {
-	const { client, isConnected } = useShellConnection();
-	const { status, endpoints, probes, error } = useGraphEndpoints();
+	const env = useGraphEnv();
+	const isConnected = env.ready;
+	const { status, endpoints, probes, error, omitted } = useGraphEndpoints();
 	const [drawerKey, setDrawerKey] = useState<string | null>(null);
 
-	// First discovery as soon as the shell connection is live.
+	// First discovery as soon as the engine connection is live. Automatic, so quiet: a refusal (a dev-tool controller
+	// still settling its identity) is not announced; the state says what happened.
 	useEffect(() => {
-		if (client && isConnected && status === 'idle') void graphEndpoints.refresh(client);
-	}, [client, isConnected, status]);
+		if (isConnected && status === 'idle') void env.refresh({ quiet: true });
+	}, [env, isConnected, status]);
 
 	// A sign-out or a change of identity resets the store: the drawer closes with the connections it forgot.
 	useEffect(() => {
@@ -59,7 +63,7 @@ export const ConnectionsView: React.FC = () => {
 	}, [drawerKey, endpoints]);
 
 	const open = (endpoint: IExplorerEndpoint): void => {
-		getDocs()?.openStaticDocument(workbenchUri(endpoint.key), endpoint.nodeName || 'Graph', { endpoint });
+		env.openDocument({ kind: 'workbench', endpoint });
 	};
 	const drawerEndpoint = endpoints.find((e) => e.key === drawerKey) ?? null;
 	// The cards stay whenever there are any (a message sits above them); the empty state stands alone only without cards.
@@ -72,7 +76,7 @@ export const ConnectionsView: React.FC = () => {
 				title="Connections"
 				subtitle="Graph databases reachable through your running pipelines (Apache AGE, Neo4j, FalkorDB). A connection is a graph node in a pipeline."
 				actions={
-					<Button variant="ghost" onClick={() => { if (client) void graphEndpoints.refresh(client); }} disabled={!client || status === 'loading'}>
+					<Button variant="ghost" onClick={() => { if (isConnected) void env.refresh(); }} disabled={!isConnected || status === 'loading'}>
 						{status === 'loading' ? 'Refreshing...' : 'Refresh'}
 					</Button>
 				}
@@ -88,12 +92,17 @@ export const ConnectionsView: React.FC = () => {
 						icon={<GraphIcon />}
 						title={landing.message.title}
 						description={messageText}
-						action={landing.message.kind === 'loading' ? undefined : <Button variant="primary" onClick={() => { if (client) void graphEndpoints.refresh(client); }} disabled={!client}>Refresh</Button>}
+						action={landing.message.kind === 'loading' ? undefined : <Button variant="primary" onClick={() => { if (isConnected) void env.refresh(); }} disabled={!isConnected}>Refresh</Button>}
 					/>
 				)}
 				{landing.message && landing.cards && (
 					<div style={{ marginBottom: 16 }}>
 						<Banner variant={landing.message.kind === 'loading' ? 'info' : 'warning'}>{`${landing.message.title}. ${messageText}`}</Banner>
+					</div>
+				)}
+				{omitted > 0 && (
+					<div style={{ marginBottom: 16 }}>
+						<Banner variant="info">{omittedText(omitted)}</Banner>
 					</div>
 				)}
 				{landing.cards && (
@@ -121,7 +130,7 @@ export const ConnectionsView: React.FC = () => {
 				open={drawerEndpoint !== null}
 				endpoint={drawerEndpoint}
 				probe={drawerEndpoint ? probes[drawerEndpoint.key] : undefined}
-				onTest={(endpoint) => (client ? graphEndpoints.probe(client, endpoint.key) : Promise.resolve(null))}
+				onTest={(endpoint) => (isConnected ? env.probe(endpoint.key) : Promise.resolve(null))}
 				onOpen={(endpoint) => {
 					setDrawerKey(null);
 					open(endpoint);

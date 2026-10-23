@@ -35,20 +35,24 @@
 // that can write only where this console is meant to). rocketride_graph has no
 // account to choose: it connects as the role that owns the RocketRide database,
 // so for it the boundary is whether the node allows execute at all.
+//
+// As a dev tool, where the console is unavailable Test connection shows the
+// connection details inline in this document, with a test (ConnectionDetailsPanel,
+// never a drawer); the full app keeps Open Connections.
 // =============================================================================
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Banner, Button, ContentHeader, EmptyState } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { announcer } from '../adapters/explorer';
-import { useGraphEndpoints } from '../adapters/react';
-import { CONNECTIONS_URI } from '../graph/addresses';
-import { connectionView, surfaceGate } from '../graph/connections';
+import { useGraphEndpoints, useGraphEnv } from '../env';
+import { DETAILS_CLOSED, connectionView, detailsPanelAfter, surfaceGate } from '../graph/connections';
+import type { DetailsPanelAction, IDetailsPanelState } from '../graph/connections';
 import { canWrite, engineText, parseDialect, targetText } from '../graph/dialect';
 import { WRITE_CONSOLE_BANNER, rerunAnnouncement } from '../graph/writeConfirm';
-import { getDocs } from '../docs';
 import { GraphIcon } from '../icons';
 import { styles } from '../styles';
+import ConnectionDetailsPanel from '../components/ConnectionDetailsPanel';
 import HistoryPanel from '../components/HistoryPanel';
 import RunSurface from '../components/RunSurface';
 import { createLoadSlot } from '../graph/loadSlot';
@@ -72,6 +76,7 @@ export interface IWriteConsoleViewProps {
  * @returns The view.
  */
 export const WriteConsoleView: React.FC<IWriteConsoleViewProps> = ({ endpoint }) => {
+	const env = useGraphEnv();
 	const { probes } = useGraphEndpoints();
 	const probe = probes[endpoint.key];
 	const dialect = useMemo(() => (probe?.ok ? parseDialect(probe.info) : null), [probe]);
@@ -85,6 +90,10 @@ export const WriteConsoleView: React.FC<IWriteConsoleViewProps> = ({ endpoint })
 	const gate = surfaceGate({ openable: allowed, blocked: allowed ? null : unavailable }, opened.current);
 
 	const [historyOpen, setHistoryOpen] = useState(false);
+	// A dev-tool frame shows the connection details inline here, from Test connection (see detailsPanelAfter).
+	const inFrame = env.mount === 'frame';
+	const [details, setDetails] = useState<IDetailsPanelState>(DETAILS_CLOSED);
+	const panel = (action: DetailsPanelAction): void => setDetails((current) => detailsPanelAfter(current, action));
 	// One slot for the life of the document: the surface takes each request once (see loadSlot.ts).
 	const [slot] = useState(createLoadSlot);
 	const [loadSeq, setLoadSeq] = useState(0);
@@ -98,6 +107,20 @@ export const WriteConsoleView: React.FC<IWriteConsoleViewProps> = ({ endpoint })
 	return (
 		<div style={styles.root}>
 			<ContentHeader title={`${view.title} \u2014 write console`} subtitle={subtitle} />
+			{inFrame && details.open && (
+				<ConnectionDetailsPanel
+					key={endpoint.key}
+					endpoint={endpoint}
+					probe={probe}
+					testRequest={details.testRequest}
+					onTest={(target) => (env.ready ? env.probe(target.key) : Promise.resolve(null))}
+					onOpen={(target) => {
+						panel('close');
+						env.openDocument({ kind: 'workbench', endpoint: target });
+					}}
+					onClose={() => panel('close')}
+				/>
+			)}
 			{gate.mounted ? (
 				<>
 					<div style={{ padding: '8px 24px 0' }}>
@@ -113,9 +136,15 @@ export const WriteConsoleView: React.FC<IWriteConsoleViewProps> = ({ endpoint })
 					title="The write console is not available for this connection"
 					description={endpoint.state !== 'ready' ? (view.blocked ?? 'This connection is not available.') : writeUnavailableText(dialect?.allowExecute === true, dialect !== null && dialect.capabilities.execute_shape_graph === true)}
 					action={
-						<Button variant="primary" onClick={() => getDocs()?.openStaticDocument(CONNECTIONS_URI, 'Connections')}>
-							Open Connections
-						</Button>
+						inFrame ? (
+							<Button variant="primary" onClick={() => panel('test')}>
+								Test connection
+							</Button>
+						) : (
+							<Button variant="primary" onClick={() => env.openDocument({ kind: 'connections' })}>
+								Open Connections
+							</Button>
+						)
 					}
 				/>
 			)}

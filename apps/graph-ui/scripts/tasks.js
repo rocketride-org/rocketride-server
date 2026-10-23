@@ -78,6 +78,10 @@ const REQUIRED_TESTS = [
 	'graph.surface.test.ts',
 	'graph.identity-change.test.ts',
 	'builder.e2e.test.ts',
+	// Dev-tool mounts (T1-T13) over the real shell modules.
+	'devtool.protocol.test.ts',
+	'devtool.lifecycle.test.ts',
+	'devtool.mounts.test.ts',
 ];
 
 const mod = createAppModule({

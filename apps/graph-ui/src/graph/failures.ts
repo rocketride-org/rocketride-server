@@ -52,7 +52,7 @@
 // =============================================================================
 
 import type { IFailureNotice as ISharedFailureNotice } from 'shared/explorer';
-import { GRID_NOTICE, STOP_WAITING_NOTE, upgradeText } from './wording';
+import { CONTROLLER_NOT_READY_TEXT, GRID_NOTICE, STOP_WAITING_NOTE, upgradeText } from './wording';
 
 /** What the shared tool session threw, reduced to what this module reads. */
 export interface IFailureInput {
@@ -136,7 +136,9 @@ function describeKind(error: IFailureInput, canWrite: boolean): Omit<IFailureNot
 		return { ...base, variant: 'error', headline: 'This node does not allow execute (allow_execute is off).', detail: '', hint: 'Browsing with Cypher works. Statements that change data need a node with direct execution turned on.' };
 	}
 	if (error.kind === 'timeout') return { ...base, variant: 'warning', headline: error.headline, detail: error.detail ?? '', hint: STOP_WAITING_NOTE };
-	if (error.kind === 'unavailable') return { ...base, variant: 'error', headline: error.headline, hint: 'Start the pipeline, then refresh the connections.' };
+	// A dev-tool document whose call no controller took: the headline says to open the sidebar, and the pipeline is not
+	// the problem, so no pipeline hint.
+	if (error.kind === 'unavailable') return { ...base, variant: 'error', headline: error.headline, hint: error.headline === CONTROLLER_NOT_READY_TEXT ? null : 'Start the pipeline, then refresh the connections.' };
 	if (error.kind === 'malformed') return { ...base, variant: 'error', headline: error.headline, hint: 'The node answered in a shape this app does not understand. It may need an upgrade.' };
 	if (error.kind === 'invalid') return { ...base, variant: 'error', headline: error.headline, hint: null };
 
