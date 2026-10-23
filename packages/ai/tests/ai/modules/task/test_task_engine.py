@@ -1254,7 +1254,8 @@ async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
     monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
     t.source = 'src'
-    t._env = {}
+    t._env_source = AsyncMock(return_value={})
+    t._restart_env = None
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
     t._is_restarting = False
     t._launch_args = {}
