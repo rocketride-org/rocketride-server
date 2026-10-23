@@ -33,11 +33,12 @@ from ai.common.config import Config
 
 from .client import SystemOneClient, SystemOneError
 from .limits import DecisionLimits
-from .questions import parse_questions
+from .questions import YES_NO, ProtocolError, QuestionSpec, map_answer, parse_questions
 from .runner import DecisionRunner
 
 PROBE_STATE = 'Hello, this is a short test message.'
 PROBE_QUESTIONS = {'probe': {'type': 'noul', 'instructions': 'Is this text a greeting?'}}
+PROBE_SPEC = QuestionSpec('probe', YES_NO, 'Is this text a greeting?')
 
 
 class IGlobal(IGlobalBase):
@@ -77,11 +78,14 @@ class IGlobal(IGlobalBase):
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             model = self._model(config)
             parse_questions(config, self._limits(config))
-            client = SystemOneClient(
-                self._base_url(config), self._api_key(config), timeout=self._timeout(config), max_attempts=1
-            )
-            client.decide(model, PROBE_STATE, PROBE_QUESTIONS)
-        except (ValueError, SystemOneError) as exc:
+            base_url = self._base_url(config)
+            client = SystemOneClient(base_url, self._api_key(config), timeout=self._timeout(config), max_attempts=1)
+            reply = client.decide(model, PROBE_STATE, PROBE_QUESTIONS)
+            answers = reply.get('answers') if isinstance(reply, dict) else None
+            if not isinstance(answers, dict) or 'probe' not in answers:
+                raise ProtocolError(f'{base_url} did not answer the test question with a yes/no answer')
+            map_answer(PROBE_SPEC, answers['probe'])
+        except (ValueError, SystemOneError, ProtocolError) as exc:
             warning(str(exc))
         except Exception as exc:
             warning(f'System One config check failed: {exc}')

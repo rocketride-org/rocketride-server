@@ -24,16 +24,17 @@
 """Gate node: passes or blocks each item by response['decisions'] (spec §7)."""
 
 import importlib
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from rocketlib import AVI_ACTION
+from rocketlib import AVI_ACTION, OPEN_MODE
 from rocketlib.decisions import record, record_decision
 
-from ai.common.decision import DecisionError, fingerprint, parse_rule
+from ai.common.decision import DecisionError, RuleConfigError, fingerprint, parse_rule
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 # sys.path can hold a package with the same name as the node (see #1687).
@@ -43,6 +44,7 @@ sys.path.insert(0, str(NODES_SRC))
 
 # The package re-exports the IInstance class under the module's name, so `import gate.IInstance as x` would bind the class.
 gate_instance = importlib.import_module('gate.IInstance')
+gate_global = importlib.import_module('gate.IGlobal')
 
 SPAM = {'is_spam': {'kind': 'yes_no'}}
 TOPIC = {'topic': {'kind': 'pick_one'}}
@@ -332,3 +334,30 @@ def test_a_passed_value_check_is_remembered_per_instance_only():
     first.writeText('a')
     assert first._values_checked == {(0, 'so_1')}
     assert gate_instance.IInstance._values_checked == frozenset()
+
+
+def _global(monkeypatch, open_mode):
+    """A Gate IGlobal configured with the default profile from services.json."""
+    preconfig = json.loads((NODES_SRC / 'gate' / 'services.json').read_text(encoding='utf-8'))['preconfig']
+    config = preconfig['profiles'][preconfig['default']]
+    warnings = []
+    monkeypatch.setattr(gate_global, 'Config', SimpleNamespace(getNodeConfig=lambda *_a: config))
+    monkeypatch.setattr(gate_global, 'warning', warnings.append)
+    glb = gate_global.IGlobal()
+    glb.glb = SimpleNamespace(logicalType='gate', connConfig={})
+    glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=open_mode))
+    return glb, warnings
+
+
+def test_the_default_config_warns_in_validate_and_fails_at_start(monkeypatch):
+    glb, warnings = _global(monkeypatch, OPEN_MODE.PIPELINE)
+    glb.validateConfig()
+    assert len(warnings) == 1 and 'at least one condition' in warnings[0]
+    with pytest.raises(RuleConfigError, match='at least one condition'):
+        glb.beginGlobal()
+
+
+def test_begin_global_skips_the_rule_in_config_mode(monkeypatch):
+    glb, _ = _global(monkeypatch, OPEN_MODE.CONFIG)
+    glb.beginGlobal()
+    assert glb.rule is None

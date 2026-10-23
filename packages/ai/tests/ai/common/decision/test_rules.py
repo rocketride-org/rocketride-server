@@ -54,6 +54,7 @@ def _c(op, value=None, question='q'):
         ('lt', 2, HIGH, False),
         ('between', '1, 2', HIGH, True),
         ('gt', 0, UNSURE_RUBRIC, False),  # uncertain has no index
+        ('gte', 1, {'answer': 'uncertain', 'index': 2}, False),  # ... even if a writer leaves one
         ('gt', '0.9', SCORE, True),
         ('lte', 0.5, SCORE, False),
         ('between', [0.9, 1], SCORE, True),

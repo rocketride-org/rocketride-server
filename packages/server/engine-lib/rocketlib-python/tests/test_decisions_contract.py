@@ -136,6 +136,7 @@ def test_fake_non_system_one_writer_with_number_answers_and_custom_status():
             {'lane': 'text', 'status': 'ok', 'item': 3, 'answers': {'is_spam': {'answer': 'no'}}},
             '"item" must be a dict',
         ),
+        ({'lane': 'text', 'status': 'ok', 'preview': 3, 'answers': {'is_spam': {'answer': 'no'}}}, 'preview'),
     ],
 )
 def test_bad_items_raise_in_the_writer(item, message):
@@ -150,6 +151,10 @@ def test_bad_group_arguments_raise():
         record({}, 'g', writer='', questions=QUESTIONS, item=OK_ITEM)
     with pytest.raises(DecisionError, match='needs a "kind"'):
         record({}, 'g', writer='w', questions={'is_spam': {}}, item=OK_ITEM)
+    with pytest.raises(DecisionError, match='question name'):
+        record({}, 'g', writer='w', questions={'': {'kind': 'yes_no'}}, item=OK_ITEM)
+    with pytest.raises(DecisionError, match='usage must be a dict'):
+        record({}, 'g', writer='w', questions=QUESTIONS, item=OK_ITEM, usage='x')
 
 
 def test_group_questions_are_fixed_by_the_first_write():
@@ -163,6 +168,8 @@ def test_group_questions_are_fixed_by_the_first_write():
             questions={'is_spam': {'kind': 'yes_no', 'question': 'Changed?'}},
             item=OK_ITEM,
         )
+    with pytest.raises(DecisionError, match='different writer or question set'):
+        record(response, 'decision_ollama_1', writer='other_writer', questions=QUESTIONS, item=OK_ITEM)
 
 
 def test_stamp_adds_its_own_key_and_keeps_others():
@@ -207,3 +214,36 @@ def test_values_must_be_a_non_empty_list_of_scalars(values):
 
 def test_values_of_scalars_are_accepted():
     assert _record({}, questions={'is_spam': {'kind': 'yes_no', 'values': ['yes', 'no']}}) == 0
+
+
+@pytest.mark.parametrize(
+    'answer, message',
+    [
+        ({'answer': 'Yes'}, 'not one of the declared values'),
+        ({'answer': 'no', 'index': 2}, 'outside the declared values'),
+    ],
+)
+def test_answers_must_fall_within_declared_values(answer, message):
+    questions = {'is_spam': {'kind': 'yes_no', 'values': ['yes', 'no']}}
+    with pytest.raises(DecisionError, match=message):
+        _record({}, questions=questions, item={**OK_ITEM, 'answers': {'is_spam': answer}})
+    assert _record({}, questions=questions, item={**OK_ITEM, 'answers': {'is_spam': {'answer': 'uncertain'}}}) == 0
+
+
+@pytest.mark.parametrize(
+    'values, answer, declared',
+    [
+        ([1], True, False),
+        ([True], 1, False),
+        ([True], True, True),
+        ([0.12345], 0.12345, True),
+    ],
+)
+def test_declared_values_match_by_type_and_after_rounding(values, answer, declared):
+    questions = {'score': {'kind': 'number', 'values': values}}
+    item = {**OK_ITEM, 'answers': {'score': {'answer': answer}}}
+    if declared:
+        assert _record({}, questions=questions, item=item) == 0
+    else:
+        with pytest.raises(DecisionError, match='not one of the declared values'):
+            _record({}, questions=questions, item=item)

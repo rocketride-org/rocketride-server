@@ -34,7 +34,7 @@ Choose whether **all** or **any** of the conditions must hold, then list the con
 
 ### Conditions
 
-A rule needs at least one condition. Values typed in the panel are text; when the recorded answer is a number or a boolean, the Gate converts the value to that type before comparing (`0.8` becomes the number 0.8, `true` the boolean). A value that cannot be converted makes the comparison false, except for the numeric operators (`>`, `≥`, `<`, `≤`, between), where the rule is rejected at startup.
+A rule needs at least one condition. Values typed in the panel are text; when the recorded answer is a number or a boolean, the Gate converts the value to that type before comparing (`0.8` becomes the number 0.8, `true` the boolean). A value that cannot be converted never equals the answer: `equals` and `is one of` are false, and `does not equal` and `is none of` are true, so `score does not equal high` passes every item. For the numeric operators (`>`, `≥`, `<`, `≤`, between) such a value is rejected at startup.
 
 ### Operators
 

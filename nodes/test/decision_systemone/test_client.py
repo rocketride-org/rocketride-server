@@ -264,6 +264,7 @@ def test_error_message_excludes_body_but_exc_body_keeps_it():
         ({'error': {'type': 'invalid_request'}}, 'invalid_request'),
         ({'error': 'short message'}, 'short message'),
         ({'error': 'z' * 81}, None),
+        ({'error': {'code': 'z' * 81}}, None),
         ({'detail': 'x'}, None),
     ],
 )

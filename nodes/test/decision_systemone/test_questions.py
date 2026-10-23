@@ -237,6 +237,18 @@ def test_map_unknown_choice_raises_protocol_error():
             {'type': 'choice', 'choice': 'a'},
             'missing both probabilities and confidence',
         ),
+        # PICK_ONE malformed: a probability key that is not an option
+        (
+            QuestionSpec('team', PICK_ONE, 'q', options=(('a', None), ('b', None))),
+            {'type': 'choice', 'choice': 'a', 'probabilities': {'a': 0.6, 'zzz': 0.4}},
+            'probability key not an option',
+        ),
+        # PICK_ONE malformed: choice is not the most probable option
+        (
+            QuestionSpec('team', PICK_ONE, 'q', options=(('a', None), ('b', None))),
+            {'type': 'choice', 'choice': 'a', 'probabilities': {'a': 0.1, 'b': 0.9}},
+            'choice not the most probable',
+        ),
         # RUBRIC malformed: missing score
         (
             QuestionSpec('sev', RUBRIC, 'q', levels=('Low', 'High')),

@@ -163,7 +163,7 @@ Every node can record decisions. There's nothing to import and no base class to 
 self.recordDecision(questions, answers, doc=..., table=..., lane=..., status='ok')
 ```
 
-- **`questions`** is the node's fixed declaration, the same dict on every call: `{name: {'kind': ..., 'values': [...]}}`. `kind` is `yes_no`, `pick_one`, `rubric`, `number` or your own. Declare `values` (the answers it can give) so a Gate can reject a condition that can never match.
+- **`questions`** is the node's fixed declaration, the same dict on every call: `{name: {'kind': ..., 'values': [...]}}`. `kind` is `yes_no`, `pick_one`, `rubric`, `number` or your own. Declare `values` (the answers it can give) so a Gate can reject a condition that can never match. `recordDecision` then rejects an answer that is not in `values` (other than `uncertain`) and an `index` outside it.
 - **`answers`** is `{name: {'answer': ...}}`, with optional `confidence` (0-1) and `index`. An `ok` decision answers exactly the declared questions.
 - **What it's about.** Pass exactly one of:
   - `doc=` for one document. Stamps `doc.metadata.decision_refs`, so the doc needs metadata.

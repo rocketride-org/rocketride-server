@@ -217,6 +217,8 @@ def _equals(answer, value) -> bool:
 
 
 def _ordinal(answer: dict):
+    if answer['answer'] == UNCERTAIN:
+        return None
     if 'index' in answer:
         return answer['index']
     value = answer['answer']

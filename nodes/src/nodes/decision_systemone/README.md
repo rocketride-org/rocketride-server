@@ -37,16 +37,21 @@ A document or table with empty content, a document that is not text, and an empt
 question, answer or JSON item (null, `{}`, `[]` or blank text) fail the object with an error
 that names the node.
 
+Questions, answers and JSON items are recorded as whole-object decisions for their lane, so a
+Gate expects one such item per object on each lane. If an object carries several on the same
+lane, a Gate downstream fails it ("holds N whole-object decisions").
+
 ## Profiles
 
 System One (custom endpoint) default: **Custom** (`custom`). Ollama default: **Nimble** (`nimble`). TypeSafe Jev, OpenRouter and rout.my default: **Jev (latest)** (`jev-latest`). Laya Studio default: **English** (`english`). CLM default: **CLM (latest)** (`clm-latest`). Superagent Security-One has one profile, **Security-One** (`security-one`).
 
 The directory registers eight canvas nodes that share one implementation. The custom endpoint,
-Ollama, rout.my and CLM nodes each have a `custom` profile; the table lists it once.
+TypeSafe Jev, OpenRouter, Ollama, rout.my and CLM nodes each have a `custom` profile; the table
+lists it once.
 
 | Profile                       | Node                          | Model sent to the endpoint                  |
 | ----------------------------- | ----------------------------- | ------------------------------------------- |
-| `custom` **(default)**        | Custom endpoint, Ollama, rout.my, CLM | _(user-specified)_                  |
+| `custom` **(default)** on the custom endpoint only | Custom endpoint, TypeSafe Jev, OpenRouter, Ollama, rout.my, CLM | _(user-specified)_ |
 | `jev-latest` **(default)**    | TypeSafe Jev, OpenRouter, rout.my | `jev-latest` (TypeSafe, rout.my), `~typesafe/jev-latest` (OpenRouter) |
 | `jev-preview`                 | TypeSafe Jev, rout.my         | `jev-preview` (follows the provider's newest build; today it is the same model as `jev-latest`) |
 | `jev-1-13-0`                  | TypeSafe Jev                  | `jev-1.13.0`                                |
@@ -71,7 +76,8 @@ of them. Pick the profile first; on the custom endpoint node, also set the serve
 the endpoint serves it. The per-backend limits are listed under [Limits by backend](#limits-by-backend).
 
 The question set is checked when the pipeline starts, before any item flows. Validating the
-configuration also makes one live yes/no call to the backend and reports a failure as a warning. The
+configuration also makes one live yes/no call to the backend and reports a failure, or a reply that is
+not a valid yes/no answer, as a warning. The
 node refuses to start if a name is invalid or duplicated, an option or level count is
 outside the backend's limits, or no question is configured.
 
@@ -141,7 +147,7 @@ Something is broken and there is no workaround
 
 The model returns a confidence with every answer. When it is below the question's
 **Minimum confidence** (default 0, so never), the answer is replaced with the string
-`uncertain` and `uncertain` is set to `true`, so a Gate node can block it or send it to review. Confidence is computed as follows:
+`uncertain`, the model's answer is kept as `best`, and a rubric's `index` is dropped, so a Gate node can block it or send it to review. Confidence is computed as follows:
 
 - Yes/No: the margin from the threshold, scaled to 0 to 1. For `yes`, `(p - t) / (1 - t)`;
   for `no`, `(t - p) / t`, where `p` is the probability of yes and `t` the threshold.

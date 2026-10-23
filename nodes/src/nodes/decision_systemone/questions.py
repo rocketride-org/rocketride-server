@@ -263,6 +263,12 @@ def map_answer(spec: QuestionSpec, wire: dict) -> dict:
             raise ProtocolError(f'{spec.name}: choice must be a hashable value: {e}') from e
         if not probabilities and conf_raw is None:
             raise ProtocolError(f'{spec.name}: pick-one requires either probabilities or backend confidence')
+        if probabilities:
+            unknown = set(probabilities) - {value for value, _ in spec.options}
+            if unknown:
+                raise ProtocolError(f'{spec.name}: probability keys {sorted(unknown)} are not options')
+            if probabilities.get(choice, 0.0) < max(probabilities.values()):
+                raise ProtocolError(f'{spec.name}: backend chose {choice!r}, not its most probable option')
         return _finish(spec, {'answer': choice, 'confidence': confidence, 'probabilities': probabilities})
     if not probabilities:
         raise ProtocolError(f'{spec.name}: rubric answer has no probabilities')

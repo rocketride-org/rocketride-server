@@ -80,13 +80,10 @@ def _error_code(text: str) -> str | None:
         error = json.loads(text).get('error')
     except (ValueError, AttributeError):
         return None
-    if isinstance(error, dict):
-        for key in ('code', 'type'):
-            if isinstance(error.get(key), str) and error[key]:
-                return error[key]
-        return None
-    if isinstance(error, str) and 0 < len(error) <= MAX_ERROR_CODE_CHARS:
-        return error
+    candidates = [error.get('code'), error.get('type')] if isinstance(error, dict) else [error]
+    for candidate in candidates:
+        if isinstance(candidate, str) and 0 < len(candidate) <= MAX_ERROR_CODE_CHARS:
+            return candidate
     return None
 
 

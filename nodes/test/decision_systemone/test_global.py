@@ -91,6 +91,13 @@ def test_probe_failure_is_reported_as_a_warning(systemone, monkeypatch):
     assert ProbeClient.instances[0].closed
 
 
+def test_probe_reply_without_an_answer_is_reported_as_a_warning(systemone, monkeypatch):
+    glb = _global(systemone, monkeypatch, CONFIG)
+    monkeypatch.setattr(ProbeClient, 'decide', lambda self, *a: {})
+    glb.validateConfig()
+    assert systemone.warnings == ['http://localhost:11434 did not answer the test question with a yes/no answer']
+
+
 def test_bad_questions_warn_without_a_live_call(systemone, monkeypatch):
     _global(systemone, monkeypatch, {**CONFIG, 'yes_no': [{'name': 'Bad Name', 'question': 'q'}]}).validateConfig()
     assert ProbeClient.instances == []

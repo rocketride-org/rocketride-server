@@ -31,7 +31,7 @@ RESERVED_MESSAGE = "'decisions' is reserved for decision nodes"
 
 def _reserved_key_used(config: dict) -> bool:
     names = [config.get('laneName')] + [
-        info.get('laneName') for info in config.get('lanes') or [] if isinstance(info, dict)
+        info.get('laneName') for info in config.get('lanes') or [] if hasattr(info, 'get')
     ]
     return any(name in RESERVED_KEYS for name in names)
 
