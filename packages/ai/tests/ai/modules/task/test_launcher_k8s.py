@@ -44,6 +44,7 @@ import json
 import re
 import shlex
 import tarfile
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -495,8 +496,8 @@ async def test_prepare_sweeps_this_instances_leftovers_then_watches():
             '--output-watch-events',
             '-o',
             f'jsonpath={k8.WATCH_FORMAT}',
-            # It ends itself: a watch whose engine went without a word must not live on
-            '--request-timeout=300s',
+            # Nothing that changes kubectl's client config: inside a pod it would skip the
+            # in-cluster settings and dial localhost:8080
         ]
     ]
 
@@ -1080,6 +1081,35 @@ async def test_the_watch_is_started_again_when_it_ends(monkeypatch):
     launch = await launcher.start(_spec())
     cli.emit('Succeeded', exit_code='0')
     assert await launch.wait() == 0
+
+
+async def test_the_launcher_ends_a_watch_that_ran_its_time_and_starts_another(monkeypatch):
+    """The launcher ends the watch itself: kubectl is not told when to stop."""
+    _no_waiting(monkeypatch)
+    monkeypatch.setattr(k8, 'CONST_WATCH_MAX_LIFE', 0.05)
+    cli = FakeKubectl()
+    launcher = _launcher(cli)
+    await launcher.prepare()
+    first = cli.watches[0]
+    deadline = time.monotonic() + 5
+    while len(cli.watches) < 2 and time.monotonic() < deadline:
+        await asyncio.sleep(0)
+    assert first.killed
+    assert len(cli.watches) >= 2 and cli.spawned[1] == cli.spawned[0]
+    # And the new one tells a task started now of its pod
+    monkeypatch.setattr(k8, 'CONST_WATCH_MAX_LIFE', 300)
+    launch = await launcher.start(_spec())
+    cli.emit('Succeeded', exit_code='0')
+    assert await launch.wait() == 0
+
+
+async def test_a_watch_that_ended_before_its_time_is_not_killed(monkeypatch):
+    _no_waiting(monkeypatch)
+    cli = FakeKubectl()
+    await _launcher(cli).prepare()
+    cli.watches[0].exit(0)
+    await _settle()
+    assert not cli.watches[0].killed
 
 
 async def test_a_watch_that_cannot_be_started_again_is_tried_again(monkeypatch):
