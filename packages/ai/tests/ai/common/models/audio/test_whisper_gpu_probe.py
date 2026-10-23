@@ -108,7 +108,6 @@ class StorageView:
 _STUB_FASTER_WHISPER = """
 import atexit
 import os
-import posixpath
 
 STAGE = os.environ.get("PROBE_FAIL_STAGE", "")
 
@@ -128,13 +127,17 @@ def download_model(name, *_args, **kwargs):
         raise PermissionError(13, "Permission denied", "/home/J\\u00fcrgen/models/tiny")
     if os.environ.get("PROBE_TINY_DIR"):
         return os.environ["PROBE_TINY_DIR"]  # a real snapshot directory, complete or not
-    # The fake cache root is a marker the tests assert literally; it is never touched
-    # on disk, so join it POSIX-style on every platform (os.path.join gives /cache\\tiny on Windows).
-    return posixpath.join(kwargs.get("cache_dir") or "/cache", name)
+    print("stub cache root", kwargs.get("cache_dir"), flush=True)
+    return os.path.join(os.path.dirname(__file__), "snapshots", "abc")
 
 
 class WhisperModel:
     def __init__(self, model_name, device, device_index, compute_type, **kwargs):
+        print("stub model constructed", flush=True)
+        # faster-whisper falls back to Tokenizer.from_pretrained without this file,
+        # even when download_model used local_files_only. Never allow that in tests.
+        if not os.path.isfile(os.path.join(model_name, "tokenizer.json")):
+            raise RuntimeError("unexpected tokenizer network fallback")
         if STAGE == "load":
             raise RuntimeError("Library libcudnn_ops.so.9 is not found")
         self.model_name = model_name
@@ -166,6 +169,7 @@ def stub_stack(tmp_path):
         pkg = tmp_path / name
         pkg.mkdir()
         (pkg / '__init__.py').write_text(textwrap.dedent(source))
+    _weights(tmp_path / 'faster_whisper')
     return tmp_path
 
 
@@ -192,14 +196,15 @@ def test_probe_script_passes_on_a_working_stack(stub_stack):
     assert any(line.startswith('probe: inference ok') for line in lines)
     # The inference stage loads the smallest model, resolved from the local cache,
     # on the probed device in float16; the echo proves the lazy segments were consumed.
-    assert 'probe model /cache/tiny cuda 0 float16 {}' in result.stdout
+    assert f'probe model {stub_stack / "faster_whisper/snapshots/abc"} cuda 0 float16 {{}}' in result.stdout
 
 
 def test_probe_script_forwards_device_index_and_looks_in_the_callers_cache(stub_stack):
     result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo'}, device_index=2, download_root='/models')
 
     assert result.returncode == 0, result.stderr
-    assert 'probe model /models/tiny cuda 2 float16 {}' in result.stdout
+    assert f'probe model {stub_stack / "faster_whisper/snapshots/abc"} cuda 2 float16 {{}}' in result.stdout
+    assert 'stub cache root /models' in result.stdout
     assert 'stub compute types queried for device 2' in result.stdout  # not GPU 0 by default
 
 
@@ -210,7 +215,7 @@ def test_probe_script_takes_a_path_as_the_download_root(stub_stack):
 
     assert result.returncode == 0, result.stderr
     assert any(line.startswith('probe: inference ok') for line in _probe_lines(result))
-    assert f'probe model {os.fspath(root)}' in result.stdout  # the caller's cache reached the lookup
+    assert f'stub cache root {os.fspath(root)}' in result.stdout  # the caller's cache reached the lookup
 
 
 def test_probe_script_skips_inference_when_the_weights_are_not_local(stub_stack):
@@ -250,25 +255,48 @@ def test_probe_script_skips_inference_when_the_weights_cannot_be_looked_up(stub_
     assert 'probe model' not in result.stdout  # no model was loaded
 
 
-def test_probe_script_treats_an_incomplete_snapshot_as_not_cached(stub_stack, tmp_path):
-    """The hub cache lists a snapshot before its files arrive; without model.bin there is nothing to load."""
-    snapshot = tmp_path / 'snapshots' / 'abc'
-    snapshot.mkdir(parents=True)
-    (snapshot / 'config.json').write_text('{}')
+@pytest.mark.parametrize('missing', ['model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'])
+@pytest.mark.parametrize('local_directory', [False, True])
+def test_probe_script_treats_an_incomplete_snapshot_as_not_cached(stub_stack, tmp_path, missing, local_directory):
+    """Every required asset must be local before constructing the model (including its tokenizer)."""
+    snapshot = _weights(tmp_path)
+    (snapshot / missing).unlink()
+    kwargs = {'model_name': str(snapshot)} if local_directory else {}
 
-    result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_TINY_DIR': str(snapshot)})
+    result = _run_probe_child(stub_stack, env={'PROBE_TINY_DIR': str(snapshot)}, **kwargs)
 
     assert result.returncode == 0, result.stderr
     lines = _probe_lines(result)
     assert lines[-1] == 'probe: ok'
-    assert any('model.bin is missing' in line or 'inference skipped' in line for line in lines)
-    assert 'probe model' not in result.stdout
+    assert 'probe: storage view ok' in lines
+    assert any('inference skipped' in line for line in lines)
+    assert 'stub model constructed' not in result.stdout
+    assert 'unexpected tokenizer network fallback' not in result.stderr
+
+
+def test_probe_script_skips_a_snapshot_path_that_no_longer_exists(stub_stack, tmp_path):
+    result = _run_probe_child(stub_stack, env={'PROBE_TINY_DIR': str(tmp_path / 'removed')})
+
+    assert result.returncode == 0, result.stderr
+    assert any('inference skipped' in line for line in _probe_lines(result))
+    assert 'stub model constructed' not in result.stdout
+
+
+@pytest.mark.parametrize('vocabulary', ['vocabulary.json', 'vocabulary.txt'])
+def test_probe_accepts_both_vocabulary_formats_without_optional_preprocessor(stub_stack, tmp_path, vocabulary):
+    snapshot = _weights(tmp_path)
+    if vocabulary != 'vocabulary.json':
+        (snapshot / 'vocabulary.json').rename(snapshot / vocabulary)
+    assert not (snapshot / 'preprocessor_config.json').exists()
+
+    assert WhisperLoader._probe_weights_cached(lambda *a, **k: str(snapshot), None) is True
+    result = _run_probe_child(stub_stack, env={'PROBE_TINY_DIR': str(snapshot)})
+    assert result.returncode == 0, result.stderr
+    assert any('inference ok' in line for line in _probe_lines(result))
 
 
 def test_probe_script_loads_a_local_model_directory_as_is(stub_stack, tmp_path):
-    local = tmp_path / 'my-whisper'
-    local.mkdir()
-    (local / 'model.bin').write_bytes(b'weights')
+    local = _weights(tmp_path / 'my-whisper')
 
     result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo'}, model_name=str(local))
 
@@ -282,7 +310,7 @@ def test_probe_script_uses_a_supported_precision(stub_stack):
     )
 
     assert result.returncode == 0, result.stderr
-    assert 'probe model /cache/tiny cuda 0 int8_float32 {}' in result.stdout
+    assert f'probe model {stub_stack / "faster_whisper/snapshots/abc"} cuda 0 int8_float32 {{}}' in result.stdout
 
 
 def test_probe_script_falls_back_to_float32_on_a_gpu_without_float16(stub_stack):
@@ -290,7 +318,7 @@ def test_probe_script_falls_back_to_float32_on_a_gpu_without_float16(stub_stack)
     result = _run_probe_child(stub_stack, env={'PROBE_FAIL_STAGE': 'echo', 'PROBE_COMPUTE_TYPES': 'float32'})
 
     assert result.returncode == 0, result.stderr
-    assert 'probe model /cache/tiny cuda 0 float32 {}' in result.stdout
+    assert f'probe model {stub_stack / "faster_whisper/snapshots/abc"} cuda 0 float32 {{}}' in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -573,10 +601,12 @@ def _fetch_child(monkeypatch, plan, on_ok=lambda: None):
 
 
 def _weights(tmp_path, complete=True):
-    """A fake cache snapshot directory, with or without model.bin."""
+    """A real snapshot directory with placeholder assets for the stub model stack."""
     snapshot = tmp_path / 'snapshots' / 'abc'
     snapshot.mkdir(parents=True, exist_ok=True)
     (snapshot / 'config.json').write_text('{}')
+    (snapshot / 'tokenizer.json').write_text('{}')
+    (snapshot / 'vocabulary.json').write_text('[]')
     if complete:
         (snapshot / 'model.bin').write_bytes(b'weights')
     return snapshot
@@ -627,14 +657,47 @@ def test_a_cached_tiny_makes_no_network_call(monkeypatch, fresh_probe, tmp_path)
     assert fetch.starts == []  # no fetch child, no network
 
 
-def test_a_partial_snapshot_counts_as_not_cached_and_is_fetched_again(monkeypatch, fresh_probe, tmp_path):
-    """An interrupted download leaves a snapshot without model.bin; the parent must not take it for a complete copy."""
-    snapshot = _weights(tmp_path, complete=False)
+@pytest.mark.parametrize('missing', ['model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'])
+def test_a_partial_snapshot_counts_as_not_cached_and_is_fetched_again(monkeypatch, fresh_probe, tmp_path, missing):
+    """An interrupted download must resume even when model.bin arrived before other assets."""
+    snapshot = _weights(tmp_path)
+    asset = snapshot / missing
+    contents = asset.read_bytes()
+    asset.unlink()
     _local_lookup(monkeypatch, snapshot)
-    fetch = _fetch_child(monkeypatch, ['ok'], on_ok=lambda: (snapshot / 'model.bin').write_bytes(b'weights'))
+    fetch = _fetch_child(monkeypatch, ['ok'], on_ok=lambda: asset.write_bytes(contents))
 
     assert WhisperLoader._prefetch_probe_weights(str(tmp_path)) is True
-    assert len(fetch.starts) == 1  # the fetch resumed and completed the snapshot
+    assert len(fetch.starts) == 1
+    assert asset.read_bytes() == contents
+
+
+@pytest.mark.parametrize('missing', ['model.bin', 'config.json', 'tokenizer.json', 'vocabulary.json'])
+def test_partial_cache_offline_keeps_the_gpu_with_the_real_probe(
+    stub_stack, monkeypatch, fresh_probe, tmp_path, missing
+):
+    """A failed repair and skipped inference must not poison the process-wide GPU verdict."""
+    snapshot = _weights(tmp_path)
+    (snapshot / missing).unlink()
+    _local_lookup(monkeypatch, snapshot)
+    monkeypatch.setenv('PROBE_TINY_DIR', str(snapshot))
+    prefix = f'import sys\nsys.path.insert(0, {str(stub_stack)!r})\n'
+    monkeypatch.setattr(whispermod, '_gpu_probe_script', lambda **kw: prefix + _gpu_probe_script(**kw))
+    real_popen = subprocess.Popen
+    fetch = _fetch_child(monkeypatch, ['fail'])
+
+    def popen(args, **kwargs):
+        # Only the fetch is fake: subprocess.run must launch the actual probe child.
+        if 'download_model(sys.argv[1]' in args[2]:
+            return fetch(args, **kwargs)
+        return real_popen(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, 'Popen', popen)
+    assert WhisperLoader._check_gpu_compatible(download_root=str(tmp_path)) is True
+    assert len(fetch.starts) == 1
+    assert WhisperLoader._gpu_compatible is True
+    assert WhisperLoader._gpu_probe_reason is None
+    assert 'inference skipped' in WhisperLoader._gpu_probe_inference_skipped
 
 
 _SKIPPED_STDOUT = 'probe: storage view ok\nprobe: inference skipped: tiny weights are not cached locally; LocalEntryNotFoundError\nprobe: ok\n'

@@ -52,6 +52,15 @@ logger = logging.getLogger('rocketlib.models.whisper')
 # failure. torch is imported first because its import preloads the CUDA
 # libraries from the nvidia-* wheels.
 _GPU_PROBE_MODEL = 'tiny'
+# Each group needs one local file. CTranslate2 accepts either vocabulary format;
+# faster-whisper downloads a tokenizer if tokenizer.json is absent, even when
+# the snapshot lookup was local-only. preprocessor_config.json is optional.
+_GPU_PROBE_ASSET_GROUPS = (
+    ('model.bin',),
+    ('config.json',),
+    ('tokenizer.json',),
+    ('vocabulary.json', 'vocabulary.txt'),
+)
 # The child reads only local files, so this covers the torch import, a cold CUDA
 # context (10-30 s on H100-class GPUs, #1936), the tiny load and one second of audio.
 # A timeout is cached for the process, so the bound errs on the generous side.
@@ -84,10 +93,12 @@ def _gpu_probe_script(
     directory) when it is there, and when the weights are simply not cached it
     skips the inference stage and ends on the storage-view verdict, which is
     what the probe checked before #2498, so a host without the weights keeps
-    its GPU. A snapshot without ``model.bin`` (an interrupted download: the hub
-    cache lists a snapshot before its files have all arrived) counts as not
-    cached. Any other error while resolving the weights (a ``download_root``
-    the engine user cannot read) skips the stage as well and names the error:
+    its GPU. A snapshot missing model, config, tokenizer or vocabulary assets
+    (an interrupted download: the hub lists a snapshot before all its files
+    arrive) counts as not cached; in particular a missing tokenizer must not
+    trigger faster-whisper's network fallback. Any other error while resolving
+    the weights (a ``download_root`` the engine user cannot read) skips the
+    stage as well and names the error:
     the verdict is shared by every load in the process, and a cache one caller
     cannot use says nothing about the GPU stack. The loader always probes with
     the default model today; ``model_name`` is there for a caller that wants to
@@ -132,8 +143,9 @@ def _gpu_probe_script(
         f'name, root = {model_name!r}, {download_root!r}\n'
         'try:\n'
         '    path = name if os.path.isdir(name) else download_model(name, cache_dir=root, local_files_only=True)\n'
-        '    if os.path.isdir(path) and not os.path.isfile(os.path.join(path, "model.bin")):\n'
-        '        raise FileNotFoundError("model.bin is missing from " + path)\n'
+        f'    for group in {_GPU_PROBE_ASSET_GROUPS!r}:\n'
+        '        if not any(os.path.isfile(os.path.join(path, asset)) for asset in group):\n'
+        '            raise FileNotFoundError(" or ".join(group) + " is missing from " + str(path))\n'
         '# Not cached: huggingface_hub raises a FileNotFoundError subclass, an unresolvable name\n'
         '# is a ValueError. Any other lookup error (an unreadable download_root) skips the stage\n'
         '# too: a cache this caller cannot use says nothing about the GPU stack.\n'
@@ -426,13 +438,14 @@ class WhisperLoader(BaseLoader):
         """Whether a complete copy of the probe weights is in the local cache (no network call)."""
         try:
             path = download_model(_GPU_PROBE_MODEL, cache_dir=download_root, local_files_only=True)
+            # A local-only hub lookup can return a snapshot before every asset
+            # arrives. Use the child's completeness check so a partial fetch is
+            # resumed, including when model.bin arrived before the tokenizer.
+            return bool(path) and all(
+                any(os.path.isfile(os.path.join(path, asset)) for asset in group) for group in _GPU_PROBE_ASSET_GROUPS
+            )
         except Exception:  # noqa: BLE001
             return False
-        # The hub cache lists a snapshot before its files have all arrived, and a
-        # local-only lookup cannot tell: a fetch stopped at the bound leaves
-        # config.json and no model.bin. The child treats such a snapshot as not
-        # cached, and so must the parent, or it would never fetch again.
-        return bool(path) and os.path.isfile(os.path.join(str(path), 'model.bin'))
 
     @classmethod
     def _prefetch_probe_weights(cls, download_root: Optional[Union[str, 'os.PathLike[str]']]) -> Optional[bool]:
