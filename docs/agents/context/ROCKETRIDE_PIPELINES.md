@@ -680,7 +680,10 @@ an agent can control a graph store as a tool instead.
 
 **Writing to a graph store** goes through its `execute` tool (node config
 `allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. On `rocketride_graph`
-the rules follow the Apache AGE version of the database (1.5.0 or 1.6.0):
+the rules follow the Apache AGE version the database reports (`pg_extension.extversion`):
+1.5.0 and 1.6.0 have their own rules, and any other version gets the strict 1.5.0 rules. A
+database whose AGE library is already 1.6.0 reports 1.5.0 until `ALTER EXTENSION age UPDATE`
+runs, so it keeps the 1.5.0 rules until then.
 
 - Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
   Cypher text: no escaping, and bound values do not count toward the 10,000-character query
