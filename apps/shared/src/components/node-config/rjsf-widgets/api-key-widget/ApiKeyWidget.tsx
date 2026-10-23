@@ -23,7 +23,7 @@
 
 import { useEffect, useRef, useState, useCallback, KeyboardEvent, FC } from 'react';
 import { WidgetProps } from '@rjsf/utils';
-import { InputAdornment, TextField, Tooltip } from '@mui/material';
+import { IconButton, InputAdornment, TextField, Tooltip } from '@mui/material';
 import { Delete, Visibility, VisibilityOff } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 
@@ -187,11 +187,14 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 									</Tooltip>
 								) : (
 									<Tooltip title={showRawValue ? t('form.apiKeyHideTooltip') : t('form.apiKeyShowTooltip')}>
-										{showRawValue ? (
-											<VisibilityOff sx={{ cursor: 'pointer' }} onClick={() => setShowRawValue(false)} />
-										) : (
-											<Visibility sx={{ cursor: 'pointer' }} onClick={() => setShowRawValue(true)} />
-										)}
+										<IconButton
+											aria-label={showRawValue ? t('form.apiKeyHideTooltip') : t('form.apiKeyShowTooltip')}
+											onClick={() => setShowRawValue((prev) => !prev)}
+											edge="end"
+											size="small"
+										>
+											{showRawValue ? <VisibilityOff /> : <Visibility />}
+										</IconButton>
 									</Tooltip>
 								)}
 							</InputAdornment>
