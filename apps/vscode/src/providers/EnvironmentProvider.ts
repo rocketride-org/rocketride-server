@@ -206,7 +206,7 @@ export class EnvironmentProvider {
 					break;
 				}
 				try {
-					// Persist the full env dict on the slot's server
+					// Persist the env changes on the slot's server (null deletes, the mask keeps)
 					await resolved.client.account.setEnv(message.scope, message.env, message.scopeId);
 
 					// Re-fetch and send fresh data so the webview reflects the

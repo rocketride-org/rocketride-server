@@ -118,7 +118,7 @@ export type EnvironmentWebviewToHost =
 			/** The scope level to write. */
 			scope: 'org' | 'team' | 'user';
 			/** The full key-value dict to persist (replaces existing). */
-			env: Record<string, string>;
+			env: Record<string, string | null>;
 			/** Optional scope identifier (orgId for org, teamId for team). */
 			scopeId?: string;
 	  };
