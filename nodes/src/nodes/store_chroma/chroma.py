@@ -32,6 +32,7 @@ import chromadb
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+from nodes.store_chroma.mode import is_local
 from rocketlib import debug
 import uuid
 import numpy as np
@@ -137,12 +138,9 @@ class Store(DocumentStoreBase):
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
 
-        # The merged node config carries the profile selection in 'mode':
-        # getNodeConfig consumes the 'profile' key while merging the selected
-        # profile's contents, so 'profile' is absent when configured through
-        # a service/autopipe config and the cloud branch was never taken.
-        # Keep 'profile' as a fallback for direct configurations.
-        profile = config.get('mode') or config.get('profile') or 'local'
+        # Read the same way as the key check (IGlobal._credentials), so the key is
+        # checked exactly when it is sent.
+        local = is_local(config)
 
         # check if the similarity matches qdrant configuration options
         similarity = config.get('similarity', 'cosine')
@@ -156,7 +154,7 @@ class Store(DocumentStoreBase):
         # KeyError('_type')). Wrap it so the user gets an actionable message instead of a
         # silent failure.
         try:
-            if profile == 'local':
+            if local:
                 self.client = chromadb.HttpClient(host=self.host, port=self.port)
             else:
                 # Cloud / remote server. Chroma Cloud only serves HTTPS, and a
