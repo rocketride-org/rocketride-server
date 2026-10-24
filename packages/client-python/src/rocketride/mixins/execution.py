@@ -60,7 +60,6 @@ import os
 from typing import Dict, Any, List, Optional
 from ..core import DAPClient
 from ..types.pipeline import PipelineConfig
-from ..types.task import TASK_STATUS
 
 try:
     import json5
@@ -395,7 +394,7 @@ class ExecutionMixin(DAPClient):
         if self.did_fail(response):
             raise RuntimeError(response.get('message', 'Restart failed'))
 
-    async def get_task_status(self, token: str) -> TASK_STATUS:
+    async def get_task_status(self, token: str) -> Dict[str, Any]:
         """
         Get the current status of a running pipeline.
 
@@ -407,20 +406,26 @@ class ExecutionMixin(DAPClient):
             token: Task token of the pipeline to check (from use())
 
         Returns:
-            Dict containing status information:
-            - state: Current execution state ('starting', 'running', 'completed', 'failed', etc.)
-            - progress: Progress information if available (items processed, percentage, etc.)
-            - error: Error message if pipeline failed
-            - started_at: When execution started (timestamp)
-            - completed_at: When execution finished (timestamp, if completed)
-            - performance: Processing speed and resource usage metrics
-            - Additional pipeline-specific status data
+            The response body as a plain dict, not a validated model. See
+            ``TASK_STATUS`` in ``rocketride.types.task`` for the full field list;
+            the keys seen most often:
+            - state: Current task state, an ``int`` from the ``TASK_STATE`` enum
+              (0 NONE, 1 STARTING, 2 INITIALIZING, 3 RUNNING, 4 STOPPING,
+              5 COMPLETED, 6 CANCELLED)
+            - status: Current status message (str)
+            - completed: Whether the task has finished (bool)
+            - completedCount / totalCount: Items processed so far / expected (int)
+            - failedCount: Items that failed processing (int)
+            - errors / warnings: Recent error and warning messages (list of str)
+            - startTime / endTime: Unix timestamps (float)
 
         Raises:
             RuntimeError: If status retrieval fails
             ValueError: If token is invalid
 
         Example:
+            from rocketride.types import TASK_STATE
+
             # Start pipeline and monitor status
             result = await client.use(filepath="data_processor.json")
             token = result['token']
@@ -433,32 +438,33 @@ class ExecutionMixin(DAPClient):
                 status = await client.get_task_status(token)
                 state = status.get('state')
 
-                if state == 'running':
-                    progress = status.get('progress', {})
-                    print(f"Processing: {progress.get('percentage', 0):.1f}%")
-                elif state == 'completed':
+                if state == TASK_STATE.RUNNING.value:
+                    done = status.get('completedCount', 0)
+                    total = status.get('totalCount', 0)
+                    print(f"Processing: {done}/{total} items")
+                elif state == TASK_STATE.COMPLETED.value:
                     print("Pipeline completed successfully!")
                     break
-                elif state == 'failed':
-                    error = status.get('error', 'Unknown error')
-                    print(f"Pipeline failed: {error}")
+                elif state == TASK_STATE.CANCELLED.value:
+                    print(f"Pipeline terminated: {status.get('exitMessage', '')}")
                     break
 
                 await asyncio.sleep(1)  # Check every second
 
         Status States:
-            - 'starting': Pipeline is initializing
-            - 'running': Pipeline is actively processing data
-            - 'waiting': Pipeline is waiting for more data
-            - 'completed': Pipeline finished successfully
-            - 'failed': Pipeline encountered an error
-            - 'terminated': Pipeline was stopped by user
+            ``state`` carries the ``TASK_STATE`` values, which are ints:
+            - 0: NONE — no resources allocated
+            - 1: STARTING — resource allocation and subprocess preparation
+            - 2: INITIALIZING — service startup
+            - 3: RUNNING — actively processing data
+            - 4: STOPPING — graceful shutdown in progress
+            - 5: COMPLETED — finished successfully
+            - 6: CANCELLED — terminated before completion
 
         Tips:
             - Poll status regularly for long-running operations
-            - Check 'progress' field for completion percentage
-            - Use 'error' field for detailed error information
-            - Performance metrics help optimize pipeline configurations
+            - Compare ``state`` against ``TASK_STATE`` values, never against strings
+            - Use the ``errors`` field for failure details
         """
         # Send status request
         return await self.call('rrext_get_task_status', token=token)
