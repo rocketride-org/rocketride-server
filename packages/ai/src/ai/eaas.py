@@ -40,11 +40,8 @@ import os
 import tempfile
 from typing import Any, Dict
 
-from rocketlib import warning
-
 from ai.constants import CONST_TASK_DATA_PATH
 from ai.modules.task.launcher import RUNTIMES, default_runtime
-from ai.proc_privacy import make_process_private, should_make_private
 from ai.web import WebServer
 
 
@@ -59,19 +56,6 @@ def runtime_of(args: argparse.Namespace) -> str:
         The runtime's name.
     """
     return args.runtime or default_runtime(args.saas)
-
-
-def _make_engine_private() -> None:
-    """Make the engine's /proc entries private when hosted or opted in (see ai.proc_privacy).
-
-    Logged, never fatal: the engine keeps serving rather than crash-looping.
-    """
-    if not should_make_private():
-        return
-    try:
-        make_process_private()
-    except Exception as e:
-        warning(f'could not make the engine process private: {e}')
 
 
 def _require_writable_task_data(path: str = CONST_TASK_DATA_PATH) -> None:
@@ -212,10 +196,6 @@ async def run(config: Dict[str, Any] = None) -> None:
 
     # Create the server
     server = WebServer(config=config, standardEndpoints=False)
-
-    # After WebServer, which loads the engine's .env (RR_PROC_PRIVATE may live
-    # there), and before serving, so before any task exists.
-    _make_engine_private()
 
     # Add our modules
     server.use('services')

@@ -222,9 +222,10 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'RR_SIGNING_KEY',
         'RR_CORS_ORIGINS',
         'RR_OAUTH_BROKER_URL',
-        # Operator opt-in that makes task processes hide their /proc entries
-        # (ai.proc_privacy); non-secret, and tasks must see it to act on it
-        'RR_PROC_PRIVATE',
+        # Operator opt-out that keeps a process open to its user's debuggers
+        # (the engine reads it as it starts); non-secret, and a task is a
+        # process of its own, so it must see it to act on it
+        'RR_ENABLE_DEBUGGER_CONNECTION',
         # Executable override for the media toolkit nodes
         'MEDIA_TOOLKIT_FFMPEG',
         # Bare names individual node READMEs document as engine-host fallbacks
@@ -2002,6 +2003,11 @@ class Task(DAPBase):
 
             # Send out a status update when needed
             self._status_updated = True
+
+        # The task crashed and wrote a dump; a container runtime fetches it before the container goes
+        elif event_type == 'apaevt_dump':
+            if self._launch:
+                self._launch.crash_dump_announced(str(body.get('file', '')))
 
         # Handle pipeline trace events to build summary and flow events
         elif event_type == 'apaevt_trace':

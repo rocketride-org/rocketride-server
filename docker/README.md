@@ -129,7 +129,10 @@ installs from it with no network, and a uid other than 1000 in the image's
 group can write what a run writes and install (`docker/test-node-image.sh`).
 That last one matters because a task runs as the engine's own uid and gid with
 `--group-add 1000`, so the image keeps everything a run writes — site-packages,
-`cache/`, the uv cache, `/opt/data`, `HOME` — writable by its group. Files whose
+`cache/`, the uv cache, `/opt/data`, `HOME` — writable by its group.
+`container:test` also crashes the engine in a container run as a task runs and
+copies the minidump out of the stopped container, as the docker runtime does
+before it removes one (`docker/test-node-crash-dump.sh`). Files whose
 resolution needs a local inference runtime — torch, or onnxruntime, which
 depends() installs as the 430 MB onnxruntime-gpu on Linux — are not warmed: the
 warm step lists them, and fails the build unless the file is installed only
@@ -153,7 +156,7 @@ The node image has five builder tasks of its own:
 | Task | Where | What it does |
 | ---- | ----- | ------------ |
 | `container:build` | Linux, WSL included | Builds engine-base and the node image from `dist/server`; tags `rocketride/node:<version>` and `rocketride/node:<version>-clean` and labels them with the SHA-256 of `libengine.so`. |
-| `container:test` | Linux | The image probe (`test-node-image.sh`), then `nodes:test --runtime=docker`. |
+| `container:test` | Linux | The image probes (`test-node-image.sh`, `test-node-crash-dump.sh`), then `nodes:test --runtime=docker`. |
 | `container:sync` | Windows and Linux; macOS on a pulled image, untested | Copies the Python trees of `dist/server` (`ai/`, `nodes/`, `rocketride/`, `rocketride_common/`) over `<version>-clean` and recompiles `constraints.txt` once (`Dockerfile.node-overlay`). Seconds; the binaries are never touched. |
 | `container:build-on-wsl` | Windows | Runs `container:build` in a WSL checkout: `--checkout=` or `RR_WSL_CHECKOUT`, and `--distro=` or `RR_WSL_DISTRO` (default `Ubuntu-22.04`, which must be 22.04 like the image base). |
 | `container:sync-from-wsl` | Windows | When WSL runs a daemon of its own, copies `<version>` and `<version>-clean` from it with `docker save \| docker load`. With Docker Desktop's WSL integration both sides see one daemon and there is nothing to copy. |

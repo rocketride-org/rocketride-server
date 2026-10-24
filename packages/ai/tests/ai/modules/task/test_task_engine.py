@@ -1321,7 +1321,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             'RR_BASE_URL': 'https://engine.example',
             'RR_SIGNING_KEY': 'sign',
             'RR_OAUTH_BROKER_URL': 'https://broker.example',
-            'RR_PROC_PRIVATE': '1',
+            'RR_ENABLE_DEBUGGER_CONNECTION': '1',
             'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
             'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
             'NOTION_API_KEY': 'notion',
@@ -1347,7 +1347,7 @@ def test_filter_subprocess_env_is_an_allowlist():
         'RR_BASE_URL': 'https://engine.example',
         'RR_SIGNING_KEY': 'sign',
         'RR_OAUTH_BROKER_URL': 'https://broker.example',
-        'RR_PROC_PRIVATE': '1',  # tasks must see the opt-in to act on it
+        'RR_ENABLE_DEBUGGER_CONNECTION': '1',  # a task is a process of its own: it must see the opt-out
         'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
         'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
         'NOTION_API_KEY': 'notion',
@@ -1789,6 +1789,18 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'message': 'Malformed exit message'}})
 
     assert t._status.exitCode == 1
+
+
+@pytest.mark.asyncio
+async def test_on_event_dump_tells_the_launch():
+    """A container holds its task's dump, so the runtime has to hear the task announce one."""
+    t = _event_task()
+    t._launch = MagicMock()
+
+    await Task.on_event(t, {'event': 'apaevt_dump', 'body': {'file': 'engine.7.dmp'}})
+
+    t._launch.crash_dump_announced.assert_called_once_with('engine.7.dmp')
+    t._forward_task_event.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
