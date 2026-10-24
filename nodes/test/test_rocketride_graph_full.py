@@ -560,6 +560,22 @@ class TestAgeDataGaps:
         _raw_cypher(age_graph, "MATCH (p:Person {name:'alice'}) UNWIND [1, 2, 3] AS i SET p.c = i")
         assert _raw_cypher(age_graph, "MATCH (p:Person {name:'alice'}) RETURN p.c", 'c agtype') == [('1',)]
 
+    def test_canary_merge_path_to_a_shared_fixed_key_node_keeps_one_write(self, rr_env, age_graph):
+        # Both versions: when the rows' paths already lead to one fixed-key node,
+        # MERGE matches that node on every row and AGE keeps one of the writes
+        # (standard Cypher keeps both: 2).
+        _raw_cypher(
+            age_graph,
+            "MATCH (a:Person {name:'alice'}), (b:Person {name:'bob'}) "
+            "CREATE (a)-[:WORKS_AT]->(c:Company {name:'acme'}), (b)-[:WORKS_AT]->(c)",
+        )
+        _raw_cypher(
+            age_graph,
+            "MATCH (p:Person) WHERE p.name IN ['alice', 'bob'] "
+            "MERGE (p)-[:WORKS_AT]->(c:Company {name:'acme'}) SET c.n = coalesce(c.n, 0) + 1",
+        )
+        assert _raw_cypher(age_graph, "MATCH (c:Company {name:'acme'}) RETURN c.n", 'n agtype') == [('1',)]
+
     def test_canary_merge_with_other_pattern_properties_adds_an_edge(self, rr_env, age_graph):
         # Why the rejection message leads with a separate SET call: MERGE
         # matches on pattern properties, so new values mean a second edge.
@@ -709,6 +725,7 @@ class TestAgeDataGaps:
             'MERGE (n:U {id: 1}) WITH n UNWIND [1, 2, 3] AS i SET n.x = i',
             'MERGE (n:U {id: 1}) WITH n MATCH (p:Person) SET n.x = p.name',
             'UNWIND [1, 2, 3] AS i MERGE (n:U {id: 1}) SET n.x = coalesce(n.x, 0) + 1',
+            "MATCH (p:Person) MERGE (p)-[:WORKS_AT]->(n:U {name: 'acme'}) SET n.x = p.name",
         ],
     )
     def test_same_merge_entity_written_from_several_rows_rejected_before_db(self, rr_env, age_graph, query):

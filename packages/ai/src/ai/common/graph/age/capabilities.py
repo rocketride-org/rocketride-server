@@ -221,9 +221,10 @@ AGE_1_6_0: Dict[str, Capability] = {
         detail=(
             'AGE 1.6.0 keeps only one of several SET/REMOVE/DELETE writes that one entity a '
             'MERGE created receives in a statement: here the same entity is written from '
-            'several rows (a MATCH/UNWIND/CALL after the MERGE, or a MERGE whose pattern '
-            'uses no per-row value). Make each row write its own entity, or run the write '
-            'as a separate execute call (MATCH (n:L {key: ...}) SET n.prop = ...)'
+            'several rows (a MATCH/UNWIND/CALL after the MERGE, or a MERGE node whose own '
+            'properties use no per-row value, such as a fixed key, even next to a per-row '
+            'node). Make each row write its own entity, or run the write as a separate '
+            'execute call (MATCH (n:L {key: ...}) SET n.prop = ...)'
         ),
     ),
 }

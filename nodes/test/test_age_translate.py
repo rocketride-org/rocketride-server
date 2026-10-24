@@ -453,6 +453,10 @@ _WRITES_EACH_ROW = [
     _ALICE_BOB + 'MERGE (a)-[r:K {since: 1}]->(b) REMOVE r.since',
     _ALICE_BOB + 'MERGE (a)-[r:K]->(b) DELETE r',
     "MATCH (p:P) MATCH (b:P {name: 'bob'}) MERGE (p)-[r:K]->(b) SET r.w = 1",
+    # Per node and edge: each node keyed by a per-row value, the edge between them.
+    'UNWIND $rows AS row MERGE (a:P {id: row.a})-[r:R]->(b:Q {id: row.b}) SET b.x = row.x, r.w = row.w',
+    # An edge from a per-row node is per-row, even when its far node has a fixed key.
+    "MATCH (p:P) MERGE (p)-[r:WORKS_AT]->(c:Company {name: 'acme'}) SET r.since = 2024",
 ]
 
 # One MERGE-created entity written from several rows: AGE 1.6.0 keeps one write.
@@ -466,6 +470,11 @@ _WRITES_SAME_ENTITY_PER_ROW = [
     # The MERGE pattern uses no per-row value: the same entity on every row.
     'UNWIND $events AS e MERGE (s:Stats {id: 1}) SET s.n = coalesce(s.n, 0) + 1',
     'MATCH (p:P) MERGE (c:Company {name: "acme"}) SET c.people = coalesce(c.people, 0) + 1',
+    # A fixed-key node next to a per-row node: rows whose path already exists share it.
+    "MATCH (p:P) MERGE (p)-[:WORKS_AT]->(c:Company {name: 'acme'}) SET c.people = coalesce(c.people, 0) + 1",
+    'UNWIND $rows AS row MERGE (a:A {id: row.id}) MERGE (a)-[r:R]->(b:B {id: 1}) SET b.x = 1',
+    # No properties at all: the text cannot show whether rows share the node.
+    'MATCH (p:P) MERGE (p)-[:HAS]->(x:Profile) SET x.v = p.name',
 ]
 
 

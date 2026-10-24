@@ -64,7 +64,8 @@ the SET as a separate execute call, for example
 AGE 1.6.0 applies them to every entity a MERGE creates, so the one-call form
 `UNWIND $rows AS row MERGE (n:Item {id: row.id}) SET n.name = row.name` works.
 It is still rejected when one MERGE-created entity would be written from several
-rows, because AGE keeps only one of those writes.
+rows, for example a node with a fixed key such as `{name: 'acme'}` that every row
+reaches, because AGE keeps only one of those writes.
 
 On both versions, keep keys unique within one call: when two rows reach the same
 node or edge, AGE keeps only one of their writes. Properties written inside the

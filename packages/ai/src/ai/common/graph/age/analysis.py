@@ -357,6 +357,51 @@ def _project_row_variables(items_ctx, row_vars: Set[str]) -> Set[str]:
     return out
 
 
+def _per_row_merge_variables(part, introduced: Set[str], row_vars: Set[str]) -> Set[str]:
+    """Variables a MERGE introduced that name a different entity on every row.
+
+    Decided per node and per relationship, not per pattern: a node differs per
+    row when its own properties use a per-row value. A fixed key such as
+    ``{name: 'acme'}`` can reach the same node from every row, even when the
+    node sits next to a per-row node. A relationship differs per row when a
+    node at either end does (a per-row variable bound earlier, or a node of
+    this MERGE), or when its own properties use a per-row value. A path
+    variable differs per row when every part of the path does.
+
+    Args:
+        part: The MERGE's ``oC_PatternPart``.
+        introduced: Variables this MERGE introduces.
+        row_vars: Variables bound earlier whose value differs from row to row.
+
+    Returns:
+        The introduced variables that differ from row to row.
+    """
+    element = part.oC_AnonymousPatternPart().oC_PatternElement()
+    while element.oC_NodePattern() is None:
+        element = element.oC_PatternElement()
+    nodes = [element.oC_NodePattern()]
+    details = []
+    for chain in element.oC_PatternElementChain():
+        details.append(chain.oC_RelationshipPattern().oC_RelationshipDetail())
+        nodes.append(chain.oC_NodePattern())
+
+    def name(ctx) -> Optional[str]:
+        variable = ctx.oC_Variable() if ctx is not None else None
+        return _strip_backticks(variable.getText()) if variable is not None else None
+
+    def uses_row_value(ctx) -> bool:
+        properties = ctx.oC_Properties() if ctx is not None else None
+        return properties is not None and bool(_referenced_variables(properties) & row_vars)
+
+    node_rows = [(name(node) in row_vars) or uses_row_value(node) for node in nodes]
+    rel_rows = [node_rows[i] or node_rows[i + 1] or uses_row_value(detail) for i, detail in enumerate(details)]
+    per_row = {name(ctx) for ctx, row in zip(nodes + details, node_rows + rel_rows) if row}
+    path = part.oC_Variable()
+    if path is not None and all(node_rows + rel_rows):
+        per_row.add(_strip_backticks(path.getText()))
+    return per_row & introduced
+
+
 def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = False) -> bool:
     """True when a SET/REMOVE/DELETE after a MERGE changes something AGE may drop.
 
@@ -373,9 +418,9 @@ def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = Fal
       when one entity receives several writes in a statement, AGE keeps only
       one of them. A write may target a variable a MERGE introduced when every
       row writes its own entity: the MERGE runs before any MATCH/UNWIND/CALL,
-      or its pattern uses a variable that differs from row to row. A MERGE
-      whose pattern uses no per-row variable after rows were multiplied
-      matches the same entity on every row, so writes to it are unsafe.
+      or that entity differs from row to row (``_per_row_merge_variables``).
+      After rows were multiplied, an entity with a fixed key can be the same
+      on every row, even next to a per-row node, so writes to it are unsafe.
 
     In both modes a MATCH/UNWIND/CALL between the MERGE and the write repeats
     the write once per row on the same entity, so it makes the target unsafe;
@@ -405,10 +450,13 @@ def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = Fal
                 safe = set(bound)
                 if not writes_reach_every_merge and index == 0 and not _has_relationship(part):
                     fresh = introduced
-            if writes_reach_every_merge and (not multiplied or (_referenced_variables(part) - introduced) & row_vars):
-                fresh |= introduced
-                if multiplied:
-                    row_vars |= introduced
+            if writes_reach_every_merge:
+                if not multiplied:
+                    fresh |= introduced
+                else:
+                    per_row = _per_row_merge_variables(part, introduced, row_vars)
+                    fresh |= per_row
+                    row_vars |= per_row
             bound |= introduced
             continue
         if isinstance(clause, _ROW_MULTIPLYING_CLAUSES):
