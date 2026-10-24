@@ -210,7 +210,7 @@ def test_writes_are_refused_until_the_node_allows_them(tools_env):
     assert delete['success'] is False and 'rrvector.delete is disabled' in delete['error']
     # Nothing touched the database: the table was never created.
     assert not _table_exists(raw_conn)
-    assert tools.stats({}) == {'success': True, 'count': 0, 'model': '', 'vector_size': 0}
+    assert tools.stats({}) == {'success': True, 'count': 0, 'document_count': 0, 'model': '', 'vector_size': 0}
 
 
 def test_tools_round_trip_on_the_real_store(tools_env):
@@ -224,8 +224,14 @@ def test_tools_round_trip_on_the_real_store(tools_env):
     assert result == {'success': True, 'count': 3, 'skipped': 0}
     assert _table_exists(raw_conn)
 
-    # stats: rows (the three documents plus the store's own schema row), model and width
-    assert tools.stats({}) == {'success': True, 'count': 4, 'model': 'test-model', 'vector_size': DIMS}
+    # stats: rows (the three documents plus the store's own schema row), documents, model and width
+    assert tools.stats({}) == {
+        'success': True,
+        'count': 4,
+        'document_count': 3,
+        'model': 'test-model',
+        'vector_size': DIMS,
+    }
 
     # objdir: one entry per distinct parent path
     listing = tools.objdir({})
@@ -247,10 +253,15 @@ def test_tools_round_trip_on_the_real_store(tools_env):
     assert found['results'][0]['metadata']['objectId'] == 'obj-c'
     assert found['results'][0]['score'] > 0.99
 
-    # delete: gone from the count and the listing
-    assert tools.delete({'object_ids': ['obj-c']}) == {'success': True, 'deleted_count': 1}
-    assert tools.stats({})['count'] == 3
+    # delete: gone from the counts and the listing, and get now says so
+    assert tools.delete({'object_ids': ['obj-c']}) == {'success': True, 'deleted_count': 1, 'object_ids': ['obj-c']}
+    assert (tools.stats({})['count'], tools.stats({})['document_count']) == (3, 2)
     assert '/c' not in tools.objdir({})['paths']
+    assert tools.get({'object_id': 'obj-c'}) == {
+        'success': False,
+        'error': "get: no document with object_id 'obj-c'",
+        'object_id': 'obj-c',
+    }
 
 
 def test_search_without_an_embedder_names_the_node(tools_env):
@@ -338,10 +349,13 @@ def test_tools_are_refused_until_the_node_exposes_them(tools_env):
     calls = [
         ('stats', {}),
         ('objdir', {}),
+        ('list_documents', {}),
         ('get', {'object_id': 'obj-a'}),
         ('search', {'query': 'anything'}),
         ('upsert', {'documents': _docs([('a', _unit_vec(rng))])}),
         ('delete', {'object_ids': ['obj-a']}),
+        ('soft_delete', {'object_ids': ['obj-a']}),
+        ('restore', {'object_ids': ['obj-a']}),
     ]
     for tool, args in calls:
         result = getattr(tools, tool)(args)
@@ -411,12 +425,22 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
         glb, inst = make({'collection': TABLE, 'expose_tools': True})
         assert glb.expose_tools is True and glb.allow_write is False
         if real_collector:
-            assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats'}
+            assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats', 'list_documents'}
 
         glb, inst = make({'collection': TABLE, 'expose_tools': True, 'allow_write': True})
         assert glb.expose_tools is True and glb.allow_write is True
         if real_collector:
-            assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats', 'upsert', 'delete'}
+            assert set(inst._collect_tool_methods()) == {
+                'search',
+                'objdir',
+                'get',
+                'stats',
+                'list_documents',
+                'upsert',
+                'delete',
+                'soft_delete',
+                'restore',
+            }
     finally:
         for glb in opened:
             store = getattr(glb, 'store', None)

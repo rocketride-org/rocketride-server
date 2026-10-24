@@ -232,6 +232,7 @@ def _build_rr_env(monkeypatch):
     store_mod.DocumentStoreBase = _StubDocumentStoreBase
     store_mod.StoreGlobalBase = bases.StoreGlobalBase
     store_mod.StoreInstanceBase = bases.StoreInstanceBase
+    store_mod.CONTROL_OBJECT_ID = bases.CONTROL_OBJECT_ID
 
     monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
     monkeypatch.setitem(sys.modules, 'ai.common', common_pkg)

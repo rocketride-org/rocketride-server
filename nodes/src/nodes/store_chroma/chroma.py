@@ -35,7 +35,6 @@ from ai.common.config import Config
 from rocketlib import debug
 import uuid
 import numpy as np
-import json
 import sys
 import re
 
@@ -475,9 +474,9 @@ class Store(DocumentStoreBase):
         # no documents in the collection
         if not self.doesCollectionExist():
             return 0
-        # Get all ids in collection
-        result = self.collectionObj.get(include=[])
-        return len(result['ids'])
+        # The server counts the records; reading every ID to count them would
+        # move the whole collection's IDs on each call.
+        return self.collectionObj.count()
 
     def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """
@@ -582,15 +581,18 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return {}
 
-        # Base filter: Only chunk 0
-        filter_dict = {'chunk': 0}
+        # Chroma stores flat metadata; combine predicates explicitly. The same
+        # trash predicate as _convertFilter: addChunks drops None metadata values,
+        # so a record may lack isDeleted, and $eq False would hide it while get
+        # reads it.
+        filters = [{'chunkId': {'$eq': 0}}, {'isDeleted': {'$ne': True}}]
 
         # If parent specified, add condition
         if parent is not None:
-            filter_dict['parent'] = {'$eq': json.dumps(parent, ensure_ascii=False)}
+            filters.append({'parent': {'$eq': parent}})
 
         # Perform the query
-        results = self.collectionObj.get(where=filter_dict, limit=limit, offset=offset)
+        results = self.collectionObj.get(where={'$and': filters}, limit=limit, offset=offset)
 
         # Build paths dictionary
         paths = {}
@@ -700,53 +702,69 @@ class Store(DocumentStoreBase):
 
         return
 
-    def markDeleted(self, objectIds: List[str]) -> None:
+    def _setDeleted(self, objectIds: List[str], deleted: bool) -> int:
+        """
+        Set isDeleted on every chunk of the given object IDs, in one update.
+
+        A Chroma ``get`` answers with one dict of parallel lists (``ids``,
+        ``metadatas``, ...), not with one record per chunk, and ``update`` takes
+        the ids to change with their new metadatas; there is no update by filter.
+
+        @param objectIds: The object IDs whose chunks change.
+        @param deleted: The isDeleted value to write.
+        @returns: The number of chunks matched.
+        """
+        # By definition, if the collection does not exists, there
+        # is nothing to mark
+        if not objectIds or not self.doesCollectionExist():
+            return 0
+
+        results = self.collectionObj.get(where={'objectId': {'$in': objectIds}}, include=['metadatas'])
+        ids = list(results.get('ids') or [])
+        if not ids:
+            return 0
+
+        metadatas = []
+        for metadata in results.get('metadatas') or [{}] * len(ids):
+            metadata = dict(metadata or {})
+            metadata['isDeleted'] = deleted
+            metadatas.append(metadata)
+        # The HTTP client refuses one request above the server's batch limit,
+        # which it reports; a document with many chunks is updated in slices.
+        batch = self._maxBatchSize(fallback=len(ids))
+        for start in range(0, len(ids), batch):
+            self.collectionObj.update(ids=ids[start : start + batch], metadatas=metadatas[start : start + batch])
+        return len(ids)
+
+    def _maxBatchSize(self, fallback: int) -> int:
+        """
+        Return the largest batch the connected server accepts, as the client reports it.
+
+        @param fallback: The size to use when the client cannot report one.
+        """
+        get_max = getattr(getattr(self, 'client', None), 'get_max_batch_size', None)
+        size = get_max() if callable(get_max) else None
+        return size if isinstance(size, int) and size > 0 else max(fallback, 1)
+
+    def markDeleted(self, objectIds: List[str]) -> int:
         """
         Mark the set of documents with the given objectId as deleted.
 
-        They then will not be returned from the search without specifying deleted=True
+        They then will not be returned from the search without specifying deleted=True.
+
+        @returns: The number of chunks marked.
         """
-        # By definition, if the collection does not exists, there
-        # is nothing to mark
-        if not self.doesCollectionExist():
-            return
+        return self._setDeleted(objectIds, True)
 
-        if not objectIds:
-            return
-
-        # Get all the objects with the given objectIds
-        results = self.collectionObj.get(where={'objectId': {'$in': objectIds}}, include=['metadatas'])
-
-        # Set all isDeleted parameters for the objects with the given objectId to true
-        for res in results:
-            res['metadata']['isDeleted'] = True
-            self.collectionObj.update(where={'objectId': res['metadata']['objectId']}, new_metadata=res['metadata'])
-
-        return
-
-    def markActive(self, objectIds: List[str]) -> None:
+    def markActive(self, objectIds: List[str]) -> int:
         """
         Mark the set of documents with the given objectId as active.
 
-        This occurs if a document now "comes back" after begin deleted
+        This occurs if a document now "comes back" after begin deleted.
+
+        @returns: The number of chunks marked.
         """
-        # By definition, if the collection does not exists, there
-        # is nothing to mark
-        if not self.doesCollectionExist():
-            return
-
-        if not objectIds:
-            return
-
-        # Get all the objects with the given objectIds
-        results = self.collectionObj.get(where={'objectId': {'$in': objectIds}}, include=['metadatas'])
-
-        # Set all isDeleted parameters for the objects with the given objectId to false
-        for res in results:
-            res['metadata']['isDeleted'] = False
-            self.collectionObj.update(where={'objectId': res['metadata']['objectId']}, new_metadata=res['metadata'])
-
-        return
+        return self._setDeleted(objectIds, False)
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
         """
