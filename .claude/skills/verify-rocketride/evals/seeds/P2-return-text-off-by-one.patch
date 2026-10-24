@@ -1,0 +1,11 @@
+--- a/nodes/src/nodes/response/IInstance.py
++++ b/nodes/src/nodes/response/IInstance.py
+@@ -159,7 +159,7 @@
+ 
+     def writeText(self, text: str):
+         # Save it out so we can write it into the text array
+-        self.text += text + '\n\n'
++        self.text += text[:-1] + '\n\n'
+ 
+     def writeTable(self, table: str):
+         # Get the key to write to (official lane name is "table")

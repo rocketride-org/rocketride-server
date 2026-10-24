@@ -21,9 +21,9 @@ Preconditions:
 
 - Your run is live.
 
-- **Run doctor.** Run `rr-verify record engine-health -- rr-verify doctor`. After the first line, `run <run-id>`, every line starts with `ok` or `info`, and the exit code is 0. Note the hash in the line `ok   no engine, ai, or node changes since the build (<hash>)`.
-- **Read the version.** Run `rr-verify record engine-health -- curl -s "$ROCKETRIDE_URI/version"`. The JSON has `"status":"OK"`, and `data.hash` equals the hash from doctor's freshness line. `git cat-file -t <hash>` prints `commit`.
-- **Confirm freshness.** Doctor's `ok   no engine, ai, or node changes since the build` line means the engine runs this checkout's code. A `WARN` line names the rebuild command to run first; report the feature as not verified until you rebuild and launch a new run.
+- **Run doctor.** Run `rr-verify record engine-health -- rr-verify doctor`. After the first line, `run <run-id>`, every line starts with `ok` or `info`, and the exit code is 0. Note the hash in the line `ok   dist/server matches this checkout's engine, ai, and node code (engine built from <hash>)`.
+- **Read the version.** Run `rr-verify record engine-health -- curl -s "$ROCKETRIDE_URI/version"`. The JSON has `"status":"OK"`, and `data.hash` equals the hash in doctor's `engine built from` line. `git cat-file -t <hash>` prints `commit`.
+- **Confirm freshness.** Doctor's `ok   dist/server matches this checkout's engine, ai, and node code` line means the engine runs this checkout's code. A `WARN` line names the rebuild or sync command to run first; report the feature as not verified until you run it and launch a new run.
 - **Reject a wrong key.** Run `rr-verify record engine-health -- curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' "$ROCKETRIDE_URI/task"`. It prints `401`.
 - **Reject a missing key.** Run `rr-verify record engine-health -- curl -s -o /dev/null -w '%{http_code}' "$ROCKETRIDE_URI/task"`. It prints `401`.
 - **Accept the right key.** Run `rr-verify record engine-health -- curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ROCKETRIDE_APIKEY" "$ROCKETRIDE_URI/task"`. It prints `422`, because the request passed auth and then lacked a `token` parameter.
@@ -32,6 +32,6 @@ Preconditions:
 
 - `/version` reports the commit the engine was built from, not the checkout's `HEAD`. On a branch with new commits they differ; compare with doctor's freshness line instead.
 - `/ping` is not a health endpoint. It returns 401 without a key and 404 with one. Use `/version`, which needs no key.
-- Python changes synced with `./builder ai:sync nodes:sync` do not change `/version`, which is why doctor compares files, not only hashes.
+- Python changes synced with `./builder ai:sync nodes:sync` do not change `/version`. Doctor compares each changed ai or node file with its copy in `dist/server` instead, so it stops warning once the sync is done.
 - An engine started with `--autoterm` exits as soon as its stdin closes. `rr-verify launch` does not pass it. Do not add it when launching by hand from an agent shell.
 - When `ROCKETRIDE_APIKEY` is unset in the engine's environment, the engine accepts any key. `rr-verify launch` always sets it, so a missing key still fails.

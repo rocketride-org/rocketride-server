@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# run: prepare one eval case, have a headless agent verify its area, and save the result.
+#
+#   run --worktree DIR --agent claude|codex [--model M] [--no-skill] [--timeout SECONDS] CASE_ID
+#
+# The agent gets only the case's area (evals/prompt.md), never the planted or replayed bug.
+# Results go to <this checkout>/.verify/evals/<case>/<agent>[-noskill]-<time>/:
+# prompt.txt, the agent's raw output, its final message, and result.json.
+set -euo pipefail
+
+EVALS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+HOME_REPO=$(git -C "$EVALS" rev-parse --show-toplevel)
+WORKTREE="" AGENT="" MODEL="" NO_SKILL=0 TIMEOUT=1800 CASE=""
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--worktree) WORKTREE="$2"; shift 2 ;;
+		--agent) AGENT="$2"; shift 2 ;;
+		--model) MODEL="$2"; shift 2 ;;
+		--no-skill) NO_SKILL=1; shift ;;
+		--timeout) TIMEOUT="$2"; shift 2 ;;
+		-*) echo "run: unknown option $1" >&2; exit 2 ;;
+		*) CASE="$1"; shift ;;
+	esac
+done
+if [ -z "$WORKTREE" ] || [ -z "$AGENT" ] || [ -z "$CASE" ]; then
+	echo "usage: run --worktree DIR --agent claude|codex [--model M] [--no-skill] [--timeout SECONDS] CASE_ID" >&2
+	exit 2
+fi
+WORKTREE=$(cd "$WORKTREE" && pwd)
+
+case "$AGENT" in
+	claude) MODEL="${MODEL:-sonnet}" ;;
+	codex) MODEL="${MODEL:-gpt-6.1-sol}" ;;
+	*) echo "run: --agent must be claude or codex" >&2; exit 2 ;;
+esac
+
+variant="$AGENT"
+if [ "$NO_SKILL" = 1 ]; then variant="$AGENT-noskill"; fi
+stamp=$(date +%Y%m%d-%H%M%S)
+RUN_ID="eval-$CASE-$variant-$stamp"
+OUT="$HOME_REPO/.verify/evals/$CASE/$variant-$stamp"
+mkdir -p "$OUT"
+
+prep_args=(--worktree "$WORKTREE")
+[ "$NO_SKILL" = 1 ] && prep_args+=(--no-skill)
+"$EVALS/prepare" "${prep_args[@]}" "$CASE" >"$OUT/prepare.log" 2>&1
+
+AREA=$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); c={c["id"]:c for c in d["cases"]}[sys.argv[2]]; print(d["areas"][c["area"]])' "$EVALS/cases.json" "$CASE")
+if [ "$NO_SKILL" = 1 ]; then
+	SKILL_LINE="Work out from the repository how to start and check this part of RocketRide."
+else
+	SKILL_LINE="This repository has a verification skill at .claude/skills/verify-rocketride/SKILL.md. Use it."
+fi
+python3 -I - "$EVALS/prompt.md" "$OUT/prompt.txt" "$WORKTREE" "$AREA" "$SKILL_LINE" "$RUN_ID" <<'EOF'
+import sys
+template, out, worktree, area, skill_line, run_id = sys.argv[1:]
+text = open(template).read()
+for key, value in (('worktree', worktree), ('area', area), ('skill_line', skill_line), ('run_id', run_id)):
+    text = text.replace('{' + key + '}', value)
+open(out, 'w').write(text)
+EOF
+
+stop_engines() {
+	# End every engine whose working directory is this eval checkout's dist/server.
+	local pid
+	for pid in $(pgrep -f 'ai/eaas.py' || true); do
+		if [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$WORKTREE/dist/server" ]; then
+			kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+		fi
+	done
+}
+
+started=$(date +%s)
+code=0
+if [ "$AGENT" = claude ]; then
+	(cd "$WORKTREE" && timeout "$TIMEOUT" claude -p "$(cat "$OUT/prompt.txt")" --output-format json \
+		--model "$MODEL" --dangerously-skip-permissions --no-session-persistence) >"$OUT/agent.json" 2>"$OUT/agent.stderr" || code=$?
+	python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("result", ""))' "$OUT/agent.json" >"$OUT/final.md" 2>/dev/null || true
+else
+	timeout "$TIMEOUT" codex exec --json -C "$WORKTREE" -m "$MODEL" -c model_reasoning_effort=medium \
+		--dangerously-bypass-approvals-and-sandbox --ephemeral -o "$OUT/final.md" \
+		"$(cat "$OUT/prompt.txt")" >"$OUT/agent.jsonl" 2>"$OUT/agent.stderr" || code=$?
+fi
+ended=$(date +%s)
+stop_engines
+
+python3 -I "$EVALS/collect.py" "$OUT" "$CASE" "$AGENT" "$MODEL" "$NO_SKILL" "$RUN_ID" "$code" "$((ended - started))"

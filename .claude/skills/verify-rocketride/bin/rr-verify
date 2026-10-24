@@ -173,19 +173,38 @@ cmd_doctor() {
 	fi
 	local version
 	if version=$(curl -sf --max-time 5 "$ROCKETRIDE_URI/version"); then
-		local built changed
+		local built
 		built=$(printf '%s' "$version" | grep -oE '"hash":"[0-9a-f]+"' | cut -d'"' -f4)
 		echo "ok   /version answered: $version"
 		if git -C "$REPO" cat-file -e "$built^{commit}" 2>/dev/null; then
-			# Tracked edits since the build commit, plus new untracked files, in the code the engine runs.
-			changed=$({
-				git -C "$REPO" diff --name-only "$built" -- packages/server packages/ai nodes/src packages/client-python/src
-				git -C "$REPO" ls-files --others --exclude-standard -- packages/server packages/ai nodes/src packages/client-python/src
-			} | sort -u | wc -l)
-			if [ "$changed" -eq 0 ]; then
-				echo "ok   no engine, ai, or node changes since the build ($built)"
-			else
-				echo "WARN $changed engine, ai, or node file(s) changed since the build ($built). The engine runs the copies in dist/server: run ./builder ai:sync nodes:sync for Python changes, ./builder server:build for C++ changes, then launch a new run"
+			# The engine runs copies in dist/server. A C++ change since the build needs a rebuild; a
+			# Python or node file only matters if its dist/server copy differs from the source.
+			local f dist_copy stale=0 cpp=0
+			while IFS= read -r f; do
+				[ -n "$f" ] || continue
+				case "$f" in
+					packages/server/*) cpp=$((cpp + 1)); continue ;;
+					packages/ai/src/ai/*) dist_copy="$SERVER_DIR/ai/${f#packages/ai/src/ai/}" ;;
+					nodes/src/nodes/*) dist_copy="$SERVER_DIR/nodes/${f#nodes/src/nodes/}" ;;
+					*) continue ;;
+				esac
+				if [ -e "$REPO/$f" ]; then
+					cmp -s "$REPO/$f" "$dist_copy" || stale=$((stale + 1))
+				elif [ -e "$dist_copy" ]; then
+					stale=$((stale + 1))
+				fi
+			done < <({
+				git -C "$REPO" diff --name-only "$built" -- packages/server packages/ai/src nodes/src
+				git -C "$REPO" ls-files --others --exclude-standard -- packages/server packages/ai/src nodes/src
+			} | sort -u)
+			if [ "$cpp" -gt 0 ]; then
+				echo "WARN $cpp engine C++ file(s) changed since the build ($built). Run ./builder server:build, then launch a new run"
+			fi
+			if [ "$stale" -gt 0 ]; then
+				echo "WARN $stale ai or node file(s) differ from their copies in dist/server. Run ./builder --sequential ai:sync nodes:sync, then launch a new run"
+			fi
+			if [ "$cpp" -eq 0 ] && [ "$stale" -eq 0 ]; then
+				echo "ok   dist/server matches this checkout's engine, ai, and node code (engine built from $built)"
 			fi
 		else
 			echo "WARN engine build commit $built is not in this checkout; rebuild with ./builder server:build"

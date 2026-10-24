@@ -1,0 +1,242 @@
+{
+	"about": "Eval cases for verify-rocketride. `area` is the only thing the agent is told. `ground_truth` is for scoring and is never shown to the agent.",
+	"areas": {
+		"chat": "chat pipelines: a Chat source, an LLM node, and a Return Answers node, as the IDE quickstart builds them, run through the Python SDK",
+		"webhook": "webhook pipelines: starting one, sending it text, reading the text it returns, and stopping it",
+		"auth": "the engine's API-key authentication: which requests it accepts and which it rejects",
+		"cli-validate": "the Python `rocketride validate` command, including its output and exit code for valid and invalid pipeline files",
+		"mcp": "the engine's HTTP MCP endpoint, including running a pipeline through it and terminating the task afterwards",
+		"placeholder-key": "what a user sees when a pipeline's LLM API key is an unfilled `${ROCKETRIDE_OPENAI_KEY}` placeholder: run the quickstart chat pipeline on an engine launched without mocks, with ROCKETRIDE_OPENAI_KEY unset, and judge whether the error tells the user what to fix",
+		"local-text-output": "the Local Text Output node (provider `local-text-output`) and its `exclude` setting, which removes one leading path prefix from each object's path before the node writes the file; the path comes from the object name sent with the data; read the node's README for its settings",
+		"question-instructions": "how the Python SDK's `Question.addInstruction()` text appears in the prompt that `Question.getPrompt()` builds, including multi-line, indented content such as a code example",
+		"pipe-diff": "`rocketride diff` on pipeline files, including pipelines whose nodes sit inside canvas groups and files with unusual numeric values",
+		"context-optimizer": "the Context Optimizer node (provider `context_optimizer`) in a chat pipeline (Chat, Context Optimizer, an LLM node, Return Answers) on an engine launched with mocks; read the node's README for its lanes"
+	},
+	"cases": [
+		{
+			"id": "P1",
+			"kind": "planted",
+			"area": "chat",
+			"seed": "P1-return-answers-drops-text.patch",
+			"expect": "defect",
+			"ground_truth": "Return Answers drops text answers: a chat pipeline with Return Answers returns no answers."
+		},
+		{
+			"id": "P2",
+			"kind": "planted",
+			"area": "webhook",
+			"seed": "P2-return-text-off-by-one.patch",
+			"expect": "defect",
+			"ground_truth": "Return Text drops the last character of each text chunk: 'hello from verify' comes back as 'hello from verif'."
+		},
+		{
+			"id": "P3",
+			"kind": "planted",
+			"area": "auth",
+			"seed": "P3-auth-substring-match.patch",
+			"expect": "defect",
+			"ground_truth": "Auth accepts any key that contains the real key as a substring (for example wrong-verify-key), and a request with no key gets no HTTP response instead of 401."
+		},
+		{
+			"id": "P4",
+			"kind": "planted",
+			"area": "cli-validate",
+			"seed": "P4-cli-validate-exit-zero.patch",
+			"expect": "defect",
+			"ground_truth": "rocketride validate exits 0 when a file is invalid."
+		},
+		{
+			"id": "P5",
+			"kind": "planted",
+			"area": "mcp",
+			"seed": "P5-mcp-terminate-untracked-noop.patch",
+			"expect": "defect",
+			"ground_truth": "MCP terminate reports success but does not stop a task MCP no longer tracks, such as one left by a one-shot run_pipeline; the task stays running."
+		},
+		{
+			"id": "R1",
+			"kind": "replay",
+			"area": "placeholder-key",
+			"pr": 2690,
+			"commit": "05971252e",
+			"expect": "defect",
+			"paths": [
+				"nodes/src/nodes/embedding_openai/OpenAIEmbeddingWrapper.py",
+				"nodes/src/nodes/llm_anthropic/IGlobal.py",
+				"nodes/src/nodes/llm_anthropic/anthropic.py",
+				"nodes/src/nodes/llm_baidu_qianfan/IGlobal.py",
+				"nodes/src/nodes/llm_bedrock/IGlobal.py",
+				"nodes/src/nodes/llm_bedrock/bedrock.py",
+				"nodes/src/nodes/llm_deepseek/IGlobal.py",
+				"nodes/src/nodes/llm_gemini/IGlobal.py",
+				"nodes/src/nodes/llm_glm/IGlobal.py",
+				"nodes/src/nodes/llm_gmi_cloud/IGlobal.py",
+				"nodes/src/nodes/llm_kimi/IGlobal.py",
+				"nodes/src/nodes/llm_minimax/IGlobal.py",
+				"nodes/src/nodes/llm_mistral/IGlobal.py",
+				"nodes/src/nodes/llm_openai/IGlobal.py",
+				"nodes/src/nodes/llm_openai_api/IGlobal.py",
+				"nodes/src/nodes/llm_perplexity/IGlobal.py",
+				"nodes/src/nodes/llm_qwen/IGlobal.py",
+				"nodes/src/nodes/llm_vision_gemini/IGlobal.py",
+				"nodes/src/nodes/llm_xai/IGlobal.py",
+				"nodes/src/nodes/store_astra/IGlobal.py",
+				"nodes/src/nodes/store_atlas/IGlobal.py",
+				"nodes/src/nodes/store_chroma/IGlobal.py",
+				"nodes/src/nodes/store_elasticsearch/IGlobal.py",
+				"nodes/src/nodes/store_elasticsearch/elasticsearch_store.py",
+				"nodes/src/nodes/store_milvus/IGlobal.py",
+				"nodes/src/nodes/store_pinecone/IGlobal.py",
+				"nodes/src/nodes/store_postgres/IGlobal.py",
+				"nodes/src/nodes/store_qdrant/IGlobal.py",
+				"nodes/src/nodes/store_weaviate/IGlobal.py",
+				"packages/ai/src/ai/common/chat.py",
+				"packages/ai/src/ai/common/config.py",
+				"packages/ai/src/ai/common/store/store_global_base.py"
+			],
+			"ground_truth": "The literal placeholder reaches OpenAI: the chat answer is OpenAI's 401 'Incorrect API key provided: ${ROCKET***KEY}' instead of an error naming ROCKETRIDE_OPENAI_KEY and where to set it."
+		},
+		{
+			"id": "R3",
+			"kind": "replay",
+			"area": "mcp",
+			"pr": 2315,
+			"commit": "0d12d30a4",
+			"expect": "defect",
+			"paths": [
+				"packages/ai/src/ai/modules/mcp/__init__.py",
+				"packages/ai/src/ai/modules/mcp/auth.py",
+				"packages/ai/src/ai/modules/mcp/engine.py",
+				"packages/ai/src/ai/modules/mcp/handlers.py",
+				"packages/ai/src/ai/modules/mcp/resources.py",
+				"packages/ai/src/ai/modules/mcp/tooling.py",
+				"packages/ai/src/ai/modules/mcp/tools/__init__.py",
+				"packages/ai/src/ai/modules/mcp/tools/capability.py",
+				"packages/ai/src/ai/modules/mcp/tools/execution.py",
+				"packages/ai/src/ai/modules/shell/shell.py",
+				"packages/ai/src/ai/modules/task_http/task_exec.py"
+			],
+			"ground_truth": "The MCP endpoint is broken: POST /mcp is refused, or tools that call the engine fail (for example 'Missing engine URI')."
+		},
+		{
+			"id": "R4",
+			"kind": "replay",
+			"area": "context-optimizer",
+			"pr": 2304,
+			"commit": "97bb71c55",
+			"expect": "defect",
+			"paths": [
+				"nodes/src/nodes/context_optimizer/IInstance.py",
+				"nodes/src/nodes/summarization/IInstance.py",
+				"nodes/src/nodes/tool_guild/IInstance.py",
+				"nodes/src/nodes/tool_n8n/IInstance.py"
+			],
+			"ground_truth": "Context Optimizer also forwards the raw question, so the LLM is asked twice and the chat returns two answers instead of one."
+		},
+		{
+			"id": "R5",
+			"kind": "replay",
+			"area": "local-text-output",
+			"pr": 2078,
+			"commit": "9fd9fdf18",
+			"expect": "defect",
+			"paths": [
+				"nodes/src/nodes/local_text_output/IInstance.py",
+				"nodes/src/nodes/local_text_output/path_prefix.py"
+			],
+			"ground_truth": "exclude removes every occurrence of the prefix instead of one leading prefix: object 'data/in/x/data/in/y.txt' with exclude 'data/in/' is written as x/y.txt instead of x/data/in/y.txt."
+		},
+		{
+			"id": "R6",
+			"kind": "replay",
+			"area": "question-instructions",
+			"pr": 2523,
+			"commit": "b88777f02",
+			"expect": "defect",
+			"paths": [
+				"nodes/src/nodes/summarization/IInstance.py",
+				"packages/client-python/src/rocketride/schema/question.py"
+			],
+			"ground_truth": "getPrompt flattens indentation inside instruction blocks, so nested code loses its structure."
+		},
+		{
+			"id": "R7",
+			"kind": "replay",
+			"area": "pipe-diff",
+			"pr": 2695,
+			"commit": "87f530f39",
+			"expect": "defect",
+			"paths": [
+				"packages/client-python/src/rocketride/cli/commands/diff.py",
+				"packages/client-python/src/rocketride/cli/main.py",
+				"packages/client-python/src/rocketride/pipediff/_pipejson.py",
+				"packages/client-python/src/rocketride/pipediff/engine.py",
+				"packages/client-python/src/rocketride/pipediff/gitref.py",
+				"packages/client-python/src/rocketride/pipediff/reporters.py"
+			],
+			"ground_truth": "Any of: NaN or Infinity accepted; moving a node inside a canvas group reported as a change instead of layout; empty values breaking the Markdown report."
+		},
+		{
+			"id": "C-chat",
+			"kind": "clean",
+			"area": "chat",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-webhook",
+			"kind": "clean",
+			"area": "webhook",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-auth",
+			"kind": "clean",
+			"area": "auth",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-cli-validate",
+			"kind": "clean",
+			"area": "cli-validate",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-mcp",
+			"kind": "clean",
+			"area": "mcp",
+			"expect": "no-defect",
+			"known_issues": "One-shot run_pipeline leaves its task running (pre-existing bug); flagging it is correct, not a false alarm."
+		},
+		{
+			"id": "C-placeholder-key",
+			"kind": "clean",
+			"area": "placeholder-key",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-context-optimizer",
+			"kind": "clean",
+			"area": "context-optimizer",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-local-text-output",
+			"kind": "clean",
+			"area": "local-text-output",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-question-instructions",
+			"kind": "clean",
+			"area": "question-instructions",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-pipe-diff",
+			"kind": "clean",
+			"area": "pipe-diff",
+			"expect": "no-defect"
+		}
+	],
+	"calibration": "Every bug case was reproduced by hand on 2026-10-24 against the same check on clean code. R2 (#2376) was dropped: reverting it on current develop wraps the component as a pipeline and validates it without error, which a user cannot see as a failure."
+}
