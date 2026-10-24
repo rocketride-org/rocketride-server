@@ -42,7 +42,7 @@ It is ready when it prints `engine: http://127.0.0.1:<port>`. It waits for the e
 - `--mock` starts the engine with `ROCKETRIDE_MOCK=nodes/test/mocks`. Pipelines then load stub OpenAI, Anthropic, LangChain, and vector-store libraries, so LLM nodes answer without keys. It also sets `ROCKETRIDE_OPENAI_KEY` to a placeholder when you have not set one. Without `--mock`, LLM nodes call the real providers and need their keys in your environment, such as `ROCKETRIDE_OPENAI_KEY`.
 - The engine requires the API key `verify-key` (override with `RR_VERIFY_APIKEY`). Every `rr-verify` command passes it.
 - Each launch gets its own port and its own range of task ports. By default the port is a free port passed explicitly. `--port 0` lets the OS pick, the way the VS Code extension's local mode starts the engine; see the MCP gotchas before using it.
-- `--id NAME` names the run. Otherwise it is named by date and time, and later commands use the most recent run.
+- `--id NAME` names the run. Otherwise it is named by date and time. Later commands use `--id`, then `$RR_VERIFY_ID`, then the most recently launched run. If another agent or person may be verifying in this checkout at the same time, pass the same `--id NAME` to every command, because "most recent" may be their run.
 - Runs from the same checkout share `dist/data` and the file store in `~/.rocketlib/store`. Do not run features that write to the store in two runs at once. The engine the VS Code extension installs in `~/.config/RocketRide/engine` is separate and is never touched.
 
 ## Doctor
