@@ -36,6 +36,7 @@ import tempfile
 import time
 import socket
 import hashlib
+import secrets
 import shlex
 import shutil
 from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
@@ -643,6 +644,8 @@ class Task(DAPBase):
         self._data_port: Optional[int] = None
         self._data_client: DAPClient = None
         self._data_keeper: Optional[asyncio.Task] = None
+        # Per-run credential for the child's /task/data, separate from self.token
+        self._data_token: Optional[str] = None
 
         # Status broadcasting
         self._status_update_task: Optional[asyncio.Task] = None
@@ -1169,6 +1172,9 @@ class Task(DAPBase):
         """
         Send data requests to task's data communication channel.
 
+        The connection is opened on first use and presents the run's channel
+        token on the handshake.
+
         Args:
             data: Data processing request
 
@@ -1247,6 +1253,10 @@ class Task(DAPBase):
             # "Connection refused" error. We retry up to 10 times (150ms apart) to
             # give uvicorn time to start accepting connections.
             if not self._data_client:
+                # No token: the run never started or was torn down while we waited for the lock
+                if not self._data_token:
+                    raise RuntimeError('Task is not running, cannot open the data channel')
+
                 uri = f'ws://127.0.0.1:{self._data_port}/task/data'
 
                 @retry(
@@ -1261,7 +1271,7 @@ class Task(DAPBase):
                     # Don't retry if subprocess has died
                     if self._engine_process and self._engine_process.returncode is not None:
                         raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
-                    transport = TransportWebSocket(uri)
+                    transport = TransportWebSocket(uri, headers={'Authorization': f'Bearer {self._data_token}'})
                     name = f'DATA-{self.id}'
                     client = Task.TaskData(parent_task=self, module=name, transport=transport)
                     await client.connect()
@@ -1311,7 +1321,7 @@ class Task(DAPBase):
         Handle task termination with comprehensive resource cleanup.
 
         Manages subprocess termination, resource cleanup, connection management,
-        and final status updates.
+        and final status updates. The run's channel token is dropped here.
 
         Idempotent: safe to call multiple times (only the first call performs
         cleanup; subsequent calls return immediately).
@@ -1409,6 +1419,9 @@ class Task(DAPBase):
                 self._data_port = None
         except Exception as e:
             self.debug_message(f'Error cleaning up data port: {e}')
+
+        # The token dies with the run; a restart mints a new one
+        self._data_token = None
 
         try:
             # Cancel status update task
@@ -2456,7 +2469,9 @@ class Task(DAPBase):
         Launch subprocess and initialize communication interfaces.
 
         Performs complete startup sequence with environment detection,
-        resource allocation, and interface initialization.
+        resource allocation, and interface initialization. Every start mints
+        a new channel token for the child's ``/task/data``; the child gets
+        only its SHA-256.
 
         Raises:
             RuntimeError: If already started or critical startup failure
@@ -2546,12 +2561,16 @@ class Task(DAPBase):
                 self._debug_subprocess = True
                 exec_path = sys.executable
 
-            # Configure data communication
+            # Configure data communication; a fresh channel token per start, and
+            # only its hash goes on argv — the token itself stays here
             self._data_port = self._server.assign_port()
+            self._data_token = secrets.token_urlsafe(32)
+            token_sha256 = hashlib.sha256(self._data_token.encode('utf-8')).hexdigest()
             child_args.extend(
                 [
                     f'--data_port={self._data_port}',
                     '--data_host=127.0.0.1',
+                    f'--data_token_sha256={token_sha256}',
                 ]
             )
             # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
