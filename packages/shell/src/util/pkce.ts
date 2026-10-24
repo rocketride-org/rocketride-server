@@ -30,6 +30,8 @@
 //   3. Server does the exchange via cd_ credential in connectClient()
 // =============================================================================
 
+import { getSessionStorageItem, removeSessionStorageItem, setSessionStorageItem } from './sessionStorage';
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -114,7 +116,7 @@ export async function generatePkce(): Promise<PkceChallenge> {
 
     // Persist the verifier in sessionStorage so it survives the browser
     // redirect to the Zitadel authorization endpoint and back.
-    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    setSessionStorageItem(PKCE_VERIFIER_KEY, verifier);
 
     return { verifier, challenge };
 }
@@ -132,7 +134,7 @@ export function getStoredVerifier(): string | null {
     // Read the previously stored verifier from sessionStorage.
     // Returns null if the key does not exist (e.g., the tab was closed
     // between the initial navigation and the redirect callback).
-    return sessionStorage.getItem(PKCE_VERIFIER_KEY);
+    return getSessionStorageItem(PKCE_VERIFIER_KEY);
 }
 
 /**
@@ -143,7 +145,7 @@ export function getStoredVerifier(): string | null {
  */
 export function clearStoredVerifier(): void {
     // Remove the verifier entry from sessionStorage so it cannot be reused.
-    sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+    removeSessionStorageItem(PKCE_VERIFIER_KEY);
 }
 
 // =============================================================================
