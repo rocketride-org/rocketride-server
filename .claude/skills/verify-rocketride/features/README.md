@@ -1,32 +1,31 @@
 # RocketRide verification map
 
-This directory is the maintained source for verifying RocketRide's user-facing behavior. Read [the skill](../SKILL.md) first for launch, doctor, and cleanup, then use the matching feature file as the recipe.
+This directory is the maintained source for verifying RocketRide's user-facing behavior. Read [the skill](../SKILL.md) first for shell setup, launch, doctor, and cleanup, then use the matching feature file as the recipe.
 
 ## Baseline preconditions
 
-- The checkout is built: `dist/server/engine` exists and `rr-verify launch` starts.
-- A run is live: `rr-verify launch --mock` printed `engine: http://127.0.0.1:<port>`.
+- The checkout is built: `dist/server/engine` exists.
+- A run is live: `rr-verify launch --mock` printed `engine: http://127.0.0.1:<port>` for your run ID.
 - `rr-verify doctor` exits 0 for that run.
-- Never drive an engine that this run did not start, such as one from the VS Code extension or `./builder server:run`.
+- Never drive an engine that this run did not start, such as one from the VS Code extension, `./builder server:run`, or another agent's run.
 
 ## Driving conventions
 
-- Start every recipe from a fresh run unless its preconditions say otherwise.
+- Every command below assumes the line starts with `. .claude/skills/verify-rocketride/bin/env.sh <run-id> &&`, run from the repository root. That puts `rr-verify` on `PATH` and sets `$F`, `$ROCKETRIDE_URI`, and `$ROCKETRIDE_APIKEY`.
+- Use one run for the whole session. Run `rr-verify doctor` before the first feature, between features, and after any `FAIL`. Launch a new run with a new ID only when doctor fails or a recipe says so.
 - Treat every command as literal. Keep quoted text and flags unchanged.
-- Run commands from the repository root. `rr-verify` means `.claude/skills/verify-rocketride/bin/rr-verify`, and `F` means `.claude/skills/verify-rocketride/fixtures`.
-- Stop every task a recipe starts. `rr-verify tscli -- list` should end with `No active tasks found`.
+- Pass `--label <feature-id>` so evidence lands in that feature's folder.
+- Stop every task a recipe starts. `rr-verify tscli -- list` should end each feature with `No active tasks found`.
 - Keep proof artifacts during cleanup.
 
 ## Proof and skip reporting
 
 - Capture the user action and the resulting state, not only the final output.
-- SDK proof is the evidence JSON that `rr-verify chat` or `rr-verify send` saves, plus its `PASS:` or `FAIL:` line.
-- CLI proof is the command, its stdout and stderr, and its exit code.
-- MCP proof is the request and response JSON that `rr-verify mcp` saves.
-- Record the feature ID and entry point with every artifact.
+- Every recipe command saves its own evidence: `chat` and `send` write `-chat.json` or `-send.json`, `cli`, `tscli`, and `record` write `-cmd.json`, and `mcp` writes the request and response.
+- Record the sub-feature ID with every result.
 - Report an unreachable path with the command you tried and the unmet precondition.
 - Do not report a skipped entry point as verified through a different path.
-- Mark results from a `--mock` run as "mocked LLM".
+- Mark results from a `--mock` run as "mocked LLM". The evidence JSON has a `mock` field.
 
 ## Feature entry contract
 
@@ -42,7 +41,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 ## Features
 
 - [Engine health](./engine-health.md) covers version, build freshness, and API-key auth.
-- [Chat pipeline](./chat-pipeline.md) covers the quickstart Chat, LLM, and Return Answers pipeline, with and without Return Answers.
-- [Webhook pipeline](./webhook-pipeline.md) covers sending text to a webhook-source pipeline and reading the result.
-- [CLIs](./cli.md) covers the Python and TypeScript `rocketride` CLIs: validate, upload, and list.
-- [MCP](./mcp.md) covers the engine's HTTP MCP endpoint: tool listing, validation, one-shot runs, and task cleanup.
+- [Chat pipeline](./chat-pipeline.md) covers the quickstart Chat, LLM, and Return Answers pipeline, with and without Return Answers, mocked and real.
+- [Webhook pipeline](./webhook-pipeline.md) covers sending text to a webhook-source pipeline, uploading from the CLI, and termination.
+- [CLIs](./cli.md) covers the Python and TypeScript `rocketride` CLIs: validate, start, list, stop, and upload.
+- [MCP](./mcp.md) covers the engine's HTTP MCP endpoint: initialize, tool listing, validation, one-shot runs, and task cleanup.

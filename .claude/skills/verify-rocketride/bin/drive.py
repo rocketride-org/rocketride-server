@@ -1,7 +1,7 @@
 """Drive a RocketRide pipeline through the Python SDK and save the evidence.
 
 Run through `rr-verify chat` or `rr-verify send`, which set ROCKETRIDE_URI,
-ROCKETRIDE_APIKEY, and RR_VERIFY_DIR for the active run.
+ROCKETRIDE_APIKEY, RR_VERIFY_DIR, and ENGINE_MOCK for the active run.
 
 Exit codes: 0 = the expectation held, 1 = it did not, 2 = the run itself failed.
 """
@@ -21,22 +21,32 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CHAT_PIPE = SKILL_DIR / 'fixtures' / 'quickstart-chat.pipe'
 
 
-def evidence_path(label: str, kind: str) -> Path:
-    run_dir = Path(os.environ['RR_VERIFY_DIR'])
-    out_dir = run_dir / label
+def evidence_path(label: str, kind: str, started: float) -> Path:
+    out_dir = Path(os.environ['RR_VERIFY_DIR']) / label
     out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir / f'{time.strftime("%H%M%S")}-{kind}.json'
+    stamp = time.strftime('%H%M%S', time.localtime(started)) + f'.{int(started * 1000) % 1000:03d}'
+    return out_dir / f'{stamp}-{kind}.json'
 
 
-async def run_chat(args) -> tuple[dict, bool, str]:
+async def run_pipeline(args, record: dict, call) -> dict:
+    """Start the pipeline, run `call` against its token, and always terminate it."""
     async with RocketRideClient(uri=os.environ['ROCKETRIDE_URI'], auth=os.environ['ROCKETRIDE_APIKEY']) as client:
         token = (await client.use(filepath=str(args.pipe)))['token']
+        record['token'] = token
         try:
-            question = Question()
-            question.addQuestion(args.text)
-            result = await client.chat(token=token, question=question)
+            return await call(client, token)
         finally:
             await client.terminate(token)
+            record['terminated'] = True
+
+
+async def run_chat(args, record: dict) -> tuple[dict, bool, str]:
+    async def ask(client, token):
+        question = Question()
+        question.addQuestion(args.text)
+        return await client.chat(token=token, question=question)
+
+    result = await run_pipeline(args, record, ask)
     answers = result.get('answers') or []
     if args.expect == 'answers':
         ok = bool(answers)
@@ -47,13 +57,11 @@ async def run_chat(args) -> tuple[dict, bool, str]:
     return result, ok, verdict
 
 
-async def run_send(args) -> tuple[dict, bool, str]:
-    async with RocketRideClient(uri=os.environ['ROCKETRIDE_URI'], auth=os.environ['ROCKETRIDE_APIKEY']) as client:
-        token = (await client.use(filepath=str(args.pipe)))['token']
-        try:
-            result = await client.send(token, args.text, objinfo={'name': 'input.txt'}, mimetype='text/plain')
-        finally:
-            await client.terminate(token)
+async def run_send(args, record: dict) -> tuple[dict, bool, str]:
+    async def send(client, token):
+        return await client.send(token, args.text, objinfo={'name': 'input.txt'}, mimetype='text/plain')
+
+    result = await run_pipeline(args, record, send)
     if args.expect_text is None:
         return result, True, 'no expectation set; inspect the result'
     texts = result.get('text') or []
@@ -82,20 +90,30 @@ def main() -> int:
 
     args = parser.parse_args()
     started = time.time()
-    record = {'mode': args.mode, 'pipe': str(args.pipe), 'input': args.text, 'engine': os.environ['ROCKETRIDE_URI']}
+    record = {
+        'feature': args.label,
+        'mode': args.mode,
+        'mock': os.environ.get('ENGINE_MOCK') == '1',
+        'pipe': str(args.pipe),
+        'input': args.text,
+        'engine': os.environ['ROCKETRIDE_URI'],
+        'token': None,
+        'terminated': False,
+    }
     try:
         record['pipeline'] = json.loads(args.pipe.read_text())
         runner = run_chat if args.mode == 'chat' else run_send
-        result, ok, verdict = asyncio.run(runner(args))
+        result, ok, verdict = asyncio.run(runner(args, record))
         record.update(result=result, ok=ok, verdict=verdict)
         code = 0 if ok else 1
     except Exception as exc:  # noqa: BLE001 - every failure is reported as evidence
         record.update(ok=False, verdict=f'run failed: {type(exc).__name__}: {exc}')
         code = 2
     record['seconds'] = round(time.time() - started, 2)
-    path = evidence_path(args.label, args.mode)
+    path = evidence_path(args.label, args.mode, started)
     path.write_text(json.dumps(record, indent=2, default=str))
     print(json.dumps(record.get('result'), indent=2, default=str))
+    print(f'token: {record["token"]}  terminated: {record["terminated"]}  mock: {record["mock"]}')
     print(f'{"PASS" if code == 0 else "FAIL"}: {record["verdict"]}')
     print(f'saved: {path}')
     return code

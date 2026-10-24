@@ -19,17 +19,19 @@ A running engine reports its version and the commit it was built from, rejects r
 
 Preconditions:
 
-- A run is live and `rr-verify doctor` has not been run against it yet, or you want a fresh check.
+- Your run is live.
 
-- **Check everything at once.** Run `rr-verify doctor`. Every line starts with `ok` or `info`, and the exit code is 0.
-- **Read the version.** Run `. .verify/<run-id>/engine.env && curl -s "$ROCKETRIDE_URI/version"`. The JSON has `"status":"OK"` and `data.hash` equal to the first 8 characters of the commit the engine was built from.
-- **Confirm freshness.** In the doctor output, `ok   no engine, ai, or node changes since the build` means the engine runs this checkout's code. A `WARN` line names the rebuild command to run before verifying.
-- **Reject a wrong key.** Run `curl -s -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer wrong' "$ROCKETRIDE_URI/task"`. It prints `401`.
-- **Accept the right key.** Run `curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $ROCKETRIDE_APIKEY" "$ROCKETRIDE_URI/task"`. It prints `422`, because the request passed auth and then lacked a `token` parameter.
+- **Run doctor.** Run `rr-verify record engine-health -- rr-verify doctor`. Every line starts with `ok` or `info`, and the exit code is 0. Note the hash in the line `ok   no engine, ai, or node changes since the build (<hash>)`.
+- **Read the version.** Run `rr-verify record engine-health -- curl -s "$ROCKETRIDE_URI/version"`. The JSON has `"status":"OK"`, and `data.hash` equals the hash from doctor's freshness line. `git cat-file -t <hash>` prints `commit`.
+- **Confirm freshness.** Doctor's `ok   no engine, ai, or node changes since the build` line means the engine runs this checkout's code. A `WARN` line names the rebuild command to run first; report the feature as not verified until you rebuild and launch a new run.
+- **Reject a wrong key.** Run `rr-verify record engine-health -- curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' "$ROCKETRIDE_URI/task"`. It prints `401`.
+- **Reject a missing key.** Run `rr-verify record engine-health -- curl -s -o /dev/null -w '%{http_code}' "$ROCKETRIDE_URI/task"`. It prints `401`.
+- **Accept the right key.** Run `rr-verify record engine-health -- curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ROCKETRIDE_APIKEY" "$ROCKETRIDE_URI/task"`. It prints `422`, because the request passed auth and then lacked a `token` parameter.
 
 ## Gotchas
 
+- `/version` reports the commit the engine was built from, not the checkout's `HEAD`. On a branch with new commits they differ; compare with doctor's freshness line instead.
 - `/ping` is not a health endpoint. It returns 401 without a key and 404 with one. Use `/version`, which needs no key.
-- `/version` reports the commit the engine binary was built from. Python changes synced later with `./builder ai:sync nodes:sync` do not change it, which is why doctor compares files, not only hashes.
+- Python changes synced with `./builder ai:sync nodes:sync` do not change `/version`, which is why doctor compares files, not only hashes.
 - An engine started with `--autoterm` exits as soon as its stdin closes. `rr-verify launch` does not pass it. Do not add it when launching by hand from an agent shell.
 - When `ROCKETRIDE_APIKEY` is unset in the engine's environment, the engine accepts any key. `rr-verify launch` always sets it, so a missing key still fails.
