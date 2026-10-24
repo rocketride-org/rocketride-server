@@ -92,7 +92,11 @@ class NERRecognizer:
             # - Tokenization
             # - Model inference
             # - Post-processing
-            raw_entities = self.ner_pipeline(text)
+            results = self.ner_pipeline(text)
+            # RocketRide's local and remote wrappers return one result envelope
+            # per input. This call submits a single text, whose complete HF
+            # entity dictionaries are carried in the 'entities' field.
+            raw_entities = results[0]['entities'] if results else []
 
             # Filter by confidence threshold
             filtered_entities = [entity for entity in raw_entities if entity.get('score', 0) >= self.min_confidence]
