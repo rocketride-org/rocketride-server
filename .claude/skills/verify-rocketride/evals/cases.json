@@ -205,7 +205,7 @@
 			"kind": "clean",
 			"area": "mcp",
 			"expect": "no-defect",
-			"known_issues": "One-shot run_pipeline leaves its task running (pre-existing bug); flagging it is correct, not a false alarm."
+			"known_issues": "Pre-existing in develop and documented in features/mcp.md: (1) a one-shot run_pipeline leaves its task running, so a repeat run fails with 'Pipeline is already running.' until terminated; (2) run_pipeline or send_data with string inputs returns no text field for the echo pipeline because MCP sends without a mimetype. Reporting either is correct, not a false alarm."
 		},
 		{
 			"id": "C-placeholder-key",
@@ -217,19 +217,22 @@
 			"id": "C-context-optimizer",
 			"kind": "clean",
 			"area": "context-optimizer",
-			"expect": "no-defect"
+			"expect": "no-defect",
+			"known_issues": "(1) history_budget_pct does not limit history: allocate_budget gives history whatever is left after the other three components, so setting it to 0 does not empty history, although the node README says a component given 0 is emptied. Confirmed by hand on 2026-10-24 (optimizer.py allocate_budget). (2) In auto mode, a max_context_tokens value in the node's auto block or top-level config is used as the context window, although the README says the field is ignored in auto mode (optimizer.py line 245). (3) A Python SDK chat request whose Question has a document added with addDocuments (a plain string, or a Doc leaving optional fields unset) fails with pydantic validation errors and no answer, with or without Context Optimizer, because the SDK sends unset fields as null and the engine rejects them. All confirmed by hand on 2026-10-24."
 		},
 		{
 			"id": "C-local-text-output",
 			"kind": "clean",
 			"area": "local-text-output",
-			"expect": "no-defect"
+			"expect": "no-defect",
+			"known_issues": "Objects whose names contain non-ASCII characters (for example plain/caf\u00e9.md or u/\u6587.md) are silently not written, while ASCII names are. Confirmed by hand on 2026-10-24."
 		},
 		{
 			"id": "C-question-instructions",
 			"kind": "clean",
 			"area": "question-instructions",
-			"expect": "no-defect"
+			"expect": "no-defect",
+			"known_issues": "Question.getPrompt() drops blank lines inside addInstruction() text: 'First paragraph.\\n\\nSecond paragraph.' renders with no blank line between the paragraphs. Confirmed by hand on 2026-10-24."
 		},
 		{
 			"id": "C-pipe-diff",
@@ -238,5 +241,5 @@
 			"expect": "no-defect"
 		}
 	],
-	"calibration": "Every bug case was reproduced by hand on 2026-10-24 against the same check on clean code. R2 (#2376) was dropped: reverting it on current develop wraps the component as a pipeline and validates it without error, which a user cannot see as a failure."
+	"calibration": "Every bug case was reproduced by hand on 2026-10-24 against the same check on clean code. R2 (#2376) was dropped: reverting it on current develop wraps the component as a pipeline and validates it without error, which a user cannot see as a failure. Defects that agents reported on clean controls were reproduced independently before being added to known_issues; one Codex report (Local Text Output skipping absolute or backslash exclude prefixes on Linux) was judged not a defect and stays a false alarm."
 }
