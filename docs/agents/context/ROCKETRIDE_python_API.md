@@ -1049,7 +1049,8 @@ except Exception:
 ```
 
 **Graph bulk upsert** (`rocketride_graph`, see Pattern 14 in ROCKETRIDE_PIPELINES.md) — named
-params, and MERGE then a separate `MATCH ... SET`:
+params, and MERGE then a separate `MATCH ... SET` (works on every AGE version; on AGE 1.6.0 the
+MERGE and SET can also run as one call):
 
 ```python
 rows = [{'id': 1, 'name': 'a'}, {'id': 2, 'name': 'b'}]

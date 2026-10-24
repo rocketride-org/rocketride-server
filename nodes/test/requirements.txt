@@ -11,8 +11,8 @@ pytest-xdist
 # without these the tests below skip depending on what ran earlier on the dist.
 # Base engine packages (numpy, pillow, requests, SQLAlchemy, antlr4) need no entry.
 img2table                   # ocr: test_model_server_ocr.py
-psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_full.py, test_rocketride_graph_full.py
-pgvector                    # rocketride_vector, store_postgres: test_rocketride_db_full.py
+psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_live.py, test_rocketride_graph_live.py
+pgvector                    # rocketride_vector, store_postgres: test_rocketride_db_live.py
 python-docx                 # tool_microsoft_365: test_word.py
 smbprotocol                 # text_output: test_validate_config.py
 pygit2                      # tool_git: test_tools.py
