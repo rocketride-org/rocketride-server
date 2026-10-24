@@ -36,5 +36,6 @@ Preconditions:
 
 - The Python CLI defaults to RocketRide's cloud (`https://api.rocketride.ai`) when `ROCKETRIDE_URI` is unset. The TypeScript CLI defaults to `localhost:5565`. `rr-verify cli` and `rr-verify tscli` always set it.
 - `rr-verify cli` runs the CLI from the built wheel, as a user would after `pip install`. Running `dist/server/engine -m rocketride.cli` instead fails with `No module named 'rocketride_common'`.
-- After editing the Python SDK, rebuild the wheel with `./builder client-python:wheel-source`. `rr-verify` reinstalls `.verify/venv` when the wheel changes.
+- After editing the Python SDK or CLI, rebuild the wheel with `./builder --sequential client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync`. `client-python:wheel-source` alone only stages the source and leaves the old wheel. `rr-verify` reinstalls `.verify/venv` when the wheel changes, and `rr-verify doctor` warns when the source is newer than the wheel.
+- A checkout whose engine was downloaded has the release's wheel in `dist/server/static/clients/python`, not one built from this checkout. Rebuild it as above before verifying the SDK or CLI.
 - A task started from the CLI shows `Description: RocketRide DTC MCP Tool`, although MCP was not involved.

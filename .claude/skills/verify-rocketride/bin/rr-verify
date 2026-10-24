@@ -203,6 +203,19 @@ cmd_doctor() {
 		401 | 403 | 000) echo "FAIL the run's API key got HTTP $allowed"; fail=1 ;;
 		*) echo "ok   the run's API key is accepted (HTTP $allowed)" ;;
 	esac
+	# The SDK and CLI run from the built wheel; a source file newer than it means the wheel is stale.
+	local wheel newer
+	wheel=$(find "$SERVER_DIR/static/clients/python" -maxdepth 1 -name 'rocketride-*.whl' 2>/dev/null | head -n 1)
+	if [ -z "$wheel" ]; then
+		echo "WARN no Python wheel in dist/server/static/clients/python; the SDK and CLI cannot run"
+	else
+		newer=$(find "$REPO/packages/client-python/src" "$REPO/packages/client-common" -name '*.py' -newer "$wheel" 2>/dev/null | wc -l)
+		if [ "$newer" -eq 0 ]; then
+			echo "ok   the Python wheel is newer than the SDK source"
+		else
+			echo "WARN $newer Python SDK source file(s) are newer than the wheel, so the SDK and CLI may not match this checkout. Rebuild: ./builder --sequential client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync"
+		fi
+	fi
 	echo "info mock mode: $([ "$ENGINE_MOCK" = 1 ] && echo on || echo off)"
 	echo "info log: $ENGINE_LOG"
 	return $fail
