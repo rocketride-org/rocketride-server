@@ -777,6 +777,8 @@ def _graph_iglobal(monkeypatch):
     for name in ('AgeTranslationError', 'FirewallConfig', 'TranslatedQuery'):
         setattr(age, name, type(name, (), {}))
     age.TranslateMode = types.SimpleNamespace(SAFE='safe')
+    age.CAPABILITY_TABLES = {'1.5.0': {}, '1.6.0': {}}
+    age.DEFAULT_AGE_VERSION = '1.5.0'
     for name in ('decode_agtype', 'decode_row', 'translate'):
         setattr(age, name, lambda *a, **kw: None)
     for name, mod in (
