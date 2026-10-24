@@ -19,6 +19,7 @@ from rocketride.schema import Question
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CHAT_PIPE = SKILL_DIR / 'fixtures' / 'quickstart-chat.pipe'
+LLM_ERROR_PREFIXES = ('**LLM error**', 'LLM error:')
 
 
 def evidence_path(label: str, kind: str, started: float) -> Path:
@@ -48,9 +49,15 @@ async def run_chat(args, record: dict) -> tuple[dict, bool, str]:
 
     result = await run_pipeline(args, record, ask)
     answers = result.get('answers') or []
+    # The engine returns an LLM failure as an answer (`**LLM error** — <Exception>: ...`),
+    # so an answer list is not proof that the model answered.
+    errors = [a for a in answers if isinstance(a, str) and a.lstrip().startswith(LLM_ERROR_PREFIXES)]
     if args.expect == 'answers':
-        ok = bool(answers)
-        verdict = f'{len(answers)} answer(s) returned' if ok else 'expected answers, got none'
+        ok = bool(answers) and not errors
+        if errors:
+            verdict = f'the answer is an LLM error: {errors[0][:300]}'
+        else:
+            verdict = f'{len(answers)} answer(s) returned' if ok else 'expected answers, got none'
     else:
         ok = not answers
         verdict = 'no answers returned, as expected' if ok else f'expected no answers, got {len(answers)}'

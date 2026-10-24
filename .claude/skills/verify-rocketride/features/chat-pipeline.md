@@ -34,3 +34,4 @@ Preconditions:
 - `${ROCKETRIDE_OPENAI_KEY}` in a `.pipe` file is filled from the engine's environment when the pipeline starts. `rr-verify launch --mock` sets a placeholder. Without `--mock`, export the real key before launching.
 - Two pipelines with the same `project_id` cannot run at once. A second start fails with `Pipeline is already running.` Stop the first task, or give the copy a different `project_id`.
 - Use `client.chat` for chat-source pipelines. `client.send` is for webhook and dropper sources.
+- The engine returns an LLM failure, such as a rejected API key, as an answer that starts with `**LLM error** —`. `rr-verify chat` reports that as `FAIL: the answer is an LLM error: ...`, not as an answer. Read the message: it should tell the user what to fix.
