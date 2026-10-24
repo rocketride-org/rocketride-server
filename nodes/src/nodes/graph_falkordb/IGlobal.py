@@ -64,6 +64,8 @@ SCHEMA_LABEL_LIMIT = 200
 class IGlobal(GraphGlobalBase):
     """FalkorDB-specific global connection state."""
 
+    supports_execute_params = True
+
     client: Optional[FalkorDB] = None
 
     graph_name: str = DEFAULT_GRAPH
@@ -187,19 +189,32 @@ class IGlobal(GraphGlobalBase):
         result = self.select_graph().ro_query(query, params=params or None, timeout=self.query_timeout_ms)
         return self._rows_as_dicts(result, cap=cap)
 
-    def _run_query_raw(self, query: str) -> Dict[str, Any]:
-        """Execute a raw statement with writes allowed (the EXECUTE path)."""
+    def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a raw statement with writes allowed (the EXECUTE path).
+
+        FalkorDB saves a statement before it returns and has no rollback, so a
+        write is already stored when the row cap is checked. A read over
+        ``max_execute_rows`` raises. A write over it returns the first
+        ``max_execute_rows`` rows with ``'truncated': True``: an error there
+        would make the caller retry a saved write and store it twice.
+
+        ``params`` binds ``$name`` values through the client's ``CYPHER`` header.
+        """
         max_rows = self.max_execute_rows
-        result = self.select_graph().query(query, timeout=self.query_timeout_ms)
+        result = self.select_graph().query(query, params=params or None, timeout=self.query_timeout_ms)
 
         rows = self._rows_as_dicts(result, cap=max_rows + 1)
-        if len(rows) > max_rows:
-            raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
-
         # Count writes unconditionally: unlike SQL, a Cypher write commonly also
         # returns rows (CREATE (n) RETURN n), so `rows` being non-empty does not
         # mean nothing was written. _affected_rows is 0 for a pure read anyway.
-        return {'rows': rows, 'affected_rows': _affected_rows(result)}
+        affected = _affected_rows(result)
+        if len(rows) <= max_rows:
+            return {'rows': rows, 'affected_rows': affected}
+        if not affected:
+            raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
+
+        warning(f'EXECUTE result cut to max_execute_rows={max_rows}; the statement is saved')
+        return {'rows': rows[:max_rows], 'affected_rows': affected, 'truncated': True}
 
     def _validate_query(self, query: str) -> Tuple[bool, str]:
         """Check syntax with EXPLAIN without running the query."""
@@ -435,7 +450,11 @@ def _header_names(header) -> List[str]:
 
 
 def _affected_rows(result) -> int:
-    """Sum the write counters of a QueryResult (CREATE/DELETE/SET return no rows)."""
+    """Sum the write counters of a QueryResult (CREATE/DELETE/SET return no rows).
+
+    Zero means the statement changed nothing, which is how the EXECUTE path
+    tells a read from a write, so every write counter the client reports is here.
+    """
     total = 0
     for attr in (
         'nodes_created',
@@ -445,7 +464,9 @@ def _affected_rows(result) -> int:
         'properties_set',
         'properties_removed',
         'labels_added',
+        'labels_removed',
         'indices_created',
+        'indices_deleted',
     ):
         try:
             total += int(getattr(result, attr, 0) or 0)
