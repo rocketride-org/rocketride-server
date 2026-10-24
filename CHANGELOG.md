@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — since 2026-10-16
 
+### Changed
+
+- **server**: on Linux every engine and every task closes itself to the other processes of its user as it starts (`/proc/<pid>/environ`, memory, `ptrace`), so a debugger of the same user (`gdb`, `strace`, `py-spy`) no longer works on them unless the debugger runs as root or the engine starts with `RR_ENABLE_DEBUGGER_CONNECTION=1`. That variable opens nothing in the Docker images: their engine is execute-only, and the kernel starts it closed. `RR_PROC_PRIVATE` is gone: what it turned on is now the default (#2783)
+
 ### Fixed
 
 - **parse**: RAR4 and RAR5 archives extracted nothing since #2440, silently and on every platform: the move of the Tika code into the parse node left `RarSevenZipParser` behind in the unbuilt `packages/tika`, so `ConfigBuilder` replaced Tika's RAR parser with a class that was not on the classpath. The class now lives in the parse node library, the swap checks that the class resolves before it removes Tika's own parser, and a RAR5 archive yields its member text again (#2678)
@@ -14,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **parse**: parse tasks that started together, or while another parse task was running, broke each other's 7-Zip-JBinding: every task rewrote the shared native library in `<data>/cache` in place (16.02-2.01 never matches its own hash), so on Windows the later tasks lost RAR support silently and on Linux a running task could crash with SIGBUS or SIGSEGV. The parse node now extracts the library itself, reuses a complete copy and publishes a new one only by an atomic rename (#2790)
 - **profiler**: the call tree repeated a function's callees under every path that reached it, and the Profiler app's table summed the repeats (2–3× on shared callees). A function's copies now split its callee totals and add up to them, the all-threads tree is built over every thread at once, so work spread thinly over a pool is not pruned away, and `rrext_cprofile_report_tree` returns `functions`, the exact per-function totals the table shows (#2786)
 - **nodes**: `parse` extracts images, audio and video, embedded in documents or as standalone files, only when something is connected to that lane (the optional Aspose PDF parser still extracts images itself and only skips sending them), and reuses its Tika configuration for embedded objects instead of rebuilding it per object; with the stock Tika PDF parser, PDFs drawn as thousands of inline images parse in about a second on text pipelines instead of minutes, and pipelines that consume the images get the same images several times faster on image-heavy documents (#2745).
+- **server**: an engine from the Docker images left no crash dump on a Linux host whose `fs.suid_dumpable` is 2, Ubuntu's default: the image's engine is execute-only, so the kernel started it with a dumpable flag of 2, which Crashpad does not lift for its `ptrace`. The engine now clears the flag itself as it starts (#2782)
 
 ## [3.5.0] - 2026-10-16
 

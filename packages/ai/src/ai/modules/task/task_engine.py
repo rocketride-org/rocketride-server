@@ -227,9 +227,10 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'RR_SIGNING_KEY',
         'RR_CORS_ORIGINS',
         'RR_OAUTH_BROKER_URL',
-        # Operator opt-in that makes task processes hide their /proc entries
-        # (ai.proc_privacy); non-secret, and tasks must see it to act on it
-        'RR_PROC_PRIVATE',
+        # Operator opt-out that keeps a process open to its user's debuggers
+        # (the engine reads it as it starts); non-secret, and a task is a
+        # process of its own, so it must see it to act on it
+        'RR_ENABLE_DEBUGGER_CONNECTION',
         # Executable override for the media toolkit nodes
         'MEDIA_TOOLKIT_FFMPEG',
         # Bare names individual node READMEs document as engine-host fallbacks

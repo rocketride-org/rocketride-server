@@ -25,6 +25,7 @@
 
 namespace ap::plat::lin {
 
+void closeProcess() noexcept;
 void init() noexcept;
 void deinit() noexcept;
 

@@ -25,6 +25,8 @@
 
 namespace ap::plat {
 
+void closeProcess() noexcept {}
+
 void init() noexcept {
     // Init com
     plat::ComInit::init();

@@ -1,5 +1,6 @@
 """Tests for ALLOWED_MODULES allowlist and WebServer.use() validation."""
 
+import os
 import signal
 import sys
 from types import SimpleNamespace
@@ -87,6 +88,33 @@ class TestDotenvLoading:
         monkeypatch.setattr('ai.web.server.load_dotenv', load)
         WebServer(config={'host': '127.0.0.1', 'port': 0}, load_env=False)
         load.assert_not_called()
+
+    def test_a_debugger_opt_out_from_dotenv_is_dropped(self, monkeypatch):
+        """The engine read the variable as it started; one from .env would open the tasks only."""
+        monkeypatch.delenv('RR_ENABLE_DEBUGGER_CONNECTION', raising=False)
+        monkeypatch.setattr(
+            'ai.web.server.load_dotenv',
+            lambda **_: monkeypatch.setitem(os.environ, 'RR_ENABLE_DEBUGGER_CONNECTION', '1'),
+        )
+        warn = MagicMock(name='warning')
+        monkeypatch.setattr('ai.web.server.warning', warn)
+
+        WebServer(config={'host': '127.0.0.1', 'port': 0})
+
+        assert 'RR_ENABLE_DEBUGGER_CONNECTION' not in os.environ
+        warn.assert_called_once()
+
+    def test_a_debugger_opt_out_set_at_start_is_kept(self, monkeypatch):
+        """A value the engine started with stays, and nothing is said about it."""
+        monkeypatch.setenv('RR_ENABLE_DEBUGGER_CONNECTION', 'yes')
+        monkeypatch.setattr('ai.web.server.load_dotenv', MagicMock(name='load_dotenv'))
+        warn = MagicMock(name='warning')
+        monkeypatch.setattr('ai.web.server.warning', warn)
+
+        WebServer(config={'host': '127.0.0.1', 'port': 0})
+
+        assert os.environ['RR_ENABLE_DEBUGGER_CONNECTION'] == 'yes'
+        warn.assert_not_called()
 
 
 def teardown_module() -> None:

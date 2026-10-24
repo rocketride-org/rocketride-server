@@ -32,6 +32,12 @@
 
 namespace ap::plat {
 
+void closeProcess() noexcept {
+#if ROCKETRIDE_PLAT_LIN
+    ap::plat::lin::closeProcess();
+#endif
+}
+
 void init() noexcept {
 #if ROCKETRIDE_PLAT_LIN
     ap::plat::lin::init();

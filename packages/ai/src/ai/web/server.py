@@ -66,7 +66,7 @@ from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.routing import compile_path
-from rocketlib import debug
+from rocketlib import debug, warning
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
@@ -214,7 +214,15 @@ class WebServer:
         # environment from the engine (task_engine.filter_subprocess_env) and
         # must not pull the excluded names back in from the file.
         if kwargs.get('load_env', True):
+            # The engine reads RR_ENABLE_DEBUGGER_CONNECTION as it starts, before
+            # this file: one that comes from here would open the tasks and not the
+            # engine, so it is dropped. .env never overrides one set at start.
+            debugger_at_start = os.environ.get('RR_ENABLE_DEBUGGER_CONNECTION')
             load_dotenv(dotenv_path=exec_dir + '/.env')
+            if debugger_at_start is None and os.environ.pop('RR_ENABLE_DEBUGGER_CONNECTION', None) is not None:
+                warning(
+                    'RR_ENABLE_DEBUGGER_CONNECTION in .env is ignored: set it in the environment the engine starts with'
+                )
 
         # Authenticators, given an authorization string, return a structure of the decode key info
         self._authenticators: List[Callable[[str], Awaitable[Optional[AccountInfo]]]] = []

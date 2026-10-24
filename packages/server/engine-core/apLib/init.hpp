@@ -28,6 +28,10 @@ namespace ap {
 // Main entry point for apLib's global state. The scope deinits on destruction,
 // so a failed init still tears down whatever came up before it
 inline auto init() noexcept {
+    // Before anything else here: the process is open to the other processes of
+    // its user until then (see plat::closeProcess)
+    plat::closeProcess();
+
     // Let the standard call us back if there's a problem with memory
     auto prevHandler = std::set_new_handler(
         [] { dev::fatality(_location, "Memory allocation attempt failed"); });

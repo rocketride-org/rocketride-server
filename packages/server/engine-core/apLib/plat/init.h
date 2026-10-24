@@ -25,6 +25,11 @@
 
 namespace ap::plat {
 
+// Close this process to the other processes of its user, first thing in
+// ap::init(): before the rest of apLib comes up, and before Crashpad, which
+// finds the flag as it is when a crash comes. Linux only; a no-op elsewhere.
+void closeProcess() noexcept;
+
 void init() noexcept;
 void deinit() noexcept;
 
