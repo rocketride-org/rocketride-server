@@ -159,8 +159,8 @@ Examples:
         '--runtime',
         choices=RUNTIMES,
         default=None,
-        help='How tasks run: spawn (a child process of this engine) or docker (a container per task). '
-        'Default: docker with --saas, spawn otherwise',
+        help='How tasks run: spawn (a child process of this engine), docker (a container per task) '
+        'or k8s (a Kubernetes Job per task). Default: docker with --saas, spawn otherwise',
     )
 
     # Logging

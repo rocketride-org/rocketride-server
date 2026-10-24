@@ -24,13 +24,18 @@
 # =============================================================================
 
 """
-What a crashed task leaves on the engine's host, the same under both runtimes.
+What a crashed task leaves on the engine's host, the same under spawn and docker.
 
 A task whose process faults writes a minidump and dies. Under spawn the dump
 lands in the engine's log directory. Under docker it lands inside the task's
 container, which the engine then removes, so the launcher copies it out first,
 into a directory per task. Either way the engine's host ends up holding a
 minidump of that task, and under docker no container of it.
+
+Under k8s the dump lands inside the task's pod and goes with it: the launcher
+does not fetch it yet. What holds there already is checked — the task ends
+with a failure and neither its Job nor its pod stays — and the dump is left to
+the change that fetches it.
 
 No node crashes on demand, so the mocked LLM does: a question carrying
 `CRASH_PHRASE` faults the task that answers it (`mocks/langchain_openai`).
@@ -58,7 +63,15 @@ import pytest
 CRASH_PHRASE = 'rocketride-mock: crash this task'
 
 # The runtime the test server runs tasks with (set by the builder)
-_DOCKER = os.environ.get('ROCKETRIDE_TEST_RUNTIME') == 'docker'
+_RUNTIME = os.environ.get('ROCKETRIDE_TEST_RUNTIME', 'spawn')
+_DOCKER = _RUNTIME == 'docker'
+_K8S = _RUNTIME == 'k8s'
+
+# Why the dump is not looked for under k8s
+_K8S_DUMP_NOT_FETCHED = (
+    'under --runtime=k8s the minidump of a crashed task stays in its pod and goes with it; '
+    'fetching it is the follow-up to that runtime (crash dumps under k8s, which needs pods/exec)'
+)
 
 # The dump is looked for on this host, so the server must run here
 _SERVER_HOST = urlsplit(os.environ.get('ROCKETRIDE_URI', 'http://localhost')).hostname
@@ -161,6 +174,50 @@ def _containers(token: str) -> List[str]:
     return [label for label in listed.stdout.split() if label.startswith(start)]
 
 
+def _jobs_and_pods(token: str) -> List[str]:
+    """
+    The Jobs and pods of one task that are still in the cluster.
+
+    Args:
+        token: The task's token. The task id they are labelled with starts as the token does.
+
+    Returns:
+        Their kinds and names.
+    """
+    scope = ['-n', os.environ.get('RR_K8S_NAMESPACE') or 'rocketride-tasks']
+    if os.environ.get('RR_K8S_CONTEXT'):
+        scope = ['--context', os.environ['RR_K8S_CONTEXT'], *scope]
+    listed = subprocess.run(
+        ['kubectl', *scope, 'get', 'jobs,pods', '-l', 'rocketride.task', '-o', 'json'],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    start = token.split('_', 1)[-1][:8]
+    return [
+        f'{item["kind"]}/{item["metadata"]["name"]}'
+        for item in json.loads(listed.stdout)['items']
+        if item['metadata']['labels']['rocketride.task'].startswith(start)
+    ]
+
+
+def _left_in_the_runtime(token: str) -> List[str]:
+    """
+    What the runtime still holds of one task: its containers, or its Job and pod.
+
+    Args:
+        token: The task's token.
+
+    Returns:
+        Their names; nothing under spawn, where the task is only a process.
+    """
+    if _DOCKER:
+        return _containers(token)
+    if _K8S:
+        return _jobs_and_pods(token)
+    return []
+
+
 async def _ask(client, token: str, text: str) -> None:
     """
     Put one question through the pipeline.
@@ -184,8 +241,10 @@ async def test_a_crashed_task_leaves_its_minidump_on_the_engines_host(client):
         client: Connected RocketRide client (fixture).
     """
     token = (await client.use(pipeline=_pipeline()))['token']
-    if _DOCKER:
-        assert _containers(token), 'the task has no container to be removed: the test would prove nothing'
+    if _DOCKER or _K8S:
+        assert _left_in_the_runtime(token), (
+            'the task has no container or pod to be removed: the test would prove nothing'
+        )
 
     dumps: List[str] = []
     status: Dict[str, Any] = {}
@@ -197,13 +256,17 @@ async def test_a_crashed_task_leaves_its_minidump_on_the_engines_host(client):
         while time.monotonic() < deadline:
             status = await asyncio.wait_for(client.get_task_status(token), timeout=10)
             dumps = _dumps(token)
-            # Under docker the dump is copied out just before the container is removed
-            if status.get('completed') and dumps and not (_DOCKER and _containers(token)):
+            # Under docker the dump is copied out just before the container is removed;
+            # under k8s none comes, and the Job and its pod go
+            if status.get('completed') and (dumps or _K8S) and not _left_in_the_runtime(token):
                 break
             await asyncio.sleep(0.5)
 
         assert status.get('completed'), f'the task is still running: {status}'
         assert status.get('exitCode'), f'the task crashed, yet its status reports success: {status}'
+        if _K8S:
+            assert _jobs_and_pods(token) == [], 'the Job or the pod of the crashed task was not removed'
+            pytest.skip(_K8S_DUMP_NOT_FETCHED)
         assert dumps, 'the crashed task left no minidump on the host of the engine'
         for dump in dumps:
             streams = _stream_types(dump)

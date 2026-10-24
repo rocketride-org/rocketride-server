@@ -139,10 +139,10 @@ function parseArgs(args) {
 			// container:build-on-wsl / container:sync-from-wsl: the WSL distribution
 			options.distro = arg.substring('--distro='.length);
 		} else if (arg.startsWith('--runtime=')) {
-			// How the engine runs tasks (spawn | docker): node tests, server:dev
+			// How the engine runs tasks (spawn | docker | k8s): node tests, server:dev
 			const runtime = arg.substring('--runtime='.length);
-			if (!['spawn', 'docker'].includes(runtime)) {
-				console.error(`Error: --runtime=${runtime}: expected 'spawn' or 'docker'`);
+			if (!['spawn', 'docker', 'k8s'].includes(runtime)) {
+				console.error(`Error: --runtime=${runtime}: expected 'spawn', 'docker' or 'k8s'`);
 				process.exit(1);
 			}
 			options.runtime = runtime;
@@ -318,8 +318,8 @@ Options:
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
   --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt,
                       requirements.hash and the satisfied/ verdicts)
-  --runtime=spawn|docker  How the engine runs tasks (node tests, server:dev): a child process or a
-                      container; default docker with --saas, spawn otherwise
+  --runtime=spawn|docker|k8s  How the engine runs tasks (node tests, server:dev): a child process,
+                      a container or a Kubernetes Job; default docker with --saas, spawn otherwise
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)

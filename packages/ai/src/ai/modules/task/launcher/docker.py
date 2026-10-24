@@ -53,7 +53,7 @@ import tarfile
 import time
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
 from rocketlib import debug
@@ -340,12 +340,13 @@ def overlaps(a: str, b: str) -> bool:
     return a != b and (a.startswith(b + os.sep) or b.startswith(a + os.sep))
 
 
-def _swap_loopback_host(netloc: str) -> str:
+def _swap_loopback_host(netloc: str, gateway: str = HOST_GATEWAY) -> str:
     """
     Replace a loopback host in ``[userinfo@]host[:port]`` with the host gateway name.
 
     Args:
         netloc: The authority part of an address.
+        gateway: The name the host is reached by.
 
     Returns:
         The netloc, rewritten only when its host is a loopback address.
@@ -361,10 +362,10 @@ def _swap_loopback_host(netloc: str) -> str:
         host, port = hostport, ''
     if host.lower() not in LOOPBACK_HOSTS:
         return netloc
-    return f'{userinfo}{at}{HOST_GATEWAY}{port}'
+    return f'{userinfo}{at}{gateway}{port}'
 
 
-def rewrite_loopback(address: str) -> str:
+def rewrite_loopback(address: str, gateway: str = HOST_GATEWAY) -> str:
     """
     Point a loopback address at the host gateway, so a container reaches the host.
 
@@ -373,24 +374,26 @@ def rewrite_loopback(address: str) -> str:
 
     Args:
         address: A model server address or a database DSN.
+        gateway: The name the host is reached by; ``host.docker.internal`` under docker.
 
     Returns:
-        The address, with a loopback host rewritten to ``host.docker.internal``.
+        The address, with a loopback host rewritten to the gateway.
     """
     if '://' in address:
         parts = urlsplit(address)
-        return urlunsplit(parts._replace(netloc=_swap_loopback_host(parts.netloc)))
+        return urlunsplit(parts._replace(netloc=_swap_loopback_host(parts.netloc, gateway)))
     if address.isdigit():
         return address
-    return _swap_loopback_host(address)
+    return _swap_loopback_host(address, gateway)
 
 
-def rewrite_loopback_dsns(value: str) -> str:
+def rewrite_loopback_dsns(value: str, rewrite: Callable[[str], str] = rewrite_loopback) -> str:
     """
     ``rewrite_loopback`` for each DSN of a ``ROCKETRIDE_DB_DSNS`` map.
 
     Args:
         value: The map, as JSON.
+        rewrite: What each DSN goes through; the k8s runtime passes its own.
 
     Returns:
         The map with each loopback host rewritten; a value that is no map of
@@ -402,7 +405,7 @@ def rewrite_loopback_dsns(value: str) -> str:
         return value
     if not isinstance(dsns, dict) or not all(isinstance(dsn, str) for dsn in dsns.values()):
         return value
-    return json.dumps({key: rewrite_loopback(dsn) for key, dsn in dsns.items()})
+    return json.dumps({key: rewrite(dsn) for key, dsn in dsns.items()})
 
 
 def task_tar(data: bytes, uid: int = CONST_IMAGE_UID, gid: int = CONST_IMAGE_GID) -> bytes:

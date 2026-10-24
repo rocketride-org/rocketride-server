@@ -62,6 +62,10 @@ Everything else is set in the engine's environment or its `.env` file:
 | `RR_DOCKER_INSTANCE`    | `<hostname>:<engine port>`  | Labels the engine's containers. It must stay the same across restarts so the engine can remove containers an earlier run left behind.                                                                                     |
 | `RR_DOCKER_CRASH_DUMPS` | `true`                      | `false` leaves the minidump of a crashed task in its container, which is then removed with it (see [Crash dumps](#crash-dumps)).                                                                                          |
 
+The engine's server configuration can set the same values under its `docker`
+key, named as the variables are without `RR_DOCKER_` and in lower case
+(`image`, `memory` and so on). A value there wins over the variable.
+
 ## How the engine reaches a task
 
 Inside every container the task listens on port 5570. With
@@ -191,6 +195,119 @@ ones out of containers, so removing old ones is up to you.
   egress on the host if tasks must not reach your internal network. On Docker
   Desktop they can also reach services on the host's loopback, the engine's
   own port included.
+
+## Tasks as Kubernetes Jobs
+
+Started with `--runtime=k8s`, the engine runs each task as a Kubernetes Job of
+one pod instead of a container, through the `kubectl` CLI. This runtime was
+built to compare with the docker one on the same work. It is never a default,
+and it does less: see [How it differs from docker](#how-it-differs-from-docker).
+
+A task's pod gets what a task container gets: its own filesystem and network
+namespace, its own dependencies, a memory and CPU limit, no Linux capabilities
+and no privilege escalation. It runs as the image's own user, without a token
+for the cluster's API, and fits a namespace that enforces the `restricted` Pod
+Security Standard.
+
+### What the cluster needs
+
+- The `kubectl` CLI on the engine's `PATH`, and a cluster it reaches: through a
+  kubeconfig context (`RR_K8S_CONTEXT`, else the current one), or the cluster
+  the engine itself runs in.
+- A namespace for the tasks, `rocketride-tasks` unless you name another. The
+  engine does not create it.
+- The node image of the engine's own version where the cluster's nodes get
+  their images from. With `RR_K8S_IMAGE_PULL_POLICY=Never` it has to be on the
+  node already; a missing image fails the start with a message saying so.
+- These permissions in that namespace, for the account `kubectl` uses:
+
+| Resource                  | Verbs                                      | For                                                                                                                    |
+| ------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `jobs` (`batch`)          | `create`, `get`, `list`, `watch`, `delete` | A Job per task.                                                                                                        |
+| `pods`                    | `get`, `list`, `watch`, `delete`           | Following a task's pod, and stopping it.                                                                               |
+| `pods/attach`             | `create`, `get`                            | The task's input and output.                                                                                           |
+| `pods/portforward`        | `create`, `get`                            | Tasks dialled through a forwarded port: `RR_K8S_REACH=forward`, or `auto` with the engine outside the cluster (below). |
+| `pods` (`metrics.k8s.io`) | `get`                                      | Only CPU and memory readings; optional.                                                                                |
+
+### Start the engine with it
+
+```bash
+./engine ai/eaas.py --runtime=k8s
+```
+
+Everything else is set in the engine's environment or its `.env` file:
+
+| Variable                                      | Default                     | Effect                                                                                                                                                                                                                             |
+| --------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR_K8S_NAMESPACE`                            | `rocketride-tasks`          | The namespace the Jobs are created in.                                                                                                                                                                                             |
+| `RR_K8S_CONTEXT`                              | the current context         | The kubeconfig context. Leave it unset for an engine that runs in the cluster.                                                                                                                                                     |
+| `RR_K8S_IMAGE`                                | `rocketride/node:<version>` | The node image. Never `latest`: a task protocol of another version is not compatible.                                                                                                                                              |
+| `RR_K8S_IMAGE_PULL_POLICY`                    | `IfNotPresent`              | `Always`, `IfNotPresent` or `Never`. `Never` suits an image loaded into a local cluster.                                                                                                                                           |
+| `RR_K8S_MEMORY`, `RR_K8S_CPUS`                | `2Gi`, `1`                  | Memory and CPU limit per task.                                                                                                                                                                                                     |
+| `RR_K8S_MEMORY_REQUEST`, `RR_K8S_CPU_REQUEST` | `256Mi`, `100m`             | What the cluster reserves for each task.                                                                                                                                                                                           |
+| `RR_K8S_EPHEMERAL_STORAGE`                    | none                        | Disk limit per task. Unset, the namespace's own limits apply.                                                                                                                                                                      |
+| `RR_K8S_REACH`                                | `auto`                      | `pod` dials the pod's IP, `forward` dials a port forwarded to `127.0.0.1`; `auto` decides from where the engine runs (below).                                                                                                      |
+| `RR_K8S_HOST_ALIAS`                           | none                        | The name pods reach the engine's host by (see [How it differs from docker](#how-it-differs-from-docker)).                                                                                                                          |
+| `RR_K8S_MOUNTS`                               | none                        | Comma-separated names of variables that name host directories a task needs; each is copied into the pod at `/opt/data/mounts/<name>`, 16 MiB in all at most, and the variable points there. The node tests use it for their mocks. |
+| `RR_K8S_INSTANCE`                             | `<hostname>-<engine port>`  | Labels the engine's Jobs. It must stay the same across restarts so the engine can remove Jobs an earlier run left behind.                                                                                                          |
+| `RR_K8S_NODE_SELECTOR`                        | none                        | `key=value[,key=value]`: the node labels a task's pod asks for.                                                                                                                                                                    |
+| `RR_K8S_TOLERATIONS`                          | none                        | A JSON list of tolerations, as a pod spec holds them.                                                                                                                                                                              |
+| `RR_K8S_NODE`                                 | none                        | The node tasks run on; `same` is the engine's own, read from `NODE_NAME`.                                                                                                                                                          |
+| `RR_K8S_RUNTIME_CLASS`                        | none                        | The pods' runtime class.                                                                                                                                                                                                           |
+| `RR_K8S_START_TIMEOUT`                        | `120`                       | Seconds a task's pod may take to run before the start fails.                                                                                                                                                                       |
+| `RR_K8S_TTL`                                  | `600`                       | Seconds the cluster keeps a finished Job the engine did not remove itself.                                                                                                                                                         |
+
+The engine's server configuration can set the same values under its `k8s`
+key, named as the variables are without `RR_K8S_` and in lower case
+(`namespace`, `image_pull_policy` and so on). A value there wins over the
+variable.
+
+### How the engine reaches a pod
+
+Inside every pod the task listens on port 5570. With `RR_K8S_REACH=auto`, an
+engine that is a pod itself dials the task's pod IP, and any other engine, which
+cannot route to it, forwards a port of its own `127.0.0.1` to the pod
+(`kubectl port-forward`) and dials that. `pod` and `forward` choose one way or
+the other wherever the engine runs. The task authenticates the engine with a
+per-run token either way.
+
+### How it differs from docker
+
+- **Files and storage.** A pod shares no filesystem with the engine, and
+  nothing is mounted into it: only the directories named in `RR_K8S_MOUNTS`
+  are copied in, when the task starts. A pipeline that uses the file-system tool
+  (`tool_filesystem`) on a filesystem store, or on S3 authenticated through a
+  web-identity token file, is refused before it starts. S3 with a key in the
+  engine's environment works.
+- **Crash dumps.** They are not copied out: the minidump of a crashed task
+  stays in its pod and goes with it.
+- **CPU and memory readings.** They come from the cluster's metrics API, about
+  every 15 seconds. Without a metrics server they read zero.
+- **Task output.** It reaches the engine and its clients as it does today. The
+  node also keeps it as the container's log, so `kubectl logs` shows it while
+  the pod exists, as far as the node's log rotation keeps it: the oldest output
+  can be gone sooner. There is no setting that turns this off. Reading it takes
+  `get` on `pods/log`, which the engine itself does not need.
+- **Services on the host.** A loopback address in `--modelserver` or in a
+  RocketRide database DSN is rewritten to `RR_K8S_HOST_ALIAS`. A cluster has no
+  name of its own for the engine's host, so without the alias a task that
+  needs such an address is refused before it starts. On Docker Desktop's
+  cluster the alias is `host.docker.internal`.
+- **Environment.** The values are not in the pod's spec. They travel with the
+  task file on the stream the engine attaches to the pod, so reading the Job
+  or the pod (`kubectl get`, `kubectl describe`) shows none of them.
+- **User.** Tasks run as the image's own user, not the engine's.
+- **Cleanup.** The engine deletes each Job, and its pod with it, when the task
+  ends, and at start it removes the Jobs labelled with its `RR_K8S_INSTANCE`
+  that an earlier run left behind. A finished Job it never got to is removed
+  by the cluster after `RR_K8S_TTL`.
+
+The first three [known limits](#known-limits) above hold here too: no GPU, no
+files of the engine host, no workspace nodes. The network one is docker's: a
+pod reaches whatever the cluster's network allows, so restrict its egress with
+a NetworkPolicy in the tasks' namespace if tasks must not reach your internal
+network. A NetworkPolicy has an effect only where the cluster's network plugin
+enforces it: check that yours does.
 
 ## Related
 
