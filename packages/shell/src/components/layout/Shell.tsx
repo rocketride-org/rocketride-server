@@ -51,7 +51,7 @@ import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
 import { registerAndMapApps, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
-import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
+import { getAppVersionOverrides, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
 
@@ -216,27 +216,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		return cm.getSessionAppId();
 	});
 
-	// Deep-link version pin (?appid=X&version=7): seed the session override on
-	// mount — NOT in the useState initializer above, which is impure and would
-	// fire the write twice under StrictMode. REGISTRY INTS ONLY (semver is
-	// developer-controlled display, never a wire identity); a value with any
-	// trailing non-digit (?version=7abc) is REJECTED outright rather than
-	// silently pinned to 7 by parseInt's prefix parsing. The int IS the whole
-	// identity — registration constructs the versioned URL from it directly.
-	useEffect(() => {
-		const params = new URLSearchParams(window.location.search);
-		const fromUrl = params.get('appId') || params.get('appid') || '';
-		const raw = params.get('version') ?? '';
-		if (fromUrl && /^\d+$/.test(raw)) {
-			// Number(), not parseInt(): a digit string too long for a safe
-			// integer must be rejected (parseInt rounds, and overlong input
-			// reaches Infinity — which passes a bare `> 0` check).
-			const version = Number(raw);
-			if (Number.isSafeInteger(version) && version > 0) {
-				setAppVersionOverride(fromUrl, { version });
-			}
-		}
-	}, []);
+	// A deep-link version pin (?appid=X&version=7) needs no seeding step: the
+	// URL IS where pins live now, and getAppVersionOverrides reads it straight
+	// (registry ints only — ?version=7abc is rejected, never prefix-parsed).
+	// This used to copy the parameter into sessionStorage, which is how a pin
+	// outlived the address that explained it.
 
 	// Surface a version pin dropped by the PREVIOUS document: the load
 	// failure path clears the override and reloads, so the notice has to
