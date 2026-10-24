@@ -186,19 +186,22 @@
 			"id": "C-webhook",
 			"kind": "clean",
 			"area": "webhook",
-			"expect": "no-defect"
+			"expect": "no-defect",
+			"known_issues": "After a pipeline is terminated, webhook and SDK submissions report the internal source location 'Queue.hpp:61' (and the task shows exitCode 1) instead of a readable 'pipeline stopped' error, and the HTTP response leaves out the TASK_STOPPED code. Confirmed by hand on 2026-10-24."
 		},
 		{
 			"id": "C-auth",
 			"kind": "clean",
 			"area": "auth",
-			"expect": "no-defect"
+			"expect": "no-defect",
+			"known_issues": "The engine accepts the Authorization scheme only as exactly 'Bearer ': a valid key sent as 'bearer <key>' or 'BEARER <key>' gets 401, although RFC 7235 makes the scheme case-insensitive (web/server.py removeprefix). Confirmed by hand on 2026-10-24."
 		},
 		{
 			"id": "C-cli-validate",
 			"kind": "clean",
 			"area": "cli-validate",
-			"expect": "no-defect"
+			"expect": "no-defect",
+			"known_issues": "rocketride validate --json (Python and TypeScript CLIs) prints a plain-text error and no JSON when it cannot connect or authenticate, unlike other commands, which print the documented {\"error\": {\"message\", \"hint\"}} envelope. Confirmed by hand on 2026-10-24."
 		},
 		{
 			"id": "C-mcp",
@@ -218,7 +221,7 @@
 			"kind": "clean",
 			"area": "context-optimizer",
 			"expect": "no-defect",
-			"known_issues": "(1) history_budget_pct does not limit history: allocate_budget gives history whatever is left after the other three components, so setting it to 0 does not empty history, although the node README says a component given 0 is emptied. Confirmed by hand on 2026-10-24 (optimizer.py allocate_budget). (2) In auto mode, a max_context_tokens value in the node's auto block or top-level config is used as the context window, although the README says the field is ignored in auto mode (optimizer.py line 245). (3) A Python SDK chat request whose Question has a document added with addDocuments (a plain string, or a Doc leaving optional fields unset) fails with pydantic validation errors and no answer, with or without Context Optimizer, because the SDK sends unset fields as null and the engine rejects them. All confirmed by hand on 2026-10-24."
+			"known_issues": "(1) history_budget_pct does not limit history: allocate_budget gives history whatever is left after the other three components, so setting it to 0 does not empty history, although the node README says a component given 0 is emptied. Confirmed by hand on 2026-10-24 (optimizer.py allocate_budget). (2) In auto mode, a max_context_tokens value in the node's auto block or top-level config is used as the context window, although the README says the field is ignored in auto mode (optimizer.py line 245). (3) A Python SDK chat request whose Question has a document added with addDocuments (a plain string, or a Doc leaving optional fields unset) fails with pydantic validation errors and no answer, with or without Context Optimizer, because the SDK sends unset fields as null and the engine rejects them. All confirmed by hand on 2026-10-24. (4) When Context Optimizer falls back to a token-level cut, it can split a multi-byte UTF-8 character and send U+FFFD to the LLM instead of a clean prefix of the question. Confirmed by hand on 2026-10-24."
 		},
 		{
 			"id": "C-local-text-output",
@@ -241,5 +244,5 @@
 			"expect": "no-defect"
 		}
 	],
-	"calibration": "Every bug case was reproduced by hand on 2026-10-24 against the same check on clean code. R2 (#2376) was dropped: reverting it on current develop wraps the component as a pipeline and validates it without error, which a user cannot see as a failure. Defects that agents reported on clean controls were reproduced independently before being added to known_issues; one Codex report (Local Text Output skipping absolute or backslash exclude prefixes on Linux) was judged not a defect and stays a false alarm."
+	"calibration": "Every bug case was reproduced by hand on 2026-10-24 against the same check on clean code. R2 (#2376) was dropped: reverting it on current develop wraps the component as a pipeline and validates it without error, which a user cannot see as a failure. Defects that agents reported on clean controls were reproduced independently before being added to known_issues; one Codex report (Local Text Output skipping absolute or backslash exclude prefixes on Linux) was judged not a defect and stays a false alarm. Reports judged not defects because the docs state the behavior: send() on a chat-source pipeline returns no answer (docs say use chat()); rocketride validate passes unknown providers (docs say provider availability is a runtime concern)."
 }
