@@ -66,3 +66,29 @@ def test_an_allow_names_the_database_it_approved():
     decision = asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'org'}))
     assert (decision.allowed, decision.owner_id) == (True, '')
     assert asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'team', 'team_id': 't1'})).owner_id == ''
+
+
+def test_a_hosted_engine_is_told_by_its_capability_or_its_flag(monkeypatch):
+    """The hosted checks (https-only broker, verify-full TLS) key on the same two
+    signals as the task engine: the account's ``saas`` capability or ``--saas``.
+    """
+    import rocketlib
+
+    class _Saas(_Minimal):
+        capabilities = ('saas',)
+
+    monkeypatch.setattr(rocketlib, 'args', lambda: ['engine'])
+    assert _Saas()._is_hosted() and not _Minimal()._is_hosted()
+    monkeypatch.setattr(rocketlib, 'args', lambda: ['engine', '--saas'])
+    assert _Minimal()._is_hosted()
+
+
+def test_the_default_authorizer_is_identifiable_by_the_task_engine():
+    """The hosted refusal compares the class attribute with AccountBase's own."""
+
+    class _Own(_Minimal):
+        async def authorize_db_target(self, identity, target=None):
+            return DbDecision(False, 'x')
+
+    assert _Minimal.authorize_db_target is AccountBase.authorize_db_target
+    assert _Own.authorize_db_target is not AccountBase.authorize_db_target

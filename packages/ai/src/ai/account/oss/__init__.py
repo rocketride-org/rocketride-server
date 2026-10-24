@@ -422,18 +422,24 @@ class Account(AccountBase):
         sub = args.get('subcommand', '')
 
         if command == 'rrext_account_me':
+            # The engine-owned database names (the broker credential, the DSN
+            # delivery variables) live in ROCKETRIDE_* but are not the
+            # client's: they are never listed, read, created, changed or
+            # deleted here.
+            from ai.common.rocketride_db import is_engine_db_env
+
             if sub == 'get_env':
-                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k)}
                 return conn.build_response(request, body={'env': env})
 
             if sub == 'set_env':
                 # Only accept ROCKETRIDE_* keys — reject anything else
                 raw = args.get('env', {})
-                env = {k: v for k, v in raw.items() if k.startswith('ROCKETRIDE_')}
+                env = {k: v for k, v in raw.items() if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k)}
 
                 # Step 1: Remove existing ROCKETRIDE_* keys from os.environ
                 # so that deleted keys don't linger in memory.
-                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k)]:
                     del os.environ[k]
 
                 # Step 2: Set the new values in os.environ so get_env
@@ -450,7 +456,7 @@ class Account(AccountBase):
                 return conn.build_response(request, body={'updated': True})
 
             if sub == 'env_keys':
-                keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_'))
+                keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k))
                 return conn.build_response(request, body={'keys': keys})
 
         raise NotImplementedError('Account management requires SaaS mode')
@@ -461,12 +467,16 @@ class Account(AccountBase):
         Merge ROCKETRIDE_* entries into a .env file.
 
         Preserves non-ROCKETRIDE lines and comments. Replaces existing
-        ROCKETRIDE_* lines and appends new ones.
+        ROCKETRIDE_* lines and appends new ones. The engine-owned database
+        names are the operator's: their lines stay as they are, and ``env``
+        never adds one.
 
         Args:
             path: Absolute path to the .env file.
             env:  Key-value dict to write.
         """
+        from ai.common.rocketride_db import is_engine_db_env
+
         lines: List[str] = []
         written_keys: set = set()
         try:
@@ -475,7 +485,7 @@ class Account(AccountBase):
                     stripped = line.strip()
                     if stripped and not stripped.startswith('#') and '=' in stripped:
                         key = stripped.split('=', 1)[0].strip()
-                        if key.startswith('ROCKETRIDE_'):
+                        if key.startswith('ROCKETRIDE_') and not is_engine_db_env(key):
                             if key in env:
                                 lines.append(f'{key}={env[key]}\n')
                                 written_keys.add(key)
@@ -485,7 +495,7 @@ class Account(AccountBase):
             pass
 
         for k, v in sorted(env.items()):
-            if k not in written_keys:
+            if k not in written_keys and not is_engine_db_env(k):
                 lines.append(f'{k}={v}\n')
 
         with open(path, 'w') as f:

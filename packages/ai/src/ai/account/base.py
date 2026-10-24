@@ -34,6 +34,29 @@ import os
 from abc import ABC, abstractmethod
 from typing import NamedTuple
 
+# Seconds the database broker gets to answer. A tenant's first provision
+# creates its database from a template, which is not instant; the SaaS client
+# of the same broker allows the same minute.
+_BROKER_TIMEOUT_S = 60
+
+# Set once the deprecation warning for the legacy ROCKETRIDE_DB_BROKER_* names was logged.
+_LEGACY_BROKER_WARNED = False
+
+# The only hosts for which a non-hosted engine accepts a plain-http broker URL.
+_LOOPBACK_HOSTS = ('localhost', '127.0.0.1', '::1')
+
+
+def _server_log(message: str) -> None:
+    """Write one line to the server-side log, never to a task or a client."""
+    try:
+        from rocketlib import warning
+
+        warning(message)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(message)
+
 
 class DbDecision(NamedTuple):
     """Answer of ``AccountBase.authorize_db_target``.
@@ -162,8 +185,11 @@ class AccountBase(ABC):
         Merge order: os.environ → org → team → user.  Each layer overrides
         the previous.
 
-        OSS default: returns ROCKETRIDE_* entries from os.environ only.
-        SaaS override: also decrypts org/team/user secrets from the database.
+        OSS default: returns ROCKETRIDE_* entries from os.environ only, minus
+        the engine-owned database names (the broker credential and the DSN
+        delivery variables), so ``${ROCKETRIDE_DB_BROKER_TOKEN}`` in a node
+        config stays a literal. SaaS override: also decrypts org/team/user
+        secrets from the database.
 
         Args:
             user_id: The user's internal ID.
@@ -173,7 +199,9 @@ class AccountBase(ABC):
         Returns:
             Merged key-value dict ready for pipeline variable resolution.
         """
-        return {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+        from ai.common.rocketride_db import is_engine_db_env
+
+        return {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k)}
 
     async def init_account(self, server) -> None:
         """
@@ -395,7 +423,9 @@ class AccountBase(ABC):
             return DbDecision(True, 'single_tenant')
         return DbDecision(False, 'scope_needs_rocketride_cloud')
 
-    async def resolve_db_dsn(self, client_id: str, scope: str = 'org', owner_id: str = '') -> str:
+    async def resolve_db_dsn(
+        self, client_id: str, scope: str = 'org', owner_id: str = '', *, request_id: str = ''
+    ) -> str:
         """
         Resolve the DSN of one RocketRide cloud database.
 
@@ -409,9 +439,15 @@ class AccountBase(ABC):
         Default implementation (both editions): call the data-core provisioner
         configured via server-side environment —
 
-            ROCKETRIDE_DB_BROKER_URL    the /provision endpoint URL
-            ROCKETRIDE_DB_BROKER_TOKEN  its Bearer token (from ASM/k8s; never
-                                        hardcoded)
+            RR_DB_BROKER_URL    the /provision endpoint URL
+            RR_DB_BROKER_TOKEN  its Bearer token (from ASM/k8s; never
+                                hardcoded)
+
+        These are operator-only: unlike ROCKETRIDE_*, no client can list,
+        read, rewrite or ``${...}``-expand them. The legacy
+        ROCKETRIDE_DB_BROKER_URL / ROCKETRIDE_DB_BROKER_TOKEN still work as a
+        deprecated fallback (logged once). The URL picks the tier and the
+        token must come from the same tier; the tiers are never mixed.
 
         Org scope sends ``{"tenant_id": client_id}`` (unchanged, so existing
         org databases keep their name and password). Team and user scope send
@@ -430,10 +466,16 @@ class AccountBase(ABC):
             scope: ``'org'``, ``'team'`` or ``'user'``.
             owner_id: The team id or user id for team and user scope. Must be
                 empty for org scope.
+            request_id: Correlation id (the task engine passes the task id),
+                sent to the broker as ``X-Request-Id`` so its own log line can
+                be tied to this call. Characters outside ``[A-Za-z0-9._:-]``
+                become ``_``; at most 128 are sent.
 
         Returns:
             A libpq/SQLAlchemy-compatible PostgreSQL DSN for the tenant DB
             (e.g. ``postgresql://role:pass@pooler:5432/t_<slug>?sslmode=require``).
+            On a hosted engine the query is always
+            ``sslmode=verify-full&sslrootcert=<RR_DB_TLS_ROOT_CERT>``.
 
         Raises:
             NotImplementedError: broker environment not configured.
@@ -441,20 +483,16 @@ class AccountBase(ABC):
             RuntimeError: the broker rejected the request (HTTP 409: the
                 database is retired or being deleted) or returned no DSN.
         """
-        broker_url = os.environ.get('ROCKETRIDE_DB_BROKER_URL', '').strip()
-        broker_token = os.environ.get('ROCKETRIDE_DB_BROKER_TOKEN', '').strip()
-        if not broker_url or not broker_token:
-            missing = [
-                name
-                for name, value in (
-                    ('ROCKETRIDE_DB_BROKER_URL', broker_url),
-                    ('ROCKETRIDE_DB_BROKER_TOKEN', broker_token),
-                )
-                if not value
-            ]
+        from ai.common.rocketride_db import broker_config
+
+        config = broker_config(os.environ)
+        broker_url, broker_token = config.url, config.token
+        if config.missing:
             raise NotImplementedError(
-                f'no RocketRide cloud database is configured on this server (missing: {", ".join(missing)})'
+                f'no RocketRide cloud database is configured on this server (missing: {", ".join(config.missing)})'
             )
+        if config.tier == 'legacy':
+            self._warn_legacy_broker_names()
         if not client_id or not client_id.strip():
             raise ValueError('resolve_db_dsn requires a non-empty client_id')
         owner_id = (owner_id or '').strip()
@@ -468,64 +506,142 @@ class AccountBase(ABC):
             body = {'scope': scope, 'org_id': client_id.strip(), 'owner_id': owner_id}
         else:
             raise ValueError(f'unknown database scope: {scope!r}')
-        self._check_broker_url(broker_url)
+        # A hosted engine takes https only: the loopback http exception is for
+        # a local dev rig, and nothing on a hosted engine runs one.
+        hosted = self._is_hosted()
+        self._check_broker_url(broker_url, allow_loopback_http=not hosted)
+        ca_file = self._db_tls_ca_file(hosted)
 
         import asyncio
 
-        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, body)
+        return await asyncio.to_thread(
+            self._call_db_broker, broker_url, broker_token, body, hosted=hosted, ca_file=ca_file, request_id=request_id
+        )
 
     @staticmethod
-    def _check_broker_url(url: str) -> None:
-        """Refuse to send the broker token over anything but HTTPS.
+    def _warn_legacy_broker_names() -> None:
+        """Log, once per process, that ROCKETRIDE_DB_BROKER_* is deprecated."""
+        global _LEGACY_BROKER_WARNED
+        if _LEGACY_BROKER_WARNED:
+            return
+        _LEGACY_BROKER_WARNED = True
+        _server_log(
+            'ROCKETRIDE_DB_BROKER_URL / ROCKETRIDE_DB_BROKER_TOKEN are deprecated: set the operator-only '
+            'RR_DB_BROKER_URL / RR_DB_BROKER_TOKEN instead (the ROCKETRIDE_* namespace is readable and '
+            'writable by clients on a self-hosted engine)'
+        )
+
+    def _is_hosted(self) -> bool:
+        """True on the hosted (SaaS) engine.
+
+        The same two signals as the task engine's ``_is_saas_engine``: this
+        account provider's ``saas`` capability, or the engine's own ``--saas``
+        launch flag (its argv, which no pipeline can reach).
+        """
+        if 'saas' in (getattr(self, 'capabilities', None) or ()):
+            return True
+        try:
+            from rocketlib import args as startup_args
+
+            return '--saas' in startup_args()
+        except Exception:
+            return False
+
+    @staticmethod
+    def _check_broker_url(url: str, *, allow_loopback_http: bool = True) -> None:
+        """Refuse a broker URL the token must not be sent to.
 
         The token can resolve ANY tenant's DSN, so a deployment typo like an
         ``http://`` broker URL must fail loudly, not silently ship the token
         (and every returned DSN) in cleartext. Plain http is allowed only for
-        localhost — the local dev/test rig runs the provisioner there.
+        localhost, where the local dev/test rig runs the provisioner, and only
+        when ``allow_loopback_http`` is set: a hosted engine passes False.
+
+        Every URL must also be one thing to every parser: userinfo, a
+        backslash, a fragment, a bad port or an empty host make the check
+        and the connection disagree about the host (or put a password into
+        an error message), so they are refused. The message never repeats the
+        URL.
         """
         from urllib.parse import urlparse
 
+        not_https = (
+            'the database broker URL must use https (got {scheme} scheme): the broker token must never travel '
+            'unencrypted'
+            + ('; plain http is allowed only for localhost on a non-hosted engine' if allow_loopback_http else '')
+        )
+        malformed = RuntimeError(
+            'the database broker URL is malformed: it must be an https URL with a host and no credentials, '
+            'backslash, fragment or invalid port'
+        )
         try:
             parsed = urlparse(url)
             scheme, host = parsed.scheme.lower(), parsed.hostname
+            parsed.port  # noqa: B018 (raises ValueError on a bad port)
         except ValueError:
-            scheme, host = '', None
-        if scheme == 'https':
-            return
-        if scheme == 'http' and host in ('localhost', '127.0.0.1', '::1'):
-            return
-        raise RuntimeError(
-            f'ROCKETRIDE_DB_BROKER_URL must use https (got {scheme or "no"} scheme): '
-            'the broker token must never travel unencrypted; plain http is allowed only for localhost'
-        )
+            raise malformed from None
+        if scheme not in ('https', 'http'):
+            raise RuntimeError(not_https.format(scheme=scheme or 'no'))
+        if '@' in parsed.netloc or '\\' in url or parsed.fragment or not host:
+            raise malformed
+        if scheme == 'http' and not (allow_loopback_http and host in _LOOPBACK_HOSTS):
+            raise RuntimeError(not_https.format(scheme=scheme))
 
     @staticmethod
-    def _call_db_broker(url: str, token: str, body: dict) -> str:
+    def _broker_opener():
+        """The opener for the broker call: no ambient proxy, no redirects.
+
+        ``urlopen`` would follow a 301/302/303 on the POST as a GET that keeps
+        the Authorization header, to any host and from https to http, and then
+        accept the redirected body as the broker's answer; and it would send
+        the call through an http(s)_proxy from the environment. The broker
+        is addressed directly or not at all. TLS keeps the default context
+        (certificate and hostname checks, the process trust store).
+        """
+        import urllib.request
+
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
+    @staticmethod
+    def _call_db_broker(
+        url: str, token: str, body: dict, *, hosted: bool = False, ca_file: str = '', request_id: str = ''
+    ) -> str:
         """Blocking POST of ``body`` to the provisioner; runs in a worker thread.
 
         Stdlib-only on purpose: the account layer has no async-HTTP dependency,
         and one small request per task start does not justify adding one.
+
+        Failures raise a fixed phrase plus the exception type: the text of a
+        URL or TLS error can carry host names, and this message is handed to
+        the task as ROCKETRIDE_DB_RESOLVE_ERROR. The detail goes to the server
+        log, with the token masked.
         """
         import json
+        import re
         import urllib.error
         import urllib.request
 
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode('utf-8'),
-            headers={
-                'Authorization': f'Bearer {token}',
-                'Content-Type': 'application/json',
-            },
-            method='POST',
-        )
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+        }
+        if request_id:
+            # A correlation id, not free text: nothing that could end the header.
+            headers['X-Request-Id'] = re.sub(r'[^A-Za-z0-9._:-]', '_', request_id)[:128]
+        request = urllib.request.Request(url, data=json.dumps(body).encode('utf-8'), headers=headers, method='POST')
         try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                body = json.loads(response.read().decode('utf-8'))
+            with AccountBase._broker_opener().open(request, timeout=_BROKER_TIMEOUT_S) as response:
+                raw = response.read()
         except urllib.error.HTTPError as e:
             # 4xx = unknown/invalid tenant per the broker contract; 5xx = broker fault.
             code, reason = e.code, e.reason
             e.close()
+            if 300 <= code < 400:
+                raise RuntimeError(f'DB broker answered with a redirect (HTTP {code}); redirects are refused') from None
             if code == 409:
                 # The provisioner refuses a retained or dropping tenant: its
                 # team was deleted or its user left the org. Only an operator
@@ -535,30 +651,75 @@ class AccountBase(ABC):
                 ) from e
             raise RuntimeError(f'DB broker rejected provision for this account (HTTP {code})') from e
         except Exception as e:
-            raise RuntimeError(f'DB broker unreachable: {e}') from e
+            cause = e.reason if isinstance(e, urllib.error.URLError) and isinstance(e.reason, BaseException) else e
+            _server_log(f'DB broker call failed: {type(cause).__name__}: {str(cause).replace(token, "***")}')
+            raise RuntimeError(f'DB broker unreachable ({type(cause).__name__})') from None
 
-        dsn = body.get('dsn') if isinstance(body, dict) else None
+        # The broker was reached and answered: a body that is not JSON is a bad
+        # answer, not a transport fault. The body is not repeated (it may hold a DSN).
+        try:
+            answer = json.loads(raw.decode('utf-8'))
+        except (UnicodeDecodeError, ValueError):
+            raise RuntimeError('DB broker answered with a response that is not JSON') from None
+
+        dsn = answer.get('dsn') if isinstance(answer, dict) else None
         if not dsn or not isinstance(dsn, str):
             raise RuntimeError('DB broker response did not include a DSN')
-        return AccountBase._pin_dsn_tls(dsn)
+        return AccountBase._pin_dsn_tls(dsn, hosted=hosted, ca_file=ca_file)
 
     @staticmethod
-    def _pin_dsn_tls(dsn: str) -> str:
-        """Validate the broker's DSN and guarantee it carries an sslmode.
+    def _db_tls_ca_file(hosted: bool) -> str:
+        """The operator's CA file for tenant database connections, or '' off a hosted engine.
 
-        The broker contract sends ``sslmode=require``; this pins that
-        guarantee client-side so a broker regression cannot silently
-        downgrade every tenant connection to cleartext.
+        ``RR_DB_TLS_ROOT_CERT`` names a SINGLE-PURPOSE CA file (the CA that
+        signs the database servers). libpq ignores ``SSL_CERT_FILE``, and the
+        merged system + broker bundle it points at on the hosted engine is not
+        acceptable. On a hosted engine a missing, unreadable or certificate-less
+        file fails closed; the check runs before the broker is called so that
+        nothing is provisioned for a DSN that cannot be delivered.
+
+        Raises:
+            RuntimeError: hosted, and the variable is unset or names no usable CA.
         """
-        from urllib.parse import parse_qs, urlparse
+        from ai.common.rocketride_db import DB_TLS_ROOT_CERT_ENV
 
-        parsed = urlparse(dsn)
-        if parsed.scheme.lower() not in ('postgres', 'postgresql'):
-            raise RuntimeError(f'DB broker returned a non-PostgreSQL DSN (scheme {parsed.scheme!r})')
-        if 'sslmode' in parse_qs(parsed.query):
-            return dsn
-        separator = '&' if parsed.query else '?'
-        return f'{dsn}{separator}sslmode=require'
+        path = os.environ.get(DB_TLS_ROOT_CERT_ENV, '').strip()
+        if not hosted:
+            return path
+        if not path:
+            raise RuntimeError(
+                f'{DB_TLS_ROOT_CERT_ENV} is not set: a hosted engine verifies the database server certificate '
+                'and has no CA file to verify it against'
+            )
+        try:
+            with open(path, encoding='utf-8') as f:
+                pem = f.read()
+        except (OSError, UnicodeDecodeError):
+            pem = ''
+        if '-----BEGIN CERTIFICATE-----' not in pem or '-----END CERTIFICATE-----' not in pem:
+            raise RuntimeError(
+                f'{DB_TLS_ROOT_CERT_ENV} names a file that is missing, unreadable or holds no PEM certificate'
+            )
+        return path
+
+    @staticmethod
+    def _pin_dsn_tls(dsn: str, *, hosted: bool = False, ca_file: str = '') -> str:
+        """Check the broker's DSN against the TLS policy and return the DSN to issue.
+
+        The broker contract sends ``sslmode=require``; this enforces the policy
+        client-side so a broker regression cannot silently downgrade every
+        tenant connection, and a hosted engine verifies the database server
+        (``verify-full`` against ``ca_file``). See
+        :func:`ai.common.rocketride_db.enforce_dsn_tls` for the rules.
+        """
+        from ai.common.rocketride_db import DB_ALLOW_INSECURE_DSN_ENV, enforce_dsn_tls
+
+        return enforce_dsn_tls(
+            dsn,
+            hosted=hosted,
+            ca_file=ca_file,
+            allow_insecure=os.environ.get(DB_ALLOW_INSECURE_DSN_ENV, '').strip() == '1',
+        )
 
     # =========================================================================
     # DEPLOYMENTS — the teams-as-environments interface.
