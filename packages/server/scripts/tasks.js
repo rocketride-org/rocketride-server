@@ -1413,6 +1413,49 @@ module.exports = {
 						args.push('--saas');
 					}
 
+					// --logfile[=PATH] → write the engine's log to a file.
+					//
+					// OPT-IN, because the engine's own wording is "log to file INSTEAD
+					// of stdout": turning it on by default would empty the dev console,
+					// which is where everyone actually reads this.
+					//
+					// Worth having at all because without it a node failure exists only
+					// in whichever terminal happened to be open. Two failures in this
+					// tree — a settings outage and a model credential — had to be
+					// reconstructed by reproducing them against the database, because
+					// the exception that said so had already scrolled away.
+					//
+					// The timestamp rides along: a log whose lines cannot be placed in
+					// time does not settle "is this error still happening", which is
+					// the first question asked of one.
+					//
+					// An explicit PATH is resolved here, against the caller's directory:
+					// the engine runs with cwd set to dist/server, so a relative path
+					// passed through as-is would land there instead.
+					if (options.logfile) {
+						const logPath =
+							options.logfile === true ? path.join(DIST_DIR, 'engine.log') : path.resolve(options.logfile);
+						args.push(`--log.file=${logPath}`);
+						args.push('--log.includeDateTime');
+					}
+
+					// An overlay repository can carry workspace-local nodes in a
+					// `local_nodes` folder at its root, and the engine scans that folder
+					// only when --node_path names its parent. The flag has to be on argv:
+					// the option is read with application::Opt, which never looks at the
+					// environment, so there is no env or config equivalent. Task
+					// subprocesses inherit it from here (task_engine.py, "Inherit parent
+					// engine's --node_path"), so the parent process is the only place it
+					// needs setting.
+					//
+					// Without it the nodes load silently as nothing: the engine logs "No
+					// local_nodes directory under --node_path", and the first pipeline
+					// naming one of those providers fails validation with "references a
+					// provider with no registered service definition".
+					if (options.overlayRoot && (await exists(path.join(options.overlayRoot, 'local_nodes')))) {
+						args.push(`--node_path=${path.resolve(options.overlayRoot)}`);
+					}
+
 					// --modelserver: true means local (default address), string means use given address
 					if (options.modelserver === true) {
 						args.push('--modelserver=localhost:5590');
