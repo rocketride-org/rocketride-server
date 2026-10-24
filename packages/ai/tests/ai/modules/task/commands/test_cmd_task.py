@@ -206,6 +206,9 @@ async def test_on_execute_foreign_team_secrets_resolve_to_dev_team(monkeypatch):
 
     await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
 
+    # The task loads its env when it starts; load it as the task would.
+    await server.start_task.await_args.kwargs['env_source']()
+
     # The secret merge used the session's default team, not the foreign one.
     assert merged_env.await_args.kwargs['team_id'] == 'team-1'
     assert server.start_task.await_args.kwargs['team_id'] == 'team-1'
@@ -259,7 +262,36 @@ async def test_on_execute_trusted_attributes_classify_deploy_runs(monkeypatch):
     assert kwargs['run_kind'] == 'deploy'
     assert kwargs['trigger'] == 'schedule'
     # No user layer for deploy runs.
+    await kwargs['env_source']()
     assert merged.await_args.kwargs['user_id'] == ''
+
+
+@pytest.mark.asyncio
+async def test_on_execute_hands_the_task_a_loader_not_the_values(monkeypatch):
+    """on_execute decrypts nothing itself: the task gets a loader and calls it
+    at each (re)start, so the values are current and not kept on the task.
+    Caller ROCKETRIDE_* values still override the saved ones.
+    """
+    from ai.account import account as account_mod
+
+    merged = AsyncMock(side_effect=[{'ROCKETRIDE_A': 'v1', 'ROCKETRIDE_B': 'saved'}, {'ROCKETRIDE_A': 'v2'}])
+    monkeypatch.setattr(account_mod, 'get_merged_env', merged)
+
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+
+    await TaskCommands.on_execute(
+        conn,
+        {'arguments': {'pipeline': {'components': []}, 'env': {'ROCKETRIDE_B': 'caller', 'OTHER': 'x'}}},
+    )
+
+    kwargs = server.start_task.await_args.kwargs
+    assert 'env' not in kwargs
+    merged.assert_not_awaited()
+
+    assert await kwargs['env_source']() == {'ROCKETRIDE_A': 'v1', 'ROCKETRIDE_B': 'caller'}
+    assert await kwargs['env_source']() == {'ROCKETRIDE_A': 'v2', 'ROCKETRIDE_B': 'caller'}
 
 
 @pytest.mark.asyncio
@@ -426,6 +458,24 @@ async def test_on_terminate_denied_does_not_stop_the_task():
 # ---------------------------------------------------------------------------
 # on_restart
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_restart_rechecks_the_callers_access_to_the_team():
+    """A restart decrypts the team's current secrets again, so a caller who
+    passes get_task (the run's owner) but no longer holds task.control on the
+    team is refused before the task restarts and loads anything.
+    """
+    server = MagicMock()
+    server.restart_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.get_task = MagicMock(return_value=MagicMock(team_id='team-9'))
+    conn.verify_team_permission = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
+
+    with pytest.raises(PermissionError, match='denied'):
+        await TaskCommands.on_restart(conn, {'arguments': {'token': 'tk_x'}})
+    conn.verify_team_permission.assert_called_once_with('team-9', 'task.control')
+    server.restart_task.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -951,6 +1001,6 @@ async def test_on_execute_never_exposes_server_settings_to_sys_admin(monkeypatch
 
     await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
 
-    env = server.start_task.await_args.kwargs['env']
+    env = await server.start_task.await_args.kwargs['env_source']()
     assert env == {'ROCKETRIDE_SAVED': 'ok'}
     assert 'must-not-leak' not in env.values()

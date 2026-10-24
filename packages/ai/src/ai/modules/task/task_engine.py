@@ -38,7 +38,7 @@ import socket
 import hashlib
 import shlex
 import shutil
-from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
@@ -71,7 +71,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .pipeline import resolve_pipeline_env
+from .pipeline import references_env, resolve_pipeline_env
 from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
@@ -541,6 +541,7 @@ class Task(DAPBase):
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = 'manual',
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
         **kwargs,
     ) -> None:
         """
@@ -556,6 +557,9 @@ class Task(DAPBase):
             client_id: Account identifier for store access scoping
             team_id: Owning team id (rides the task file as trusted identity)
             org_id: Owning org id (rides the task file as trusted identity)
+            env: Fixed values for ${...} placeholders, used when no env_source is given
+            env_source: Returns the values for ${...} placeholders. Called at every
+                start and restart, so the values live only while the pipeline is resolved
             run_kind: Run classification ('dev' | 'deploy') — picks the
                 run-log continuum; only the trusted dispatch sets 'deploy'
             trigger: What fired the run ('' | 'manual' | 'schedule');
@@ -626,6 +630,9 @@ class Task(DAPBase):
         # Lifecycle state
         self._tmpfile = None
         self._stop_requested = False
+        # Bumped by every stop_task, so a restart can tell whether a stop arrived
+        # while it loaded, even on a task whose last run was already stopped
+        self._stop_count = 0
         # WHY the stop was requested ('user' | 'ttl'); None until requested.
         # A ttl-window expiry is SUCCESS (the run stayed up exactly as
         # configured), so the run-log outcome derives from this.
@@ -711,6 +718,8 @@ class Task(DAPBase):
 
         # Termination management
         self._is_restarting = False
+        # One restart at a time: two would share _restart_env and _is_restarting
+        self._restart_in_progress = False
         self._is_terminating = False
         self._termination_lock = asyncio.Lock()
 
@@ -718,17 +727,39 @@ class Task(DAPBase):
         self._launch_args = launch_args
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
-        self._env: Dict[str, str] = env or {}
+        # Where ${...} placeholders resolve from. The values are loaded at each
+        # (re)start and dropped once the task file is written, so decrypted
+        # variables are not held for the task's lifetime.
+        if env_source is None:
+            fixed_env = dict(env or {})
+
+            async def env_source() -> Dict[str, str]:
+                return dict(fixed_env)
+
+        self._env_source = env_source
+
+        # Values a restart loaded before stopping the old process, for the next start only
+        self._restart_env: Optional[Dict[str, str]] = None
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
-    def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
-        """Replace ``${KEY}`` placeholders using the merged environment dict.
+    async def _load_env(self, pipeline: Dict[str, Any]) -> Dict[str, str]:
+        """Load the values for the pipeline's placeholders; nothing is loaded when it has none."""
+        if not references_env(pipeline):
+            return {}
+        return await self._env_source()
 
-        Delegates to :func:`pipeline.resolve_pipeline_env`.
+    async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace ``${KEY}`` placeholders using freshly loaded environment values.
+
+        Uses the values a restart already loaded, if any. Delegates to
+        :func:`pipeline.resolve_pipeline_env`.
         """
-        return resolve_pipeline_env(pipeline, self._env)
+        env, self._restart_env = self._restart_env, None
+        if env is None:
+            env = await self._load_env(pipeline)
+        return resolve_pipeline_env(pipeline, env)
 
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
@@ -2400,12 +2431,28 @@ class Task(DAPBase):
         5. Reset all status from the previous run
         6. Start task (full initialization)
         """
+        # Checked and set before the first await, so a concurrent restart is refused
+        # instead of starting with the other restart's values
+        if self._restart_in_progress:
+            raise RuntimeError('Failed to restart task: a restart is already in progress')
+        self._restart_in_progress = True
+
         try:
             self._server.debug_message(f'Task "{self.id}" restart initiated...')
 
             # Check if debugger is attached - fail if so
             if self.has_attached_debugger():
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
+
+            # Load the new run's values while the old process still runs and
+            # nothing has changed yet: a failed load leaves the task as it was
+            stops_before = self._stop_count
+            self._restart_env = await self._load_env(pipeline)
+
+            # A stop that arrived while the values loaded wins: nothing has
+            # changed yet, so the task stays stopped instead of starting again
+            if self._stop_count != stops_before:
+                raise RuntimeError('the task was stopped while the restart loaded its values')
 
             # Set the restart flag to inhibit termination/start events
             self._is_restarting = True
@@ -2448,8 +2495,10 @@ class Task(DAPBase):
             raise RuntimeError(f'Failed to restart task: {str(e)}')
 
         finally:
-            # Always reset this
+            # Always reset these
             self._is_restarting = False
+            self._restart_env = None
+            self._restart_in_progress = False
 
     async def start_task(self) -> None:
         """
@@ -2491,7 +2540,7 @@ class Task(DAPBase):
 
             # Resolve ${...} placeholders into a local variable — never stored on self
             # so secrets are not retained in memory beyond the temp file write.
-            resolved = self._resolve_pipeline(self._pipeline)
+            resolved = await self._resolve_pipeline(self._pipeline)
 
             # Check it - throws on error
             self._check_pipeline(resolved)
@@ -2603,6 +2652,12 @@ class Task(DAPBase):
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
+
+            # A stop that arrived during the awaits above (loading the
+            # placeholder values, writing the task file) found no process to
+            # end: honour it here instead of starting one
+            if self._stop_requested:
+                raise RuntimeError('the task was stopped before it started')
 
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
@@ -2782,6 +2837,7 @@ class Task(DAPBase):
 
                 # Mark as a requested stop and block new operations.
                 self._stop_requested = True
+                self._stop_count += 1
                 self._stop_reason = reason
                 self._is_terminating = True
 
