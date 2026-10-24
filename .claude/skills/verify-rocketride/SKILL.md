@@ -45,7 +45,7 @@ Run it from the repository root. `env.sh` puts `rr-verify` on `PATH`, sets `F` t
 . .claude/skills/verify-rocketride/bin/env.sh my-run && rr-verify launch --mock
 ```
 
-It is ready when it prints `engine: http://127.0.0.1:<port>`. It waits for the engine's `Application startup complete.` log line and fails with the last log lines if the engine exits first. Launching an ID that already exists fails; pick a new ID.
+It is ready when it prints a line starting `engine:   http://127.0.0.1:<port>`. It waits for the engine's `Application startup complete.` log line and fails with the last log lines if the engine exits first. Launching an ID that already exists fails; pick a new ID.
 
 - `--mock` starts the engine with `ROCKETRIDE_MOCK=nodes/test/mocks`. Pipelines then load stub OpenAI, Anthropic, LangChain, and vector-store libraries, so LLM nodes answer without keys. It also sets `ROCKETRIDE_OPENAI_KEY` to a placeholder when you have not set one. Without `--mock`, LLM nodes call the real providers and need their keys in your environment, such as `ROCKETRIDE_OPENAI_KEY`.
 - The engine requires the API key `verify-key` (override with `RR_VERIFY_APIKEY`). Every `rr-verify` command passes it.
@@ -60,7 +60,7 @@ It is ready when it prints `engine: http://127.0.0.1:<port>`. It waits for the e
 
 A read-only check that the run's engine is worth driving. It checks that the process is alive, that it owns its port, that `/version` answers, whether engine, ai, or node code changed since the build, and that the API key works both ways (a wrong key gets 401, the run's key gets through). Exit 0 means safe to drive.
 
-Run it before the first recipe, between features, after any `FAIL`, and whenever output looks wrong. If it fails, run `rr-verify stop`, launch a new run with a new ID, and do not drive the failed one.
+Run it before the first recipe, between features, after any unexpected `FAIL`, and whenever output looks wrong. A recipe step that expects a `FAIL` does not count. If it fails, run `rr-verify stop`, launch a new run with a new ID, and do not drive the failed one.
 
 ## Drive
 
@@ -89,8 +89,9 @@ To verify a pipeline your change touches, pass the repository's own `.pipe` file
 Results:
 
 - `chat` and `send` print the result, a `token: ... terminated: ... mock: ...` line, then `PASS:` or `FAIL:` with the reason. Exit code 0 means the expectation held, 1 means it did not, 2 means the run itself failed.
-- `mcp` prints the JSON-RPC response, then `MCP: ok` or `MCP: error` on stderr, and exits 1 on any error or `isError` response.
+- `mcp` prints the JSON-RPC response, then `MCP: ok` or `MCP: error (see the response above)` on stderr, and exits 1 on any error or `isError` response.
 - `cli`, `tscli`, and `record` print the command's output and exit with its exit code.
+- Every command that saves evidence also prints `saved: <path>` on stderr. In a combined view of stdout and stderr, that line can come before or after the output, so match the result lines, not the last line.
 
 ## Evidence
 
@@ -101,7 +102,7 @@ Everything lands in `.verify/<run-id>/`, which git ignores:
 - `<feature>/<time>-cmd.json` holds a `cli`, `tscli`, or `record` command with its exit code, stdout, and stderr.
 - `<feature>/<time>-<method>[-<tool>].json` holds each MCP request and response, including the `initialize` exchange that precedes it.
 
-Times have millisecond precision, so files never overwrite each other.
+Times have millisecond precision, so files never overwrite each other. A command run without `--label` saves to `mcp/` (for `mcp`) or `cli/` (for `cli` and `tscli`).
 
 Proof standards:
 

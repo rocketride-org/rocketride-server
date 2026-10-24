@@ -23,10 +23,10 @@ Preconditions:
 
 - **Ask a question.** Run `rr-verify chat --label chat-answer "What is RocketRide?"`. The result has an `answers` list with one string, the token line ends `terminated: True  mock: True`, and the output ends with `PASS: 1 answer(s) returned` and exit code 0. Under `--mock` the answer is `Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set so tests run without API keys or external services.`
 - **Drop Return Answers.** Run `rr-verify chat --label chat-no-return --pipe $F/quickstart-chat-no-return.pipe --expect none "What is RocketRide?"`. The result has no `answers` field, and the output ends with `PASS: no answers returned, as expected`.
-- **Confirm the check can fail.** Run `rr-verify chat --label chat-no-return --pipe $F/quickstart-chat-no-return.pipe "What is RocketRide?"`. The output ends with `FAIL: expected answers, got none` and exit code 1. This is the expected result.
+- **Confirm the check can fail.** Run `rr-verify chat --label chat-no-return-control --pipe $F/quickstart-chat-no-return.pipe "What is RocketRide?"`. The output ends with `FAIL: expected answers, got none` and exit code 1. This is the expected result.
 - **Ask a real model.** Only when `ROCKETRIDE_OPENAI_KEY` holds a real OpenAI key in your shell. Launch a second run without `--mock`: `. .claude/skills/verify-rocketride/bin/env.sh <run-id>-real && rr-verify launch`. Then, on that run, `rr-verify chat --label chat-real-llm "Reply with the single word pineapple."`. The output ends with `PASS: 1 answer(s) returned`, the token line ends `mock: False`, and the answer is not the mock text and contains `pineapple`. Stop that run when done. Without a key, report `chat-real-llm` as SKIPPED with the reason "no provider key".
 - **Check your own pipeline.** Run `rr-verify chat --label <feature-id> --pipe <path to .pipe> "<question>"`. Read the saved JSON's `result` for the lanes your change affects.
-- **Confirm cleanup.** Run `rr-verify tscli -- list`. It prints `No active tasks found`.
+- **Confirm cleanup.** Run `rr-verify tscli --label chat-cleanup -- list`. It prints `No active tasks found`.
 
 ## Gotchas
 

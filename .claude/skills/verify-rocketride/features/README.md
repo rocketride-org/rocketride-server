@@ -5,15 +5,15 @@ This directory is the maintained source for verifying RocketRide's user-facing b
 ## Baseline preconditions
 
 - The checkout is built: `dist/server/engine` exists.
-- A run is live: `rr-verify launch --mock` printed `engine: http://127.0.0.1:<port>` for your run ID.
+- A run is live: `rr-verify launch --mock` printed a line starting `engine:   http://127.0.0.1:<port>` for your run ID.
 - `rr-verify doctor` exits 0 for that run.
 - Never drive an engine that this run did not start, such as one from the VS Code extension, `./builder server:run`, or another agent's run.
 
 ## Driving conventions
 
 - Every command below assumes the line starts with `. .claude/skills/verify-rocketride/bin/env.sh <run-id> &&`, run from the repository root. That puts `rr-verify` on `PATH` and sets `$F`, `$ROCKETRIDE_URI`, and `$ROCKETRIDE_APIKEY`.
-- Use one run for the whole session. Run `rr-verify doctor` before the first feature, between features, and after any `FAIL`. Launch a new run with a new ID only when doctor fails or a recipe says so.
-- Treat every command as literal. Keep quoted text and flags unchanged.
+- Use one run for the whole session. Run `rr-verify doctor` before the first feature, between features, and after any unexpected `FAIL`. Launch a new run with a new ID only when doctor fails or a recipe says so.
+- Treat every command as literal. Keep quoted text and flags unchanged. Expected output that says "starts with" is a prefix of the real line; any other quoted output appears as written.
 - Pass `--label <feature-id>` so evidence lands in that feature's folder.
 - Stop every task a recipe starts. `rr-verify tscli -- list` should end each feature with `No active tasks found`.
 - Keep proof artifacts during cleanup.
@@ -21,7 +21,8 @@ This directory is the maintained source for verifying RocketRide's user-facing b
 ## Proof and skip reporting
 
 - Capture the user action and the resulting state, not only the final output.
-- Every recipe command saves its own evidence: `chat` and `send` write `-chat.json` or `-send.json`, `cli`, `tscli`, and `record` write `-cmd.json`, and `mcp` writes the request and response.
+- Every recipe command that checks behavior saves its own evidence: `chat` and `send` write `-chat.json` or `-send.json`, `cli`, `tscli`, and `record` write `-cmd.json`, and `mcp` writes the request and response. Setup commands that only create input files need no evidence.
+- Scratch files go under `/tmp` with your run ID in the name, as the recipes show, so two runs never share one.
 - Record the sub-feature ID with every result.
 - Report an unreachable path with the command you tried and the unmet precondition.
 - Do not report a skipped entry point as verified through a different path.

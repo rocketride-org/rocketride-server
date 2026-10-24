@@ -21,7 +21,7 @@ Preconditions:
 
 - Your run is live.
 
-- **Run doctor.** Run `rr-verify record engine-health -- rr-verify doctor`. Every line starts with `ok` or `info`, and the exit code is 0. Note the hash in the line `ok   no engine, ai, or node changes since the build (<hash>)`.
+- **Run doctor.** Run `rr-verify record engine-health -- rr-verify doctor`. After the first line, `run <run-id>`, every line starts with `ok` or `info`, and the exit code is 0. Note the hash in the line `ok   no engine, ai, or node changes since the build (<hash>)`.
 - **Read the version.** Run `rr-verify record engine-health -- curl -s "$ROCKETRIDE_URI/version"`. The JSON has `"status":"OK"`, and `data.hash` equals the hash from doctor's freshness line. `git cat-file -t <hash>` prints `commit`.
 - **Confirm freshness.** Doctor's `ok   no engine, ai, or node changes since the build` line means the engine runs this checkout's code. A `WARN` line names the rebuild command to run first; report the feature as not verified until you rebuild and launch a new run.
 - **Reject a wrong key.** Run `rr-verify record engine-health -- curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' "$ROCKETRIDE_URI/task"`. It prints `401`.

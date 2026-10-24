@@ -23,7 +23,7 @@ Preconditions:
 
 - **Send text.** Run `rr-verify send --label webhook-send-text --pipe $F/echo.pipe --expect-text "hello from verify" "hello from verify"`. The result has `"text": ["hello from verify\n\n"]`, and the output ends with `PASS: result text contains 'hello from verify'`.
 - **Confirm termination after send.** The send's output shows `token: tk_...  terminated: True`, so the task was started and then terminated. Run `rr-verify tscli --label webhook-terminate -- list`. It prints `No active tasks found`.
-- **Upload from the CLI.** Run `printf 'hello from verify\n' > /tmp/rr-verify-hello.txt && rr-verify cli --label webhook-cli-upload -- upload --pipeline $F/echo.pipe /tmp/rr-verify-hello.txt`. It prints `uploaded rr-verify-hello.txt (18 B)` and `Uploaded 1 of 1 file(s)`, and exits 0.
+- **Upload from the CLI.** Run `printf 'hello from verify\n' > /tmp/rr-verify-$RR_VERIFY_ID-hello.txt && rr-verify cli --label webhook-cli-upload -- upload --pipeline $F/echo.pipe /tmp/rr-verify-$RR_VERIFY_ID-hello.txt`. It prints `uploaded rr-verify-<run-id>-hello.txt (18 B)` and a line starting `Uploaded 1 of 1 file(s), 18 B`, and exits 0.
 - **Confirm termination after upload.** Run `rr-verify tscli --label webhook-terminate -- list`. It prints `No active tasks found`, because `upload --pipeline` stops the task it started.
 
 ## Gotchas
