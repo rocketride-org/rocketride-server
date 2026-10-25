@@ -30,10 +30,13 @@
  * `log.read`) and its arguments in order, calls it on the connected client and
  * returns the result as JSON. The guide is the manual, so nothing here repeats it.
  *
- * - Names are checked before the client is touched. Methods that hand the model
- *   a credential, the raw `call` and `request`, and the `fs*` store methods
- *   are blocked; methods that need a callback, bytes or a live object are
- *   refused. Each refusal says what to call instead.
+ * - The tool prepares each call: it checks the name, reads the arguments and
+ *   names the exact call as its act, so the approval list (`approval.ts`)
+ *   rates it before the client is touched. That list blocks the methods that
+ *   hand the model a credential, the raw `call` and `request`, and the `fs*`
+ *   store methods, and asks the user first for outward ones. Methods that
+ *   need a callback, bytes or a live object are refused here. Each refusal
+ *   says what to call instead.
  * - For `use`, `validate` and `deploy.add`, `{ "filepath": "pipelines/x.pipe" }`
  *   is read from the run's workspace view, unsaved edits included, and passed as
  *   `pipeline`, the way the guide's `filepath` works locally.
@@ -48,46 +51,12 @@
 import type { RocketRideClient } from 'rocketride';
 
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
-import { AgentTool, AgentToolkit } from '../tools';
+import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
 import { clip, isJsonObject, isWalkable, messageOf, pipelineArg, redactSecrets, requireClient, RESULT_MAX_CHARS, toolText, type ClientGetter, type JsonObject } from './common';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-/**
- * The methods the tool never calls, each with the helpful tail of its error.
- * They would hand the model a credential, or reach the methods that do.
- */
-const BLOCKED: Record<string, string> = {
-	// Returns the user's live rr_ session token.
-	getApiKey: 'the client is already signed in as the user, so you never need the key',
-	// Returns a ConnectResult, whose userToken is the session token.
-	getAccountInfo: 'use getOrgId, account.getOrg or account.listTeams for account details',
-	// Returns the same ConnectResult as getAccountInfo.
-	'account.getProfile': 'use getOrgId, account.getOrg or account.listTeams for account details',
-	// Returns a ConnectResult with the session token in it.
-	connect: 'the client is already connected and signed in as the user',
-	// Returns a ConnectResult with the session token in it.
-	login: 'the client is already connected and signed in as the user',
-	// Returns the real values of the user's Variables.
-	'account.getEnv': 'use account.getEnvironmentKeys for the names, and ${ROCKETRIDE_<NAME>} placeholders in pipelines',
-	// Returns a new API key's value.
-	'account.createKey': 'ask the user to create API keys in their settings',
-	// Returns a Stripe clientSecret.
-	'billing.createCheckoutSession': 'ask the user to go through billing themselves',
-	// Returns a Stripe clientSecret.
-	'billing.purchaseTopup': 'ask the user to go through billing themselves',
-	// Returns a short-lived Stripe billing-portal URL that signs whoever opens it into the org's billing.
-	'billing.createPortalSession': 'ask the user to open billing themselves',
-	// Sends any server command by name, so it reaches every method above.
-	call: 'call the client method that wraps the command instead',
-	// Sends any raw DAP message, so it reaches everything call does.
-	request: 'call the client method that wraps the command instead',
-};
-
-/** Why every `fs*` method is blocked: one-segment names that start with `fs`. */
-const FILE_METHODS_MESSAGE = "the fs methods write the store directly, skipping the file tools' checks and save-time validation; use the file tools";
 
 /** The methods that cannot work over JSON, each with the JSON way to do the job. */
 const NOT_JSON: Record<string, string> = {
@@ -152,7 +121,7 @@ Example: rocketride_client { "method": "use", "params": [{ "filepath": "pipeline
  *
  * @param raw - The call's `method` argument.
  * @returns The method as the tool calls it: trimmed, with one leading `client.` dropped.
- * @throws When the name is empty, private, not a method's shape, blocked, or cannot work over JSON; the message says what to call instead.
+ * @throws When the name is empty, private, not a method's shape, or cannot work over JSON; the message says what to call instead.
  */
 function methodName(raw: unknown): string {
 	const text = typeof raw === 'string' ? raw.trim() : '';
@@ -165,8 +134,6 @@ function methodName(raw: unknown): string {
 		throw new Error(`'${name}' is not a RocketRide client method: only account, billing, database, deploy and log hold methods of their own, as in "deploy.add".`);
 	}
 
-	if (Object.hasOwn(BLOCKED, name)) throw new Error(`${name} is blocked: ${BLOCKED[name]}.`);
-	if (segments.length === 1 && name.startsWith('fs')) throw new Error(`${name} is blocked: ${FILE_METHODS_MESSAGE}.`);
 	if (Object.hasOwn(NOT_JSON, name)) throw new Error(`${name} can't work over JSON: ${NOT_JSON[name]}.`);
 	return name;
 }
@@ -371,31 +338,36 @@ export class RocketRideClientToolkit extends AgentToolkit {
 					required: ['method'],
 					additionalProperties: false,
 				},
-				execute: (args) => this.call(args),
+				prepare: (args) => this.prepareCall(args),
 			}),
 		];
 	}
 
 	/**
-	 * Checks a call, makes it and shapes its result. The name is checked before
-	 * the client is touched, so a blocked method never reaches it.
+	 * Gets a call ready: checks the name, reads the arguments, and names the
+	 * exact call as the act, so the approval list rates it before the client
+	 * is touched. The run makes the call and shapes its result.
 	 *
 	 * @param args - The tool arguments: `method`, and `params` when the method takes any.
-	 * @returns The result text.
-	 * @throws When the call is refused or the method fails; the message says how to fix it.
+	 * @returns The step: the method and its final arguments, and the run that calls it.
+	 * @throws When the call can't be made; the message says how to fix it.
 	 */
-	private async call(args: Record<string, unknown>): Promise<string> {
+	private async prepareCall(args: Record<string, unknown>): Promise<ToolStep> {
 		const method = methodName(args.method);
 		const given = paramsOf(args.params);
 		const { owner, fn } = resolveMethod(requireClient(this.client), method);
 		const params = await withPipelineFile(method, given, this.vfs);
-
-		let result: unknown;
-		try {
-			result = await fn.apply(owner, params);
-		} catch (err) {
-			throw new Error(`${method} failed: ${messageOf(err)}.`);
-		}
-		return resultText(method, result);
+		return {
+			act: { name: method, params },
+			run: async () => {
+				let result: unknown;
+				try {
+					result = await fn.apply(owner, params);
+				} catch (err) {
+					throw new Error(`${method} failed: ${messageOf(err)}.`);
+				}
+				return resultText(method, result);
+			},
+		};
 	}
 }

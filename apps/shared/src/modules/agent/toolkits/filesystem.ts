@@ -50,7 +50,7 @@
 
 import { sha256Hex } from '../../vfs/hash';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
-import { AgentTool, AgentToolkit } from '../tools';
+import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
 
 // =============================================================================
 // CONSTANTS — caps and hygiene
@@ -490,15 +490,17 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/**
-	 * delete_file: remove a file, or a directory when recursive is true.
-	 * The tree root is refused here; protected roots inside the tree are
-	 * the backend's rule to enforce.
+	 * delete_file, made ready: remove a file, or a directory when recursive is
+	 * true. The checks run here, and the act names the target for the approval
+	 * list, since a delete does not go through the client. The tree root is
+	 * refused here; protected roots inside the tree are the backend's rule to
+	 * enforce.
 	 *
 	 * @param rawPath - Agent-supplied path.
 	 * @param recursive - Required true to remove a directory and its contents.
-	 * @returns A confirmation line.
+	 * @returns The step: the act `delete_file [path, type]`, and the run that deletes and returns a confirmation line.
 	 */
-	private async deleteFile(rawPath: unknown, recursive: boolean): Promise<string> {
+	private async prepareDelete(rawPath: unknown, recursive: boolean): Promise<ToolStep> {
 		const path = normalizePath(rawPath);
 		const type = await this.entryType(path);
 		if (type === null) throw new Error(`No such path: ${path}`);
@@ -506,8 +508,15 @@ export class FilesystemTools extends AgentToolkit {
 			throw new Error(`${path} is a directory — pass recursive: true to delete it and its contents.`);
 		}
 		this.guardDirty(path, 'delete_file');
-		await this.vfs.delete(path, AGENT_ORIGIN);
-		return `Deleted ${path}.`;
+		return {
+			act: { name: 'delete_file', params: [path, type] },
+			run: async () => {
+				// the user may have edited it while the card waited
+				this.guardDirty(path, 'delete_file');
+				await this.vfs.delete(path, AGENT_ORIGIN);
+				return `Deleted ${path}.`;
+			},
+		};
 	}
 
 	// ── Toolkit surface ──────────────────────────────────────────────────
@@ -645,7 +654,7 @@ export class FilesystemTools extends AgentToolkit {
 					required: ['path'],
 					additionalProperties: false,
 				},
-				execute: (a) => this.deleteFile(a.path, a.recursive === true),
+				prepare: (a) => this.prepareDelete(a.path, a.recursive === true),
 			}),
 		];
 	}

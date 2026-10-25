@@ -25,7 +25,6 @@
 // =============================================================================
 
 import type { RocketRideClient } from 'rocketride';
-import { showConfirmDialog } from 'shell';
 
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 
@@ -55,41 +54,6 @@ export function requireClient(get: ClientGetter): RocketRideClient {
 	const client = get();
 	if (!client) throw new Error(NOT_CONNECTED_MESSAGE);
 	return client;
-}
-
-// =============================================================================
-// CONFIRM — asking the user before a tool does something that needs their say-so
-// =============================================================================
-
-/**
- * The app tools ask the user before they publish or submit an app (spec
- * section 6). They never call the shell's dialog themselves: the host passes in
- * a `ConfirmFn`, so tests can answer yes or no without a browser.
- */
-
-/** Asks the user to confirm. Resolves true when they do, false when they decline. */
-export type ConfirmFn = (title: string, message: string) => Promise<boolean>;
-
-/**
- * The confirm function for the real app: the shell's confirmation dialog.
- *
- * `showConfirmDialog` is looked up when the dialog opens, not when this
- * module loads (it is undefined under the test runner, where nothing opens one).
- *
- * @returns A `ConfirmFn` backed by the shell's dialog.
- */
-export function shellConfirm(): ConfirmFn {
-	return (title, message) => showConfirmDialog(title, message);
-}
-
-/**
- * The tool result when the user says no.
- *
- * @param title - What the user was asked to confirm.
- * @returns Text telling the model not to retry and to ask the user instead.
- */
-export function declined(title: string): string {
-	return `The user declined: ${title}. Don't retry it; ask the user what they want instead.`;
 }
 
 // =============================================================================

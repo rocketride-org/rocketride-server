@@ -33,21 +33,27 @@
  * answer as one `content` chunk, with the checks line the code builds from the
  * record. A stopped run sends no `content` chunk.
  *
- * Everything that only works in the browser (the model pipeline, the confirm
- * dialog, Monaco's markers) has a default here and comes in through `deps`
- * otherwise, so tests run a whole run without a browser or an engine.
+ * Everything that only works in the browser (the model pipeline, Monaco's
+ * markers) has a default here and comes in through `deps` otherwise, so tests
+ * run a whole run without a browser or an engine.
+ *
+ * One `Approvals` per run rates every tool act: the loop asks it before a
+ * prepared call runs, and every toolkit and the save hook get its checked
+ * client. The model's own `chat` calls keep the real client.
  */
 
 import { Question } from 'rocketride';
 import type { ChatMessage } from 'shell';
+import type { ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
 import { GuideFileSystem } from './guides';
 import type { AgentHost } from './host';
 import { CORE_PROMPT } from './prompts';
 import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, typesNote } from './toolkits/appCheck';
 import type { CheckReport, MarkerSource } from './toolkits/appCheck';
+import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
-import { NOT_CONNECTED_MESSAGE, shellConfirm, type ClientGetter, type ConfirmFn } from './toolkits/common';
+import { NOT_CONNECTED_MESSAGE, type ClientGetter } from './toolkits/common';
 import { FilesystemTools, normalizePath } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit } from './toolkits/rocketrideClient';
@@ -106,6 +112,8 @@ export interface AgentRunOptions {
 	signal: AbortSignal;
 	/** Takes the messages the user sent since the last take, oldest first. */
 	takeQueued: () => string[];
+	/** Shows a "Needs your OK" card in the chat and waits for the answer (the turn's ask). Absent: an act that asks is refused in Ask mode. */
+	ask?: (card: ChatAskCard) => ChatAsking;
 }
 
 /** What one run needs from its host. The optional parts have browser defaults; tests always pass them. */
@@ -116,8 +124,6 @@ export interface AgentDeps {
 	client: ClientGetter;
 	/** Asks the model one question (default: the LLM pipeline behind `options.token`). */
 	model?: ModelCall;
-	/** Asks the user to confirm (default: the shell's confirm dialog). */
-	confirm?: ConfirmFn;
 	/** Gets Monaco's marker source, or null when there is none (default: the editor's, loaded once). */
 	markers?: () => Promise<MarkerSource | null>;
 }
@@ -633,7 +639,6 @@ function toRocketRideQuestion(q: QuestionSpec): Question {
 export async function runAgent(request: string, callback: (type: string, content: string) => void, options: AgentRunOptions, deps: AgentDeps): Promise<void> {
 	const { host, client } = deps;
 	const model = deps.model ?? createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal });
-	const confirm = deps.confirm ?? shellConfirm();
 	const markers = deps.markers ?? editorMarkers;
 
 	// step: the record of check results, which is also the loop's finish rule; it names an app the way check_app does
@@ -648,11 +653,13 @@ export async function runAgent(request: string, callback: (type: string, content
 	// step: the workspace with the guides; every save that works returns the types of an app's
 	// TypeScript file or the validate of a pipeline, and the validate is recorded for the finish rule
 	const vfs = new GuideFileSystem(host.vfs, host.guides);
+	// step: the run's approvals; the toolkits and the save hook below get its checked client
+	const approvals = new Approvals({ client, vfs, ask: options.ask, signal: options.signal });
 	const afterSave = async (path: string): Promise<string> => {
 		const appFile = APP_TYPESCRIPT_FILE.exec(path);
 		if (appFile) return typesNote(vfs, markers, appFile[1], appFile[2]);
 		if (!path.endsWith('.pipe')) return '';
-		const validation = await validateSaved(client, vfs, path);
+		const validation = await validateSaved(approvals.client, vfs, path);
 		checks.pipelineSaved(path, validation);
 		return validateNote(validation);
 	};
@@ -662,8 +669,8 @@ export async function runAgent(request: string, callback: (type: string, content
 		// one file toolkit per run, so reads never carry over; its saves run the hook above
 		new FilesystemTools(vfs, undefined, afterSave),
 		new InventoryToolkit(vfs, (id) => host.devSession(id) !== null),
-		new RocketRideClientToolkit(client, vfs),
-		new AppToolkit(client, host, confirm, { signal: options.signal }),
+		new RocketRideClientToolkit(approvals.client, vfs),
+		new AppToolkit(approvals.client, host, { signal: options.signal }),
 		// check_app hands each report to the record
 		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal }),
 	]);
@@ -679,7 +686,7 @@ export async function runAgent(request: string, callback: (type: string, content
 		timeoutMs: (tool) => (tool === 'deploy_app' ? DEPLOY_APP_TIMEOUT_MS : TOOL_TIMEOUT_MS),
 		signal: options.signal,
 		takeQueued: options.takeQueued,
-		approve: async (_act, run) => run,
+		approve: (act, run) => approvals.approve(act, run),
 	});
 
 	// step: a stopped run writes no answer: the chat closes the turn with its stop row, and this adds the one fact that row can't know

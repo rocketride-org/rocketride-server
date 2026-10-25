@@ -186,8 +186,8 @@ const CHECKING = `- After your last change, you MUST run the check that covers e
 - Leave the "Checked:" line to the system, because it is built from the check results.`;
 
 /** 6. Outward actions, deletes and secrets. */
-const ACTING_WITH_CARE = `- Some tools reach beyond the workspace, so they ask the user in a confirm dialog. Call them without asking in chat first, because the dialog is the question.
-- A "no" comes back as the tool result. You MUST NOT retry it or work around it; ask the user what they want instead.
+const ACTING_WITH_CARE = `- Publishing, deployment and schedule changes, and deletes may stop for the user's OK in the chat before they run. Call the tool without asking in chat first, because the card is the question.
+- A "no" comes back as the tool's error. You MUST NOT retry it or work around it; ask the user what they want instead.
 - You have no undo, so delete or overwrite only what the task needs. Make ordinary edits without asking.
 - Secrets MUST always be placeholders, because real values are filled in at run time. Never write, print or repeat a key value, even a pasted one; use its placeholder.`;
 

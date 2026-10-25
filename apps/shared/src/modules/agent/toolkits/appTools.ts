@@ -31,11 +31,11 @@
  * you, a team, or everyone.
  *
  * Risk tiers (spec section 6): creating an app and deploying a version are
- * free. Publishing to any audience, and submitting a version for review, ask
- * the user first; a "no" goes back to the model as the result and the client
- * is not called. Every question is asked after the arguments are checked and
- * the client is known to be there, so the user is never asked about a call
- * that cannot run.
+ * free. `publish_app` prepares: it checks the arguments, picks the version and
+ * names the one client call it will make (`publishApp` or `submitApp`) as its
+ * act, and the approval list (`approval.ts`) decides whether the user is asked
+ * first. A "no" is the call's error, and the client is not called. Prepare
+ * throws on anything that cannot run, so the user is never asked about it.
  *
  * Deploying waits for the server build (spec section 7) and returns its
  * errors, because an upload that fails to build serves nothing. The publish
@@ -48,8 +48,8 @@
 import type { RocketRideClient } from 'rocketride';
 
 import type { AgentHost } from '../host';
-import { AgentTool, AgentToolkit } from '../tools';
-import { declined, messageOf, numberArg, requireClient, sleep, textArg, type ClientGetter, type ConfirmFn } from './common';
+import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
+import { messageOf, numberArg, requireClient, sleep, textArg, type ClientGetter } from './common';
 import { findApp, readApps, type AppEntry } from './inventory';
 
 // =============================================================================
@@ -67,16 +67,6 @@ type IdentifiedApp = AppEntry & { id: string };
 
 /** The audiences `publish_app` takes. */
 type Target = 'me' | 'team' | 'public';
-
-/** What a publish will do, once the user says yes. */
-interface Plan {
-	/** What the user is asked to confirm; a no goes back to the model as this. */
-	title: string;
-	/** The question, naming the app, version and audience. */
-	message: string;
-	/** The client call, and the text the tool returns. */
-	run: () => Promise<string>;
-}
 
 // =============================================================================
 // CONSTANTS
@@ -175,7 +165,7 @@ async function appArg(host: AgentHost, args: Record<string, unknown>, verb: stri
 }
 
 /**
- * How the audience reads in a question to the user.
+ * How the audience reads in the tool's result.
  *
  * @param target - The audience.
  * @param team - The team, for a team audience.
@@ -235,7 +225,7 @@ function uploadedVersion(reply: unknown): number | undefined {
 // TOOLKIT
 // =============================================================================
 
-/** The app toolkit: create and deploy are free, and publishing asks the user first. */
+/** The app toolkit: create and deploy are free, and publishing names its call for the approval list. */
 export class AppToolkit extends AgentToolkit {
 	readonly name = 'apps';
 	readonly instructions = INSTRUCTIONS;
@@ -244,13 +234,11 @@ export class AppToolkit extends AgentToolkit {
 	private readonly client: ClientGetter;
 	/** The host: the workspace, the scaffold, the packer and the dev sessions. */
 	private readonly host: AgentHost;
-	/** Asks the user before an app is published or submitted. */
-	private readonly confirm: ConfirmFn;
 	/** How often to ask for the build's progress. */
 	private readonly pollMs: number;
 	/** How long to wait for the build. */
 	private readonly buildWaitMs: number;
-	/** Aborted when the user stops the run; the build wait ends, and a yes that comes after it publishes nothing. */
+	/** Aborted when the user stops the run; the build wait ends. */
 	private readonly signal?: AbortSignal;
 
 	/**
@@ -258,14 +246,12 @@ export class AppToolkit extends AgentToolkit {
 	 *
 	 * @param client - The host's client getter.
 	 * @param host - The agent host.
-	 * @param confirm - Asks the user before a version is published or submitted for review.
 	 * @param opts - Timing: how often to read the build's progress (default 3 s) and how long to wait for it (default 540 s); and the run's stop signal.
 	 */
-	constructor(client: ClientGetter, host: AgentHost, confirm: ConfirmFn, opts: { pollMs?: number; buildWaitMs?: number; signal?: AbortSignal } = {}) {
+	constructor(client: ClientGetter, host: AgentHost, opts: { pollMs?: number; buildWaitMs?: number; signal?: AbortSignal } = {}) {
 		super();
 		this.client = client;
 		this.host = host;
-		this.confirm = confirm;
 		this.pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
 		this.buildWaitMs = opts.buildWaitMs ?? DEFAULT_BUILD_WAIT_MS;
 		this.signal = opts.signal;
@@ -368,13 +354,14 @@ export class AppToolkit extends AgentToolkit {
 	}
 
 	/**
-	 * Publishes a built version to an audience, after the user says yes.
+	 * Gets a publish ready: checks the arguments, picks the version, and names
+	 * the client call that publishes or submits it. Only reads.
 	 *
 	 * @param args - The `publish_app` arguments.
-	 * @returns What was done, or the text telling the model the user declined.
+	 * @returns The step: its act and run, or a run that only reports when there is nothing to do.
 	 * @throws When an argument is wrong or the version cannot serve yet.
 	 */
-	private async publish(args: Record<string, unknown>): Promise<string> {
+	private async preparePublish(args: Record<string, unknown>): Promise<ToolStep> {
 		const app = await appArg(this.host, args, 'published');
 		const target = textArg(args, 'target') as Target;
 		if (!TARGETS.includes(target)) throw new Error("target must be 'me', 'team' or 'public'.");
@@ -385,12 +372,8 @@ export class AppToolkit extends AgentToolkit {
 		const client = requireClient(this.client);
 
 		const version = this.versionToPublish(app, await client.listDeployments(app.id), requested);
-		const plan = this.planFor(client, app, version, target, team);
-		if (typeof plan === 'string') return plan;
-		if (!(await this.confirm(plan.title, plan.message))) return declined(plan.title);
-		// a yes clicked after Stop must not publish: the run that asked is over
-		if (this.signal?.aborted) throw new Error(`The user stopped the run, so this was not done: ${plan.title}.`);
-		return plan.run();
+		const step = this.planFor(client, app, version, target, team);
+		return typeof step === 'string' ? { run: async () => step } : step;
 	}
 
 	/**
@@ -431,29 +414,26 @@ export class AppToolkit extends AgentToolkit {
 	 * @param version - The version to publish.
 	 * @param target - The audience.
 	 * @param team - The team, for a team audience.
-	 * @returns What to ask and do; or the final text, when there is nothing to do and so nothing to ask.
+	 * @returns The client call to make, as act and run; or the final text, when there is nothing to do.
 	 * @throws When the version's state cannot be published to everyone.
 	 */
-	private planFor(client: RocketRideClient, app: IdentifiedApp, version: Version, target: Target, team: string): Plan | string {
+	private planFor(client: RocketRideClient, app: IdentifiedApp, version: Version, target: Target, team: string): ToolStep | string {
 		const n = version.registryVersion;
-		const label = app.name ? `${app.name} (${app.id})` : app.id;
-		const bind = (audience: string, words: string, effect: string): Plan => ({
-			title: `Publish ${label} v${n} to ${words}`,
-			message: `Publish ${label} v${n} to ${words}? ${effect}`,
+		const bind = (audience: string): ToolStep => ({
+			act: { name: 'publishApp', params: [app.id, n, audience] },
 			run: async () => {
 				await client.publishApp(app.id, n, audience);
-				return `Published v${n} to ${words}.`;
+				return `Published v${n} to ${audienceWords(target, team)}.`;
 			},
 		});
 
-		if (target === 'me') return bind('@me', audienceWords(target, team), 'Only you can open it.');
-		if (target === 'team') return bind(`@team/${team}`, audienceWords(target, team), 'Everyone on that team can open it.');
+		if (target === 'me') return bind('@me');
+		if (target === 'team') return bind(`@team/${team}`);
 
 		switch (version.state) {
 			case 'private':
 				return {
-					title: `Submit ${label} v${n} for review`,
-					message: `Submit ${label} v${n} for review so it can go public? It goes public only after an admin approves it.`,
+					act: { name: 'submitApp', params: [app.id, n] },
 					run: async () => {
 						await client.submitApp(app.id, n);
 						return `Submitted v${n} for review; it goes public after an admin approves it.`;
@@ -462,7 +442,7 @@ export class AppToolkit extends AgentToolkit {
 			case 'submit':
 				return `v${n} is already waiting for review.`;
 			case 'ready':
-				return bind('@public', audienceWords(target, team), 'It is approved, so it goes live to everyone straight away.');
+				return bind('@public');
 			default:
 				throw new Error(`v${n} of ${app.id} is '${version.state}', so it can't go public. Call deploy_app for a new version and publish that.`);
 		}
@@ -518,7 +498,7 @@ export class AppToolkit extends AgentToolkit {
 					required: ['app', 'target'],
 					additionalProperties: false,
 				},
-				execute: (args) => this.publish(args),
+				prepare: (args) => this.preparePublish(args),
 			}),
 		];
 	}
