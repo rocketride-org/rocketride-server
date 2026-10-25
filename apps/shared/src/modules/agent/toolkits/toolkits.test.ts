@@ -29,13 +29,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { RocketRideClient } from 'rocketride';
+import type { ChatAskAnswer, ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
 import type { ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { GuideFileSystem, guidePathFor } from '../guides';
-import type { AgentDevSession, AgentHost } from '../host';
+import type { AgentDevSession, AgentHost, ApprovalPrefs, ApprovalSettings, Grant } from '../host';
 import type { AgentTool } from '../tools';
 import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo } from './appCheck';
+import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
 import { declined, NOT_CONNECTED_MESSAGE, type ConfirmFn } from './common';
 import { FilesystemTools } from './filesystem';
@@ -593,6 +595,127 @@ test('rocketride_client explains a call it cannot make', async () => {
 		'only the live-object call reached the client'
 	);
 	await assert.rejects(clientTool(null).execute({ method: 'getServices' }), { message: NOT_CONNECTED_MESSAGE });
+});
+
+// =============================================================================
+// APPROVALS — the list, the card, the modes and the checked client
+// =============================================================================
+
+/**
+ * A chat ask that answers each card in turn from `answers`; 'wait' leaves a
+ * card open until something approves it.
+ *
+ * @param answers - How each card ends, in order; past the end, 'deny'.
+ * @returns The ask, and every card it was shown.
+ */
+function fakeAsk(answers: Array<ChatAskAnswer | 'wait'>): { ask: (card: ChatAskCard) => ChatAsking; cards: ChatAskCard[] } {
+	const cards: ChatAskCard[] = [];
+	const ask = (card: ChatAskCard): ChatAsking => {
+		cards.push(card);
+		const next = answers.shift() ?? 'deny';
+		let settle: (answer: ChatAskAnswer) => void = () => undefined;
+		const answer = new Promise<ChatAskAnswer>((resolve) => {
+			settle = resolve;
+		});
+		if (next !== 'wait') settle(next);
+		return { answer, approve: () => settle('approve') };
+	};
+	return { ask, cards };
+}
+
+/** Approval settings a test changes by hand; every grant the run turns on is recorded. */
+function fakeSettings(): ApprovalSettings & { set(prefs: Partial<ApprovalPrefs>): void; granted: Grant[] } {
+	let prefs: ApprovalPrefs = { mode: 'ask', grants: { schedules: false, deploymentToggles: false } };
+	const listeners = new Set<() => void>();
+	const granted: Grant[] = [];
+	return {
+		read: () => prefs,
+		subscribe: (listener) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+		grant: (kind) => granted.push(kind),
+		set: (next) => {
+			prefs = { ...prefs, ...next };
+			for (const listener of [...listeners]) listener();
+		},
+		granted,
+	};
+}
+
+/** One run's approvals over a client, in a workspace with the app `a-ui` (id `acme.a`, named Alpha). */
+function approvalsFor(client: RocketRideClient | null, ask: (card: ChatAskCard) => ChatAsking, opts: { settings?: ApprovalSettings; signal?: AbortSignal } = {}): Approvals {
+	const vfs = createMemoryWorkspace({ 'apps/a-ui/package.json': JSON.stringify({ name: 'x', appManifest: { id: 'acme.a', name: 'Alpha' } }) });
+	return new Approvals({ client: () => client, vfs, ask, settings: opts.settings, signal: opts.signal ?? new AbortController().signal });
+}
+
+/** Calls a client method by its dotted name, on the object that holds it. */
+function callMethod(client: RocketRideClient | null, name: string, params: unknown[]): unknown {
+	const [first, second] = name.split('.');
+	const root = client as unknown as Record<string, Record<string, (...p: unknown[]) => unknown>>;
+	return second === undefined ? (root as unknown as Record<string, (...p: unknown[]) => unknown>)[first](...params) : root[first][second](...params);
+}
+
+/** An act let through by `approvals`, then run: the run makes the announced call through the checked client. */
+async function approveAndRun(approvals: Approvals, name: string, params: unknown[]): Promise<string> {
+	const run = await approvals.approve({ name, params }, async () => JSON.stringify(await callMethod(approvals.client(), name, params)));
+	return run();
+}
+
+/** Waits a few milliseconds at a time, up to 100 times, for `ready`. */
+async function until(ready: () => boolean): Promise<void> {
+	for (let i = 0; i < 100 && !ready(); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+}
+
+test("an asked call runs only after Approve, with a card in the user's words; Deny and Stop run nothing", async () => {
+	const { client, calls } = scriptedClient({ publishApp: { publish: {} }, 'deploy.remove': {} });
+	const yes = fakeAsk(['approve']);
+	await approveAndRun(approvalsFor(client, yes.ask), 'publishApp', ['acme.a', 4, '@public']);
+	assert.deepEqual(yes.cards, [{ title: 'Publish Alpha (acme.a) v4 to everyone', detail: 'It is approved, so it goes live to everyone straight away.' }]);
+	assert.equal(calls.length, 1);
+
+	await assert.rejects(approveAndRun(approvalsFor(client, fakeAsk(['deny']).ask), 'publishApp', ['acme.a', 4, '@public']), /^Error: The user declined: Publish Alpha \(acme\.a\) v4 to everyone\./);
+	// the name lookups fail on this client, so the card falls back to ids
+	await assert.rejects(approveAndRun(approvalsFor(client, fakeAsk(['stopped']).ask), 'deploy.remove', ['p1', 't1']), /^Error: Not done: the user stopped the run before answering: Remove p1 from team t1\./);
+	assert.equal(calls.length, 1, 'only the approved call reached the client');
+});
+
+test('Auto runs an ask with no card, never stays refused, and switching to Auto approves a waiting card', async () => {
+	const { client, calls } = scriptedClient({ 'deploy.disable': {}, 'account.deleteAccount': {} });
+	const settings = fakeSettings();
+	const waiting = fakeAsk(['wait']);
+	const running = approveAndRun(approvalsFor(client, waiting.ask, { settings }), 'deploy.disable', ['p1', 't1']);
+	await until(() => waiting.cards.length === 1);
+	assert.equal(waiting.cards.length, 1, 'the card is waiting');
+	settings.set({ mode: 'auto' });
+	await running;
+	assert.equal(calls.length, 1, 'switching to Auto approved the waiting card');
+
+	const auto = fakeAsk([]);
+	const approvals = approvalsFor(client, auto.ask, { settings });
+	await approveAndRun(approvals, 'deploy.disable', ['p2', 't1']);
+	await assert.rejects(approveAndRun(approvals, 'account.deleteAccount', []), /^Error: account\.deleteAccount is blocked: /);
+	assert.equal(auto.cards.length, 0, 'Auto showed no card');
+	assert.deepEqual(
+		calls.map(([method]) => method),
+		['deploy.disable', 'deploy.disable'],
+		'deleteAccount never reached the client'
+	);
+});
+
+test('Always allow turns the grant on, and the checked client refuses an asked call nobody announced', async () => {
+	const { client, calls } = scriptedClient({ 'deploy.setSchedule': {}, publishApp: { publish: {} } });
+	Object.assign(client, { getOrgId: () => 'org-1' });
+	const settings = fakeSettings();
+	const always = fakeAsk(['always']);
+	await approveAndRun(approvalsFor(client, always.ask, { settings }), 'deploy.setSchedule', ['p1', 'cron_1', null, 't1']);
+	assert.deepEqual(always.cards, [{ title: 'Clear the schedule of p1 (cron_1) on team t1', detail: 'It stops running on a schedule.', alwaysLabel: 'Always allow schedule changes' }]);
+	assert.deepEqual(settings.granted, ['schedules']);
+
+	const checked = approvalsFor(client, fakeAsk([]).ask).client() as unknown as { publishApp(...params: unknown[]): unknown; getOrgId(): string };
+	assert.throws(() => checked.publishApp('acme.a', 4, '@me'), /^Error: publishApp needs the user's OK, and the call that reached it didn't say it would make it/);
+	assert.equal(checked.getOrgId(), 'org-1', 'a free sync method stays sync');
+	assert.equal(calls.length, 1, 'the unannounced publish never reached the client');
 });
 
 // =============================================================================

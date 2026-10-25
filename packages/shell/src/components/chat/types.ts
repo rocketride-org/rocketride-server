@@ -100,6 +100,35 @@ export interface UseChatMessagesOptions {
 export type ChatStatusSink = (type: string, text: string) => void;
 
 // =============================================================================
+// ASK — a "Needs your OK" card a request shows, and its answer
+// =============================================================================
+
+/** A question for the user's OK, as an injected request asks it. The shell knows nothing of what it means. */
+export interface ChatAskCard {
+	/** The action and its target, in the user's words ("Publish Daybook v3 to everyone"). The answered line repeats it. */
+	readonly title: string;
+	/** What happens, in a sentence or two, shown under the title while the card waits. */
+	readonly detail?: string;
+	/** The label of an "Always allow" button, when the request offers one ("Always allow schedule changes"). */
+	readonly alwaysLabel?: string;
+}
+
+/** How a card ended. 'stopped': the turn ended first (Stop, the turn settling, a clear, an unmount), so nobody answered it. */
+export type ChatAskAnswer = 'approve' | 'always' | 'deny' | 'stopped';
+
+/** A card the request is waiting on. */
+export interface ChatAsking {
+	/** Settles once, with how the card ended. Never rejects. */
+	readonly answer: Promise<ChatAskAnswer>;
+	/**
+	 * Answers approve for the user, when something the request reads changed so
+	 * the card no longer needs asking (the user switched the agent to Auto). The
+	 * card closes as approved. Does nothing once the card has ended.
+	 */
+	approve(): void;
+}
+
+// =============================================================================
 // TURN
 // =============================================================================
 

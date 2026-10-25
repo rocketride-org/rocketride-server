@@ -119,6 +119,55 @@ export interface AgentHost {
 }
 
 // =============================================================================
+// APPROVAL SETTINGS — the user's mode and grants, as the agent reads them
+// =============================================================================
+
+/**
+ * Ask: an action the approval list rates as asking waits for the user's OK.
+ * Auto: it runs without asking. Auto judges nothing; it just doesn't ask, and
+ * an action the list never allows stays refused.
+ */
+export type ApprovalMode = 'ask' | 'auto';
+
+/** The routine kinds a card can offer "Always allow" for. Publishing, submitting, removing a deployment and deleting a file are never among them. */
+export type Grant = 'schedules' | 'deploymentToggles';
+
+/** The user's approval settings at one moment. */
+export interface ApprovalPrefs {
+	/** Ask first, or don't ask. */
+	readonly mode: ApprovalMode;
+	/** The kinds the user has always allowed. */
+	readonly grants: Readonly<Record<Grant, boolean>>;
+}
+
+/**
+ * The user's approval settings as a run sees them. It reads them and hears
+ * every change; it can turn a grant on for the user's "Always allow" click,
+ * and has no way to set the mode.
+ */
+export interface ApprovalSettings {
+	/**
+	 * The settings now.
+	 *
+	 * @returns The mode and grants.
+	 */
+	read(): ApprovalPrefs;
+	/**
+	 * Calls back after every change.
+	 *
+	 * @param listener - Called with no arguments; read() has the new settings.
+	 * @returns The unsubscribe.
+	 */
+	subscribe(listener: () => void): () => void;
+	/**
+	 * Turns a grant on. Called only for the user's "Always allow" click.
+	 *
+	 * @param kind - The grant the card offered.
+	 */
+	grant(kind: Grant): void;
+}
+
+// =============================================================================
 // REGISTRY
 // =============================================================================
 
