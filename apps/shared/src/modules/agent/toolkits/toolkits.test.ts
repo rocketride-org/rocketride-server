@@ -454,7 +454,10 @@ test('the README, CLI and Python guides are not served', async () => {
 test('publish_app and delete_file name their exact act, and only an approved one acts', async () => {
 	const publish = { app: 'a-ui', target: 'public' };
 	const { client, calls } = fakeClient({ listings: [[row(4, 'ok', 'ready')]] });
-	const step = await toolOf(appTools(() => client), 'publish_app').tool.prepare(publish);
+	const step = await toolOf(
+		appTools(() => client),
+		'publish_app'
+	).tool.prepare(publish);
 	assert.deepEqual(step.act, { name: 'publishApp', params: ['acme.a', 4, '@public'] });
 	assert.deepEqual(calls, ['listDeployments'], 'preparing publishes nothing');
 
@@ -725,7 +728,10 @@ test("deploy_app waits for the version it uploaded, not a teammate's newer one",
 	// The upload reply names v5; a teammate's v6 lands beside it and is built first.
 	const listings = [[row(4)], [row(6, 'building'), row(5, 'queued'), row(4)], [row(6), row(5, 'building'), row(4)], [row(6), row(5), row(4)]];
 	const { client } = fakeClient({ listings, added: { artifact: { registryVersion: 5, buildStatus: 'queued' } } });
-	const result = await toolOf(appTools(() => client), 'deploy_app').execute({ app: 'a-ui', message: 'Mine' });
+	const result = await toolOf(
+		appTools(() => client),
+		'deploy_app'
+	).execute({ app: 'a-ui', message: 'Mine' });
 	assert.equal(result, 'Deployed v5; server build OK.');
 });
 
