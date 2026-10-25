@@ -46,14 +46,20 @@
  * and store-illegal characters are refused here with LLM-readable errors —
  * backends still validate again).
  *
+ * Reads and searches show a `«secret:<id>»` marker in place of each secret
+ * value, and writes and edits put the value back (./secretMarkers.ts). The
+ * server's guides under .rocketride/ show as served.
+ *
  * Tool results are strings fed straight back to the LLM; structured
  * results are JSON.
  */
 
 import { sha256Hex } from '../../vfs/hash';
-import { ROCKETRIDE_ROOT } from '../../vfs/referenceTree';
+import { ROCKETRIDE_ROOT, isReferencePath } from '../../vfs/referenceTree';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
+import { replaceSpans } from './common';
+import { SecretMarkers } from './secretMarkers';
 
 // =============================================================================
 // CONSTANTS — caps and hygiene
@@ -164,6 +170,9 @@ export class FilesystemTools extends AgentToolkit {
 	/** SHA-256 of each file's full content as this run last read or wrote it, by path. */
 	private readonly readHashes = new Map<string, string>();
 
+	/** The secret values this run's reads hid, each with its marker; writes put them back. */
+	private readonly secrets = new SecretMarkers();
+
 	/** The host's after-save hook, if any. */
 	private readonly afterSave?: (path: string) => Promise<string>;
 
@@ -252,10 +261,27 @@ export class FilesystemTools extends AgentToolkit {
 	private async noteAfterSave(path: string): Promise<string> {
 		if (!this.afterSave) return '';
 		try {
-			return await this.afterSave(path);
+			// step: the engine's validate may quote the config, values included
+			return this.secrets.hideKnown(await this.afterSave(path));
 		} catch {
 			return '';
 		}
+	}
+
+	/**
+	 * A file's text as the model sees it: each secret value as its marker, and
+	 * the note a read ends with. A guide under .rocketride/ is the server's
+	 * text, not the user's, and no editor or tool can change it, so it shows
+	 * as served: its examples stay whole, with no note to move them to
+	 * Variables. Every tool result still passes through redactText
+	 * (wave/loop.ts).
+	 *
+	 * @param path - Canonical path.
+	 * @param text - The file's full content.
+	 * @returns The text to show, and the note ('' when nothing was hidden).
+	 */
+	private shown(path: string, text: string): { text: string; note: string } {
+		return isReferencePath(path) ? { text, note: '' } : this.secrets.hide(path, text);
 	}
 
 	/**
@@ -301,6 +327,10 @@ export class FilesystemTools extends AgentToolkit {
 		let text = String(await this.vfs.read(path));
 		// step: record the whole file's hash, windowed or not — it is what edits are checked against
 		this.readHashes.set(path, await sha256Hex(text));
+		// step: hide secret values before any window — a window could cut one in half, and half a key no longer matches
+		const hidden = this.shown(path, text);
+		text = hidden.text;
+		const note = hidden.note ? `\n[${hidden.note}]` : '';
 
 		// step: line window first — the usual partial-read path
 		let header = '';
@@ -316,9 +346,9 @@ export class FilesystemTools extends AgentToolkit {
 
 		// step: cap by UTF-8 byte length — the cap bounds payload, not chars
 		const bytes = new TextEncoder().encode(text);
-		if (bytes.length <= cap) return header + text;
+		if (bytes.length <= cap) return header + text + note;
 		const truncated = new TextDecoder().decode(bytes.slice(0, cap));
-		return `${header}${truncated}\n[TRUNCATED: showing first ${cap} of ${bytes.length} bytes — narrow with offset/limit or raise maxBytes]`;
+		return `${header}${truncated}\n[TRUNCATED: showing first ${cap} of ${bytes.length} bytes — narrow with offset/limit or raise maxBytes]${note}`;
 	}
 
 	/**
@@ -331,6 +361,8 @@ export class FilesystemTools extends AgentToolkit {
 	 */
 	private async writeFile(rawPath: unknown, content: string): Promise<string> {
 		const path = normalizePath(rawPath);
+		// step: the model writes markers; the file gets the values they stand for
+		content = this.secrets.reveal(content, 'write_file');
 		const size = new TextEncoder().encode(content).length;
 		if (size > WRITE_MAX_BYTES) {
 			throw new Error(`write_file caps at ${WRITE_MAX_BYTES} bytes per file (got ${size}).`);
@@ -357,14 +389,22 @@ export class FilesystemTools extends AgentToolkit {
 	 */
 	private async editFile(rawPath: unknown, oldString: string, newString: string, replaceAll: boolean): Promise<string> {
 		const path = normalizePath(rawPath);
+		// step: a path the view refuses, such as the read-only .rocketride/, is refused before any anchor is matched
+		this.vfs.assertWritable?.(path);
 		if (!oldString) throw new Error('edit_file needs a non-empty oldString anchor.');
 		if (oldString === newString) throw new Error('oldString and newString are identical — nothing to change.');
+		// step: refuse a marker this run did not make; the replacement's markers become the values they stand for
+		this.secrets.reveal(oldString, 'edit_file');
+		const replacement = this.secrets.reveal(newString, 'edit_file');
 		this.guardDirty(path, 'edit_file');
 		const text = String(await this.vfs.read(path));
 		await this.guardRead(path, 'edit_file', text);
 
+		// step: match the anchor against the file as the model sees it, markers in place, so an anchor cannot test a guess at a hidden value
+		const found = this.secrets.anchors(path, text, oldString);
+
 		// step: count anchors — zero is a miss, several without replaceAll is ambiguous
-		const occurrences = text.split(oldString).length - 1;
+		const occurrences = found.length;
 		if (occurrences === 0) {
 			throw new Error(`edit_file: oldString not found in ${path}. Re-read the file — the anchor must match exactly, including whitespace.`);
 		}
@@ -372,8 +412,8 @@ export class FilesystemTools extends AgentToolkit {
 			throw new Error(`edit_file: oldString matches ${occurrences} places in ${path}. Extend the anchor to make it unique, or pass replaceAll: true.`);
 		}
 
-		// step: a replacer function keeps '$&' and '$$' in newString literal
-		const updated = replaceAll ? text.split(oldString).join(newString) : text.replace(oldString, () => newString);
+		// step: splice the replacement in as written, so '$&' and '$$' in newString stay literal
+		const updated = replaceSpans(text, replaceAll ? found : found.slice(0, 1), () => replacement);
 		const size = new TextEncoder().encode(updated).length;
 		if (size > WRITE_MAX_BYTES) {
 			throw new Error(`edit_file result exceeds the ${WRITE_MAX_BYTES}-byte file cap.`);
@@ -412,7 +452,7 @@ export class FilesystemTools extends AgentToolkit {
 	 * the cache as they go.
 	 *
 	 * @param pattern - The text or regex to find.
-	 * @param rawPath - Optional directory to search under ('' = whole tree).
+	 * @param rawPath - Optional directory to search under, or one file to search ('' = whole tree).
 	 * @param isRegex - Treat pattern as a JavaScript regular expression.
 	 * @param maxResults - Result cap (clamped to SEARCH_MAX_RESULTS).
 	 * @returns Matches as path:line:text rows, or a no-match message.
@@ -435,24 +475,31 @@ export class FilesystemTools extends AgentToolkit {
 			matcher = (line) => line.toLowerCase().includes(needle);
 		}
 
-		// step: bounded walk, then read-and-scan through the cache
+		// step: bounded walk, then read through the cache; a file path searches that one file
+		const root = normalizePath(rawPath ?? '', true);
 		const files: string[] = [];
-		await this.collectSearchFiles(normalizePath(rawPath ?? '', true), files);
-		const matches: string[] = [];
-		for (let i = 0; i < files.length && matches.length < cap; i += SEARCH_READ_BATCH) {
+		if (root && (await this.entryType(root)) === 'file') files.push(root);
+		else await this.collectSearchFiles(root, files);
+		const contents: Array<[file: string, content: string]> = [];
+		for (let i = 0; i < files.length; i += SEARCH_READ_BATCH) {
 			// step: one batched read per chunk — unreadable files come back omitted
 			const batch = files.slice(i, i + SEARCH_READ_BATCH);
-			const contents = await this.vfs.readMany(batch);
+			const read = await this.vfs.readMany(batch);
 			for (const file of batch) {
-				if (matches.length >= cap) break;
-				const raw = Object.hasOwn(contents, file) ? contents[file] : undefined;
-				if (raw === undefined) continue;
-				const content = String(raw);
-				if (content.length > SEARCH_MAX_FILE_CHARS) continue;
-				const lines = content.split('\n');
-				for (let n = 0; n < lines.length && matches.length < cap; n++) {
-					if (matcher(lines[n])) matches.push(`${file}:${n + 1}: ${lines[n].trim().slice(0, 200)}`);
-				}
+				const raw = Object.hasOwn(read, file) ? read[file] : undefined;
+				if (raw !== undefined && String(raw).length <= SEARCH_MAX_FILE_CHARS) contents.push([file, String(raw)]);
+			}
+		}
+
+		// step: hide every file once before scanning any — a value that only a later file names as a secret must not show in an earlier one
+		for (const [file, content] of contents) this.shown(file, content);
+		const matches: string[] = [];
+		for (const [file, content] of contents) {
+			if (matches.length >= cap) break;
+			// step: match and clip the text with its secrets hidden, so no line shows one and no pattern can probe one
+			const lines = this.shown(file, content).text.split('\n');
+			for (let n = 0; n < lines.length && matches.length < cap; n++) {
+				if (matcher(lines[n])) matches.push(`${file}:${n + 1}: ${lines[n].trim().slice(0, 200)}`);
 			}
 		}
 
@@ -588,12 +635,12 @@ export class FilesystemTools extends AgentToolkit {
 			}),
 			new AgentTool({
 				name: 'search_files',
-				description: `Search file contents across the workspace (or one subtree). Literal case-insensitive by default; set isRegex for a JavaScript regex. Returns path:line:text matches, capped at ${SEARCH_MAX_RESULTS}. Build trees are skipped.`,
+				description: `Search file contents across the workspace (or one subtree or file). Literal case-insensitive by default; set isRegex for a JavaScript regex. Returns path:line:text matches, capped at ${SEARCH_MAX_RESULTS}. Build trees are skipped.`,
 				parameters: {
 					type: 'object',
 					properties: {
 						pattern: { type: 'string', description: 'Text or regex to find' },
-						path: { type: 'string', description: 'Optional directory to search under; omit for the whole workspace' },
+						path: { type: 'string', description: 'Optional directory to search under, or one file to search; omit for the whole workspace' },
 						isRegex: { type: 'boolean', description: 'Treat pattern as a regular expression' },
 						maxResults: { type: 'number', description: `Match cap (default ${SEARCH_DEFAULT_RESULTS}, max ${SEARCH_MAX_RESULTS})` },
 					},

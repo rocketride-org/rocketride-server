@@ -49,7 +49,7 @@ import type { RocketRideClient } from 'rocketride';
 
 import type { AgentHost } from '../host';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
-import { messageOf, numberArg, requireClient, sleep, textArg, type ClientGetter } from './common';
+import { messageOf, numberArg, redactText, requireClient, sleep, textArg, type ClientGetter } from './common';
 import { findApp, readApps, type AppEntry } from './inventory';
 
 // =============================================================================
@@ -341,7 +341,8 @@ export class AppToolkit extends AgentToolkit {
 				if (state === 'ok') return `Deployed v${version.registryVersion}; server build OK.`;
 				if (state === 'failed') {
 					const { log } = await client.buildLog(appId, version.registryVersion);
-					return `Deployed v${version.registryVersion}; server build FAILED:\n${log.slice(-BUILD_LOG_TAIL_CHARS) || '(the build recorded no log)'}`;
+					// redact before the cut: a cut inside a credential leaves a part no pattern matches
+					return `Deployed v${version.registryVersion}; server build FAILED:\n${redactText(log).slice(-BUILD_LOG_TAIL_CHARS) || '(the build recorded no log)'}`;
 				}
 			}
 			if (Date.now() >= deadline || this.signal?.aborted) break;

@@ -80,33 +80,51 @@ const REDACTED = '[redacted]';
 
 /**
  * Field names that hold secrets: api keys, secrets, passwords and passphrases,
- * tokens, credentials, private keys, access/account/ssh keys (including
+ * credentials, private keys, access/account/ssh keys (including
  * `serviceAccountKey`), bearer values, auth and header values, webhook URLs and
- * connection strings.
+ * connection strings. A name is read as words (`secretKind`), and this is
+ * tested against the words joined, up to the end of each word in turn: so
+ * `client_secret`, `secretKey` and `apikey` match, and `secretary` and
+ * `passwordless` do not.
  *
  * A bare `url` is not matched: it is too common a field name to hide. The one
  * secure field that goes by it (graph_falkordb.url) is a known gap.
  */
-const SECRET_KEY = /api[_-]?key|secret|passw(?:or)?d|passphrase|token|credential|private[_-]?key|(?:access|account|ssh)[_-]?key|bearer|auth(?:orization)?[_-]?value|header[_-]?value|webhook[_-]?url|connection[_-]?string/i;
+const SECRET_WORD = /(?:apikey|secret|passw(?:or)?d|passphrase|credential|privatekey|(?:access|account|ssh)key|bearer|auth(?:orization)?value|headervalue|webhookurl|connectionstring)s?$/;
 
-/** A secret reference: `${ROCKETRIDE_*}` names a key without holding it. */
-const PLACEHOLDER = /^\$\{ROCKETRIDE_\w+\}$/;
+/**
+ * A token field: the name's last word is `token` (`token`, `auth_token`,
+ * `refreshToken`). With other words after it, `token` names a setting
+ * (`token_limit`, `token_count`); `tokens` and `tokenizer` are other words.
+ */
+const TOKEN_WORD = /token$/;
+
+/**
+ * A variable reference: `${NAME}` names a value without holding it. The server
+ * fills in only `${ROCKETRIDE_*}`, and any other name arrives as written, so
+ * neither holds a key. The guide's wrong-prefix example, `"apikey":
+ * "${OPENAI_KEY}"`, must reach the model whole.
+ */
+const PLACEHOLDER = /^\$\{[A-Za-z_]\w*\}$/;
 
 // =============================================================================
 // CLIP
 // =============================================================================
 
 /**
- * Cuts text that is too long and says how much was cut and what to do about it.
+ * Redacts text, then cuts it when it is too long and says how much was cut
+ * and what to do about it.
  *
  * @param text - The text to return.
  * @param hint - How the model can see less or see the rest (shown in the cut notice).
  * @param max - The most characters to keep.
- * @returns The text unchanged when it fits, otherwise its first `max` characters and a notice.
+ * @returns The redacted text when it fits, otherwise its first `max` characters and a notice.
  */
 export function clip(text: string, hint: string, max: number = RESULT_MAX_CHARS): string {
-	if (text.length <= max) return text;
-	return `${text.slice(0, max)}\n[TRUNCATED: showing first ${max} of ${text.length} chars — ${hint}]`;
+	// redact before the cut: a cut inside a credential leaves a part no pattern matches
+	const safe = redactText(text);
+	if (safe.length <= max) return safe;
+	return `${safe.slice(0, max)}\n[TRUNCATED: showing first ${max} of ${safe.length} chars — ${hint}]`;
 }
 
 // =============================================================================
@@ -126,6 +144,53 @@ export function isWalkable(value: unknown): value is Record<string, unknown> | u
 	return proto === Object.prototype || proto === null;
 }
 
+/** What a secret-named field is named for: a token, or any other secret (see `secretKind`). */
+export type SecretKind = 'token' | 'secret';
+
+/**
+ * The words of a field name, lower-cased. `_`, `-`, `.`, spaces, digits and
+ * camelCase all split words: `OPENAI_API_KEY`, `openaiApiKey` and
+ * `openai.api-key` all give `openai`, `api`, `key`.
+ *
+ * @param name - A JSON or YAML key.
+ * @returns Its words, in order.
+ */
+function nameWords(name: string): string[] {
+	return name
+		.replace(/([a-z\d])([A-Z])/g, '$1 $2')
+		.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+		.toLowerCase()
+		.split(/[^a-z]+/)
+		.filter((word) => word.length > 0);
+}
+
+/**
+ * Whether a field name holds secrets, and what kind. The name is read as
+ * words, so a word inside another word does not count: `max_tokens`,
+ * `tokenizer` and `token_limit` are not secret-named, and `auth_token` is.
+ *
+ * @param name - A JSON or YAML key.
+ * @returns 'secret' for a `SECRET_WORD`, 'token' when the last word is `token`, or null.
+ */
+export function secretKind(name: string): SecretKind | null {
+	let joined = '';
+	for (const word of nameWords(name)) {
+		joined += word;
+		if (SECRET_WORD.test(joined)) return 'secret';
+	}
+	return TOKEN_WORD.test(joined) ? 'token' : null;
+}
+
+/**
+ * Whether a field name holds secrets (see `secretKind`).
+ *
+ * @param name - A JSON or YAML key.
+ * @returns True for api keys, secrets, passwords, tokens and the rest of `SECRET_WORD`.
+ */
+export function isSecretName(name: string): boolean {
+	return secretKind(name) !== null;
+}
+
 /**
  * Copies a value, hiding strings that are secrets.
  *
@@ -140,7 +205,7 @@ function redactValue(value: unknown, secret: boolean): unknown {
 
 	const out: Record<string, unknown> = {};
 	for (const [key, child] of Object.entries(value)) {
-		const named = SECRET_KEY.test(key);
+		const named = isSecretName(key);
 		out[key] = redactValue(child, secret || named);
 	}
 	return out;
@@ -149,12 +214,12 @@ function redactValue(value: unknown, secret: boolean): unknown {
 /**
  * Copies a value with every secret string replaced by `[redacted]`.
  *
- * A string is a secret when its key looks like one (see `SECRET_KEY`: api key,
+ * A string is a secret when its key looks like one (see `secretKind`: api key,
  * secret, password, token, credential, private/access/account/ssh key, bearer,
  * auth or header value, webhook URL, connection string), or when a key like that
  * sits above it. That includes a field named `token`: node configs use it for
  * real secrets. A bare `url` is not hidden, so graph_falkordb.url (a secure
- * field) is a known gap. `${ROCKETRIDE_*}` placeholders stay, since they name a
+ * field) is a known gap. `${NAME}` placeholders stay, since they name a
  * secret without holding it. Numbers, booleans and null are never changed.
  *
  * @param value - The value a tool is about to show the model.
@@ -162,6 +227,209 @@ function redactValue(value: unknown, secret: boolean): unknown {
  */
 export function redactSecrets<T>(value: T): T {
 	return redactValue(value, false) as T;
+}
+
+// =============================================================================
+// REDACT TEXT — credentials inside free text
+// =============================================================================
+
+/**
+ * `redactSecrets` works on structured results, by field name. Text has no
+ * fields, so `findSecrets` looks for what a credential looks like: a known key
+ * shape, a bearer token, a password in a URL, a private key block, or a JSON
+ * string or number under a secret-named key (`"apikey": "..."`). `redactText`
+ * hides what it finds; every tool result passes through it on its way to the
+ * model (wave/loop.ts), and so do the answer, the session rows and the title.
+ * `looksLikeCredential` runs the same search on what the user types, and
+ * counts only what is sure to be a key. The file tools put markers in place
+ * of these instead (`./secretMarkers.ts`), so an edit can put the real value
+ * back; `redactText` leaves every marker as it is, since `[redacted]` in its
+ * place would be written over the value.
+ *
+ * Bare `key: value` lines are left to the file markers, which apply them to
+ * YAML files only: in code, `token: string` is a type, not a secret.
+ */
+
+/** One credential found in text. */
+export interface SecretSpan {
+	/** Where it starts. */
+	start: number;
+	/** Where it ends (exclusive). */
+	end: number;
+	/** What it looks like, as the pasted-key message names it ("OpenAI-style"). */
+	kind: string;
+	/** Whether it is sure to be a key, sure enough to hold a pasted message back: a key shape, a private key or a URL password. */
+	sure: boolean;
+}
+
+/** A marker the file tools show in place of a secret value: `«secret:<id>»`. */
+const MARKER = /^«secret:[^»\s]{1,64}»$/;
+
+/** Every marker in a text. */
+const MARKERS = /«secret:[^»\s]{1,64}»/g;
+
+/**
+ * Credential shapes, most specific first, each with the kind it is reported
+ * as. A lookbehind keeps a shape from starting inside a longer word (`task-…`
+ * holds `sk-`). For bearer tokens and URL passwords only the secret part
+ * matches, so `Bearer` and the user and host stay readable. A bearer token is
+ * not sure: `Bearer` may be followed by an ordinary word. A URL password stops
+ * at `?` and `#`, which a URL cannot hold before its host, and at `«`, which
+ * starts a marker.
+ */
+const SHAPES: ReadonlyArray<{ kind: string; sure: boolean; pattern: RegExp }> = [
+	// An unclosed block (a read window cut it) runs to the end of the text.
+	{ kind: 'a private key', sure: true, pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g },
+	{ kind: 'Anthropic-style', sure: true, pattern: /(?<![\w-])sk-ant-[\w-]{16,}/g },
+	{ kind: 'OpenAI-style', sure: true, pattern: /(?<![\w-])sk-[\w-]{16,}/g },
+	{ kind: 'Stripe-style', sure: true, pattern: /(?<![\w-])[rs]k_(?:live|test)_[A-Za-z0-9]{16,}/g },
+	{ kind: 'AWS-style', sure: true, pattern: /(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])/g },
+	{ kind: 'GitHub-style', sure: true, pattern: /(?<![\w-])(?:gh[oprsu]_[A-Za-z0-9]{30,}|github_pat_\w{22,})/g },
+	{ kind: 'Slack-style', sure: true, pattern: /(?<![\w-])xox[abp]-[A-Za-z0-9-]{20,}/g },
+	{ kind: 'a bearer token', sure: false, pattern: /(?<=\bBearer )[\w.~+/-]{20,}=*/g },
+	{ kind: 'a password in a URL', sure: true, pattern: /(?<=\b[a-z][\w+.-]*:\/\/[^\s/:@?#«»]*:)[^\s/@?#«»]+(?=@)/gi },
+];
+
+/** A JSON string or number under its key, escapes allowed: group 1 is the key, group 2 a string's value as written, group 3 a number. */
+const JSON_FIELD = /"((?:[^"\\\n]|\\.){1,100})"\s*:\s*(?:"((?:[^"\\\n]|\\.)*)"|(-?\d[\d.eE+-]*))/g;
+
+/** A plain number. Under a token name it is a count or a limit (`"max_token": "4096"`), not a secret. */
+const NUMBER = /^-?\d+(?:\.\d+)?$/;
+
+/** The run token's prefix. `use` and `deploy.run` hand the run token to the model on purpose (`./rocketrideClient.ts`). */
+const RUN_TOKEN_PREFIX = 'tk_';
+
+/**
+ * Whether a value under a secret-named field holds no secret: it is empty, a
+ * `${NAME}` placeholder, a file marker, already `[redacted]`, or a
+ * plain number under a token name.
+ *
+ * @param value - The field's value, unescaped.
+ * @param kind - What the field is named for; a password or secret field holds a number as a secret.
+ * @returns True when there is nothing to hide.
+ */
+export function holdsNoSecret(value: string, kind: SecretKind = 'secret'): boolean {
+	return value === '' || value === REDACTED || PLACEHOLDER.test(value) || MARKER.test(value) || (kind === 'token' && NUMBER.test(value));
+}
+
+/**
+ * A JSON string's content as written, unescaped.
+ *
+ * @param raw - The text between the quotes.
+ * @returns The string it stands for; `raw` itself when its escapes do not parse.
+ */
+export function unescapeJson(raw: string): string {
+	try {
+		return JSON.parse(`"${raw}"`) as string;
+	} catch {
+		return raw;
+	}
+}
+
+/**
+ * Every credential in a text, in order of where it starts, overlaps kept. A
+ * file marker already stands for a value, so a span that touches one is left
+ * out. Each marker is read as a run of digits: part of a word, as the value
+ * it hides was, and the start of no shape or URL scheme. So a shape next to a
+ * marker matches only where it matched before the value was hidden:
+ * `-----END PRIVATE KEY-----sk-…` holds no `sk-` key, and hiding the block
+ * must not make one.
+ *
+ * @param text - Any text.
+ * @returns Each one's place, kind and sureness.
+ */
+function credentials(text: string): SecretSpan[] {
+	const markers = [...text.matchAll(MARKERS)].map((m) => ({ start: m.index, end: m.index + m[0].length }));
+	const touchesMarker = (start: number, end: number): boolean => markers.some((marker) => start < marker.end && end > marker.start);
+	if (markers.length > 0) text = text.replace(MARKERS, (marker) => '0'.repeat(marker.length));
+	const spans: SecretSpan[] = [];
+	for (const { kind, sure, pattern } of SHAPES) {
+		for (const m of text.matchAll(pattern)) {
+			if (!touchesMarker(m.index, m.index + m[0].length)) spans.push({ start: m.index, end: m.index + m[0].length, kind, sure });
+		}
+	}
+	for (const m of text.matchAll(JSON_FIELD)) {
+		const [whole, key, quoted, number] = m;
+		const named = secretKind(unescapeJson(key));
+		const raw = quoted ?? number;
+		const value = quoted === undefined ? number : unescapeJson(quoted);
+		// The run token is the one secret-named value the model is meant to read. A key that holds a marker is not a key the file had.
+		if (!named || holdsNoSecret(value, named) || (key === 'token' && value.startsWith(RUN_TOKEN_PREFIX)) || touchesMarker(m.index, m.index + whole.length)) continue;
+		const end = m.index + whole.length - (quoted === undefined ? 0 : 1);
+		spans.push({ start: end - raw.length, end, kind: `the "${key}" field`, sure: false });
+	}
+	return spans.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Every credential in a text, in order, overlaps merged.
+ *
+ * @param text - Any text.
+ * @returns Where each one is and what kind it is; empty when there is none.
+ */
+export function findSecrets(text: string): SecretSpan[] {
+	return mergeSpans(credentials(text));
+}
+
+/**
+ * Sorts spans and merges the ones that overlap; a merged span keeps the kind
+ * of the one that starts first.
+ *
+ * @param spans - Spans in any order.
+ * @returns Spans in order, none overlapping.
+ */
+export function mergeSpans<T extends { start: number; end: number }>(spans: T[]): T[] {
+	const merged: T[] = [];
+	for (const span of [...spans].sort((a, b) => a.start - b.start || b.end - a.end)) {
+		const last = merged[merged.length - 1];
+		if (last && span.start < last.end) last.end = Math.max(last.end, span.end);
+		else merged.push({ ...span });
+	}
+	return merged;
+}
+
+/**
+ * Replaces each span of a text.
+ *
+ * @param text - The text.
+ * @param spans - Spans in order, none overlapping (see `mergeSpans`).
+ * @param replace - The replacement for a span, given its text.
+ * @returns The text with every span replaced.
+ */
+export function replaceSpans<T extends { start: number; end: number }>(text: string, spans: T[], replace: (found: string, span: T) => string): string {
+	let out = '';
+	let at = 0;
+	for (const span of spans) {
+		out += text.slice(at, span.start) + replace(text.slice(span.start, span.end), span);
+		at = span.end;
+	}
+	return out + text.slice(at);
+}
+
+/**
+ * Hides every credential in a text (see `findSecrets`) as `[redacted]`.
+ * `${NAME}` placeholders, file markers and the run token stay.
+ *
+ * @param text - Text on its way to the model, the chat or the session file.
+ * @returns The text with each credential replaced; the same text when there is none.
+ */
+export function redactText(text: string): string {
+	const spans = findSecrets(text);
+	return spans.length === 0 ? text : replaceSpans(text, spans, () => REDACTED);
+}
+
+/**
+ * Whether a text holds something sure to be a credential: a key shape, a
+ * private key or a password in a URL. Used on what the user types, before
+ * anything is sent. A secret-named field or a `Bearer` word is not enough:
+ * `"max_token": "4096"` and "the API wants Bearer token_from_login" are not
+ * keys, and holding them back would stop the user.
+ *
+ * @param text - The user's message.
+ * @returns The kind of the first one found ("OpenAI-style"), or null.
+ */
+export function looksLikeCredential(text: string): string | null {
+	return credentials(text).find((span) => span.sure)?.kind ?? null;
 }
 
 // =============================================================================
@@ -223,14 +491,15 @@ export function textArg(args: Record<string, unknown>, key: string): string {
 const SUMMARY_DETAIL_MAX_CHARS = 200;
 
 /**
- * Error text made fit for a summary: the raw text on one line, cut short. The
- * step output keeps the full text.
+ * Error text made fit for a summary: the text redacted, on one line, cut
+ * short. The step output keeps the full text.
  *
  * @param text - The raw error text.
  * @returns At most about 200 characters on one line.
  */
 export function brief(text: string): string {
-	const line = text.replace(/\s+/g, ' ').trim();
+	// redact before the cut: a cut inside a credential leaves a part no pattern matches
+	const line = redactText(text).replace(/\s+/g, ' ').trim();
 	return line.length > SUMMARY_DETAIL_MAX_CHARS ? `${line.slice(0, SUMMARY_DETAIL_MAX_CHARS - 1).trimEnd()}…` : line;
 }
 

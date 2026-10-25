@@ -22,28 +22,36 @@
 
 // =============================================================================
 // TOOLKIT TESTS — read before edit, no overwriting unsaved editor changes, read-only guides,
-// the user says yes first, the RocketRide client tool, deploy_app keeps its version, check_app
+// the user says yes first, the RocketRide client tool, secrets stay out of the model,
+// deploy_app keeps its version, check_app
 // =============================================================================
 
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
 import type { RocketRideClient } from 'rocketride';
-import type { ChatAskAnswer, ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
+import type { ChatMessage } from 'shell';
+import { TurnController } from 'shell/src/components/chat/turns/turnController';
+import type { ChatAskAnswer, ChatAskCard, ChatAsking, ChatTurn, TextResult } from 'shell/src/components/chat/types';
 
 import type { ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
-import { docsPathFor } from '../../vfs/referenceTree';
+import { docsPathFor, isReferencePath } from '../../vfs/referenceTree';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
+import { AgentSession } from '../agent';
 import type { AgentDevSession, AgentHost, ApprovalPrefs, ApprovalSettings, Grant } from '../host';
 import { BUILDER_PROMPTS } from '../prompts';
+import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
+import type { ModelCall, QuestionSpec } from '../wave/plan';
 import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
-import { NOT_CONNECTED_MESSAGE, type ClientGetter } from './common';
+import { clip, isSecretName, looksLikeCredential, NOT_CONNECTED_MESSAGE, redactText, RESULT_MAX_CHARS, toolText, type ClientGetter } from './common';
 import { FilesystemTools } from './filesystem';
+import { SecretMarkers } from './secretMarkers';
 import { RocketRideClientToolkit } from './rocketrideClient';
 
 // =============================================================================
@@ -281,21 +289,28 @@ const toolkits = new WeakMap<MemoryWorkspace, FilesystemTools>();
 
 /**
  * Runs one filesystem tool by name against a workspace. Calls on the same
- * workspace share one toolkit, as the tools of one agent run do.
+ * workspace share one toolkit, as the tools of one agent run do. The result,
+ * and the message of an error, pass through redactText, as every call's
+ * outcome does in the agent loop (wave/loop.ts): the model only ever sees
+ * them that way.
  *
  * @param ws - The workspace the tools work on.
  * @param tool - The tool name the model would call.
  * @param args - The tool arguments.
- * @returns The tool result text.
+ * @returns The tool result text, as the model would see it.
  */
-function run(ws: MemoryWorkspace, tool: string, args: Record<string, unknown>): Promise<string> {
+async function run(ws: MemoryWorkspace, tool: string, args: Record<string, unknown>): Promise<string> {
 	if (!toolkits.has(ws)) toolkits.set(ws, new FilesystemTools(ws));
 	const found = toolkits
 		.get(ws)
 		?.tools()
 		.find((t) => t.name === tool);
 	if (!found) throw new Error(`No such tool: ${tool}`);
-	return callable(found).execute(args);
+	try {
+		return redactText(await callable(found).execute(args));
+	} catch (error) {
+		throw new Error(redactText((error as Error).message));
+	}
 }
 
 /** One row of an app's version rail, as `listDeployments` returns it. */
@@ -316,6 +331,8 @@ interface Answers {
 	listings?: Row[][];
 	/** What `deploy.add` returns. */
 	added?: unknown;
+	/** What `buildLog` returns as the log. */
+	log?: string;
 }
 
 /**
@@ -337,7 +354,7 @@ function fakeClient(answers: Answers = {}): { client: RocketRideClient; calls: s
 			add: method('add', () => answers.added ?? { artifact: { version: 3 } }),
 		},
 		listDeployments: method('listDeployments', () => listings[Math.min(listed++, listings.length - 1)]),
-		buildLog: method('buildLog', () => ({ log: '' })),
+		buildLog: method('buildLog', () => ({ log: answers.log ?? '' })),
 		publishApp: method('publishApp', () => ({ publish: {} })),
 		submitApp: method('submitApp', () => ({ artifact: {} })),
 	};
@@ -551,19 +568,20 @@ test('rocketride_client reads a filepath from the workspace, unsaved edits inclu
 test('rocketride_client results hide secrets but keep the run token, and the catalog only loses its icons', async () => {
 	const services = { llm_openai: { classType: ['llm'], description: 'Calls OpenAI.', apikey: { type: 'string', title: 'API key' } } };
 	const { client } = scriptedClient({
-		use: { token: 'tk-run-0001', pipeline: { components: [{ id: 'llm_1', config: { apikey: 'sk-fake-not-a-real-key', api_key: '${ROCKETRIDE_OPENAI_KEY}' } }] } },
-		'deploy.run': { token: 'tk-run-0002', version: 3 },
+		// Run tokens carry the engine's tk_ prefix, which redactText keeps (common.ts RUN_TOKEN_PREFIX).
+		use: { token: 'tk_run_0001', pipeline: { components: [{ id: 'llm_1', config: { apikey: 'sk-fake-not-a-real-key', api_key: '${ROCKETRIDE_OPENAI_KEY}' } }] } },
+		'deploy.run': { token: 'tk_run_0002', version: 3 },
 		getTasks: [{ token: 'tk-other-0003', name: 'Digest' }],
 		getServices: { services, icons: { i1: '<svg/>' }, version: 2 },
 	});
 	const tool = clientTool(client);
 
 	const used = await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
-	assert.match(used, /tk-run-0001/, 'use hands out its run token');
+	assert.match(used, /tk_run_0001/, 'use hands out its run token');
 	assert.doesNotMatch(used, /sk-fake-not-a-real-key/);
 	assert.match(used, /\[redacted\]/);
 	assert.match(used, /\$\{ROCKETRIDE_OPENAI_KEY\}/, 'a placeholder names a key without holding it');
-	assert.match(await tool.execute({ method: 'deploy.run', params: ['p1', 'webhook_1', 't1'] }), /tk-run-0002/);
+	assert.match(await tool.execute({ method: 'deploy.run', params: ['p1', 'webhook_1', 't1'] }), /tk_run_0002/);
 	assert.doesNotMatch(await tool.execute({ method: 'getTasks' }), /tk-other-0003/, 'a token anywhere else stays hidden');
 	assert.deepEqual(JSON.parse(await tool.execute({ method: 'getServices' })), { services, version: 2 });
 });
@@ -731,6 +749,791 @@ test('Stop while a card looks up names refuses at once, without waiting out the 
 });
 
 // =============================================================================
+// SECRETS — markers in files, redaction at every boundary, pasted keys blocked
+// =============================================================================
+
+/**
+ * The file tools show markers in place of secret values and put the values
+ * back on a write, every tool result passes through redactText, and a key the
+ * user pastes never reaches the model. Every key here is synthetic.
+ */
+
+/**
+ * A pipeline whose model node holds an inline key, the way a user might paste
+ * one, beside a placeholder that only names a key.
+ *
+ * @param key - The inline key.
+ * @returns The `.pipe` text.
+ */
+function inlineKeyPipe(key: string): string {
+	return JSON.stringify(
+		{
+			components: [
+				{ id: 'chat_1', provider: 'chat', config: { mode: 'Source' } },
+				{ id: 'llm_1', provider: 'llm_openai', config: { apikey: key, fallback: '${ROCKETRIDE_OPENAI_KEY}' } },
+			],
+		},
+		null,
+		1
+	);
+}
+
+/**
+ * The marker a text shows, asserting there is one.
+ *
+ * @param text - A read's result, or a question.
+ * @returns The first `«secret:<8 hex>»` in it.
+ */
+function markerIn(text: string): string {
+	const marker = /«secret:[0-9a-f]{8}»/.exec(text)?.[0];
+	assert.ok(marker, 'the text shows a marker');
+	return marker;
+}
+
+/** A model reply: text, or made from the question it answers. */
+type Reply = string | ((q: QuestionSpec) => string);
+
+/**
+ * A fake model that answers from a script and keeps every question it was asked.
+ *
+ * @param replies - The replies, in order; running out throws.
+ * @returns The model, with `questions`.
+ */
+function scriptedModel(replies: Reply[]): ModelCall & { questions: QuestionSpec[] } {
+	const queue = [...replies];
+	const questions: QuestionSpec[] = [];
+	const call: ModelCall = async (q) => {
+		questions.push(q);
+		const next = queue.shift();
+		if (next === undefined) throw new Error('scriptedModel: no reply left');
+		return typeof next === 'function' ? next(q) : next;
+	};
+	return Object.assign(call, { questions });
+}
+
+/** A reply asking for tool calls. */
+function plan(...calls: Array<[tool: string, args?: Record<string, unknown>]>): string {
+	return JSON.stringify({ thought: 'working', tool_calls: calls.map(([tool, args]) => ({ tool, args: args ?? {} })) });
+}
+
+/** A reply that finishes with `answer`. */
+function done(answer: string): string {
+	return JSON.stringify({ thought: 'finishing', done: true, answer });
+}
+
+/**
+ * Runs one agent turn with a scripted model, the way the Agent tab does
+ * minus the browser: no Monaco, and the chat's "Needs your OK" cards go to
+ * `opts.ask`. With no ask there is no chat to ask in, so nothing that asks
+ * runs.
+ *
+ * @param ws - The workspace.
+ * @param model - The scripted model.
+ * @param opts - The client, the conversation so far, a dev session for check_app, messages the user sends during the turn, and the chat's ask.
+ * @returns Every chunk the turn streamed, in order.
+ */
+async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; request?: string } = {}): Promise<Array<{ type: string; text: string }>> {
+	const host: AgentHost = {
+		vfs: ws,
+		scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }),
+		packApp: async () => new Uint8Array(),
+		devSession: () => opts.dev ?? null,
+	};
+	const chunks: Array<{ type: string; text: string }> = [];
+	const queued = [...(opts.queued ?? [])];
+	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, token: async () => '', signal: new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
+	await runAgent(opts.request ?? 'Describe and tidy the leak pipeline.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, model, markers: async () => null });
+	return chunks;
+}
+
+/**
+ * Makes a memory workspace refuse changes under `.rocketride/` the way the
+ * app's workspace does: assertWritable throws for a reference path, and every
+ * write runs it first, as StagedFileSystem's mutations do.
+ *
+ * @param ws - The workspace; it is changed in place.
+ * @returns The same workspace.
+ */
+function withReadOnlyReference(ws: MemoryWorkspace): MemoryWorkspace {
+	const refuse = (path: string): void => {
+		if (isReferencePath(path)) throw new Error('.rocketride/ is read-only reference. Write under apps/ or pipelines/.');
+	};
+	const write = ws.write.bind(ws);
+	ws.assertWritable = refuse;
+	ws.write = async (path, content) => {
+		refuse(path);
+		await write(path, content);
+	};
+	return ws;
+}
+
+/**
+ * A fake file store behind the shell's getClient, so AgentSession can save.
+ * The runner's 'shell' module is one stub object (scripts/stub-shell.cjs), so
+ * the fake goes onto it. Its `chat` and `use` record a call: the model's
+ * pipeline is started with `use` and asked with `chat`.
+ *
+ * @returns Every JSON file written, by store path, and the model calls made.
+ */
+function fakeStore(): { files: Map<string, unknown>; modelCalls: string[] } {
+	const shell = createRequire(__filename)('shell') as Record<string, unknown>;
+	const files = new Map<string, unknown>();
+	const modelCalls: string[] = [];
+	shell.ConnectionManager = { getInstance: () => ({ emit: () => undefined }) };
+	shell.getClient = () => ({
+		fsWriteJson: async (path: string, value: unknown) => {
+			files.set(path, value);
+		},
+		fsReadJson: async (path: string) => {
+			if (!files.has(path)) throw new Error(`File not found: ${path}`);
+			return files.get(path);
+		},
+		chat: async () => {
+			modelCalls.push('chat');
+			return { answers: [done('unexpected')] };
+		},
+		use: async () => {
+			modelCalls.push('use');
+			return { token: 'tk_standin' };
+		},
+	});
+	AgentSession.configure('rocketride.test');
+	return { files, modelCalls };
+}
+
+/**
+ * A chat turn as useChatMessages hands one to AgentSession.execute: no
+ * earlier rows, never stopped, nothing queued.
+ *
+ * @returns The turn.
+ */
+function chatTurn(): ChatTurn {
+	return { history: [], signal: new AbortController().signal, takeQueued: () => [], ask: () => ({ answer: Promise.resolve('stopped'), approve: () => undefined }) };
+}
+
+test('a .pipe read shows a marker and a note, and the marker writes the real value back', async () => {
+	// No key shape: only the field name says it is a secret.
+	const key = 'canary-inline-4d1f9a';
+	const ws = createMemoryWorkspace({ 'pipelines/a.pipe': inlineKeyPipe(key) });
+	const read = await run(ws, 'read_file', { path: 'pipelines/a.pipe' });
+	assert.ok(!read.includes(key), 'the key is hidden');
+	const marker = markerIn(read);
+	assert.match(read, /"fallback": "\$\{ROCKETRIDE_OPENAI_KEY\}"/, 'a placeholder holds no secret, so it stays');
+	assert.ok(read.endsWith('\n[1 secret value hidden (components[1].config.apikey). The file stores it in plain text; you see a marker in its place. Keep the marker as it is when you edit this file. A key written in a file should move to Variables: tell the user to set it there and use a ${ROCKETRIDE_<NAME>} placeholder.]'), read);
+	assert.equal(markerIn(await run(ws, 'read_file', { path: 'pipelines/a.pipe' })), marker, 'a re-read shows the same marker');
+
+	// edit_file: the anchor holds the marker, and the file keeps the key
+	await run(ws, 'edit_file', { path: 'pipelines/a.pipe', oldString: `"apikey": "${marker}"`, newString: `"apikey": "${marker}", "model": "gpt-5"` });
+	const config = () => JSON.parse(ws.files.get('pipelines/a.pipe') ?? '').components[1].config;
+	assert.deepEqual(config(), { apikey: key, model: 'gpt-5', fallback: '${ROCKETRIDE_OPENAI_KEY}' });
+
+	// write_file: the whole read, changed, goes back with the key in it
+	const again = await run(ws, 'read_file', { path: 'pipelines/a.pipe' });
+	await run(ws, 'write_file', { path: 'pipelines/a.pipe', content: again.slice(0, again.lastIndexOf('\n[')).replace('gpt-5', 'gpt-5-mini') });
+	assert.deepEqual(config(), { apikey: key, model: 'gpt-5-mini', fallback: '${ROCKETRIDE_OPENAI_KEY}' });
+
+	// a save's note that quotes the value shows the marker instead
+	const tools = new FilesystemTools(createMemoryWorkspace({ 'pipelines/a.pipe': inlineKeyPipe(key) }), '', async () => `\n\nvalidate: 1 error:\n- llm_1: the key ${key} was rejected`);
+	const tool = (name: string) => toolOf(tools, name);
+	const shown = markerIn(await tool('read_file').execute({ path: 'pipelines/a.pipe' }));
+	const saved = await tool('edit_file').execute({ path: 'pipelines/a.pipe', oldString: '"llm_openai"', newString: '"llm_anthropic"' });
+	assert.ok(!saved.includes(key), saved);
+	assert.match(saved, new RegExp(`the key ${shown} was rejected`));
+});
+
+test('a marker this run did not make is refused, and nothing is written', async () => {
+	const ws = createMemoryWorkspace({ 'pipelines/a.pipe': inlineKeyPipe('canary-inline-4d1f9a') });
+	const marker = markerIn(await run(ws, 'read_file', { path: 'pipelines/a.pipe' }));
+	await assert.rejects(run(ws, 'edit_file', { path: 'pipelines/a.pipe', oldString: '"llm_1"', newString: '"«secret:zz99zz99»"' }), /^Error: edit_file refused: «secret:zz99zz99» is not a marker from this run\./);
+	await assert.rejects(run(ws, 'write_file', { path: 'pipelines/b.pipe', content: '{"apikey": "«secret:00000000»"}' }), /^Error: write_file refused: «secret:00000000» is not a marker from this run\./); // gitleaks:allow, made-up test value
+
+	// a new run has its own markers: the last run's marker means nothing to it
+	const next = toolOf(new FilesystemTools(ws), 'write_file');
+	await assert.rejects(next.execute({ path: 'pipelines/c.pipe', content: `{"apikey": "${marker}"}` }), /^Error: write_file refused: «secret:[0-9a-f]{8}» is not a marker from this run\./);
+	assert.deepEqual(ws.log, []);
+});
+
+test('a guide under .rocketride/docs/ shows as served on read and search, and a write or an edit there is still refused', async () => {
+	const key = `sk-canary-guide-${'d'.repeat(12)}`;
+	const path = '.rocketride/docs/ROCKETRIDE_SETUP.md';
+	const guide = `# Setup\n\nAn example config:\n\n    OPENAI_API_KEY=${key}\n    "apikey": "\${OPENAI_KEY}" does not substitute.\n`;
+	const ws = withReadOnlyReference(createMemoryWorkspace({ [path]: guide }));
+	// the guide is the server's text: no marker and no note, and a key shape still reaches the model only as [redacted], as every tool result does
+	const read = await run(ws, 'read_file', { path });
+	assert.equal(read, guide.replace(key, '[redacted]'));
+	// a whole-workspace search skips .rocketride/; one that starts inside it reaches the guide, shown the same way
+	const found = await run(ws, 'search_files', { pattern: 'OPENAI', path: '.rocketride/docs' });
+	assert.equal(found, `2 match(es):\n${path}:5: OPENAI_API_KEY=[redacted]\n${path}:6: "apikey": "\${OPENAI_KEY}" does not substitute.`);
+
+	// the view refuses the path before an anchor is matched, and the error names no value
+	await assert.rejects(run(ws, 'write_file', { path, content: read }), /^Error: \.rocketride\/ is read-only reference\./);
+	await assert.rejects(run(ws, 'edit_file', { path, oldString: 'OPENAI_API_KEY=[redacted]', newString: 'OPENAI_API_KEY=${ROCKETRIDE_OPENAI_KEY}' }), /^Error: \.rocketride\/ is read-only reference\./);
+	await assert.rejects(run(ws, 'write_file', { path: '.rocketride/docs/NEW.md', content: '«secret:00000000»' }), /^Error: write_file refused: «secret:00000000» is not a marker from this run\./); // gitleaks:allow, made-up test value
+	assert.equal(ws.files.get(path), guide);
+	assert.deepEqual(ws.log, [], 'nothing was written');
+});
+
+test("the pipelines guide's Pitfall 6 example reaches the model whole, and a key in a user file is still hidden", async () => {
+	const path = '.rocketride/docs/ROCKETRIDE_PIPELINES.md';
+	const guide = readFileSync(resolve(__dirname, '../../../../../../docs/agents/context/ROCKETRIDE_PIPELINES.md'), 'utf8');
+	const lines = guide.split('\n');
+	const at = lines.findIndex((line) => line.includes('"apikey": "${OPENAI_KEY}"'));
+	assert.ok(at >= 0, 'the guide has the Pitfall 6 example');
+	const key = 'canary-user-pipe-5b8e';
+	const ws = withReadOnlyReference(createMemoryWorkspace({ [path]: guide, 'pipelines/a.pipe': inlineKeyPipe(key) }));
+	const model = scriptedModel([plan(['read_file', { path, offset: at, limit: 3 }], ['search_files', { pattern: 'wrong prefix', path }], ['read_file', { path: 'pipelines/a.pipe' }]), done('Read.')]);
+	await agentTurn(ws, model);
+
+	const context = model.questions[1].context.find((item) => item.startsWith('Previous tool results:\n')) ?? '';
+	const [window, search, pipe] = (JSON.parse(context.slice('Previous tool results:\n'.length)) as Array<{ summary?: string }>).map((entry) => entry.summary ?? '');
+	assert.equal(window, `[Lines ${at}-${at + 2} of ${lines.length} in ${path}]\n${lines.slice(at - 1, at + 2).join('\n')}`);
+	assert.equal(search, `1 match(es):\n${path}:${at + 1}: ${lines[at].trim().slice(0, 200)}`);
+	assert.ok(!pipe.includes(key), pipe);
+	assert.match(pipe, /"apikey": "«secret:[0-9a-f]{8}»"/); // gitleaks:allow, a marker pattern, not a value
+	assert.match(pipe, /1 secret value hidden \(components\[1\]\.config\.apikey\)/);
+	assert.ok(!JSON.stringify(model.questions).includes(key), 'the key reached no question');
+});
+
+test('search_files searches one file when its path names a file, in the workspace or under .rocketride/', async () => {
+	const ws = createMemoryWorkspace({ 'pipelines/a.pipe': '{\n  "name": "chat"\n}\n', 'pipelines/b.pipe': '{ "name": "chat too" }', '.rocketride/docs/ROCKETRIDE_APPS.md': '# Apps\n\nAn app has a chat.\n' });
+	assert.equal(await run(ws, 'search_files', { pattern: 'chat', path: 'pipelines/a.pipe' }), '1 match(es):\npipelines/a.pipe:2: "name": "chat"');
+	assert.equal(await run(ws, 'search_files', { pattern: 'chat', path: '.rocketride/docs/ROCKETRIDE_APPS.md' }), '1 match(es):\n.rocketride/docs/ROCKETRIDE_APPS.md:3: An app has a chat.');
+	assert.equal(await run(ws, 'search_files', { pattern: 'chat', path: 'pipelines' }), '2 match(es):\npipelines/a.pipe:2: "name": "chat"\npipelines/b.pipe:1: { "name": "chat too" }');
+});
+
+test('a key cut by a read window or the search clip is still hidden', async () => {
+	// The key starts at character 186 of its line, so the 200-character clip cuts it; it also has a line of its own.
+	const key = `sk-${'w'.repeat(40)}`;
+	const pipeKey = 'canary-inline-4d1f9a';
+	const pipe = inlineKeyPipe(pipeKey);
+	const ws = createMemoryWorkspace({ 'notes/setup.md': `${'x'.repeat(170)} OPENAI_API_KEY=${key}\nline two\n${key}\n`, 'pipelines/a.pipe': pipe });
+	const results = [await run(ws, 'read_file', { path: 'notes/setup.md', maxBytes: 200 }), await run(ws, 'read_file', { path: 'notes/setup.md', offset: 3, limit: 1 }), await run(ws, 'read_file', { path: 'pipelines/a.pipe', maxBytes: pipe.indexOf(pipeKey) + 6 }), await run(ws, 'search_files', { pattern: 'OPENAI_API_KEY' }), await run(ws, 'search_files', { pattern: 'apikey' })];
+	for (const text of results) {
+		assert.ok(!text.includes(key.slice(0, 8)) && !text.includes(pipeKey.slice(0, 6)), `part of a key shows in: ${text.slice(-300)}`);
+	}
+	assert.match(results[1], /^\[Lines 3-3 of 4 in notes\/setup\.md\]\n«secret:[0-9a-f]{8}»\n\[2 secret values hidden \(line 1, line 3\)\./, 'a window shows the marker, and the note names both places the key sits');
+	assert.match(await run(ws, 'search_files', { pattern: 'sk-www' }), /^No matches/, 'a search cannot probe a hidden value');
+});
+
+test('a request with a bearer token or a secret field reaches the model redacted', async () => {
+	// Neither is a sure key shape, so execute does not hold the message back; the run still must not send it.
+	const token = 't'.repeat(32);
+	const field = 'canary-field-7c2e';
+	const model = scriptedModel([done('Done.')]);
+	await agentTurn(createMemoryWorkspace({}), model, { request: `Call the API with Authorization: Bearer ${token} and {"password": "${field}"}` });
+	const asked = JSON.stringify(model.questions);
+	assert.ok(!asked.includes(token) && !asked.includes(field), asked);
+	assert.match(asked, /Authorization: Bearer \[redacted\]/);
+});
+
+test('a cut that falls inside a credential still hides it', () => {
+	const url = 'postgres://admin:hunter2secretpw@db.example.invalid/x';
+	const text = `${'x'.repeat(50)}${url}`;
+	// The cut lands just before the @, where the clipped part no longer looks like a URL password.
+	const cut = clip(text, 'see less', 50 + url.indexOf('@'));
+	assert.ok(!cut.includes('hunter2secretpw'), cut);
+	// The same through a client result: pad the row so the 32,000-character cut falls just before the @.
+	const at = (note: string) => JSON.stringify({ rows: [{ note, url }] }, null, 1).indexOf('@');
+	const result = toolText({ rows: [{ note: 'x'.repeat(RESULT_MAX_CHARS - at('')), url }] }, 'see less');
+	assert.match(result, /\[TRUNCATED: showing first 32000 of/);
+	assert.ok(!result.includes('hunter2secretpw'), result.slice(-300));
+});
+
+test('redactText hides each credential shape and keeps placeholders, markers and the run token', () => {
+	// blocks: what looksLikeCredential says, so whether a pasted message is held back
+	const rows: Array<[text: string, expected: string, blocks: string | null]> = [
+		[`key sk-${'a'.repeat(20)} end`, 'key [redacted] end', 'OpenAI-style'],
+		[`sk-ant-api03-${'b'.repeat(20)}`, '[redacted]', 'Anthropic-style'],
+		[`AKIA${'C'.repeat(16)}`, '[redacted]', 'AWS-style'],
+		[`ghp_${'d'.repeat(36)}`, '[redacted]', 'GitHub-style'],
+		[`gho_${'d'.repeat(36)}`, '[redacted]', 'GitHub-style'],
+		[`ghs_${'d'.repeat(36)}`, '[redacted]', 'GitHub-style'],
+		[`github_pat_11ABCDEFG0${'d'.repeat(20)}_${'D'.repeat(59)}`, '[redacted]', 'GitHub-style'],
+		[`sk_live_${'s'.repeat(24)}`, '[redacted]', 'Stripe-style'],
+		[`rk_live_${'r'.repeat(24)}`, '[redacted]', 'Stripe-style'],
+		[`xoxb-${'1'.repeat(10)}-${'e'.repeat(12)}`, '[redacted]', 'Slack-style'],
+		['postgres://admin:hunter2@db.example.invalid/x', 'postgres://admin:[redacted]@db.example.invalid/x', 'a password in a URL'],
+		['-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJB\n-----END RSA PRIVATE KEY-----', '[redacted]', 'a private key'], // gitleaks:allow, made-up test value
+		// hidden, but not sure enough to hold a message back: a bearer word and a field name
+		[`Authorization: Bearer ${'f'.repeat(24)}.sig`, 'Authorization: Bearer [redacted]', null],
+		['{"apikey": "hunter2", "name": "chat"}', '{"apikey": "[redacted]", "name": "chat"}', null], // gitleaks:allow, made-up test value
+		['{"password": 12345678}', '{"password": [redacted]}', null],
+		['{"password": "12345678", "auth_token": "Zq9mPx4tLrWw"}', '{"password": "[redacted]", "auth_token": "[redacted]"}', null], // gitleaks:allow, made-up test value
+		// nothing to hide: a placeholder, a marker, the run token, and words that only look close
+		['{"apikey": "${ROCKETRIDE_OPENAI_KEY}"}', '{"apikey": "${ROCKETRIDE_OPENAI_KEY}"}', null],
+		['{"apikey": "«secret:0a1b2c3d»"}', '{"apikey": "«secret:0a1b2c3d»"}', null], // gitleaks:allow, made-up test value
+		['postgres://admin:«secret:28be2aa3»@db.example.invalid/x', 'postgres://admin:«secret:28be2aa3»@db.example.invalid/x', null],
+		['DATABASE_URL: "postgres://admin:«secret:28be2aa3»@db.example.invalid/x"', 'DATABASE_URL: "postgres://admin:«secret:28be2aa3»@db.example.invalid/x"', null],
+		['http://host.example.invalid:8080?email=bob@x.example.invalid', 'http://host.example.invalid:8080?email=bob@x.example.invalid', null],
+		['{\n "token": "tk_0a1b2c3d4e5f",\n "state": "running"\n}', '{\n "token": "tk_0a1b2c3d4e5f",\n "state": "running"\n}', null], // gitleaks:allow, made-up test value
+		['{"model": "gpt-5", "max_tokens": "4096", "tokenizer": "cl100k_base", "token": "4096", "token_limit": "8000"}', '{"model": "gpt-5", "max_tokens": "4096", "tokenizer": "cl100k_base", "token": "4096", "token_limit": "8000"}', null],
+		['apps/task-manager-dashboard-ui/src/App.tsx', 'apps/task-manager-dashboard-ui/src/App.tsx', null],
+		['interface Options { token: string; apiKey?: string }', 'interface Options { token: string; apiKey?: string }', null],
+		['ssh://git@github.com/acme/app.git', 'ssh://git@github.com/acme/app.git', null],
+	];
+	for (const [text, expected, blocks] of rows) {
+		assert.equal(redactText(text), expected, text);
+		assert.equal(looksLikeCredential(text), blocks, text);
+	}
+});
+
+test('a pasted message is held back only for a key shape, a private key or a URL password', () => {
+	// Field names and a bearer word are too unsure to stop the user: these go to the model.
+	assert.equal(looksLikeCredential('{"model": "gpt-5", "max_tokens": "4096"}'), null);
+	assert.equal(looksLikeCredential('the API wants Bearer token_from_the_login_endpoint'), null);
+	assert.equal(looksLikeCredential('my config has {"apikey": "hunter2hunter2"} in it'), null); // gitleaks:allow, made-up test value
+	assert.equal(looksLikeCredential(`use ${'sk-proj-'}${'h'.repeat(40)}`), 'OpenAI-style');
+	assert.equal(looksLikeCredential('-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA'), 'a private key');
+	assert.equal(looksLikeCredential('connect to postgres://admin:hunter2@db.example.invalid/app'), 'a password in a URL');
+});
+
+test('a field is secret-named by its words: a token field is, a token count is not', () => {
+	const secret = ['apikey', 'api_key', 'apiKey', 'x-api-key', 'OPENAI_API_KEY', 'client_secret', 'secretKey', 'SECRET_KEY', 'password', 'passwd', 'dbPassword', 'passphrase', 'credentials', 'credentials_json', 'private_key', 'privateKey', 'aws_access_key_id', 'serviceAccountKey', 'ssh_key', 'bearer', 'auth_value', 'authorizationValue', 'header_value', 'webhook_url', 'connection_string', 'token', 'auth_token', 'access_token', 'refreshToken', 'hf.token', 'BOT_TOKEN'];
+	const plain = ['max_tokens', 'maxTokens', 'tokenizer', 'num_tokens', 'token_count', 'token_limit', 'tokens', 'model', 'url', 'user', 'secretary', 'passwordless', 'keyboard', 'monkey'];
+	assert.deepEqual(
+		secret.filter((name) => !isSecretName(name)),
+		[],
+		'these hold secrets'
+	);
+	assert.deepEqual(
+		plain.filter((name) => isSecretName(name)),
+		[],
+		'these do not'
+	);
+});
+
+test('a client result with a key in free text or a URL is hidden once it passes the boundary', () => {
+	// redactSecrets hides fields by name; redactText then hides what has no secret name
+	const key = `sk-${'g'.repeat(24)}`;
+	const text = redactText(toolText({ apikey: 'hunter2', text: `the run printed ${key}`, url: 'https://user:hunter2@example.invalid', ref: '${ROCKETRIDE_ANTHROPIC_KEY}' }, ''));
+	assert.deepEqual(JSON.parse(text), { apikey: '[redacted]', text: 'the run printed [redacted]', url: 'https://user:[redacted]@example.invalid', ref: '${ROCKETRIDE_ANTHROPIC_KEY}' });
+});
+
+test('read_file and search_files put a marker, never the key, in the next question', async () => {
+	const key = 'canary-inline-4d1f9a';
+	const calls: Array<[tool: string, args: Record<string, unknown>]> = [
+		['read_file', { path: 'pipelines/a.pipe' }],
+		['search_files', { pattern: 'apikey' }],
+	];
+	for (const call of calls) {
+		const model = scriptedModel([plan(call), done('Read.')]);
+		await agentTurn(createMemoryWorkspace({ 'pipelines/a.pipe': inlineKeyPipe(key) }), model);
+		const next = model.questions[1].context.join('\n');
+		assert.ok(!next.includes(key), `${call[0]}: the key reached the model`);
+		markerIn(next);
+	}
+});
+
+/**
+ * A read without the note it ends with when it hid anything: the file as the
+ * model sees it, ready to be written back whole.
+ *
+ * @param read - What read_file returned.
+ * @returns The text before the note.
+ */
+function withoutNote(read: string): string {
+	return read.replace(/\n\[\d+ secret values? hidden \([\s\S]*\]$/, '');
+}
+
+test('writing a whole read back keeps each URL password, after the redaction every result gets', async () => {
+	// run() redacts the read as the loop does: a read that showed [redacted] would save it over the password.
+	const files: Record<string, string> = {
+		'.env': 'DATABASE_URL=postgres://admin:hunter2pass@db.example.invalid:5432/app\n',
+		'config/db.yaml': 'database:\n  DATABASE_URL: "postgres://admin:hunter2pass@db.example.invalid/app"\n',
+		'pipelines/db.pipe': JSON.stringify({ components: [{ id: 'db_1', provider: 'db_postgres', config: { url: 'postgres://admin:hunter2pass@db.example.invalid/app' } }] }, null, 1),
+		'notes/form.md': 'The form posts to http://host.example.invalid:8080?email=bob@x.example.invalid\n',
+	};
+	const ws = createMemoryWorkspace(files);
+	for (const [path, content] of Object.entries(files)) {
+		const read = await run(ws, 'read_file', { path });
+		assert.ok(!read.includes('hunter2pass') && !read.includes('[redacted]'), read);
+		await run(ws, 'write_file', { path, content: withoutNote(read) });
+		assert.equal(ws.files.get(path), content, `${path} keeps its password`);
+	}
+	assert.ok(!(await run(ws, 'read_file', { path: 'notes/form.md' })).includes('«secret:'), 'a port and a query are not a password');
+});
+
+test('a quoted YAML value is hidden up to its real closing quote', async () => {
+	const text = "db:\n  password: \"abc\\\"defSECRETTAIL\"\nsmtp:\n  password: 'it''sSECRETTAIL' # the smtp login\n";
+	const ws = createMemoryWorkspace({ 'config/app.yaml': text });
+	const read = await run(ws, 'read_file', { path: 'config/app.yaml' });
+	assert.ok(!read.includes('SECRETTAIL') && !read.includes('abc') && !read.includes("it'"), read);
+	assert.match(read, /password: "«secret:[0-9a-f]{8}»"\n/);
+	assert.match(read, /password: '«secret:[0-9a-f]{8}»' # the smtp login\n/, 'the comment after the quote stays');
+	await run(ws, 'write_file', { path: 'config/app.yaml', content: withoutNote(read) });
+	assert.equal(ws.files.get('config/app.yaml'), text);
+});
+
+test('a YAML value after a tag or an anchor is hidden, and a count under a token name is not', async () => {
+	const text = 'a:\n  password: !!str 12345678\nb:\n  password: &pw hunter2hunter2\nc:\n  password: *pw\nmodel:\n  token: 4096\n  max_tokens: 4096\n';
+	const ws = createMemoryWorkspace({ 'config/app.yml': text });
+	const read = await run(ws, 'read_file', { path: 'config/app.yml' });
+	assert.ok(!read.includes('12345678') && !read.includes('hunter2hunter2'), read);
+	assert.match(read, /password: !!str «secret:[0-9a-f]{8}»\n/);
+	assert.match(read, /password: &pw «secret:[0-9a-f]{8}»\n/);
+	assert.match(read, /password: \*pw\n/, 'an alias holds no value');
+	assert.match(read, /token: 4096\n {2}max_tokens: 4096\n/, 'a count under a token name stays');
+	await run(ws, 'write_file', { path: 'config/app.yml', content: withoutNote(read) });
+	assert.equal(ws.files.get('config/app.yml'), text);
+});
+
+test('a .pipe mid-edit, missing a comma or a closing quote, still hides each secret', async () => {
+	const nested = '"credentials": {"user": "bob", "pw": "nested-secret-1"}';
+	const files: Record<string, string> = {
+		'pipelines/comma.pipe': `{\n "components": [{\n  "id": "llm_1",\n  "config": {\n   "model": "gpt"\n   ${nested}\n  }\n }]\n}`,
+		'pipelines/quote.pipe': `{\n "components": [{\n  "id": "llm_1",\n  "config": {\n   "name": "unclosed,\n   ${nested}\n  }\n }]\n}`,
+	};
+	const ws = createMemoryWorkspace(files);
+	for (const path of Object.keys(files)) {
+		const read = await run(ws, 'read_file', { path });
+		assert.ok(!read.includes('nested-secret-1') && !read.includes('"bob"'), read);
+		assert.match(read, /\[2 secret values hidden \(components\[0\]\.config\.credentials\.user, components\[0\]\.config\.credentials\.pw\)\./);
+	}
+});
+
+test('a number under a password name is hidden, and a count under a token name is not', async () => {
+	const text = JSON.stringify({ db: { password: 12345678, port: 5432 }, llm: { token: '4096', max_tokens: 4096, tokenizer: 'cl100k_base' } }, null, 1);
+	const ws = createMemoryWorkspace({ 'pipelines/n.pipe': text });
+	const read = await run(ws, 'read_file', { path: 'pipelines/n.pipe' });
+	assert.ok(!read.includes('12345678'), read);
+	assert.match(read, /"password": «secret:[0-9a-f]{8}»,\n {2}"port": 5432\n/);
+	assert.match(read, /"token": "4096",\n {2}"max_tokens": 4096,\n {2}"tokenizer": "cl100k_base"\n/);
+	assert.match(read, /\n\[1 secret value hidden \(db\.password\)\./, 'only the password is hidden');
+	await run(ws, 'write_file', { path: 'pipelines/n.pipe', content: withoutNote(read) });
+	assert.equal(ws.files.get('pipelines/n.pipe'), text);
+});
+
+test('search_files hides a value that a later file names as a secret', async () => {
+	// No key shape: only b.pipe's field name says it is a secret, and a-notes.md comes first in the walk.
+	const value = 'Zq9mPx4tLrWw';
+	const ws = createMemoryWorkspace({ 'a-notes.md': `backup login ${value}\n`, 'pipelines/b.pipe': `{"apikey": "${value}"}` });
+	const found = await run(ws, 'search_files', { pattern: 'backup login' });
+	assert.ok(!found.includes(value), found);
+	assert.match(found, /^1 match\(es\):\na-notes\.md:1: backup login «secret:[0-9a-f]{8}»$/);
+	assert.match(await run(ws, 'search_files', { pattern: 'Zq9m' }), /^No matches/, 'a search cannot probe the value in either file');
+});
+
+test('an edit anchor matches the text the model sees, so it cannot test a guess at a hidden value', async () => {
+	const key = 'canary-inline-4d1f9a';
+	const ws = createMemoryWorkspace({ 'pipelines/a.pipe': inlineKeyPipe(key) });
+	const marker = markerIn(await run(ws, 'read_file', { path: 'pipelines/a.pipe' }));
+	const before = ws.files.get('pipelines/a.pipe');
+	// a right guess at the start of the value misses, and so does part of a marker
+	const guesses = ['"apikey": "canary-', `"apikey": "${marker.slice(0, 12)}`]; // gitleaks:allow, made-up test value
+	for (const oldString of guesses) {
+		await assert.rejects(run(ws, 'edit_file', { path: 'pipelines/a.pipe', oldString, newString: '"apikey": "x' }), /^Error: edit_file: oldString not found in pipelines\/a\.pipe\./, oldString); // gitleaks:allow, made-up test value
+	}
+	assert.equal(ws.files.get('pipelines/a.pipe'), before, 'nothing was written');
+	// the whole marker matches, and the edit lands on the real text
+	await run(ws, 'edit_file', { path: 'pipelines/a.pipe', oldString: `"${marker}",`, newString: `"${marker}",\n    "model": "gpt-5",`, replaceAll: true });
+	assert.deepEqual(JSON.parse(ws.files.get('pipelines/a.pipe') ?? '').components[1].config, { apikey: key, model: 'gpt-5', fallback: '${ROCKETRIDE_OPENAI_KEY}' });
+});
+
+test('a second copy of a hidden value in the same file is hidden on the first read', async () => {
+	// Only the apikey field gives the value away; the copy in the description has no field name or shape.
+	const value = 'Zq9mPx4tLrWw';
+	const ws = createMemoryWorkspace({ 'pipelines/a.pipe': JSON.stringify({ description: `backup login ${value}`, components: [{ id: 'llm_1', config: { apikey: value } }] }, null, 1) });
+	const read = await run(ws, 'read_file', { path: 'pipelines/a.pipe' });
+	assert.ok(!read.includes(value), read);
+	assert.match(read, /"description": "backup login («secret:[0-9a-f]{8}»)",[\s\S]*"apikey": "\1"/, 'both copies show the one marker');
+});
+
+test('generated files: a read writes back whole, passes redactText unchanged, and takes edits where the model saw them', () => {
+	// Pieces of keys, fields, quotes, tags and URLs, joined at random with a fixed seed. 300,000 such files passed when this was written.
+	const pieces = ['{', '}', '[', ']', ',', ':', ' ', '\n', '"', "'", '\\', '\\"', "''", '#', ' #', '!!str ', '&pw ', '*pw', '|', '- ', '"apikey"', '"password"', '"token"', '"max_tokens"', '"credentials"', '"url"', '"auth_token"', 'password: ', 'token: ', 'DATABASE_URL: ', '"hunter2hunter2"', '12345678', '4096', '-5', '"4096"', '"${ROCKETRIDE_KEY}"', 'Zq9mPx4tLrWw', 'postgres://admin:hunter2@db/x', 'http://h:8080?e=b@x.y', 'https://u:p@h', '://', '@', `sk-${'a'.repeat(20)}`, `sk_live_${'b'.repeat(20)}`, `ghp_${'c'.repeat(36)}`, 'Bearer ', 'd'.repeat(24), `AKIA${'E'.repeat(16)}`, '-----BEGIN RSA PRIVATE KEY-----', '-----END RSA PRIVATE KEY-----', 'é'];
+	const paths = ['a.pipe', 'b.json', 'c.yaml', 'd.md', '.env'];
+	let seed = 1;
+	// mulberry32: a small seeded generator, so a failure reproduces
+	const random = (): number => {
+		seed = (seed + 0x6d2b79f5) >>> 0;
+		let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+	const pick = <T>(items: T[]): T => items[Math.floor(random() * items.length)];
+	const marker = /«secret:[0-9a-f]{8}»/g;
+	for (let n = 0; n < 3000; n++) {
+		const markers = new SecretMarkers();
+		const path = pick(paths);
+		const text = Array.from({ length: 1 + Math.floor(random() * 30) }, () => pick(pieces)).join('');
+		const shown = markers.hide(path, text).text;
+		const where = `${path} ${JSON.stringify(text)}`;
+		assert.equal(markers.reveal(shown, 'write_file'), text, `writes back whole: ${where}`);
+		assert.equal(redactText(shown), shown, `redactText changes nothing: ${where}`);
+
+		// an anchor cut from what the model saw matches where it shows, skipping any place it cuts a marker
+		const from = Math.floor(random() * shown.length);
+		const anchor = shown.slice(from, from + 1 + Math.floor(random() * 12));
+		const placed = [...shown.matchAll(marker)].map((m) => ({ start: m.index, end: m.index + m[0].length }));
+		const seen: Array<{ start: number; end: number }> = [];
+		for (let at = shown.indexOf(anchor); at >= 0; ) {
+			const end = at + anchor.length;
+			const cuts = placed.some((p) => at < p.end && end > p.start && (at > p.start || end < p.end));
+			if (!cuts) seen.push({ start: at, end });
+			at = shown.indexOf(anchor, cuts ? at + 1 : end);
+		}
+		const found = markers.anchors(path, text, anchor);
+		assert.equal(found.length, seen.length, `anchor ${JSON.stringify(anchor)} count: ${where}`);
+		const edited = found.reduceRight((out, { start, end }) => out.slice(0, start) + 'X' + out.slice(end), text);
+		const expected = markers.reveal(
+			seen.reduceRight((out, { start, end }) => out.slice(0, start) + 'X' + out.slice(end), shown),
+			'edit_file'
+		);
+		assert.equal(edited, expected, `anchor ${JSON.stringify(anchor)} edit: ${where}`);
+	}
+});
+
+test('a pasted key never reaches the model, the title, the catalog or the saved session', async () => {
+	const store = fakeStore();
+	const key = `sk-proj-${'h'.repeat(40)}`;
+	// The key starts past the title's 60-character cut: a title cut first would keep part of it.
+	const text = `Please build the chat pipeline and use my key: ${key}`;
+	const session = AgentSession.newSession();
+	const message = 'That message looks like it contains a key (OpenAI-style). I did not send it to the model. Put it in Variables and refer to it as ${ROCKETRIDE_<NAME>}.';
+	await assert.rejects(session.execute(text, undefined, chatTurn()), { message });
+	assert.deepEqual(store.modelCalls, [], 'the model was never started or asked');
+	assert.equal(session.title, 'Please build the chat pipeline and use my key: [redacted]');
+
+	// The chat hook appends the user's row and the error row, then saves; an
+	// earlier thinking row with a key in it is saved too.
+	const thinking = `- rocketride_client getTaskStatus — error: token rejected: ghp_${'i'.repeat(36)}`;
+	const rows: ChatMessage[] = [
+		{ id: 1, sender: 'status', sseType: 'thinking', text: thinking, timestamp: '' },
+		{ id: 2, sender: 'user', text, timestamp: '' },
+		{ id: 3, sender: 'bot', text: message, isError: true, timestamp: '' },
+	];
+	await session.save(rows);
+	const stored = JSON.stringify([...store.files.values()]);
+	assert.ok(!stored.includes(key) && !stored.includes('ghp_'), stored);
+	assert.match(stored, /"title":"Please build the chat pipeline and use my key: \[redacted\]"/);
+	assert.deepEqual(
+		session.messages.map((m) => m.text),
+		['- rocketride_client getTaskStatus — error: token rejected: [redacted]', 'Please build the chat pipeline and use my key: [redacted]', message],
+		'a reopened session starts from the redacted rows'
+	);
+});
+
+test('a queued message with a key that opens its own turn never reaches the model, and is saved redacted', async () => {
+	const store = fakeStore();
+	const key = `sk-proj-${'q'.repeat(40)}`;
+	const session = AgentSession.newSession();
+	// The first turn holds the slot and takes nothing, so the message sent meanwhile opens the next turn.
+	let release: () => void = () => undefined;
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let turns = 0;
+	const chat = new TurnController({
+		request: () => async (text, sink, turn) => {
+			if (++turns > 1) return session.execute(text, sink, turn);
+			await held;
+			return [{ text: 'Done.', key: '' }] as TextResult[];
+		},
+		now: () => '12:00',
+		stopGraceMs: 0,
+	});
+	chat.send('Build the chat pipeline.');
+	chat.send(`Use my key: ${key}`);
+	release();
+	for (let i = 0; i < 100 && chat.snapshot().phase !== 'idle'; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+
+	const rows = chat.snapshot().messages;
+	assert.equal(turns, 2, 'the queued message opened its own turn');
+	assert.deepEqual(store.modelCalls, [], 'the model was never started or asked');
+	assert.ok(
+		rows.some((m) => m.isError && m.text.startsWith('That message looks like it contains a key (OpenAI-style).')),
+		'the error row points to Variables'
+	);
+	await session.save(rows);
+	const stored = JSON.stringify([...store.files.values()]);
+	assert.ok(!stored.includes(key), stored);
+	assert.match(stored, /Use my key: \[redacted\]/);
+});
+
+test('a key the user sends never shows in their own row, live or queued, and the chat says where the key goes', async () => {
+	const store = fakeStore();
+	const midRun = `sk-proj-${'m'.repeat(40)}`;
+	const pasted = `sk-proj-${'p'.repeat(40)}`;
+	const session = AgentSession.newSession();
+	// The first turn waits, then takes the message sent meanwhile; the pasted message later opens its own turn.
+	let release: () => void = () => undefined;
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const heard: string[][] = [];
+	let turns = 0;
+	const chat = new TurnController({
+		request: () => async (text, sink, turn) => {
+			if (++turns > 1) return session.execute(text, sink, turn);
+			await held;
+			heard.push(turn.takeQueued());
+			return [{ text: 'Done.', key: '' }] as TextResult[];
+		},
+		now: () => '12:00',
+		stopGraceMs: 0,
+	});
+	// as AgentConversation's handleSend does, with isTyping read before the send
+	const send = (text: string): void => {
+		const running = chat.snapshot().phase !== 'idle';
+		const screened = session.screen(text);
+		chat.send(screened.text);
+		if (screened.note && running) chat.addSystemMessage(screened.note);
+	};
+	const settled = async (): Promise<void> => {
+		for (let i = 0; i < 100 && chat.snapshot().phase !== 'idle'; i++) await new Promise((resolve) => setTimeout(resolve, 1));
+	};
+	assert.deepEqual(session.screen('Set max_tokens to 4096.'), { text: 'Set max_tokens to 4096.', note: '' }, 'a message with no key is sent as typed');
+
+	send('Build the chat pipeline.');
+	send(`Also use this key: ${midRun}`);
+	const queued = chat.snapshot().messages.filter((m) => m.queued);
+	assert.deepEqual(
+		queued.map((m) => m.text),
+		['Also use this key: [redacted]'],
+		'the queued row shows no key'
+	);
+	release();
+	await settled();
+	send(`Here is my key: ${pasted}`);
+	await settled();
+
+	const rows = chat.snapshot().messages;
+	assert.deepEqual(heard, [['Also use this key: [redacted]']], 'the running turn read the message without its key');
+	assert.deepEqual(
+		rows.filter((m) => m.sender === 'user').map((m) => m.text),
+		['Build the chat pipeline.', 'Also use this key: [redacted]', 'Here is my key: [redacted]']
+	);
+	assert.deepEqual(
+		rows.filter((m) => m.sender === 'system').map((m) => m.text),
+		['I removed a key (OpenAI-style) from your message, so it was not sent. Put it in Variables and refer to it as `${ROCKETRIDE_<NAME>}`.'],
+		'a send during a turn gets the note'
+	);
+	assert.ok(
+		rows.some((m) => m.isError && m.text.startsWith('That message looks like it contains a key (OpenAI-style).')),
+		'the pasted message opened a turn that was refused, and the error row points to Variables'
+	);
+	assert.equal(turns, 2);
+	assert.deepEqual(store.modelCalls, [], 'the model was never started or asked');
+	const shown = JSON.stringify(rows);
+	assert.ok(!shown.includes(midRun) && !shown.includes(pasted), shown);
+	await session.save(rows);
+	const stored = JSON.stringify([...store.files.values()]);
+	assert.ok(!stored.includes(midRun) && !stored.includes(pasted), stored);
+});
+
+test('leak test: no canary reaches a question, a thinking chunk, an approval card, the answer, the saved session or the catalog', async () => {
+	// One canary per way in. pipeField has no key shape, so only its field name gives it away.
+	const canaries = {
+		pipeField: 'canary-pipe-field-7c2e',
+		freeText: `sk-canary-free-text-${'1'.repeat(8)}`,
+		toolError: `ghp_${'2'.repeat(36)}`,
+		runResult: `sk-canary-run-result-${'3'.repeat(8)}`,
+		consoleRow: `xoxb-canary-console-${'4'.repeat(8)}`,
+		history: `AKIA${'5'.repeat(16)}`,
+		answer: `sk-ant-api03-canary-answer-${'6'.repeat(8)}`,
+		prompt: `sk-proj-canary-prompt-${'7'.repeat(8)}`,
+		midRun: `sk-canary-mid-run-${'9'.repeat(8)}`,
+		guide: `sk-canary-guide-${'a'.repeat(8)}`,
+		cardName: `sk-canary-card-name-${'b'.repeat(8)}`,
+		prepareError: `canary-prepare-pw-${'c'.repeat(8)}`,
+	};
+	const ws = withReadOnlyReference(
+		createMemoryWorkspace({
+			'pipelines/leak.pipe': inlineKeyPipe(canaries.pipeField),
+			'notes/setup.md': `Set OPENAI_API_KEY=${canaries.freeText} before you run it.`,
+			'apps/daybook-ui/package.json': JSON.stringify({ appManifest: { id: 'daybook', name: 'Daybook' } }),
+			'apps/daybook-ui/src/App.tsx': 'export default function App() { return null; }',
+			'.rocketride/docs/ROCKETRIDE_SETUP.md': `An example config:\n\n    OPENAI_API_KEY=${canaries.guide}\n`,
+		})
+	);
+	// The store's error quotes a URL with its password; rocketride_client reads the file while it prepares the call.
+	const read = ws.read.bind(ws);
+	ws.read = async (path) => {
+		if (path === 'pipelines/broken.pipe') throw new Error(`the store refused the read: postgres://admin:${canaries.prepareError}@db.example.invalid/store`);
+		return read(path);
+	};
+	// The deployment's name, as the server holds it, goes on the schedule card.
+	const { client } = scriptedClient({ use: { token: 'tk_run_0001', output: `the run printed ${canaries.runResult}` }, getServices: { services: { chat: {}, llm_openai: {} } }, validate: { errors: [], warnings: [] }, 'deploy.get': { pipelineName: `Nightly digest ${canaries.cardName}` }, 'deploy.setSchedule': {} });
+	(client as unknown as Record<string, unknown>).getTaskStatus = async () => {
+		throw new Error(`token rejected: ${canaries.toolError}`);
+	};
+	const history: ChatMessage[] = [
+		{ id: 1, sender: 'user', text: `My old AWS key is ${canaries.history}`, timestamp: '' },
+		{ id: 2, sender: 'bot', text: 'Noted.', timestamp: '' },
+	];
+	const model = scriptedModel([
+		plan(['read_file', { path: 'pipelines/leak.pipe' }], ['read_file', { path: 'notes/setup.md' }], ['search_files', { pattern: 'OPENAI_API_KEY' }], ['rocketride_client', { method: 'getTaskStatus', params: ['tk_run_0001'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/leak.pipe' }] }], ['read_file', { path: '.rocketride/docs/ROCKETRIDE_SETUP.md' }], ['search_files', { pattern: 'OPENAI_API_KEY', path: '.rocketride/docs' }], ['rocketride_client', { method: 'deploy.setSchedule', params: ['p1', 'webhook_1', '0 9 * * *', 't1'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/broken.pipe' }] }]),
+		(q) => {
+			// the first marker is leak.pipe's: its read is the wave's first result
+			const marker = markerIn(JSON.stringify(q));
+			return plan(['edit_file', { path: 'pipelines/leak.pipe', oldString: `"apikey": "${marker}"`, newString: `"apikey": "${marker}", "model": "gpt-5"` }], ['check_app', { app: 'daybook-ui' }], ['write_file', { path: '.rocketride/docs/ROCKETRIDE_SETUP.md', content: `{"apikey": "${marker}"}` }]);
+		},
+		done(`Tidied. A model that echoes a key, like ${canaries.answer}, has it redacted.`),
+	]);
+	// The user writes again while the turn runs; the first wave takes it.
+	const midRun = `Use this key for the model instead: ${canaries.midRun}`;
+	// The user denies the schedule card; the chat then adds the card's status row, as the shell does.
+	const asked = fakeAsk(['deny']);
+	const chunks = await agentTurn(ws, model, { client, history, dev: session({ state: 'ok' }, `Request failed with ${canaries.consoleRow}`), queued: [midRun], ask: asked.ask });
+	const cardRows = asked.cards.map((card, i): ChatMessage => ({ id: 80 + i, sender: 'status', sseType: 'approval', text: `Denied: ${card.title}`, timestamp: '' }));
+
+	// The pasted prompt goes through the session, and the whole transcript is saved.
+	const store = fakeStore();
+	const agentSession = AgentSession.newSession();
+	const prompt = `Here is my key: ${canaries.prompt}`;
+	await assert.rejects(agentSession.execute(prompt, undefined, chatTurn()), /looks like it contains a key/);
+	const rows: ChatMessage[] = [...history, { id: 3, sender: 'user', text: 'Describe and tidy the leak pipeline.', timestamp: '' }, { id: 89, sender: 'user', text: midRun, timestamp: '' }, ...chunks.map((c, i): ChatMessage => (c.type === 'thinking' ? { id: 4 + i, sender: 'status', sseType: 'thinking', text: c.text, timestamp: '' } : { id: 4 + i, sender: 'bot', text: c.text, timestamp: '' })), ...cardRows, { id: 90, sender: 'user', text: prompt, timestamp: '' }, { id: 91, sender: 'bot', text: 'That message looks like it contains a key (OpenAI-style).', isError: true, timestamp: '' }];
+	await agentSession.save(rows);
+
+	const seen = {
+		questions: JSON.stringify(model.questions),
+		thinking: chunks
+			.filter((c) => c.type === 'thinking')
+			.map((c) => c.text)
+			.join('\n'),
+		answer: chunks
+			.filter((c) => c.type === 'content')
+			.map((c) => c.text)
+			.join('\n'),
+		cards: JSON.stringify(asked.cards),
+		session: JSON.stringify([...store.files].filter(([path]) => !path.endsWith('/catalog.json'))),
+		catalog: JSON.stringify([...store.files].filter(([path]) => path.endsWith('/catalog.json'))),
+	};
+	const leaks = Object.entries(seen).flatMap(([where, text]) => Object.entries(canaries).flatMap(([name, canary]) => (text.includes(canary) ? [`${name} in the ${where}`] : [])));
+	assert.deepEqual(leaks, []);
+	assert.equal(model.questions.length, 3, 'every planned wave ran');
+	assert.deepEqual(store.modelCalls, [], 'the pasted prompt never reached the model');
+	assert.ok(seen.questions.includes('tk_run_0001'), 'the run token stays readable');
+	assert.ok(seen.questions.includes('Use this key for the model instead: [redacted]'), 'the mid-run message reached the model, without its key');
+	assert.match(seen.answer, /like \[redacted\], has it redacted/);
+	assert.deepEqual(
+		asked.cards.map((card) => card.title),
+		['Schedule Nightly digest [redacted] (webhook_1) on team t1 to run 0 9 * * *'],
+		'the card was shown, without the key'
+	);
+	assert.ok(seen.questions.includes('The user declined: Schedule Nightly digest [redacted]'), 'the model read the refusal, without the key');
+	assert.ok(seen.questions.includes("Cannot read 'pipelines/broken.pipe': the store refused the read: postgres://admin:[redacted]@db.example.invalid/store"), 'the model read the prepare error, without the password');
+	assert.ok(seen.questions.includes('.rocketride/ is read-only reference.'), 'the write to the guide was refused');
+	assert.deepEqual(JSON.parse(ws.files.get('pipelines/leak.pipe') ?? '').components[1].config, { apikey: canaries.pipeField, model: 'gpt-5', fallback: '${ROCKETRIDE_OPENAI_KEY}' }, 'the file keeps the real key');
+	assert.equal(ws.files.get('.rocketride/docs/ROCKETRIDE_SETUP.md'), `An example config:\n\n    OPENAI_API_KEY=${canaries.guide}\n`, 'the guide is unchanged');
+});
+
+test('known limit: a base64-encoded key reaches the model', { todo: 'redaction matches key shapes and secret-named fields, not encodings' }, async () => {
+	const encoded = btoa(`sk-${'8'.repeat(24)}`);
+	const model = scriptedModel([plan(['read_file', { path: 'notes/key.txt' }]), done('Read.')]);
+	await agentTurn(createMemoryWorkspace({ 'notes/key.txt': encoded }), model);
+	assert.ok(!JSON.stringify(model.questions).includes(encoded));
+});
+
+test('known limit: a key split across two results reaches the model in halves', { todo: 'neither half has a key shape on its own' }, async () => {
+	const key = `sk-${'9'.repeat(24)}`;
+	const model = scriptedModel([plan(['read_file', { path: 'notes/a.txt' }], ['read_file', { path: 'notes/b.txt' }]), done('Read.')]);
+	await agentTurn(createMemoryWorkspace({ 'notes/a.txt': key.slice(0, 12), 'notes/b.txt': key.slice(12) }), model);
+	const asked = JSON.stringify(model.questions);
+	assert.ok(!(asked.includes(key.slice(0, 12)) && asked.includes(key.slice(12))));
+});
+
+// =============================================================================
 // deploy_app
 // =============================================================================
 
@@ -743,6 +1546,20 @@ test("deploy_app waits for the version it uploaded, not a teammate's newer one",
 		'deploy_app'
 	).execute({ app: 'a-ui', message: 'Mine' });
 	assert.equal(result, 'Deployed v5; server build OK.');
+});
+
+test('a failed server build log cut at its start hides a password the cut splits', async () => {
+	const url = 'postgres://admin:hunter2secretpw@db.example.invalid/x';
+	// The 8,000-character tail starts inside the URL, after its scheme, where no pattern sees a URL password.
+	const log = `${url}${'z'.repeat(8_000 - url.length + 'postgres://ad'.length)}`;
+	const listings = [[row(4)], [row(5, 'failed'), row(4)]];
+	const { client } = fakeClient({ listings, added: { artifact: { registryVersion: 5, buildStatus: 'queued' } }, log });
+	const result = await toolOf(
+		appTools(() => client),
+		'deploy_app'
+	).execute({ app: 'a-ui', message: 'Mine' });
+	assert.match(result, /^Deployed v5; server build FAILED:/);
+	assert.ok(!result.includes('hunter2secretpw'), result.slice(0, 120));
 });
 
 // =============================================================================
@@ -847,6 +1664,16 @@ test('a failed build fails the app check', async () => {
 	const { text, report } = await runCheck(appCheck(session({ state: 'error', reason: '"left-pad" is not a declared dependency' })), 'daybook-ui');
 	assert.match(text, /^CHECK FAILED: daybook/);
 	assert.deepEqual(steps(report), ['types pass', 'build fail']);
+});
+
+test("a failed build's summary hides a password the summary cut splits", async () => {
+	const url = 'postgres://admin:hunter2secretpw@db.example.invalid/x';
+	// The summary keeps 199 characters of the reason, which ends just before the @.
+	const reason = `${'r'.repeat(199 - 1 - url.indexOf('@'))} ${url}`;
+	const { text, report } = await runCheck(appCheck(session({ state: 'error', reason })), 'daybook-ui');
+	assert.deepEqual(steps(report), ['types pass', 'build fail']);
+	assert.ok(!JSON.stringify(report).includes('hunter2secretpw'), JSON.stringify(report));
+	assert.ok(!text.includes('hunter2secretpw'), text);
 });
 
 test('console errors are reported but do not block the app check', async () => {

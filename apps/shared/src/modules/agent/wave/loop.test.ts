@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// WAVE LOOP TESTS — the done rule, reading replies, and same-file order, stop and steering
+// WAVE LOOP TESTS — the done rule, reading replies, same-file order, stop and steering, and no key past a tool
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -30,7 +30,7 @@ import { test } from 'node:test';
 import { CheckRecord, createChatModel } from '../run';
 import type { CheckStatus } from '../toolkits/appCheck';
 import { AgentTool } from '../tools';
-import { runLoop, type LoopOptions } from './loop';
+import { runLoop, type FinishRule, type LoopOptions, type RanCall } from './loop';
 import type { ModelCall, PromptPrefix, QuestionSpec } from './plan';
 
 // =============================================================================
@@ -405,4 +405,143 @@ test('a model call abandoned by Stop does not restart the pipeline when it fails
 	failLate?.(new Error('pipeline ended'));
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	assert.equal(restarts, 1, 'the late failure restarted nothing');
+});
+
+// =============================================================================
+// SECRETS — what a tool returns or throws is redacted before anything reads it
+// =============================================================================
+
+test('a key in a tool result, error or late return reaches no question, thinking line or finish rule', async () => {
+	// Synthetic key shapes, one per way out of a tool.
+	const keys = { result: `sk-${'r'.repeat(24)}`, error: `ghp_${'e'.repeat(36)}`, late: `xoxb-${'l'.repeat(24)}` };
+	const leaky = stub('leaky', () => `connected with ${keys.result}`);
+	const failing = new AgentTool({
+		name: 'failing',
+		description: 'failing',
+		parameters: { type: 'object' },
+		execute: async () => {
+			throw new Error(`auth rejected for ${keys.error}`);
+		},
+	});
+	// Times out (limit 10 ms), then ends with its key while the next wave plans.
+	const slow = stub('slow', async () => {
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		return `late with ${keys.late}`;
+	});
+	const replies = [plan([['leaky'], ['failing'], ['slow']]), plan([['leaky', { again: true }]]), done('finished')];
+	const questions: QuestionSpec[] = [];
+	const model: ModelCall = async (q) => {
+		questions.push(q);
+		// The second plan waits until the slow call has ended, so the finish rule hears its late return.
+		if (questions.length === 2) await new Promise((resolve) => setTimeout(resolve, 50));
+		return replies.shift() ?? done('finished');
+	};
+	const checks = record();
+	const heard: RanCall[] = [];
+	const finish: FinishRule = {
+		checkTool: checks.checkTool,
+		beginWave: (wave) => checks.beginWave(wave),
+		endWave: async (calls) => {
+			heard.push(...calls);
+			await checks.endWave(calls);
+		},
+		unchecked: () => checks.unchecked(),
+	};
+	const status: string[] = [];
+	const result = await setup(model, [leaky, failing, slow], { finish, emit: (_type, text) => status.push(text), timeoutMs: (tool) => (tool === 'slow' ? 10 : 0) }).run();
+
+	const seen = { questions: JSON.stringify(questions), status: status.join('\n'), finish: JSON.stringify(heard) };
+	for (const [where, text] of Object.entries(seen)) {
+		for (const [kind, key] of Object.entries(keys)) assert.ok(!text.includes(key), `the ${kind} key reached the ${where}`);
+	}
+	assert.match(seen.questions, /auth rejected for \[redacted\]/, 'the error keeps its words, without the key');
+	assert.match(seen.status, /failing — error: auth rejected for \[redacted\]/);
+	assert.ok(
+		heard.some((call) => call.late && call.result === 'late with [redacted]'),
+		'the late return is redacted too'
+	);
+	assert.equal(result.answer, 'finished');
+});
+
+test('a key in a prepare error, a refusal or the late return of an approved call reaches no question, thinking line or finish rule', async () => {
+	// Synthetic key shapes, one per way out that tool approval added.
+	const keys = { prepare: `sk-${'p'.repeat(24)}`, refusal: `ghp_${'d'.repeat(36)}`, late: `xoxb-${'a'.repeat(24)}` };
+	const tool = (name: string, prepare: AgentTool['prepare']): AgentTool => new AgentTool({ name, description: name, parameters: { type: 'object' }, prepare });
+	const unreadable = tool('unreadable', async () => {
+		throw new Error(`Cannot read 'pipelines/x.pipe': the store said ${keys.prepare}`);
+	});
+	const refused = tool('refused', async () => ({ act: { name: 'refused', params: [] }, run: async () => 'refused ran' }));
+	// Approved, then times out (limit 10 ms) and ends with its key while the next wave plans.
+	const slow = tool('slow', async () => ({
+		act: { name: 'slow', params: [] },
+		run: async () => {
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			return `late with ${keys.late}`;
+		},
+	}));
+	// The card's title, and so the refusal, is built from names the server holds.
+	const approve: LoopOptions['approve'] = async (act, run) => {
+		if (act.name === 'refused') throw new Error(`The user declined: Schedule Nightly ${keys.refusal}.`);
+		return run;
+	};
+	const replies = [plan([['unreadable'], ['refused'], ['slow']]), plan([['unreadable', { again: true }]]), done('finished')];
+	const questions: QuestionSpec[] = [];
+	const model: ModelCall = async (q) => {
+		questions.push(q);
+		// The second plan waits until the slow call has ended, so the finish rule hears its late return.
+		if (questions.length === 2) await new Promise((resolve) => setTimeout(resolve, 50));
+		return replies.shift() ?? done('finished');
+	};
+	const checks = record();
+	const heard: RanCall[] = [];
+	const finish: FinishRule = {
+		checkTool: checks.checkTool,
+		beginWave: (wave) => checks.beginWave(wave),
+		endWave: async (calls) => {
+			heard.push(...calls);
+			await checks.endWave(calls);
+		},
+		unchecked: () => checks.unchecked(),
+	};
+	const status: string[] = [];
+	const result = await setup(model, [unreadable, refused, slow], { approve, finish, emit: (_type, text) => status.push(text), timeoutMs: (name) => (name === 'slow' ? 10 : 0) }).run();
+
+	const seen = { questions: JSON.stringify(questions), status: status.join('\n'), finish: JSON.stringify(heard) };
+	for (const [where, text] of Object.entries(seen)) {
+		for (const [kind, key] of Object.entries(keys)) assert.ok(!text.includes(key), `the ${kind} key reached the ${where}`);
+	}
+	assert.match(seen.questions, /the store said \[redacted\]/, 'the prepare error keeps its words, without the key');
+	assert.match(seen.questions, /The user declined: Schedule Nightly \[redacted\]\./, 'the refusal keeps its words, without the key');
+	assert.match(seen.status, /refused — error: The user declined: Schedule Nightly \[redacted\]/);
+	// the unstarted calls stay out of the finish rule; the approved one that ran late is heard, redacted
+	assert.deepEqual(
+		heard.map((call) => [call.tool, call.late === true, call.result ?? call.error]),
+		[
+			['slow', false, 'TimeoutError: no result after 0.01 s'],
+			['slow', true, 'late with [redacted]'],
+		]
+	);
+	assert.equal(result.answer, 'finished');
+});
+
+test('a key in a message the user sends during the run reaches no question', async () => {
+	// A mid-run message skips AgentSession.execute and its pasted-key check.
+	const key = `sk-ant-api03-${'k'.repeat(24)}`;
+	const inbox: string[] = [];
+	const read = stub('read_file', () => {
+		inbox.push(`use this key instead: ${key}`);
+		return 'file text';
+	});
+	// The second plan call fails after the run has gathered a result, so the best-effort question is asked too.
+	const model = scriptedModel([plan([['read_file', { path: 'a.ts' }]]), new Error('The model provider failed'), 'Read a.ts.']);
+	const result = await setup(model, [read], { takeQueued: () => inbox.splice(0) }).run();
+	assert.equal(result.stopReason, 'error');
+	assert.equal(model.questions.length, 3, 'the next plan and the best-effort question both came after the message');
+	assert.ok(!JSON.stringify(model.questions).includes(key), 'the key reached a question');
+	for (const q of model.questions.slice(1)) {
+		assert.ok(
+			q.context.some((c) => c.includes('1. use this key instead: [redacted]')),
+			'the message keeps its words, without the key'
+		);
+	}
 });

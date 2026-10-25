@@ -53,7 +53,7 @@ import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, type
 import type { CheckReport, MarkerSource } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
-import { NOT_CONNECTED_MESSAGE, type ClientGetter } from './toolkits/common';
+import { NOT_CONNECTED_MESSAGE, redactText, type ClientGetter } from './toolkits/common';
 import { FilesystemTools, normalizePath } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit } from './toolkits/rocketrideClient';
@@ -413,7 +413,9 @@ function within(path: string, root: string): boolean {
  * error banners, and system and status rows are not part of the conversation.
  * A turn's request and the messages it took mid-run, or a request whose
  * answer was an error, are consecutive user rows; they merge into one user
- * turn, so the roles alternate.
+ * turn, so the roles alternate. Each row passes through redactText: the live
+ * chat still shows a key the user pasted, and a session saved before rows
+ * were redacted may still hold one.
  *
  * @param messages - The chat's messages, oldest first.
  * @returns The history turns, oldest first.
@@ -422,9 +424,10 @@ function toHistory(messages: ChatMessage[]): HistoryTurn[] {
 	const turns: HistoryTurn[] = [];
 	for (const m of messages) {
 		const last = turns.at(-1);
-		if (m.sender === 'user' && last?.role === 'user') last.content = `${last.content}\n\n${m.text}`;
-		else if (m.sender === 'user') turns.push({ role: 'user', content: m.text });
-		else if (m.sender === 'bot' && !m.isError && !m.resultKey) turns.push({ role: 'assistant', content: m.text });
+		const text = redactText(m.text);
+		if (m.sender === 'user' && last?.role === 'user') last.content = `${last.content}\n\n${text}`;
+		else if (m.sender === 'user') turns.push({ role: 'user', content: text });
+		else if (m.sender === 'bot' && !m.isError && !m.resultKey) turns.push({ role: 'assistant', content: text });
 	}
 	return turns;
 }
@@ -444,6 +447,8 @@ function isChecksLine(line: string): boolean {
  * the record, then a warning when the run changed the work and stopped before
  * finishing. Lines in the answer that start with "Checked:" or "Not checked:",
  * markdown-wrapped or not, are dropped, because only the code writes those.
+ * The whole text passes through redactText on its way to the chat and the
+ * saved session.
  *
  * @param result - How the loop ended.
  * @param checks - Every check result the run recorded.
@@ -457,7 +462,21 @@ function finalText(result: LoopResult, checks: CheckRecord): string {
 		.trim();
 	const parts = [answer, checks.checksLine()];
 	if (checks.changed && result.stopReason !== 'done') parts.push(NOT_CHECKED);
-	return parts.filter((part) => part.length > 0).join('\n\n');
+	return redactText(parts.filter((part) => part.length > 0).join('\n\n'));
+}
+
+/**
+ * A "Needs your OK" card with its title and detail passed through
+ * redactText. Card text comes from the model's arguments and from names the
+ * workspace and the server hold. The chat shows it, and the answered card's
+ * status row repeats the title into the thread, the saved session and the
+ * history of later turns.
+ *
+ * @param card - The card the run's approvals built.
+ * @returns The card the chat shows.
+ */
+function redactCard(card: ChatAskCard): ChatAskCard {
+	return { ...card, title: redactText(card.title), detail: card.detail === undefined ? undefined : redactText(card.detail) };
 }
 
 /**
@@ -653,8 +672,10 @@ export async function runAgent(request: string, callback: (type: string, content
 	// step: the workspace; every save that works returns the types of an app's TypeScript file
 	// or the validate of a pipeline, and the validate is recorded for the finish rule
 	const { vfs } = host;
-	// step: the run's approvals; the toolkits and the save hook below get its checked client
-	const approvals = new Approvals({ client, vfs, ask: options.ask, settings: host.approvals?.run, signal: options.signal });
+	// step: the run's approvals; the toolkits and the save hook below get its checked client,
+	// and every card it shows is redacted on its way to the chat
+	const { ask } = options;
+	const approvals = new Approvals({ client, vfs, ask: ask && ((card) => ask(redactCard(card))), settings: host.approvals?.run, signal: options.signal });
 	const afterSave = async (path: string): Promise<string> => {
 		const appFile = APP_TYPESCRIPT_FILE.exec(path);
 		if (appFile) return typesNote(vfs, markers, appFile[1], appFile[2]);
@@ -677,7 +698,8 @@ export async function runAgent(request: string, callback: (type: string, content
 	]);
 
 	const result = await runLoop({
-		request,
+		// execute holds back only a sure key shape, so a bearer token or a secret field still reaches here
+		request: redactText(request),
 		history: toHistory(options.history),
 		prefix: buildPrefix(CORE_PROMPT, options.prompts, composed),
 		tools: composed.tools,
