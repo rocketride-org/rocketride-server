@@ -7,16 +7,18 @@
  * MessageList — the scrollable chat thread.
  *
  * Renders each message (grouping consecutive "thinking" status messages into a
- * collapsible block), the streaming TypingIndicator, the messages queued behind
- * the running turn (below the indicator), and a stock EmptyState for
- * brand-new conversations. Autoscroll is scroll-locked: the thread only follows
- * new messages while the user is already at/near the bottom.
+ * collapsible block), any "Needs your OK" cards of the running turn (above the
+ * indicator), the streaming TypingIndicator, the messages queued behind the
+ * running turn (below the indicator), and a stock EmptyState for brand-new
+ * conversations. Autoscroll is scroll-locked: the thread only follows new
+ * messages while the user is already at/near the bottom.
  */
 
 import React, { useEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
-import { ChatMessage, CHAT_COLUMN_MAX_WIDTH, type ChatTurnView } from '../types';
+import { ChatMessage, CHAT_COLUMN_MAX_WIDTH, type ChatAskAnswer, type ChatAskView, type ChatTurnView } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
+import { Button } from '../../button/Button';
 import { EmptyState } from '../../empty-state/EmptyState';
 
 // =============================================================================
@@ -83,6 +85,41 @@ const styles = {
 		marginLeft: 2,
 		marginTop: 2,
 	} as CSSProperties,
+
+	askCard: {
+		maxWidth: '72%',
+		padding: '10px 14px',
+		marginBottom: 12,
+		borderRadius: '12px 12px 12px 4px',
+		backgroundColor: 'var(--rr-bg-widget)',
+		border: '1px solid var(--rr-border)',
+		color: 'var(--rr-text-primary)',
+		fontSize: 13,
+		lineHeight: 1.55,
+		boxSizing: 'border-box',
+	} as CSSProperties,
+
+	askHeading: {
+		fontSize: 11,
+		color: 'var(--rr-text-caption)',
+		marginBottom: 2,
+	} as CSSProperties,
+
+	askTitle: {
+		fontWeight: 600,
+	} as CSSProperties,
+
+	askDetail: {
+		marginTop: 2,
+		color: 'var(--rr-text-caption)',
+	} as CSSProperties,
+
+	askButtons: {
+		display: 'flex',
+		flexWrap: 'wrap',
+		gap: 6,
+		marginTop: 8,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -113,6 +150,46 @@ const ThinkingGroup: React.FC<{ messages: ChatMessage[] }> = ({ messages }) => {
 		</div>
 	);
 };
+
+// =============================================================================
+// ASK CARD
+// =============================================================================
+
+/**
+ * A "Needs your OK" card: what the request wants to do, Approve and Deny,
+ * and "Always allow" when the request offers it. Once answered it leaves the
+ * list, and the controller puts its one row in the thread.
+ *
+ * @param props.ask - The waiting card.
+ * @param props.onAnswer - Called with the button pressed.
+ * @returns The card.
+ */
+const AskCard: React.FC<{ ask: ChatAskView; onAnswer: (answer: Exclude<ChatAskAnswer, 'stopped'>) => void }> = ({ ask, onAnswer }) => (
+	<div style={styles.askCard} role="group" aria-label="Needs your OK">
+		<div style={styles.askHeading}>Needs your OK</div>
+		<div style={styles.askTitle}>{ask.card.title}</div>
+		{ask.card.detail && <div style={styles.askDetail}>{ask.card.detail}</div>}
+		<div style={styles.askButtons}>
+			<Button variant="primary" small onClick={() => onAnswer('approve')}>
+				Approve
+			</Button>
+			<Button variant="secondary" small onClick={() => onAnswer('deny')}>
+				Deny
+			</Button>
+			{ask.card.alwaysLabel && (
+				<Button variant="ghost" small onClick={() => onAnswer('always')}>
+					{ask.card.alwaysLabel}
+				</Button>
+			)}
+		</div>
+	</div>
+);
+
+/** The typing indicator's caption, read from the turn, so no new phase is needed and Esc and Stop work as before. */
+function typingLabel(turn: ChatTurnView | undefined): string | undefined {
+	if (turn?.asks.length) return 'Waiting for your OK';
+	return turn?.phase === 'stopping' ? 'Stopping…' : undefined;
+}
 
 // =============================================================================
 // MESSAGE LIST
@@ -158,7 +235,7 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 	// user scrolled up to read history, leave their position untouched.
 	useEffect(() => {
 		if (atBottomRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' });
-	}, [messages, isTyping]);
+	}, [messages, isTyping, turn?.asks]);
 
 	// Fold consecutive "thinking" status messages into a single collapsible group.
 	// Queued messages are always the last rows; they render apart, below the indicator.
@@ -194,7 +271,10 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 			{/* Inner column mirrors the entry bar width so thread and input align. */}
 			<div style={styles.column}>
 				{items.map((item) => (item.kind === 'thinking-group' ? <ThinkingGroup key={`tg-${item.id}`} messages={item.messages} /> : <MessageBubble key={item.message.id} message={item.message} />))}
-				{isTyping && <TypingIndicator label={turn?.phase === 'stopping' ? 'Stopping…' : undefined} />}
+				{turn?.asks.map((ask) => (
+					<AskCard key={`ask-${ask.id}`} ask={ask} onAnswer={(answer) => turn.answerAsk(ask.id, answer)} />
+				))}
+				{isTyping && <TypingIndicator label={typingLabel(turn)} />}
 				{queued.map((m) => (
 					<MessageBubble key={m.id} message={m} turn={turn} />
 				))}

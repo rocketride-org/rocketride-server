@@ -11,10 +11,15 @@
  * `begin()`, and `begin()` runs only from an idle slot, so one turn runs at a
  * time. A send during a turn becomes a queued row at the end of the list: the
  * running request may take it, and otherwise it opens the next turn.
+ *
+ * It also owns the turn's "Needs your OK" cards (`ChatTurn.ask`). A card is
+ * not a row: it waits on the turn, is never saved, and Stop, the turn
+ * settling and a clear all end it as not answered, so no card outlives its
+ * turn. An answered card leaves one status row.
  */
 
-import type { ChatMessage, ChatStatusSink, ChatTurn, ChatTurnPhase, ChatTurnView, TextResult } from '../types';
-import { makeStatusSink } from '../hooks/statusRows';
+import type { ChatAskAnswer, ChatAskCard, ChatAsking, ChatAskView, ChatMessage, ChatStatusSink, ChatTurn, ChatTurnPhase, ChatTurnView, TextResult } from '../types';
+import { makeStatusSink, statusRow } from '../hooks/statusRows';
 
 // =============================================================================
 // TYPES
@@ -22,6 +27,9 @@ import { makeStatusSink } from '../hooks/statusRows';
 
 /** How long a stopped request has to settle before the controller closes its turn without it. */
 export const STOP_GRACE_MS = 3_000;
+
+/** The `sseType` of the row an answered card leaves. Not 'thinking', so it shows on its own, outside the Thinking fold. */
+export const ASK_ROW_TYPE = 'approval';
 
 /** The request one turn runs. v0's optional-argument `request` fits it as it is. */
 export type ChatRequest = (text: string, onStatus: ChatStatusSink, turn: ChatTurn) => Promise<TextResult[]>;
@@ -43,6 +51,8 @@ export interface ChatSnapshot {
 	readonly messages: ChatMessage[];
 	readonly phase: ChatTurnPhase;
 	readonly returned: ChatTurnView['returned'];
+	/** The running turn's waiting cards, oldest first; [] when none. */
+	readonly asks: readonly ChatAskView[];
 }
 
 /** The turn in the slot. */
@@ -50,6 +60,14 @@ interface LiveTurn {
 	readonly abort: AbortController;
 	/** The id of the turn's opening user row; the turn's progress rows are the status rows from it on. */
 	readonly openingId: number;
+}
+
+/** A card waiting in a turn. */
+interface WaitingAsk {
+	readonly id: number;
+	readonly turn: LiveTurn;
+	readonly card: ChatAskCard;
+	readonly resolve: (answer: ChatAskAnswer) => void;
 }
 
 /** The one turn slot. "Stopping without a turn" cannot be written. */
@@ -67,6 +85,10 @@ export class TurnController {
 	private slot: Slot = { phase: 'idle' };
 	private rows: ChatMessage[];
 	private returned: ChatTurnView['returned'] = null;
+	/** The waiting cards, oldest first; every one belongs to the turn in the slot. */
+	private asks: WaitingAsk[] = [];
+	/** The cards as the snapshot shows them, rebuilt only when the cards change. */
+	private askViews: readonly ChatAskView[] = [];
 	private snap: ChatSnapshot;
 	private nextId: number;
 	private readonly now: () => string;
@@ -82,7 +104,7 @@ export class TurnController {
 		// ids continue past the restored ones: Edit and Remove address rows by id
 		this.nextId = this.rows.reduce((max, row) => Math.max(max, row.id), 0) + 1;
 		this.now = o.now ?? clockTime;
-		this.snap = { messages: this.rows, phase: 'idle', returned: null };
+		this.snap = { messages: this.rows, phase: 'idle', returned: null, asks: this.askViews };
 	}
 
 	/** Adds a change listener; returns its unsubscribe. */
@@ -120,8 +142,27 @@ export class TurnController {
 		}
 		const grace = setTimeout(() => this.settle(turn, { kind: 'cut' }), this.o.stopGraceMs ?? STOP_GRACE_MS);
 		this.slot = { phase: 'stopping', turn, grace };
+		// before the abort: the request hears 'stopped' for each card, so it starts nothing
+		this.closeAsks(turn, true);
 		// after the slot moves: an abort listener that runs at once must already see a stopping turn
 		turn.abort.abort();
+		this.publish();
+	}
+
+	/**
+	 * Answers a waiting card: it leaves the bottom of the thread, its row goes
+	 * into the thread (before any queued row), and the request hears the
+	 * answer. An id that no longer waits does nothing.
+	 *
+	 * @param id - The card's id, from the snapshot.
+	 * @param answer - The button the user pressed, or the request's own approve().
+	 */
+	answerAsk(id: number, answer: Exclude<ChatAskAnswer, 'stopped'>): void {
+		const ask = this.asks.find((a) => a.id === id);
+		if (!ask) return;
+		this.setAsks(this.asks.filter((a) => a !== ask));
+		this.insert(statusRow(this.mint(), ASK_ROW_TYPE, answeredLine(ask.card, answer), this.now()));
+		ask.resolve(answer);
 		this.publish();
 	}
 
@@ -150,6 +191,7 @@ export class TurnController {
 			const { turn } = this.slot;
 			if (this.slot.phase === 'stopping') clearTimeout(this.slot.grace);
 			this.slot = { phase: 'idle' };
+			this.closeAsks(turn, false);
 			turn.abort.abort();
 		}
 		this.rows = [this.systemRow(welcome)];
@@ -173,6 +215,7 @@ export class TurnController {
 			history: this.rows.slice(0, this.rows.indexOf(opening)),
 			signal: turn.abort.signal,
 			takeQueued: () => (this.slot.phase === 'running' && this.slot.turn === turn ? this.takeQueued() : []),
+			ask: (card) => this.ask(turn, card),
 		};
 		this.publish();
 		new Promise<TextResult[]>((resolve) => resolve(this.o.request()(opening.text, sink, handle))).then(
@@ -190,9 +233,49 @@ export class TurnController {
 		return taken.map((row) => row.text);
 	}
 
+	/**
+	 * Puts a card up for a turn. A turn that no longer runs gets no card and
+	 * an answer of 'stopped' at once, so a request still going after Stop can
+	 * never get anything approved.
+	 */
+	private ask(turn: LiveTurn, card: ChatAskCard): ChatAsking {
+		if (this.slot.phase !== 'running' || this.slot.turn !== turn) return { answer: Promise.resolve('stopped'), approve: () => undefined };
+		const id = this.mint();
+		let resolve: (answer: ChatAskAnswer) => void = () => undefined;
+		const answer = new Promise<ChatAskAnswer>((settle) => {
+			resolve = settle;
+		});
+		this.setAsks([...this.asks, { id, turn, card, resolve }]);
+		this.publish();
+		return { answer, approve: () => this.answerAsk(id, 'approve') };
+	}
+
+	/**
+	 * Ends every card of a turn as not answered.
+	 *
+	 * @param withRows - Whether each leaves its "Not answered" row (not on a clear, which resets the rows).
+	 */
+	private closeAsks(turn: LiveTurn, withRows: boolean): void {
+		const ending = this.asks.filter((a) => a.turn === turn);
+		if (!ending.length) return;
+		this.setAsks(this.asks.filter((a) => a.turn !== turn));
+		for (const ask of ending) {
+			if (withRows) this.insert(statusRow(this.mint(), ASK_ROW_TYPE, answeredLine(ask.card, 'stopped'), this.now()));
+			ask.resolve('stopped');
+		}
+	}
+
+	/** Replaces the waiting cards and the views the snapshot shows. */
+	private setAsks(next: WaitingAsk[]): void {
+		this.asks = next;
+		this.askViews = next.map(({ id, card }) => ({ id, card }));
+	}
+
 	/** Closes a turn with its answer, its error, or (when stopping) the stop row, then opens the next queued one. */
 	private settle(turn: LiveTurn, how: Settled): void {
 		if (this.slot.phase === 'idle' || this.slot.turn !== turn) return;
+		// a request that ends with a card still up never hears an answer for it
+		this.closeAsks(turn, true);
 		if (this.slot.phase === 'stopping') {
 			clearTimeout(this.slot.grace);
 			this.insert(closingRow(this.progressOf(turn), this.mint(), this.now()));
@@ -242,7 +325,7 @@ export class TurnController {
 
 	/** Replaces the snapshot and tells every subscriber. */
 	private publish(): void {
-		this.snap = { messages: this.rows, phase: this.slot.phase, returned: this.returned };
+		this.snap = { messages: this.rows, phase: this.slot.phase, returned: this.returned, asks: this.askViews };
 		for (const listener of this.listeners) listener();
 	}
 
@@ -276,6 +359,23 @@ function unqueued(row: ChatMessage): ChatMessage {
 /** v0's row time: the local hour and minute. */
 function clockTime(): string {
 	return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * The one row a card leaves. It is a status row, so it lands in the Stop
+ * row's "Progress before the stop", which the model reads next turn.
+ */
+function answeredLine(card: ChatAskCard, answer: ChatAskAnswer): string {
+	switch (answer) {
+		case 'approve':
+			return `Approved: ${card.title}`;
+		case 'always':
+			return `Approved: ${card.title} (always allowed from now on)`;
+		case 'deny':
+			return `Denied: ${card.title}`;
+		case 'stopped':
+			return `Not answered: ${card.title}. The run ended first, so nothing was done.`;
+	}
 }
 
 /** The bot row that closes a stopped turn; its text is what the model reads as its last answer next turn. */

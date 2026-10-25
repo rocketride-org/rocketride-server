@@ -129,6 +129,37 @@ test('a request that ignores Stop is closed after the grace, and nothing it does
 	assert.equal(calls.length, 2, 'the chat is free for the next turn');
 });
 
+test('a card waits on the turn, leaves one row once answered, and ends not answered on Stop or after the turn', async () => {
+	const { chat, calls } = scripted();
+	chat.send('publish it');
+	const [call] = calls;
+
+	const first = call.turn.ask({ title: 'Publish Daybook v3 to everyone' });
+	assert.equal(chat.snapshot().asks.length, 1);
+	assert.equal(chat.snapshot().messages.length, 1, 'a waiting card is not a row');
+	chat.answerAsk(chat.snapshot().asks[0].id, 'approve');
+	assert.equal(await first.answer, 'approve');
+	assert.deepEqual(thread(chat).at(-1), ['status', 'Approved: Publish Daybook v3 to everyone', false]);
+
+	// the request's own approve() closes its card the same way (the switch to Auto)
+	const second = call.turn.ask({ title: 'Turn off digest for team Staging' });
+	second.approve();
+	assert.equal(await second.answer, 'approve');
+
+	const third = call.turn.ask({ title: 'Delete apps/x' });
+	const id = chat.snapshot().asks[0].id;
+	chat.stop();
+	assert.equal(await third.answer, 'stopped');
+	chat.answerAsk(id, 'approve');
+	assert.equal(chat.snapshot().asks.length, 0, 'a click after Stop does nothing');
+	call.answer('ignored');
+	await tick();
+	assert.match(chat.snapshot().messages.at(-1)?.text ?? '', /Progress before the stop:[\s\S]*Not answered: Delete apps\/x\. The run ended first, so nothing was done\./, 'the model reads what went unanswered');
+
+	assert.equal(await call.turn.ask({ title: 'late' }).answer, 'stopped', 'a settled turn shows no card');
+	assert.equal(chat.snapshot().asks.length, 0);
+});
+
 test('Edit and Remove take a queued message out, and Edit hands its text back', async () => {
 	const { chat, calls } = scripted();
 	chat.send('a');

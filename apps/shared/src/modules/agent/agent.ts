@@ -92,7 +92,7 @@ export async function agent(request: string, callback: AgentCallback, options: A
 		: async () => {
 				await standin.restart(conversationId);
 			};
-	await runAgent(request, callback, { history: [...turn.history], prompts, token, onPipelineError, signal: turn.signal, takeQueued: () => turn.takeQueued() }, { host: getAgentHost(), client: getClient });
+	await runAgent(request, callback, { history: [...turn.history], prompts, token, onPipelineError, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card) }, { host: getAgentHost(), client: getClient });
 }
 
 // =============================================================================

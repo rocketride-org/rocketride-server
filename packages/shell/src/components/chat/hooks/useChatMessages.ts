@@ -86,7 +86,7 @@ export interface UseChatMessagesReturn {
 	sendMessage: (text: string, client: any, authToken: string) => Promise<void>;
 	clearMessages: () => void;
 	addSystemMessage: (text: string) => void;
-	/** Turn controls for ChatView's `turn` prop: Stop, and Edit and Remove on queued messages. */
+	/** Turn controls for ChatView's `turn` prop: Stop, Edit and Remove on queued messages, and the running turn's waiting cards. */
 	turn: ChatTurnView;
 }
 
@@ -122,8 +122,10 @@ export function useChatMessages(options: UseChatMessagesOptions = {}): UseChatMe
 			stop: () => controller.stop(),
 			editQueued: (id) => controller.editQueued(id),
 			removeQueued: (id) => controller.removeQueued(id),
+			asks: snap.asks,
+			answerAsk: (id, answer) => controller.answerAsk(id, answer),
 		}),
-		[controller, snap.phase, snap.returned]
+		[controller, snap.phase, snap.returned, snap.asks]
 	);
 	return { messages: snap.messages, isTyping: snap.phase !== 'idle', sendMessage, clearMessages, addSystemMessage, turn };
 }
