@@ -82,9 +82,9 @@ function record(): CheckRecord {
 	return new CheckRecord(async (ref) => ref);
 }
 
-/** A reply asking for tool calls. */
-function plan(calls: Array<[string, Record<string, unknown>?]>): string {
-	return JSON.stringify({ thought: 'working', tool_calls: calls.map(([tool, args]) => ({ tool, args: args ?? {} })) });
+/** A reply asking for tool calls; with `answer`, it also says it is done. */
+function plan(calls: Array<[string, Record<string, unknown>?]>, answer?: string): string {
+	return JSON.stringify({ thought: 'working', tool_calls: calls.map(([tool, args]) => ({ tool, args: args ?? {} })), ...(answer === undefined ? {} : { done: true, answer }) });
 }
 
 /** A reply that finishes with `answer`. */
@@ -135,6 +135,7 @@ function setup(model: ModelCall, tools: AgentTool[] = [], extra: Partial<LoopOpt
 		emit: () => undefined,
 		signal: new AbortController().signal,
 		takeQueued: () => [],
+		approve: async (_act, run) => run,
 		...extra,
 	};
 	return { run: () => runLoop(options) };
@@ -258,6 +259,42 @@ test('calls on one file in one wave run in planned order', async () => {
 	]);
 	await setup(model, [edit, checkTool(checks)], { finish: checks }).run();
 	assert.deepEqual(events, ['start 0', 'end 0', 'start 1', 'end 1']);
+});
+
+// =============================================================================
+// ASKING FIRST — a call that needs the user's OK
+// =============================================================================
+
+test('waiting for an OK never counts against the limit, and a refused call runs nothing, blocks done and is no change', async () => {
+	const ran: string[] = [];
+	const asking = (name: string): AgentTool =>
+		new AgentTool({
+			name,
+			description: name,
+			parameters: { type: 'object' },
+			prepare: async (args) => ({
+				act: { name, params: [args.path] },
+				run: async () => {
+					ran.push(name);
+					return `${name} ran`;
+				},
+			}),
+		});
+	const answers = ['approve', 'deny'];
+	// each OK takes 30 ms, three times the 10 ms limit
+	const approve: LoopOptions['approve'] = async (act, run) => {
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		if (answers.shift() === 'deny') throw new Error(`The user declined: ${act.name}.`);
+		return run;
+	};
+	const model = scriptedModel([plan([['publish_app']]), plan([['delete_file', { path: APP_FILE }]], 'Deleted.'), done('Not deleted: the user said no.')]);
+	const result = await setup(model, [asking('publish_app'), asking('delete_file')], { approve, timeoutMs: () => 10 }).run();
+
+	assert.deepEqual(ran, ['publish_app'], 'the refused call never ran');
+	assert.match(JSON.stringify(resultsIn(model.questions[1])), /publish_app ran/, 'the wait for an OK did not time the call out');
+	assert.match(JSON.stringify(resultsIn(model.questions[2])), /The user declined: delete_file/, 'the model read the refusal');
+	// a refused delete heard as a change would refuse this done until a check_app, and the script has no reply left
+	assert.equal(result.answer, 'Not deleted: the user said no.', 'the done beside the refused call was not accepted, and the next one needed no check');
 });
 
 // =============================================================================

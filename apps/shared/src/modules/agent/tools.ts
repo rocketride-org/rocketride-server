@@ -42,22 +42,68 @@
 // TOOL — one callable surface
 // =============================================================================
 
-/** The defining spec of one tool: contract plus executor. */
-export interface AgentToolSpec {
+/**
+ * What a prepared call is about to do, for the approval list to rate
+ * (`toolkits/approval.ts`). The tool names it before any of its work starts.
+ */
+export interface ToolAct {
+	/**
+	 * The list entry it falls under: a client method as the guide names it
+	 * (`publishApp`, `deploy.setSchedule`), or a tool whose work bypasses the
+	 * client (`delete_file`).
+	 */
+	readonly name: string;
+	/**
+	 * For a client method, its arguments exactly as `run` will pass them: the
+	 * checked client lets an asked method through only with these. For a tool,
+	 * its target. The card is built from them.
+	 */
+	readonly params: readonly unknown[];
+}
+
+/** A call made ready: what it is about to do, and the work itself. */
+export interface ToolStep {
+	/** What it is about to do, when the approval list rates it. Absent: nothing to rate, so the run starts at once. */
+	readonly act?: ToolAct;
+	/** Does the work. The loop calls it at most once, and only after the act (if any) was let through. */
+	run(): Promise<string>;
+}
+
+/** What every tool spec has. */
+interface ToolSpecBase {
 	/** Tool name as the LLM calls it. */
 	name: string;
 	/** Tool description shown to the LLM at discovery. */
 	description: string;
 	/** JSON Schema of the arguments object. */
 	parameters: Record<string, unknown>;
-	/** Runs the call; the resolved string is the tool result fed to the LLM. */
-	execute: (args: Record<string, unknown>) => Promise<string>;
 }
+
+/**
+ * The defining spec of one tool: contract plus executor. Most tools give
+ * `execute`. A tool whose call may need the user's OK gives `prepare`
+ * instead: it reads what it needs and says what it is about to do, and the
+ * loop asks before it calls the step's `run`. `prepare` only reads, because
+ * the call may be refused after it.
+ */
+export type AgentToolSpec =
+	| (ToolSpecBase & {
+			/** Runs the call; the resolved string is the tool result fed to the LLM. */
+			execute: (args: Record<string, unknown>) => Promise<string>;
+			prepare?: never;
+	  })
+	| (ToolSpecBase & {
+			/** Gets the call ready: its act and its work. Throws when the arguments are wrong. */
+			prepare: (args: Record<string, unknown>) => Promise<ToolStep>;
+			execute?: never;
+	  });
 
 /**
  * One tool as presented to the LLM. A concrete class built from a spec so
  * toolkits can define tools inline while still giving hosts one nominal
- * type to pass around and extend.
+ * type to pass around and extend. It has one way in, `prepare`, so no
+ * tool's work starts except through the loop's approve step; an `execute`
+ * spec prepares to a step with no act.
  */
 export class AgentTool {
 	/** Tool name as the LLM calls it. */
@@ -66,8 +112,8 @@ export class AgentTool {
 	readonly description: string;
 	/** JSON Schema of the arguments object. */
 	readonly parameters: Record<string, unknown>;
-	/** The bound executor. */
-	private readonly executor: AgentToolSpec['execute'];
+	/** The spec's executor, in its two-step form. */
+	private readonly preparer: (args: Record<string, unknown>) => Promise<ToolStep>;
 
 	/**
 	 * Builds a tool from its spec.
@@ -78,18 +124,26 @@ export class AgentTool {
 		this.name = spec.name;
 		this.description = spec.description;
 		this.parameters = spec.parameters;
-		this.executor = spec.execute;
+		this.preparer = spec.execute ? oneStep(spec.execute) : spec.prepare;
 	}
 
 	/**
-	 * Runs the tool.
+	 * Gets one call ready. Only the loop calls it.
 	 *
 	 * @param args - The LLM-supplied arguments object.
-	 * @returns The tool result text fed back to the LLM.
+	 * @returns What the call is about to do, and its work.
 	 */
-	execute(args: Record<string, unknown>): Promise<string> {
-		return this.executor(args);
+	prepare(args: Record<string, unknown>): Promise<ToolStep> {
+		return this.preparer(args);
 	}
+}
+
+/**
+ * An execute function as a one-step preparer. The work waits for `run()`, so
+ * it happens inside the call's clock.
+ */
+function oneStep(execute: (args: Record<string, unknown>) => Promise<string>): (args: Record<string, unknown>) => Promise<ToolStep> {
+	return async (args) => ({ run: () => execute(args) });
 }
 
 // =============================================================================

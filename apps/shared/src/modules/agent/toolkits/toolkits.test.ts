@@ -240,6 +240,29 @@ function createMemoryWorkspace(files: Record<string, string>, opts?: { dirty?: s
 // HELPERS
 // =============================================================================
 
+/** A tool as these tests call it: prepared, then run, as the loop does once its act is let through. */
+interface Callable {
+	/** The tool itself. */
+	readonly tool: AgentTool;
+	/**
+	 * Calls the tool.
+	 *
+	 * @param args - The tool arguments.
+	 * @returns The tool result text.
+	 */
+	execute(args: Record<string, unknown>): Promise<string>;
+}
+
+/**
+ * A tool, callable the way the loop calls it.
+ *
+ * @param tool - The tool.
+ * @returns The tool and its call.
+ */
+function callable(tool: AgentTool): Callable {
+	return { tool, execute: async (args) => (await tool.prepare(args)).run() };
+}
+
 /** One toolkit per workspace, so reads carry over between calls the way they do within one run. */
 const toolkits = new WeakMap<MemoryWorkspace, FilesystemTools>();
 
@@ -259,7 +282,7 @@ function run(ws: MemoryWorkspace, tool: string, args: Record<string, unknown>): 
 		?.tools()
 		.find((t) => t.name === tool);
 	if (!found) throw new Error(`No such tool: ${tool}`);
-	return found.execute(args);
+	return callable(found).execute(args);
 }
 
 /** One row of an app's version rail, as `listDeployments` returns it. */
@@ -330,12 +353,12 @@ function fakeConfirm(answer: boolean): { confirm: ConfirmFn; asked: string[] } {
  *
  * @param toolkit - The toolkit.
  * @param name - The tool name.
- * @returns The tool.
+ * @returns The tool, callable.
  */
-function toolOf(toolkit: { tools(): AgentTool[] }, name: string): AgentTool {
+function toolOf(toolkit: { tools(): AgentTool[] }, name: string): Callable {
 	const found = toolkit.tools().find((t) => t.name === name);
 	assert.ok(found, `${name} is mounted`);
-	return found;
+	return callable(found);
 }
 
 /** The app tools over a fake client and a workspace with one app, `a-ui`, whose manifest id is `acme.a`. */
@@ -405,7 +428,7 @@ test('the file tools read guides but cannot change them', async () => {
 	const base = createMemoryWorkspace({ 'apps/a.ts': 'const a = 1;\n' });
 	const guides = { paths: () => ['docs/ROCKETRIDE_APPS.md'], read: async () => '# Apps\nBuild apps here.\n' };
 	const tools = new Map(new FilesystemTools(new GuideFileSystem(base, guides)).tools().map((t) => [t.name, t]));
-	const run = (name: string, args: Record<string, unknown>) => (tools.get(name) as NonNullable<ReturnType<typeof tools.get>>).execute(args);
+	const run = (name: string, args: Record<string, unknown>) => callable(tools.get(name) as AgentTool).execute(args);
 	const guide = '.rocketride/docs/ROCKETRIDE_APPS.md';
 	const readOnly = /Guides under \.rocketride\/ are read-only\./;
 
@@ -424,7 +447,7 @@ test('the README, CLI and Python guides are not served', async () => {
 	const paths = bundle.map((key) => guidePathFor(key)).filter((path): path is string => path !== null);
 	const guides = { paths: () => paths, read: async () => '# Apps\n' };
 	const tools = new Map(new FilesystemTools(new GuideFileSystem(createMemoryWorkspace({}), guides)).tools().map((t) => [t.name, t]));
-	const run = (name: string, args: Record<string, unknown>) => (tools.get(name) as NonNullable<ReturnType<typeof tools.get>>).execute(args);
+	const run = (name: string, args: Record<string, unknown>) => callable(tools.get(name) as AgentTool).execute(args);
 
 	assert.deepEqual(JSON.parse(await run('list_directory', { path: '.rocketride/docs' })), [{ name: 'ROCKETRIDE_APPS.md', type: 'file' }]);
 	await assert.rejects(run('read_file', { path: '.rocketride/docs/ROCKETRIDE_README.md' }), /^Error: No guide at \.rocketride\/docs\/ROCKETRIDE_README\.md\. Guides: \.rocketride\/docs\/ROCKETRIDE_APPS\.md$/);
@@ -481,7 +504,7 @@ function scriptedClient(answers: Record<string, unknown>): { client: RocketRideC
 }
 
 /** The rocketride_client tool over a client (null for none) and a workspace view. */
-function clientTool(client: RocketRideClient | null, vfs: IWorkspaceFileSystem = createMemoryWorkspace({})): AgentTool {
+function clientTool(client: RocketRideClient | null, vfs: IWorkspaceFileSystem = createMemoryWorkspace({})): Callable {
 	return toolOf(new RocketRideClientToolkit(() => client, vfs), 'rocketride_client');
 }
 

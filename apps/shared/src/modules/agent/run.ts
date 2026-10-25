@@ -679,6 +679,7 @@ export async function runAgent(request: string, callback: (type: string, content
 		timeoutMs: (tool) => (tool === 'deploy_app' ? DEPLOY_APP_TIMEOUT_MS : TOOL_TIMEOUT_MS),
 		signal: options.signal,
 		takeQueued: options.takeQueued,
+		approve: async (_act, run) => run,
 	});
 
 	// step: a stopped run writes no answer: the chat closes the turn with its stop row, and this adds the one fact that row can't know

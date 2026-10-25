@@ -46,7 +46,7 @@
  * instructions, so the cached start stays identical on every call.
  */
 
-import type { AgentTool } from '../tools';
+import type { AgentTool, ToolAct, ToolStep } from '../tools';
 import { MEMORY_PEEK_TOOL, peek, resolveAnswerRefs, resolveArgRefs, resultKey, RunMemory } from './memory';
 import { buildWaveQuestion, heardText, parseReply, type PromptPrefix } from './plan';
 import type { HistoryTurn, ModelCall, PlanReply, QuestionSpec, ResultEntry, StopReason, ToolCall } from './plan';
@@ -121,6 +121,15 @@ export interface LoopOptions {
 	signal: AbortSignal;
 	/** Takes the messages the user sent since the last take, oldest first. */
 	takeQueued: () => string[];
+	/**
+	 * Lets a prepared call whose step names an act start, or refuses it.
+	 * Resolves with the work to start; rejects with the refusal the model
+	 * reads (blocked, declined, not answered). The loop calls it between the
+	 * call's prepare and its run with the call's clock stopped, so the user's
+	 * think time never counts against a limit. A step with no act never
+	 * reaches it.
+	 */
+	approve: (act: ToolAct, run: () => Promise<string>) => Promise<() => Promise<string>>;
 }
 
 /** How a run ended. */
@@ -344,8 +353,13 @@ function partialReport(cause: string, lines: string[], scratch: string): string 
 // OUTCOMES — what a call left behind
 // =============================================================================
 
-/** How one call ended: its result, or the error that stopped it (with whether the time limit did). */
-export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false; error: string; ms: number; timedOut: boolean };
+/**
+ * How one call ended: its result, or the error that stopped it (with whether
+ * the time limit did). `unstarted` marks a call whose work never began
+ * (prepare failed or timed out, its act was refused, or a stop came first),
+ * so it changed nothing and the finish rule does not hear of it.
+ */
+export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false; error: string; ms: number; timedOut: boolean; unstarted?: true };
 
 // =============================================================================
 // WRITE PATHS — what a call changes
@@ -400,48 +414,82 @@ function overlaps(a: string[], b: string[]): boolean {
 }
 
 // =============================================================================
-// ONE CALL — run it against its time limit
+// ONE CALL — prepare it, let it through, run it against its time limit
 // =============================================================================
 
+/** How the loop gets a call ready and lets it start. */
+interface CallSteps {
+	/** Gets the call's tool ready with its arguments; throws for a tool the run does not have. */
+	prepare: (call: ToolCall) => Promise<ToolStep>;
+	/** The loop option. */
+	approve: LoopOptions['approve'];
+}
+
+/** How a piece of work ended against its limit: its value, or the error that stopped it. */
+type Timed<T> = { ok: true; value: T; ms: number } | { ok: false; error: string; ms: number; timedOut: boolean };
+
+/** What a call the stop kept from starting settles with. */
+function notStarted(ms: number): CallOutcome {
+	return { ok: false, error: STOPPED_BEFORE_START, ms, timedOut: false, unstarted: true };
+}
+
 /**
- * Runs one call and settles with its outcome; never rejects. A limit that is
- * not a positive finite number means no limit. A stop cuts a running call
- * loose like a timeout does, and a call asked to start after a stop never
- * runs.
+ * Runs one call and settles with its outcome; never rejects. Three steps:
+ *
+ * 1. prepare: the tool reads what it needs and says what it is about to do,
+ *    timed against the call's limit. A failure or timeout is `unstarted`, and
+ *    a prepare still going is dropped, since it only reads.
+ * 2. approve: only when the step names an act, with the clock stopped. A
+ *    refusal is the outcome (`unstarted`), and the run never starts.
+ * 3. run: the work, timed with what the limit has left. A timeout or a stop
+ *    cuts it loose into `late`.
+ *
+ * A limit that is not a positive finite number means no limit. A stop before
+ * step 3 means the run never starts. `ms` counts steps 1 and 3, not the wait.
  */
-function runOne(call: ToolCall, exec: (call: ToolCall) => Promise<string>, limitMs: number, late: Map<Promise<unknown>, LateCall>, signal: AbortSignal): Promise<CallOutcome> {
+async function runOne(call: ToolCall, steps: CallSteps, limitMs: number, late: Map<Promise<unknown>, LateCall>, signal: AbortSignal): Promise<CallOutcome> {
 	// a call that waited on an overlapping write starts after a stop through here
-	if (signal.aborted) return Promise.resolve({ ok: false, error: STOPPED_BEFORE_START, ms: 0, timedOut: false });
+	if (signal.aborted) return notStarted(0);
+	const ready = await timed(() => steps.prepare(call), limitMs, signal);
+	if (signal.aborted) return notStarted(ready.ms);
+	if (!ready.ok) return { ...ready, unstarted: true };
+
+	const { act, run } = ready.value;
+	let work = run;
+	if (act) {
+		try {
+			work = await steps.approve(act, run);
+		} catch (error) {
+			return { ok: false, error: messageOf(error), ms: ready.ms, timedOut: false, unstarted: true };
+		}
+		if (signal.aborted) return notStarted(ready.ms);
+	}
+
+	const left = Number.isFinite(limitMs) && limitMs > 0 ? Math.max(1, limitMs - ready.ms) : limitMs;
+	const done = await timed(work, left, signal, (running) => trackLate(late, call, running));
+	return done.ok ? { ok: true, result: done.value, ms: ready.ms + done.ms } : { ...done, ms: ready.ms + done.ms };
+}
+
+/**
+ * Runs `work` against a limit and settles with how it ended; never rejects.
+ * A limit that is not a positive finite number means no limit. A stop cuts
+ * the work loose like a timeout does. The work itself cannot be cancelled, so
+ * once cut loose it is handed to `cutLoose` (or dropped without one).
+ */
+function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, cutLoose?: (running: Promise<T>) => void): Promise<Timed<T>> {
 	const began = performance.now();
 	const elapsed = (): number => Math.round(performance.now() - began);
 
-	return new Promise<CallOutcome>((resolve) => {
+	return new Promise<Timed<T>>((resolve) => {
 		let over = false;
-		const running = new Promise<string>((done) => done(exec(call)));
-		const lateCall: LateCall = { call };
-
-		// Tracks the call after the wave stops waiting for it. It never rejects, so a
-		// late failure is not an unhandled rejection; it notes how the call ended, then
-		// leaves `late`.
-		const tracked: Promise<void> = running
-			.then(
-				(result) => {
-					lateCall.ended = { result };
-				},
-				(error: unknown) => {
-					lateCall.ended = { error: messageOf(error) };
-				}
-			)
-			.then(() => {
-				late.delete(tracked);
-			});
+		const running = new Promise<T>((done) => done(work()));
 
 		const timer =
 			Number.isFinite(limitMs) && limitMs > 0
 				? setTimeout(() => {
 						over = true;
 						signal.removeEventListener('abort', cut);
-						late.set(tracked, lateCall);
+						cutLoose?.(running);
 						resolve({ ok: false, error: `TimeoutError: no result after ${limitMs / 1000} s`, ms: elapsed(), timedOut: true });
 					}, limitMs)
 				: undefined;
@@ -450,28 +498,50 @@ function runOne(call: ToolCall, exec: (call: ToolCall) => Promise<string>, limit
 			if (over) return;
 			over = true;
 			clearTimeout(timer);
-			late.set(tracked, lateCall);
+			cutLoose?.(running);
 			resolve({ ok: false, error: STOPPED_WHILE_RUNNING, ms: elapsed(), timedOut: false });
 		};
-		// checked after exec started on purpose: the call's own synchronous work may have stopped the run
+		// checked after the work started on purpose: its own synchronous work may have stopped the run
 		if (signal.aborted) cut();
 		else signal.addEventListener('abort', cut, { once: true });
 
 		running.then(
-			(result) => {
+			(value) => {
 				signal.removeEventListener('abort', cut);
 				if (over) return;
 				clearTimeout(timer);
-				resolve({ ok: true, result, ms: elapsed() });
+				resolve({ ok: true, value, ms: elapsed() });
 			},
 			(error: unknown) => {
 				signal.removeEventListener('abort', cut);
 				if (over) return;
 				clearTimeout(timer);
-				resolve({ ok: false, error: error instanceof Error ? error.message : String(error), ms: elapsed(), timedOut: false });
+				resolve({ ok: false, error: messageOf(error), ms: elapsed(), timedOut: false });
 			}
 		);
 	});
+}
+
+/**
+ * Tracks a call the wave stopped waiting for in `late` until it settles. The
+ * tracker never rejects, so a late failure is not an unhandled rejection; it
+ * notes how the call ended, then leaves `late`.
+ */
+function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, running: Promise<string>): void {
+	const lateCall: LateCall = { call };
+	const tracked: Promise<void> = running
+		.then(
+			(result) => {
+				lateCall.ended = { result };
+			},
+			(error: unknown) => {
+				lateCall.ended = { error: messageOf(error) };
+			}
+		)
+		.then(() => {
+			late.delete(tracked);
+		});
+	late.set(tracked, lateCall);
 }
 
 // =============================================================================
@@ -484,22 +554,24 @@ function runOne(call: ToolCall, exec: (call: ToolCall) => Promise<string>, limit
  * A call starts once every earlier call in the wave with overlapping write
  * paths has settled or timed out, so calls on different files run together and
  * calls on the same file run as planned. The call's clock starts when it
- * starts, not while it waits. A call that outlives its limit is reported as
- * `timedOut` and its promise sits in `opts.late` until it settles.
+ * starts, not while it waits, and stops while the user is asked for an OK; a
+ * call waiting for an OK holds back only later calls on its own paths. A call
+ * that outlives its limit is reported as `timedOut` and its promise sits in
+ * `opts.late` until it settles.
  *
  * @param calls - The wave's tool calls, in the order the model planned them.
- * @param exec - Runs one call and resolves with its result text; a throw becomes an `ok: false` outcome.
+ * @param steps - Gets each call ready and lets it start; a throw becomes an `ok: false` outcome.
  * @param opts.timeoutMs - The time limit in milliseconds for a tool; zero or infinity means none.
  * @param opts.late - Collects the promises of timed-out calls that are still running, each with its call.
  * @param opts.signal - The run's stop signal: running calls are cut loose and waiting ones never start.
  */
-async function runWave(calls: ToolCall[], exec: (call: ToolCall) => Promise<string>, opts: { timeoutMs: (tool: string) => number; late: Map<Promise<unknown>, LateCall>; signal: AbortSignal }): Promise<CallOutcome[]> {
+async function runWave(calls: ToolCall[], steps: CallSteps, opts: { timeoutMs: (tool: string) => number; late: Map<Promise<unknown>, LateCall>; signal: AbortSignal }): Promise<CallOutcome[]> {
 	const held = calls.map(writePaths);
 	const outcomes: Promise<CallOutcome>[] = [];
 
 	calls.forEach((call, i) => {
 		const earlier = outcomes.filter((_, j) => overlaps(held[i], held[j]));
-		const start = (): Promise<CallOutcome> => runOne(call, exec, opts.timeoutMs(call.tool), opts.late, opts.signal);
+		const start = (): Promise<CallOutcome> => runOne(call, steps, opts.timeoutMs(call.tool), opts.late, opts.signal);
 		// With nothing to wait for, the call starts now, in this turn, so unrelated calls overlap fully.
 		outcomes.push(earlier.length === 0 ? start() : Promise.all(earlier).then(start));
 	});
@@ -618,8 +690,8 @@ class WaveRun {
 	 * where arguments go. Arguments are resolved next, and a call whose
 	 * reference names nothing does not run. memory.peek reads memory here,
 	 * before this wave's results are stored; every other call goes through the
-	 * scheduler. Every call but memory.peek and the skipped ones is also handed
-	 * back as the finish rule hears it.
+	 * scheduler. Every call but memory.peek, the skipped ones and those whose
+	 * work never started is also handed back as the finish rule hears it.
 	 */
 	async act(wave: number, calls: ToolCall[]): Promise<Acted> {
 		const prepared = calls.map((call, i): Prepared => {
@@ -636,7 +708,8 @@ class WaveRun {
 		});
 
 		const runnable = prepared.flatMap((p) => ('args' in p ? [{ tool: p.call.tool, args: p.args }] : []));
-		const outcomes = await runWave(runnable, (call) => this.exec(call), { timeoutMs: (tool) => this.limit(tool), late: this.late, signal: this.o.signal });
+		const steps: CallSteps = { prepare: (call) => this.prepare(call), approve: this.o.approve };
+		const outcomes = await runWave(runnable, steps, { timeoutMs: (tool) => this.limit(tool), late: this.late, signal: this.o.signal });
 
 		let next = 0;
 		const ran: RanCall[] = [];
@@ -647,7 +720,9 @@ class WaveRun {
 			}
 			const key = resultKey(wave, i);
 			const outcome = outcomes[next++];
-			ran.push(outcome.ok ? { tool: p.call.tool, args: p.args, result: outcome.result } : { tool: p.call.tool, args: p.args, error: outcome.error });
+			// a refused or unstarted call changed nothing, so a denied delete_file needs no check_app
+			if (outcome.ok) ran.push({ tool: p.call.tool, args: p.args, result: outcome.result });
+			else if (!outcome.unstarted) ran.push({ tool: p.call.tool, args: p.args, error: outcome.error });
 			return this.withCall(outcome.ok ? this.store(p.call.tool, key, outcome.result) : { tool: p.call.tool, key, error: outcome.error }, p.call);
 		});
 		return { entries, ran };
@@ -666,11 +741,11 @@ class WaveRun {
 		return required.filter((name): name is string => typeof name === 'string' && (call.args[name] === undefined || call.args[name] === null));
 	}
 
-	/** Runs one call on its tool. */
-	private exec(call: ToolCall): Promise<string> {
+	/** Gets one call ready on its tool. */
+	private prepare(call: ToolCall): Promise<ToolStep> {
 		const tool = this.tools.get(call.tool);
 		if (!tool) throw new Error(`Unknown tool '${call.tool}'. Use only the tools in Available Tools.`);
-		return tool.execute(call.args);
+		return tool.prepare(call.args);
 	}
 
 	/** A tool's time limit: the option's when it is a positive number, else the default. */
