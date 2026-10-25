@@ -654,7 +654,7 @@ export async function runAgent(request: string, callback: (type: string, content
 	// TypeScript file or the validate of a pipeline, and the validate is recorded for the finish rule
 	const vfs = new GuideFileSystem(host.vfs, host.guides);
 	// step: the run's approvals; the toolkits and the save hook below get its checked client
-	const approvals = new Approvals({ client, vfs, ask: options.ask, signal: options.signal });
+	const approvals = new Approvals({ client, vfs, ask: options.ask, settings: host.approvals?.run, signal: options.signal });
 	const afterSave = async (path: string): Promise<string> => {
 		const appFile = APP_TYPESCRIPT_FILE.exec(path);
 		if (appFile) return typesNote(vfs, markers, appFile[1], appFile[2]);

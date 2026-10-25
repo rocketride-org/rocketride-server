@@ -41,18 +41,24 @@
 // A brand-new conversation renders a welcome panel of example prompts in
 // place of the empty thread — clicking one sends it as the first request.
 //
+// Beside the composer, a switch sets the agent's approval mode for every
+// agent chat at once: Ask first, or Don't ask. It goes through the host's
+// approval handle, so it writes the same setting the Settings page shows.
+// Cards that need the user's OK show in the thread itself (ChatTurn.ask).
+//
 // The session is loaded once per mount; Documents keeps open tabs mounted,
 // so switching tabs never reloads, and reopening a closed tab re-reads disk.
 // =============================================================================
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
-import { ChatView, useChatMessages, useShellConnection, commonStyles } from 'shell';
+import { Button, ChatView, useChatMessages, useShellConnection, commonStyles } from 'shell';
 import type { DevToolProps } from 'shell';
 import type { TextResult } from 'shell';
 import type { ChatTurn } from 'shell/src/components/chat/types';
 import { AgentSession } from '../../modules/agent/agent';
 import type { AgentCallback } from '../../modules/agent/agent';
+import { findAgentHost, type ApprovalControls, type ApprovalMode } from '../../modules/agent/host';
 import { buttonize } from '../../utils/buttonize';
 import { AgentIcon } from './AgentIcon';
 
@@ -166,6 +172,34 @@ const styles: Record<string, CSSProperties> = {
 const CARD_HOVER_BG = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
 
 // =============================================================================
+// APPROVAL MODE SWITCH
+// =============================================================================
+
+/** What the switch says in each mode, and what it explains on hover. Don't ask says plainly that nothing judges the risk instead of the user. */
+const MODES: Readonly<Record<ApprovalMode, { label: string; hint: string }>> = {
+	ask: { label: 'Ask first', hint: 'The agent waits for your OK before it publishes, changes a deployment or schedule, or deletes a file. Click to stop asking.' },
+	auto: { label: "Don't ask (still blocks account and billing)", hint: "The agent does those without asking. Nothing checks them for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked. Click to ask first." },
+};
+
+/**
+ * The chat's switch for the agent's approval mode. One click flips it for
+ * every agent chat. Switching to Don't ask while a card waits approves that
+ * card, since the run hears the setting change.
+ *
+ * @param props.controls - The host's approval handle for UI code.
+ * @returns The switch.
+ */
+const ApprovalModeSwitch: React.FC<{ controls: ApprovalControls }> = ({ controls }) => {
+	const { mode } = useSyncExternalStore(controls.subscribe, controls.read);
+	const { label, hint } = MODES[mode];
+	return (
+		<Button variant="ghost" small pressed={mode === 'auto'} title={hint} onClick={() => controls.setMode(mode === 'ask' ? 'auto' : 'ask')}>
+			{label}
+		</Button>
+	);
+};
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
@@ -234,6 +268,8 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 	const request = useCallback((text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> => session.execute(text, onStatus, turn), [session]);
 
 	const { messages, isTyping, sendMessage, turn: controls } = useChatMessages({ initialMessages: session.messages, request });
+	// a host that serves no approval settings gets no switch
+	const approvals = findAgentHost()?.approvals?.controls;
 
 	// step: persist after each completed exchange (bot reply landed). The
 	// ref dodges saving on mount when a restored conversation ends idle.
@@ -275,7 +311,7 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 
 	return (
 		<div style={styles.root}>
-			<ChatView messages={messages} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} turn={controls} />
+			<ChatView messages={messages} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} leadingInputSlot={approvals && <ApprovalModeSwitch controls={approvals} />} turn={controls} />
 		</div>
 	);
 };

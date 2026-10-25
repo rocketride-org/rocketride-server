@@ -91,6 +91,32 @@
 						"default": true,
 						"order": 6,
 						"description": "Write saved changes straight to your workspace on the server. Turn this off to review, diff, and commit changes yourself - saves (yours and the agent's) stay local until you commit them. Cloud workspaces only."
+					},
+					"rocketride.pipeBuilder.agentApproval": {
+						"type": "string",
+						"enum": [
+							"ask",
+							"auto"
+						],
+						"enumDescriptions": [
+							"Ask first: the agent waits for your OK before it publishes, submits for review, changes a deployment or a schedule, or deletes a file.",
+							"Don't ask: the agent does those without asking. Nothing judges the risk for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked."
+						],
+						"default": "ask",
+						"order": 7,
+						"description": "Whether the agent asks before outward actions and deletes, in every agent chat. Account, team, member and billing changes are refused in both modes."
+					},
+					"rocketride.pipeBuilder.agentAllowScheduleChanges": {
+						"type": "boolean",
+						"default": false,
+						"order": 8,
+						"description": "Let the agent set, pause and resume deployment schedules without asking. Always allow on a card turns this on."
+					},
+					"rocketride.pipeBuilder.agentAllowDeploymentToggles": {
+						"type": "boolean",
+						"default": false,
+						"order": 9,
+						"description": "Let the agent turn deployments on and off without asking. Always allow on a card turns this on. Removing a deployment always asks."
 					}
 				}
 			}

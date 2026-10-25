@@ -28,11 +28,12 @@
  * The agent lives in shared code and cannot import rocket-ui, so rocket-ui
  * builds its AgentHost here and installs it right after the workspace is
  * created: the workspace view, the bundled guides, the New App scaffold, the
- * deploy packer and the open apps' dev sessions.
+ * deploy packer, the open apps' dev sessions, and the user's approval
+ * settings.
  */
 
 import type { RocketRideClient } from 'shell';
-import type { AgentDevSession, AgentHost } from 'shared/modules/agent/host';
+import type { AgentDevSession, AgentHost, ApprovalControls, ApprovalPrefs, ApprovalSettings, Grant } from 'shared/modules/agent/host';
 import type { FrameOptions } from 'shared/tools/appdev';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
@@ -71,6 +72,96 @@ function agentDevSession(session: WebDevSession): AgentDevSession {
 }
 
 // =============================================================================
+// APPROVALS — the user's settings behind the agent's approvals
+// =============================================================================
+
+/** The settings behind the agent's approvals, as package.json declares them. Typed by Grant, so a new kind doesn't compile until it has a key. */
+const APPROVAL_KEYS: Readonly<Record<'mode' | Grant, string>> = {
+	mode: 'rocketride.pipeBuilder.agentApproval',
+	schedules: 'rocketride.pipeBuilder.agentAllowScheduleChanges',
+	deploymentToggles: 'rocketride.pipeBuilder.agentAllowDeploymentToggles',
+};
+
+/** Writes one setting: the workspace's updateSetting. */
+type SettingWriter = (key: string, value: string | boolean) => void;
+
+/**
+ * The agent's approval settings in the effective settings. Anything but
+ * 'auto' reads as Ask, and anything but true as no grant, so a missing or
+ * garbled value fails safe.
+ *
+ * @param settings - The effective workspace settings.
+ * @returns The mode and grants.
+ */
+function approvalPrefsOf(settings: Readonly<Record<string, unknown>>): ApprovalPrefs {
+	return {
+		mode: settings[APPROVAL_KEYS.mode] === 'auto' ? 'auto' : 'ask',
+		grants: { schedules: settings[APPROVAL_KEYS.schedules] === true, deploymentToggles: settings[APPROVAL_KEYS.deploymentToggles] === true },
+	};
+}
+
+/** Whether two sets of prefs say the same. */
+function samePrefs(a: ApprovalPrefs, b: ApprovalPrefs): boolean {
+	return a.mode === b.mode && a.grants.schedules === b.grants.schedules && a.grants.deploymentToggles === b.grants.deploymentToggles;
+}
+
+/**
+ * The user's approval settings for every agent chat in the page. RocketApp
+ * pushes the workspace settings in on every change, as it does autoCommit,
+ * and a write goes out to the settings file and comes back through the next
+ * push, so the settings file is the one source.
+ */
+class ApprovalFeed {
+	private prefs: ApprovalPrefs = approvalPrefsOf({});
+	private write: SettingWriter | null = null;
+	private readonly listeners = new Set<() => void>();
+
+	/** What a run gets: it reads, hears changes and grants, with no way to set the mode. */
+	readonly run: ApprovalSettings = {
+		read: () => this.prefs,
+		subscribe: (listener) => {
+			this.listeners.add(listener);
+			return () => {
+				this.listeners.delete(listener);
+			};
+		},
+		grant: (kind) => this.write?.(APPROVAL_KEYS[kind], true),
+	};
+
+	/** What the chat's mode switch gets. */
+	readonly controls: ApprovalControls = { ...this.run, setMode: (mode) => this.write?.(APPROVAL_KEYS.mode, mode) };
+
+	/**
+	 * Takes the settings as they now stand. Settings that say the same change
+	 * nothing and tell no one, so RocketApp may push on every settings change.
+	 *
+	 * @param settings - The effective workspace settings.
+	 * @param write - Writes one setting.
+	 */
+	push(settings: Readonly<Record<string, unknown>>, write: SettingWriter): void {
+		this.write = write;
+		const next = approvalPrefsOf(settings);
+		if (samePrefs(next, this.prefs)) return;
+		this.prefs = next;
+		for (const listener of [...this.listeners]) listener();
+	}
+}
+
+/** The page's one feed: every host built here hands out the same one. */
+const approvalFeed = new ApprovalFeed();
+
+/**
+ * Pushes the workspace settings into the agent's approvals. RocketApp calls
+ * it on every settings change.
+ *
+ * @param settings - The effective workspace settings.
+ * @param write - Writes one setting (the workspace's updateSetting).
+ */
+export function feedApprovalSettings(settings: Readonly<Record<string, unknown>>, write: SettingWriter): void {
+	approvalFeed.push(settings, write);
+}
+
+// =============================================================================
 // THE HOST
 // =============================================================================
 
@@ -99,5 +190,6 @@ export function createRocketAgentHost(client: RocketRideClient): AgentHost {
 			const session = findDevSession(appId);
 			return session ? agentDevSession(session) : null;
 		},
+		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
 	};
 }

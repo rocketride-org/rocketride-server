@@ -116,6 +116,12 @@ export interface AgentHost {
 	 * @returns The session, or null when none is running.
 	 */
 	devSession(appId: string): AgentDevSession | null;
+	/**
+	 * The user's approval mode and grants, live. Without it a run asks for
+	 * everything the approval list rates as asking, nothing is always allowed,
+	 * and the chat shows no mode switch.
+	 */
+	approvals?: HostApprovals;
 }
 
 // =============================================================================
@@ -167,6 +173,28 @@ export interface ApprovalSettings {
 	grant(kind: Grant): void;
 }
 
+/** The chat's mode switch: the same settings, plus the one thing only the user does, setting the mode. */
+export interface ApprovalControls extends ApprovalSettings {
+	/**
+	 * Sets the mode for every agent chat at once.
+	 *
+	 * @param mode - Ask first, or don't ask.
+	 */
+	setMode(mode: ApprovalMode): void;
+}
+
+/**
+ * The user's approval settings as the host hands them over, as two separate
+ * handles: a run gets `run`, which has no way to set the mode, and only UI
+ * code gets `controls`.
+ */
+export interface HostApprovals {
+	/** What a run reads, hears and grants through. */
+	readonly run: ApprovalSettings;
+	/** What the chat's mode switch uses. */
+	readonly controls: ApprovalControls;
+}
+
 // =============================================================================
 // REGISTRY
 // =============================================================================
@@ -190,5 +218,15 @@ export function setAgentHost(host: AgentHost): void {
  */
 export function getAgentHost(): AgentHost {
 	if (!current) throw new Error('The agent host is not configured — rocket-ui sets it at startup.');
+	return current;
+}
+
+/**
+ * The installed host, or null when none is set. For UI that renders in hosts
+ * that may not serve the agent; agent code uses getAgentHost().
+ *
+ * @returns The installed host, or null.
+ */
+export function findAgentHost(): AgentHost | null {
 	return current;
 }

@@ -62,7 +62,7 @@ import { useDevToolPins } from './surfaces/devtools/devToolPins';
 import { CodiconExtensions } from 'shared/components/icons/Codicon';
 import { AgentSession } from 'shared/modules/agent/agent';
 import { setAgentHost } from 'shared/modules/agent/host';
-import { createRocketAgentHost } from './agent/agentHost';
+import { createRocketAgentHost, feedApprovalSettings } from './agent/agentHost';
 import { registerRocketHostOps } from './ops/hostOps';
 import { registerRocketFsOps } from './ops/fsOps';
 import { registerRocketAppDevOps } from './ops/appdevOps';
@@ -149,7 +149,7 @@ const styles = {
 const RocketApp: React.FC<ShellAppProps> = (_props) => {
 	const { client } = useShellConnection();
 	const authUser = useAuthUser();
-	const { loaded, appState, updateAppState, flushWorkspaceNow, activeAppId, settings } = useWorkspace();
+	const { loaded, appState, updateAppState, flushWorkspaceNow, activeAppId, settings, updateSetting } = useWorkspace();
 	const [ready, setReady] = useState(false);
 
 	// --- Workspace scope (dev team → shared tree) -----------------------------
@@ -372,6 +372,10 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 			else throw err;
 		}
 	}, [settingAutoCommit, ready]);
+
+	// --- Setting changes flow to the agent's approvals ------------------------
+
+	useEffect(() => feedApprovalSettings(settings, updateSetting), [settings, updateSetting]);
 
 	// --- Sign-out -------------------------------------------------------------
 	// Logout is handled entirely by the shell, in-place: handleLogout switches the
