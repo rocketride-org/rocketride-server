@@ -308,26 +308,6 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
-    ///		Registers node definitions that did not come from a scan, as
-    ///		[(definition, path), ...], then resolves them together so
-    ///		fields that list other services see all of them. path is the
-    ///		services file's place in the unpacked node; it anchors the icon.
-    ///------------------------------------------------------------
-    engLib.PYBIND_FUNCTION(registerServices, [](py::list nodes) {
-        // Convert the whole batch first: a malformed entry registers nothing
-        std::vector<std::pair<json::Value, file::Path>> batch;
-        for (auto node : nodes) {
-            auto pair = node.cast<py::tuple>();
-            batch.emplace_back(engine::python::pyjson::dictToJson(pair[0]),
-                               file::Path(pair[1].cast<std::string>()));
-        }
-        if (auto ccode =
-                engine::store::IServices::registerDefinitions(_mv(batch)))
-            throw ccode;
-    });
-
-    //-------------------------------------------------------------
-    /// @details
     ///		Returns the complete task-file JSON of the task currently
     ///		executing in this process, or None when no task is
     ///		running. This is how subprocess python reads trusted
@@ -547,19 +527,27 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		to python strings. This is for nodes to output
     ///		under the DebugOut level
     ///------------------------------------------------------------
-    engLib.PYBIND_FUNCTION(getServiceDefinitions, []() -> py::object {
-        // Get the service type
-        const auto result = IServices::getServiceSchemas();
+    engLib.PYBIND_FUNCTION(
+        getServiceDefinitions,
+        [](py::list custom) -> py::object {
+            // Get the service type, with the caller's custom services
+            std::optional<json::Value> schemas;
+            if (auto ccode = IServices::withCustomServices(
+                    pyjson::dictToJson(custom), [&]() -> Error {
+                        auto res = IServices::getServiceSchemas();
+                        if (!res) return res.ccode();
+                        schemas = _mv(*res);
+                        return {};
+                    })) {
+                // A custom service that does not parse is the caller's to fix
+                if (custom.size()) throw ccode;
+                return py::none();
+            }
 
-        // Return none or an object
-        if (!result) return py::none();
-
-        // Get a ptr to it
-        const auto services = *result;
-
-        // Return it
-        return pyjson::jsonToDict(services);
-    });
+            // Return it
+            return pyjson::jsonToDict(*schemas);
+        },
+        py::arg("custom") = py::list());
 
     //-------------------------------------------------------------
     /// @details
@@ -676,12 +664,24 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///		Defines the validatePipeline function which can be
     ///		called by a python to validate a pipeline configuration.
     ///-------------------------------------------------------------
-    engLib.PYBIND_FUNCTION(validatePipeline, [](py::dict config) -> py::dict {
-        auto resConfig = store::pipeline::validatePipelineOrComponent(
-            _mv(pyjson::dictToJson(config)));
-        resConfig.checkThrow();
-        return pyjson::jsonToDict(*resConfig);
-    });
+    engLib.PYBIND_FUNCTION(
+        validatePipeline,
+        [](py::dict config, py::list custom) -> py::dict {
+            // Validated with the caller's custom services
+            auto root = pyjson::dictToJson(config);
+            std::optional<json::Value> validated;
+            if (auto ccode = IServices::withCustomServices(
+                    pyjson::dictToJson(custom), [&]() -> Error {
+                        auto res = store::pipeline::validatePipelineOrComponent(
+                            _mv(root));
+                        if (!res) return res.ccode();
+                        validated = _mv(*res);
+                        return {};
+                    }))
+                throw ccode;
+            return pyjson::jsonToDict(*validated);
+        },
+        py::arg("config"), py::arg("custom") = py::list());
 
     //-------------------------------------------------------------
     /// @details
@@ -1190,8 +1190,27 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                                   : py::none();
             })
         .PYBIND(endLoad, &ILoader::endLoad)
-        .def_static("getPipeStack", &ILoader::getPipeStack,
-                    py::arg("pipes") = py::dict());
+        .def_static(
+            "getPipeStack",
+            [](const py::dict &pipes, py::list custom) -> py::dict {
+                // Built with the caller's custom services. getPipeStack
+                // throws, so it is caught here and rethrown once they are gone
+                py::dict stack;
+                std::exception_ptr failed;
+                if (auto ccode = IServices::withCustomServices(
+                        pyjson::dictToJson(custom), [&]() -> Error {
+                            try {
+                                stack = ILoader::getPipeStack(pipes);
+                            } catch (...) {
+                                failed = std::current_exception();
+                            }
+                            return {};
+                        }))
+                    throw ccode;
+                if (failed) std::rethrow_exception(failed);
+                return stack;
+            },
+            py::arg("pipes") = py::dict(), py::arg("custom") = py::list());
 
     //-------------------------------------------------------------
     /// @details

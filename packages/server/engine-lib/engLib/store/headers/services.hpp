@@ -170,30 +170,18 @@ public:
 
     //-----------------------------------------------------------------
     ///	@details
-    ///		Registers one parsed service definition into the service map,
-    ///		without reading anything from disk. The directory walk uses it
-    ///		for every services.json it finds; anything else that can hand
-    ///		us a definition uses the same path
+    ///		Runs call with the caller's custom services: definitions passed
+    ///		as JSON, parsed and resolved on top of the registered ones and
+    ///		seen by every lookup this thread makes until call returns. The
+    ///		registry itself never changes
+    ///	@param[in]	custom
+    ///		An array of service definitions; a logical type that is already
+    ///		registered, or listed twice, is refused
+    ///	@param[in]	call
+    ///		The work that should see them
     //-----------------------------------------------------------------
-    static Error registerDefinition(json::Value serviceInfo,
-                                    const Path &definitionPath,
-                                    bool replace = false,
-                                    bool factories = true) noexcept;
-
-    //-----------------------------------------------------------------
-    ///	@details
-    ///		Resolves what registerDefinition added since the last call
-    //-----------------------------------------------------------------
-    static Error refreshDefinitions() noexcept;
-
-    //-----------------------------------------------------------------
-    ///	@details
-    ///		Registers and resolves a batch of definitions, all or none:
-    ///		a failure leaves the services and global fields as they were.
-    ///		Called before any pipeline runs; nothing guards concurrent reads
-    //-----------------------------------------------------------------
-    static Error registerDefinitions(
-        std::vector<std::pair<json::Value, Path>> batch) noexcept;
+    static Error withCustomServices(const json::Value &custom,
+                                    const std::function<Error()> &call) noexcept;
 
 private:
     //-----------------------------------------------------------------
@@ -264,7 +252,9 @@ private:
         json::Value &field) noexcept;
     static ErrorOr<IServices::ServiceSchema> getFields(
         ServiceContext &context, json::Value &section) noexcept;
-    static Error updateDefinitions() noexcept;
+    static Error updateDefinitions(ServiceDefinitions &services) noexcept;
+    static ErrorOr<std::optional<ServiceDefinition>> parseDefinition(
+        json::Value serviceInfo, const Path &definitionPath) noexcept;
     static Error registerFactories(const ServiceDefinition &def) noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
@@ -283,6 +273,12 @@ private:
     ///		Our list of global field defintions
     //-----------------------------------------------------------------
     inline static ServiceFields m_fields{};
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The custom services of the call running on this thread, if any
+    //-----------------------------------------------------------------
+    inline static thread_local ServiceDefinitions *t_custom = nullptr;
 };
 
 }  // namespace engine::store
