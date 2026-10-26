@@ -41,12 +41,12 @@ import type { ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
 import { docsPathFor, isReferencePath } from '../../vfs/referenceTree';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
-import type { AgentDevSession, AgentHost, ApprovalPrefs, ApprovalSettings, Grant } from '../host';
+import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs, type ApprovalSettings, type Grant } from '../host';
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
 import type { ModelCall, QuestionSpec } from '../wave/plan';
-import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo } from './appCheck';
+import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo, type MarkerSource } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
 import { clip, isSecretName, looksLikeCredential, NOT_CONNECTED_MESSAGE, redactText, RESULT_MAX_CHARS, toolText, type ClientGetter } from './common';
@@ -829,10 +829,10 @@ function done(answer: string): string {
  *
  * @param ws - The workspace.
  * @param model - The scripted model.
- * @param opts - The client, the conversation so far, a dev session for check_app, messages the user sends during the turn, the chat's ask, and the markers Monaco holds for daybook's App.tsx.
+ * @param opts - The client, the conversation so far, a dev session for check_app, messages the user sends during the turn, the chat's ask, and Monaco's markers: a source as the run sees it, or a list Monaco holds for daybook's App.tsx.
  * @returns Every chunk the turn streamed, in order.
  */
-async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; request?: string; markers?: MarkerInfo[] } = {}): Promise<Array<{ type: string; text: string }>> {
+async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; request?: string; markers?: MarkerSource | MarkerInfo[] } = {}): Promise<Array<{ type: string; text: string }>> {
 	const host: AgentHost = {
 		vfs: ws,
 		scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }),
@@ -843,7 +843,7 @@ async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?:
 	const queued = [...(opts.queued ?? [])];
 	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, token: async () => '', signal: new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
 	const { markers } = opts;
-	const source = markers && { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined };
+	const source = Array.isArray(markers) ? { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined } : markers;
 	await runAgent(opts.request ?? 'Describe and tidy the leak pipeline.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, model, markers: async () => source ?? null });
 	return chunks;
 }
@@ -873,7 +873,8 @@ function withReadOnlyReference(ws: MemoryWorkspace): MemoryWorkspace {
  * A fake file store behind the shell's getClient, so AgentSession can save.
  * The runner's 'shell' module is one stub object (scripts/stub-shell.cjs), so
  * the fake goes onto it. Its `chat` and `use` record a call: the model's
- * pipeline is started with `use` and asked with `chat`.
+ * pipeline is started with `use` and asked with `chat`. It also installs an
+ * agent host in the personal workspace, as rocket-ui does at startup.
  *
  * @returns Every JSON file written, by store path, and the model calls made.
  */
@@ -900,6 +901,7 @@ function fakeStore(): { files: Map<string, unknown>; modelCalls: string[] } {
 		},
 	});
 	AgentSession.configure('rocketride.test');
+	setAgentHost({ vfs: createMemoryWorkspace({}), scopeKey: '', scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }), packApp: async () => new Uint8Array(), devSession: () => null });
 	return { files, modelCalls };
 }
 
@@ -1655,7 +1657,7 @@ test('a rebuild that cannot run shows no part of a value a read hid in its summa
 	};
 	const hide = (text: string): string => text.replaceAll(key, '«M»');
 	for (const dev of [Object.assign(session(), { rebuild: fail }), Object.assign(session(), { subscribeWatch: fail })]) {
-		const { report } = await runCheck(appCheck(dev, [], hide), 'daybook');
+		const { report } = await runCheck(appCheck(dev, [], APP_FILES, undefined, hide), 'daybook');
 		assert.equal(report.evidence.at(-1)?.summary, `build not run: no build: ${'«M»'.repeat(20)}`);
 	}
 });
@@ -1756,16 +1758,29 @@ function session(end: WatchStatus = { state: 'ok' }, consoleError?: string): Age
 }
 
 /**
+ * Monaco's own Uri, which the dev session names a model with. The module has
+ * no type declarations, hence the cast.
+ *
+ * @returns The uri a model named from `value` gets, spelled as the marker source spells it.
+ */
+async function monacoModelUri(): Promise<(value: string) => string> {
+	const { URI } = (await import('monaco-editor/esm/vs/base/common/uri.js' as string)) as { URI: { parse(value: string): { toString(skipEncoding?: boolean): string } } };
+	return (value) => URI.parse(value).toString(true);
+}
+
+/**
  * The check_app toolkit over APP_FILES, with `markers` in the editor, and every report it hands the run.
  *
  * @param dev - The app's dev session.
  * @param markers - The markers Monaco holds.
+ * @param files - The workspace's files (default: APP_FILES).
+ * @param models - The uri of each model Monaco holds (default: daybook's App.tsx).
  * @param hide - Hides the values the run's file tools hid.
  * @returns The toolkit and the reports it has reported.
  */
-function appCheck(dev: AgentDevSession, markers: MarkerInfo[] = [], hide?: (text: string) => string): { toolkit: AppCheckToolkit; heard: CheckReport[] } {
+function appCheck(dev: AgentDevSession, markers: MarkerInfo[] = [], files: Record<string, string> = APP_FILES, models = ['file:///daybook/src/App.tsx'], hide?: (text: string) => string): { toolkit: AppCheckToolkit; heard: CheckReport[] } {
 	const host: AgentHost = {
-		vfs: createMemoryWorkspace(APP_FILES),
+		vfs: createMemoryWorkspace(files),
 		scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }),
 		packApp: async () => new Uint8Array(),
 		devSession: () => dev,
@@ -1773,7 +1788,10 @@ function appCheck(dev: AgentDevSession, markers: MarkerInfo[] = [], hide?: (text
 	const heard: CheckReport[] = [];
 	const toolkit = new AppCheckToolkit(
 		host,
-		async () => ({ modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined }),
+		async () => {
+			const modelUri = await monacoModelUri();
+			return { modelUris: () => models, modelUri: (appId: string, relPath: string) => modelUri(`file:///${appId}/${relPath}`), markers: () => markers, onChange: () => () => undefined };
+		},
 		(_folder, report) => heard.push(report),
 		{ ...APP_FAST, hide }
 	);
@@ -1835,4 +1853,59 @@ test('a broken manifest fails the app check', async () => {
 		assert.match(text, /^CHECK FAILED: /, folder);
 		assert.equal(report.evidence[0].summary, summary, folder);
 	}
+});
+
+test('type errors of a file that no longer exists are ignored, and the output says so', async () => {
+	const gone: MarkerInfo = { ...TYPE_ERROR, uri: 'file:///daybook/src/gone.ts' };
+	const { text, report } = await runCheck(appCheck(session(), [gone]), 'daybook-ui');
+	assert.match(text, /^CHECK PASSED: daybook/);
+	assert.deepEqual(steps(report), ['types pass', 'build pass', 'runtime pass']);
+	assert.match(report.evidence[0].output, /Ignored 1 marker for a file that no longer exists: src\/gone\.ts\./);
+});
+
+test('type errors of a file whose name the editor decodes are kept', async () => {
+	// step: the dev session names a model with Uri.parse, which decodes each %XX; the file list keeps the stored name
+	const cases = [
+		{ stored: 'src/foo%20bar.ts', model: 'src/foo bar.ts' },
+		// Uri.parse decodes once, so a `%` can be left in the model's name
+		{ stored: 'src/a%2520b.ts', model: 'src/a%20b.ts' },
+	];
+	for (const { stored, model } of cases) {
+		const error: MarkerInfo = { ...TYPE_ERROR, uri: `file:///daybook/${model}` };
+		const files = { ...APP_FILES, [`apps/daybook-ui/${stored}`]: 'export const x: number = "wrong";' };
+		const { text, report } = await runCheck(appCheck(session(), [error], files, ['file:///daybook/src/App.tsx', error.uri]), 'daybook-ui');
+		assert.match(text, /^CHECK FAILED: daybook/, stored);
+		assert.deepEqual(steps(report), ['types fail', 'build pass', 'runtime pass'], stored);
+		assert.ok(report.evidence[0].output.startsWith(`${model}:3 Type 'string'`), stored);
+		assert.doesNotMatch(report.evidence[0].output, /Ignored/, stored);
+	}
+});
+
+test('type errors of a deleted file are ignored under the name the editor gives it', async () => {
+	// step: src/old%20file.ts and src/foo%2520bar.ts were deleted; their models keep the names Uri.parse gave them
+	for (const model of ['src/old file.ts', 'src/foo%20bar.ts']) {
+		const gone: MarkerInfo = { ...TYPE_ERROR, uri: `file:///daybook/${model}` };
+		const { text, report } = await runCheck(appCheck(session(), [gone], APP_FILES, ['file:///daybook/src/App.tsx', gone.uri]), 'daybook-ui');
+		assert.match(text, /^CHECK PASSED: daybook/, model);
+		assert.ok(report.evidence[0].output.endsWith(`\nIgnored 1 marker for a file that no longer exists: ${model}.`), model);
+	}
+});
+
+// =============================================================================
+// THE RUN — a whole run over the memory workspace
+// =============================================================================
+
+test('a run that deletes a source file with stale editor errors can still finish', async () => {
+	const ws = createMemoryWorkspace({ 'apps/a-ui/package.json': JSON.stringify({ appManifest: { id: 'a', name: 'A' } }), 'apps/a-ui/src/App.tsx': 'export default () => null;', 'apps/a-ui/src/unused.ts': 'export const unused = 1;' });
+	// step: the editor keeps the deleted file's model and its error, as devSession does
+	const markers: MarkerSource = { modelUris: () => ['file:///a/src/App.tsx', 'file:///a/src/unused.ts'], markers: () => [{ uri: 'file:///a/src/unused.ts', line: 1, message: 'stale type error', severity: 8, owner: 'typescript' }], onChange: () => () => undefined };
+	const model = scriptedModel([plan(['delete_file', { path: 'apps/a-ui/src/unused.ts' }]), plan(['check_app', { app: 'a' }]), done('Deleted.')]);
+	const chunks = await agentTurn(ws, model, { markers, ask: approveAll });
+	const answer = chunks.filter((c) => c.type === 'content').at(-1)?.text ?? '';
+	const questions = model.questions;
+	assert.equal(ws.files.has('apps/a-ui/src/unused.ts'), false);
+	assert.match(questions[2].context.join('\n'), /Ignored 1 marker for a file that no longer exists: src\/unused\.ts/);
+	assert.match(answer, /^Deleted\./);
+	assert.doesNotMatch(answer, /Not checked/);
+	assert.equal(questions.length, 3);
 });

@@ -74,6 +74,8 @@ export interface AgentSessionFile {
 	contextRefs: string[];
 	/** The shell chat message shape verbatim — restore = initialMessages seed. */
 	messages: ChatMessage[];
+	/** The workspace scope the conversation runs in ('' = the user's own files); unset in files saved before scopes. */
+	scopeKey?: string;
 }
 
 // =============================================================================

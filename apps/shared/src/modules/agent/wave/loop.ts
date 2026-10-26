@@ -169,6 +169,12 @@ const STOPPED_WHILE_RUNNING = 'Still running when the run was stopped; it may st
 /** What a call the stop kept from starting leaves behind. */
 const STOPPED_BEFORE_START = 'Not run: the run was stopped first.';
 
+/** Why a done is sent back in the wave a timed-out call is found to have ended: the model has not read how. */
+const READ_THE_LATE = 'Not finished: read how the call(s) that timed out ended (the entries marked late) before done=true.';
+
+/** What a late entry tells the model. */
+const LATE_NOTE = 'This call timed out and has now ended; this is how it ended. Plan again any call that was not run while it was still running.';
+
 /** The heading of a stopped run's last row, over the calls still running. */
 const STILL_RUNNING = 'Still running when you stopped (these may still finish and change the work):';
 
@@ -189,6 +195,16 @@ const THINKING_ERROR_CHARS = 200;
 
 /** The arguments that name what a call works on, in the order a thinking line looks for them. */
 const PRIMARY_ARGS = ['path', 'oldPath', 'target', 'app', 'name', 'task_token', 'project_id', 'method'];
+
+/**
+ * The error of a call that was not started because an earlier call on the same files timed out and still runs.
+ *
+ * @param waitsFor - The call that timed out.
+ */
+function heldBackMessage(waitsFor: ToolCall): string {
+	const target = primaryArg(waitsFor.args);
+	return `Not run: it waits for ${waitsFor.tool}${target ? ` on ${target}` : ''}, which timed out and is still running. You will be told when that call ends; then plan this one again.`;
+}
 
 /** The note that sends an unusable reply back, for that one call. */
 function retryNote(problems: string[]): string {
@@ -348,9 +364,9 @@ function partialReport(cause: string, lines: string[], scratch: string): string 
  *
  * Each call also has a time limit, set per tool. A call over its limit is
  * reported as timed out and the wave moves on; the tool itself cannot be
- * cancelled, so its promise goes into `late` until it settles, beside a record
- * of the call that also keeps how it ended. The loop checks `late.size` to know
- * whether a timed-out call may still be changing things.
+ * cancelled, so its promise goes into `late`, beside a record of the call that
+ * also keeps how it ended, until the loop reads that. A call in `late` with no
+ * ending yet may still be changing things.
  */
 
 // =============================================================================
@@ -360,8 +376,9 @@ function partialReport(cause: string, lines: string[], scratch: string): string 
 /**
  * How one call ended: its result, or the error that stopped it (with whether
  * the time limit did). `unstarted` marks a call whose work never began
- * (prepare failed or timed out, its act was refused, or a stop came first),
- * so it changed nothing and the finish rule does not hear of it.
+ * (prepare failed or timed out, its act was refused, a stop came first, or
+ * it waits for a timed-out call on its files), so it changed nothing and the
+ * finish rule does not hear of it.
  */
 export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false; error: string; ms: number; timedOut: boolean; unstarted?: true };
 
@@ -541,25 +558,22 @@ function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, 
 }
 
 /**
- * Tracks a call the wave stopped waiting for in `late` until it settles. The
- * tracker never rejects, so a late failure is not an unhandled rejection; it
- * notes how the call ended, passed through redactText as an outcome is, then
- * leaves `late`.
+ * Tracks a call the wave stopped waiting for in `late`, from the moment it is
+ * cut loose until lateReturns() hands over how it ended, so a call that ends
+ * before the rest of its wave is still reported. The tracker never rejects,
+ * so a late failure is not an unhandled rejection; it notes how the call
+ * ended, passed through redactText as an outcome is.
  */
 function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, running: Promise<string>): void {
 	const lateCall: LateCall = { call };
-	const tracked: Promise<void> = running
-		.then(
-			(result) => {
-				lateCall.ended = { result: redactText(result) };
-			},
-			(error: unknown) => {
-				lateCall.ended = { error: redactText(messageOf(error)) };
-			}
-		)
-		.then(() => {
-			late.delete(tracked);
-		});
+	const tracked: Promise<void> = running.then(
+		(result) => {
+			lateCall.ended = { result: redactText(result) };
+		},
+		(error: unknown) => {
+			lateCall.ended = { error: redactText(messageOf(error)) };
+		}
+	);
 	late.set(tracked, lateCall);
 }
 
@@ -575,24 +589,62 @@ function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, runnin
  * calls on the same file run as planned. The call's clock starts when it
  * starts, not while it waits, and stops while the user is asked for an OK; a
  * call waiting for an OK holds back only later calls on its own paths. A call
- * that outlives its limit is reported as `timedOut` and its promise sits in
- * `opts.late` until it settles.
+ * that outlives its limit is reported as `timedOut` and sits in `opts.late`
+ * until the run reads how it ended.
+ *
+ * A call is not started when one of those earlier calls ran past its limit
+ * (its work may still land), or was itself held back that way, or when a
+ * call that timed out in an earlier wave still runs on its files: it would
+ * land before or under a change still on its way. It is never prepared, so
+ * it asks the user nothing. It is reported `unstarted`, like a call a stop
+ * kept from starting, and the late entry tells the model when to plan it
+ * again. A call whose prepare failed or timed out, or whose act was
+ * refused, holds nothing back: its work never began, so nothing of it can
+ * land.
  *
  * @param calls - The wave's tool calls, in the order the model planned them.
  * @param steps - Gets each call ready and lets it start; a throw becomes an `ok: false` outcome.
  * @param opts.timeoutMs - The time limit in milliseconds for a tool; zero or infinity means none.
- * @param opts.late - Collects the promises of timed-out calls that are still running, each with its call.
+ * @param opts.late - Collects each timed-out call by the promise that tracks it, with how it ended once it does.
  * @param opts.signal - The run's stop signal: running calls are cut loose and waiting ones never start.
  */
 async function runWave(calls: ToolCall[], steps: CallSteps, opts: { timeoutMs: (tool: string) => number; late: Map<Promise<unknown>, LateCall>; signal: AbortSignal }): Promise<CallOutcome[]> {
 	const held = calls.map(writePaths);
 	const outcomes: Promise<CallOutcome>[] = [];
+	// the timed-out call each held-back call waits for, by index; set before that call's outcome settles
+	const waitsFor: (ToolCall | undefined)[] = [];
+	const holdBack = (i: number, blocking: ToolCall): CallOutcome => {
+		waitsFor[i] = blocking;
+		return { ok: false, error: heldBackMessage(blocking), ms: 0, timedOut: false, unstarted: true };
+	};
+	// step: a call that timed out in an earlier wave and still runs holds its files too
+	const running = [...opts.late.values()].filter((late) => !late.ended);
 
 	calls.forEach((call, i) => {
-		const earlier = outcomes.filter((_, j) => overlaps(held[i], held[j]));
+		const blocking = running.find((late) => overlaps(held[i], writePaths(late.call)));
+		if (blocking) {
+			outcomes.push(Promise.resolve(holdBack(i, blocking.call)));
+			return;
+		}
+		const earlier = outcomes.flatMap((outcome, j) => (overlaps(held[i], held[j]) ? [{ outcome, j }] : []));
 		const start = (): Promise<CallOutcome> => runOne(call, steps, opts.timeoutMs(call.tool), opts.late, opts.signal);
 		// With nothing to wait for, the call starts now, in this turn, so unrelated calls overlap fully.
-		outcomes.push(earlier.length === 0 ? start() : Promise.all(earlier).then(start));
+		if (earlier.length === 0) {
+			outcomes.push(start());
+			return;
+		}
+		outcomes.push(
+			Promise.all(earlier.map((e) => e.outcome)).then((settled) => {
+				// step: an earlier call on these files ran past its limit (it may still land) or waits for one that did: so does this one
+				for (const [k, before] of settled.entries()) {
+					const { j } = earlier[k];
+					const waits = waitsFor[j];
+					if (waits) return holdBack(i, waits);
+					if (!before.ok && before.timedOut && !before.unstarted) return holdBack(i, calls[j]);
+				}
+				return start();
+			})
+		);
 	});
 
 	return Promise.all(outcomes);
@@ -636,10 +688,8 @@ class WaveRun {
 	readonly heard: string[] = [];
 	/** What every earlier call left behind, oldest first; what the next question shows. */
 	private results: Entry[] = [];
-	/** The calls that timed out and are still running, by the promise that settles when each ends. */
+	/** The calls that timed out, by the promise that settles when each ends; each stays until lateReturns() hands over how it ended. */
 	private readonly late = new Map<Promise<unknown>, LateCall>();
-	/** The timed-out calls seen running at the last look, so a return is noticed. */
-	private readonly watched = new Map<Promise<unknown>, LateCall>();
 	/** Each call (tool and arguments as written) by the key of its first result. */
 	private readonly seenCalls = new Map<string, string>();
 	/** Each stored result's text by the key that first held it. */
@@ -715,7 +765,8 @@ class WaveRun {
 	 * reference names nothing does not run. memory.peek reads memory here,
 	 * before this wave's results are stored; every other call goes through the
 	 * scheduler. Every call but memory.peek, the skipped ones and those whose
-	 * work never started is also handed back as the finish rule hears it.
+	 * work never started (refused, stopped first, or held back by a timed-out
+	 * call) is also handed back as the finish rule hears it.
 	 */
 	async act(wave: number, calls: ToolCall[]): Promise<Acted> {
 		const prepared = calls.map((call, i): Prepared => {
@@ -857,19 +908,46 @@ class WaveRun {
 	}
 
 	/**
-	 * The timed-out calls that have ended since the last look, as the finish
-	 * rule hears them: what they did may have landed after a check read the
-	 * work, and the model never read how they ended.
+	 * The timed-out calls that have ended since the last look, a call that
+	 * ended before the rest of its own wave included, as the finish rule hears
+	 * them: what they did may have landed after a check read the work, and the
+	 * model never read how they ended.
 	 */
 	lateReturns(): RanCall[] {
 		const returned: RanCall[] = [];
-		for (const [running, { call, ended }] of this.watched) {
-			if (this.late.has(running)) continue;
-			this.watched.delete(running);
+		for (const [tracked, { call, ended }] of this.late) {
+			if (!ended) continue;
+			this.late.delete(tracked);
 			returned.push({ tool: call.tool, args: call.args, ...ended, late: true });
 		}
-		for (const [running, lateCall] of this.late) this.watched.set(running, lateCall);
 		return returned;
+	}
+
+	/** The timed-out calls still running. */
+	private stillRunning(): LateCall[] {
+		return [...this.late.values()].filter((lateCall) => !lateCall.ended);
+	}
+
+	/**
+	 * The entries that tell the model how timed-out calls ended, one per call
+	 * the last lateReturns() found. A result is stored under its entry's key,
+	 * as a result of this wave is, so memory.peek and references can read it.
+	 *
+	 * @param wave - The wave they are noticed in.
+	 * @param returned - The calls, as lateReturns() handed them over.
+	 */
+	lateEntries(wave: number, returned: RanCall[]): Entry[] {
+		return returned.map((call, i) => {
+			const key = `wave-${wave}.late${i}`;
+			const entry: Entry = { tool: call.tool, key, args: previewArgs(call.args) };
+			if (call.error !== undefined) entry.error = call.error;
+			else {
+				this.memory.put(key, call.result ?? '');
+				entry.summary = summarize(call.result ?? '');
+			}
+			entry.note = LATE_NOTE;
+			return entry;
+		});
 	}
 
 	/**
@@ -878,8 +956,9 @@ class WaveRun {
 	 * finish rule decides.
 	 */
 	unfinished(): string | null {
-		if (this.late.size) {
-			return `Not finished: ${this.late.size} call(s) that timed out are still running and may still change the work. A check cannot cover them yet; call ${this.o.finish.checkTool} again after they end.`;
+		const running = this.stillRunning();
+		if (running.length) {
+			return `Not finished: ${running.length} call(s) that timed out are still running and may still change the work. A check cannot cover them yet; call ${this.o.finish.checkTool} again after they end.`;
 		}
 		return this.o.finish.unchecked();
 	}
@@ -904,7 +983,8 @@ class WaveRun {
 	 * the work.
 	 */
 	stopped(waves: number): LoopResult {
-		if (this.late.size) this.o.emit('thinking', [STILL_RUNNING, ...[...this.late.values()].map(({ call }) => `- ${callName(call)}`)].join('\n'));
+		const running = this.stillRunning();
+		if (running.length) this.o.emit('thinking', [STILL_RUNNING, ...running.map(({ call }) => `- ${callName(call)}`)].join('\n'));
 		return this.finish('stopped', '', waves);
 	}
 
@@ -953,8 +1033,10 @@ class WaveRun {
  * Each wave plans, runs its calls, tells the finish rule what ran, and records
  * their entries for the next question. A done=true is sent back, with the
  * reason in an entry, while a timed-out call still runs, in the wave the check
- * tool is called, while the finish rule finds something unchecked, and while
- * a message the user sent during the run is unread. Every
+ * tool is called, in the wave a timed-out call is found to have ended (each
+ * such call gets an entry saying how it ended), while the finish rule finds
+ * something unchecked, and while a message the user sent during the run is
+ * unread. Every
  * wave sends one thinking chunk except the one whose answer is accepted, which
  * goes out as the answer instead.
  *
@@ -979,15 +1061,17 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		}
 		const { toolCalls } = reply;
 
-		// step: done with nothing to run — the answer stands unless the work is unchecked
+		// step: done with nothing to run — the answer stands unless the work is unchecked,
+		// or a timed-out call has ended since and the model has not read how
 		if (reply.done && !toolCalls.length) {
-			await o.finish.endWave(run.lateReturns());
-			const refused = run.unfinished() ?? (run.hear() ? READ_THE_USER : null);
+			const late = run.lateReturns();
+			await o.finish.endWave(late);
+			const refused = late.length ? READ_THE_LATE : (run.unfinished() ?? (run.hear() ? READ_THE_USER : null));
 			if (!refused) {
 				return run.finish('done', resolveAnswerRefs(reply.answer, run.memory), wave + 1);
 			}
 			// Its remove list is not applied: the answer it sends again may still need those keys.
-			run.record([refusal(wave, refused), ...problemEntries(wave, reply.problems)]);
+			run.record([refusal(wave, refused), ...problemEntries(wave, reply.problems), ...run.lateEntries(wave, late)]);
 			run.think(reply.thought, []);
 			continue;
 		}
@@ -1013,18 +1097,24 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		// ended since: what it did may have landed after a check read the work. A
 		// call skipped for missing arguments never touched the work or a check, so
 		// the rule never hears of it.
-		await o.finish.endWave([...ran, ...run.lateReturns()]);
+		const late = run.lateReturns();
+		await o.finish.endWave([...ran, ...late]);
+		entries.push(...run.lateEntries(wave, late));
 		if (o.signal.aborted) {
 			run.think(reply.thought, lines);
 			return run.stopped(wave + 1);
 		}
 
 		// step: done with calls — the answer stands only if every call worked, the
-		// model has read any check it ran, and the work is checked
+		// model has read any check it ran and how any timed-out call ended, and the
+		// work is checked
 		let finished = reply.done && !entries.some((entry) => entry.error !== undefined);
 		if (finished && toolCalls.some((call) => call.tool === o.finish.checkTool)) {
 			finished = false;
 			entries.push(refusal(wave, readTheCheck(o.finish.checkTool)));
+		} else if (finished && late.length) {
+			finished = false;
+			entries.push(refusal(wave, READ_THE_LATE));
 		} else if (finished) {
 			const refused = run.unfinished() ?? (run.hear() ? READ_THE_USER : null);
 			if (refused) {

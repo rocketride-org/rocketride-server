@@ -271,7 +271,7 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		const ws = await createWorkspace({ hostAppId: activeAppId, autoCommit: autoCommitRef.current, scope: workspaceScope });
 		if (cancelled) return;
 		// step: hand the agent this workspace's view, guides, scaffold, packer and dev sessions
-		setAgentHost(createRocketAgentHost(client));
+		setAgentHost(createRocketAgentHost(client, ws));
 		// step: restored pending changes refuse auto mode — prompt the user
 		if (ws.pendingBlocksAuto) setModeSwitchBlocked(true);
 

@@ -43,6 +43,7 @@ import { ConnectionManager } from 'shell';
 import type { RocketRideClient, PrefsStore } from 'shell';
 import { createBusAppBuilderHost, projectListing, applyListing, probePackage, runListingPreflight } from 'shared/tools/appdev';
 import type { IAppBuilderHost } from 'shared/tools/appdev';
+import { getWorkspace } from '../../workspace/vfs/workspace';
 import { appFileExists, readAppImageDataUri, readAppPackage, readAppText, writeAppPackage } from './appStore';
 import { packAppSource } from './pack';
 import type { WebDevSession } from './devSession';
@@ -138,9 +139,13 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 			}
 		},
 		saveListing: async (draft) => {
-			const pkg = await readAppPackage(folder);
+			// step: read and write in the workspace the save started in. A read
+			// that ends after a team switch must not write this team's package
+			// into the new team's workspace.
+			const view = getWorkspace().view;
+			const pkg = await readAppPackage(folder, view);
 			applyListing(pkg, draft);
-			await writeAppPackage(folder, pkg);
+			await writeAppPackage(folder, pkg, undefined, view);
 		},
 		runPreflight: async () => {
 			// The SHARED tiered bar (one implementation for every host), fed

@@ -99,9 +99,14 @@ const DEFAULT_WRITE_ORIGIN = 'workspace';
 export type WorkspaceScope = { kind: 'user' } | { kind: 'team'; teamId: string };
 
 /**
- * The active scope. Set ONCE by createWorkspace() before the first path
+ * The active scope. Set by createWorkspace() before the first path
  * translation; 'user' until then so pre-bootstrap translations (none are
- * expected) fail safe into the caller's own tree rather than a team's.
+ * expected) fail safe into the caller's own tree rather than a team's. The
+ * workspace backend never reads it: each backend, and the announcements of
+ * its staged view, keep the scope they were built for, so a call still
+ * running when the team changes lands in its own team. Only the raw binary
+ * reads (toScopedStorePath without a scope) and bus adoption
+ * (storePathToVirtual) follow it.
  */
 let activeScope: WorkspaceScope = { kind: 'user' };
 
@@ -109,28 +114,30 @@ let activeScope: WorkspaceScope = { kind: 'user' };
 const SAFE_TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
 /**
- * The physical store-path prefix of the active scope: the '@/Team/=<id>/'
- * scope spelling (resolved and authorized server-side by team membership),
- * or '' for the caller's own tree.
+ * The physical store-path prefix of a scope: the '@/Team/=<id>/' scope
+ * spelling (resolved and authorized server-side by team membership), or ''
+ * for the caller's own tree.
  *
+ * @param scope - The scope to translate into.
  * @returns The prefix every physical path translation applies.
  */
-function scopePrefix(): string {
-	return activeScope.kind === 'team' ? `@/Team/=${activeScope.teamId}/` : '';
+function scopePrefix(scope: WorkspaceScope): string {
+	return scope.kind === 'team' ? `@/Team/=${scope.teamId}/` : '';
 }
 
 
 /**
  * Maps a scope-relative physical path (e.g. '.projects/.appdev/foo') to the
- * full store path in the ACTIVE scope. The escape hatch for the few raw
- * binary reads that bypass the view (appStore.appPath) — everything else
- * goes through toStorePath.
+ * full store path in a scope, the ACTIVE one unless told. The escape hatch
+ * for the few raw binary reads that bypass the view (appStore.appPath) —
+ * everything else goes through toStorePath.
  *
  * @param rel - The scope-relative physical path.
+ * @param scope - The scope to translate into (default: the active one).
  * @returns The full store path.
  */
-export function toScopedStorePath(rel: string): string {
-	return `${scopePrefix()}${rel}`;
+export function toScopedStorePath(rel: string, scope: WorkspaceScope = activeScope): string {
+	return `${scopePrefix(scope)}${rel}`;
 }
 
 /**
@@ -295,14 +302,15 @@ export function isWritable(path: string): boolean {
 }
 
 /**
- * Maps a store path to its physical store path in the active scope.
+ * Maps a store path to its physical store path in a scope.
  *
  * @param wp - The parsed store path.
+ * @param scope - The scope the path lives in.
  * @returns The store-relative physical path.
  */
-function toStorePath(wp: WritablePath): string {
+function toStorePath(wp: WritablePath, scope: WorkspaceScope): string {
 	const dir = ROOTS[wp.root].dir;
-	return `${scopePrefix()}${wp.rest ? `${dir}/${wp.rest}` : dir}`;
+	return `${scopePrefix(scope)}${wp.rest ? `${dir}/${wp.rest}` : dir}`;
 }
 
 /**
@@ -322,7 +330,7 @@ export function storePathToVirtual(storePath: string): string | null {
 	// step: paths from another scope are NOT this workspace's content — a
 	// user-tree event while the workspace is team-rooted (or vice versa)
 	// must not be adopted into the virtual tree.
-	const prefix = scopePrefix();
+	const prefix = scopePrefix(activeScope);
 	if (prefix) {
 		if (!p.startsWith(prefix)) return null;
 		p = p.slice(prefix.length);
@@ -361,10 +369,11 @@ function requireClient(): RocketRideClient {
  *
  * @param client - The connected client.
  * @param wp - The store directory being listed.
+ * @param scope - The scope the directory lives in.
  * @returns Entries with name and type.
  */
-async function listPhysicalDir(client: RocketRideClient, wp: WritablePath): Promise<Array<{ name: string; type: 'file' | 'dir' }>> {
-	const { entries } = await client.fsListDir(toStorePath(wp));
+async function listPhysicalDir(client: RocketRideClient, wp: WritablePath, scope: WorkspaceScope): Promise<Array<{ name: string; type: 'file' | 'dir' }>> {
+	const { entries } = await client.fsListDir(toStorePath(wp, scope));
 	return entries
 		.filter((e) => {
 			if (e.name === DIR_MARKER) return false;
@@ -384,16 +393,19 @@ async function listPhysicalDir(client: RocketRideClient, wp: WritablePath): Prom
  * performs the root translation per call, serves the read-only reference
  * root from its tree, enforces the structural rules (protected roots, no
  * cross-root moves), and announces every mutation on the shell event bus.
+ * Every store path translates into the scope the backend was built for, so
+ * a call that outlives a team switch still lands in its own team's tree.
  *
+ * @param scope - The scope every store path translates into.
  * @returns The workspace backend for a CachedVfs.
  */
-function createWorkspaceBackend(): IVirtualFileSystem {
+function createWorkspaceBackend(scope: WorkspaceScope): IVirtualFileSystem {
 	return {
 		/** Lists one virtual directory ('' = the roots). */
 		async list(dir: string): Promise<{ name: string; type: 'file' | 'dir' }[]> {
 			const parsed = parsePath(dir, true);
 			if (parsed === null) return ROOT_NAMES.map((name) => ({ name, type: 'dir' as const }));
-			if (parsed.kind === 'store') return listPhysicalDir(requireClient(), parsed);
+			if (parsed.kind === 'store') return listPhysicalDir(requireClient(), parsed, scope);
 			let tree: ReferenceTree;
 			try {
 				tree = await ROOTS[parsed.root].load();
@@ -410,7 +422,7 @@ function createWorkspaceBackend(): IVirtualFileSystem {
 		async read(path: string): Promise<unknown> {
 			const parsed = parsePath(path);
 			if (parsed.kind === 'reference') return (await ROOTS[parsed.root].load()).read(parsed.rest);
-			return requireClient().fsReadString(toStorePath(parsed));
+			return requireClient().fsReadString(toStorePath(parsed, scope));
 		},
 		/**
 		 * Batch text read via the store's native fsReadMany (one round trip
@@ -424,7 +436,7 @@ function createWorkspaceBackend(): IVirtualFileSystem {
 			for (const path of paths) {
 				const parsed = parsePath(path);
 				if (parsed.kind === 'store') {
-					stored.push({ path, storePath: toStorePath(parsed) });
+					stored.push({ path, storePath: toStorePath(parsed, scope) });
 					continue;
 				}
 				try {
@@ -449,7 +461,7 @@ function createWorkspaceBackend(): IVirtualFileSystem {
 		async write(path: string, content: unknown, origin?: string): Promise<void> {
 			const wp = writablePath(path);
 			if (!wp.rest) throw new Error(`Cannot write to the ${wp.root}/ root.`);
-			const storePath = toStorePath(wp);
+			const storePath = toStorePath(wp, scope);
 			await requireClient().fsWriteString(storePath, String(content));
 			emitFsChange(storePath, origin ?? DEFAULT_WRITE_ORIGIN);
 		},
@@ -462,8 +474,8 @@ function createWorkspaceBackend(): IVirtualFileSystem {
 			if (from.root !== to.root) {
 				throw new Error(`Cannot move between ${from.root}/ and ${to.root}/ — entities do not change kind by renaming.`);
 			}
-			const fromStore = toStorePath(from);
-			const toStore = toStorePath(to);
+			const fromStore = toStorePath(from, scope);
+			const toStore = toStorePath(to, scope);
 			await requireClient().fsRename(fromStore, toStore);
 			emitFsChange(fromStore, origin ?? DEFAULT_WRITE_ORIGIN);
 			emitFsChange(toStore, origin ?? DEFAULT_WRITE_ORIGIN);
@@ -473,7 +485,7 @@ function createWorkspaceBackend(): IVirtualFileSystem {
 			const wp = writablePath(path);
 			if (!wp.rest) throw new Error(`Refusing to delete the ${wp.root}/ root.`);
 			const client = requireClient();
-			const storePath = toStorePath(wp);
+			const storePath = toStorePath(wp, scope);
 			// step: route by actual kind — the tool layer has already enforced
 			// the explicit-recursive policy for directories
 			const stat = await client.fsStat(storePath);
@@ -485,7 +497,7 @@ function createWorkspaceBackend(): IVirtualFileSystem {
 		async mkdir(path: string, origin?: string): Promise<void> {
 			const wp = writablePath(path);
 			if (!wp.rest) throw new Error(`The ${wp.root}/ root already exists.`);
-			const storePath = toStorePath(wp);
+			const storePath = toStorePath(wp, scope);
 			await requireClient().fsMkdir(storePath);
 			emitFsChange(storePath, origin ?? DEFAULT_WRITE_ORIGIN);
 		},
@@ -501,6 +513,10 @@ function createWorkspaceBackend(): IVirtualFileSystem {
 export interface Workspace {
 	/** The staged view — all reads/writes go through it. */
 	view: StagedFileSystem;
+	/** The scope the view is rooted in. */
+	scope: WorkspaceScope;
+	/** The scope's key: '' for the user's own tree, 'team-<id>' for a team's. */
+	scopeKey: string;
 	/** The single mode owner (autoCommit setting → setMode). */
 	policy: CommitPolicy;
 	/**
@@ -517,6 +533,18 @@ let workspace: Workspace | null = null;
 let workspaceBuild: Promise<Workspace> | null = null;
 /** The scope key the current build was rooted in ('' = user scope). */
 let builtScopeKey: string | null = null;
+/**
+ * Every workspace built in this document, by scope key, with its staging
+ * store. A call that started before a team switch can still stage into its
+ * workspace after it, so going back to that scope reuses the same
+ * workspace: the late change shows as pending there, and the next staged
+ * write persists it. A second workspace over the same staging namespace
+ * would never see the late change and would rewrite the staging manifest
+ * without it. The workspace is reused only while its store's manifest is
+ * the one it last loaded or wrote; when another tab changed it meanwhile,
+ * a fresh build loads it, as on a first visit.
+ */
+const builtByScope = new Map<string, { ws: Workspace; staging: StagingStore }>();
 
 /**
  * Parks an outgoing workspace before a scope switch: every dirty editor
@@ -553,6 +581,33 @@ async function stashForScopeSwitch(outgoing: Workspace): Promise<void> {
 }
 
 /**
+ * Reopens the workspace of a scope the user switched away from and back to.
+ * Its staged layers are the live ones, late writes included, and the caller
+ * has checked that no other tab changed the persisted ones since, so nothing
+ * rehydrates. Its base cache is dropped and its tree walked again, since
+ * nothing kept them current while another scope was active; a read still on
+ * its way from before cannot refill the cache (CachedVfs.fill). The mode is
+ * decided again the way a fresh build decides it.
+ *
+ * @param kept - The scope's workspace from before.
+ * @param autoCommit - The host's autoCommit setting value.
+ * @returns The workspace service, ready for its first read.
+ */
+async function reopenWorkspace(kept: Workspace, autoCommit: boolean): Promise<Workspace> {
+	const view = kept.view;
+	view.invalidate();
+	try {
+		await view.refresh();
+	} catch (err) {
+		console.log('[workspace] scope switch: re-walking the tree failed:', err);
+	}
+	const pendingBlocksAuto = autoCommit && view.hasPendingChanges();
+	const effectiveAuto = autoCommit && !pendingBlocksAuto;
+	if (effectiveAuto) void view.setWriteThrough(true);
+	return { ...kept, policy: new CommitPolicy(view, effectiveAuto), pendingBlocksAuto };
+}
+
+/**
  * Builds the workspace service: backend + CachedVfs + StagedFileSystem +
  * StagingStore + CommitPolicy. Called ONCE from RocketApp's bootstrap,
  * BEFORE any consumer renders; later calls (React remount of the bootstrap
@@ -578,7 +633,8 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 
 	// A DIFFERENT scope: park the outgoing workspace (stage dirty buffers
 	// into ITS namespace while ITS translation is still active), then build
-	// fresh against the new tree. Chained through workspaceBuild so a
+	// fresh against the new tree, or reopen the workspace built for it
+	// before. Chained through workspaceBuild so a
 	// consumer arriving mid-switch awaits the finished switch, never a
 	// half-torn-down view.
 	const outgoing = workspaceBuild;
@@ -591,12 +647,22 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 		// step: the scope roots EVERY path translation — set only after the
 		// outgoing workspace is parked, before the first read fires.
 		activeScope = scope;
-		const base = new CachedVfs(createWorkspaceBackend(), { skipDirs: SKIP_DIRS });
+		// step: a scope built before keeps its workspace; calls that outlived
+		// the switch may still stage into it. Not when another tab changed
+		// the scope's staged state meanwhile: the kept layers would erase it.
+		const kept = builtByScope.get(scopeKey);
+		if (kept && (await kept.staging.isCurrent())) {
+			workspace = await reopenWorkspace(kept.ws, options.autoCommit);
+			builtByScope.set(scopeKey, { ...kept, ws: workspace });
+			return workspace;
+		}
+		const base = new CachedVfs(createWorkspaceBackend(scope), { skipDirs: SKIP_DIRS });
 		// step: staged until rehydration settles — write-through cannot be
 		// decided before the restored pending state is known. Staging is
 		// namespaced per scope: each team's (and the user tree's) pending
 		// state rehydrates only into its own workspace.
-		const view = new StagedFileSystem(base, new StagingStore(options.hostAppId, scopeKey), {
+		const staging = new StagingStore(options.hostAppId, scopeKey);
+		const view = new StagedFileSystem(base, staging, {
 			writeThrough: false,
 			// step: the read-only rule — a change to .rocketride/ (or outside
 			// the roots) is refused before it stages, in both modes
@@ -605,14 +671,17 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 			// writes — manual mode's saves reach every onFsChange consumer
 			// (dev preview, rescans) exactly like write-through saves do.
 			// Write-through delegates to the backend, which announces itself.
-			onMutate: (p, origin) => emitFsChange(toStorePath(writablePath(p)), origin ?? DEFAULT_WRITE_ORIGIN),
+			// Either way the path is named in this workspace's scope, even
+			// after a team switch.
+			onMutate: (p, origin) => emitFsChange(toStorePath(writablePath(p), scope), origin ?? DEFAULT_WRITE_ORIGIN),
 		});
 		await view.whenReady();
 		const pendingBlocksAuto = options.autoCommit && view.hasPendingChanges();
 		const effectiveAuto = options.autoCommit && !pendingBlocksAuto;
 		if (effectiveAuto) void view.setWriteThrough(true);
 		const policy = new CommitPolicy(view, effectiveAuto);
-		workspace = { view, policy, pendingBlocksAuto };
+		workspace = { view, scope, scopeKey, policy, pendingBlocksAuto };
+		builtByScope.set(scopeKey, { ws: workspace, staging });
 		return workspace;
 	})();
 	return workspaceBuild;
