@@ -50,6 +50,7 @@
 
 import { sha256Hex } from '../../vfs/hash';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
+import { refuseGuides } from '../guides';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
 
 // =============================================================================
@@ -492,9 +493,9 @@ export class FilesystemTools extends AgentToolkit {
 	/**
 	 * delete_file, made ready: remove a file, or a directory when recursive is
 	 * true. The checks run here, and the act names the target for the approval
-	 * list, since a delete does not go through the client. The tree root is
-	 * refused here; protected roots inside the tree are the backend's rule to
-	 * enforce.
+	 * list, since a delete does not go through the client. The tree root and
+	 * the read-only guides are refused here, before the user is asked;
+	 * protected roots inside the tree are the backend's rule to enforce.
 	 *
 	 * @param rawPath - Agent-supplied path.
 	 * @param recursive - Required true to remove a directory and its contents.
@@ -502,6 +503,7 @@ export class FilesystemTools extends AgentToolkit {
 	 */
 	private async prepareDelete(rawPath: unknown, recursive: boolean): Promise<ToolStep> {
 		const path = normalizePath(rawPath);
+		refuseGuides(path);
 		const type = await this.entryType(path);
 		if (type === null) throw new Error(`No such path: ${path}`);
 		if (type === 'dir' && !recursive) {

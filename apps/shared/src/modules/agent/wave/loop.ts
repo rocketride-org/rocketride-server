@@ -465,8 +465,7 @@ async function runOne(call: ToolCall, steps: CallSteps, limitMs: number, late: M
 		if (signal.aborted) return notStarted(ready.ms);
 	}
 
-	const left = Number.isFinite(limitMs) && limitMs > 0 ? Math.max(1, limitMs - ready.ms) : limitMs;
-	const done = await timed(work, left, signal, (running) => trackLate(late, call, running));
+	const done = await timed(work, limitMs, signal, (running) => trackLate(late, call, running), ready.ms);
 	return done.ok ? { ok: true, result: done.value, ms: ready.ms + done.ms } : { ...done, ms: ready.ms + done.ms };
 }
 
@@ -475,10 +474,13 @@ async function runOne(call: ToolCall, steps: CallSteps, limitMs: number, late: M
  * A limit that is not a positive finite number means no limit. A stop cuts
  * the work loose like a timeout does. The work itself cannot be cancelled, so
  * once cut loose it is handed to `cutLoose` (or dropped without one).
+ * `spentMs` of the limit is already used, so the work gets what is left, and
+ * a timeout still names the whole limit.
  */
-function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, cutLoose?: (running: Promise<T>) => void): Promise<Timed<T>> {
+function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, cutLoose?: (running: Promise<T>) => void, spentMs = 0): Promise<Timed<T>> {
 	const began = performance.now();
 	const elapsed = (): number => Math.round(performance.now() - began);
+	const leftMs = Math.max(1, limitMs - spentMs);
 
 	return new Promise<Timed<T>>((resolve) => {
 		let over = false;
@@ -491,7 +493,7 @@ function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, 
 						signal.removeEventListener('abort', cut);
 						cutLoose?.(running);
 						resolve({ ok: false, error: `TimeoutError: no result after ${limitMs / 1000} s`, ms: elapsed(), timedOut: true });
-					}, limitMs)
+					}, leftMs)
 				: undefined;
 
 		const cut = (): void => {

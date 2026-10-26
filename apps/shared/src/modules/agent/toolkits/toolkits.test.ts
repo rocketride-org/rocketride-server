@@ -429,7 +429,9 @@ test('the file tools read guides but cannot change them', async () => {
 	assert.match(await run('read_file', { path: guide }), /Build apps here\./);
 	await assert.rejects(run('write_file', { path: guide, content: 'x' }), readOnly);
 	await assert.rejects(run('edit_file', { path: guide, oldString: 'Apps', newString: 'Mine' }), readOnly);
-	await assert.rejects(run('delete_file', { path: guide }), readOnly);
+	const asked = fakeAsk(['approve']);
+	await assert.rejects(callable(tools.get('delete_file') as AgentTool, approvalsFor(null, asked.ask)).execute({ path: guide }), readOnly);
+	assert.deepEqual(asked.cards, [], 'a guide delete is refused before any card');
 	await assert.rejects(run('rename', { oldPath: guide, newPath: 'a.md' }), readOnly);
 	await assert.rejects(run('write_file', { path: '.rocketride/notes.md', content: 'x' }), readOnly);
 	await assert.rejects(run('create_directory', { path: '.rocketride/mine' }), readOnly);

@@ -85,6 +85,20 @@ function guideRelative(path: string): string | null {
 	return clean.startsWith(`${GUIDE_ROOT}/`) ? clean.slice(GUIDE_ROOT.length + 1) : null;
 }
 
+/**
+ * Refuses a change that touches the guides. GuideFileSystem refuses every
+ * such mutation with it; a tool that asks the user first refuses with it
+ * before it asks.
+ *
+ * @param paths - The workspace paths the change touches.
+ * @throws The read-only error when any path is under '.rocketride/'.
+ */
+export function refuseGuides(...paths: string[]): void {
+	if (paths.some((path) => guideRelative(path) !== null)) {
+		throw new Error(`Guides under ${GUIDE_ROOT}/ are read-only. Use a path outside ${GUIDE_ROOT}/.`);
+	}
+}
+
 // =============================================================================
 // BUNDLE KEYS
 // =============================================================================
@@ -217,22 +231,22 @@ export class GuideFileSystem implements IWorkspaceFileSystem {
 	// ---- mutations: the workspace's, never the guides' ----
 
 	async write(path: string, content: unknown, origin?: string): Promise<void> {
-		this.refuseGuides(path);
+		refuseGuides(path);
 		return this.base.write(path, content, origin);
 	}
 
 	async rename(oldPath: string, newPath: string, origin?: string): Promise<void> {
-		this.refuseGuides(oldPath, newPath);
+		refuseGuides(oldPath, newPath);
 		return this.base.rename(oldPath, newPath, origin);
 	}
 
 	async delete(path: string, origin?: string): Promise<void> {
-		this.refuseGuides(path);
+		refuseGuides(path);
 		return this.base.delete(path, origin);
 	}
 
 	async mkdir(path: string, origin?: string): Promise<void> {
-		this.refuseGuides(path);
+		refuseGuides(path);
 		return this.base.mkdir(path, origin);
 	}
 
@@ -309,12 +323,5 @@ export class GuideFileSystem implements IWorkspaceFileSystem {
 	private noGuide(rel: string): Error {
 		const guides = this.guides.paths().map((path) => this.workspacePath(path));
 		return new Error(`No guide at ${this.workspacePath(rel)}.${guides.length > 0 ? ` Guides: ${guides.join(', ')}` : ''}`);
-	}
-
-	/** Refuses a mutation that touches the guides. */
-	private refuseGuides(...paths: string[]): void {
-		if (paths.some((path) => guideRelative(path) !== null)) {
-			throw new Error(`Guides under ${GUIDE_ROOT}/ are read-only. Use a path outside ${GUIDE_ROOT}/.`);
-		}
 	}
 }
