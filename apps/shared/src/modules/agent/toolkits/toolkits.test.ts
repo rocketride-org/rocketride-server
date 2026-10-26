@@ -720,6 +720,22 @@ test('Always allow turns the grant on, and the checked client refuses an asked c
 	assert.equal(calls.length, 1, 'the unannounced publish never reached the client');
 });
 
+test('Stop while a card looks up names refuses at once, without waiting out the lookups', async () => {
+	const stop = new AbortController();
+	const hang = () => new Promise<never>(() => undefined);
+	const stopWhileReading = () => {
+		stop.abort();
+		return hang();
+	};
+	const client = { getOrgId: () => 'org-1', account: { listTeams: hang }, deploy: { get: stopWhileReading } } as unknown as RocketRideClient;
+	const shown = fakeAsk(['approve']);
+	const approving = approvalsFor(client, shown.ask, { signal: stop.signal }).approve({ name: 'deploy.remove', params: ['p1', 't1'] }, async () => 'removed');
+	// well inside the 2 s a lookup may take
+	const late = new Promise((resolve) => setTimeout(resolve, 500, 'still waiting'));
+	await assert.rejects(Promise.race([approving, late]), /^Error: Not done: the user stopped the run before answering: Remove p1 from team t1\.$/);
+	assert.deepEqual(shown.cards, [], 'no card was shown');
+});
+
 // =============================================================================
 // deploy_app
 // =============================================================================

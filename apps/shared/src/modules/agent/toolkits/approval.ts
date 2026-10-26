@@ -500,52 +500,59 @@ function quoted(message: unknown): string {
 }
 
 /**
- * Resolves with a lookup's name, or with the fallback when the lookup fails
- * or takes longer than LOOKUP_LIMIT_MS.
+ * Resolves with a lookup's name, or with the fallback when the lookup fails,
+ * takes longer than LOOKUP_LIMIT_MS, or the run is stopped.
  */
-function capped(lookup: () => Promise<string>, fallback: string): Promise<string> {
+function capped(lookup: () => Promise<string>, fallback: string, signal: AbortSignal): Promise<string> {
+	if (signal.aborted) return Promise.resolve(fallback);
 	return new Promise((resolve) => {
-		const timer = setTimeout(() => resolve(fallback), LOOKUP_LIMIT_MS);
-		Promise.resolve()
-			.then(lookup)
-			.then(
-				(name) => {
-					clearTimeout(timer);
-					resolve(name || fallback);
-				},
-				() => {
-					clearTimeout(timer);
-					resolve(fallback);
-				}
-			);
+		const settle = (name: string): void => {
+			clearTimeout(timer);
+			signal.removeEventListener('abort', stop);
+			resolve(name || fallback);
+		};
+		const stop = (): void => settle(fallback);
+		const timer = setTimeout(stop, LOOKUP_LIMIT_MS);
+		signal.addEventListener('abort', stop, { once: true });
+		Promise.resolve().then(lookup).then(settle, stop);
 	});
 }
 
 /**
  * The names cards use for one run, read through the real client and the
- * workspace. The team list is read once.
+ * workspace. The team list is kept once a read of it succeeds. Every lookup
+ * ends when the run is stopped, so a stopped card is not held up by them.
  */
-function cardNames(client: ClientGetter, vfs: IWorkspaceFileSystem): Names {
-	let teams: Promise<ReadonlyMap<string, string>> | undefined;
-	const teamNames = (): Promise<ReadonlyMap<string, string>> =>
-		(teams ??= (async () => {
-			const real = requireClient(client);
-			const org = real.getOrgId();
-			return new Map(org ? (await real.account.listTeams(org)).map((team) => [team.id, team.name]) : []);
-		})());
+function cardNames(client: ClientGetter, vfs: IWorkspaceFileSystem, signal: AbortSignal): Names {
+	let teams: ReadonlyMap<string, string> | undefined;
+	const teamNames = async (): Promise<ReadonlyMap<string, string>> => {
+		if (teams) return teams;
+		const real = requireClient(client);
+		const org = real.getOrgId();
+		if (!org) return new Map();
+		return (teams = new Map((await real.account.listTeams(org)).map((team) => [team.id, team.name])));
+	};
 	return {
 		app: (appId) =>
-			capped(async () => {
-				const found = (await readApps(vfs, () => false)).find((app) => app.id === appId);
-				return found?.name ? `${found.name} (${text(appId)})` : text(appId);
-			}, text(appId)),
-		team: (teamId) => capped(async () => (await teamNames()).get(text(teamId)) ?? text(teamId), text(teamId)),
-		deployment: (projectId, teamId) => capped(async () => (await requireClient(client).deploy.get(text(projectId), text(teamId))).pipelineName ?? text(projectId), text(projectId)),
+			capped(
+				async () => {
+					const found = (await readApps(vfs, () => false)).find((app) => app.id === appId);
+					return found?.name ? `${found.name} (${text(appId)})` : text(appId);
+				},
+				text(appId),
+				signal
+			),
+		team: (teamId) => capped(async () => (await teamNames()).get(text(teamId)) ?? text(teamId), text(teamId), signal),
+		deployment: (projectId, teamId) => capped(async () => (await requireClient(client).deploy.get(text(projectId), text(teamId))).pipelineName ?? text(projectId), text(projectId), signal),
 		nextRuns: (schedule) =>
-			capped(async () => {
-				const preview = await requireClient(client).deploy.preview(schedule, NEXT_RUNS);
-				return (preview.next ?? []).map((seconds) => new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })).join(', ');
-			}, ''),
+			capped(
+				async () => {
+					const preview = await requireClient(client).deploy.preview(schedule, NEXT_RUNS);
+					return (preview.next ?? []).map((seconds) => new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })).join(', ');
+				},
+				'',
+				signal
+			),
 	};
 }
 
@@ -573,7 +580,7 @@ export class Approvals {
 	 * @param o - The real client, the workspace, the turn's ask, the settings and the stop signal.
 	 */
 	constructor(private readonly o: ApprovalsOptions) {
-		this.names = cardNames(o.client, o.vfs);
+		this.names = cardNames(o.client, o.vfs, o.signal);
 		this.client = () => {
 			const real = o.client();
 			return real ? (this.view(real, '') as RocketRideClient) : null;
@@ -602,7 +609,8 @@ export class Approvals {
 		if (allowed(rule, this.prefs())) return this.withPass(act, run);
 		if (!this.o.ask) throw new Error(noChat(card.title));
 
-		const asking = this.o.ask(rule.grant ? { ...card, alwaysLabel: ALWAYS_LABELS[rule.grant] } : card);
+		// without settings an Always click would save nothing
+		const asking = this.o.ask(rule.grant && this.o.settings ? { ...card, alwaysLabel: ALWAYS_LABELS[rule.grant] } : card);
 		const off = this.o.settings?.subscribe(() => {
 			if (allowed(rule, this.prefs())) asking.approve();
 		});
