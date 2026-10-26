@@ -224,15 +224,14 @@ function ask(card: CardBuilder, extra: Pick<AskRule, 'grant' | 'freeWhen'> = {})
 
 /**
  * The one list: every public client method, by the name rocketride_client
- * takes. Reads and pipeline work are free. Rows marked DECIDE hold the
- * recommended tier until Dylan decides (`tier-decisions.md`).
+ * takes. Reads and pipeline work are free.
  */
 const CLIENT_POLICY: ClientPolicy = {
 	// The connection and the client's plumbing
 	connect: never(SIGNED_IN),
 	login: never(SIGNED_IN),
-	logout: never(CONNECTION), // DECIDE
-	disconnect: never(CONNECTION), // DECIDE
+	logout: never(CONNECTION),
+	disconnect: never(CONNECTION),
 	attach: never(CONNECTION),
 	detach: never(CONNECTION),
 	_dapConnect: never(CONNECTION),
@@ -278,10 +277,10 @@ const CLIENT_POLICY: ClientPolicy = {
 	getTaskPipeline: FREE,
 	addMonitor: FREE,
 	setEvents: FREE,
-	terminate: FREE, // DECIDE
-	restart: FREE, // DECIDE
-	removeMonitor: never(MONITORS), // DECIDE
-	clearAllMonitors: never(MONITORS), // DECIDE
+	terminate: FREE,
+	restart: FREE,
+	removeMonitor: never(MONITORS),
+	clearAllMonitors: never(MONITORS),
 
 	// Server state
 	getServices: FREE,
@@ -293,18 +292,18 @@ const CLIENT_POLICY: ClientPolicy = {
 	cprofileReport: FREE,
 	cprofileReportTree: FREE,
 	cprofileThreads: FREE,
-	cprofileStart: ask(async () => ({ title: 'Start profiling the server' })), // DECIDE
-	cprofileStop: ask(async () => ({ title: 'Stop profiling the server' })), // DECIDE
+	cprofileStart: ask(async () => ({ title: 'Start profiling the server' })),
+	cprofileStop: ask(async () => ({ title: 'Stop profiling the server' })),
 
 	// Templates and saved logs, in the user's server-side store
 	getTemplate: FREE,
 	getAllTemplates: FREE,
 	getLog: FREE,
 	listLogs: FREE,
-	saveTemplate: ask(async ([o]) => ({ title: `Save the pipeline template ${field(o, 'templateId')}`, detail: 'A template with that id is overwritten.' })), // DECIDE
-	deleteTemplate: ask(async ([o]) => ({ title: `Delete the pipeline template ${field(o, 'templateId')}` })), // DECIDE
-	saveLog: ask(async () => ({ title: 'Save a run log to your store' })), // DECIDE
-	deleteLog: ask(async ([o]) => ({ title: `Delete the saved run log ${field(o, 'name')}` })), // DECIDE
+	saveTemplate: ask(async ([o]) => ({ title: `Save the pipeline template ${field(o, 'templateId')}`, detail: 'A template with that id is overwritten.' })),
+	deleteTemplate: ask(async ([o]) => ({ title: `Delete the pipeline template ${field(o, 'templateId')}` })),
+	saveLog: ask(async () => ({ title: 'Save a run log to your store' })),
+	deleteLog: ask(async ([o]) => ({ title: `Delete the saved run log ${field(o, 'name')}` })),
 
 	// The store: every fs method
 	fsOpen: never(FILES),
@@ -337,7 +336,7 @@ const CLIENT_POLICY: ClientPolicy = {
 
 	// account
 	'account.getOrg': FREE,
-	'account.listKeys': FREE, // DECIDE
+	'account.listKeys': FREE,
 	'account.listMembers': FREE,
 	'account.listTeams': FREE,
 	'account.getTeamDetail': FREE,
@@ -346,7 +345,7 @@ const CLIENT_POLICY: ClientPolicy = {
 	'account.getEnv': never('use account.getEnvironmentKeys for the names, and ${ROCKETRIDE_<NAME>} placeholders in pipelines'),
 	'account.createKey': never('ask the user to create API keys in their settings'),
 	'account.setDevTeam': ask(async ([teamId], n) => ({ title: `Make team ${await n.team(teamId)} your development team`, detail: 'Dev runs bill to it and use its environment, and the workspace reloads.' })),
-	'account.updateProfile': never(ACCOUNT), // DECIDE
+	'account.updateProfile': never(ACCOUNT),
 	'account.setDefaultOrg': never(ACCOUNT),
 	'account.deleteAccount': never(ACCOUNT),
 	'account.updateOrgName': never(ACCOUNT),
@@ -381,9 +380,9 @@ const CLIENT_POLICY: ClientPolicy = {
 	'billing.upgradeSubscription': never(BILLING),
 
 	// database: SQL on a database node of a pipeline the agent runs
-	'database.query': ask(async ([o]) => ({ title: 'Run SQL on a pipeline database', detail: brief(field(o, 'sql')) })), // DECIDE
+	'database.query': ask(async ([o]) => ({ title: 'Run SQL on a pipeline database', detail: brief(field(o, 'sql')) })),
 	'database.beginTransaction': FREE,
-	'database.commit': FREE, // DECIDE
+	'database.commit': FREE,
 	'database.rollback': FREE,
 	'database.dialect': FREE,
 	'database.sequelize': FREE,
@@ -406,8 +405,8 @@ const CLIENT_POLICY: ClientPolicy = {
 	'deploy.setSchedule': ask(scheduleCard, { grant: 'schedules' }),
 	'deploy.pauseSchedule': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Pause the schedule of ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)}` }), { grant: 'schedules' }),
 	'deploy.resumeSchedule': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Resume the schedule of ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)}` }), { grant: 'schedules' }),
-	'deploy.run': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Run ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)} now` })), // DECIDE
-	'deploy.setSourceConfig': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Change tracing for ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)}` })), // DECIDE
+	'deploy.run': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Run ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)} now` })),
+	'deploy.setSourceConfig': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Change tracing for ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)}` })),
 
 	// log
 	'log.openEventStream': FREE,
@@ -415,7 +414,7 @@ const CLIENT_POLICY: ClientPolicy = {
 	'log.streams': FREE,
 	'log.read': FREE,
 	'log.segment': FREE,
-	'log.delete': ask(async ([stream]) => ({ title: `Delete run logs of ${field(stream, 'source')} in ${field(stream, 'projectId')}` })), // DECIDE
+	'log.delete': ask(async ([stream]) => ({ title: `Delete run logs of ${field(stream, 'source')} in ${field(stream, 'projectId')}` })),
 };
 
 /** The list by plain name, for lookups at run time. */
