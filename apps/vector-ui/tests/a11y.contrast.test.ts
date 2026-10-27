@@ -40,14 +40,11 @@ function ratio(tokens: Record<string, string>, token: string, surface: string): 
 }
 
 /**
- * The files that write text which are not under the console's text rule yet, each with why. Every other component,
- * view and mount file is, so a file added later is checked without being listed here.
+ * The files that write text which are not under the console's text rule, each with why. None: every component, view
+ * and mount file is covered (the upload lane moved to the text token), so a file added later is checked too. A file
+ * listed here must say why.
  */
-const TEXT_EXEMPT: Readonly<Record<string, string>> = {
-	'components/IngestDropZone.tsx': 'the upload lane writes secondary text (P1 rehomes it in Add documents, W11)',
-	'components/IngestPanel.tsx': 'the upload lane writes secondary and status-coloured text (P1, W11)',
-	'components/UploadList.tsx': 'the upload lane writes secondary text (P1, W11)',
-};
+const TEXT_EXEMPT: Readonly<Record<string, string>> = {};
 
 /** The files the console's text rule covers: every mount, component and view file but the exempt ones, and the styles. */
 const CONSOLE_FILES = ['', 'components/', 'views/']
@@ -111,7 +108,8 @@ test('the selected row: text stays at least 4.5:1 on its tinted background, and 
 test('the secondary and disabled text tokens fail in some theme, which is why the console never writes text in them', () => {
 	const dark = themes.find((t) => t.name === 'rocketride')!;
 	assert.ok(Math.min(...CONSOLE_SURFACES.map((s) => ratio(dark.tokens, '--rr-text-secondary', s))) < MIN_TEXT_CONTRAST, 'the premise');
-	for (const file of ['views/ConsoleView.tsx', 'components/WorkbenchTabs.tsx', 'components/InlineRemoveConfirm.tsx', 'components/DocumentsTab.tsx', 'VectorApp.tsx', 'styles.ts']) assert.ok(CONSOLE_FILES.includes(file), `the premise: ${file} is covered`);
+	for (const file of ['views/ConsoleView.tsx', 'components/WorkbenchTabs.tsx', 'components/InlineRemoveConfirm.tsx', 'components/DocumentsTab.tsx', 'components/IngestPanel.tsx', 'components/IngestDropZone.tsx', 'components/UploadList.tsx', 'VectorApp.tsx', 'styles.ts']) assert.ok(CONSOLE_FILES.includes(file), `the premise: ${file} is covered`);
+	assert.deepEqual(Object.keys(TEXT_EXEMPT), [], 'no file is exempt from the text rule');
 	for (const file of Object.keys(TEXT_EXEMPT)) assert.ok(fs.existsSync(path.resolve(__dirname, '..', 'src', file)), `${file} is exempt but does not exist`);
 	for (const file of CONSOLE_FILES) {
 		const full = path.resolve(__dirname, '..', 'src', file);

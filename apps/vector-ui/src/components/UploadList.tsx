@@ -27,7 +27,8 @@
 // Each row: the path, a progress bar while bytes are sent, and the row's
 // words (uploads.ts uploadLabel) — "Uploading… 40%", "Processing…",
 // "7 chunks added", or a sentence saying why it was not added. The words
-// carry the whole message; the colour of the status mark only repeats it.
+// carry the whole message; the status mark (a shape in the text token for a
+// finished upload: ✓ ✕ ! –; the accent dot while it runs) only repeats it.
 // What the engine said about a failure is one click away, not in the row.
 //
 // Above the rows, the summary of each drop (IngestSummary): the latest drop
@@ -80,20 +81,20 @@ const S = {
 	list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 180, overflowY: 'auto' } as CSSProperties,
 	row: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', columnGap: 8, rowGap: 2, alignItems: 'center', fontSize: 12, padding: '3px 4px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
 	path: { color: 'var(--rr-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
-	label: { color: 'var(--rr-text-secondary)', textAlign: 'right', maxWidth: 320, overflowWrap: 'anywhere' } as CSSProperties,
+	label: { color: 'var(--rr-text-primary)', textAlign: 'right', maxWidth: 320, overflowWrap: 'anywhere' } as CSSProperties,
 	bar: { gridColumn: '1 / span 2', height: 4, borderRadius: 2, background: 'var(--rr-bg-widget)', overflow: 'hidden' } as CSSProperties,
 	fill: { height: '100%', background: 'var(--rr-border-focus)' } as CSSProperties,
-	detail: { gridColumn: '1 / span 2', fontSize: 11, color: 'var(--rr-text-secondary)' } as CSSProperties,
-	notes: { margin: '0 0 4px', paddingLeft: 16, fontSize: 12, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	detail: { gridColumn: '1 / span 2', fontSize: 11, color: 'var(--rr-text-primary)' } as CSSProperties,
+	notes: { margin: '0 0 4px', paddingLeft: 16, fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	footer: { display: 'flex', justifyContent: 'flex-end', marginTop: 4 } as CSSProperties,
 	summary: { display: 'flex', flexDirection: 'column', gap: 6, margin: '0 0 6px', padding: '6px 8px', borderRadius: 4, background: 'var(--rr-bg-widget)', fontSize: 12 } as CSSProperties,
 	drop: { display: 'flex', flexDirection: 'column', gap: 4 } as CSSProperties,
 	line: { margin: 0, color: 'var(--rr-text-primary)', fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' } as CSSProperties,
 	segment: { whiteSpace: 'nowrap' } as CSSProperties,
 	actions: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } as CSSProperties,
-	reason: { fontSize: 11, color: 'var(--rr-text-secondary)', overflowWrap: 'anywhere' } as CSSProperties,
-	note: { margin: 0, fontSize: 11, color: 'var(--rr-text-secondary)', overflowWrap: 'anywhere' } as CSSProperties,
-	earlier: { fontSize: 11, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	reason: { fontSize: 11, color: 'var(--rr-text-primary)', overflowWrap: 'anywhere' } as CSSProperties,
+	note: { margin: 0, fontSize: 11, color: 'var(--rr-text-primary)', overflowWrap: 'anywhere' } as CSSProperties,
+	earlier: { fontSize: 11, color: 'var(--rr-text-primary)' } as CSSProperties,
 	earlierList: { listStyle: 'none', margin: '4px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 } as CSSProperties,
 };
 
@@ -210,12 +211,15 @@ export function IngestSummary({ drops, ...rest }: IngestSummaryProps): React.Rea
 	);
 }
 
-/** The status mark's colour (the label says the same in words). */
+/**
+ * The status mark of a finished upload: a shape, in the text token, beside the label that says the same in words (no
+ * status colour: those fall below 3:1 in the light themes). An upload still running keeps the accent's dot.
+ */
 const MARK: Partial<Record<UploadStatus, string>> = {
-	done: 'var(--rr-color-success)',
-	failed: 'var(--rr-color-error)',
-	refused: 'var(--rr-color-warning)',
-	cancelled: 'var(--rr-text-secondary)',
+	done: '✓',
+	failed: '✕',
+	refused: '!',
+	cancelled: '–',
 };
 
 /**
@@ -246,8 +250,8 @@ export function UploadList({ rows, notes, onClearFinished, drops, onShowNew, sho
 					return (
 						<li key={row.id} style={S.row} data-status={row.status}>
 							<span style={S.path} title={row.path}>
-								<span aria-hidden="true" style={{ color: MARK[row.status] ?? 'var(--rr-border-focus)', marginRight: 6 }}>
-									●
+								<span aria-hidden="true" style={{ color: MARK[row.status] ? 'var(--rr-text-primary)' : 'var(--rr-border-focus)', marginRight: 6 }}>
+									{MARK[row.status] ?? '●'}
 								</span>
 								{row.path}
 							</span>
