@@ -27,7 +27,9 @@
 // Renders the Overview's cards (vector/overview.ts overviewCards: "—" with a
 // reason for what the store did not count, Size only where it is
 // reported), the chips (each label carries its whole message), and "counts
-// as of N s ago" after a quick refresh. While the first answer is pending it
+// as of N s ago" (in a cell of its own width, so the chips never rewrap on
+// the 15 s quick tick; the header says Refreshing… for a refresh someone
+// asked for). While the first answer is pending it
 // shows a skeleton; after a failure it keeps the last figures, in italics,
 // marked "last known values" (the workbench's banner says what failed).
 // While a scope is active a second line says what it covers ("Scope: 12 of
@@ -52,7 +54,7 @@ const local = {
 	label: { ...styles.small, fontWeight: 600 } as CSSProperties,
 	value: (long: boolean, stale: boolean): CSSProperties => ({ margin: 0, fontSize: long ? 13 : 18, fontWeight: 600, fontStyle: stale ? 'italic' : 'normal', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }),
 	chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 } as CSSProperties,
-	asOf: { ...styles.small, marginLeft: 'auto' } as CSSProperties,
+	asOf: { ...styles.small, marginLeft: 'auto', minWidth: '24ch', textAlign: 'right' } as CSSProperties,
 	scope: { ...styles.small, marginTop: 6 } as CSSProperties,
 };
 
@@ -78,19 +80,19 @@ function useNow(): number {
 }
 
 /**
- * "counts as of N s ago" (or "last known values", "Refreshing…"): the only
- * part of the strip on the one-second clock, so a tick re-renders these words
- * alone, never the cards.
+ * "counts as of N s ago" (or "last known values"): the only part of the strip
+ * on the one-second clock, so a tick re-renders these words alone, never the
+ * cards.
  *
- * @param props - The stats answer, and whether it is stale or refreshing.
+ * @param props - The stats answer, and whether it is stale.
  * @returns The words.
  */
-export function StatsAsOf({ view, stale, refreshing }: { view: IStatsSlot['view']; stale: boolean; refreshing: boolean }): React.ReactElement {
+export function StatsAsOf({ view, stale }: { view: IStatsSlot['view']; stale: boolean }): React.ReactElement {
 	const now = useNow();
 	const asOf = countsAsOfText(view, now);
 	return (
 		<span style={local.asOf} aria-live="off">
-			{stale ? 'last known values' : refreshing ? 'Refreshing…' : (asOf ?? '')}
+			{stale ? 'last known values' : (asOf ?? '')}
 		</span>
 	);
 }
@@ -124,7 +126,7 @@ export function StatsStrip({ stats, dialect, readOnly, scopeLine = null, health 
 						{chip.label}
 					</span>
 				))}
-				<StatsAsOf view={stats.view} stale={stale} refreshing={stats.status === 'loading' && stats.view !== null} />
+				<StatsAsOf view={stats.view} stale={stale} />
 			</div>
 			{scopeLine !== null && (
 				<div role="status" style={local.scope} data-scope-line="">

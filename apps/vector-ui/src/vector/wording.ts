@@ -97,7 +97,7 @@ export const CAVEAT_SENTENCES: Readonly<Record<Caveat, string>> = {
 	extras_not_stored: 'This backend does not keep file size or ingest time.',
 	documents_by_first_chunk: 'Documents are counted by their first chunk on this store.',
 	document_count_capped: 'Orphan counts above 1,000 are not exact on this store.',
-	documents_unsorted: 'This store lists documents in storage order; the directory sorts what is loaded.',
+	documents_unsorted: 'This store lists documents in storage order; Documents sorts what is loaded.',
 	documents_paging_unsupported: 'This store cannot page its document list; only the first page is shown.',
 	model_mismatch: 'The chat embedding model differs from the one this collection was built with; results may be meaningless.',
 	meta_column_pending: 'File size and ingest time are not stored yet: another session holds this table; the store will retry.',
@@ -129,7 +129,7 @@ export const WRITE_TIMEOUT_TEXT = 'The request may still complete on the server.
 export const CANCELLED_TEXT = 'Cancelled. Nothing was sent.';
 
 /** Under the directory when a page brought no document that was not already listed (the listing stops there). */
-export const DOCUMENTS_REPEATED_TEXT = 'The store sent documents it had already listed instead of the next page, so the directory stopped asking.';
+export const DOCUMENTS_REPEATED_TEXT = 'The store sent documents it had already listed instead of the next page, so the Documents list stopped asking.';
 
 /** Server codes that mean the task is not running (yet). */
 const NOT_RUNNING_CODES: ReadonlySet<string> = new Set(['TASK_STOPPED', 'TASK_NOT_REGISTERED', 'TASK_COMPLETED']);

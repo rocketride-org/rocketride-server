@@ -31,7 +31,8 @@
 // stays mounted, hidden while closed, so an upload in flight keeps following
 // its progress. Opened, it takes the focus; Escape (inside it, unless an
 // inner control handled it) or its close button closes it, and the focus
-// goes back to what opened it.
+// goes back to what opened it, or, when that is gone or hidden (another tab
+// shows), to `returnFocus`: never to the page body.
 // =============================================================================
 
 import React, { useEffect, useRef } from 'react';
@@ -41,6 +42,7 @@ import type { IExplorerEndpoint } from 'shared/explorer';
 import { VECTOR_PROVIDERS } from '../adapters/explorer';
 import type { ConsoleActions, ConsoleModel, VectorChannels } from '../contract/types';
 import { alsoReaches } from '../vector/consoleModel';
+import { firstFocusable, focusLost } from '../vector/focus';
 import IngestPanel from './IngestPanel';
 
 const styles = {
@@ -61,6 +63,8 @@ export interface IAddDocumentsAsideProps {
 	/** Shown, or hidden (it stays mounted). */
 	open: boolean;
 	onClose(): void;
+	/** Where the focus goes on close when the opener is gone or hidden. */
+	returnFocus?: () => HTMLElement | null;
 }
 
 /**
@@ -69,9 +73,11 @@ export interface IAddDocumentsAsideProps {
  * @param props - {@link IAddDocumentsAsideProps}.
  * @returns The aside.
  */
-export function AddDocumentsAside({ model, channels, actions, endpoint, open, onClose }: IAddDocumentsAsideProps): React.ReactElement {
+export function AddDocumentsAside({ model, channels, actions, endpoint, open, onClose, returnFocus }: IAddDocumentsAsideProps): React.ReactElement {
 	const region = useRef<HTMLElement>(null);
 	const opener = useRef<Element | null>(null);
+	const fallback = useRef(returnFocus);
+	fallback.current = returnFocus;
 	// Opened: remember what had the focus, and take it. Closed with the focus inside (or lost): give it back, if still on the page.
 	useEffect(() => {
 		if (typeof document === 'undefined') return;
@@ -80,12 +86,10 @@ export function AddDocumentsAside({ model, channels, actions, endpoint, open, on
 			region.current?.focus();
 			return;
 		}
-		const focused = document.activeElement;
-		const node = region.current;
-		const lost = focused === null || focused === document.body || (node !== null && node.contains(focused));
 		const back = opener.current;
 		opener.current = null;
-		if (lost && back instanceof HTMLElement && back.isConnected) back.focus();
+		if (!focusLost(document.activeElement, document.body, region.current)) return;
+		firstFocusable([back instanceof HTMLElement ? back : null, fallback.current?.()])?.focus();
 	}, [open]);
 	return (
 		<aside

@@ -115,8 +115,9 @@ test('the workbench renders its header and tab row, and on each tab only that ta
 	for (const tab of Object.keys(parts) as WorkbenchTab[]) {
 		const html = render(env, endpoint, tab);
 		for (const label of ['Refresh', 'Details', 'Add documents']) assert.ok(html.includes(`>${label}</`), `${tab}: the header's ${label}`);
-		const row = html.slice(html.indexOf('role="tablist" aria-label="Connection"'), html.indexOf('</div>', html.indexOf('role="tablist" aria-label="Connection"')));
-		assert.deepEqual([...row.matchAll(/role="tab"[^>]*>([^<]+)</g)].map((m) => m[1]), ['Overview', 'Documents', 'Query', 'Map', 'Collection', 'Trash'], `${tab}: the tab row, on its own row`);
+		const row = html.slice(html.indexOf('role="tablist" aria-label="Collection views"'), html.indexOf('</div>', html.indexOf('role="tablist" aria-label="Collection views"')));
+		assert.deepEqual([...row.matchAll(/role="tab" id="[^"]*-tab-(\w+)"/g)].map((m) => m[1]), ['overview', 'documents', 'query', 'map', 'collection', 'trash'], `${tab}: the tab row, on its own row`);
+		assert.match(row, />Trash<\/span><span aria-hidden="true"[^>]*>Trash \(888\)</, `${tab}: the Trash label reserves its count's width`);
 		assert.match(row, new RegExp(`aria-selected="true" aria-controls="[^"]*-panel-${tab}" tabindex="0"`), `${tab}: the shown tab is selected and the one in the tab order`);
 		assert.equal((row.match(/tabindex="0"/g) ?? []).length, 1, `${tab}: one tab in the tab order (roving)`);
 		assert.ok(html.indexOf('data-workbench-tabs') < html.indexOf('flex-direction:column;padding:'), `${tab}: the tab row is above the panels`);

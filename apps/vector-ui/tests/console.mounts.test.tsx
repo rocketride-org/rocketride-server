@@ -110,8 +110,9 @@ test('the Overview: the cards on top, then Summary, Charts and Insights on a row
 	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
 	const summary = overview(rows);
 	assert.ok(summary.indexOf('aria-label="Database summary"') < summary.indexOf('role="tablist" aria-label="Overview"'), 'the cards first');
-	assert.match(summary, /role="tab" aria-selected="true" tabindex="0"[^>]*data-overview-view="summary">Summary</);
-	assert.match(summary, /data-overview-view="insights">Insights \(\d+\)</);
+	assert.match(summary, /role="tab" id="([^"]*)-tab-summary" aria-selected="true" aria-controls="\1-panel-summary" tabindex="0"[^>]*>Summary</);
+	assert.match(summary, /role="tabpanel" id="[^"]*-panel-summary" aria-labelledby="[^"]*-tab-summary"/);
+	assert.match(summary, /-tab-insights"[^>]*>(<span[^>]*>){2}Insights \(\d+\)</);
 	assert.doesNotMatch(summary, /data-component="StatsCharts"/, 'the charts are drawn only on their view');
 	mounted(overview(rows, { initialView: 'charts' }), 'StatsCharts');
 });
@@ -179,7 +180,7 @@ test("the strip's one-second clock re-renders only the 'counts as of' words; the
 	assert.equal((clock[0]?.props as { view: unknown }).view, stats.view);
 	assert.ok(!first.some((e) => e.type === StatsCharts), 'no chart under the clock');
 	assert.equal((StatsCharts as unknown as { $$typeof: symbol }).$$typeof, Symbol.for('react.memo'));
-	assert.match(renderToStaticMarkup(<StatsAsOf view={stats.view} stale={false} refreshing={false} />), /aria-live="off"/);
+	assert.match(renderToStaticMarkup(<StatsAsOf view={stats.view} stale={false} />), /aria-live="off"/);
 });
 
 test('the ingest chart with one far-off ingest time: a few dozen bars, not ninety thousand', () => {
@@ -262,7 +263,7 @@ test('the Documents grid says a flagged document needs attention in its Health c
 	// The Overview's Insights list the same documents: its count is the chip's.
 	const health = healthSummary(rows, { medianChunks: 9, complete: true });
 	const view = overview(rows, { health, median: 9, initialView: 'insights' });
-	assert.match(view, /data-overview-view="insights">Insights \(1\)</);
+	assert.match(view, /-tab-insights"[^>]*>(<span[^>]*>){2}Insights \(1\)</);
 	assert.equal((view.match(/<li><button type="button"/g) ?? []).length, 1, 'one row per document that needs attention');
 	assert.match(view, /title="Open it in Documents"><span[^>]*>[^<]*<\/span><span[^>]*>1 deleted chunk</);
 	assert.match(overview(rows, { health: { ...health, complete: false }, median: 9 }), /Insights \(1\+\)/, 'while more documents may need attention than the loaded ones');

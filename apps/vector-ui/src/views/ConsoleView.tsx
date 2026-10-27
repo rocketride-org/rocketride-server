@@ -53,7 +53,7 @@
 //
 // THE DIALECT. When fresh stats say the collection exists but the probe
 // read at discovery says it does not, the store is probed again, once per
-// stats answer, so the index and size fill in without a Test connection.
+// disagreement, so the index and size fill in without a Test connection.
 //
 // THE SCOPE. The directory's ScopeBar sets the connection's scope (the
 // entry's value store, read by the map and search as ConsoleModel.scope);
@@ -99,7 +99,7 @@ import { savedFiltersFor } from '../vector/savedFilters';
 import { roleLine, vectorCardView } from '../vector/connections';
 import { providerTitle } from '../vector/support';
 import { BUSY, EMPTY } from '../vector/wording';
-import { focusStranded } from '../vector/workbench';
+import { focusStranded, reprobeFor } from '../vector/workbench';
 import type { WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
 import MapView from './MapView';
@@ -287,6 +287,8 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 		const shown = root.current?.querySelector<HTMLElement>(`[data-workbench-panel="${tab}"]`) ?? null;
 		return firstFocusable([shown?.querySelector<HTMLElement>('[data-return-focus]'), shown?.querySelector<HTMLElement>('[role="grid"]'), currentTab()]);
 	};
+	// Where the focus goes when Add documents closes and its opener cannot take it back: the header's button, else the tab.
+	const asideFocus = (): HTMLElement | null => firstFocusable([root.current?.querySelector<HTMLElement>('[data-add-documents] button'), currentTab()]);
 	// A tab switch made from inside a panel leaves the focus on an element now hidden: it goes to the new tab.
 	useLayoutEffect(() => {
 		if (typeof document === 'undefined') return;
@@ -303,20 +305,21 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	}, [statsLoading, refreshAsked]);
 	const refreshing = refreshAsked && statsLoading;
 	const refresh = (): void => {
+		// A refresh already running is not asked again.
+		if (refreshing) return;
 		setRefreshAsked(true);
 		entry.controller.refresh();
 	};
 
 	// B1(b): fresh stats say the collection exists while the probe read at discovery says it does not: probe again,
-	// once per stats answer (a store that keeps disagreeing is not asked in a loop).
-	const reprobedFor = useRef<number | null>(null);
-	const statsAt = state.stats.lastAt;
+	// once per disagreement (a store whose probe keeps disagreeing is not asked on every quick tick).
+	const reprobed = useRef<string | null>(null);
 	const disagree = state.stats.view !== null && state.stats.view.collectionExists && dialect?.health.collection_exists === false;
 	useEffect(() => {
-		if (!disagree || statsAt === null || reprobedFor.current === statsAt) return;
-		reprobedFor.current = statsAt;
-		void env.probe(endpoint.key);
-	}, [disagree, statsAt, env, endpoint.key]);
+		const next = reprobeFor(reprobed.current, disagree, endpoint.key);
+		reprobed.current = next.tried;
+		if (next.probe) void env.probe(endpoint.key);
+	}, [disagree, env, endpoint.key]);
 
 	const title = `${providerTitle(endpoint.provider)}${model.collection ? ` · ${model.collection}` : ''}`;
 	const subtitle = `"${endpoint.pipelineName}" · ${endpoint.nodeName || endpoint.nodeId} · ${roleLine(endpoint)}`;
@@ -339,9 +342,11 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 						<Button variant="ghost" pressed={details} onClick={() => setDetails((open) => !open)}>
 							Details
 						</Button>
-						<Button variant="ghost" pressed={adding} onClick={() => (adding ? setAdding(false) : openAdding())}>
-							Add documents
-						</Button>
+						<span data-add-documents="">
+							<Button variant="ghost" pressed={adding} onClick={() => (adding ? setAdding(false) : openAdding())}>
+								Add documents
+							</Button>
+						</span>
 					</>
 				}
 			/>
@@ -427,7 +432,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 					)}
 					<PendingBar {...panel(tab)} />
 				</div>
-				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} />}
+				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} returnFocus={asideFocus} />}
 			</div>
 		</div>
 	);

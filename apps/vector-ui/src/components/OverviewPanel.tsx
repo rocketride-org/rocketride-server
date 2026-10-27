@@ -43,7 +43,7 @@
 // rendered in tests; OverviewPanel binds it to the connection.
 // =============================================================================
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Button } from 'shell';
 import type { IDialectResult, IDocumentItem, IDocumentsFilter, ISampleModel } from '../contract/types';
@@ -55,19 +55,19 @@ import { clientKeys, matches } from '../vector/filters';
 import type { IHealthSummary } from '../vector/health';
 import { insights, insightsLabel, overLine, topFolders } from '../vector/overview';
 import { formatCount } from '../vector/stats';
-import { tabKeyTarget, workbenchNonce } from '../vector/workbench';
+import { workbenchNonce } from '../vector/workbench';
 import type { OverviewView as OverviewViewId, WorkbenchTab } from '../vector/workbench';
 import { useValueStore } from '../envContext';
-import { FOCUS_RING, styles } from '../styles';
+import { styles } from '../styles';
 import StatsCharts from './StatsCharts';
 import StatsStrip from './StatsStrip';
+import TabRow, { tabRowIds } from './TabRow';
+import type { ITabRowTab } from './TabRow';
 import type { IWorkbenchPanelProps } from './workbenchProps';
 
 const local = {
 	root: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
-	views: { flexShrink: 0, display: 'flex', gap: 4, padding: '6px 24px 0' } as CSSProperties,
-	view: (selected: boolean, focused: boolean): CSSProperties => ({ padding: '4px 8px', border: 'none', borderBottom: selected ? '2px solid var(--rr-border-focus)' : '2px solid transparent', background: 'none', color: 'var(--rr-text-primary)', font: 'inherit', fontSize: 12, fontWeight: selected ? 600 : 400, fontVariantNumeric: 'tabular-nums', cursor: 'pointer', outline: focused ? FOCUS_RING : 'none', outlineOffset: -2 }),
-	body: { flex: 1, minHeight: 0, overflowY: 'auto' } as CSSProperties,
+	body: (shown: boolean): CSSProperties => ({ flex: 1, minHeight: 0, overflowY: 'auto', display: shown ? 'block' : 'none' }),
 	columns: { display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 2fr)', gap: 12, padding: '8px 24px 16px' } as CSSProperties,
 	side: { display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 } as CSSProperties,
 	more: { marginTop: 6 } as CSSProperties,
@@ -91,7 +91,7 @@ const local = {
 };
 
 /** The views, in order. */
-const VIEWS: ReadonlyArray<{ id: OverviewViewId; label: string }> = [
+const VIEWS: ReadonlyArray<ITabRowTab<OverviewViewId>> = [
 	{ id: 'summary', label: 'Summary' },
 	{ id: 'charts', label: 'Charts' },
 	{ id: 'insights', label: 'Insights' },
@@ -146,37 +146,34 @@ export interface IOverviewViewProps {
 export function OverviewView(props: IOverviewViewProps): React.ReactElement {
 	const { stats, dialect, readOnly, rows, loading, scopeLine, scopeFilter, sample, health, median } = props;
 	const [view, setView] = useState<OverviewViewId>(props.initialView ?? 'summary');
-	const [focused, setFocused] = useState<OverviewViewId | null>(null);
-	const row = useRef<HTMLDivElement>(null);
+	// Each view mounts the first time it shows, then stays (the charts are not drawn again on every switch).
+	const [mounted, setMounted] = useState<ReadonlySet<OverviewViewId>>(() => new Set([view]));
+	if (!mounted.has(view)) setMounted(new Set([...mounted, view]));
+	const prefix = `ov${useId().replace(/:/g, '')}`;
 	const flagged = useMemo(() => insights(rows, median), [rows, median]);
-	const label = (id: OverviewViewId, base: string): string => (id === 'insights' ? insightsLabel(health.flagged, health.complete) : base);
-	const onKeyDown = (event: React.KeyboardEvent, index: number): void => {
-		const target = tabKeyTarget(event.key, index, VIEWS.length);
-		if (target === null) return;
-		event.preventDefault();
-		// Automatic activation: these views call nothing.
-		setView(VIEWS[target].id);
-		row.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[target]?.focus();
+	const tabs: Array<ITabRowTab<OverviewViewId>> = VIEWS.map((v) => (v.id === 'insights' ? { id: v.id, label: insightsLabel(health.flagged, health.complete), reserve: insightsLabel(888, false) } : v));
+	const panel = (id: OverviewViewId, content: React.ReactNode): React.ReactNode => {
+		if (!mounted.has(id)) return null;
+		const ids = tabRowIds(prefix, id);
+		return (
+			<div role="tabpanel" id={ids.panel} aria-labelledby={ids.tab} style={local.body(view === id)} data-overview-panel={id}>
+				{content}
+			</div>
+		);
 	};
 	return (
 		<div style={local.root}>
 			<StatsStrip stats={stats} dialect={dialect} readOnly={readOnly} scopeLine={scopeLine} health={health} />
-			<div ref={row} role="tablist" aria-label="Overview" style={local.views}>
-				{VIEWS.map((v, index) => (
-					<button key={v.id} type="button" role="tab" aria-selected={view === v.id} tabIndex={view === v.id ? 0 : -1} style={local.view(view === v.id, focused === v.id)} onClick={() => setView(v.id)} onKeyDown={(event) => onKeyDown(event, index)} onFocus={() => setFocused(v.id)} onBlur={() => setFocused((current) => (current === v.id ? null : current))} data-overview-view={v.id}>
-						{label(v.id, v.label)}
-					</button>
-				))}
-			</div>
-			<div role="tabpanel" aria-label={VIEWS.find((v) => v.id === view)?.label} style={local.body}>
-				{view === 'summary' && <Summary {...props} />}
-				{view === 'charts' && (
-					<div style={local.charts}>
-						<StatsCharts rows={rows} total={stats.view?.documents ?? null} sample={sample} dialect={dialect} onScope={props.onChartScope} loading={loading} scope={scopeFilter} />
-					</div>
-				)}
-				{view === 'insights' && <Insights flagged={flagged} health={health} onOpen={props.onOpenDocument} />}
-			</div>
+			{/* Automatic activation: these views call nothing. */}
+			<TabRow<OverviewViewId> tabs={tabs} value={view} onSelect={setView} activation="automatic" label="Overview" idPrefix={prefix} small />
+			{panel('summary', <Summary {...props} />)}
+			{panel(
+				'charts',
+				<div style={local.charts}>
+					<StatsCharts rows={rows} total={stats.view?.documents ?? null} sample={sample} dialect={dialect} onScope={props.onChartScope} loading={loading} scope={scopeFilter} />
+				</div>
+			)}
+			{panel('insights', <Insights flagged={flagged} health={health} onOpen={props.onOpenDocument} />)}
 		</div>
 	);
 }
@@ -354,11 +351,12 @@ export interface IOverviewPanelProps extends IWorkbenchPanelProps {
  * @param props - {@link IOverviewPanelProps}.
  * @returns The tab's panel.
  */
-export function OverviewPanel({ entry, model, actions, console: state, selection, scopeLine, health, median, onChartScope, onAddDocuments }: IOverviewPanelProps): React.ReactElement {
+export function OverviewPanel({ entry, model, console: state, selection, scopeLine, health, median, onChartScope, onAddDocuments }: IOverviewPanelProps): React.ReactElement {
 	const dir = state.directory;
 	// The documents the scope covers: the store filtered the listing; what it did not apply is matched here.
 	const scopedRows = useMemo(() => (dir.filter === null ? dir.rows : dir.rows.filter((r) => matches(r, dir.filter as IDocumentsFilter, clientKeys(dir.filter as IDocumentsFilter, dir.filterApplied, dir.filterIgnored)))), [dir]);
-	const openTab = (tab: WorkbenchTab): void => actions.openTab?.(tab);
+	// The console is in front already: showing one of its tabs is setting it.
+	const openTab = (tab: WorkbenchTab): void => entry.tab.set(tab);
 	const fieldsRead = useValueStore(entry.fields);
 	return (
 		<OverviewView

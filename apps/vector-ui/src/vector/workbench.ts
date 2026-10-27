@@ -130,6 +130,22 @@ export function tabKeyTarget(key: string, index: number, count: number): number 
 	}
 }
 
+/**
+ * B1(b): whether to probe the store again because fresh stats say the collection exists while the probe read at
+ * discovery said it does not. Once per disagreement: a store whose probe keeps disagreeing is not asked again until
+ * the two agree (or the connection changes), whatever the 15 s quick tick brings.
+ *
+ * @param tried - The connection already probed for the disagreement in progress, or null.
+ * @param disagree - Whether the stats and the probe disagree now.
+ * @param key - The connection.
+ * @returns Whether to probe now, and the connection probed for (null once they agree).
+ */
+export function reprobeFor(tried: string | null, disagree: boolean, key: string): { probe: boolean; tried: string | null } {
+	if (!disagree) return { probe: false, tried: null };
+	if (tried === key) return { probe: false, tried };
+	return { probe: true, tried: key };
+}
+
 /** What {@link panelOf} reads of an element. */
 export interface IPanelLookup {
 	closest(selector: string): { getAttribute(name: string): string | null } | null;

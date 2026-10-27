@@ -30,7 +30,7 @@ import type { IDocumentItem } from '../src/contract/types';
 import { healthSummary } from '../src/vector/health';
 import { TOP_FOLDERS, insights, insightsLabel, overLine, overviewCards, percentShares, topFolders } from '../src/vector/overview';
 import { readDialect, readStats } from '../src/vector/results';
-import { focusStranded, panelOf, tabKeyTarget, workbenchNonce } from '../src/vector/workbench';
+import { focusStranded, panelOf, reprobeFor, tabKeyTarget, workbenchNonce } from '../src/vector/workbench';
 import { fixture } from './support/fixtures';
 
 /** A document row. */
@@ -108,4 +108,15 @@ test('a focus left in a hidden panel after a tab switch is stranded; in the show
 	assert.equal(focusStranded(inPanel('map'), 'map'), false);
 	assert.equal(focusStranded(inPanel(null), 'map'), false, 'the tab row, the header');
 	assert.notEqual(workbenchNonce('document'), workbenchNonce('document'));
+});
+
+test('B1(b) probes once per disagreement: again only after the stats and the probe agreed, or for another connection', () => {
+	let step = reprobeFor(null, true, 'k1');
+	assert.deepEqual(step, { probe: true, tried: 'k1' });
+	step = reprobeFor(step.tried, true, 'k1');
+	assert.deepEqual(step, { probe: false, tried: 'k1' }, 'the next quick tick asks nothing');
+	assert.deepEqual(reprobeFor(step.tried, true, 'k2'), { probe: true, tried: 'k2' }, 'another connection');
+	step = reprobeFor(step.tried, false, 'k1');
+	assert.deepEqual(step, { probe: false, tried: null }, 'they agree: the episode ends');
+	assert.deepEqual(reprobeFor(step.tried, true, 'k1'), { probe: true, tried: 'k1' }, 'a new disagreement probes once more');
 });

@@ -153,11 +153,16 @@ test('the workbench header and tab row never move: Refresh keeps its width and s
 	assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join(' < '));
 	assert.match(view, /<Button small variant="secondary" onClick=\{refresh\}>\s*Retry/, 'a store error keeps the last figures and offers Retry');
 	assert.match(view, /\{EMPTY\.noDocuments\}\s*\{model\.ingest\.enabled \? \(/, 'an empty collection says how to add documents where the mount can, and why not where it cannot');
-	const tabs = code('components/WorkbenchTabs.tsx');
-	assert.match(tabs, /role="tablist"/);
-	assert.match(tabs, /role="tab"[\s\S]*?aria-selected=\{selected\}[\s\S]*?tabIndex=\{selected \? 0 : -1\}/, 'a roving tabindex');
-	assert.match(tabs, /const target = tabKeyTarget\(event\.key, index, WORKBENCH_TABS\.length\);[\s\S]*?\.focus\(\);/, 'arrows move the focus only: activation is manual (the Map samples)');
-	assert.match(tabs, /fontVariantNumeric: 'tabular-nums'/, 'a changing count keeps the label width');
+	assert.match(code('components/WorkbenchTabs.tsx'), /<TabRow tabs=\{tabs\} value=\{value\} onSelect=\{onChange\} activation="manual" label="Collection views"/, 'arrows move the focus only: activation is manual (the Map samples)');
+	assert.match(code('components/WorkbenchTabs.tsx'), /reserve: tabLabel\('trash', \{ trash: 888 \}\)/, 'the Trash label keeps the width of a three-digit count');
+	const row = code('components/TabRow.tsx');
+	assert.match(row, /role="tablist"/);
+	assert.match(row, /role="tab"[\s\S]*?id=\{ids\.tab\}[\s\S]*?aria-selected=\{selected\}[\s\S]*?aria-controls=\{ids\.panel\}[\s\S]*?tabIndex=\{selected \? 0 : -1\}/, 'a roving tabindex; each tab names its panel');
+	assert.match(row, /const target = tabKeyTarget\(event\.key, index, tabs\.length\);\s*if \(target === null\) return;\s*event\.preventDefault\(\);\s*if \(activation === 'automatic'\) onSelect\(tabs\[target\]\.id\);/, 'only an automatic row shows the tab a key reaches');
+	assert.match(row, /fontVariantNumeric: 'tabular-nums'/);
+	const overviewRow = code('components/OverviewPanel.tsx');
+	assert.match(overviewRow, /<TabRow<OverviewViewId> tabs=\{tabs\} value=\{view\} onSelect=\{setView\} activation="automatic" label="Overview"/, "the Overview's views call nothing: automatic");
+	assert.match(overviewRow, /<div role="tabpanel" id=\{ids\.panel\} aria-labelledby=\{ids\.tab\} style=\{local\.body\(view === id\)\}/, 'each view is the panel its tab names, kept mounted once shown');
 });
 
 test('focus in the workbench: a tab switch from inside a panel moves the focus to the new tab; the aside closes on Escape and gives the focus back', () => {
@@ -166,13 +171,16 @@ test('focus in the workbench: a tab switch from inside a panel moves the focus t
 	const aside = code('components/AddDocumentsAside.tsx');
 	assert.match(aside, /if \(event\.key !== 'Escape' \|\| event\.defaultPrevented\) return;\s*event\.preventDefault\(\);\s*onClose\(\);/, 'the Escape rule: an inner handler that acted wins; no stopPropagation');
 	assert.match(aside, /opener\.current = document\.activeElement;\s*region\.current\?\.focus\(\);/, 'opened: it takes the focus');
-	assert.match(aside, /if \(lost && back instanceof HTMLElement && back\.isConnected\) back\.focus\(\);/, 'closed: back to its opener');
+	assert.match(aside, /if \(!focusLost\(document\.activeElement, document\.body, region\.current\)\) return;\s*firstFocusable\(\[back instanceof HTMLElement \? back : null, fallback\.current\?\.\(\)\]\)\?\.focus\(\);/, 'closed: back to its opener, else (gone, or on a hidden tab) to the fallback');
+	assert.match(view, /const asideFocus = \(\): HTMLElement \| null => firstFocusable\(\[root\.current\?\.querySelector<HTMLElement>\('\[data-add-documents\] button'\), currentTab\(\)\]\);/, "the fallback: the header's Add documents, else the current tab");
+	assert.match(view, /returnFocus=\{asideFocus\} \/>/);
 });
 
-test('B1(b): fresh stats that say the collection exists, against a probe that said it did not, probe the store again once per stats answer', () => {
+test('B1(b): fresh stats that say the collection exists, against a probe that said it did not, probe the store again once per disagreement', () => {
 	const view = code('views/ConsoleView.tsx');
 	assert.match(view, /const disagree = state\.stats\.view !== null && state\.stats\.view\.collectionExists && dialect\?\.health\.collection_exists === false;/);
-	assert.match(view, /if \(!disagree \|\| statsAt === null \|\| reprobedFor\.current === statsAt\) return;\s*reprobedFor\.current = statsAt;\s*void env\.probe\(endpoint\.key\);/, 'never in a loop: one probe per stats answer');
+	assert.match(view, /const next = reprobeFor\(reprobed\.current, disagree, endpoint\.key\);\s*reprobed\.current = next\.tried;\s*if \(next\.probe\) void env\.probe\(endpoint\.key\);\s*\}, \[disagree, env, endpoint\.key\]\);/, 'not on every quick tick: the stats time is not a dependency');
+	assert.match(view, /if \(refreshing\) return;/, 'a refresh already running is not asked again');
 });
 
 test('the console renders the strip, the directory, the chunks, adding documents and the chat (each in its tab), and paces itself through its controller', () => {
