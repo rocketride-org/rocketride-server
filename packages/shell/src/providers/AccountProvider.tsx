@@ -376,6 +376,20 @@ const AccountProvider: React.FC = () => {
 		[client]
 	);
 
+	/**
+	 * Removes the user from an organization. Leaving the ACTIVE org makes the
+	 * server push an org-changed event that reloads the shell; leaving another
+	 * org pushes nothing, so the profile (memberships) is reloaded here.
+	 */
+	const handleLeaveOrg = useCallback(
+		async (orgId: string) => {
+			if (!client) return;
+			await client.account.leaveOrg(orgId);
+			await loadProfile();
+		},
+		[client, loadProfile]
+	);
+
 	/** Deletes the user account. */
 	const handleDeleteAccount = useCallback(async () => {
 		if (!client) return;
@@ -578,6 +592,7 @@ const AccountProvider: React.FC = () => {
 				onSaveProfile={handleSaveProfile}
 				onSetDevTeam={handleSetDevTeam}
 				onSetDefaultOrg={handleSetDefaultOrg}
+				onLeaveOrg={handleLeaveOrg}
 				onLogout={() => logout?.()}
 				onDeleteAccount={handleDeleteAccount}
 				onSaveOrgName={handleSaveOrgName}
