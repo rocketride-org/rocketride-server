@@ -206,22 +206,32 @@ test("B10: a document tab's cancel or write (sharing this controller in the full
 	entry.controller.dispose();
 });
 
-test("B10: a document surface says what its own write did, under its confirmation; nothing of another surface's", () => {
+test("B10: a document surface says what its own write did, in a fixed slot of the hub's height; nothing of another surface's", async () => {
 	const { DocumentWriteLine } = require('../src/components/DocumentWriteLine') as typeof import('../src/components/DocumentWriteLine');
 	const { CONSOLE_ORIGIN } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
 	const over = (removal: Record<string, unknown>) => ({ controller: { subscribe: () => () => undefined, getState: () => ({ removal }) } }) as unknown as Parameters<typeof DocumentWriteLine>[0]['entry'];
+	const draw = (removal: Record<string, unknown>, origin: string): string => renderToStaticMarkup(<DocumentWriteLine entry={over(removal)} origin={origin} returnFocus={() => null} />);
+	const slotTag = (html: string): string => html.slice(0, html.indexOf('data-document-write-slot=""'));
 	const doc = documentOrigin('doc-x');
-	const failed = renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'error', message: 'Stopped after 0 of 1 batches: the store is busy.', audit: [], origin: doc })} origin={doc} />);
+	const failed = draw({ status: 'error', message: 'Stopped after 0 of 1 batches: the store is busy.', audit: [], origin: doc }, doc);
 	assert.match(failed, /<div role="alert"[^>]*>Stopped after 0 of 1 batches: the store is busy\.<\/div>/, 'a failure of its Move to trash, as an alert');
 	assert.match(failed, /<summary[^>]*>Write details<\/summary>[\s\S]*<p[^>]*>Stopped after 0 of 1 batches/, 'with Write details');
-	const partial = renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'done', message: 'x.md was already gone; nothing was moved to the trash', audit: [], partial: true, origin: doc })} origin={doc} />);
-	assert.match(partial, /<div role="status"[^>]*>x\.md was already gone/);
-	assert.match(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'running', message: null, origin: doc })} origin={doc} />), /<div role="status"[^>]*>Removing/);
+	const partial = draw({ status: 'done', message: 'x.md was already gone; nothing was moved to the trash', audit: [], partial: true, origin: doc }, doc);
+	assert.match(partial, /<div role="status"[^>]*>x\.md was already gone/, 'a write that did not do all it was asked stays');
+	assert.match(draw({ status: 'running', message: null, origin: doc }, doc), /<div role="status"[^>]*>Removing/);
+	const empty = draw({ status: 'idle', message: null }, CONSOLE_ORIGIN);
+	assert.match(empty, /data-document-write-slot=""><\/div>$/, 'nothing to say: the slot, empty');
 	// The console's write, or another document's: not this tab's line (the full app shares one controller).
-	assert.equal(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'done', message: 'Moved 3 documents to the trash.' })} origin={doc} />), '');
-	assert.equal(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'done', message: 'Moved y.md to the trash.', origin: documentOrigin('doc-y') })} origin={doc} />), '');
+	assert.match(draw({ status: 'error', message: 'Moved 0 documents.', origin: undefined }, doc), /data-document-write-slot=""><\/div>$/);
+	assert.match(draw({ status: 'error', message: 'No.', origin: documentOrigin('doc-y') }, doc), /data-document-write-slot=""><\/div>$/);
 	// A dev-tool document frame has its own controller: its writes carry no origin, and show.
-	assert.match(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'done', message: 'Moved x.md to the trash (2 chunks).', audit: [] })} origin={CONSOLE_ORIGIN} />), /role="status"[^>]*>Moved x\.md to the trash/);
-	assert.equal(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'idle', message: null })} origin={CONSOLE_ORIGIN} />), '', 'nothing to say: nothing');
+	assert.match(draw({ status: 'error', message: 'Stopped after 0 of 1 batches.', audit: [] }, CONSOLE_ORIGIN), /role="alert"[^>]*>Stopped after 0 of 1 batches\./);
+	// One height and style in every state, and exactly the hub's slot.
+	for (const html of [failed, partial, empty]) assert.equal(slotTag(html), slotTag(empty));
+	assert.match(slotTag(empty), /height:32px/);
+	const { env, endpoint } = await discovered();
+	const hub = render(env, endpoint, 'documents');
+	const hubSlot = hub.slice(hub.lastIndexOf('<div', hub.indexOf('data-bottom-slot=""')), hub.indexOf('data-bottom-slot=""'));
+	assert.equal(slotTag(empty), hubSlot, "the hub's bottom slot, exactly");
 });
 

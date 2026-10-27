@@ -30,7 +30,7 @@ import type { IDocumentItem } from '../src/contract/types';
 import { healthSummary } from '../src/vector/health';
 import { TOP_FOLDERS, insights, insightsLabel, overLine, overviewCards, percentShares, topFolders } from '../src/vector/overview';
 import { readDialect, readStats } from '../src/vector/results';
-import { NO_FAILURES, bottomSlot, focusStranded, takesFocusOnShow, panelOf, reprobeFor, statsFailures, tabKeyTarget, unreachableShown, workbenchNonce, writeTouches } from '../src/vector/workbench';
+import { NO_FAILURES, bottomSlot, documentSlot, focusStranded, takesFocusOnShow, panelOf, reprobeFor, statsFailures, tabKeyTarget, unreachableShown, workbenchNonce, writeTouches } from '../src/vector/workbench';
 import { documentFocus, focusAdrift } from '../src/vector/focus';
 import { fixture } from './support/fixtures';
 
@@ -217,5 +217,16 @@ test('B5: the focus is adrift on nothing, the page, or an element removed, hidde
 	assert.equal(focusAdrift(el({ isConnected: false }), body), true);
 	assert.equal(focusAdrift(el({ disabled: true }), body), true);
 	assert.equal(focusAdrift(el(), body), false, 'a shown control keeps it');
+});
+
+test("live B10: a document's bottom slot keeps the hub's rules, without a pending bar", () => {
+	const at = (over: Partial<Parameters<typeof documentSlot>[0]>) => documentSlot({ write: 'result', fresh: false, held: false, showing: 'write', ...over });
+	assert.equal(at({ write: null }), 'empty', 'nothing to say: the same height, empty');
+	assert.equal(at({ write: 'running', showing: 'empty' }), 'write');
+	assert.equal(at({ write: 'failure', showing: 'empty' }), 'write', 'a failure, or a write that did not do all it was asked, stays');
+	assert.equal(at({ fresh: true, showing: 'empty' }), 'write', 'a success for a few seconds');
+	assert.equal(at({}), 'empty', 'then goes');
+	assert.equal(at({ held: true }), 'write', 'never from under the focus or the pointer');
+	assert.equal(at({ held: true, showing: 'empty' }), 'empty', 'resting on the empty slot brings nothing back');
 });
 

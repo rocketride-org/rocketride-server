@@ -71,6 +71,8 @@ const styles = {
 	welcome: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' } as CSSProperties,
 	/** A document tab's own root (its focus stays inside): it lays out as its view did. */
 	documentRoot: { display: 'flex', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' } as CSSProperties,
+	/** The document above its write slot: the room the slot leaves. */
+	documentBody: { display: 'flex', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' } as CSSProperties,
 };
 
 /** The landing document's URI and label. */
@@ -233,13 +235,11 @@ const DocumentTab: React.FC<{ uri: string; payload: IDocumentDocPayload; active:
 	}, []);
 	return (
 		<div ref={root} style={styles.documentRoot}>
-			<DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={
-					<>
-						<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} returnFocus={returnFocus} />
-						{/* What this tab's own write did (the console's line leaves it here). */}
-						<DocumentWriteLine entry={entry} origin={documentOrigin(payload.objectId)} />
-					</>
-				} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />
+			<div style={styles.documentBody}>
+				<DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} returnFocus={returnFocus} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />
+			</div>
+			{/* What this tab's own write did (the console's line leaves it here), in a fixed slot under the document. */}
+			{model.writes.enabled && <DocumentWriteLine entry={entry} origin={documentOrigin(payload.objectId)} returnFocus={() => returnFocus(null)} />}
 		</div>
 	);
 };
