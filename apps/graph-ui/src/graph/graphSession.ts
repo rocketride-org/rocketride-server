@@ -25,8 +25,9 @@
 // =============================================================================
 //
 // A small state machine around the canvas model: selection, focus, the inspector's
-// target, and the five actions that may call the node - expand, collapse (local),
-// dismiss (local), connect, find path, and refresh of an inspected element.
+// target, the found path, and the actions that may call the node - expand (all
+// neighbours, or over one relationship type), connect, find path, and refresh of an
+// inspected element. Collapse, dismiss and clearing the path are local.
 //
 // RULES IT KEEPS
 //   - One request at a time. A second action while one runs is declined with a
@@ -48,6 +49,12 @@
 //     neighbours per expansion, and every cut is said out loud.
 //   - Generated queries never run by themselves: each action here is the direct
 //     result of a user gesture, and every query goes through read_query.
+//   - Selection and the inspector are keyed by KIND and id. Node and relationship ids
+//     are separate namespaces (FalkorDB numbers both from 0), so the selected nodes
+//     and the selected relationship are held apart, and an element leaving the canvas
+//     releases only the inspector, selection and path that were about IT.
+//   - The out-of-date state has one renderer: `stale` (markStale announces it once and
+//     leaves the notice alone); an action it refuses says so in a short sentence.
 //
 // The session knows nothing about transport: it is given `invoke`, which sends one
 // recipe through read_query and resolves with the envelope or throws.
@@ -61,13 +68,13 @@ import type { IGraphModel } from './model';
 import { collectEntities } from './results';
 import type { IEntities } from './results';
 import type { GraphId, GraphNode, GraphRelationship, ReadQueryResult } from './types';
-import { DATA_CHANGED_TEXT, STALE_CONNECT_RELATIONSHIPS_TEXT, STALE_CONNECT_TEXT, STALE_ELEMENT_TEXT, conflictText, identityConflicts } from './identity';
+import { DATA_CHANGED_TEXT, STALE_CONNECT_RELATIONSHIPS_TEXT, STALE_CONNECT_TEXT, STALE_ELEMENT_TEXT, STALE_REFUSAL_TEXT, conflictText, identityConflicts } from './identity';
 import type { IIdentityConflict } from './identity';
 import { connectText, expandText, num } from './wording';
 import { STOP_WAITING_NOTE } from './wording';
 import { createPathSearch, noPathText } from '../cypher/pathSearch';
-import type { IPathSearch } from '../cypher/pathSearch';
-import { connectNodes as connectRecipe, expandNeighbors, inspectNode as inspectRecipe, isRefusal } from '../cypher/recipes';
+import type { IPathSearch, PathMethod } from '../cypher/pathSearch';
+import { connectNodes as connectRecipe, expandByType as expandByTypeRecipe, expandNeighbors, inspectNode as inspectRecipe, isRefusal, neighboursQueryText, pathQueryText, relationshipQueryText, usesShortestPath } from '../cypher/recipes';
 import type { IEngine, IRecipe, RecipeResult } from '../cypher/recipes';
 
 // =============================================================================
@@ -86,6 +93,16 @@ export interface IGraphNotice {
 	text: string;
 	/** The node's own text, when the notice is a failure. */
 	detail?: string;
+}
+
+/** A found path, while it is shown. */
+export interface IFoundPath {
+	/** Node ids in path order (the canvas lays them out left to right in this order). */
+	nodes: readonly GraphId[];
+	/** Relationship ids in path order; `relationships[i]` joins `nodes[i]` and `nodes[i + 1]`. */
+	relationships: readonly GraphId[];
+	/** How it was found: one shortestPath call, or the depth search (depth 1 to its length, one call each). */
+	method: PathMethod;
 }
 
 /** Where new nodes should start (the layout reads it). */
@@ -119,6 +136,10 @@ export interface IGraphState {
 	 * from the nodes: node and relationship ids are separate namespaces, and FalkorDB numbers both from 0.
 	 */
 	staleRelationshipIds: ReadonlySet<GraphId>;
+	/** The selected relationship (its own id space, apart from the nodes), or null. */
+	selectedRelationship: GraphId | null;
+	/** A found path in order, while it is shown; null otherwise. */
+	path: IFoundPath | null;
 }
 
 /** What the session needs from its caller. */
@@ -145,6 +166,16 @@ export interface IGraphSession {
 	load(result: ReadQueryResult | null): void;
 	focus(id: GraphId | null): void;
 	toggleSelect(id: GraphId): void;
+	/** Select a node: `only` replaces the selection and inspects it (a click); `toggle` adds or removes it (Shift-click). */
+	select(id: GraphId, mode: 'only' | 'toggle'): void;
+	/**
+	 * Select several nodes in one update (the legend's "every node of this label"): `only` replaces the selection with
+	 * exactly these and inspects the first (or closes the inspector when there is none); `toggle` adds them all when any
+	 * is not selected, else takes them all out. Ids that are not drawn are ignored.
+	 */
+	selectMany(ids: readonly GraphId[], mode: 'only' | 'toggle'): void;
+	/** Select a relationship and inspect it; null clears it. */
+	selectRelationship(id: GraphId | null): void;
 	clearSelection(): void;
 	inspect(target: IInspectTarget | null): void;
 	refreshInspected(): Promise<void>;
@@ -153,6 +184,12 @@ export interface IGraphSession {
 	dismiss(id: GraphId): void;
 	connect(): Promise<void>;
 	findPath(): Promise<void>;
+	/** Add a node's neighbours over one relationship type. */
+	expandByType(id: GraphId, type: string): Promise<void>;
+	/** The query "New query from here" (or a path's "Open as query") opens, or null when there is none. */
+	queryTextFor(target: IInspectTarget | { kind: 'path' }): string | null;
+	/** Stop showing the found path. */
+	clearPath(): void;
 	/**
 	 * Stop waiting for whatever is running (a path search, an expansion, Connect, a refresh). The node may still be
 	 * working on it; its late answer is dropped.
@@ -166,7 +203,7 @@ export interface IGraphSession {
 	dispose(): void;
 }
 
-const EMPTY: IGraphState = { model: EMPTY_MODEL, entities: null, selected: new Set(), focusedId: null, inspect: null, busy: null, notice: null, hint: null, highlight: new Set(), progress: null, stale: false, staleIds: new Set(), staleRelationshipIds: new Set() };
+const EMPTY: IGraphState = { model: EMPTY_MODEL, entities: null, selected: new Set(), focusedId: null, inspect: null, busy: null, notice: null, hint: null, highlight: new Set(), progress: null, stale: false, staleIds: new Set(), staleRelationshipIds: new Set(), selectedRelationship: null, path: null };
 
 // =============================================================================
 // FACTORY
@@ -219,7 +256,7 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 	/** Whether an action on these drawn elements must not go to the node (and says why). */
 	const outOfDate = (ids: readonly GraphId[]): boolean => {
 		if (state.stale) {
-			say(DATA_CHANGED_TEXT, 'warning');
+			say(STALE_REFUSAL_TEXT, 'warning');
 			return true;
 		}
 		if (ids.some((id) => state.staleIds.has(id))) {
@@ -239,6 +276,27 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 	const forget = (ids: readonly GraphId[]): ReadonlySet<GraphId> => new Set([...state.staleIds].filter((id) => !ids.includes(id)));
 	/** The marked relationships that are still drawn (a relationship leaves the canvas with either of its ends). */
 	const stillDrawn = (model: IGraphModel): ReadonlySet<GraphId> => new Set([...state.staleRelationshipIds].filter((id) => model.relationships.has(id)));
+	/**
+	 * What follows the drawing when elements leave it: the inspector and the selected relationship let go of an element
+	 * that is gone (looked up by its kind), and the path goes once a node of it that was drawn is gone.
+	 */
+	const follow = (model: IGraphModel): Partial<IGraphState> => {
+		const drawn = (target: IInspectTarget): boolean => (target.kind === 'node' ? model.nodes.has(target.id) : model.relationships.has(target.id));
+		const broken = state.path !== null && state.path.nodes.some((id) => state.model.nodes.has(id) && !model.nodes.has(id));
+		return {
+			inspect: state.inspect && drawn(state.inspect) ? state.inspect : null,
+			selectedRelationship: state.selectedRelationship !== null && model.relationships.has(state.selectedRelationship) ? state.selectedRelationship : null,
+			...(broken ? { path: null, highlight: new Set<GraphId>() } : {}),
+		};
+	};
+	/** A relationship in words, as the canvas names it: `TYPE from A to B`. */
+	const relationshipWords = (rel: GraphRelationship): string => {
+		const end = (id: GraphId): string => {
+			const node = state.model.nodes.get(id);
+			return node ? captionFor(node) : id;
+		};
+		return `${rel.type} from ${end(rel.start)} to ${end(rel.end)}`;
+	};
 
 	/**
 	 * Run a recipe for the current epoch.
@@ -261,6 +319,73 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 			fail(deps.describe(error));
 			return null;
 		}
+	};
+
+	/**
+	 * Expand a node: all its neighbours, or those over one relationship type. The relationships already drawn (of that
+	 * type) are left out of the request, so a repeat asks for the next ones.
+	 *
+	 * @param id - The node.
+	 * @param type - One relationship type, or null for every type.
+	 */
+	const grow = async (id: GraphId, type: string | null): Promise<void> => {
+		const node = state.model.nodes.get(id);
+		if (!node || !idle()) return;
+		if (outOfDate([id])) return;
+		const engine = engineOrSay();
+		if (!engine) return;
+		const drawn = relationshipsOf(state.model, id)
+			.filter((rel) => type === null || rel.type === type)
+			.map((rel) => rel.id);
+		const recipe = type === null ? expandNeighbors(engine, id, MAX_NEW_NEIGHBORS, drawn) : expandByTypeRecipe(engine, id, type, MAX_NEW_NEIGHBORS, drawn);
+		if (isRefusal(recipe)) {
+			say(recipe.refusal, 'warning');
+			return;
+		}
+		const mine = epoch;
+		set({ busy: 'expand', notice: null });
+		deps.announce(`Expanding ${captionFor(node)}${type === null ? '' : ` over ${type}`}.`);
+		const answer = await ask(recipe, mine);
+		if (epoch !== mine) return;
+		set({ busy: null });
+		if (!answer) return;
+		const entities = collectEntities(answer.result.rows);
+		// The recipe matches the node on its own, so an answer without it means the id no longer finds it.
+		if (!entities.nodes.has(id)) {
+			say(`${captionFor(node)} is no longer found: element ids are live handles. Nothing was added.`, 'warning');
+			return;
+		}
+		if (entities.relationships.size === 0 && drawn.length === 0) {
+			say(`${captionFor(node)} has no ${type === null ? '' : `${type} `}relationships in the database. Nothing was added.`);
+			return;
+		}
+		const conflicts = identityConflicts(state.model, entities.nodes.values(), entities.relationships.values());
+		if (conflicts.length > 0) {
+			reject(conflicts);
+			return;
+		}
+		const outcome = expandNode(state.model, id, entities, MAX_NEW_NEIGHBORS);
+		const incomplete = answer.result.truncated || answer.result.rows.length >= answer.recipe.limit;
+		// A cut answer with nothing new in it: the same request returns the same rows (drawn relationships AGE could
+		// not leave out filled the node's row cap), so "expand again" would never help.
+		const stuck = incomplete && outcome.addedNodes.length === 0 && outcome.addedRelationships.length === 0 && outcome.skippedNeighbors === 0 && outcome.budget === null;
+		set({ model: outcome.model, hint: { centerId: id, newIds: outcome.addedNodes } });
+		const captionIn = (nodeId: GraphId): string => {
+			const drawnNode = outcome.model.nodes.get(nodeId);
+			return drawnNode ? captionFor(drawnNode) : nodeId;
+		};
+		// The centre is named as the user saw it when they asked; the added nodes as they are drawn now.
+		const about = { center: captionFor(node), added: outcome.addedNodes.map(captionIn), ...(type === null ? {} : { type }) };
+		say(expandText(outcome.addedNodes.length, outcome.skippedNeighbors, incomplete, outcome.budget, stuck ? answer.result.row_limit : null, about), stuck ? 'warning' : 'info');
+	};
+
+	const toggleSelect = (id: GraphId): void => {
+		const next = new Set(state.selected);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		set({ selected: next });
+		const node = state.model.nodes.get(id);
+		if (node) deps.announce(`${captionFor(node)} ${next.has(id) ? 'selected' : 'deselected'}. ${next.size} ${next.size === 1 ? 'node' : 'nodes'} selected.`);
 	};
 
 	return {
@@ -290,18 +415,54 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 
 		focus: (id) => set({ focusedId: id }),
 
-		toggleSelect(id) {
-			const next = new Set(state.selected);
-			if (next.has(id)) next.delete(id);
-			else next.add(id);
-			set({ selected: next });
+		toggleSelect,
+
+		select(id, mode) {
+			if (mode === 'toggle') {
+				toggleSelect(id);
+				return;
+			}
 			const node = state.model.nodes.get(id);
-			if (node) deps.announce(`${captionFor(node)} ${next.has(id) ? 'selected' : 'deselected'}. ${next.size} ${next.size === 1 ? 'node' : 'nodes'} selected.`);
+			if (!node) return;
+			set({ selected: new Set([id]), selectedRelationship: null, inspect: { kind: 'node', id } });
+			deps.announce(`${captionFor(node)} selected.`);
+		},
+
+		selectMany(ids, mode) {
+			const drawn = [...new Set(ids)].filter((id) => state.model.nodes.has(id));
+			const nodes = (n: number): string => `${num(n)} ${n === 1 ? 'node' : 'nodes'}`;
+			if (mode === 'only') {
+				set({ selected: new Set(drawn), selectedRelationship: null, inspect: drawn.length > 0 ? { kind: 'node', id: drawn[0] } : null });
+				deps.announce(`${nodes(drawn.length)} selected.`);
+				return;
+			}
+			if (drawn.length === 0) return;
+			const next = new Set(state.selected);
+			const add = drawn.some((id) => !next.has(id));
+			for (const id of drawn) {
+				if (add) next.add(id);
+				else next.delete(id);
+			}
+			set({ selected: next });
+			deps.announce(`${nodes(drawn.length)} ${add ? 'selected' : 'deselected'}. ${nodes(next.size)} selected.`);
+		},
+
+		selectRelationship(id) {
+			if (id === null) {
+				set({ selectedRelationship: null, inspect: state.inspect?.kind === 'relationship' ? null : state.inspect });
+				return;
+			}
+			const rel = state.model.relationships.get(id);
+			if (!rel) return;
+			// A click selects that element only: the selected NODES are let go (they are another id space, never this one).
+			set({ selected: new Set(), selectedRelationship: id, inspect: { kind: 'relationship', id } });
+			deps.announce(`${relationshipWords(rel)} selected.`);
 		},
 
 		clearSelection() {
-			if (state.selected.size === 0) return;
-			set({ selected: new Set(), highlight: new Set() });
+			if (state.selected.size === 0 && state.selectedRelationship === null) return;
+			// The found path stays: it has its own Clear path.
+			set({ selected: new Set(), selectedRelationship: null });
 			deps.announce('Selection cleared.');
 		},
 
@@ -337,44 +498,9 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 			say('Refreshed from the database.');
 		},
 
-		async expand(id) {
-			const node = state.model.nodes.get(id);
-			if (!node || !idle()) return;
-			if (outOfDate([id])) return;
-			const engine = engineOrSay();
-			if (!engine) return;
-			const mine = epoch;
-			set({ busy: 'expand', notice: null });
-			deps.announce(`Expanding ${captionFor(node)}.`);
-			// The relationships already drawn are left out of the request, so a repeat asks for the next ones.
-			const drawn = relationshipsOf(state.model, id).map((rel) => rel.id);
-			const answer = await ask(expandNeighbors(engine, id, MAX_NEW_NEIGHBORS, drawn), mine);
-			if (epoch !== mine) return;
-			set({ busy: null });
-			if (!answer) return;
-			const entities = collectEntities(answer.result.rows);
-			// The recipe matches the node on its own, so an answer without it means the id no longer finds it.
-			if (!entities.nodes.has(id)) {
-				say(`${captionFor(node)} is no longer found: element ids are live handles. Nothing was added.`, 'warning');
-				return;
-			}
-			if (entities.relationships.size === 0 && drawn.length === 0) {
-				say(`${captionFor(node)} has no relationships in the database. Nothing was added.`);
-				return;
-			}
-			const conflicts = identityConflicts(state.model, entities.nodes.values(), entities.relationships.values());
-			if (conflicts.length > 0) {
-				reject(conflicts);
-				return;
-			}
-			const outcome = expandNode(state.model, id, entities, MAX_NEW_NEIGHBORS);
-			const incomplete = answer.result.truncated || answer.result.rows.length >= answer.recipe.limit;
-			// A cut answer with nothing new in it: the same request returns the same rows (drawn relationships AGE could
-			// not leave out filled the node's row cap), so "expand again" would never help.
-			const stuck = incomplete && outcome.addedNodes.length === 0 && outcome.addedRelationships.length === 0 && outcome.skippedNeighbors === 0 && outcome.budget === null;
-			set({ model: outcome.model, hint: { centerId: id, newIds: outcome.addedNodes } });
-			say(expandText(outcome.addedNodes.length, outcome.skippedNeighbors, incomplete, outcome.budget, stuck ? answer.result.row_limit : null), stuck ? 'warning' : 'info');
-		},
+		expand: (id) => grow(id, null),
+
+		expandByType: (id, type) => grow(id, type),
 
 		collapse(id) {
 			const result = collapseNode(state.model, id);
@@ -383,7 +509,7 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 				return;
 			}
 			const selected = new Set([...state.selected].filter((s) => !result.removed.includes(s)));
-			set({ model: result.model, selected, staleIds: forget(result.removed), staleRelationshipIds: stillDrawn(result.model), inspect: state.inspect && result.removed.includes(state.inspect.id) ? null : state.inspect, hint: null });
+			set({ ...follow(result.model), model: result.model, selected, staleIds: forget(result.removed), staleRelationshipIds: stillDrawn(result.model), hint: null });
 			say(`Collapsed. ${num(result.removed.length)} ${result.removed.length === 1 ? 'node' : 'nodes'} removed from the graph.`);
 		},
 
@@ -394,7 +520,7 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 			const selected = new Set(state.selected);
 			selected.delete(id);
 			const first = model.nodes.keys().next().value as GraphId | undefined;
-			set({ model, selected, staleIds: forget([id]), staleRelationshipIds: stillDrawn(model), inspect: state.inspect?.id === id ? null : state.inspect, focusedId: state.focusedId === id ? first ?? null : state.focusedId, hint: null });
+			set({ ...follow(model), model, selected, staleIds: forget([id]), staleRelationshipIds: stillDrawn(model), focusedId: state.focusedId === id ? first ?? null : state.focusedId, hint: null });
 			say(`${captionFor(node)} dismissed from the graph. It is still in the results table.`);
 		},
 
@@ -444,12 +570,17 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 			const current = createPathSearch({
 				engine,
 				run: (recipe) => deps.invoke(recipe),
+				// One shortestPath call first where the engine has it (never AGE); the depth search backs it up.
+				single: usesShortestPath(engine),
+				onSingle: () => {
+					if (epoch === mine) set({ progress: 'Asking for a shortest path in one call…' });
+				},
 				onDepth: (depth) => {
 					if (epoch === mine) set({ progress: `Looking for a path of ${depth} ${depth === 1 ? 'relationship' : 'relationships'}…` });
 				},
 			});
 			search = current;
-			set({ busy: 'path', notice: null, highlight: new Set(), progress: 'Starting…' });
+			set({ busy: 'path', notice: null, highlight: new Set(), path: null, progress: 'Starting…' });
 			const outcome = await current.start(from, to);
 			if (epoch !== mine || search !== current) return;
 			search = null;
@@ -462,8 +593,16 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 						break;
 					}
 					const merged = mergePath(state.model, outcome.path);
-					set({ model: merged.model, highlight: new Set(outcome.path.relationships.map((r: GraphRelationship) => r.id)), hint: merged.addedNodes.length > 0 ? { centerId: from, newIds: merged.addedNodes } : null });
-					say(`Found a path of ${outcome.depth} ${outcome.depth === 1 ? 'relationship' : 'relationships'} (the first, so a shortest one). Relationships keep their stored direction.${merged.budget ? ' Part of it could not be drawn: the canvas budget was reached.' : ''}`);
+					const nodes = outcome.path.nodes.map((n: GraphNode) => n.id);
+					const relationships = outcome.path.relationships.map((r: GraphRelationship) => r.id);
+					set({ model: merged.model, highlight: new Set(relationships), path: { nodes, relationships, method: outcome.method }, hint: merged.addedNodes.length > 0 ? { centerId: from, newIds: merged.addedNodes } : null });
+					const [first, last] = [nodes[0], nodes[nodes.length - 1]].map((id) => {
+						const drawn = merged.model.nodes.get(id);
+						return drawn ? captionFor(drawn) : id;
+					});
+					// Both searches give a shortest path: the depth search stops at the first depth that answers.
+					const how = outcome.method === 'shortest-path' ? 'found with one shortestPath call' : `found by trying depth 1 to ${outcome.depth}, one call each`;
+					say(`Shortest path ${first} → ${last}: ${outcome.depth} ${outcome.depth === 1 ? 'relationship' : 'relationships'}, ${how}. Laid out left to right; other nodes dimmed. Relationships keep their stored direction.${merged.budget ? ' Part of it could not be drawn: the canvas budget was reached.' : ''}`);
 					break;
 				}
 				case 'none':
@@ -484,6 +623,23 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 					break;
 				}
 			}
+		},
+
+		queryTextFor(target) {
+			const engine = deps.engine();
+			if (!engine) return null;
+			if (target.kind === 'node') return state.model.nodes.has(target.id) ? neighboursQueryText(engine, target.id) : null;
+			if (target.kind === 'relationship') return state.model.relationships.has(target.id) ? relationshipQueryText(engine, target.id) : null;
+			const path = state.path;
+			if (!path || path.nodes.length < 2) return null;
+			return pathQueryText(engine, path.nodes[0], path.nodes[path.nodes.length - 1], path.method === 'shortest-path' ? { method: 'shortest-path' } : { method: 'depth', depth: path.relationships.length });
+		},
+
+		clearPath() {
+			if (state.path === null) return;
+			set({ path: null, highlight: new Set() });
+			// Said as the notice too: the found-path sentence ("laid out left to right; other nodes dimmed") is no longer true.
+			say('Path cleared.');
 		},
 
 		stopWaiting() {
@@ -513,8 +669,10 @@ export function createGraphSession(deps: IGraphSessionDeps): IGraphSession {
 			epoch += 1;
 			search?.stop();
 			search = null;
-			set({ stale: true, busy: null, progress: null, highlight: new Set() });
-			say(DATA_CHANGED_TEXT, 'warning');
+			// Every notice was about the drawing that is now out of date (a found path, an expansion): none of it stays.
+			set({ stale: true, busy: null, progress: null, highlight: new Set(), path: null, notice: null });
+			// Announced, not set as the notice: the out-of-date line is rendered from `stale`, once.
+			deps.announce(DATA_CHANGED_TEXT);
 		},
 
 		dispose() {

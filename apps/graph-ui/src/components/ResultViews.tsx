@@ -29,6 +29,10 @@
 // (`c0`, `c1`, ...), never by name, so a result that names the same column twice
 // keeps both. Raw is the exact envelope as pretty JSON (precision-safe: anything a
 // JSON number cannot carry arrived as text).
+//
+// Both cards carry the Export menu (components/ExportMenu.tsx), built from the
+// result itself. The grid's own gear export is off (`noExport`): it would write
+// positional keys (`c0`, `c1`) and read the rows the grid has touched.
 // =============================================================================
 
 import React, { useCallback, useMemo, useState } from 'react';
@@ -39,7 +43,8 @@ import { columnGridTypes, columnKeys, rawView, toGridRows } from '../graph/resul
 import type { ReadQueryResult } from '../graph/types';
 import { describeValue } from '../graph/values';
 import { COPY_BLOCKED_NOTE } from '../graph/wording';
-import { useGraphEnv } from '../env';
+import { RESULT_LAYOUTS, guardLayouts, layoutRulesFor, nextMountNonce, resultLayoutKey } from '../graph/gridLayout';
+import { ExportMenu } from './ExportMenu';
 
 // =============================================================================
 // TABLE
@@ -68,6 +73,8 @@ export interface IResultTableProps {
 	onRowOpen(rowIndex: number): void;
 	/** The text above the grid (counts, limit, timing). */
 	meta: React.ReactNode;
+	/** The polite live region, for the outcome of an export. */
+	announce?(text: string): void;
 }
 
 /**
@@ -76,9 +83,10 @@ export interface IResultTableProps {
  * @param props - See {@link IResultTableProps}.
  * @returns The table inside a card.
  */
-export const ResultTable: React.FC<IResultTableProps> = ({ result, tableKey, onRowOpen, meta }) => {
-	// Grid layouts: the env's (session-only copies in a dev-tool frame).
-	const env = useGraphEnv();
+export const ResultTable: React.FC<IResultTableProps> = ({ result, tableKey, onRowOpen, meta, announce }) => {
+	// This mount's own number: the tab id and the result counter in `tableKey` restart when the workbench is opened again.
+	const [nonce] = useState(nextMountNonce);
+	const tableId = useMemo(() => resultLayoutKey(tableKey, nonce, result.columns), [tableKey, nonce, result.columns]);
 	const rows = useMemo(() => toGridRows(result), [result]);
 	const columns = useMemo<GridColumnDefinition[]>(() => {
 		const keys = columnKeys(result.columns);
@@ -102,15 +110,20 @@ export const ResultTable: React.FC<IResultTableProps> = ({ result, tableKey, onR
 		})) as GridColumnDefinition[];
 	}, [result]);
 
+	// A result grid built in a hidden tab crushes its flexible columns and would save that: the saved layout is guarded.
+	// Session-only, by design: the key restarts with the page, so a stored sort or hidden column would reappear on another result.
+	const persistence = useMemo(() => guardLayouts(RESULT_LAYOUTS, layoutRulesFor(columns)), [columns]);
+
 	return (
 		<Card noBodyPadding fill>
 			<CardDataGrid<Record<string, unknown>>
 				title="Results"
-				actions={<span style={metaStyle}>{meta}</span>}
+				actions={<span style={metaStyle}>{meta}<ExportMenu result={result} announce={announce} /></span>}
+				noExport
 				columns={columns}
 				data={rows}
-				tableId={`graph-results-${tableKey}`}
-				persistence={env.gridPersistence}
+				tableId={tableId}
+				persistence={persistence}
 				paginate={false}
 				height="100%"
 				emptyTitle="No rows"
@@ -196,7 +209,7 @@ export const RawView: React.FC<IRawViewProps> = ({ result, announce }) => {
 		announce(ok ? 'Copied the result as JSON.' : 'Copying was not allowed by the browser.');
 	}, [result, announce]);
 	return (
-		<Card header="Raw result" headerActions={<Button variant="ghost" small onClick={() => void copy()}>{copied ? 'Copied' : 'Copy JSON'}</Button>} noBodyPadding fill>
+		<Card header="Raw result" headerActions={<span style={metaStyle}><Button variant="ghost" small onClick={() => void copy()}>{copied ? 'Copied' : 'Copy JSON'}</Button><ExportMenu result={result} announce={announce} /></span>} noBodyPadding fill>
 			<div style={{ height: '100%', overflow: 'auto', padding: 12 }}>
 				{blocked !== null && <CopyBlocked text={blocked} />}
 				{view.cut && (

@@ -183,7 +183,7 @@ describe('T12 - the full app (app:) runs on the LOCAL env', () => {
 		assert.match(app, /getBusExplorerClient\(ConnectionManager\.getInstance\(\)\)/);
 		assert.match(app, /createLocalGraphEnv\(\{ mount: 'app', ready: isConnected, client, stores: APP_STORES,/);
 		assert.match(app, /<GraphEnvProvider value=\{env\}><GraphSidebar \/><\/GraphEnvProvider>/);
-		assert.match(app, /historyPrivacyNote: APP_HISTORY_PRIVACY_NOTE/);
+		assert.match(app, /historyPrivacyNote: \(\) => appHistoryNote\(APP_WORKSPACE_PIN\.access\(owner\.current\)\)/, 'the History note follows the account signed in now (graph/workspacePin.ts appHistoryNote)');
 	});
 
 	it('names a connection the way #2625 does: listTasks\'s status name, else the source component\'s name; keys unchanged', async () => {
@@ -547,7 +547,21 @@ describe('grid layouts are copies everywhere: a frame keeps them in the session,
 		assert.ok(persisted.includes(path.join('components', 'ResultViews.tsx')), persisted.join(', '));
 		for (const rel of persisted) {
 			const text = read(rel);
-			assert.equal((text.match(/persistence=\{env\.gridPersistence\}/g) ?? []).length, (text.match(/tableId=/g) ?? []).length, `${rel}: every persisted grid`);
+			// Each grid element, not just the file: the element holding a tableId also holds its persistence, which is the env's
+			// directly or, through graph/gridLayout.ts, the env's wrapped by the layout guard (and nothing else).
+			let at = text.indexOf('tableId=');
+			while (at !== -1) {
+				const start = Math.max(text.lastIndexOf('<CardDataGrid', at), text.lastIndexOf('<DataGrid', at));
+				const element = text.slice(start, text.indexOf('/>', at));
+				assert.ok(start !== -1, `${rel}: a tableId outside a grid`);
+				const direct = /persistence=\{env\.gridPersistence\}/.test(element);
+				const guarded = /persistence=\{persistence\}/.test(element) && /guardLayouts\(env\.gridPersistence,/.test(text);
+				// The one exception, by design: the results Table keeps its sort and shown columns for the page session only (its
+				// key restarts with the page, so a stored layout would come back on another result). It never reaches the env.
+				const sessionOnly = rel === path.join('components', 'ResultViews.tsx') && /persistence=\{persistence\}/.test(element) && /guardLayouts\(RESULT_LAYOUTS,/.test(text) && !/gridPersistence/.test(text);
+				assert.ok(direct || guarded || sessionOnly, `${rel}: this grid does not take the env's persistence`);
+				at = text.indexOf('tableId=', at + 1);
+			}
 		}
 		assert.match(read('devtool/frame.ts'), /gridPersistence: SESSION_GRIDS,/);
 	});
@@ -597,7 +611,9 @@ describe('R11 - what cannot work in a dev-tool mount degrades visibly', () => {
 	it('a layout worker the window cannot start (a VS Code webview loading the remote from the engine) falls back to the grid, with a note', () => {
 		const strategy = chooseWorkerStrategy({ workerUrl: 'http://127.0.0.1:5565/apps/rocketride.graph/v3/static/js/async/graph-layout.js', pageHref: 'vscode-webview://abc123/index.html', production: true, hasWorker: true });
 		assert.equal(strategy.kind, 'unavailable');
-		assert.match(code(read('components/GraphView.tsx')), /layoutStatus\.state === 'fallback' && \([\s\S]*?\$\{GRID_NOTICE\} \(\$\{layoutStatus\.detail\}\)/);
+		// The grid note reaches the person through the status line, which GraphView feeds the layout status.
+		assert.match(code(read('graph/statusLine.ts')), /input\.layout\.state === 'fallback'\)[^\n]*\$\{GRID_NOTICE\} \(\$\{input\.layout\.detail\}\)/);
+		assert.match(code(read('components/GraphView.tsx')), /layout: layoutStatus,/);
 		assert.match(GRID_NOTICE, /grid/);
 	});
 
@@ -606,6 +622,6 @@ describe('R11 - what cannot work in a dev-tool mount degrades visibly', () => {
 		const raw = code(read('components/ResultViews.tsx'));
 		assert.match(raw, /\{blocked !== null && <CopyBlocked text=\{blocked\} \/>\}/);
 		assert.match(raw, /<textarea readOnly value=\{text\}/);
-		assert.match(code(read('components/InspectorPanel.tsx')), /\{blocked !== null && blocked === m\.json && <CopyBlocked text=\{blocked\} \/>\}/);
+		assert.match(code(read('components/InspectorPanel.tsx')), /\{blocked !== null && blocked === json && <CopyBlocked text=\{blocked\} \/>\}/);
 	});
 });

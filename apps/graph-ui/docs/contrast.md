@@ -101,3 +101,32 @@ canvas and its panels sit on (`--rr-bg-default` and `--rr-bg-paper`). The pairs 
   editor accepts an app's token colours.
 - Small secondary text elsewhere in the app uses the shell's `--rr-text-secondary`, which is a platform
   decision and is not restyled here.
+
+## Relationship type colours and label styles
+
+A person can give each label one of the six chart colours (the legend's style
+editor); every label keeps the slot it was first given, so adding a label never
+moves another's colour. A node has its outline, so any of the six is acceptable
+as a fill.
+
+A relationship is a thin line with no outline, so its colour has to clear 3:1
+(WCAG 1.4.11) against both canvas surfaces on its own. `tests/a11y.contrast.test.ts`
+measures every chart colour on both surfaces in all six shipped themes and offers
+for relationship types only those that clear it (`TYPE_COLOR_SLOTS` in
+`src/graph/colors.ts`):
+
+| Colour | Worst ratio over every theme and surface | Offered for types |
+| --- | ---: | --- |
+| Blue | 3.23 | yes |
+| Green | 3.53 | yes |
+| Red | 4.14 | yes |
+| Purple | 3.97 | yes |
+| Orange | 2.36 | no |
+| Yellow | 2.42 | no |
+
+The test also fails if an excluded colour starts to pass, so the list is
+revisited when a theme changes. Relationship type text keeps `--rr-text-primary`.
+
+Badges (the letters in a node) are distinct per label (`src/graph/badges.ts`), so
+Person and Product no longer share a "P"; they are black or white on the fill
+as before.

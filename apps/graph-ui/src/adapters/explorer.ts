@@ -151,7 +151,10 @@ export function makeGraphHistory(persistDelayMs?: number): IHistoryStore<'cypher
 /** Graph history: `graph.history` / `graph.historyRecording`, entry text field `cypher`. */
 export const graphHistory: IHistoryStore<'cypher'> = makeGraphHistory();
 
-/** Per-connection caption choices and similar view state live in their own bag. */
+/**
+ * Where 1.2 kept per-connection caption choices (the full app). Captions are part of the style now; this key is read
+ * only to move those choices into the styles once (graph/workspacePin.ts createAppUserData), then cleared.
+ */
 export const CAPTIONS_PREF_KEY = 'graph.captions';
 
 /** Per-connection editor drafts. Text only, never a token or a result. */

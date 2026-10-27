@@ -60,6 +60,20 @@ test('expansion wording separates the per-expansion cap, the canvas budgets and 
 	assert.equal(expandText(0, 0, false, null, null), 'No new neighbours.');
 });
 
+// The status line sits under the graph, away from the node that was expanded, so the sentence names it and the first
+// few nodes it added (COPY-SPEC explore-expanded: "Added 3 neighbours of Northwind Labs: Lighthouse, Tidewater, ...").
+test('expansion wording names the expanded node, the first three it added and, for Expand by type, the type', () => {
+	const about = (added: string[], type?: string) => ({ center: 'Northwind Labs', added, ...(type ? { type } : {}) });
+	assert.equal(expandText(3, 0, false, null, null, about(['Lighthouse', 'Tidewater', 'Sentinel Edge'])), 'Added 3 neighbours of Northwind Labs: Lighthouse, Tidewater, Sentinel Edge.');
+	assert.equal(expandText(1, 0, false, null, null, about(['Lighthouse'])), 'Added 1 neighbour of Northwind Labs: Lighthouse.');
+	assert.equal(expandText(5, 0, false, null, null, about(['A', 'B', 'C', 'D', 'E'])), 'Added 5 neighbours of Northwind Labs: A, B, C and 2 more.');
+	assert.equal(expandText(2, 0, false, null, null, about(['A', 'B'], 'MAKES')), 'Added 2 MAKES neighbours of Northwind Labs: A, B.');
+	assert.equal(expandText(0, 0, false, null, null, about([], 'MAKES')), 'No new MAKES neighbours of Northwind Labs.');
+	assert.equal(expandText(0, 0, false, null, null, about([])), 'No new neighbours of Northwind Labs.');
+	assert.equal(expandText(100, 40, false, null, null, about(['A', 'B', 'C', ...Array.from({ length: 97 }, (_, i) => `n${i}`)])), 'Added 100 neighbours of Northwind Labs: A, B, C and 97 more. 40 more were left out (at most 100 new neighbours per expansion); expand again to see more.');
+	assert.equal(expandText(0, 0, true, null, null, about([])), 'Added 0 neighbours of Northwind Labs. This node has more relationships than were fetched; expand again for more.');
+});
+
 test('result announcements say counts of what was returned, plus any truncation', () => {
 	assert.equal(resultAnnouncement(5, 3, 5, null), '5 rows returned, 3 nodes and 5 relationships.');
 	assert.equal(resultAnnouncement(1, 1, 0, null), '1 row returned, 1 node and 0 relationships.');

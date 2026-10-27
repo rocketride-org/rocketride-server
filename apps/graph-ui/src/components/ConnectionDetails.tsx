@@ -26,18 +26,22 @@
 //
 // The body two places share: the full app's ConnectionDrawer (a DetailPanel
 // over the window, opened from a Connections card) and, as a dev tool, a
-// connection document's inline details panel. Status (the badge, why it
-// cannot be browsed, the last Test result), Connection (pipeline, node, run,
-// engine, target, writes) and What to know (the read boundary, upgrades).
-// `useConnectionTest` is the Test connection step both run. Nothing here
-// holds or shows a credential, and nothing here listens outside itself.
+// connection document's inline details panel. The summary comes first: Status
+// (the badge and the chips, why it cannot be browsed, the last Test result)
+// and Graph (engine, database or graph, and, once the schema was read in this
+// session, its size and a schema line). The plumbing (pipeline, node, run,
+// writes, and what to know about the read boundary) sits behind the
+// "Connection details" disclosure. `useConnectionTest` is the Test connection
+// step both run. Nothing here holds or shows a credential, and nothing here
+// listens outside itself.
 // =============================================================================
 
 import React, { useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, LabelValue, Section, StatusBadge } from 'shell';
+import { Banner, BxChevronDown, BxChevronRight, LabelValue, Section, StatusBadge } from 'shell';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
-import { connectionView, testResultText } from '../graph/connections';
+import { useSchemaView } from '../env';
+import { connectionChips, connectionView, detailSections, testResultText } from '../graph/connections';
 import type { ITestResult } from '../graph/connections';
 
 const styles = {
@@ -45,6 +49,12 @@ const styles = {
 	notice: { marginTop: 12 } as CSSProperties,
 	/** One sentence of What to know. */
 	note: { fontSize: 12.5, color: 'var(--rr-text-secondary)', lineHeight: 1.5, marginBottom: 8 } as CSSProperties,
+	/** The badge and the chips, on one wrapping line. */
+	chips: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' } as CSSProperties,
+	/** The plumbing's disclosure: a plain button that reads as a section heading. */
+	disclosure: { display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '10px 0 6px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--rr-text-primary)', fontSize: 13, fontWeight: 600, textAlign: 'left' } as CSSProperties,
+	disclosureHint: { fontWeight: 400, fontSize: 12, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	notesHeading: { fontSize: 12, fontWeight: 600, color: 'var(--rr-text-secondary)', margin: '10px 0 4px' } as CSSProperties,
 };
 
 /** The Test connection step: whether it runs, and what it said last. */
@@ -92,10 +102,22 @@ export interface IConnectionDetailsBodyProps {
  */
 export const ConnectionDetailsBody: React.FC<IConnectionDetailsBodyProps> = ({ endpoint, probe, tested }) => {
 	const view = connectionView(endpoint, probe);
+	// Only a schema already read in this session (no request of its own); a frame fetches it from its controller.
+	const schema = useSchemaView(endpoint.key);
+	const chips = connectionChips(endpoint, probe, schema);
+	const { summary, plumbing } = detailSections(endpoint, probe, schema);
+	const [plumbingOpen, setPlumbingOpen] = useState(false);
 	return (
 		<>
 			<Section label="Status">
-				<StatusBadge variant={view.badge.variant}>{view.badge.label}</StatusBadge>
+				<div style={styles.chips}>
+					<StatusBadge variant={view.badge.variant}>{view.badge.label}</StatusBadge>
+					{chips.map((chip) => (
+						<StatusBadge key={chip.id} variant={chip.variant}>
+							{chip.label}
+						</StatusBadge>
+					))}
+				</div>
 				{view.blocked && (
 					<div style={styles.notice}>
 						<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{view.blocked}</Banner>
@@ -103,21 +125,37 @@ export const ConnectionDetailsBody: React.FC<IConnectionDetailsBodyProps> = ({ e
 				)}
 				{tested && <div style={styles.notice}><Banner variant={tested.variant}>{tested.text}</Banner></div>}
 			</Section>
-			<Section label="Connection">
-				{view.details.map((row) => (
-					<LabelValue key={row.label} label={row.label}>
-						{row.value}
-					</LabelValue>
-				))}
-			</Section>
-			{view.notes.length > 0 && (
-				<Section label="What to know">
-					{view.notes.map((note) => (
-						<div key={note} style={styles.note}>
-							{note}
-						</div>
+			{summary.length > 0 && (
+				<Section label="Graph">
+					{summary.map((row) => (
+						<LabelValue key={row.label} label={row.label}>
+							{row.value}
+						</LabelValue>
 					))}
 				</Section>
+			)}
+			<button type="button" style={styles.disclosure} aria-expanded={plumbingOpen} onClick={() => setPlumbingOpen((open) => !open)}>
+				{plumbingOpen ? <BxChevronDown size={16} /> : <BxChevronRight size={16} />}
+				Connection details <span style={styles.disclosureHint}>pipeline, node, run, read boundary</span>
+			</button>
+			{plumbingOpen && (
+				<div>
+					{plumbing.map((row) => (
+						<LabelValue key={row.label} label={row.label}>
+							{row.value}
+						</LabelValue>
+					))}
+					{view.notes.length > 0 && (
+						<>
+							<div style={styles.notesHeading}>What to know</div>
+							{view.notes.map((note) => (
+								<div key={note} style={styles.note}>
+									{note}
+								</div>
+							))}
+						</>
+					)}
+				</div>
 			)}
 		</>
 	);

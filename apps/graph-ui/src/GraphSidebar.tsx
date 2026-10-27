@@ -24,12 +24,15 @@
 // GRAPH-UI - SIDEBAR (navigation menu + the active connection's schema)
 // =============================================================================
 //
-// The stock Explorer tree shows what the schema holds for the active connection:
-// node labels and relationship types, each with its properties and observed types.
-// Clicking a label or type is the user's request for the 25-row preview, which the
-// connection's workbench shows and runs. The status line under the tree says how far
-// the schema can be trusted (fresh, sampled, stale, an older format, or unreadable);
-// an old node's snapshot is never presented as "the whole graph".
+// The schema list (components/SchemaList.tsx) shows what the schema holds for the
+// active connection: node labels, each with its colour dot (the connection's style,
+// the same colour the canvas draws it in), and relationship types, each with its
+// count and a disclosure for its properties and observed types. Clicking a label or
+// type is the user's request for the 25-row preview, which the connection's workbench
+// shows and runs; its menu also opens a new query with it (not run) and copies its
+// name or pattern. The status line under the list says how far the schema can be
+// trusted (fresh, sampled, stale, an older format, or unreadable); an old node's
+// snapshot is never presented as "the whole graph".
 //
 // It is mounted by the full app (in the shell's sidebar chrome) and, as a dev
 // tool, by the CONTROLLER (devtool: true). Either way it reads the LOCAL
@@ -47,20 +50,26 @@
 
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
-import { BxRefresh, Explorer, NOOP_VFS, SidebarMenu, commonStyles } from 'shell';
+import { BxRefresh, SidebarMenu, commonStyles } from 'shell';
 import type { ViewMenu } from 'shell';
 import { panelStyles } from 'shared/tools/core/chrome/panelStyles';
-import { useActiveConnection, useGraphEndpoints, useGraphEnv } from './env';
+import SchemaList from './components/SchemaList';
+import { useActiveConnection, useConnectionStyle, useGraphEndpoints, useGraphEnv } from './env';
 import type { IGraphEnv } from './env';
+import { labelColors, typeColorsOf } from './graph/colors';
 import { connectionRow, sidebarListLine } from './graph/connections';
 import type { IBadge } from './graph/connections';
+import { parseDialect } from './graph/dialect';
 import { NO_SCHEMA, SAMPLED_NOTE, schemaStatusText } from './graph/schema';
-import { buildSchemaTree } from './graph/schemaTree';
+import { buildSchemaList, countsNote } from './graph/schemaTree';
 import type { ISchemaEntry } from './graph/schemaStore';
 import { GraphIcon } from './icons';
 
 /** Said when the schema listing was cut by the node's own bounds. */
 export const TRUNCATED_NOTE = 'The node lists only part of a very large schema.';
+
+/** The last line under the list: what a click and the menu do. */
+export const SCHEMA_ACTIONS_NOTE = 'Click a label or type to preview 25 of its rows. Right-click it, or press Shift+F10, for a new query with it or to copy its name.';
 
 /** A subscription that never fires. */
 const NO_SUBSCRIBE = (): (() => void) => () => undefined;
@@ -228,7 +237,13 @@ const GraphSidebar: React.FC<IGraphSidebarProps> = ({ devtool = false }) => {
 	const entry = useSchemaEntry(env, activeKey);
 	const endpoint = useMemo(() => endpoints.find((e) => e.key === activeKey) ?? null, [endpoints, activeKey]);
 	const probe = activeKey ? probes[activeKey] : undefined;
-	const tree = useMemo(() => buildSchemaTree(entry.view), [entry.view]);
+	const list = useMemo(() => buildSchemaList(entry.view), [entry.view]);
+	// Until the stored style is read, every dot is neutral: never a colour that would change a moment later.
+	const { ready: styleReady, style } = useConnectionStyle(activeKey ?? '');
+	const colors = useMemo(() => (styleReady ? labelColors(style, entry.view.labels.map((label) => label.name)) : new Map()), [styleReady, style, entry.view.labels]);
+	// Only the type colours the canvas draws (graph/colors.ts TYPE_COLOR_SLOTS), so the two always agree.
+	const typeColors = useMemo(() => typeColorsOf(style), [style]);
+	const dialect = probe?.ok ? parseDialect(probe.info)?.dialect ?? null : null;
 
 	// Read the schema once when a connection becomes active and has answered its probe.
 	useEffect(() => {
@@ -247,11 +262,11 @@ const GraphSidebar: React.FC<IGraphSidebarProps> = ({ devtool = false }) => {
 		env.openDocument(chosen ? { kind: 'workbench', endpoint: chosen } : { kind: 'connections' });
 	};
 
-	const open = (path: string): void => {
-		const target = tree.target(path);
-		if (!target || !endpoint) return;
+	// A preview (run) or a new query (not run) with a label or type, in the connection's workbench.
+	const ask = (kind: 'label' | 'type', name: string, run: boolean): void => {
+		if (!endpoint) return;
 		env.openDocument({ kind: 'workbench', endpoint });
-		env.previews.request({ endpointKey: endpoint.key, action: target.kind === 'label' ? 'label-preview' : 'type-preview', name: target.name });
+		env.previews.request({ endpointKey: endpoint.key, action: run ? (kind === 'label' ? 'label-preview' : 'type-preview') : kind === 'label' ? 'label-query' : 'type-query', name });
 	};
 
 	const showTree = activeKey !== null && endpoint !== null && (entry.status !== 'idle' || entry.view.labels.length > 0);
@@ -299,21 +314,19 @@ const GraphSidebar: React.FC<IGraphSidebarProps> = ({ devtool = false }) => {
 			)}
 			{showTree && (
 				<>
-					<Explorer
-						vfs={NOOP_VFS}
-						config={{
-							title: entry.view.labels.length + entry.view.relationshipTypes.length === 0 ? 'Schema' : endpoint.nodeName || 'Schema',
-							extensions: null,
-							displayName: (filename) => tree.displayName(filename),
-							emptyMessage: entry.status === 'loading' ? 'Reading the schema\u2026' : 'No labels or relationship types listed',
-							allowFolders: false,
-						}}
-						entries={tree.entries}
-						isConnected={isConnected}
-						onOpenFile={open}
+					<SchemaList
+						title={entry.view.labels.length + entry.view.relationshipTypes.length === 0 ? 'Schema' : endpoint.nodeName || 'Schema'}
+						list={list}
+						colors={colors}
+						typeColors={typeColors}
+						dialect={dialect}
+						emptyText={entry.status === 'loading' ? 'Reading the schema\u2026' : 'No labels or relationship types listed'}
+						refreshBlocked={!isConnected || entry.status === 'loading'}
 						onRefresh={() => {
 							if (isConnected && endpoint) void env.loadSchema(endpoint.key, { fresh: true });
 						}}
+						onPreview={(kind, name) => ask(kind, name, true)}
+						onNewQuery={(kind, name) => ask(kind, name, false)}
 					/>
 					<div style={styles.status}>
 						<div>{schemaStatus}</div>
@@ -331,7 +344,8 @@ const GraphSidebar: React.FC<IGraphSidebarProps> = ({ devtool = false }) => {
 						)}
 						{entry.view.sampled && entry.view.labels.length > 0 && <div style={styles.statusLine}>{SAMPLED_NOTE}</div>}
 						{entry.view.truncated && <div style={styles.statusLine}>{TRUNCATED_NOTE}</div>}
-						{tree.entries.length > 0 && <div style={styles.statusLine}>Click a label or type to preview 25 of its rows.</div>}
+						{countsNote(entry.view) !== null && <div style={styles.statusLine}>{countsNote(entry.view)}</div>}
+						{list.labels.length + list.types.length > 0 && <div style={styles.statusLine}>{SCHEMA_ACTIONS_NOTE}</div>}
 					</div>
 				</>
 			)}

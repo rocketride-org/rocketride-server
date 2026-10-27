@@ -21,13 +21,23 @@
 // SOFTWARE.
 
 // =============================================================================
-// CYPHER - BOUNDED PATH SEARCH (iterative deepening, one request at a time)
+// CYPHER - BOUNDED PATH SEARCH (one shortestPath call, else iterative deepening)
 // =============================================================================
 //
-// "Find path" between two nodes without shortestPath (Apache AGE has none) and
-// without ever running an unbounded traversal: ask for a path of exactly 1
-// relationship, then exactly 2, and so on up to the depth limit (10), and stop at
-// the FIRST depth that answers. The first answer is therefore a shortest path.
+// "Find path" between two nodes without ever running an unbounded traversal.
+//
+// On Neo4j (usesShortestPath in recipes.ts) the search first asks for a shortest
+// path of at most 10 relationships in ONE call, undirected like the depth search.
+// A path in that answer is the answer, and an empty answer is "no path within 10"
+// (the call searched every depth up to 10; probed on Neo4j 2026.10.1, it finds
+// what the depth search finds). An error, or a path between other nodes, proves
+// nothing, so the search then falls back, silently, to the depth search below.
+// FalkorDB is never asked: its shortestPath() follows one direction only.
+//
+// The depth search works on every engine, Apache AGE included (it has no
+// shortestPath): ask for a path of exactly 1 relationship, then exactly 2, and so
+// on up to the depth limit (10), and stop at the FIRST depth that answers. The
+// first answer is therefore a shortest path.
 //
 //   - ONE request is in flight at a time. Each depth waits for the previous one.
 //   - A total DEADLINE bounds the whole search; the per-call client timeout
@@ -43,16 +53,19 @@
 import { PATH_MAX_DEPTH } from '../graph/budgets';
 import type { GraphId, GraphPath, ReadQueryResult } from '../graph/types';
 import { isGraphPath } from '../graph/values';
-import { isRefusal, pathAtDepth } from './recipes';
+import { isRefusal, pathAtDepth, shortestPathRecipe } from './recipes';
 import type { IEngine, IRecipe } from './recipes';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
+/** How a path was found: one shortestPath call, or the depth search (depth 1 to N, one call each). */
+export type PathMethod = 'shortest-path' | 'depth';
+
 /** How a search ended. */
 export type PathOutcome =
-	| { status: 'found'; depth: number; path: GraphPath; attempts: number }
+	| { status: 'found'; depth: number; path: GraphPath; attempts: number; method: PathMethod }
 	| { status: 'none'; maxDepth: number; attempts: number }
 	| { status: 'deadline'; depthReached: number; attempts: number }
 	| { status: 'stopped'; depthReached: number; attempts: number }
@@ -72,6 +85,10 @@ export interface IPathSearchDeps {
 	maxDepth?: number;
 	/** Called before each depth is tried. */
 	onDepth?: (depth: number) => void;
+	/** Try one shortestPath call before the depth search (the caller decides with usesShortestPath; never on AGE). */
+	single?: boolean;
+	/** Called before the shortestPath call is sent. */
+	onSingle?: () => void;
 }
 
 /** A path search. */
@@ -137,6 +154,24 @@ export function createPathSearch(deps: IPathSearchDeps): IPathSearch {
 			});
 
 			try {
+				const one = deps.single === true && deps.engine.dialect !== 'age' ? shortestPathRecipe(deps.engine, fromId, toId, maxDepth) : null;
+				if (one !== null && !isRefusal(one)) {
+					deps.onSingle?.();
+					attempts += 1;
+					let result: ReadQueryResult | 'stopped' | null;
+					try {
+						result = await Promise.race([deps.run(one), stopped]);
+					} catch {
+						// An error from the one call decides nothing: the depth search below does.
+						result = null;
+					}
+					if (result === 'stopped' || generation !== mine) return { status: 'stopped', depthReached: reached, attempts };
+					const path = result === null ? null : firstPath(result);
+					if (path && joins(path, fromId, toId)) return { status: 'found', depth: path.relationships.length, path, attempts, method: 'shortest-path' };
+					// An answer with no path at all: the undirected call searched every depth up to the maximum.
+					if (result !== null && path === null && (result.rows ?? []).length === 0) return { status: 'none', maxDepth, attempts };
+					// Failed, or about other nodes: fall back to the depth search, which every engine answers.
+				}
 				for (let depth = 1; depth <= maxDepth; depth++) {
 					if (generation !== mine) return { status: 'stopped', depthReached: reached, attempts };
 					if (now() - started >= deadlineMs) return { status: 'deadline', depthReached: reached, attempts };
@@ -155,10 +190,8 @@ export function createPathSearch(deps: IPathSearchDeps): IPathSearch {
 					reached = depth;
 					const path = firstPath(result);
 					if (path) {
-						const ends = [path.nodes[0]?.id, path.nodes[path.nodes.length - 1]?.id];
-						const matches = (ends[0] === fromId && ends[1] === toId) || (ends[0] === toId && ends[1] === fromId);
-						if (!matches) return { status: 'error', depth, message: 'The node answered with a path between other nodes than the two selected.', attempts };
-						return { status: 'found', depth, path, attempts };
+						if (!joins(path, fromId, toId)) return { status: 'error', depth, message: 'The node answered with a path between other nodes than the two selected.', attempts };
+						return { status: 'found', depth, path, attempts, method: 'depth' };
 					}
 				}
 				return { status: 'none', maxDepth, attempts };
@@ -172,6 +205,20 @@ export function createPathSearch(deps: IPathSearchDeps): IPathSearch {
 			}
 		},
 	};
+}
+
+/**
+ * Whether a path runs between the two nodes asked about (in either order).
+ *
+ * @param path - A path from an answer.
+ * @param fromId - One end asked about.
+ * @param toId - The other.
+ * @returns True when its first and last nodes are those two.
+ */
+function joins(path: GraphPath, fromId: GraphId, toId: GraphId): boolean {
+	const first = path.nodes[0]?.id;
+	const last = path.nodes[path.nodes.length - 1]?.id;
+	return (first === fromId && last === toId) || (first === toId && last === fromId);
 }
 
 /**

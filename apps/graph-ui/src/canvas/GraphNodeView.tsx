@@ -26,7 +26,11 @@
 //
 // Memoised and module-level, as React Flow's performance guidance asks: the
 // component identity never changes, and a node only re-renders when its own
-// data does (selection, focus, caption, colour).
+// data does (selection, focus, caption, colour, size, badge, dimming).
+//
+// A label's style sets the size (S, M or L: the circle's diameter) and the badge
+// (its initials, a dot, or nothing). The fit, the layouts and the relationship
+// ends all use the same diameter (SIZE_DIAMETER).
 //
 // The hidden, centred handles exist because React Flow 12.3 only draws an edge
 // whose two nodes expose a handle. The edge component ignores the handle
@@ -39,9 +43,13 @@ import type { CSSProperties } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import type { Node, NodeProps } from '@xyflow/react';
 import { NODE_RADIUS } from '../graph/geometry';
+import type { BadgeMode, LabelSize } from '../graph/userData';
 
-/** Diameter of a node circle, in canvas units. */
+/** Diameter of a node circle, in canvas units (size M, the default). */
 export const NODE_DIAMETER = NODE_RADIUS * 2;
+
+/** Diameter per label size. */
+export const SIZE_DIAMETER: Readonly<Record<LabelSize, number>> = { S: 40, M: NODE_DIAMETER, L: 76 };
 
 /** What a node renders. */
 export interface IGraphNodeData extends Record<string, unknown> {
@@ -50,8 +58,14 @@ export interface IGraphNodeData extends Record<string, unknown> {
 	fill: string;
 	/** Text colour readable on the fill. */
 	textColor: string;
-	/** First character of the primary label: a cue that does not rely on colour. */
-	initial: string;
+	/** The label's badge (its initials by default): a cue that does not rely on colour. */
+	badge: string;
+	/** Initials, a dot, or no badge. */
+	badgeMode: BadgeMode;
+	/** The circle's diameter (the label's size). */
+	diameter: number;
+	/** Drawn faint: not on the shown path, or not matching a search. */
+	dim: boolean;
 	selected: boolean;
 	expanded: boolean;
 	/** The database answered for this id with a different element (or a write ran): the copy is out of date. */
@@ -79,21 +93,23 @@ const HIDDEN_HANDLE: CSSProperties = {
 };
 
 const styles = {
-	root: { position: 'relative', width: NODE_DIAMETER, height: NODE_DIAMETER } as CSSProperties,
-	circle: (fill: string, color: string): CSSProperties => ({
-		width: NODE_DIAMETER,
-		height: NODE_DIAMETER,
+	root: (diameter: number): CSSProperties => ({ position: 'relative', width: diameter, height: diameter }),
+	circle: (fill: string, color: string, diameter: number): CSSProperties => ({
+		width: diameter,
+		height: diameter,
 		borderRadius: '50%',
 		background: fill,
 		color,
 		display: 'flex',
 		alignItems: 'center',
 		justifyContent: 'center',
-		fontSize: 16,
+		// 16 px at the normal size, in proportion for S and L.
+		fontSize: Math.round(diameter * 0.285),
 		fontWeight: 700,
 		boxSizing: 'border-box',
 		userSelect: 'none',
 	}),
+	dot: (color: string, diameter: number): CSSProperties => ({ width: Math.max(6, Math.round(diameter / 7)), height: Math.max(6, Math.round(diameter / 7)), borderRadius: '50%', background: color }),
 };
 
 /**
@@ -104,9 +120,9 @@ const styles = {
  */
 function GraphNodeViewImpl({ data }: NodeProps<GraphFlowNode>): React.ReactElement {
 	return (
-		<div className="graph-ui-node" data-selected={data.selected ? 'true' : 'false'} data-expanded={data.expanded ? 'true' : 'false'} data-stale={data.stale ? 'true' : 'false'} style={styles.root}>
-			<div className="graph-ui-circle" style={styles.circle(data.fill, data.textColor)} aria-hidden="true">
-				{data.initial}
+		<div className="graph-ui-node" data-selected={data.selected ? 'true' : 'false'} data-expanded={data.expanded ? 'true' : 'false'} data-stale={data.stale ? 'true' : 'false'} data-dim={data.dim ? 'true' : 'false'} style={styles.root(data.diameter)}>
+			<div className="graph-ui-circle" style={styles.circle(data.fill, data.textColor, data.diameter)} aria-hidden="true">
+				{data.badgeMode === 'initials' ? data.badge : data.badgeMode === 'dot' ? <span style={styles.dot(data.textColor, data.diameter)} /> : null}
 			</div>
 			<div className="graph-ui-caption" aria-hidden="true">
 				{data.caption}

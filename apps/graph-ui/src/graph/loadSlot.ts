@@ -24,17 +24,21 @@
 // GRAPH - LOAD SLOT (what a document asks its editor to hold, taken exactly once)
 // =============================================================================
 //
-// A connection document asks its run surface to put text in the editor (a History
-// load, an Ask preview, a label preview) and sometimes to run it. The request lives
-// in the DOCUMENT, which stays mounted, and the surface TAKES it: once taken it is
-// gone, so a surface that mounts again (the connection came back, the tab was
-// re-created) finds nothing to replay. Nothing here runs by itself later.
+// A connection document asks a run surface to put text in its editor (a History
+// load, an Ask answer, a label preview, a saved query) and sometimes to run it.
+// The workbench keeps one slot per query tab, the write console one for its
+// surface. The request lives in the DOCUMENT, which stays mounted, and the
+// surface TAKES it: once taken it is gone, so a surface that mounts again (the
+// connection came back, the tab was re-created) finds nothing to replay. Nothing
+// here runs by itself later.
 // =============================================================================
 
 /** Text for the editor, and whether to run it straight away. */
 export interface ILoadRequest {
 	text: string;
 	run: boolean;
+	/** Insert the text at the caret (replacing the selection) instead of replacing the whole text; never run. */
+	insert?: boolean;
 }
 
 /** A one-request mailbox: what is put is taken exactly once. */
@@ -64,7 +68,7 @@ export function createLoadSlot(): ILoadSlot {
 	let seq = 0;
 	return {
 		put(request) {
-			pending = { text: request.text, run: request.run };
+			pending = { text: request.text, run: request.run, ...(request.insert ? { insert: true } : {}) };
 			seq += 1;
 			return seq;
 		},

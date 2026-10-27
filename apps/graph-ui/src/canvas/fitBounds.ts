@@ -128,21 +128,23 @@ function includeEdge(extent: IExtent, shape: IEdgeShape, type: string): void {
  *
  * @param centers - The centre of every node, by id.
  * @param edges - The relationships to draw (one with an end that has no centre is skipped, as the layer skips it).
- * @param radius - Node radius.
+ * @param radius - Node radius: one for every node, or each node's own (a label's size style).
  * @returns The bounds, or null when there are no nodes.
  */
-export function contentBounds(centers: ReadonlyMap<string, Point>, edges: readonly IBoundsEdge[], radius: number = NODE_RADIUS): IRect | null {
+export function contentBounds(centers: ReadonlyMap<string, Point>, edges: readonly IBoundsEdge[], radius: number | ((id: string) => number) = NODE_RADIUS): IRect | null {
 	if (centers.size === 0) return null;
+	const radiusOf = typeof radius === 'number' ? () => radius : radius;
 	const extent: IExtent = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-	for (const c of centers.values()) {
-		include(extent, c.x - radius, c.y - radius);
-		include(extent, c.x + radius, c.y + radius + CAPTION_BELOW);
+	for (const [id, c] of centers) {
+		const r = radiusOf(id);
+		include(extent, c.x - r, c.y - r);
+		include(extent, c.x + r, c.y + r + CAPTION_BELOW);
 	}
 	for (const edge of edges) {
 		const a = centers.get(edge.source);
 		const b = centers.get(edge.target);
 		if (!a || !b) continue;
-		includeEdge(extent, edgeShape(a, b, edge.slot, radius, radius), edge.type);
+		includeEdge(extent, edgeShape(a, b, edge.slot, radiusOf(edge.source), radiusOf(edge.target)), edge.type);
 	}
 	return { x: extent.minX, y: extent.minY, width: extent.maxX - extent.minX, height: extent.maxY - extent.minY };
 }

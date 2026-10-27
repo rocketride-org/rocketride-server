@@ -55,7 +55,8 @@ test('every confirmation says it is a text check and that nothing is rolled back
 	assert.ok(text.includes(TEXT_CHECK_SENTENCE));
 	assert.equal(TEXT_CHECK_SENTENCE, 'This is a text check, not a database safeguard.');
 	assert.match(text, /1 of 1 statement looks like it changes data or runs a command\./);
-	assert.match(text, /A statement that has run is not undone if a later one fails\./);
+	assert.match(text, /They are sent one by one, in order, and the batch stops at the first error\. A statement that already ran is not undone when a later one fails, and the console says which ran\./);
+	assert.match(text, /Each statement that runs marks the graphs drawn from this connection out of date\./);
 	const many = confirmationParagraphs(describeWrites(all('CREATE (a); MATCH (n) RETURN n; DELETE x; SET y')));
 	assert.match(many[0], /^3 of 4 statements look like they change data or run a command \(1 is a read\)\.$/);
 });

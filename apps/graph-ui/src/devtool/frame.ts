@@ -37,7 +37,11 @@
 //     graph tools to ops, checks the generation ticket HERE (a ticket is a
 //     function and cannot cross), and reads `info()` from the endpoints state.
 //   - What the controller owns arrives as retained state (endpoints, schema
-//     labels, data versions, the history revision, the pending preview).
+//     labels, data versions, the history and user-data revisions, the pending
+//     preview). Bulk data is read with ops: history, a connection's full
+//     schema view (fetched on first use and again whenever the `schemas`
+//     summary says a newer load completed), and label styles and saved
+//     queries (devtool/remoteUserData.ts, owned by the frame's account).
 //   - Writes are counted by the controller; a write the user stopped waiting
 //     for is reported with an op.
 //   - Identity (R9): the frame remembers the first fingerprint; a different one
@@ -51,6 +55,8 @@
 //     (`signIn`), so a document can wait for one instead of claiming it is
 //     not connected.
 //   - Drafts and captions are session-only (no usePrefs on this path).
+//   - Every cache (history, schema views, user data) is cleared on an identity
+//     reset, so nothing of one account is shown under another.
 // =============================================================================
 
 import type { DevToolProps, ToolChannel, ToolControllerFn, ToolOpMap } from 'shell';
@@ -69,6 +75,8 @@ import { TOOL } from '../adapters/explorer';
 import { DEVTOOL_HISTORY_PRIVACY_NOTE, memoryPrefs } from '../env';
 import type { DocTarget, IGraphEnv, IGraphHistory, IKeyed, IReadable } from '../env';
 import { asPreview } from '../graph/previews';
+import type { ISchemaView } from '../graph/schema';
+import { createRemoteUserData } from './remoteUserData';
 import { controllerNotReadyError, isNotSent } from './frameText';
 import type { IGraphPreview } from '../graph/previews';
 import { EVENT, NO_ENDPOINTS, OP, STATE, docKeyFor, field, frameTimeoutFor, routeDocKey, toWire } from './protocol';
@@ -108,6 +116,8 @@ export interface IGraphFrame {
 	readonly connected: IReadable<boolean | undefined>;
 	/** The controller's schema summaries (status, labels, failure), as last published. */
 	readonly schemas: IReadable<Record<string, IFrameSchema>>;
+	/** Full schema views, fetched from the controller on first use and after every newer load (env.schemaView). */
+	readonly schemaView: IKeyed<ISchemaView | null>;
 	/** Whether a controller is up to carry this frame's calls (its readiness on the reserved topic). */
 	readonly controllerReady: IReadable<boolean>;
 	/** Where the summon of a missing controller stands: ready, summoning (the quiet grace), or unanswered. */
@@ -365,6 +375,90 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 		setRecording: (key, on) => edit(key, { action: 'recording', on }),
 	};
 
+	// ── Schema views: the full view of a connection is an op result, read when a load completed ──
+	interface IViewSlot {
+		value: ISchemaView | null;
+		/** The `loadedAt` the value answers for (null: never read). */
+		readFor: number | null;
+		/** The `loadedAt` a read in flight was sent for (null: none). */
+		askedFor: number | null;
+		/** The newest read sent: only its answer is used. */
+		seq: number;
+	}
+	const viewSlots = new Map<string, IViewSlot>();
+	const viewListeners = new Set<() => void>();
+	const notifyViews = (): void => viewListeners.forEach((listener) => listener());
+	// A connection whose label names did not fit the summaries still crosses with its loadedAt (protocol.ts
+	// schemasSnapshot); one missing altogether makes every new summary a reason to read it again.
+	let summaries = 0;
+	offs.push(schemas.subscribe(() => (summaries += 1)));
+	const loadedAtOf = (key: string): number => {
+		const loadedAt = schemas.get()[key]?.loadedAt;
+		return typeof loadedAt === 'number' ? loadedAt : -summaries;
+	};
+	const readView = (key: string, slot: IViewSlot): void => {
+		const want = loadedAtOf(key);
+		if (slot.readFor === want || slot.askedFor === want || connected.get() !== true || disposed) return;
+		slot.seq += 1;
+		const seq = slot.seq;
+		slot.askedFor = want;
+		caller.callReply(OP.schemaView, { key }, { timeoutMs: frameTimeoutFor(OP.schemaView) }).then(
+			(value) => {
+				if (disposed || viewSlots.get(key) !== slot || seq !== slot.seq) return;
+				slot.askedFor = null;
+				slot.readFor = want;
+				slot.value = value !== null && typeof value === 'object' && Array.isArray((value as ISchemaView).labels) ? (value as ISchemaView) : null;
+				notifyViews();
+			},
+			(error: unknown) => {
+				if (viewSlots.get(key) !== slot || seq !== slot.seq) return;
+				slot.askedFor = null;
+				report(error);
+			},
+		);
+	};
+	const readViews = (): void => {
+		for (const [key, slot] of viewSlots) readView(key, slot);
+	};
+	const resetSchemaViews = (): void => {
+		for (const slot of viewSlots.values()) {
+			slot.value = null;
+			slot.readFor = null;
+			slot.askedFor = null;
+			slot.seq += 1;
+		}
+		notifyViews();
+		readViews();
+	};
+	const schemaView: IKeyed<ISchemaView | null> = {
+		get(key) {
+			let slot = viewSlots.get(key);
+			if (!slot) {
+				const created: IViewSlot = { value: null, readFor: null, askedFor: null, seq: 0 };
+				slot = created;
+				viewSlots.set(key, created);
+				// First use: read it, after the render that asked (an op is never sent from inside a render).
+				queueMicrotask(() => readView(key, created));
+			}
+			return slot.value;
+		},
+		subscribe(listener) {
+			viewListeners.add(listener);
+			return () => {
+				viewListeners.delete(listener);
+			};
+		},
+	};
+	offs.push(schemas.subscribe(readViews));
+	offs.push(connected.subscribe(readViews));
+
+	// ── User data: styles and saved queries, the frame's account's, over ops ─────────────────────
+	// The account comes from the identity guard below, once it exists (nothing asks for it before then).
+	let guardRef: IFrameIdentityGuard | null = null;
+	const userData = createRemoteUserData({ caller, channel, owner: () => guardRef?.first() ?? null, connected: () => connected.get() === true });
+	offs.push(connected.subscribe(() => userData.retry()));
+	offs.push(() => userData.dispose());
+
 	// ── Identity (R9): close on a different fingerprint; clear caches on reset ──────────────────
 	const guard = createFrameIdentityGuard({
 		channel,
@@ -378,8 +472,12 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 				slot.listeners.forEach((listener) => listener());
 			}
 			refetchHistory();
+			resetSchemaViews();
+			userData.reset();
 		},
 	});
+	guardRef = guard;
+
 
 	// ── `active` (R8): the fronted document, the fallback while activeDocKey is undefined ───────
 	function sendActive(consumed?: string): void {
@@ -445,6 +543,7 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 		guard,
 		connected,
 		schemas,
+		schemaView,
 		controllerReady,
 		summon,
 		signIn,
@@ -466,6 +565,7 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 				probe: (key) => caller.callReply(OP.probe, { key }, { timeoutMs: frameTimeoutFor(OP.probe) }).then((value) => value as IProbeResult | null, () => null),
 				schemaLabels: keyed(labelsSource, [] as readonly string[]),
 				schemas: null,
+				schemaView,
 				loadSchema: (key, o) => caller.callReply(OP.loadSchema, o?.fresh ? { key, fresh: true } : { key }, { timeoutMs: frameTimeoutFor(OP.loadSchema) }).then(() => undefined, report),
 				session: (endpoint) => (ready ? remoteSession(caller, endpoint, () => infoOf(endpoint.key)) : null),
 				dataVersions: keyed(versions, 0),
@@ -489,6 +589,7 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 				openDocument,
 				prefs,
 				historyPrivacyNote: DEVTOOL_HISTORY_PRIVACY_NOTE,
+				userData,
 			};
 			envs.set(ready, env);
 			return env;

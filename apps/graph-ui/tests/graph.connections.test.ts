@@ -12,7 +12,9 @@ import { test } from 'node:test';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { fakeWorld, manualClock, row } from 'shared/explorer/connect/testing';
 import { makeGraphEndpointStore } from '../src/adapters/explorer';
-import { DETAILS_CLOSED, RECHECKING_TEXT, connectionRow, connectionView, detailsPanelAfter, drawerKeyAfter, emptyState, landingView, ownerText, rowStatusText, sidebarListLine, surfaceGate, testResultText } from '../src/graph/connections';
+import { DETAILS_CLOSED, RECHECKING_TEXT, connectionChips, detailSections, connectionRow, connectionView, countsText, detailsPanelAfter, drawerKeyAfter, emptyState, landingView, ownerText, rowStatusText, schemaSummaryText, sidebarListLine, sizeText, surfaceGate, testResultText } from '../src/graph/connections';
+import { NO_SCHEMA, parseSchema } from '../src/graph/schema';
+import type { ISchemaView } from '../src/graph/schema';
 import { fixture } from './support/builders';
 
 function endpoint(over: Partial<IExplorerEndpoint> = {}): IExplorerEndpoint {
@@ -268,14 +270,16 @@ test('a sidebar row says its state in words: no suffix for a running node, the c
 test('a sidebar row carries a tooltip and an accessible name that include its state, and its dot variant is the card\'s', () => {
 	const running = connectionRow(endpoint(), probeOf('neo4j'));
 	assert.deepEqual({ label: running.label, status: running.status, variant: running.variant }, { label: 'Neo4j', status: null, variant: 'success' });
-	assert.equal(running.tooltip, 'Neo4j \u2014 graph_neo4j \u00b7 Social graph \u00b7 Running');
+	assert.equal(running.tooltip, 'Neo4j \u2014 graph_neo4j \u00b7 Neo4j 5.26.31 Community \u00b7 Social graph \u00b7 Running \u00b7 Read-only', 'the engine and whether it writes');
 	assert.equal(running.ariaLabel, 'Neo4j, Running');
 	const stopped = connectionRow(endpoint({ state: 'stopped', running: false }), undefined);
 	assert.equal(stopped.variant, 'muted');
 	assert.equal(stopped.ariaLabel, 'Neo4j, Stopped');
 	assert.match(stopped.tooltip, /\u00b7 Stopped\nThe pipeline is stopped\. Start it to browse this graph\.$/, 'the reason follows on its own line');
 	const deployed = connectionRow(endpoint({ runKind: 'deploy' }), probeOf('neo4j'));
-	assert.match(deployed.tooltip, /Social graph \(deployment\) \u00b7 Running$/);
+	assert.match(deployed.tooltip, /Social graph \(deployment\) \u00b7 Running \u00b7 Read-only$/);
+	const writable = connectionRow(endpoint(), { ok: true, info: { ...fixture<Record<string, unknown>>('dialect_neo4j'), allow_execute: true }, dialect: 'neo4j' });
+	assert.match(writable.tooltip, /\u00b7 Running \u00b7 Writes allowed$/);
 	assert.ok(!JSON.stringify([running, stopped]).toLowerCase().includes('password'));
 });
 
@@ -307,4 +311,93 @@ test('the inline details panel: Details toggles, Test connection opens and asks 
 	assert.deepEqual(detailsPanelAfter(shown, 'test'), { open: true, testRequest: 1 });
 	assert.deepEqual(detailsPanelAfter(tested, 'close'), DETAILS_CLOSED);
 	assert.deepEqual(detailsPanelAfter(detailsPanelAfter(tested, 'close'), 'toggle'), { open: true, testRequest: 0 }, 'a reopened panel does not test again by itself');
+});
+
+// =============================================================================
+// CARDS AND THE DRAWER: chips, counts and the schema line (M12)
+// =============================================================================
+
+const view = (over: Partial<ISchemaView> = {}): ISchemaView => ({ ...parseSchema(fixture('schema_v2')), ...over });
+const label = (name: string, count: number | null, countEstimated = false) => ({ name, properties: [], count, countEstimated });
+const type = (name: string, count: number | null, countEstimated = false) => ({ type: name, endpoints: [], properties: [], count, countEstimated });
+const chipLabels = (...args: Parameters<typeof connectionChips>) => connectionChips(...args).map((chip) => chip.label);
+
+test('chips for the three engines: Supported (Cypher), and Writes allowed or Read-only, from the node\'s own answer', () => {
+	assert.deepEqual(chipLabels(endpoint(), probeOf('neo4j'), null), ['Supported (Cypher)', 'Read-only']);
+	assert.deepEqual(chipLabels(endpoint({ provider: 'graph_falkordb' }), probeOf('falkordb'), null), ['Supported (Cypher)', 'Read-only']);
+	assert.deepEqual(chipLabels(endpoint({ provider: 'rocketride_graph' }), probeOf('age'), null), ['Supported (Cypher)', 'Read-only']);
+	const writable: IProbeResult = { ok: true, info: { ...fixture<Record<string, unknown>>('dialect_neo4j'), allow_execute: true }, dialect: 'neo4j' };
+	assert.deepEqual(chipLabels(endpoint(), writable, null), ['Supported (Cypher)', 'Writes allowed']);
+	assert.deepEqual(chipLabels(endpoint(), probeOf('old_node'), null), [], 'an old node: its badge says Needs upgrade, and nothing it cannot do is claimed');
+	assert.deepEqual(chipLabels(endpoint(), undefined, null), [], 'nothing before the node answered');
+	assert.deepEqual(chipLabels(endpoint(), failed('down'), null), []);
+});
+
+test('"Empty graph" only for a fresh schema with no labels and no relationship types, never for unknown evidence', () => {
+	const empty = view({ evidence: 'fresh', labels: [], relationshipTypes: [] });
+	assert.ok(chipLabels(endpoint(), probeOf('falkordb'), empty).includes('Empty graph'));
+	assert.ok(!chipLabels(endpoint(), probeOf('falkordb'), { ...empty, evidence: 'unknown' }).includes('Empty graph'));
+	assert.ok(!chipLabels(endpoint(), probeOf('falkordb'), { ...empty, evidence: 'stale' }).includes('Empty graph'));
+	assert.ok(!chipLabels(endpoint(), probeOf('falkordb'), view({ evidence: 'fresh' })).includes('Empty graph'));
+});
+
+test('counts: exact sums; "about" on an estimate; "not reported" for a part whose counts are absent (AGE before ANALYZE)', () => {
+	assert.equal(countsText(view({ labels: [label('A', 20), label('B', 40)], relationshipTypes: [type('R', 90), type('S', 2)] })), '60 nodes (per label) \u00b7 92 relationships');
+	assert.equal(countsText(view({ labels: [label('A', 1, true), label('B', 2)], relationshipTypes: [type('R', 1)] })), 'about 3 nodes (per label) \u00b7 1 relationship');
+	assert.equal(countsText(view({ labels: [label('A', null), label('B', 2)], relationshipTypes: [type('R', 5, true)] })), 'some node counts not reported \u00b7 about 5 relationships', 'a label without a count: no node total, and it says some are missing');
+	assert.equal(countsText(view({ labels: [label('A', null), label('B', null)], relationshipTypes: [type('R', 5)] })), 'nodes not reported \u00b7 5 relationships', 'no label counted at all');
+	assert.equal(countsText(view({ labels: [label('A', null), label('B', 3)], relationshipTypes: [type('R', null), type('S', 1)] })), 'some counts not reported', 'nothing totalled, but some counts exist');
+	assert.equal(countsText(view({ labels: [label('A', 4)], relationshipTypes: [type('R', null)] })), '4 nodes (per label) \u00b7 relationships not reported');
+	assert.equal(countsText(view({ labels: [label('A', null)], relationshipTypes: [type('R', null)] })), 'counts not reported', 'AGE with no counts at all');
+	assert.equal(countsText(view({ labels: [label('A', null)], relationshipTypes: [] })), 'counts not reported');
+	assert.equal(countsText(view({ labels: [], relationshipTypes: [] })), '', 'an empty graph says so with its chip');
+	assert.equal(countsText(null), '', 'not read in this session: no counts, and no request for them');
+	assert.equal(countsText(view({ labels: [label('A', 1_234_567)], relationshipTypes: [] })), '1,234,567 nodes (per label)');
+	assert.equal(countsText(view({ truncated: true, labels: [label('A', 1)], relationshipTypes: [type('R', 1, true)] })), 'at least 1 node (per label) \u00b7 at least about 1 relationship', 'a listing cut short: the sums are lower bounds');
+});
+
+test('the drawer\'s size and schema lines', () => {
+	assert.equal(sizeText(view({ labels: [label('A', null)], relationshipTypes: [] })), 'Counts not reported');
+	assert.equal(sizeText(view({ labels: [label('A', null)], relationshipTypes: [type('R', 2)] })), 'Nodes not reported \u00b7 2 relationships', 'a line starts with a capital');
+	assert.equal(sizeText(view({ evidence: 'stale', labels: [label('A', 3)], relationshipTypes: [] })), '3 nodes (per label), as of the last read', 'a stale schema: the counts of the last successful read');
+	assert.equal(sizeText(view({ evidence: 'fresh', labels: [], relationshipTypes: [] })), 'Empty');
+	assert.equal(sizeText(view({ evidence: 'unknown', labels: [], relationshipTypes: [] })), 'Not reported', 'an unreadable schema proves nothing');
+	assert.equal(sizeText(view({ labels: [label('A', 3)], relationshipTypes: [type('R', 1)] })), '3 nodes (per label) \u00b7 1 relationship');
+	const props = (...names: string[]) => names.map((name) => ({ name, types: ['string'] }));
+	const schema = view({ sampled: true, labels: [{ ...label('A', 1), properties: props('name', 'age') }, { ...label('B', 1), properties: props('name') }], relationshipTypes: [{ ...type('R', 1), properties: props('since') }] });
+	assert.equal(schemaSummaryText(schema), '2 labels \u00b7 1 relationship type \u00b7 3 property keys (sampled)');
+	assert.equal(schemaSummaryText({ ...schema, sampled: false }), '2 labels \u00b7 1 relationship type \u00b7 3 property keys');
+});
+
+test('a card\'s address names the engine once the node answered', () => {
+	assert.equal(connectionView(endpoint(), probeOf('neo4j')).address, 'graph_neo4j \u00b7 Neo4j 5.26.31 Community \u00b7 Social graph');
+	assert.equal(connectionView(endpoint(), undefined).address, 'graph_neo4j \u00b7 Social graph');
+});
+
+test('the drawer leads with the summary and keeps the plumbing behind its disclosure', () => {
+	const schema = view({ labels: [label('A', 3)], relationshipTypes: [type('R', 1)] });
+	const { summary, plumbing } = detailSections(endpoint(), probeOf('neo4j'), schema);
+	assert.deepEqual(summary.map((row) => row.label), ['Engine', 'Database', 'Size', 'Schema']);
+	assert.equal(summary[1].value, 'neo4j');
+	assert.deepEqual(plumbing.map((row) => row.label), ['Pipeline', 'Node', 'Run', 'Writes']);
+	assert.deepEqual(detailSections(endpoint(), probeOf('age'), null).summary.map((row) => row.label), ['Engine', 'Graph'], 'no size or schema line before the schema was read');
+	assert.deepEqual(detailSections(endpoint(), undefined, null).summary, [], 'nothing before the node answered');
+});
+
+test('the drawer never claims "0 labels" for a schema nobody could read', () => {
+	const rows = (schema: ISchemaView) => Object.fromEntries(detailSections(endpoint(), probeOf('neo4j'), schema).summary.map((row) => [row.label, row.value]));
+	const unread = 'Could not be read';
+	const unreported = 'Not reported by this node';
+	assert.deepEqual(rows(parseSchema(fixture('schema_v2_never_succeeded'))), { Engine: 'Neo4j 5.26.31 Community', Database: 'neo4j', Schema: unread }, 'an error');
+	assert.deepEqual(rows(NO_SCHEMA), { Engine: 'Neo4j 5.26.31 Community', Database: 'neo4j', Schema: unread }, 'a failed first load');
+	assert.equal(rows(view({ evidence: 'incapable', labels: [], relationshipTypes: [] })).Schema, unreported, 'an incapable node');
+	assert.equal(rows(parseSchema({ labels: [], nodes: {}, relationships: [] })).Schema, unreported, 'an old node\'s empty answer');
+	for (const schema of [parseSchema(fixture('schema_v2_never_succeeded')), NO_SCHEMA, parseSchema({ labels: [], nodes: {}, relationships: [] })]) {
+		assert.equal(rows(schema).Size, undefined, 'and no size line');
+		assert.doesNotMatch(JSON.stringify(rows(schema)), /0 labels/);
+	}
+	assert.equal(rows(view({ evidence: 'fresh', sampled: false, labels: [], relationshipTypes: [] })).Schema, '0 labels \u00b7 0 relationship types \u00b7 0 property keys', 'a fresh read that lists nothing is an empty graph');
+	assert.equal(rows(view({ evidence: 'stale', sampled: false, labels: [label('A', 1)], relationshipTypes: [] })).Schema, '1 label \u00b7 0 relationship types \u00b7 0 property keys (as of the last read)');
+	assert.equal(rows(view({ evidence: 'stale', sampled: true, labels: [label('A', 1)], relationshipTypes: [] })).Schema, '1 label \u00b7 0 relationship types \u00b7 0 property keys (sampled, as of the last read)', 'one parenthetical, not two');
+	assert.match(rows(parseSchema(fixture('schema_old_node'))).Schema, /^2 labels/, 'an old node that lists something: what it lists');
 });

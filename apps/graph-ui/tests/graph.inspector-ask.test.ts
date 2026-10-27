@@ -39,9 +39,9 @@ test('the inspector shows labels, exact property values and the user\'s own key 
 
 test('nested maps in a property, at any depth and inside lists, show decoded keys; tagged values inside them keep their shape', () => {
 	const model = inspectNode(node('1', ['P'], { '@@a': { '@@b': 1, list: [{ '@@c': true }], big: { '@kind': 'number', value: '9007199254740993' } } }), 'c');
-	assert.deepEqual(model.fields, [{ label: '@a', value: '{"@b":1,"list":[{"@c":true}],"big":{"@kind":"number","value":"9007199254740993"}}' }]);
+	assert.deepEqual(model.fields, [{ label: '@a', value: '{"@b":1,"list":[{"@c":true}],"big":{"@kind":"number","value":"9007199254740993"}}', type: 'map' }]);
 	const relModel = inspectRelationship(rel('r', 'T', 'a', 'b', { m: { '@@x': 'y' } }), (id) => id);
-	assert.deepEqual(relModel.fields, [{ label: 'm', value: '{"@x":"y"}' }]);
+	assert.deepEqual(relModel.fields, [{ label: 'm', value: '{"@x":"y"}', type: 'map' }]);
 	const odd = inspectNode(node('2', ['P'], { m: JSON.parse('{"__proto__":{"x":1}}') }), 'c');
 	assert.equal(odd.fields[0].value, '{"__proto__":{"x":1}}', 'any key is kept as data');
 });
@@ -64,7 +64,7 @@ test('a relationship shows its stored direction, whatever way it was walked', ()
 	assert.equal(model.title, ':KNOWS');
 	assert.equal(model.subtitle, 'Alice → Bob (as stored)');
 	assert.deepEqual(model.endpoints, { start: 'a-id', end: 'b-id' });
-	assert.deepEqual(model.fields, [{ label: 'since', value: '2019' }]);
+	assert.deepEqual(model.fields, [{ label: 'since', value: '2019', type: 'integer' }]);
 	assert.ok(model.notes.includes(ID_NOTE));
 });
 

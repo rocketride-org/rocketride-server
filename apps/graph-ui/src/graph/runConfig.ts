@@ -41,6 +41,7 @@
 import { classifyStatement, patternCheck } from '../cypher/classify';
 import { splitStatements } from '../cypher/split';
 import type { IPatternFinding, StatementKind } from '../cypher/classify';
+import type { GraphDialect } from '../cypher/quote';
 import type { IHistoryEntry } from 'shared/explorer';
 import type { IBatchWords } from 'shared/explorer/runner/format';
 import { rowLimitFor } from './dialect';
@@ -90,7 +91,7 @@ export function refuseNonReads(statements: readonly IPreparedStatement[], canWri
 	const bad = statements.find((s) => s.kind === 'write');
 	if (!bad) return null;
 	const what = bad.finding ? bad.finding.kind : bad.verb;
-	return `This editor only reads. Statement ${statements.indexOf(bad) + 1} looks like it changes data or runs a command (${what}). ${canWrite ? 'Use the write console for this connection.' : 'This node has direct execution turned off, so there is no write console; use a node that allows it.'} This is a text check, not a database safeguard.`;
+	return `Not sent: statement ${statements.indexOf(bad) + 1} looks like it changes data or runs a command (${what}). ${canWrite ? 'Query tabs only run reads; use the write console for this connection.' : 'Query tabs only run reads, and this connection has no write console.'} This is a text check, not a database safeguard.`;
 }
 
 // =============================================================================
@@ -103,12 +104,14 @@ export const STILL_RUNNING_TEXT = 'Nothing was sent: a statement is still runnin
 /**
  * Why a run asked for now cannot start, in words, or null when it can.
  *
- * @param state - Whether a batch is running, and why the surface sends nothing (or null).
+ * @param state - Whether a batch is running, why the surface sends nothing (or null), and why the workbench's request
+ *   gate is busy (graph/requestGate.ts; null or absent when it is free).
  * @returns The sentence to announce, or null.
  */
-export function runRefusal(state: { running: boolean; blocked: string | null }): string | null {
+export function runRefusal(state: { running: boolean; blocked: string | null; busy?: string | null }): string | null {
 	if (state.blocked !== null) return `Nothing was sent. ${state.blocked}`;
 	if (state.running) return STILL_RUNNING_TEXT;
+	if (state.busy) return state.busy;
 	return null;
 }
 
@@ -126,15 +129,29 @@ export interface ISettledRun {
 }
 
 /**
+ * Whether the node's `affected_rows` is NOT a count of changes. Apache AGE's node sends the number of result ROWS
+ * there (0 for a write with no RETURN), so the write console never shows it as "affected".
+ *
+ * @param mode - `read` for the workbench, `write` for the write console.
+ * @param dialect - The engine, or null before the probe.
+ * @returns True for a write on Apache AGE.
+ */
+export function affectedNotReported(mode: 'read' | 'write', dialect: GraphDialect | null | undefined): boolean {
+	return mode === 'write' && dialect === 'age';
+}
+
+/**
  * How a statement that answered settles. In the write console it is the affected count `execute` returned (its rows
- * still draw); an answer without that count settles as rows rather than claiming "0 affected".
+ * still draw); an answer without that count, or one whose count is not a count of changes (Apache AGE, see
+ * {@link affectedNotReported}), settles as rows rather than claiming "0 affected".
  *
  * @param mode - `read` for the workbench, `write` for the write console.
  * @param result - The node's answer.
+ * @param dialect - The engine, or null before the probe.
  * @returns The settled fields.
  */
-export function settleRun(mode: 'read' | 'write', result: ReadQueryResult): ISettledRun {
-	if (mode === 'write' && typeof result.affected_rows === 'number') return { outcome: 'affected', rowCount: result.rows.length, affected: result.affected_rows, result };
+export function settleRun(mode: 'read' | 'write', result: ReadQueryResult, dialect: GraphDialect | null = null): ISettledRun {
+	if (mode === 'write' && !affectedNotReported(mode, dialect) && typeof result.affected_rows === 'number') return { outcome: 'affected', rowCount: result.rows.length, affected: result.affected_rows, result };
 	return { outcome: 'rows', rowCount: result.rows.length, result };
 }
 
@@ -164,22 +181,26 @@ export interface IFinishedRun {
 
 /**
  * The history summary of a finished run: its outcome, its count (rows for a read, affected for a write), and the
- * row limit only when one was sent.
+ * row limit only when one was sent. A write whose node does not count changes (Apache AGE, see
+ * {@link affectedNotReported}) settles as rows; History records it as a write whose count was not reported, never as
+ * "0 rows".
  *
  * @param run - The finished run.
  * @param now - The clock reading when it finished (ms since the epoch).
+ * @param opts - `affectedNotReported`: the run is a write on such a node.
  * @returns The summary for {@link toHistoryEntry}.
  */
-export function historySummaryOf(run: IFinishedRun, now: number): IRunSummary {
+export function historySummaryOf(run: IFinishedRun, now: number, opts: { affectedNotReported?: boolean } = {}): IRunSummary {
 	const ms = Math.round(run.ms ?? 0);
-	const outcome: IRunSummary['outcome'] = run.outcome === 'rows' || run.outcome === 'affected' || run.outcome === 'abandoned' ? run.outcome : 'error';
+	const settled: IRunSummary['outcome'] = run.outcome === 'rows' || run.outcome === 'affected' || run.outcome === 'abandoned' ? run.outcome : 'error';
+	const outcome: IRunSummary['outcome'] = opts.affectedNotReported === true && settled === 'rows' ? 'affected' : settled;
 	return {
 		cypher: run.cypher,
 		at: Math.round(now - (run.ms ?? 0)),
 		ms,
 		outcome,
 		...(outcome === 'rows' ? { rows: run.result?.rows.length ?? 0 } : {}),
-		...(outcome === 'affected' ? { affected: run.affected ?? 0 } : {}),
+		...(outcome === 'affected' && run.affected !== undefined ? { affected: run.affected } : {}),
 		...(run.limitApplied != null ? { limit: run.limitApplied } : {}),
 		...(run.error !== undefined ? { error: run.error } : {}),
 		kind: run.verb,

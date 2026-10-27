@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { KEY_HELP, handled, keyAction } from '../src/graph/keynav';
+import { KEY_HELP, handled, keyAction, nextRelationship } from '../src/graph/keynav';
 import type { IKeyContext, KeyAction } from '../src/graph/keynav';
 import { modelFromResult } from '../src/graph/model';
 import { NO_SCHEMA, ageText, countText, parseSchema, schemaStatusText, splitError } from '../src/graph/schema';
@@ -70,7 +70,7 @@ test('every core action has a key', () => {
 	assert.deepEqual(press(c, 'c'), { type: 'collapse', id: 'c' });
 	assert.deepEqual(press(c, 'Delete'), { type: 'dismiss', id: 'c' });
 	assert.deepEqual(press(c, 'p'), { type: 'find-path' });
-	assert.deepEqual(press(c, 'Escape'), { type: 'clear-selection' });
+	assert.deepEqual(press({ ...c, clearable: 'selection' }, 'Escape'), { type: 'clear-selection' });
 	assert.deepEqual(press(c, '?'), { type: 'help' });
 	const documented = KEY_HELP.map((k) => k.keys).join(' | ');
 	for (const word of ['Arrow', 'Home', 'Enter', 'Space', 'E', 'C', 'Delete', 'P', 'Escape', '?', 'Tab']) assert.ok(documented.includes(word), `${word} is documented`);
@@ -113,6 +113,50 @@ test('every key the model uses is reported as handled so the page does not also 
 	assert.equal(handled(press(c, 'Tab')), false);
 	assert.equal(handled(press(c, 'x')), false);
 	assert.equal(handled(press({ ...c, focusedId: 'n' }, 'ArrowUp')), false, 'an arrow with nowhere to go is left to the browser');
+});
+
+// Relationships are drawn by the edge layer and are not focusable, so R walks the focused node's relationships into the
+// inspector: they are reachable without a pointer.
+test('R picks the focused node\'s next drawn relationship, in drawn order, wrapping; none when it has none', () => {
+	const c = cross();
+	assert.deepEqual(press(c, 'r'), { type: 'next-relationship', id: 'c' });
+	assert.deepEqual(press(c, 'R'), { type: 'next-relationship', id: 'c' });
+	assert.deepEqual(press({ ...c, focusedId: null }, 'r'), { type: 'none' });
+	assert.equal(nextRelationship(c.model, 'c', null), '1', 'the first when none of its relationships is selected');
+	assert.equal(nextRelationship(c.model, 'c', '1'), '2');
+	assert.equal(nextRelationship(c.model, 'c', '4'), '1', 'wraps');
+	assert.equal(nextRelationship(c.model, 'c', 'unrelated'), '1', 'a selected relationship of another node starts over');
+	assert.equal(nextRelationship(c.model, 'n', null), '1');
+	assert.equal(nextRelationship(c.model, 'n', '1'), '1', 'a node with one relationship stays on it');
+	assert.equal(nextRelationship(c.model, 'far', null), null);
+	assert.equal(nextRelationship(c.model, 'gone', null), null);
+	assert.ok(KEY_HELP.some((k) => k.keys === 'R' && /relationship/.test(k.does)));
+});
+
+test('the Menu key and Shift+F10 open the focused node\'s menu; F10 alone does not', () => {
+	const c = cross();
+	assert.deepEqual(press(c, 'ContextMenu'), { type: 'context-menu', id: 'c' });
+	assert.deepEqual(press(c, 'F10', { shiftKey: true }), { type: 'context-menu', id: 'c' });
+	assert.deepEqual(press(c, 'F10'), { type: 'none' });
+	assert.deepEqual(press({ ...c, focusedId: null }, 'ContextMenu'), { type: 'none' });
+	assert.equal(handled(press(c, 'ContextMenu')), true, 'the browser does not also open its own menu');
+	assert.ok(KEY_HELP.some((k) => k.keys === 'Menu or Shift+F10' && /menu/i.test(k.does)));
+});
+
+// Escape has several owners (the canvas, the view's menu and panels, the workbench's full screen) and nothing may stop
+// an event from propagating, so the innermost one that USES Escape calls preventDefault and the others ignore an event
+// that is already defaultPrevented. The canvas uses it only while it has something to clear.
+test('Escape clears the selection, then a shown path; with nothing to clear it is not the canvas\'s, so the page gets it', () => {
+	const c = cross();
+	assert.deepEqual(press({ ...c, clearable: 'selection' }, 'Escape'), { type: 'clear-selection' });
+	assert.deepEqual(press({ ...c, clearable: 'path' }, 'Escape'), { type: 'clear-path' });
+	assert.equal(handled(press({ ...c, clearable: 'path' }, 'Escape')), true);
+	for (const clearable of [null, undefined]) {
+		const action = press({ ...c, clearable }, 'Escape');
+		assert.deepEqual(action, { type: 'none' });
+		assert.equal(handled(action), false, 'no preventDefault: full screen (or whatever holds the canvas) gets the key');
+	}
+	assert.ok(KEY_HELP.some((k) => k.keys === 'Escape' && /selection/.test(k.does) && /path/.test(k.does)));
 });
 
 // -----------------------------------------------------------------------------

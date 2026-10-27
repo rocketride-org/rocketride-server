@@ -34,6 +34,20 @@ export const styles = {
 		...commonStyles.columnFill,
 	} as CSSProperties,
 
+	// A connection document's root: the positioned ancestor its in-document full screen covers.
+	documentRoot: {
+		...commonStyles.columnFill,
+		position: 'relative',
+	} as CSSProperties,
+
+	// The same root while a graph fills it: what the graph covers is hidden from the keyboard and screen readers
+	// (the graph's own area sets itself visible again), with the layout unchanged.
+	documentRootCovered: {
+		...commonStyles.columnFill,
+		position: 'relative',
+		visibility: 'hidden',
+	} as CSSProperties,
+
 	// Scrolling content column below the header (standard 20/24 gutters).
 	content: {
 		flex: 1,

@@ -43,9 +43,21 @@
 //
 // What is not generated, on purpose: RETURN * (AGE rejects it), ORDER BY on a
 // RETURN alias (AGE fails on it), WHERE n:Label (AGE cannot parse it), multiple
-// labels on one node (AGE has one label per node), shortestPath (AGE has none),
-// datetime() and friends. The generated queries stay inside what all three
-// engines accept.
+// labels on one node (AGE has one label per node), datetime() and friends. The
+// generated queries stay inside what all three engines accept, with ONE
+// exception: the single shortestPath call of a path search, which is sent only
+// on Neo4j (usesShortestPath; never FalkorDB or AGE) and is backed by the depth
+// search, which every engine accepts. A relationship type is one type per
+// statement: AGE 1.5.0 cannot parse `[:A|B]`.
+//
+// "New query from here" is different: it is TEXT put into the editor for the
+// user to read, change and run, and the editor sends no parameters. So the id is
+// written into it, but only an id that can be written safely: an integer on
+// FalkorDB and AGE (kept as the decimal text it arrived as, never through a
+// JavaScript number), and a string with no quote, backslash or control character
+// on Neo4j. Anything else gets no text, never an escaped guess. The text starts
+// with a comment saying the id is a live handle: History and Saved queries keep
+// it long after the element may be gone.
 // =============================================================================
 
 import { PATH_MAX_DEPTH, PREVIEW_LIMIT } from '../graph/budgets';
@@ -79,6 +91,8 @@ export interface IEngine {
 	dialect: GraphDialect;
 	/** The engine version string from `dialect`, when the node reports one. */
 	version?: string | null;
+	/** The node's `dialect.capabilities.shortest_path`: true only when it says the engine has shortestPath(). */
+	shortestPath?: boolean;
 }
 
 /** The AGE ceiling for the OR-chain connect query (no `IN` over bound ids is proven on AGE). */
@@ -90,6 +104,21 @@ export const AGE_CONNECT_MAX_NODES = 40;
  * node's 10,000-character limit. Drawn relationships past this are fetched again and counted into the row limit.
  */
 export const AGE_EXPAND_MAX_EXCLUDED = 200;
+
+/**
+ * Whether FalkorDB gets the one-call shortest path: NO, for good. Probed live on FalkorDB 4.22.2 (graph `shop`, Ada to
+ * Ken): the Neo4j form fails ("only supports shortestPaths in WITH or RETURN clauses"), an undirected one is refused
+ * ("does not currently support undirected shortestPath traversals"), and the directed one it accepts answers a
+ * different question: a path of 5 relationships from Ada to Ken, none the other way, where the undirected depth search
+ * finds one of 3. The graph view's paths are undirected, so FalkorDB uses the depth search, as AGE does.
+ */
+export const FALKORDB_SHORTEST_PATH = false;
+
+/** The first line of "new query from here" text: the id written below it is a live handle. */
+export const LIVE_HANDLE_NOTE = '// Ids are live handles: an id below named its element when this text was written; after a delete, the database can give it to another.';
+
+/** Nodes fetched by "new query from here". */
+const QUERY_TEXT_LIMIT = 25;
 
 /**
  * Whether a recipe result is a refusal.
@@ -226,6 +255,38 @@ export function inspectNode(engine: IEngine, id: string): RecipeResult {
  * @returns The recipe, or why there is none.
  */
 export function expandNeighbors(engine: IEngine, id: string, wanted: number, drawn: readonly string[]): RecipeResult {
+	return expandOver(engine, id, wanted, drawn, '');
+}
+
+/**
+ * The relationships of ONE type around a node that are not drawn yet, and the nodes at their other ends: the same
+ * statement as {@link expandNeighbors}, with the type in the relationship pattern (`-[r:TYPE]-`, which every engine
+ * takes, AGE included). The type is quoted by the dialect's rules (quote.ts), or refused.
+ *
+ * @param engine - The engine.
+ * @param id - The element id of the node to expand.
+ * @param type - The relationship type exactly as the schema reports it.
+ * @param wanted - New neighbours wanted (the per-expansion cap).
+ * @param drawn - Ids of this node's relationships of that type already drawn.
+ * @returns The recipe, or why there is none.
+ */
+export function expandByType(engine: IEngine, id: string, type: string, wanted: number, drawn: readonly string[]): RecipeResult {
+	const quoted = quoteIdentifier(type, engine.dialect);
+	if (quoted === null) return { refusal: `The relationship type "${printable(type)}" cannot be put in a generated query on this engine. Write the query by hand to expand over it.` };
+	return expandOver(engine, id, wanted, drawn, `:${quoted}`);
+}
+
+/**
+ * The expansion statement.
+ *
+ * @param engine - The engine.
+ * @param id - The element id of the node to expand.
+ * @param wanted - New neighbours wanted.
+ * @param drawn - Ids of the relationships already drawn that the pattern can match.
+ * @param typed - `''` for every type, or `:QUOTED` for one.
+ * @returns The recipe, or why there is none.
+ */
+function expandOver(engine: IEngine, id: string, wanted: number, drawn: readonly string[], typed: string): RecipeResult {
 	if (!validId(id)) return { refusal: 'There is no usable id for this element.' };
 	const predicate = idPredicate(engine, 'n', 'id');
 	if (typeof predicate !== 'string') return predicate;
@@ -245,7 +306,7 @@ export function expandNeighbors(engine: IEngine, id: string, wanted: number, dra
 	}
 	// Drawn relationships that could not be left out may come back: ask for that many more rows.
 	const rows = clampInt(clampInt(wanted, 1, 1000) + (unique.length - left.length) + 1, 2, 2000);
-	return { cypher: `MATCH (n) WHERE ${predicate} OPTIONAL MATCH (n)-[r]-(m)${exclude} RETURN n, r, m LIMIT ${rows}`, params, limit: rows };
+	return { cypher: `MATCH (n) WHERE ${predicate} OPTIONAL MATCH (n)-[r${typed}]-(m)${exclude} RETURN n, r, m LIMIT ${rows}`, params, limit: rows };
 }
 
 /**
@@ -302,6 +363,123 @@ export function pathAtDepth(engine: IEngine, fromId: string, toId: string, depth
 	if (typeof to !== 'string') return to;
 	const d = clampInt(depth, 1, PATH_MAX_DEPTH);
 	return { cypher: `MATCH p = (a)-[*${d}..${d}]-(b) WHERE ${from} AND ${to} RETURN p LIMIT 1`, params: { from: fromId, to: toId }, limit: 1 };
+}
+
+/**
+ * Whether a path search starts with one shortestPath call: only where the node reports the engine has shortestPath()
+ * and the undirected form works (Neo4j 5 and later; not FalkorDB, see {@link FALKORDB_SHORTEST_PATH}; never AGE).
+ *
+ * @param engine - The engine, with the node's shortest_path capability.
+ * @returns True when the call is made.
+ */
+export function usesShortestPath(engine: IEngine): boolean {
+	if (engine.shortestPath !== true) return false;
+	if (engine.dialect === 'neo4j') return typeof idPredicate(engine, 'a', 'from') === 'string';
+	return engine.dialect === 'falkordb' && FALKORDB_SHORTEST_PATH;
+}
+
+/**
+ * One shortest path of at most `maxDepth` relationships between two nodes, in ONE call, on Neo4j. Traversal is in
+ * either direction, as the depth search's, so an empty answer means no path within `maxDepth` (probed on Neo4j
+ * 2026.10.1: it finds what the depth search finds). On an error the caller falls back to the depth search.
+ *
+ * @param engine - The engine (Neo4j; FalkorDB and AGE are refused).
+ * @param fromId - Element id of the first node.
+ * @param toId - Element id of the second node.
+ * @param maxDepth - The longest path asked for (1..10).
+ * @returns The recipe, or why there is none.
+ */
+export function shortestPathRecipe(engine: IEngine, fromId: string, toId: string, maxDepth: number = PATH_MAX_DEPTH): RecipeResult {
+	if (engine.dialect === 'age') return { refusal: 'Apache AGE has no shortestPath(); the path is found one depth at a time.' };
+	if (engine.dialect === 'falkordb' && !FALKORDB_SHORTEST_PATH) return { refusal: "FalkorDB's shortestPath() follows relationships in one direction only, so it can miss the shortest path; the path is found one depth at a time." };
+	if (!validId(fromId) || !validId(toId)) return { refusal: 'There is no usable id for one of the two nodes.' };
+	if (fromId === toId) return { refusal: 'Pick two different nodes.' };
+	const from = idPredicate(engine, 'a', 'from');
+	if (typeof from !== 'string') return from;
+	const to = idPredicate(engine, 'b', 'to');
+	if (typeof to !== 'string') return to;
+	const d = clampInt(maxDepth, 1, PATH_MAX_DEPTH);
+	return { cypher: `MATCH (a), (b) WHERE ${from} AND ${to} MATCH p = shortestPath((a)-[*..${d}]-(b)) RETURN p LIMIT 1`, params: { from: fromId, to: toId }, limit: 1 };
+}
+
+// =============================================================================
+// "NEW QUERY FROM HERE" (editor text, ids written in)
+// =============================================================================
+
+/**
+ * An id as a literal for editor text, or null when it cannot be written safely.
+ *
+ * @param engine - The engine.
+ * @param id - The element id.
+ * @returns `'4:…:26'` on Neo4j, a decimal integer elsewhere, or null.
+ */
+function idLiteral(engine: IEngine, id: string): string | null {
+	if (!validId(id)) return null;
+	if (engine.dialect !== 'neo4j') return /^\d{1,20}$/.test(id) ? id : null;
+	for (const ch of id) {
+		const code = ch.charCodeAt(0);
+		if (ch === "'" || ch === '\\' || code < 0x20 || code === 0x7f) return null;
+	}
+	return `'${id}'`;
+}
+
+/**
+ * `elementId(v) = '…'` or `id(v) = 123`, or null.
+ *
+ * @param engine - The engine.
+ * @param variable - The variable in the statement.
+ * @param id - The element id.
+ * @returns The predicate text, or null.
+ */
+function literalPredicate(engine: IEngine, variable: string, id: string): string | null {
+	const literal = idLiteral(engine, id);
+	if (literal === null || typeof idPredicate(engine, variable, 'x') !== 'string') return null;
+	return engine.dialect === 'neo4j' ? `elementId(${variable}) = ${literal}` : `id(${variable}) = ${literal}`;
+}
+
+/**
+ * Editor text for a node and its neighbours.
+ *
+ * @param engine - The engine.
+ * @param id - The node's element id.
+ * @returns The statement, or null when the id cannot be written in.
+ */
+export function neighboursQueryText(engine: IEngine, id: string): string | null {
+	const predicate = literalPredicate(engine, 'n', id);
+	return predicate === null ? null : `${LIVE_HANDLE_NOTE}\nMATCH (n) WHERE ${predicate} OPTIONAL MATCH (n)-[r]-(m) RETURN n, r, m LIMIT ${QUERY_TEXT_LIMIT}`;
+}
+
+/**
+ * Editor text for a relationship and its two ends.
+ *
+ * @param engine - The engine.
+ * @param id - The relationship's element id.
+ * @returns The statement, or null when the id cannot be written in.
+ */
+export function relationshipQueryText(engine: IEngine, id: string): string | null {
+	const predicate = literalPredicate(engine, 'r', id);
+	return predicate === null ? null : `${LIVE_HANDLE_NOTE}\nMATCH (a)-[r]->(b) WHERE ${predicate} RETURN a, r, b`;
+}
+
+/**
+ * Editor text that asks for a path between two nodes the way it was found.
+ *
+ * @param engine - The engine.
+ * @param fromId - The first node's element id.
+ * @param toId - The last node's element id.
+ * @param how - One shortestPath call, or one exact depth.
+ * @returns The statement, or null when an id cannot be written in (or there is no shortestPath on the engine).
+ */
+export function pathQueryText(engine: IEngine, fromId: string, toId: string, how: { method: 'shortest-path' } | { method: 'depth'; depth: number }): string | null {
+	const from = literalPredicate(engine, 'a', fromId);
+	const to = literalPredicate(engine, 'b', toId);
+	if (from === null || to === null) return null;
+	if (how.method === 'shortest-path') {
+		if (engine.dialect !== 'neo4j') return null;
+		return `${LIVE_HANDLE_NOTE}\nMATCH (a), (b) WHERE ${from} AND ${to} MATCH p = shortestPath((a)-[*..${PATH_MAX_DEPTH}]-(b)) RETURN p`;
+	}
+	const d = clampInt(how.depth, 1, PATH_MAX_DEPTH);
+	return `${LIVE_HANDLE_NOTE}\nMATCH p = (a)-[*${d}..${d}]-(b) WHERE ${from} AND ${to} RETURN p LIMIT 1`;
 }
 
 /**

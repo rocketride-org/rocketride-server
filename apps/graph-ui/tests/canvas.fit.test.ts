@@ -108,19 +108,41 @@ test('a single node with several loops: the bounds grow with each loop\'s reach 
 	assert.ok(reach(5) >= reach(3));
 });
 
+// Sizes S, M and L (per-label styles) give nodes different radii: the fit, and where each relationship meets its
+// circles, use each node's own radius.
+test('per-node radii: a large node grows the bounds by its own radius, and a relationship meets each circle at its own radius', () => {
+	const c = centers({ small: [0, 0], large: [300, 0] });
+	const edges = edgesOf([{ id: 'e', source: 'small', target: 'large' }]);
+	const radius = (id: string): number => (id === 'large' ? 38 : 20);
+	const same = contentBounds(c, edges)!;
+	const sized = contentBounds(c, edges, radius)!;
+	assert.equal(sized.x, -20, 'the small node reaches 20 to its left');
+	assert.equal(sized.x + sized.width, 338, 'the large node reaches 38 to its right');
+	assert.equal(sized.y + sized.height, 38 + CAPTION_BELOW, 'its caption sits under its own circle');
+	assert.notDeepEqual(sized, same);
+	assert.deepEqual(contentBounds(c, edges, NODE_RADIUS), same, 'a number is every node\'s radius, as before');
+});
+
 test('pairsIn reads path data and polygon points', () => {
 	assert.deepEqual(pairsIn('M1.5 2Q-3 4.25 5e1 6'), [{ x: 1.5, y: 2 }, { x: -3, y: 4.25 }, { x: 50, y: 6 }]);
 	assert.deepEqual(pairsIn('1,2 3,4 5,6'), [{ x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 6 }]);
 	assert.deepEqual(pairsIn(''), []);
 });
 
-test('wiring: the automatic fit, the ResizeObserver refit and the fit button all go through contentBounds, with the same zoom cap, padding and motion rules', () => {
+test('wiring: the automatic fit and the fit button go through contentBounds with the same zoom cap, padding and motion rules; a resize never refits by itself', () => {
 	const canvas = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'canvas', 'GraphCanvas.tsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-	assert.match(canvas, /contentBounds\(layoutPositions\.current, edgesRef\.current\)/);
+	assert.match(canvas, /contentBounds\(layoutPositions\.current, edgesRef\.current, radiusOf\)/, 'each node at its own size');
 	assert.match(canvas, /getViewportForBounds\(bounds, el\.clientWidth, el\.clientHeight, FLOW_MIN_ZOOM, FIT_MAX_ZOOM, FIT_PADDING\)/);
 	assert.doesNotMatch(canvas, /\.fitView\(/, 'React Flow\'s node-box fit is no longer used');
 	assert.match(canvas, /const duration = reducedRef\.current \|\| document\.hidden \? 0 : 300/, 'reduced motion and hidden tabs still skip the animation');
-	assert.match(canvas, /if \(!userMoved\.current\) pendingFit\.current = true;\s*tryFit\(\);/, 'the ResizeObserver still refits until the user takes the view over');
 	assert.match(canvas, /showFitView=\{false\}/);
 	assert.match(canvas, /onClick=\{refit\}/);
+	// The inspector opening beside the canvas resizes it between the two clicks of a double-click: a refit then moved
+	// the node from under the pointer. A resize keeps the view (only the focused node is kept inside it), and a fit is
+	// made when a layout lands (also one owed by a tab that was hidden), on Fit, or with refitOnResize.
+	const observer = canvas.slice(canvas.indexOf('new ResizeObserver('), canvas.indexOf('observer.observe(el)'));
+	assert.match(observer, /if \(el\.clientWidth === 0 \|\| el\.clientHeight === 0\) return;/, 'a hidden canvas has nothing to keep');
+	assert.match(observer, /if \(latest\.current\.refitOnResize === true && !userMoved\.current\) pendingFit\.current = true;/);
+	assert.match(observer, /if \(pendingFit\.current\) tryFit\(\);\s*else keepFocusedInView\(el\.clientWidth, el\.clientHeight\);/);
+	assert.doesNotMatch(observer, /pendingFit\.current = true;\s*tryFit\(\)/, 'no unconditional refit');
 });

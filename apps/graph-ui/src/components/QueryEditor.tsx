@@ -41,6 +41,11 @@
 // editorTheme.ts are still computed and measured (tests/a11y.contrast.test.ts) and
 // are wired back in once the shared editor takes per-app token colours.
 //
+// Suggestions: ONE completion provider per realm (components/completionProvider.ts) answers every editor from the
+// schema and engine of its own model's URI. Marks: a failed statement's position is set as one error mark, cleared on
+// the next edit; with `warnWrites` (the read workbench) a statement the local text check would refuse is marked as you
+// type. Neither exists in the plain text box.
+//
 // Keys: Ctrl/Cmd+Enter runs the selection or the statement at the caret;
 // Ctrl/Cmd+Shift+Enter runs every statement. Neither traps focus: Tab leaves the
 // plain text box, and Monaco's own "Tab moves focus" toggle (Ctrl+M) is honoured.
@@ -51,7 +56,11 @@ import type { CSSProperties } from 'react';
 import type * as MonacoNS from 'monaco-editor';
 import { MonacoEditor, loadMonaco } from 'shared/components/monaco';
 import type { Monaco } from 'shared/components/monaco';
+import type { ICompletionModel } from '../cypher/completion';
 import type { IEditorSnapshot, ISelection } from '../cypher/targets';
+import { readRefusalMarkers } from '../graph/writeWarnings';
+import { MARKER_OWNER, applyMarkers, ensureCypherCompletion, markersKey, setCompletionContext } from './completionProvider';
+import type { IEditorMarker } from './completionProvider';
 
 // =============================================================================
 // TYPES
@@ -86,7 +95,16 @@ export interface IQueryEditorProps {
 	onCursorChange?(): void;
 	/** Accessible name of the editor. */
 	label: string;
+	/** What suggestions are made from (the connection's schema and engine); null or absent: none. */
+	completion?: ICompletionModel | null;
+	/** Marks in the text, by buffer offset (a failed statement's position). Shown until the next edit; a fresh array each render is fine. */
+	markers?: readonly IEditorMarker[];
+	/** Mark, as the text changes, each statement the read workbench would refuse. Off in the write console. */
+	warnWrites?: boolean;
 }
+
+/** How long after the last edit the refusal marks are recomputed. */
+const WARNING_DEBOUNCE_MS = 400;
 
 // =============================================================================
 // MONACO AVAILABILITY
@@ -160,7 +178,7 @@ const styles = {
 };
 
 /** The wording of the fallback notice (also used by the README and the tests). */
-export const EDITOR_FALLBACK_NOTICE = 'The code editor could not be loaded, so a plain text box is used. Running, drafts and history work the same; only highlighting is missing.';
+export const EDITOR_FALLBACK_NOTICE = 'The code editor could not be loaded, so a plain text box is used. Running, drafts and history work the same; only highlighting, suggestions and error marks are missing.';
 
 // =============================================================================
 // COMPONENT
@@ -172,7 +190,7 @@ export const EDITOR_FALLBACK_NOTICE = 'The code editor could not be loaded, so a
  * @param props - See {@link IQueryEditorProps}.
  * @returns The editor, or a plain text box when Monaco is unavailable.
  */
-export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(function QueryEditor({ value, onChange, onRun, onRunAll, onCursorChange, label }, ref) {
+export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(function QueryEditor({ value, onChange, onRun, onRunAll, onCursorChange, label, completion, markers, warnWrites }, ref) {
 	const status = useMonacoStatus();
 	const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null);
 	const textRef = useRef<HTMLTextAreaElement | null>(null);
@@ -192,6 +210,64 @@ export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(fun
 	useEffect(
 		() => () => {
 			if (timer.current) clearTimeout(timer.current);
+		},
+		[]
+	);
+
+	// ── Suggestions and marks (Monaco only) ──────────────────────────────────
+	const monacoRef = useRef<Monaco | null>(null);
+	const modelUri = useRef<string | null>(null);
+	const warnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// Bumped when Monaco mounts, so the effects below run once there is a model to put things on.
+	const [mounted, setMounted] = useState(0);
+	// The failure's marks are shown until the next edit; the refusal warnings follow the text.
+	const failureShown = useRef(false);
+	const refusals = useRef<IEditorMarker[]>([]);
+	const latestMarks = useRef({ markers, warnWrites });
+	useLayoutEffect(() => {
+		latestMarks.current = { markers, warnWrites };
+	});
+
+	/** Put the current marks on the model: the failure's (until an edit) and the refusal warnings. */
+	const showMarks = useCallback(() => {
+		const monaco = monacoRef.current;
+		const model = editorRef.current?.getModel();
+		if (!monaco || !model) return;
+		applyMarkers(monaco, model, [...(failureShown.current ? latestMarks.current.markers ?? [] : []), ...(latestMarks.current.warnWrites ? refusals.current : [])]);
+	}, []);
+
+	/** Recompute the refusal warnings from the live text. */
+	const scanRefusals = useCallback(() => {
+		const model = editorRef.current?.getModel();
+		refusals.current = model && latestMarks.current.warnWrites ? readRefusalMarkers(model.getValue()) : [];
+		showMarks();
+	}, [showMarks]);
+
+	useEffect(() => {
+		const uri = modelUri.current;
+		if (!uri) return;
+		setCompletionContext(uri, completion ?? null);
+	}, [completion, mounted]);
+
+	// Keyed on what the marks say, not on the array: a caller that builds a fresh array each render must not bring a mark
+	// back on the text after an edit cleared it.
+	const marksKey = markersKey(markers);
+	useEffect(() => {
+		failureShown.current = marksKey !== '';
+		showMarks();
+	}, [marksKey, mounted, showMarks]);
+
+	useEffect(() => {
+		scanRefusals();
+	}, [warnWrites, mounted, scanRefusals]);
+
+	useEffect(
+		() => () => {
+			if (warnTimer.current) clearTimeout(warnTimer.current);
+			if (modelUri.current) setCompletionContext(modelUri.current, null);
+			// The model is disposed with the editor; its marks go with it.
+			const model = editorRef.current?.getModel();
+			if (monacoRef.current && model && !model.isDisposed()) monacoRef.current.editor.setModelMarkers(model, MARKER_OWNER, []);
 		},
 		[]
 	);
@@ -257,9 +333,25 @@ export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(fun
 		timer.current = setTimeout(() => latest.current.onCursorChange?.(), 150);
 	}, []);
 
+	const handleBeforeMount = useCallback((monaco: Monaco) => {
+		ensureCypherCompletion(monaco);
+	}, []);
+
 	const handleMount = useCallback(
 		(editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: Monaco) => {
 			editorRef.current = editor;
+			monacoRef.current = monaco;
+			modelUri.current = editor.getModel()?.uri.toString() ?? null;
+			// An edit ends the failure's mark (it pointed into the old text) and schedules the refusal check.
+			editor.onDidChangeModelContent(() => {
+				failureShown.current = false;
+				// The refusal warnings were measured on the old text: drop them until the check runs again.
+				refusals.current = [];
+				showMarks();
+				if (warnTimer.current) clearTimeout(warnTimer.current);
+				if (latestMarks.current.warnWrites) warnTimer.current = setTimeout(scanRefusals, WARNING_DEBOUNCE_MS);
+			});
+			setMounted((n) => n + 1);
 			if (pending.current !== null) {
 				editor.setValue(pending.current);
 				pending.current = null;
@@ -268,7 +360,7 @@ export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(fun
 			editor.addAction({ id: 'graph-ui.runAll', label: 'Run All Statements', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter], run: () => latest.current.onRunAll() });
 			editor.onDidChangeCursorSelection(settle);
 		},
-		[settle]
+		[settle, showMarks, scanRefusals]
 	);
 
 	if (status === 'failed') {
@@ -305,9 +397,10 @@ export const QueryEditor = forwardRef<IQueryEditorHandle, IQueryEditorProps>(fun
 				<MonacoEditor
 					language="cypher"
 					value={initial.current}
+					beforeMount={handleBeforeMount}
 					onMount={handleMount}
 					onChange={onChange}
-					options={{ minimap: { enabled: false }, fontSize: 13, lineNumbersMinChars: 3, scrollBeyondLastLine: false, automaticLayout: true, wordWrap: 'on', padding: { top: 10, bottom: 10 }, ariaLabel: label }}
+					options={{ wordBasedSuggestions: 'off', minimap: { enabled: false }, fontSize: 13, lineNumbersMinChars: 3, scrollBeyondLastLine: false, automaticLayout: true, wordWrap: 'on', padding: { top: 10, bottom: 10 }, ariaLabel: label }}
 				/>
 			)}
 		</div>

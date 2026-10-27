@@ -30,14 +30,19 @@
 // verbatim, including any literal values typed into a statement, and the panel says
 // so in the words of its mount: the full app keeps them in the workspace file, a dev
 // tool in a file in the user's folder (env.historyPrivacyNote).
+//
+// The list is the body of an inline side panel (SidePanel), never a drawer: see
+// SidePanel for why a connection document holds no modal panel. Clear asks first,
+// in the shell's one-shot confirmation.
 // =============================================================================
 
 import React, { useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Button, ConfirmDialog, DetailPanel, EmptyState, InputField, StatusBadge } from 'shell';
+import { Button, ConfirmDialog, EmptyState, InputField, StatusBadge } from 'shell';
 import { clock, readErrorMessage } from 'shared/explorer';
 import type { IHistoryEntry } from 'shared/explorer';
 import { APP_HISTORY_PRIVACY_NOTE, useGraphEnv, useHistoryView } from '../env';
+import { changesText } from '../graph/wording';
 import { GraphIcon } from '../icons';
 
 /** The full app's privacy note, word for word the same as SQL Explorer's (each mount says its own: env.historyPrivacyNote). */
@@ -47,12 +52,12 @@ export const HISTORY_PRIVACY_NOTE = APP_HISTORY_PRIVACY_NOTE;
 export interface IHistoryPanelProps {
 	endpointKey: string;
 	nodeName: string;
-	open: boolean;
-	onClose(): void;
-	/** Put the statement in the editor. */
+	/** Put the statement in the editor, in place of its text (an edit the editor can undo). */
 	onLoad(cypher: string): void;
 	/** Run the statement again (an explicit gesture; nothing reruns by itself). */
 	onRerun(cypher: string): void;
+	/** Open the statement in a new query tab, not run (the workbench only). */
+	onOpenInNewTab?(cypher: string): void;
 	announce(text: string): void;
 }
 
@@ -67,7 +72,7 @@ export function entrySummary(entry: IHistoryEntry<'cypher'>): string {
 		case 'rows':
 			return `${(entry.rows ?? 0).toLocaleString('en-US')} ${entry.rows === 1 ? 'row' : 'rows'}${entry.limit !== undefined ? ` (limit ${entry.limit.toLocaleString('en-US')})` : ''}`;
 		case 'affected':
-			return `${(entry.affected ?? 0).toLocaleString('en-US')} affected`;
+			return entry.affected === undefined ? 'change count not reported' : changesText(entry.affected);
 		case 'abandoned':
 			return 'stopped waiting; the database may have finished it';
 		default:
@@ -95,12 +100,12 @@ const styles = {
 };
 
 /**
- * The history drawer.
+ * The history list.
  *
  * @param props - See {@link IHistoryPanelProps}.
- * @returns The drawer.
+ * @returns The list, for a side panel's body.
  */
-export const HistoryPanel: React.FC<IHistoryPanelProps> = ({ endpointKey, nodeName, open, onClose, onLoad, onRerun, announce }) => {
+export const HistoryPanel: React.FC<IHistoryPanelProps> = ({ endpointKey, nodeName, onLoad, onRerun, onOpenInNewTab, announce }) => {
 	const env = useGraphEnv();
 	const history = env.history;
 	const { entries, recording } = useHistoryView(endpointKey);
@@ -120,7 +125,7 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = ({ endpointKey, nodeNa
 
 	return (
 		<>
-			<DetailPanel open={open} onClose={onClose} avatar={<GraphIcon />} title="History" subtitle={nodeName}>
+			<div>
 				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginBottom: 10 }}>{env.historyPrivacyNote}</div>
 				<div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
 					<Button variant="ghost" small pressed={recording} onClick={() => { void history.setRecording(endpointKey, !recording).then(() => announce(recording ? 'Recording off for this connection.' : 'Recording on for this connection.'), failed('Recording was not changed.')); }}>
@@ -156,6 +161,7 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = ({ endpointKey, nodeNa
 									<div style={styles.actions}>
 										<Button variant="ghost" small onClick={() => onLoad(entry.cypher)}>Load into editor</Button>
 										<Button variant="ghost" small onClick={() => onRerun(entry.cypher)}>Run again</Button>
+										{onOpenInNewTab && <Button variant="ghost" small onClick={() => onOpenInNewTab(entry.cypher)}>Open in new tab</Button>}
 										<Button variant="ghost" small onClick={() => { void history.togglePin(endpointKey, entry.id).catch(failed(entry.pinned ? 'The entry was not unpinned.' : 'The entry was not pinned.')); }}>{entry.pinned ? 'Unpin' : 'Pin'}</Button>
 										<Button variant="ghost" small ariaExpanded={expanded} onClick={() => { setOpen1(expanded ? null : entry.id); setNote(entry.note ?? ''); }}>{expanded ? 'Less' : 'More'}</Button>
 										<Button variant="ghost" small onClick={() => { void history.removeEntry(endpointKey, entry.id).catch(failed('The entry was not deleted.')); }}>Delete</Button>
@@ -165,7 +171,7 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = ({ endpointKey, nodeNa
 						})}
 					</ul>
 				)}
-			</DetailPanel>
+			</div>
 			{confirmClear && (
 				<ConfirmDialog
 					title="Clear history?"

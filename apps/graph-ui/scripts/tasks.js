@@ -82,6 +82,12 @@ const REQUIRED_TESTS = [
 	'devtool.protocol.test.ts',
 	'devtool.lifecycle.test.ts',
 	'devtool.mounts.test.ts',
+	// The redesign's seams, label styles and saved queries (per mount and per account).
+	'graph.seams.test.ts',
+	'graph.styles.test.ts',
+	'graph.userdata-store.test.ts',
+	'graph.userdata-app.test.ts',
+	'devtool.userdata.test.ts',
 ];
 
 const mod = createAppModule({

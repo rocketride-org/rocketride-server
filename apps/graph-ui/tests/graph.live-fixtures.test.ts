@@ -25,7 +25,7 @@ import { canWrite, engineText, parseDialect, readBoundaryText, rowLimitFor, supp
 import { expandNode, modelFromResult } from '../src/graph/model';
 import { chooseTab, collectEntities, summarizeResult } from '../src/graph/results';
 import { parseSchema, schemaStatusText } from '../src/graph/schema';
-import { buildSchemaTree } from '../src/graph/schemaTree';
+import { buildSchemaList } from '../src/graph/schemaTree';
 import { truncationText } from '../src/graph/wording';
 import { isGraphBytes } from '../src/graph/values';
 import type { ReadQueryResult } from '../src/graph/types';
@@ -129,11 +129,12 @@ test('a failed refresh keeps the last good schema, marks it stale and carries th
 	assert.match(schemaStatusText(view, Date.parse(view.refreshedAt!) + 3 * 60_000), /showing the snapshot from refreshed 3 minutes ago/);
 });
 
-test('the sidebar tree of a large live schema stays position-addressed and complete', () => {
+test('the sidebar list of a large live schema stays position-addressed and complete', () => {
 	const view = parseSchema(live('age_get_schema'));
-	const tree = buildSchemaTree(view);
-	assert.equal(tree.entries.length, view.labels.length + view.relationshipTypes.length);
-	assert.equal(new Set(tree.entries.map((e) => e.path)).size, tree.entries.length);
+	const list = buildSchemaList(view);
+	const rows = [...list.labels, ...list.types];
+	assert.equal(rows.length, view.labels.length + view.relationshipTypes.length);
+	assert.equal(new Set(rows.map((row) => row.id)).size, rows.length);
 });
 
 // -----------------------------------------------------------------------------

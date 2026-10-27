@@ -40,7 +40,10 @@ import { loadConnectionSchema } from './adapters/actions';
 import { countWrite } from './graph/dataVersion';
 import type { IDataVersions } from './graph/dataVersion';
 import type { IPreviewStore } from './graph/previews';
+import type { ISchemaView } from './graph/schema';
 import type { ISchemaEntry, ISchemaStore } from './graph/schemaStore';
+import { SESSION_USER_DATA_NOTE, createMemoryUserData } from './graph/userData';
+import type { IGraphUserData } from './graph/userData';
 import type { IGraphEndpointsState, IGraphHistoryView } from './devtool/protocol';
 import type { DocTarget, GraphMount, IGraphEnv, IGraphHistory, IKeyed, IReadable } from './env';
 
@@ -64,9 +67,14 @@ export interface ILocalGraphEnvOptions {
 	activeConnection: IReadable<string | null>;
 	openDocument(target: DocTarget): void;
 	prefs: IPrefsAccessor;
-	historyPrivacyNote: string;
+	/** What the History panel says about where history is kept (read each time: it can follow the account). */
+	historyPrivacyNote: string | (() => string);
 	/** Override discovery (the controller gates it on identity and activation). */
 	refresh?: IGraphEnv['refresh'];
+	/** Styles and saved queries (default: kept in memory for the session, one store per set of stores). */
+	userData?: IGraphUserData;
+	/** Grid layouts (default: the full app's APP_GRIDS, the controller's session store). */
+	gridPersistence?: IDataGridPersistence;
 }
 
 /**
@@ -74,8 +82,9 @@ export interface ILocalGraphEnvOptions {
  * grid config channel, but stored and handed out as plain-JSON copies, so
  * Tabulator never rewrites a stored layout in place
  * (shared/explorer/devtool/gridPersistence). The channel is made on first use.
+ * GraphApp hands its env these behind the page's pin (graph/workspacePin.ts).
  */
-const APP_GRIDS: IDataGridPersistence = createCopyingGridPersistence(() => createMessageGridPersistence());
+export const APP_GRIDS: IDataGridPersistence = createCopyingGridPersistence(() => createMessageGridPersistence());
 
 /** The controller's: a dev-tool mount never writes the host's prefs, so any layout stays in the session (it renders no grid today). */
 const CONTROLLER_GRIDS: IDataGridPersistence = createSessionGridPersistence();
@@ -98,6 +107,36 @@ function labelsOf(entry: ISchemaEntry): readonly string[] {
 	const names = entry.view.labels.map((label) => label.name);
 	labelCache.set(entry.view, names);
 	return names;
+}
+
+/** The session-only user data of each set of stores (an env is rebuilt on every connection change; the stores are not). */
+const memoryUserData = new WeakMap<IGraphStores, IGraphUserData>();
+
+/**
+ * The session-only user data of a set of stores (one per set, so a rebuilt env keeps it).
+ *
+ * @param stores - The realm's stores.
+ * @returns The user data.
+ */
+function sessionUserData(stores: IGraphStores): IGraphUserData {
+	let userData = memoryUserData.get(stores);
+	if (!userData) {
+		userData = createMemoryUserData(SESSION_USER_DATA_NOTE);
+		memoryUserData.set(stores, userData);
+	}
+	return userData;
+}
+
+/**
+ * The schema view a connection's views may show: null until a load of it has completed (nothing is known yet), else
+ * the newest view, which after a failed load is the last good one (or the empty `unknown` view when there never was
+ * one, so a failure can be told apart from "not read yet").
+ *
+ * @param entry - The connection's schema entry.
+ * @returns The view, or null.
+ */
+export function schemaViewOf(entry: ISchemaEntry): ISchemaView | null {
+	return entry.loadedAt === 0 ? null : entry.view;
 }
 
 /** Endpoint snapshots with `omitted: 0`, per store snapshot. */
@@ -160,6 +199,7 @@ export function createLocalGraphEnv(opts: ILocalGraphEnvOptions): IGraphEnv {
 		subscribe: stores.endpoints.subscribe,
 	};
 	const schemaLabels: IKeyed<readonly string[]> = { get: (key) => labelsOf(stores.schemas.get(key)), subscribe: stores.schemas.subscribe };
+	const schemaView: IKeyed<ISchemaView | null> = { get: (key) => schemaViewOf(stores.schemas.get(key)), subscribe: stores.schemas.subscribe };
 	const dataVersions: IKeyed<number> = { get: (key) => stores.dataVersions.get(key), subscribe: stores.dataVersions.subscribe };
 	return {
 		mount: opts.mount,
@@ -169,6 +209,7 @@ export function createLocalGraphEnv(opts: ILocalGraphEnvOptions): IGraphEnv {
 		probe: (key) => (client ? stores.endpoints.probe(client, key) : Promise.resolve(null)),
 		schemaLabels,
 		schemas: stores.schemas,
+		schemaView,
 		loadSchema: (key, o) => {
 			const endpoint = stores.endpoints.getState().endpoints.find((e) => e.key === key);
 			if (!client || !endpoint) return Promise.resolve();
@@ -187,9 +228,13 @@ export function createLocalGraphEnv(opts: ILocalGraphEnvOptions): IGraphEnv {
 			consume: (nonce) => stores.previews.consume(nonce),
 		},
 		activeConnection: opts.activeConnection,
-		gridPersistence: opts.mount === 'app' ? APP_GRIDS : CONTROLLER_GRIDS,
+		gridPersistence: opts.gridPersistence ?? (opts.mount === 'app' ? APP_GRIDS : CONTROLLER_GRIDS),
 		openDocument: opts.openDocument,
 		prefs: opts.prefs,
-		historyPrivacyNote: opts.historyPrivacyNote,
+		get historyPrivacyNote() {
+			const note = opts.historyPrivacyNote;
+			return typeof note === 'function' ? note() : note;
+		},
+		userData: opts.userData ?? sessionUserData(stores),
 	};
 }

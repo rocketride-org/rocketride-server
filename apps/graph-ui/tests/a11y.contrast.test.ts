@@ -24,8 +24,9 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { ACCENT_TOKEN, CANVAS_SURFACES, CANVAS_TEXT_TOKEN, CHIP_TEXT_TOKEN, EDGE_TOKEN, MIN_GRAPHIC_CONTRAST, MIN_TEXT_CONTRAST } from '../src/canvas/tokens';
 import { CANVAS_RULES } from '../src/canvas/environment';
+import { edgePaint } from '../src/canvas/EdgeLayer';
 import { CYPHER_TOKEN_BASES, cypherTokenRules, editorColors, ensureContrast, opaqueOver, readableOnEditor, toHexColor, toRuleHex } from '../src/components/editorTheme';
-import { contrastRatio, parseColor } from '../src/graph/colors';
+import { CHART_COLOR_NAMES, CHART_COLOR_VARS, TYPE_COLOR_SLOTS, contrastRatio, parseColor } from '../src/graph/colors';
 import type { Rgb } from '../src/graph/colors';
 
 const THEME_DIR = path.resolve(__dirname, '..', '..', '..', 'packages', 'shell', 'public', 'themes');
@@ -74,13 +75,33 @@ test('the old accent, the brand colour, is measured here and fails 3:1 in Rocket
 
 test('a highlighted relationship is told apart from an ordinary one by more than its colour: a different token AND a thicker line', () => {
 	assert.notEqual(ACCENT_TOKEN, EDGE_TOKEN);
+	// The layer draws every relationship's stroke through edgePaint (and the image export does too).
+	const plain = edgePaint({ highlighted: false, selected: false, color: null });
+	const highlighted = edgePaint({ highlighted: true, selected: false, color: null });
+	const selected = edgePaint({ highlighted: false, selected: true, color: null });
+	assert.deepEqual(plain, { stroke: `var(${EDGE_TOKEN})`, width: 1.4 });
+	assert.deepEqual(highlighted, { stroke: `var(${ACCENT_TOKEN})`, width: 2 });
+	assert.ok(selected.stroke === highlighted.stroke && selected.width > highlighted.width, 'the selected relationship is thicker still');
+	// A relationship type's own colour never hides a highlight or the selection.
+	assert.deepEqual(edgePaint({ highlighted: true, selected: false, color: '#123456' }), highlighted);
+	assert.equal(edgePaint({ highlighted: false, selected: false, color: '#123456' }).width, plain.width);
 	const layer = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'canvas', 'EdgeLayer.tsx'), 'utf8');
-	assert.match(layer, /strokeWidth=\{highlighted \? 2 : 1\.4\}/);
-	assert.match(layer, /highlighted \? `var\(\$\{ACCENT_TOKEN\}\)` : `var\(\$\{EDGE_TOKEN\}\)`/);
+	assert.match(layer, /const \{ stroke, width \} = edgePaint\(\{ highlighted, selected, color \}\);/);
 });
 
 test('an ordinary relationship line is at least 3:1 on both canvas surfaces in every theme', () => {
 	clears(EDGE_TOKEN, MIN_GRAPHIC_CONTRAST, 'relationship line');
+});
+
+test('every colour a relationship type can be given is at least 3:1 on both canvas surfaces in every theme, and the ones left out are not', () => {
+	const rows: string[] = [];
+	CHART_COLOR_VARS.forEach((token, slot) => {
+		const worst = Math.min(...themes.flatMap(({ tokens }) => CANVAS_SURFACES.map((surface) => ratio(tokens, token, surface))));
+		rows.push(`${CHART_COLOR_NAMES[slot]} ${worst.toFixed(2)}`);
+		if (TYPE_COLOR_SLOTS.includes(slot)) clears(token, MIN_GRAPHIC_CONTRAST, `type colour ${CHART_COLOR_NAMES[slot]}`);
+		else assert.ok(worst < MIN_GRAPHIC_CONTRAST, `${CHART_COLOR_NAMES[slot]} passes everywhere (${worst.toFixed(2)}:1), so it could be offered`);
+	});
+	console.log('worst contrast of each chart colour over every theme and canvas surface:', rows.join(' | '));
 });
 
 test('relationship type labels (10 px text) are at least 4.5:1 on both canvas surfaces in every theme', () => {

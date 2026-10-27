@@ -101,8 +101,13 @@ export const CANVAS_RULES = [
 	`.graph-ui-canvas .graph-ui-edge-label { font-size: 10px; fill: var(${CANVAS_TEXT_TOKEN}); paint-order: stroke; stroke: var(--rr-bg-paper); stroke-width: 3px; stroke-linejoin: round; user-select: none; }`,
 	// Zoomed out or crowded: the label text is not drawn (the edge keeps its tooltip, accessible name, the inspector and the Table).
 	'.graph-ui-canvas[data-edge-labels="off"] .graph-ui-edge-label { display: none; }',
-	// Edges have no pointer behaviour (no click, no hover, not focusable): taking them out of hit-testing saves the browser a test against every one of them on each mouse move.
+	// The drawn lines, arrows and labels take no pointer events: hit-testing them on every mouse move would be wasted.
 	'.graph-ui-canvas .graph-ui-edge-layer, .graph-ui-canvas .graph-ui-edge-layer * { pointer-events: none; }',
+	// The one exception: each relationship's invisible, wide hit path (EdgeLayer.tsx), present only when relationships can be
+	// clicked. Its width follows the zoom (GraphCanvas sets the variable, see edgeHitWidth), so it is never under 12 screen px.
+	'.graph-ui-canvas .graph-ui-edge-layer .graph-ui-edge-hit { pointer-events: stroke; cursor: pointer; stroke-width: var(--graph-ui-edge-hit, 12px); }',
+	// Not on the shown path, or not matching a search: faint, still in place and still clickable.
+	'.graph-ui-canvas .graph-ui-node[data-dim="true"] { opacity: 0.25; }',
 	// The edge layer sits behind the nodes: the viewport is a stacking context, so a negative index is behind its nodes and still in front of the page.
 	'.graph-ui-canvas .react-flow__viewport-portal { z-index: -1; }',
 	'.graph-ui-canvas .react-flow__attribution { display: none; }',

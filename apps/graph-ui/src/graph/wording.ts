@@ -41,8 +41,11 @@
 // exist"); "Stop waiting" says exactly what it does.
 // =============================================================================
 
+import { formatElapsed, formatRunLabel } from 'shared/explorer';
+import type { IStatementRunBase } from 'shared/explorer';
 import { INITIAL_NODES, MAX_NODES, MAX_RELATIONSHIPS } from './budgets';
 import type { IGraphModel } from './model';
+import type { IResultSummary } from './results';
 import type { ReadQueryResult } from './types';
 
 /** "1,000" style number formatting (stable across locales). */
@@ -88,15 +91,115 @@ export function rowsMeta(result: Pick<ReadQueryResult, 'rows' | 'row_limit' | 't
 }
 
 /**
- * The line under a result: the affected count first when the write console reported one, then {@link rowsMeta}.
- *
- * @param run - The run shown (its outcome, affected count and round trip).
- * @param result - Its answer.
- * @returns Text such as `3 affected · 0 rows returned (limit 25,000) · 0.4 s round trip`.
+ * What is announced when a graph fills the document. A first Escape is used by what is open or selected inside the
+ * graph (a menu or the search closes, the selection or a path clears); Escape leaves full screen once nothing uses it.
  */
-export function resultMeta(run: { outcome: string; affected?: number; ms?: number } | null, result: Pick<ReadQueryResult, 'rows' | 'row_limit' | 'truncated'>): string {
+export const FULL_SCREEN_TEXT = 'Full screen; the inspector stays open. Escape leaves it once no menu or search is open and nothing is selected.';
+
+/** What the write console's result line says on Apache AGE, whose node reports result rows, not a count of changes. */
+export const AGE_AFFECTED_NOT_REPORTED = 'Change count not reported by Apache AGE';
+
+/**
+ * What the write console's count adds up. Neo4j's and FalkorDB's nodes report their change counters summed (a CREATE
+ * of one node with a label and one property is 3; FalkorDB also counts indexes created), so the count is said as
+ * changes, never as nodes.
+ */
+export const CHANGES_NOTE = 'nodes, relationships, labels, properties and indexes counted together';
+
+/**
+ * A count of changes, in words.
+ *
+ * @param n - The node's count.
+ * @returns `1 change` or `3 changes`.
+ */
+export function changesText(n: number): string {
+	return `${num(n)} ${n === 1 ? 'change' : 'changes'}`;
+}
+
+/**
+ * The line under a result: the changes the write console's node counted first, when it reported them, then
+ * {@link rowsMeta}.
+ *
+ * @param run - The run shown (its outcome, count and round trip).
+ * @param result - Its answer.
+ * @param affectedNotReported - True for a write on Apache AGE (runConfig affectedNotReported): the line says so first.
+ * @returns Text such as `3 changes (nodes, relationships, labels, properties and indexes counted together) · 0 rows returned (limit 25,000) · 0.4 s round trip`.
+ */
+export function resultMeta(run: { outcome: string; affected?: number; ms?: number } | null, result: Pick<ReadQueryResult, 'rows' | 'row_limit' | 'truncated'>, affectedNotReported = false): string {
 	const rows = rowsMeta(result, run?.ms);
-	return run?.outcome === 'affected' ? `${num(run.affected ?? 0)} affected · ${rows}` : rows;
+	if (affectedNotReported) return `${AGE_AFFECTED_NOT_REPORTED} · ${rows}`;
+	return run?.outcome === 'affected' ? `${changesText(run.affected ?? 0)} (${CHANGES_NOTE}) · ${rows}` : rows;
+}
+
+/**
+ * A statement's label in the strip: the shared one, except that a write's count is said as changes.
+ *
+ * @param run - The run.
+ * @returns Text such as `2 CREATE · 3 changes · round trip 0.012 s`.
+ */
+export function graphRunLabel(run: IStatementRunBase): string {
+	if (run.outcome !== 'affected') return formatRunLabel(run);
+	return `${run.index + 1} ${run.verb} · ${changesText(run.affected ?? 0)}${run.ms === undefined ? '' : ` · ${formatElapsed(run.ms)}`}`;
+}
+
+// =============================================================================
+// NOTICES: a headline, and the rest behind Details
+// =============================================================================
+
+/** The longest headline a notice shows; anything longer goes behind a Details disclosure. */
+export const NOTICE_HEADLINE_MAX = 160;
+
+/**
+ * Split a notice into its first sentence (the headline) and the rest (the details).
+ *
+ * @param text - The notice.
+ * @returns The headline, and the details ('' when there is one sentence).
+ */
+export function splitNotice(text: string): { headline: string; details: string } {
+	const match = /^([\s\S]*?[.!?])\s+([\s\S]+)$/.exec(text.trim());
+	return match ? { headline: match[1], details: match[2] } : { headline: text.trim(), details: '' };
+}
+
+/** One note about a result: what the Notes line lists. */
+export interface IResultNote {
+	id: 'unsafe-numbers' | 'malformed' | 'dangling';
+	headline: string;
+	details: string;
+}
+
+/**
+ * What is worth knowing about a result besides its rows, as notes: a short headline each, the full sentence behind it.
+ *
+ * @param summary - The result's summary.
+ * @returns The notes, in a fixed order (none for a plain result).
+ */
+export function resultNotes(summary: Pick<IResultSummary, 'unsafeNumbers' | 'malformed' | 'danglingRelationships'>): IResultNote[] {
+	const notes: IResultNote[] = [];
+	const unsafe = summary.unsafeNumbers;
+	if (unsafe > 0) {
+		notes.push({
+			id: 'unsafe-numbers',
+			headline: `${num(unsafe)} large ${unsafe === 1 ? 'integer' : 'integers'} may have been rounded`,
+			details: `${num(unsafe)} integer ${unsafe === 1 ? 'value' : 'values'} beyond 2^53 arrived as plain JSON number${unsafe === 1 ? '' : 's'} and may have been rounded before this app saw them. This node should send them as exact text; upgrade it.`,
+		});
+	}
+	const malformed = summary.malformed;
+	if (malformed > 0) {
+		notes.push({
+			id: 'malformed',
+			headline: `${num(malformed)} malformed ${malformed === 1 ? 'value' : 'values'} shown as plain data`,
+			details: `${num(malformed)} value${malformed === 1 ? ' looks' : 's look'} like graph values but ${malformed === 1 ? 'is' : 'are'} malformed, so ${malformed === 1 ? 'it is' : 'they are'} shown as plain data.`,
+		});
+	}
+	const dangling = summary.danglingRelationships;
+	if (dangling > 0) {
+		notes.push({
+			id: 'dangling',
+			headline: `${num(dangling)} ${dangling === 1 ? 'relationship' : 'relationships'} not drawn: an end node was not returned`,
+			details: `${num(dangling)} relationship${dangling === 1 ? '' : 's'} in this result ${dangling === 1 ? 'has' : 'have'} an end node that was not returned, so ${dangling === 1 ? 'it is' : 'they are'} not drawn. Return the nodes too, or expand a node.`,
+		});
+	}
+	return notes;
 }
 
 /**
@@ -129,14 +232,21 @@ export function canvasBudgetText(model: Pick<IGraphModel, 'nodes' | 'resultNodes
  * @param incomplete - True when the node answered with more rows than were used (more neighbours exist).
  * @param budget - The canvas budget that stopped it, if any.
  * @param stuckAt - The node's row limit, when its cut answer held nothing new; otherwise null.
+ * @param about - The expanded node's caption, the captions of the nodes added (the first three are named) and, for
+ *   Expand by type, the relationship type: the status line sits away from the node, so the sentence names it.
  * @returns A sentence.
  */
-export function expandText(added: number, skipped: number, incomplete: boolean, budget: null | 'nodes' | 'relationships', stuckAt: number | null = null): string {
+export function expandText(added: number, skipped: number, incomplete: boolean, budget: null | 'nodes' | 'relationships', stuckAt: number | null = null, about?: { center: string; added: readonly string[]; type?: string }): string {
 	if (stuckAt !== null && added === 0 && skipped === 0 && budget === null) {
 		return `No new neighbours: the node stops at ${num(stuckAt)} rows and every row it returned is already drawn, so expanding again returns the same rows. Write a query by hand to see its other relationships.`;
 	}
-	if (added === 0 && skipped === 0 && !incomplete) return 'No new neighbours.';
-	const head = `Added ${num(added)} ${added === 1 ? 'neighbour' : 'neighbours'}.`;
+	const kind = about?.type ? `${about.type} ` : '';
+	const of = about ? ` of ${about.center}` : '';
+	if (added === 0 && skipped === 0 && !incomplete) return `No new ${kind}neighbours${of}.`;
+	const named = about ? about.added.slice(0, 3) : [];
+	const rest = about ? about.added.length - named.length : 0;
+	const names = named.length > 0 ? `: ${named.join(', ')}${rest > 0 ? ` and ${num(rest)} more` : ''}` : '';
+	const head = `Added ${num(added)} ${kind}${added === 1 ? 'neighbour' : 'neighbours'}${of}${names}.`;
 	if (budget === 'nodes') return `${head} The canvas holds its maximum of ${num(MAX_NODES)} nodes; dismiss some to make room.`;
 	if (budget === 'relationships') return `${head} The canvas holds its maximum relationships; dismiss some to make room.`;
 	if (skipped > 0) return `${head} ${num(skipped)} more were left out (at most 100 new neighbours per expansion); expand again to see more.`;

@@ -40,12 +40,24 @@
 //     graph.historyList       one connection's history (bulk: an op result)
 //     graph.historyEdit       every history mutation, recording a run included
 //     graph.writeAbandoned    a write the user stopped waiting for
+//     graph.schemaView        one connection's full schema view (bulk: an op
+//                             result; a frame re-reads it when the `schemas`
+//                             summary says a load completed)
+//     graph.styles            one connection's label styles (an op result), for
+//                             the frame's own account
+//     graph.savedQueries      one connection's saved queries (an op result),
+//                             for the frame's own account
+//     graph.styleEdit         a field-level style change, same rule
+//     graph.savedEdit         a saved-query change, same rule
 //
 //   STATE (controller -> frames; retained, each snapshot under 64 KiB)
 //     endpoints     the endpoint store's snapshot (capped; see below)
 //     schemas       per connection: status and label names only (capped)
 //     dataVersions  per connection: has a write run there?
 //     history       { rev }: a frame re-reads its list when it changes
+//     userData      { styleRev, savedRev }: a frame re-reads the styles, or the
+//                   saved queries, when its revision changes (its file read,
+//                   an account change, an edit, a colour slot given)
 //     identity      { fingerprint } (frameIdentity.ts)
 //     previews      the pending sidebar preview request (graph/previews.ts)
 //
@@ -56,7 +68,10 @@
 //
 // Every op names an endpoint by its library KEY (owner-aware, token-free),
 // never by an endpoint object, and never carries a token. Bulk data (rows,
-// history lists) travels as op RESULTS, never as retained state.
+// history lists, schema views, styles, saved queries) travels as op RESULTS,
+// never as retained state. The user-data ops also carry the fingerprint of the
+// account the frame belongs to (`owner`): the controller serves and changes
+// only that account's data, checked again after every wait.
 // =============================================================================
 
 import type { ToolOpMap, ToolOpSpec } from 'shell';
@@ -69,8 +84,10 @@ import { jsonByteLength, MAX_RETAINED_STATE_BYTES } from 'shared/explorer/devtoo
 import { frameOpTimeoutMs, toolCallBudgetMs } from 'shared/explorer/devtool/timeouts';
 import { isWorkbenchUri, isWriteUri, workbenchUri, writeUri } from '../graph/addresses';
 import type { IGraphPreview } from '../graph/previews';
+import type { ISchemaView } from '../graph/schema';
 import type { ISchemaEntry } from '../graph/schemaStore';
 import type { ReadQueryResult } from '../graph/types';
+import type { ISavedQueriesView, IStyleView, SavedEdit, StyleEdit } from '../graph/userData';
 
 /** The tool's app id (also the manifest id). */
 export const GRAPH_APP_ID = 'rocketride.graph';
@@ -90,6 +107,11 @@ export const OP = {
 	historyList: 'graph.historyList',
 	historyEdit: 'graph.historyEdit',
 	writeAbandoned: 'graph.writeAbandoned',
+	schemaView: 'graph.schemaView',
+	styles: 'graph.styles',
+	savedQueries: 'graph.savedQueries',
+	styleEdit: 'graph.styleEdit',
+	savedEdit: 'graph.savedEdit',
 } as const;
 
 /** One connection's history as a frame shows it. */
@@ -109,6 +131,17 @@ export type HistoryEdit =
 	| { action: 'clear' }
 	| { action: 'recording'; on: boolean };
 
+/** One connection's styles as a frame reads them (`ready`: the controller has read its styles file), with where they are kept. */
+export interface IStylesAnswer extends IStyleView {
+	privacyNote: string;
+}
+
+/** One connection's saved queries as a frame reads them, with where they are kept (one sentence). */
+export interface ISavedQueriesAnswer {
+	saved: ISavedQueriesView;
+	privacyNote: string;
+}
+
 /** The ops a frame calls. */
 export interface GraphOps extends ToolOpMap {
 	'graph.refreshEndpoints': ToolOpSpec<IDeadline & { reprobe?: boolean }, Reply<null>>;
@@ -120,6 +153,11 @@ export interface GraphOps extends ToolOpMap {
 	'graph.historyList': ToolOpSpec<IDeadline & { key: string }, Reply<IGraphHistoryView>>;
 	'graph.historyEdit': ToolOpSpec<IDeadline & { key: string; edit: HistoryEdit }, Reply<null>>;
 	'graph.writeAbandoned': ToolOpSpec<IDeadline & { key: string }, Reply<null>>;
+	'graph.schemaView': ToolOpSpec<IDeadline & { key: string }, Reply<ISchemaView | null>>;
+	'graph.styles': ToolOpSpec<IDeadline & { key: string; owner: string | null }, Reply<IStylesAnswer>>;
+	'graph.savedQueries': ToolOpSpec<IDeadline & { key: string; owner: string | null }, Reply<ISavedQueriesAnswer>>;
+	'graph.styleEdit': ToolOpSpec<IDeadline & { key: string; owner: string | null; edit: StyleEdit }, Reply<null>>;
+	'graph.savedEdit': ToolOpSpec<IDeadline & { key: string; owner: string | null; edit: SavedEdit }, Reply<null>>;
 }
 
 // =============================================================================
@@ -134,6 +172,7 @@ export const STATE = {
 	history: 'history',
 	identity: 'identity',
 	previews: 'previews',
+	userData: 'userData',
 } as const;
 
 /** The endpoint store's snapshot as it crosses: `omitted` endpoints did not fit the cap. */
@@ -152,6 +191,8 @@ export interface IFrameSchema {
 	loadedAt: number;
 	/** Why the latest load failed (its headline), or null. */
 	failure: string | null;
+	/** True when the label names did not fit the snapshot (`labels` is then empty; graph.schemaView has them). */
+	labelsCut?: boolean;
 }
 
 /** The retained state, by topic. */
@@ -162,6 +203,7 @@ export interface GraphStateMap {
 	history: { rev: number };
 	identity: IIdentityState;
 	previews: { pending: IGraphPreview | null };
+	userData: { styleRev: number; savedRev: number };
 }
 
 /** Event names (disjoint from every op name: the op server would run an event named like an op). */
@@ -187,6 +229,14 @@ export const NO_ENDPOINTS: IGraphEndpointsState = { status: 'idle', endpoints: [
 
 /** What the controller answers from memory (a refresh or schema load it starts, history, marks). */
 export const CONTROLLER_LOCAL_OP_MS = 10_000;
+
+/**
+ * How long a user-data op may wait for the account's file to be read: the dev-tool library's whole load
+ * (shared/explorer/devtool/prefs: three attempts of a stat and a read, each 15 s, with 1 s and then 3 s between them).
+ * Spelled out because frames import this module and must not import that one (it reaches the bus client); a test
+ * pins the numbers.
+ */
+export const USER_DATA_LOAD_WAIT_MS = 3 * 2 * 15_000 + 1_000 + 3_000;
 
 /**
  * The session wait of a statement on a node (read_query and execute): its published statement deadline plus the
@@ -218,8 +268,15 @@ export function frameTimeoutFor(op: keyof GraphOps & string, info: Record<string
 			return frameOpTimeoutMs(toolCallBudgetMs(statementWaitMs(info)));
 		case OP.ask:
 			return frameOpTimeoutMs(toolCallBudgetMs(DEFAULT_TOOL_TIMEOUTS.get_query));
+		case OP.styles:
+		case OP.savedQueries:
+		case OP.styleEdit:
+		case OP.savedEdit:
+			// The account's file is read first (a change is written later, debounced).
+			return frameOpTimeoutMs(USER_DATA_LOAD_WAIT_MS + CONTROLLER_LOCAL_OP_MS);
 		default:
-			// refreshEndpoints and loadSchema START work whose results arrive as state; the rest are answered from memory.
+			// refreshEndpoints and loadSchema START work whose results arrive as state; the rest (history, the schema view,
+			// marks) are answered from memory.
 			return frameOpTimeoutMs(CONTROLLER_LOCAL_OP_MS);
 	}
 }
@@ -268,8 +325,9 @@ export const SCHEMAS_STATE_BYTES = 48 * 1024;
 
 /**
  * Budget of the data-versions snapshot. With the endpoints and schemas budgets this leaves about 3 KiB of the base's
- * 128 KiB total (MAX_RETAINED_TOTAL_BYTES) for identity, history, previews and the readiness topic, so the fixed
- * topics always fit together and the guard never has to degrade or withhold one of them.
+ * 128 KiB total (MAX_RETAINED_TOTAL_BYTES) for identity, history, previews, user data ({styleRev, savedRev}, about 30
+ * bytes) and the readiness topic, so the fixed topics always fit together and the guard never has to degrade or
+ * withhold one of them.
  */
 export const VERSIONS_STATE_BYTES = 16 * 1024;
 
@@ -351,8 +409,9 @@ export function endpointsSnapshot(state: IEndpointState, maxBytes: number = ENDP
 }
 
 /**
- * The schemas snapshot: per connection, its status and label names, newest load first, cut to the budget (a
- * connection left out simply has no labels in its frames until it is loaded again).
+ * The schemas snapshot: per connection, its status and label names, newest load first, cut to the budget. A
+ * connection whose names do not fit still crosses without them (`labelsCut`), so its frames still see each completed
+ * load and read the full view again (graph.schemaView); one that does not fit even so is left out.
  *
  * @param entries - Every connection's schema entry.
  * @param maxBytes - The budget.
@@ -361,13 +420,25 @@ export function endpointsSnapshot(state: IEndpointState, maxBytes: number = ENDP
 export function schemasSnapshot(entries: ReadonlyArray<readonly [string, ISchemaEntry]>, maxBytes: number = SCHEMAS_STATE_BYTES): Record<string, IFrameSchema> {
 	const ordered = [...entries].sort((a, b) => b[1].loadedAt - a[1].loadedAt);
 	const out: Record<string, IFrameSchema> = {};
+	const full = new Map<string, IFrameSchema>();
 	let bytes = 2;
+	// Every connection first, without its names (newest first, while they fit)...
 	for (const [key, entry] of ordered) {
 		const item: IFrameSchema = { status: entry.status, labels: entry.view.labels.map((label) => label.name), loadedAt: entry.loadedAt, failure: entry.failure ? entry.failure.headline : null };
-		const size = jsonByteLength({ [key]: item });
+		const slim: IFrameSchema = item.labels.length > 0 ? { ...item, labels: [], labelsCut: true } : item;
+		const size = jsonByteLength({ [key]: slim });
 		if (bytes + size > maxBytes) continue;
-		out[key] = item;
+		out[key] = slim;
+		full.set(key, item);
 		bytes += size;
+	}
+	// ...then their names, newest first, while they fit.
+	for (const [key, item] of full) {
+		if (out[key] === item) continue;
+		const grow = jsonByteLength({ [key]: item }) - jsonByteLength({ [key]: out[key] });
+		if (bytes + grow > maxBytes) continue;
+		out[key] = item;
+		bytes += grow;
 	}
 	return out;
 }

@@ -40,10 +40,21 @@
 // dropped the very click that summoned a cold webview). PREVIEW_MAX_AGE_MS is
 // only a backstop: a request nobody took within a minute (its document never
 // opened) does not run when that document is opened much later.
+//
+// Four kinds of request: the 25-row preview of a label or a relationship type
+// (shown and run), and a new query with that label or type (the same text,
+// put in the editor and NOT run: the sidebar's "New query with this label").
+// `previewStatement` says what each one puts in the editor and whether it runs.
 // =============================================================================
 
-/** What to preview: the 25-row preview of a node label, or of a relationship type. */
-export type PreviewAction = 'label-preview' | 'type-preview';
+import { labelPreview, typePreview } from '../cypher/recipes';
+import type { IEngine, RecipeResult } from '../cypher/recipes';
+
+/** What to ask for: the 25-row preview of a label or relationship type (run), or a new query with it (not run). */
+export type PreviewAction = 'label-preview' | 'type-preview' | 'label-query' | 'type-query';
+
+/** Every kind of request, for checks of what crossed a channel. */
+const ACTIONS: readonly PreviewAction[] = ['label-preview', 'type-preview', 'label-query', 'type-query'];
 
 /** One preview request. Plain data: it crosses the dev-tool channel as retained state. */
 export interface IGraphPreview {
@@ -154,6 +165,18 @@ export function asPreview(value: unknown): IGraphPreview | null {
 	if (value === null || typeof value !== 'object') return null;
 	const v = value as Record<string, unknown>;
 	if (typeof v.nonce !== 'string' || typeof v.endpointKey !== 'string' || typeof v.name !== 'string' || typeof v.at !== 'number') return null;
-	if (v.action !== 'label-preview' && v.action !== 'type-preview') return null;
-	return { nonce: v.nonce, endpointKey: v.endpointKey, action: v.action, name: v.name, at: v.at };
+	if (!ACTIONS.includes(v.action as PreviewAction)) return null;
+	return { nonce: v.nonce, endpointKey: v.endpointKey, action: v.action as PreviewAction, name: v.name, at: v.at };
+}
+
+/**
+ * What a request puts in the editor, and whether it runs: a preview runs; a new query is only put there.
+ *
+ * @param engine - The connection's engine.
+ * @param request - The request (its action and name).
+ * @returns The statement (or why there is none) and whether to run it.
+ */
+export function previewStatement(engine: IEngine, request: Pick<IGraphPreview, 'action' | 'name'>): { recipe: RecipeResult; run: boolean } {
+	const label = request.action === 'label-preview' || request.action === 'label-query';
+	return { recipe: label ? labelPreview(engine, request.name) : typePreview(engine, request.name), run: request.action === 'label-preview' || request.action === 'type-preview' };
 }

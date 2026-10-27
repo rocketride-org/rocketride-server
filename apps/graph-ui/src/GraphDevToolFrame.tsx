@@ -162,7 +162,7 @@ const FrameConnectionDocument: React.FC<{ kind: 'workbench' | 'write'; endpointK
 			<>
 				{showsControllerBanner(state, gates.summon) && (
 					<div style={styles.notice}>
-						<Banner variant="info">{CONTROLLER_NOT_READY_TEXT}</Banner>
+						<Banner variant="warning">{CONTROLLER_NOT_READY_TEXT}</Banner>
 					</div>
 				)}
 				{kind === 'write' ? <WriteConsoleView key={endpoint.key} endpoint={endpoint} /> : <WorkbenchView key={endpoint.key} endpoint={endpoint} />}

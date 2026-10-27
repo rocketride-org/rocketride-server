@@ -29,12 +29,21 @@
 // Both bindings are the FULL APP's (GraphApp): the dev-tool mounts keep their
 // store wired through the controller (devtool/controller.ts) and never touch the
 // workspace prefs. Views read every store through the GraphEnv (env.ts).
+//
+// History attaches through the page's workspace pin (graph/workspacePin.ts
+// pinHistory): after another account signs in without a reload, the prefs the
+// shell holds are still the first account's, so the store is given a throwaway
+// accessor for anyone else and neither shows nor writes that history.
 // =============================================================================
 
 import { createHistoryPrefsBridge, useEndpointStoreLifecycle } from 'shared/explorer/react';
+import { pinHistory } from '../graph/workspacePin';
 import { graphHistory } from './explorer';
 
 export { useEndpointStoreLifecycle };
 
-/** Mount once near the root of the full app: keeps graph history's access to workspace preferences alive. */
-export const GraphHistoryPrefsBridge = createHistoryPrefsBridge(graphHistory);
+/** Graph history's attach, through the page's workspace pin. */
+export const pinnedGraphHistory = pinHistory(graphHistory);
+
+/** Mount once near the root of the full app: keeps graph history's access to workspace preferences alive, for the pinned account only. */
+export const GraphHistoryPrefsBridge = createHistoryPrefsBridge(pinnedGraphHistory);

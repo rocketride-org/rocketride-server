@@ -25,9 +25,10 @@
 // =============================================================================
 //
 // The shared tool session turns every failure into one error with a `kind`; this
-// module decides what the user reads. The banner leads with the first line of the
-// node's message (the headline) and shows the rest under "Database said", exactly
-// as SQL Explorer does, and adds ONE hint where the app knows what to do next.
+// module decides what the user reads. The banner (components/GraphFailureBanner)
+// leads with the first line of the node's message (the headline), shows the rest
+// as the database's own text in a block that is always visible, and adds ONE hint
+// where the app knows what to do next.
 //
 //   Refused: ...                 a safety rule or the database refused the
 //                                statement (graph_errors.py). Only the WRITE
@@ -37,7 +38,7 @@
 //                                The others (the first-row budget, AGE's resource
 //                                rules, USE, SHOW, LOAD CSV, a procedure off the
 //                                allowlist, a missing privilege) get no hint: the
-//                                node's second line under "Database said" is the
+//                                node's second line, shown in the banner, is the
 //                                remedy, and the write console is not.
 //   Not supported on Apache AGE  an AGE limit the node explains; its own text is
 //                                the hint.
@@ -69,22 +70,19 @@ export interface IFailureInput {
 
 /**
  * A failure as the banner shows it. It extends the shared notice (`headline`, the
- * verbatim "Database said" text, and whether the node withheld its text) with
+ * database's own text, and whether the node withheld it) with
  * what only Graph Explorer knows: a variant, one hint, and whether to drop it.
  */
 export interface IFailureNotice extends ISharedFailureNotice {
 	/** `error` for a failure, `warning` for one that is not a bug, `info` for a notice. */
 	variant: 'error' | 'warning' | 'info';
-	/** The node's text under "Database said"; the same text as `verbatim`. */
+	/** The node's text after the headline; the same text as `verbatim`, shown in the banner. */
 	detail: string;
 	/** One sentence on what to do next, or null. */
 	hint: string | null;
 	/** True when the result of this call must not be shown at all. */
 	ignore: boolean;
 }
-
-/** The label above the node's own text. */
-export const DATABASE_SAID_LABEL = 'Database said';
 
 /** The legacy refusal text of a node that has `execute` off (a plain error, no code). */
 const LEGACY_EXECUTE_OFF = /execute tool is disabled for this node/i;
@@ -205,8 +203,34 @@ export function describeFailureOf(message: string, error: unknown, canWrite: boo
 // user stopped waiting) does not mean nothing changed. Only a refusal raised
 // before anything reached the database means that.
 
-/** Said under a write-console failure that can have come after the statement ran. */
-export const WRITE_MAY_HAVE_APPLIED = 'The write may have been applied: this error can come after the database ran the statement, and nothing is rolled back. Check the data before running it again. Graphs drawn from this connection are marked out of date.';
+/**
+ * Said under a write-console failure that can have come after the statement ran. The app cannot know what became of the
+ * failing statement itself (it may have been applied, or the database may have rolled it back); what it does know is
+ * about EARLIER statements of a batch, and runConfig's wording says that.
+ */
+export const WRITE_MAY_HAVE_APPLIED = 'The write may or may not have been applied: some errors arrive after the database ran the statement. Check the data before running it again.';
+
+/** Said instead when the database's own text says it stopped the statement and rolled the transaction back. */
+export const WRITE_PROBABLY_ROLLED_BACK = 'The database stopped this statement with an error that rolls the transaction back, so it was probably not applied. Check the data before running it again.';
+
+/**
+ * Database texts that say, affirmatively, that the transaction was rolled back, plus Neo4j's two memory-limit signatures
+ * (the limit aborts the transaction). "could not be rolled back" and "rollback failed" do not match.
+ */
+const ROLLED_BACK = /\b(?:was|has been|have been|been) rolled back\b|dbms\.memory\.transaction\.[\w.]+ threshold reached|\bTransactionMemoryLimit\b/i;
+
+/** Quoted text and quoted names, where a database echoes the user's own query or data and so says nothing about itself. */
+const QUOTED = /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`]*`/g;
+
+/**
+ * Whether the database's own words say the failed statement's transaction was rolled back.
+ *
+ * @param message - The failure's message.
+ * @returns True only for an affirmative statement outside any quoted echo of the query.
+ */
+export function saysRolledBack(message: string): boolean {
+	return ROLLED_BACK.test(message.replace(QUOTED, ' '));
+}
 
 /**
  * The kind of a failure: the thrown error's own `kind`, else the one the session's fixed wording stands for.
@@ -257,7 +281,7 @@ export function writeMayHaveApplied(error: unknown): boolean {
 export function describeWriteFailure(message: string, error: unknown): IFailureNotice {
 	const notice = describeFailureOf(message, error, true);
 	if (notice.ignore || !writeMayHaveApplied(error ?? message)) return notice;
-	return { ...notice, hint: WRITE_MAY_HAVE_APPLIED };
+	return { ...notice, hint: saysRolledBack(message) ? WRITE_PROBABLY_ROLLED_BACK : WRITE_MAY_HAVE_APPLIED };
 }
 
 /** Re-exported so the canvas notice and the failure strip share one place for their wording. */

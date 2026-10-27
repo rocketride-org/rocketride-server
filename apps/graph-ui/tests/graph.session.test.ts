@@ -79,8 +79,8 @@ test('expand sends one parameterised read_query, draws only NEW neighbours and s
 	assert.deepEqual([...s.model.nodes.keys()], ['a', 'b', 'c']);
 	assert.deepEqual(s.hint, { centerId: 'a', newIds: ['c'] });
 	assert.equal(s.busy, null);
-	assert.equal(s.notice?.text, 'Added 1 neighbour.');
-	assert.equal(log.said[log.said.length - 1], 'Added 1 neighbour.');
+	assert.equal(s.notice?.text, 'Added 1 neighbour of A: C.', 'the status line names the node expanded and what it added');
+	assert.equal(log.said[log.said.length - 1], 'Added 1 neighbour of A: C.');
 	// The relationship that was already drawn is not duplicated.
 	assert.equal(s.model.relationships.size, 2);
 });
@@ -91,7 +91,7 @@ test('an expansion that fills its row allowance says more may exist', async () =
 	session.load(envelope([[node('a')]]));
 	// ask for exactly the rows the answer holds: wanted 100 + shown 0 + 1 = 101, so 5 rows is NOT incomplete...
 	await session.expand('a');
-	assert.equal(session.getState().notice?.text, 'Added 5 neighbours.');
+	assert.match(session.getState().notice?.text ?? '', /^Added 5 neighbours of [^.]*\.$/);
 	// ...but a truncated answer is.
 	const { session: s2 } = rig(NEO, () => envelope(rows, { truncated: true, truncated_by: 'rows' }));
 	s2.load(envelope([[node('a')]]));
@@ -136,11 +136,11 @@ test('repeating Expand on a hub behind a row cap keeps adding the next neighbour
 		texts.push(session.getState().notice?.text ?? '');
 	}
 	assert.equal(session.getState().model.nodes.size, 451, 'every neighbour is drawn');
-	for (const text of texts.slice(0, 4)) assert.match(text, /^Added 100 neighbours\. .*expand again/);
-	assert.equal(texts[4], 'Added 50 neighbours.');
+	for (const text of texts.slice(0, 4)) assert.match(text, /^Added 100 neighbours of [^.]*\. .*expand again/);
+	assert.match(texts[4], /^Added 50 neighbours of [^.]*\.$/);
 	assert.ok(log.recipes.every((r) => r.limit === 101), 'drawn relationships are left out, so wanted + 1 rows are enough');
 	await session.expand('a');
-	assert.equal(session.getState().notice?.text, 'No new neighbours.');
+	assert.match(session.getState().notice?.text ?? '', /^No new neighbours of [^.]*\.$/);
 });
 
 test('on AGE, past the relationships it can leave out, an expansion the row cap stops says a repeat cannot help', async () => {
@@ -154,7 +154,7 @@ test('on AGE, past the relationships it can leave out, an expansion the row cap 
 		texts.push(session.getState().notice?.text ?? '');
 	}
 	assert.deepEqual(drawn, [100, 200, 300, 400, 450, 450], 'each repeat that can make progress does');
-	assert.match(texts[4], /^Added 50 neighbours\. This node has more relationships than were fetched; expand again for more\.$/);
+	assert.match(texts[4], /^Added 50 neighbours of [^.]*\. This node has more relationships than were fetched; expand again for more\.$/);
 	assert.match(texts[5], /the node stops at 250 rows/);
 	assert.match(texts[5], /expanding again returns the same rows/);
 	assert.doesNotMatch(texts[5], /expand again for more/);
@@ -232,7 +232,7 @@ test('a node that answers with itself alone has no relationships, or none that a
 	const { session: drawn } = rig(NEO, () => envelope([[node('a', ['P'], { name: 'A' }), null, null]]));
 	drawn.load(base());
 	await drawn.expand('a');
-	assert.equal(drawn.getState().notice?.text, 'No new neighbours.');
+	assert.equal(drawn.getState().notice?.text, 'No new neighbours of A.');
 });
 
 test('expanding without a probed engine sends nothing and says why', async () => {
@@ -303,7 +303,7 @@ test('find path needs exactly two selected nodes, merges the first path found, h
 	assert.deepEqual([...s.highlight].sort(), ['p1', 'p2']);
 	assert.ok(s.model.nodes.has('m'), 'the path\'s middle node joined the canvas');
 	assert.equal(s.model.relationships.get('p2')?.start, 'b', 'stored direction kept');
-	assert.match(s.notice?.text ?? '', /^Found a path of 2 relationships \(the first, so a shortest one\)\./);
+	assert.match(s.notice?.text ?? '', /^Shortest path A → B: 2 relationships, found by trying depth 1 to 2, one call each\./, 'the first depth that answers gives a shortest path');
 	assert.equal(s.busy, null);
 	assert.equal(s.progress, null);
 });
@@ -511,8 +511,9 @@ test('a write that ran on the connection marks the drawing out of date: Expand, 
 	const s = session.getState();
 	assert.equal(s.stale, true);
 	assert.deepEqual([...s.model.nodes.keys()], ['a', 'b'], 'the answer as it was is still shown');
-	assert.equal(s.notice?.variant, 'warning');
-	assert.match(s.notice?.text ?? '', /ran on this connection after this graph was drawn/);
+	// The out-of-date line is rendered from `stale` alone; the notice slot does not repeat it (it was shown twice).
+	assert.equal(s.notice, null);
+	assert.match(log.said.at(-1) ?? '', /ran on this connection after this graph was drawn/, 'it is announced');
 	await session.expand('a');
 	await session.connect();
 	await session.findPath();

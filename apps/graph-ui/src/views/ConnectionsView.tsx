@@ -25,11 +25,12 @@
 // =============================================================================
 
 import React, { useEffect, useState } from 'react';
-import { Banner, Button, ConnectionCard, ContentHeader, EmptyState } from 'shell';
+import { Banner, Button, ContentHeader, EmptyState } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import ConnectionDrawer from '../components/ConnectionDrawer';
+import GraphConnectionCard from '../components/GraphConnectionCard';
 import { useGraphEndpoints, useGraphEnv } from '../env';
-import { connectionView, drawerKeyAfter, landingView } from '../graph/connections';
+import { drawerKeyAfter, landingView } from '../graph/connections';
 import { GraphIcon } from '../icons';
 import { styles } from '../styles';
 
@@ -40,7 +41,8 @@ export function omittedText(omitted: number): string {
 
 /**
  * The landing view: every graph node found in the caller's running pipelines, as
- * cards. A card opens its drawer; the drawer opens the workbench.
+ * cards (engine, state, counts once the schema was read, and whether it writes).
+ * A card opens its drawer; the drawer opens the workbench.
  *
  * @returns The view.
  */
@@ -107,21 +109,9 @@ export const ConnectionsView: React.FC = () => {
 				)}
 				{landing.cards && (
 					<div style={styles.cardGrid}>
-						{endpoints.map((endpoint) => {
-							const view = connectionView(endpoint, probes[endpoint.key]);
-							return (
-								<ConnectionCard
-									key={endpoint.key}
-									icon={<GraphIcon />}
-									name={view.title}
-									address={view.address}
-									status={view.badge.variant === 'warning' ? 'muted' : view.badge.variant}
-									statusLabel={view.badge.label}
-									connected={endpoint.state === 'ready'}
-									onClick={() => setDrawerKey(endpoint.key)}
-								/>
-							);
-						})}
+						{endpoints.map((endpoint) => (
+							<GraphConnectionCard key={endpoint.key} endpoint={endpoint} probe={probes[endpoint.key]} onOpen={() => setDrawerKey(endpoint.key)} />
+						))}
 					</div>
 				)}
 			</div>

@@ -24,11 +24,12 @@ import { createFrameCaller } from 'shared/explorer/devtool/frame';
 import { createDevToolHarness } from 'shared/explorer/devtool/testing';
 import { WRITE_REFUSED_TEXT } from '../src/devtool/controller';
 import type { IGraphFrame } from '../src/devtool/frame';
-import { CONTROLLER_LOCAL_OP_MS, ENDPOINTS_STATE_BYTES, EVENT, GRAPH_APP_ID, OP, SCHEMAS_STATE_BYTES, STATE, VERSIONS_STATE_BYTES, endpointsSnapshot, frameTimeoutFor, schemasSnapshot, versionsSnapshot } from '../src/devtool/protocol';
+import { CONTROLLER_LOCAL_OP_MS, ENDPOINTS_STATE_BYTES, EVENT, GRAPH_APP_ID, OP, SCHEMAS_STATE_BYTES, STATE, VERSIONS_STATE_BYTES, endpointsSnapshot, frameTimeoutFor, schemasSnapshot, toWire, versionsSnapshot } from '../src/devtool/protocol';
+import { parseSchema } from '../src/graph/schema';
 import type { GraphOps } from '../src/devtool/protocol';
 import { createDataVersions } from '../src/graph/dataVersion';
 import { createSchemaStore } from '../src/graph/schemaStore';
-import { NEO4J_DIALECT, NEO4J_GRAPH, NEO4J_WRITABLE, graphRow, mountController, mountFrame, readOnlyNode, settle, shellProtocol, signInVsCode, until, vscodeRealm } from './support/devtool';
+import { NEO4J_DIALECT, NEO4J_GRAPH, NEO4J_SCHEMA, NEO4J_WRITABLE, graphRow, mountController, mountFrame, readOnlyNode, settle, shellProtocol, signInVsCode, until, vscodeRealm } from './support/devtool';
 
 /** A signed-in VS Code realm, its controller and one frame, with the first discovery done. */
 async function connected(docKey: string | undefined, behave: (call: IToolCall) => unknown = readOnlyNode, over: Parameters<typeof mountController>[1] = {}) {
@@ -115,6 +116,20 @@ describe('T3 - every Graph op round-trips JSON-safe, and failures come back as e
 		const pending = sessionOf(run.frame, run.endpoint).invoke('read_query', { cypher: 'MATCH (n) RETURN n', params: {}, limit: 25 }, { generation: ticket as never });
 		current = false;
 		await assert.rejects(pending, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'stale');
+		run.frame.dispose();
+		run.controller.dispose();
+	});
+
+	it('graph.schemaView answers the controller\'s full schema view over the JSON wire, and null for a connection never read', async () => {
+		const run = await connected(undefined);
+		assert.equal(await run.frame.caller.callReply(OP.schemaView, { key: run.key }, { timeoutMs: frameTimeoutFor(OP.schemaView) }), null, 'not read yet');
+		await run.frame.env(true).loadSchema(run.key);
+		await until(() => run.frame.env(true).schemaLabels.get(run.key).length > 0, 'the schema labels');
+		const view = await run.frame.caller.callReply(OP.schemaView, { key: run.key }, { timeoutMs: frameTimeoutFor(OP.schemaView) });
+		assert.deepEqual(view, toWire(parseSchema(NEO4J_SCHEMA)));
+		assert.ok((view?.labels.length ?? 0) > 0 && (view?.relationshipTypes.length ?? 0) > 0, 'the premise: a view with labels and types');
+		assert.equal(frameTimeoutFor(OP.schemaView), frameTimeoutFor(OP.historyList), 'answered from memory');
+		assert.deepEqual(run.h.violations, []);
 		run.frame.dispose();
 		run.controller.dispose();
 	});
@@ -316,7 +331,10 @@ describe('T11 - no bulk result is retained state, and sizes are guarded', () => 
 		return settle().then(() => {
 			const schemas = schemasSnapshot(store.keys().map((k) => [k, store.get(k)] as const));
 			assert.ok(jsonByteLength(schemas) <= SCHEMAS_STATE_BYTES);
-			assert.ok(Object.keys(schemas).length > 0 && Object.keys(schemas).length < 40, 'cut to the budget, newest first');
+			const named = Object.values(schemas).filter((item) => item.labels.length > 0);
+			assert.ok(named.length > 0 && named.length < 40, 'the label names are cut to the budget, newest first');
+			assert.equal(Object.keys(schemas).length, 40, 'but every connection crosses, so its frames still see each completed load');
+			assert.ok(Object.values(schemas).every((item) => item.labels.length > 0 || item.labelsCut === true));
 		});
 	});
 
@@ -344,8 +362,10 @@ describe('T11 - no bulk result is retained state, and sizes are guarded', () => 
 		const endpoints = map[STATE.endpoints]?.snapshot as { endpoints: unknown[]; omitted: number; truncated?: unknown };
 		assert.ok(endpoints.omitted > 0 && endpoints.omitted + endpoints.endpoints.length === 400, 'the endpoints are cut by the protocol, and counted');
 		assert.equal(endpoints.truncated, undefined, 'never the generic truncated marker: the frames read omitted');
-		const schemas = map[STATE.schemas]?.snapshot as Record<string, unknown>;
-		assert.ok(Object.keys(schemas).length > 0 && Object.keys(schemas).length < 40, 'schemas cut newest first');
+		const schemas = map[STATE.schemas]?.snapshot as Record<string, { labels: unknown[]; labelsCut?: boolean }>;
+		const named = Object.values(schemas).filter((item) => item.labels.length > 0);
+		assert.ok(named.length > 0 && named.length < 40, 'the label names are cut newest first');
+		assert.equal(Object.keys(schemas).length, 40, 'every loaded connection still crosses, without its names (labelsCut)');
 		const published = map[STATE.dataVersions]?.snapshot as Record<string, number>;
 		assert.equal(published[keys[0]], 1, 'the listed connection that had a write keeps its version first');
 		assert.ok(jsonByteLength(published) <= VERSIONS_STATE_BYTES && Object.keys(published).length < 2_001, 'the versions are cut to their own budget');

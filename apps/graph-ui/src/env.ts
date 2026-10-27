@@ -43,7 +43,9 @@ import type { IDataGridPersistence } from 'shell';
 import type { IExplorerEndpoint, IHistoryEntry, IPrefsAccessor, IProbeResult, IToolSession } from 'shared/explorer';
 import type { IGraphEndpointsState, IGraphHistoryView } from './devtool/protocol';
 import type { IGraphPreview, PreviewAction } from './graph/previews';
+import type { ISchemaView } from './graph/schema';
 import type { ISchemaStore } from './graph/schemaStore';
+import type { IGraphUserData, ISavedQueriesView, IStyleView } from './graph/userData';
 
 /** A value that changes, readable outside React (useSyncExternalStore-friendly: `get` is stable between changes). */
 export interface IReadable<T> {
@@ -99,6 +101,11 @@ export interface IGraphEnv {
 	schemaLabels: IKeyed<readonly string[]>;
 	/** The full schema store: only where the schema tree is drawn (the full app and the controller), else null. */
 	schemas: ISchemaStore | null;
+	/**
+	 * A connection's full schema view (labels and relationship types with their properties, endpoints and counts), or
+	 * null until a load of it has completed. Every mount has it: a frame fetches it from the controller.
+	 */
+	schemaView: IKeyed<ISchemaView | null>;
 	/** Load (or, with `fresh`, refresh) a connection's schema; never rejects. */
 	loadSchema(key: string, opts?: { fresh?: boolean }): Promise<void>;
 	/** A session on a connection (null while it cannot be called). */
@@ -126,6 +133,8 @@ export interface IGraphEnv {
 	prefs: IPrefsAccessor;
 	/** What the History panel says about where history is kept, true for this mount. */
 	historyPrivacyNote: string;
+	/** Label styles and saved queries, per connection (graph/userData.ts). */
+	userData: IGraphUserData;
 	/**
 	 * Grid layouts (sort, columns, page), always as plain-JSON copies
 	 * (shared/explorer/devtool/gridPersistence): never the shell's bare
@@ -188,6 +197,31 @@ export function useGraphEndpoints(): IGraphEndpointsState {
  */
 export function useSchemaLabels(key: string): readonly string[] {
 	return useKeyed(useGraphEnv().schemaLabels, key);
+}
+
+/**
+ * @param key - The connection.
+ * @returns Its full schema view, or null until one was read.
+ */
+export function useSchemaView(key: string): ISchemaView | null {
+	return useKeyed(useGraphEnv().schemaView, key);
+}
+
+/**
+ * @param key - The connection.
+ * @returns How its labels and relationship types are drawn, and whether that was read yet (`ready`: until then, draw
+ * labels in a neutral colour rather than in colours that would change a moment later).
+ */
+export function useConnectionStyle(key: string): IStyleView {
+	return useReadable(useGraphEnv().userData.style(key));
+}
+
+/**
+ * @param key - The connection.
+ * @returns Its saved queries.
+ */
+export function useSavedQueries(key: string): ISavedQueriesView {
+	return useReadable(useGraphEnv().userData.saved(key));
 }
 
 /**

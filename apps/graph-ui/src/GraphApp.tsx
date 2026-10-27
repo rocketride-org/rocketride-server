@@ -38,24 +38,35 @@
 // mount provides the LOCAL one (localEnv.ts) over the app's module-level stores, the
 // realm's bus-backed client and the workspace prefs; the sidebar is rendered by the
 // shell's chrome, outside this tree, so it gets its own provider.
+//
+// Everything the app keeps in the workspace prefs (drafts, captions, the editor height,
+// grid layouts, history, label styles and saved queries) goes through the page's pin
+// (graph/workspacePin.ts): the shell reads the prefs once per page, so after another
+// account signs in without a reload they are still the first account's, and nothing is
+// read or written for anyone else. Styles and saved queries are read only once the shell
+// has loaded the prefs. A loaded schema's labels get their colour slots here
+// (followAssignments), written only then.
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { AppLayout, Button, ConnectionManager, DocSplitLayout, DocTabs, EmptyState, commonStyles, usePrefs, useShellConnection } from 'shell';
+import { AppLayout, Button, ConnectionManager, DocSplitLayout, DocTabs, EmptyState, commonStyles, usePrefs, useShellConnection, useWorkspace } from 'shell';
 import type { Documents, ShellAppProps } from 'shell';
 import { identityFingerprint, identityFromConnectResult } from 'shared/explorer';
-import type { IExplorerEndpoint, IPrefsAccessor } from 'shared/explorer';
+import type { IExplorerEndpoint } from 'shared/explorer';
 import { getBusExplorerClient } from 'shared/explorer/devtool/busClient';
 import { activeConnection, appPreviews, dataVersions, graphEndpoints, graphHistory, schemas } from './adapters/explorer';
 import { GraphHistoryPrefsBridge, useEndpointStoreLifecycle } from './adapters/react';
-import { APP_HISTORY_PRIVACY_NOTE, GraphEnvProvider, useGraphEndpoints } from './env';
+import { GraphEnvProvider, useGraphEndpoints } from './env';
 import type { DocTarget } from './env';
-import { createLocalGraphEnv } from './localEnv';
+import { APP_GRIDS, createLocalGraphEnv } from './localEnv';
 import type { IGraphStores } from './localEnv';
 import { CONNECTIONS_URI, endpointKeyFromUri, isWorkbenchUri, isWriteUri, workbenchUri, writeUri } from './graph/addresses';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { forgetConnections } from './graph/identityChange';
+import { followAssignments } from './graph/userData';
+import { APP_WORKSPACE_PIN, appHistoryNote, createAppUserData, createForwardingPrefs, pinnedGrids, pinnedPrefs } from './graph/workspacePin';
+import type { IForwardingPrefs } from './graph/workspacePin';
 import type { IConnectionDocPayload } from './docs';
 import GraphSidebar from './GraphSidebar';
 import RealmLiveRegion from './components/RealmLiveRegion';
@@ -89,25 +100,17 @@ function openAppDocument(target: DocTarget): void {
 }
 
 /**
- * Workspace prefs with one stable identity: the shell hands out a new accessor whenever any preference changes, and
- * the views need one object for the mount's life. {@link AppPrefsBinding} keeps it pointed at the latest.
- *
- * @returns The accessor and its binder.
+ * Binds the full app's workspace prefs to the shell's accessor of this render (graph/workspacePin.ts
+ * createForwardingPrefs: one stable object, reading its own writes until the shell renders again), then tells
+ * `onBound`, so readers told about a write before this accessor existed read it again. A leaf, so a preference change
+ * re-renders nothing else. Full app only.
  */
-function forwardingPrefs(): IPrefsAccessor & { bind(api: IPrefsAccessor): void } {
-	let current: IPrefsAccessor | null = null;
-	return {
-		bind: (api) => {
-			current = api;
-		},
-		getPref: (key) => current?.getPref(key),
-		setPref: (key, value) => current?.setPref(key, value),
-	};
-}
-
-/** Binds the full app's workspace prefs (a leaf, so a preference change re-renders nothing else). Full app only. */
-const AppPrefsBinding: React.FC<{ prefs: ReturnType<typeof forwardingPrefs> }> = ({ prefs }) => {
-	prefs.bind(usePrefs());
+const AppPrefsBinding: React.FC<{ prefs: IForwardingPrefs; onBound(): void }> = ({ prefs, onBound }) => {
+	const api = usePrefs();
+	prefs.bind(api);
+	useEffect(() => {
+		onBound();
+	}, [api, onBound]);
 	return null;
 };
 
@@ -123,19 +126,53 @@ const GraphApp: React.FC<ShellAppProps> = ({ identity }) => {
 	// The realm's bus-backed client (one per realm): in the shell `client.*` runs in this realm, codes intact.
 	const client = useMemo(() => (isConnected ? getBusExplorerClient(ConnectionManager.getInstance()) : null), [isConnected]);
 	useEndpointStoreLifecycle(graphEndpoints, client, identity);
-	const [prefs] = useState(forwardingPrefs);
+	const fingerprint = identityFingerprint(identityFromConnectResult(identity));
+	// Whether the shell has read the prefs from the account's file (before that, nothing automatic may write them).
+	const { loaded } = useWorkspace();
+	// Who is signed in now and whether the prefs are loaded, for the pin (read at each call, never captured).
+	const owner = useRef(fingerprint);
+	owner.current = fingerprint;
+	const prefsLoaded = useRef(loaded);
+	prefsLoaded.current = loaded;
+	const [prefs] = useState(createForwardingPrefs);
+	// Everything the app keeps in the workspace prefs itself, behind the page's pin.
+	const [pinned] = useState(() => {
+		const ownerNow = (): string | null => owner.current;
+		return { prefs: pinnedPrefs(APP_WORKSPACE_PIN, prefs, ownerNow), grids: pinnedGrids(APP_WORKSPACE_PIN, APP_GRIDS, ownerNow), userData: createAppUserData(prefs, ownerNow, () => prefsLoaded.current) };
+	});
 	const env = useMemo(
-		() => createLocalGraphEnv({ mount: 'app', ready: isConnected, client, stores: APP_STORES, activeConnection, openDocument: openAppDocument, prefs, historyPrivacyNote: APP_HISTORY_PRIVACY_NOTE }),
-		[isConnected, client, prefs]
+		() => createLocalGraphEnv({ mount: 'app', ready: isConnected, client, stores: APP_STORES, activeConnection, openDocument: openAppDocument, prefs: pinned.prefs, historyPrivacyNote: () => appHistoryNote(APP_WORKSPACE_PIN.access(owner.current)), userData: pinned.userData, gridPersistence: pinned.grids }),
+		[isConnected, client, pinned]
 	);
 
 	// A different user, organization or team (or a sign-out) must find nothing from before: no schema, and no
 	// workbench or write console still showing the previous identity's results (the store forgets its endpoints).
 	// On the first run the documents do not exist yet, so only the schema snapshots are cleared.
-	const fingerprint = identityFingerprint(identityFromConnectResult(identity));
-	useEffect(() => {
+	// Colour slots wanted for the previous account are never written for this one. A layout effect, so it runs before
+	// anything can land between this render and a passive effect (a late schema answer for the previous account).
+	useLayoutEffect(() => {
 		forgetConnections(getDocs(), { schemas });
-	}, [fingerprint]);
+		pinned.userData.forget();
+	}, [pinned, fingerprint]);
+
+	// Styles and saved queries answer to the account signed in now, once the prefs are loaded: read them again when
+	// either changes.
+	useEffect(() => {
+		pinned.userData.notify();
+	}, [pinned, fingerprint, loaded]);
+
+	// What is automatic (colour slots, 1.2's captions moved) is saved with the person's next change in this page.
+	useEffect(() => prefs.onWrite(() => pinned.userData.userWrote()), [prefs, pinned]);
+
+	// A loaded schema's labels get their colour slots here (the realm that owns the schema); a slot write still pending
+	// when the app unmounts is dropped (it is made again from the schema next time).
+	useEffect(() => {
+		const stop = followAssignments(schemas, pinned.userData);
+		return () => {
+			stop();
+			pinned.userData.dispose();
+		};
+	}, [pinned]);
 
 	useEffect(() => {
 		const docs = createDocs();
@@ -151,10 +188,10 @@ const GraphApp: React.FC<ShellAppProps> = ({ identity }) => {
 	// when the env changes.
 	const sidebar = useMemo(() => <GraphEnvProvider value={env}><GraphSidebar /></GraphEnvProvider>, [env]);
 
-	if (!ready) return <AppLayout showStatus><AppPrefsBinding prefs={prefs} /></AppLayout>;
+	if (!ready) return <AppLayout showStatus><AppPrefsBinding prefs={prefs} onBound={pinned.userData.notify} /></AppLayout>;
 	return (
 		<GraphEnvProvider value={env}>
-			<AppPrefsBinding prefs={prefs} />
+			<AppPrefsBinding prefs={prefs} onBound={pinned.userData.notify} />
 			<AppLayout sidebar={sidebar} showStatus>
 				<GraphAppReady docs={getDocs()!} />
 			</AppLayout>
