@@ -153,6 +153,11 @@ export const InspectorPanel: React.FC<IInspectorPanelProps> = ({ state, session,
 		setBlocked(ok ? null : json);
 		announce(ok ? 'Copied as JSON.' : 'Copying was not allowed by the browser.');
 	};
+	/** End the shown path; its button is about to go, so focus is put back where the person was. */
+	const clearPath = (): void => {
+		session.clearPath();
+		onClosed?.();
+	};
 	const close = (): void => {
 		if (view) session.inspect(null);
 		else session.clearPath();
@@ -185,7 +190,7 @@ export const InspectorPanel: React.FC<IInspectorPanelProps> = ({ state, session,
 					{onNewQuery && state.path && session.queryTextFor({ kind: 'path' }) !== null && (
 						<Button variant="ghost" small onClick={() => { const text = session.queryTextFor({ kind: 'path' }); if (text !== null) onNewQuery(text, 'Path'); }}>Open as query</Button>
 					)}
-					<Button variant="ghost" small onClick={() => session.clearPath()}>Clear path</Button>
+					<Button variant="ghost" small onClick={clearPath}>Clear path</Button>
 					<Button variant="ghost" small onClick={() => void copy()}>Copy JSON</Button>
 				</div>
 				{blocked !== null && blocked === json && <CopyBlocked text={blocked} />}
@@ -233,6 +238,7 @@ export const InspectorPanel: React.FC<IInspectorPanelProps> = ({ state, session,
 					</>
 				)}
 				{canQuery && <Button variant="ghost" small onClick={newQuery}>New query from here</Button>}
+				{state.path && <Button variant="ghost" small title="Stop showing the found path" onClick={clearPath}>Clear path</Button>}
 				<Button variant="ghost" small onClick={() => void copy()}>Copy JSON</Button>
 			</div>
 			{blocked !== null && blocked === json && <CopyBlocked text={blocked} />}

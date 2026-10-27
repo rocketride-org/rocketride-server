@@ -604,6 +604,7 @@ export const GraphView: React.FC<IGraphViewProps> = ({ session, schemaLabels, ca
 		{ id: 'path', label: 'Find path', title: 'Select two nodes with Space, then find a path (P)', disabled: busy || state.stale || state.selected.size !== 2, keep: 80, run: () => void session.findPath() },
 		...(busy ? [{ id: 'stop', label: 'Stop waiting', title: STOP_WAITING_NOTE, disabled: false, keep: 100, run: () => session.stopWaiting() }] : []),
 		...(hasMore ? [{ id: 'more-nodes', label: 'Show more nodes', title: 'Draw more of the result', disabled: false, keep: 10, run: () => session.showMore() }] : []),
+		...(state.path ? [{ id: 'clear-path', label: 'Clear path', title: 'Stop showing the found path', disabled: false, keep: 85, run: () => { session.clearPath(); restoreFocus(); } }] : []),
 		...(state.selected.size > 0 ? [{ id: 'clear', label: `Clear selection (${state.selected.size})`, title: 'Clear the selection', disabled: false, keep: 20, run: () => session.clearSelection() }] : []),
 		{ id: 'fit', label: 'Fit', title: 'Fit to screen (F)', disabled: false, keep: 60, run: () => handle.current?.fit() },
 	];
