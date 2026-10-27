@@ -30,7 +30,7 @@
 // decisions are here, where they can be tested without a page:
 //
 //   - focus never falls to <body>: a sub-tab that hides the focused control
-//     (a result's "ask about this", "Open in Search", "Use Search", a
+//     (a result's "ask", "Open in Search", "Use Search", a
 //     history entry's Load) moves it to the shown tab's first control;
 //   - the History aside: removing an entry moves to the next one (else the
 //     previous, else the heading); closing it returns to its button;

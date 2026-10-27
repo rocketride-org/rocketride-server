@@ -485,6 +485,17 @@ export const STATUS_WORDS: Readonly<Record<WorkbenchStatus, string>> = {
 	keyword: 'keyword match (no similarity)',
 };
 
+/**
+ * A status in a table cell, short so every row stays on one line: the cell's
+ * title (and the threshold line above the table) says it in full ({@link STATUS_WORDS}).
+ */
+export const STATUS_SHORT: Readonly<Record<WorkbenchStatus, string>> = {
+	used: 'passes',
+	near_miss: 'near miss',
+	below_floor: 'below floor',
+	keyword: 'keyword match',
+};
+
 /** A row and where it falls. */
 export interface ClassifiedRow extends WorkbenchRow {
 	status: WorkbenchStatus;

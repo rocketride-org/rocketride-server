@@ -43,7 +43,7 @@ import { EXPORT_COLUMNS } from '../src/contract/types';
 import type { CallOutcome } from '../src/chat/toolCalls';
 import { classifyRetrieval, debuggerSearchInput, withScope } from '../src/vector/retrieval';
 import { QUERY_NEEDS_EMBED } from '../src/map/wording';
-import { COMMIT_ANNOUNCE_MS, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, applyHandoff, capSearchQuestion, createCommitAnnouncer, isTableOf, modeLabel, questionEscape, scopeChipText, scoreBar, scoreHeading, takePrefill, willRunText } from '../src/vector/searchWorkbench';
+import { COMMIT_ANNOUNCE_MS, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_SHORT, applyHandoff, capSearchQuestion, createCommitAnnouncer, isTableOf, modeLabel, questionEscape, scopeChipText, scoreBar, scoreHeading, takePrefill, willRunText } from '../src/vector/searchWorkbench';
 import { HYBRID_LABEL, HYBRID_NEEDS_KEYWORD, KEYWORD_UNSUPPORTED, NODE_SETTING_NOTE, RRF_K, SEARCH_MODES, STATUS_WORDS, TOP_K_OPTIONS, VECTOR_UNSUPPORTED, classifyAt, defaultMode, fromChatLine, fuse, initialThreshold, keywordCaption, keywordSearchInput, modeOptions, nodeSettingText, openInSearchPrefill, plan, prefillRun, previewOf, rateLimitSentence, retrievalExportRows, retryAfterSeconds, rowsFromSearch, runWorkbench, scoreTitle, searchExportItems, searchScope, secondsLeft, semanticSearchInput, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, workbenchExportRows } from '../src/vector/searchWorkbench';
 import type { ChatPrefill, RunFromChat, SearchHandoff, SearchMode, WorkbenchDeps, WorkbenchRow, WorkbenchRun } from '../src/vector/searchWorkbench';
 
@@ -1001,4 +1001,10 @@ test('"Open in Search" with a question longer than the box: the user\'s run of t
 	assert.ok(outcome.ok);
 	assert.equal(outcome.run.rows.find((row) => row.chunkId === CITED[1])?.cited, true, 'the cited chunk is marked');
 	assert.ok(outcome.run.fromChat !== null, 'and the "From the chat" line describes the run');
+});
+
+test('STATUS_SHORT: a status in a table cell is short (one line per row, live B12); the full words stay its title', () => {
+	assert.deepEqual(Object.keys(STATUS_SHORT).sort(), Object.keys(STATUS_WORDS).sort());
+	assert.deepEqual(STATUS_SHORT, { used: 'passes', near_miss: 'near miss', below_floor: 'below floor', keyword: 'keyword match' });
+	for (const [status, short] of Object.entries(STATUS_SHORT)) assert.ok(short.length <= 13, `${status}: ${short}`);
 });

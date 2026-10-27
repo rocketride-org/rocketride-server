@@ -43,7 +43,7 @@ import { commonStyles } from 'shell';
 import type { IScoreInfo } from '../contract/types';
 import { compareRuns, compareSentence, rowKey, sideOf } from '../vector/compare';
 import type { CompareSide, CompareSummary } from '../vector/compare';
-import { STATUS_WORDS, fromChatLine, runCaption, scoreTitle } from '../vector/searchWorkbench';
+import { STATUS_SHORT, STATUS_WORDS, fromChatLine, runCaption, scoreTitle } from '../vector/searchWorkbench';
 import type { Classification, WorkbenchRow, WorkbenchRun } from '../vector/searchWorkbench';
 
 /** One side of the comparison: the run and its rows at the slider. */
@@ -154,7 +154,9 @@ function Column({ letter, side, summary, score, onOpen, scopeOn }: SideProps): R
 									<td style={S.td} title={scoreTitle(row, score)}>
 										{row.score !== null ? row.score.toFixed(3) : 'match'}
 									</td>
-									<td style={S.td}>{STATUS_WORDS[row.status]}</td>
+									<td style={{ ...S.td, whiteSpace: 'nowrap' }} title={STATUS_WORDS[row.status]}>
+										{STATUS_SHORT[row.status]}
+									</td>
 									<td style={S.td}>{SIDE_WORDS[where]}</td>
 								</tr>
 							);
